@@ -73,3 +73,5 @@ remains a separate reviewed effort.
 
 - [0222 — Discord setup has one shared definition](0222-discord-setup-has-one-shared-definition.md)
 - [0225 — Minecraft keeps playing with one driver](0225-minecraft-keeps-playing-with-one-driver.md)
+
+- [0226 — Quick actions are skills, and tidy keeps results](0226-quick-actions-are-skills-and-tidy-keeps-results.md)

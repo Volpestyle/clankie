@@ -1,4 +1,5 @@
 import { formatPlain } from "./command-format.ts";
+import type { ClankieAutocompleteSkill } from "./face/clankie-autocomplete.ts";
 import { questionConsoleCommand } from "./question-commands.ts";
 import { ClankieApiClient } from "@clankie/api-client";
 import { buildDiscordCommands } from "./discord-commands.ts";
@@ -147,6 +148,15 @@ export async function runHostedConsole() {
   } catch (error) {
     notice = error instanceof Error ? error.message : String(error);
   }
+  const skillCatalog: ClankieAutocompleteSkill[] = [];
+  async function refreshSkillCatalog() {
+    const id = selection.conversationId;
+    const catalog = id
+      ? await client.composerCatalog?.(id, { includeQuickActions: true }).catch(() => undefined)
+      : undefined;
+    skillCatalog.splice(0, skillCatalog.length, ...(catalog?.skills ?? []));
+  }
+  await refreshSkillCatalog();
   let observing: AbortController | undefined;
   let observation: Promise<void> | undefined;
   async function stopObservation() {
@@ -322,6 +332,7 @@ export async function runHostedConsole() {
         await stopObservation();
         const selected = await selection.select(argument.trim());
         title = selected.title;
+        await refreshSkillCatalog();
         await remember(selected.conversationId);
         await prompt.restoreHistory(createOperatorConversationShellSink(shell));
         observe();
@@ -341,6 +352,7 @@ export async function runHostedConsole() {
             ? await selection.select(direct)
             : await selection.selectDefault();
         title = selected.title;
+        await refreshSkillCatalog();
         await remember(selected.conversationId);
         await prompt.restoreHistory(createOperatorConversationShellSink(shell));
         observe();
@@ -475,6 +487,8 @@ export async function runHostedConsole() {
   const shell: ClankieFaceShell = new ClankieFaceShell({
     onLoadOlderHistory: () => prompt.loadOlderHistory(createOperatorConversationShellSink(shell)),
     commands,
+    skills: skillCatalog,
+    autocomplete: { listSkills: () => skillCatalog },
     cwd: process.cwd(),
     allowLocalShell: false,
     onHerdrJump: async () => ({

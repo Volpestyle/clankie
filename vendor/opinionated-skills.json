@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/Volpestyle/skills",
-  "revision": "8317dfe1ed8049556571ea89ad5279130582a499",
+  "revision": "e996e326ac9414b316b24690a0baec4570f2ec6e",
   "license": "MIT",
   "skills": {
     "c": "agent/c",
@@ -10,7 +10,8 @@
     "p": "agent/p",
     "reflect": "agent/reflect",
     "shared-checkout": "agent/shared-checkout",
-    "solution-space": "agent/solution-space"
+    "solution-space": "agent/solution-space",
+    "tidy": "agent/tidy"
   },
   "localChanges": []
 }

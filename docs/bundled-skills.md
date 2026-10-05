@@ -32,7 +32,7 @@ Everything selected from `vendor/opinionated-skills/` is opinionated, including
 
 | Area            | Opinionated skills           |
 | --------------- | ---------------------------- |
-| Leadership      | lead, shared-checkout        |
+| Leadership      | lead, shared-checkout, tidy  |
 | Work tracking   | linear-issues, linear-orient |
 | Review          | reflect                      |
 | Delivery        | c, p                         |
@@ -44,7 +44,7 @@ when Clankie is named or the fleet is confirmed; discovery alone does not hire
 an agent. Dotfiles can select the repo-owned source for Claude and Codex without
 copying it into the personal skills repository.
 
-The catalog contains **23 skills: 8 opinionated and 15 product/tool skills**.
+The catalog contains **24 skills: 9 opinionated and 15 product/tool skills**.
 VUH-1457 merged the three leadership entries into `lead`, with shared judgment,
 native hires and harness delivery. Its operations reference
 uses `hire_agent`, `message_seat` and `message_clankie`; Herdr holds visible terminals. The vendored dashboard plugin and board-specific references
@@ -177,3 +177,31 @@ Release assembly dereferences these links, including the worker plugin, so an
 installed body needs no sibling checkout. The vendored prose is excluded from
 Clankie's formatter and local-link checker (upstream examples contain placeholder
 URLs); review real supporting-file references at export time.
+
+## Quick-action declarations
+
+A skill can expose a normal Clankie turn through this optional frontmatter:
+
+```yaml
+quick-action:
+  name: Tidy up
+  icon: broom
+  selectionArg: selection
+```
+
+Clients request `includeQuickActions` on `composer_catalog` to receive these
+declarations. Closed-pane roster history is available with `includeClosedPanes`
+on `fleet`; omitted flags retain older strict response shapes.
+
+The catalog validates a nonempty display name, a lowercase icon identifier, and
+an optional argument name. An invalid declaration omits the action without
+hiding the skill. The surface uses the existing skill invocation and can pass
+selection context under the declared argument. Clankie judges and acts through
+his ordinary tools; the turn stays visible and interruptible.
+
+`tidy` is the first such vendored skill. `/tidy` or `/tidy selection=w1:p1`
+starts that skill through the console's normal conversation path. It tells
+Clankie to inspect and harvest before closing, give a one-line reason, and say
+what he closed. Saved reports and last output remain in roster history; Undo
+reopens and resumes within five minutes. See [ADR 0226](adr/0226-quick-actions-are-skills-and-tidy-keeps-results.md)
+for native input evidence, refusal reasons and the remaining read/close race.

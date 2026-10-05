@@ -1049,35 +1049,41 @@ describe("protocol", () => {
     });
   });
 
-  it("reads the selected conversation's composer catalog through the canonical client", async () => {
-    const client = createOperatorConversationServiceClient(async (request) => {
-      expect(request).toEqual({
-        op: "composer_catalog",
-        schemaVersion: 1,
-        conversationId: "conversation-worker",
-      });
-      return {
-        op: "composer_catalog",
-        schemaVersion: 1,
-        catalog: {
+  it.each([false, true])(
+    "reads the selected conversation catalog with quick actions opted in: %s",
+    async (includeQuickActions) => {
+      const client = createOperatorConversationServiceClient(async (request) => {
+        expect(request).toEqual({
+          op: "composer_catalog",
           schemaVersion: 1,
-          commands: [],
-          skills: [
-            {
-              name: "review",
-              description: "Review the current work",
-              source: "codex",
-              invocation: "$review",
-            },
-          ],
-        },
-      };
-    });
+          conversationId: "conversation-worker",
+          ...(includeQuickActions ? { includeQuickActions: true } : {}),
+        });
+        return {
+          op: "composer_catalog",
+          schemaVersion: 1,
+          catalog: {
+            schemaVersion: 1,
+            commands: [],
+            skills: [
+              {
+                name: "review",
+                description: "Review the current work",
+                source: "codex",
+                invocation: "$review",
+              },
+            ],
+          },
+        };
+      });
 
-    await expect(client.composerCatalog?.("conversation-worker")).resolves.toMatchObject({
-      skills: [{ name: "review", invocation: "$review" }],
-    });
-  });
+      await expect(
+        client.composerCatalog?.("conversation-worker", { includeQuickActions }),
+      ).resolves.toMatchObject({
+        skills: [{ name: "review", invocation: "$review" }],
+      });
+    },
+  );
 
   it("models persona identity with more than the six non-operator tints", () => {
     expect(

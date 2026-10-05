@@ -1103,6 +1103,58 @@ function herdrWatchTools(
     );
   };
   return [
+    ...(watches.tidy
+      ? [
+          defineTool({
+            name: "close_worker_pane",
+            label: "Close a finished worker pane",
+            description:
+              "Close a worker pane you judge finished, with a one-line reason. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts, owner-interactive/hand-started panes, and unkept results. Unknown styled input or native hire provenance fails closed. Does not decide whether the work is done. Never bypass a refusal with a raw close.",
+            parameters: Type.Object({
+              pane: Type.String({ minLength: 1, maxLength: 256 }),
+              reason: Type.String({ minLength: 1, maxLength: 512 }),
+              reportPath: Type.Optional(
+                Type.String({
+                  minLength: 1,
+                  maxLength: 4096,
+                  description:
+                    "Absolute path to a nonempty saved report; omit if its authenticated worker report was already kept.",
+                }),
+              ),
+            }),
+            executionMode: "sequential",
+            execute: async (_id, input) =>
+              json(
+                await watches.tidy!.close(input, captureConversationAuthority(turn.conversationAuthority)),
+              ),
+          }),
+          defineTool({
+            name: "undo_worker_pane",
+            label: "Reopen and resume a closed worker pane",
+            description:
+              "Undo one confirmed tidy close within its five-minute window, using the history id. Reopens the same native session through the ordinary hire/resume path. An uncertain close or resume must be inspected, never blindly retried.",
+            parameters: Type.Object({ id: Type.String({ format: "uuid" }) }),
+            executionMode: "sequential",
+            execute: async (_id, input) =>
+              json(
+                await watches.tidy!.undo(input.id, captureConversationAuthority(turn.conversationAuthority)),
+              ),
+          }),
+          defineTool({
+            name: "worker_pane_history",
+            label: "Read closed worker pane history",
+            description:
+              "Read recent tidy closes, one-line reasons, preserved last output, saved report paths, and Undo deadlines.",
+            parameters: Type.Object({}),
+            executionMode: "sequential",
+            execute: async () => {
+              const authority = captureConversationAuthority(turn.conversationAuthority);
+              await assertConversationAuthority(authority);
+              return json({ entries: watches.tidy!.history() });
+            },
+          }),
+        ]
+      : []),
     defineTool({
       name: "herdr_watch",
       label: "Watch Herdr agent",

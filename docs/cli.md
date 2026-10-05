@@ -2387,6 +2387,12 @@ retried from the same cursor. See [hosted bodies](../infra/hosted/README.md#body
 
 ### `skills [opinionated on|off | exclude NAME | include NAME]`
 
+The selected `tidy` skill exposes `/tidy` in the console. It starts an ordinary
+visible, stoppable Clankie turn to inspect, harvest and close finished hired
+panes with reasons. Output and saved reports remain in roster history, with a
+five-minute reopen/resume Undo. Optional context can be passed as
+`/tidy selection=w1:p1`. See [bundled skill declarations](bundled-skills.md#quick-action-declarations).
+
 List the bundled skill catalog as JSON, with `class` (`product` or `opinionated`)
 and `included` for each skill. `clankie doctor` includes the same selection.
 

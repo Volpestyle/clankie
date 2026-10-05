@@ -1,5 +1,6 @@
 import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
 import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "./tool-catalog-health.ts";
+import { PaneTidy } from "./pane-tidy.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { FleetMembershipReadError, type FleetProjectMembership } from "../fleet-project-membership.ts";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
@@ -146,7 +147,7 @@ import { ConversationServiceRun, waitForConversationRun } from "./conversation-r
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { composeVoiceLaneInstructions } from "./voice-lane.ts";
 import { createStanceStore } from "./stances.ts";
-import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
+import { captainComposerCatalog, composerCatalogResponse, seatComposerCatalog } from "./composer-catalog.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import {
   HerdrWatchStore,
@@ -2549,6 +2550,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return { ...result, seat: adopted, ...(roleAssignment ? { roleAssignment } : {}) };
   };
 
+  const paneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
+    runner: herdrRunner,
+    provenance: (agent) => herdrWatches.tidyProvenance(agent),
+    ownerValid: validateConversationOwner,
+    close: (seatId, guard) => herdrWatches.closeSeat(seatId, guard),
+    untrack: (seatId) => herdrWatches.untrackSeat(seatId),
+    hire: hireSeat,
+    ...(deps.agentSessions?.resolve ? { resolve: (ref: string) => deps.agentSessions!.resolve!(ref) } : {}),
+    changed: () => fleetChanges.touch(),
+  });
+  herdrWatches.tidy = paneTidy;
+
   /**
    * The one lane into a seat — an operator DM, a room turn, and the captain's
    * own messages all take it: harness control, native queue or the seat's bound
@@ -3051,6 +3064,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           cursor,
           goals,
           assignments,
+          closedPanes: [...paneTidy.history()],
           seats: [...seats],
           personas: fleetPersonas,
           channels: [...channelsResult.channels],
@@ -4180,12 +4194,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           return {
             op: "composer_catalog",
             schemaVersion: 1,
-            catalog: captainComposerCatalog({
-              skills: (await settings()).skills,
-              cwd:
-                conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
-              repoRoot: options.repoRoot,
-            }),
+            catalog: composerCatalogResponse(
+              captainComposerCatalog({
+                skills: (await settings()).skills,
+                cwd:
+                  conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
+                repoRoot: options.repoRoot,
+              }),
+              request.includeQuickActions,
+            ),
           };
         }
         await refreshFleet();
@@ -4199,10 +4216,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return {
           op: "composer_catalog",
           schemaVersion: 1,
-          catalog:
+          catalog: composerCatalogResponse(
             seat === undefined
               ? { schemaVersion: 1, commands: [], skills: [] }
               : await seatComposerCatalog(seat),
+            request.includeQuickActions,
+          ),
         };
       }
       if (request.op === "roster") {
@@ -4254,7 +4273,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (request.op === "fleet") {
         await fleetChanges.wait(request.cursor, request.waitMs ?? 0);
-        const full = await fleetSnapshot();
+        const snapshot = await fleetSnapshot();
+        const { closedPanes: _closed, ...withoutHistory } = snapshot.snapshot;
+        const full = request.includeClosedPanes ? snapshot : { ...snapshot, snapshot: withoutHistory };
         const { goals: _goals, assignments: _assignments, ...legacy } = full.snapshot;
         const result =
           request.includeWork === true
@@ -5180,7 +5201,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 : `; observed lead pane ${route.diagnostic.leadPaneId}`
             }.\n\n${message}`
           : message;
-      return inboundReceipts.accept(
+      const accepted = await inboundReceipts.accept(
         agent.paneId,
         delivery,
         text,
@@ -5192,6 +5213,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           conversationId: target.conversationId,
         },
       );
+      if (accepted.received) {
+        try {
+          paneTidy.keepReport(agent, text);
+        } catch {
+          // Its admission receipt is already durable; storage trouble must not turn
+          // an accepted report into a replayable delivery failure. Tidy still requires
+          // a readable kept report before any close.
+        }
+      }
+      return accepted;
     },
 
     async pollFleetSeatEvents(paneId, waitMs, signal) {

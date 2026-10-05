@@ -151,6 +151,7 @@ export interface HerdrWatchRunner {
   waitUntilIdle?(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   transcript?(agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined>;
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
+  readPane?(target: string, source: "visible" | "recent-unwrapped", format: "text" | "ansi"): Promise<string>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `lsof -p <pid> -Fn` via execFile (no shell). */
@@ -220,6 +221,7 @@ export type HerdrWatchArmResult =
     };
 
 export interface HerdrWatchPort {
+  tidy?: import("./pane-tidy.ts").PaneTidy;
   watch(
     conversationId: string,
     target: string,
@@ -488,6 +490,8 @@ export function createHerdrWatchRunner(
         ...(source === "visible" ? [] : ["--lines", String(SEAT_REPLY_READ_LINES)]),
         ...(harness === "pi" ? ["--format", "ansi"] : []),
       ]),
+    readPane: (target, source, format) =>
+      runHerdr(["pane", "read", target, "--source", source, "--format", format]),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     openFiles: async (pid) => {
@@ -2432,6 +2436,27 @@ export class HerdrWatchStore implements HerdrWatchPort {
       agent = await this.runner.get(paneId);
     }
     return agent;
+  }
+
+  public tidy?: import("./pane-tidy.ts").PaneTidy;
+
+  /** Pane names and adopted ownership alone cannot authorize tidy. */
+  public tidyProvenance(agent: HerdrAgentSnapshot) {
+    if (!agent.session) return "unknown" as const;
+    const occupant = occupantIdForHerdrSession(agent.session);
+    const sessionId = nativeSessionId(agent);
+    if (!sessionId) return "unknown" as const;
+    const record = this.hireOwners.tidyRecord(
+      agent.paneId,
+      agent.terminalId,
+      occupant,
+      JSON.stringify([splitFleetQualified(agent.paneId)?.fleet ?? "local", agent.agent, sessionId]),
+    );
+    if (record === "unknown") return "unknown" as const;
+    if (!record) return "owner_interactive" as const;
+    if (record.hired !== true && !this.projectHires.hiredOccupant(occupant))
+      return record.hired === false ? ("owner_interactive" as const) : ("unknown" as const);
+    return record.owner;
   }
 
   public async closeSeat(seatId: string, guard?: () => Promise<void>): Promise<boolean> {

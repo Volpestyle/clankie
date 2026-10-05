@@ -1124,6 +1124,25 @@ export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;
  */
 export const OPERATOR_FLEET_EDGE_MAX = 128;
 
+/** Durable roster history; closing never discards the harvested output. */
+export const ClosedWorkerPaneSchema = z
+  .object({
+    id: z.string().uuid(),
+    paneId: z.string().min(1),
+    seatId: z.string().min(1),
+    title: z.string(),
+    harness: z.enum(["claude", "codex"]),
+    reason: z.string().min(1).max(512),
+    lastOutput: z.string().max(131072),
+    reportPath: z.string().min(1),
+    closedAt: z.string().datetime(),
+    undoUntil: z.string().datetime(),
+    state: z.enum(["closing", "closed", "close_unconfirmed", "undoing", "reopened"]),
+    resumedSeatId: z.string().optional(),
+  })
+  .strict();
+export type ClosedWorkerPane = z.infer<typeof ClosedWorkerPaneSchema>;
+
 /** A full live-fleet read plus the cursor that wakes its next long poll. */
 export const OPERATOR_FLEET_WAIT_MS_MAX = 30_000;
 export const OperatorFleetSnapshotSchema = z
@@ -1142,6 +1161,7 @@ export const OperatorFleetSnapshotSchema = z
       )
       .max(OPERATOR_CONVERSATION_LIST_MAX)
       .optional(),
+    closedPanes: z.array(ClosedWorkerPaneSchema).max(128).optional(),
     seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
@@ -1362,6 +1382,22 @@ export const OperatorComposerCommandSchema = z
 export type OperatorComposerCommand = z.infer<typeof OperatorComposerCommandSchema>;
 
 /** One exact skill loaded by the target conversation, with its native invocation. */
+export const SkillQuickActionSchema = z
+  .object({
+    name: z.string().trim().min(1).max(64),
+    icon: z
+      .string()
+      .regex(/^[a-z0-9-]+$/u)
+      .max(64),
+    selectionArg: z
+      .string()
+      .regex(/^[a-z][a-zA-Z0-9_-]*$/u)
+      .max(64)
+      .optional(),
+  })
+  .strict();
+export type SkillQuickAction = z.infer<typeof SkillQuickActionSchema>;
+
 export const OperatorComposerSkillSchema = z
   .object({
     name: z
@@ -1372,6 +1408,7 @@ export const OperatorComposerSkillSchema = z
     source: z.string().trim().min(1).max(32),
     /** A single sigil token; arguments are appended by the client. */
     invocation: z.string().regex(/^[/$][^\s]{1,127}$/u),
+    quickAction: SkillQuickActionSchema.optional(),
   })
   .strict();
 export type OperatorComposerSkill = z.infer<typeof OperatorComposerSkillSchema>;
@@ -2924,6 +2961,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       /** Opt-in keeps older strict response schemas usable. */
       includeWork: z.boolean().optional(),
+      includeClosedPanes: z.boolean().optional(),
       /** Omitted preserves the full durable directory for existing clients. */
       view: z.literal("home").optional(),
       cursor: OperatorConversationCursorSchema.optional(),
@@ -2935,6 +2973,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("composer_catalog"),
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
+      includeQuickActions: z.boolean().optional(),
     })
     .strict(),
   /**
@@ -3301,6 +3340,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({
       op: z.literal("roster"),
       schemaVersion: z.literal(1),
+      closedPanes: z.array(ClosedWorkerPaneSchema).max(128).optional(),
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     })
     .strict(),
@@ -3468,7 +3508,10 @@ export interface OperatorConversationServiceClient {
   /** Park until present-tense activity changes. */
   presence?(cursor?: string, signal?: AbortSignal): Promise<OperatorPresenceSnapshot>;
   /** Commands and skills accepted by this exact conversation target. */
-  composerCatalog?(conversationId: string): Promise<OperatorComposerCatalog>;
+  composerCatalog?(
+    conversationId: string,
+    options?: { readonly includeQuickActions?: boolean },
+  ): Promise<OperatorComposerCatalog>;
   /**
    * An agent saying what it is doing with its own figure (ADR 0148). The seat
    * comes from the pane the caller sits in, never from the caller's word for it.
@@ -3608,6 +3651,7 @@ export function createOperatorConversationServiceClient(
     readonly tailWaitMs?: number;
     readonly fleetWaitMs?: number;
     readonly includeWork?: boolean;
+    readonly includeClosedPanes?: boolean;
   } = {},
 ): OperatorConversationServiceClient {
   const tailIdleMs = options.tailIdleMs ?? 250;
@@ -3677,6 +3721,7 @@ export function createOperatorConversationServiceClient(
           ...workProjection,
           ...(cursor === undefined ? {} : { cursor }),
           waitMs: fleetWaitMs,
+          ...(options.includeClosedPanes === true ? { includeClosedPanes: true } : {}),
         },
         signal,
       );
@@ -3696,8 +3741,13 @@ export function createOperatorConversationServiceClient(
       if (result.op !== "presence") throw new Error(`Unexpected ${result.op} result for presence`);
       return result.snapshot;
     },
-    async composerCatalog(conversationId) {
-      const result = await dispatch({ op: "composer_catalog", schemaVersion: 1, conversationId });
+    async composerCatalog(conversationId, options) {
+      const result = await dispatch({
+        op: "composer_catalog",
+        schemaVersion: 1,
+        conversationId,
+        ...(options?.includeQuickActions === true ? { includeQuickActions: true } : {}),
+      });
       if (result.op !== "composer_catalog") {
         throw new Error(`Unexpected ${result.op} result for composer_catalog`);
       }

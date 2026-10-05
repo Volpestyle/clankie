@@ -83,6 +83,12 @@ export class ProjectHires {
   public constructor(path: string) {
     this.path = path;
   }
+  /** Retained launch provenance, including a pane later reattached to that same native session. */
+  public hiredOccupant(occupantId: string): boolean {
+    return this.read().allocations.some(
+      (entry) => entry.started && entry.confirmed && entry.occupantId === occupantId,
+    );
+  }
   private read(): z.infer<typeof StateSchema> {
     return existsSync(this.path)
       ? StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")))
