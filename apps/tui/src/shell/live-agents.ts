@@ -67,6 +67,26 @@ function bridgeRemediation({ seat }: LiveAgent): string | undefined {
     : bridge?.remediation;
 }
 
+/** Catalog served is an observation of the bridge, not proof of native tool loading. */
+function workerToolsText({ seat }: LiveAgent, { ansi }: AgentTheme): string {
+  switch (seat.workerTools?.status) {
+    case "ready":
+      return ansi.dim("tools catalog served");
+    case "missing":
+      return ansi.red("tools missing");
+    case "stalled":
+      return ansi.red("tools stalled");
+    case "pending":
+      return ansi.yellow("tools pending");
+    default:
+      return ansi.dim("tools unknown");
+  }
+}
+
+function workerToolsBroken({ seat }: LiveAgent): boolean {
+  return seat.workerTools?.status === "missing" || seat.workerTools?.status === "stalled";
+}
+
 function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
   const { seat } = agent;
   const harness = clean(seat.harness);
@@ -83,6 +103,7 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
     // This Mac is the default; only a seat on another machine names where it is.
     seat.fleet === undefined ? undefined : theme.ansi.dim(clean(seat.machine ?? seat.fleet)),
     bridgeWarning(agent, theme),
+    workerToolsText(agent, theme),
   ]
     .filter((part): part is string => part !== undefined)
     .join(theme.ansi.dim(" · "));
@@ -93,7 +114,8 @@ function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
   if (
     agent.seat.workerReports?.length ||
     agent.seat.status === "blocked" ||
-    bridgeWarning(agent, theme) !== undefined
+    bridgeWarning(agent, theme) !== undefined ||
+    workerToolsBroken(agent)
   )
     return 0;
   switch (agent.seat.status) {
@@ -348,6 +370,11 @@ export class LiveAgentPicker implements Component {
           `${agentMetadata(selected, this.theme)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
           step ?? this.theme.ansi.dim("Step unavailable"),
           ...shownCatalogDetail,
+          ...(selected.seat.workerTools
+            ? [`Worker tools: ${clean(selected.seat.workerTools.reason)}`]
+            : [
+                this.theme.ansi.dim("Worker tools: no authenticated observation; native catalog unverified."),
+              ]),
           ...(bridgeRemediation(selected) && bridgeWarning(selected, this.theme)
             ? [`${this.theme.ansi.red("Fix:")} ${clean(bridgeRemediation(selected)!)}`]
             : []),

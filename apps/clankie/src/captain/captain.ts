@@ -355,6 +355,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   const hireRegistry = createModelRegistry();
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    ...(options.fleetHireTools ? { fleetHireTools: options.fleetHireTools } : {}),
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},
     resolveHireModel: async (harness, model) =>
@@ -1830,8 +1831,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           remoteFleets,
         );
     const seats = await herdrWatches.withNativeStatus(workSeats, fleet.seats);
+    for (const seat of seats) {
+      const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
+      if (!observed || !options.workerBridgeStatus) continue;
+      const qualified = splitFleetQualified(observed.paneId);
+      seat.workerTools = options.workerBridgeStatus(
+        qualified?.fleet ?? "default",
+        qualified?.id ?? observed.paneId,
+      );
+    }
     const nextWork = JSON.stringify(
-      seats.map((seat) => [seat.goal, seat.assignment, seat.harnessBridge, seat.status, seat.summary]),
+      seats.map((seat) => [
+        seat.goal,
+        seat.assignment,
+        seat.harnessBridge,
+        seat.workerTools,
+        seat.status,
+        seat.summary,
+      ]),
     );
     if (seatWork !== nextWork) {
       seatWork = nextWork;

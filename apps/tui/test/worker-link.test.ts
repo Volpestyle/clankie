@@ -30,7 +30,7 @@ afterEach(() => {
 /** A stand-in for Clankie's link listener: one event in the mailbox, then nothing. */
 async function fakeService(
   dropAck = false,
-  mcpReply?: (method: string) => "deny" | "empty" | "stall" | undefined,
+  mcpReply?: (method: string) => "deny" | "empty" | "stall" | "off" | undefined,
 ) {
   const seen: Seen[] = [];
   let delivered = false;
@@ -60,7 +60,9 @@ async function fakeService(
         const reply = mcpReply?.(message.method);
         if (reply === "deny") {
           response.statusCode = 403;
-          response.end("{}");
+          response.end(
+            JSON.stringify({ error: "fleet_admission_pending", detail: "process proof is settling" }),
+          );
           return;
         }
         if (reply === "stall") return;
@@ -80,15 +82,23 @@ async function fakeService(
             : message.method === "tools/list"
               ? {
                   tools:
-                    reply === "empty"
+                    reply === "empty" || reply === "off"
                       ? []
                       : ["clankie_tools", "clankie_call"].map((name) => ({
                           name,
                           inputSchema: { type: "object" },
                         })),
+                  ...(reply === "empty"
+                    ? {}
+                    : { _meta: { clankie: { tools: reply === "off" ? "off" : "connected" } } }),
                 }
               : { content: [{ type: "text", text: `ran ${String(message.params?.name)}` }], isError: false };
         response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+        return;
+      }
+      if (path.endsWith("/peers")) {
+        response.statusCode = 403;
+        response.end(JSON.stringify({ error: "peer_messages_disabled" }));
         return;
       }
       if (path.endsWith("/ack")) {
@@ -137,7 +147,10 @@ async function fakeService(
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  cleanups.push(() => server.close());
+  cleanups.push(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   const address = server.address();
   if (typeof address !== "object" || address === null) throw new Error("no address");
   return { seen, url: `http://127.0.0.1:${String(address.port)}` };
@@ -561,11 +574,24 @@ async function receiptService() {
     },
   };
 }
-function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string, channel = false) {
+function rawReceiptBridge(
+  mode: "fleet" | "seat",
+  home: string,
+  url: string,
+  channel = false,
+  requestTimeoutMs?: number,
+  expectedToolNames?: string,
+) {
   const code = `import { runMcpCommand } from ${JSON.stringify(new URL("../src/command/mcp.ts", import.meta.url).href)}; await runMcpCommand(["--seat"], { readParentArgv: async () => "test" });`;
+  const parentArgv = channel ? "claude --channels plugin:clankie-worker@clankie" : "test";
+  const fleetCode = `import {runSeatChannel} from ${JSON.stringify(pathToFileURL(join(bin, "seat-channel.mjs")).href)};runSeatChannel({paneId:"w8:p3",parentArgv:${JSON.stringify(parentArgv)},requestTimeoutMs:${String(requestTimeoutMs)}});`;
   const child = spawn(
     process.execPath,
-    mode === "fleet" ? [join(bin, "fleet-mcp.mjs")] : ["--input-type=module", "-e", code],
+    mode === "fleet"
+      ? requestTimeoutMs === undefined
+        ? [join(bin, "fleet-mcp.mjs")]
+        : ["--input-type=module", "-e", fleetCode]
+      : ["--input-type=module", "-e", code],
     {
       env: {
         PATH: process.env.PATH,
@@ -574,6 +600,7 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string, cha
         HERDR_SOCKET_PATH: SOCKET,
         CLANKIE_OPERATOR_TOKEN: "test-only",
         CLANKIE_CONTROL_PLANE_URL: url,
+        ...(expectedToolNames === undefined ? {} : { CLANKIE_EXPECTED_TOOL_NAMES: expectedToolNames }),
         ...(channel ? { CLANKIE_SEAT_PARENT_ARGV: "claude --channels plugin:clankie-worker@clankie" } : {}),
       },
     },
@@ -601,7 +628,11 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string, cha
     const id = ++sequence;
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     for (let i = 0; i < Math.ceil(timeoutMs / 25); i++) {
-      if (replies.has(id)) return replies.get(id) as { result: { content: { text: string }[] } };
+      if (replies.has(id))
+        return replies.get(id) as {
+          result: { content: { text: string }[]; isError?: boolean };
+          error?: { code: number; message: string };
+        };
       if (child.exitCode !== null) throw new Error(stderr);
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -619,10 +650,17 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string, cha
         capabilities: {},
         clientInfo: { name: "test", version: "1" },
       }),
+    // Wait for the actual reply within the first discovery's production budget.
     list: async (timeoutMs?: number) =>
-      (await call("tools/list", {}, timeoutMs)) as unknown as {
+      (await call(
+        "tools/list",
+        {},
+        timeoutMs ?? Math.min(requestTimeoutMs ?? 20_000, 20_000) + 2_000,
+      )) as unknown as {
         result: { tools: { name: string }[] };
+        error?: { code: number; message: string };
       },
+    tool: (name: string, args: unknown = {}) => call("tools/call", { name, arguments: args }),
     message: async (text = "original") =>
       JSON.parse(
         (await call("tools/call", { name: "message_clankie", arguments: { text } })).result.content[0]!.text,
@@ -636,7 +674,7 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
       let attempts = 0;
       let revoked = false;
       const service = await fakeService(false, (method) => {
-        if (revoked) return "deny";
+        if (revoked && method === "tools/list") return "off";
         if (method === (failure === "deny" ? "initialize" : "tools/list") && ++attempts <= 2) return failure;
       });
       const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
@@ -656,6 +694,7 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
       expect(
         service.seen
           .slice(before)
+          .filter((entry) => !entry.body.includes("notifications/clankie/bridge_status"))
           .map((request) => request.path)
           .sort(),
       ).toEqual(["/v1/fleet/mcp", "/v1/fleet/seats/w8%3Ap3/peers"]);
@@ -681,15 +720,20 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
   });
 
   it.each(["deny", "stall"] as const)(
-    "answers without granted tools within the startup budget when proof continues to %s",
+    "fails with the real reason within the startup budget when proof continues to %s",
     async (failure) => {
       const service = await fakeService(false, () => failure);
-      const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
+      const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, false, 400);
       await bridge.init();
       const started = performance.now();
-      expect((await bridge.list(25_000)).result.tools.map((tool) => tool.name)).toEqual(["message_clankie"]);
-      expect(performance.now() - started).toBeGreaterThanOrEqual(19_000);
-      expect(performance.now() - started).toBeLessThan(25_000);
+      const reply = await bridge.list(2_000);
+      expect(reply.error?.message).toContain("initial tool catalog is unavailable");
+      expect(reply.error?.message).toContain(
+        failure === "deny" ? "403: fleet_admission_pending" : "timed out",
+      );
+      expect(reply).not.toHaveProperty("result");
+      expect(performance.now() - started).toBeGreaterThanOrEqual(350);
+      expect(performance.now() - started).toBeLessThan(1_500);
       expect(service.seen.some((request) => request.body.includes("tools/call"))).toBe(false);
     },
   );
@@ -813,4 +857,406 @@ describe("a Codex session on the shared daemon", () => {
     expect(reply.result.instructions).toContain("codex --no-daemon");
     expect(reply.result.instructions).toContain("message_clankie");
   });
+});
+
+/** Real HTTP peer/MCP frames with independently identified sessions and controlled wire failures. */
+async function recoveryService(
+  options: {
+    holdInitialized?: boolean;
+    holdCatalog?: boolean;
+    peerMessages?: "on" | "off";
+    nativePeerProofRequired?: boolean;
+  } = {},
+) {
+  let initializes = 0;
+  let discoveryFails = false;
+  let peersFail = false;
+  let peersOff = false;
+  let peerRequests = 0;
+  let mailboxRequests = 0;
+  let peerMessages = options.peerMessages;
+  let toolRefusal: { status: number; error: string; reason: string } | undefined;
+  let peerRefusal: { status: number; error: string; reason: string } | undefined;
+  let prematureCall = false;
+  let releaseHandshake: () => void = () => {};
+  const handshake = options.holdInitialized
+    ? new Promise<void>((resolve) => {
+        releaseHandshake = resolve;
+      })
+    : Promise.resolve();
+  const initialized = new Set<string>();
+  let releaseCatalog: () => void = () => {};
+  const catalog = options.holdCatalog
+    ? new Promise<void>((resolve) => {
+        releaseCatalog = resolve;
+      })
+    : Promise.resolve();
+  const calls: string[] = [];
+  const bridgeRequests: { method: string; bridgeId: string; session: string }[] = [];
+  const health: { status: string; reason: string; tools: string[] }[] = [];
+  let mutationResponse: ServerResponse | undefined;
+  const server = createServer((request, response) => {
+    let text = "";
+    request.on("data", (bytes) => {
+      text += String(bytes);
+    });
+    request.on("end", () => {
+      response.setHeader("content-type", "application/json");
+      if (request.url?.includes("/events?")) {
+        mailboxRequests++;
+        setTimeout(() => response.end(JSON.stringify({ schemaVersion: 1, events: [] })), 200);
+        return;
+      }
+      if (request.url?.endsWith("/peers")) {
+        peerRequests++;
+        if (peerRefusal) {
+          response.statusCode = peerRefusal.status;
+          response.end(JSON.stringify(peerRefusal));
+        } else if (options.nativePeerProofRequired) {
+          response.statusCode = 403;
+          response.end(JSON.stringify({ error: "native_peer_sender_required" }));
+        } else if (peersOff || peersFail) {
+          response.statusCode = peersOff ? 403 : 503;
+          response.end(
+            JSON.stringify({ error: peersOff ? "peer_messages_disabled" : "peer_observation_failed" }),
+          );
+        } else
+          response.end(
+            JSON.stringify({
+              schemaVersion: 1,
+              fleet: "default",
+              sender: { seatId: "sender", paneId: "w8:p3", binding: "a".repeat(64) },
+              seats: [],
+            }),
+          );
+        return;
+      }
+      const rpc = JSON.parse(text) as { id?: number; method: string; params?: { name?: string } };
+      bridgeRequests.push({
+        method: rpc.method,
+        bridgeId: String(request.headers["x-clankie-bridge-id"] ?? ""),
+        session: String(request.headers["mcp-session-id"] ?? ""),
+      });
+      const reply = (result: unknown) => response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }));
+      if (rpc.method === "initialize") {
+        response.setHeader("mcp-session-id", `session-${++initializes}`);
+        reply({
+          protocolVersion: "2025-06-18",
+          capabilities: { tools: {} },
+          serverInfo: { name: "fixture", version: "1" },
+        });
+        return;
+      }
+      const session = String(request.headers["mcp-session-id"] ?? "");
+      if (rpc.method === "notifications/initialized") {
+        void handshake.then(() => {
+          initialized.add(session);
+          response.statusCode = 202;
+          response.end();
+        });
+        return;
+      }
+      if (rpc.method === "notifications/clankie/bridge_status") {
+        health.push(rpc.params as unknown as { status: string; reason: string; tools: string[] });
+        response.statusCode = 202;
+        response.end();
+        return;
+      }
+      if (!initialized.has(session)) prematureCall = true;
+      if (rpc.method === "tools/list") {
+        if (toolRefusal) {
+          response.statusCode = toolRefusal.status;
+          response.end(JSON.stringify(toolRefusal));
+        } else if (discoveryFails) {
+          response.statusCode = 503;
+          response.end(JSON.stringify({ error: "catalog_observation_failed" }));
+        } else
+          void catalog.then(() =>
+            reply({
+              tools: ["clankie_tools", "clankie_call"].map((name) => ({
+                name,
+                inputSchema: { type: "object" },
+              })),
+              _meta: { clankie: { tools: "connected", ...(peerMessages ? { peerMessages } : {}) } },
+            }),
+          );
+        return;
+      }
+      const name = rpc.params?.name ?? "";
+      calls.push(name);
+      if (toolRefusal) {
+        response.statusCode = toolRefusal.status;
+        response.end(JSON.stringify(toolRefusal));
+        return;
+      }
+      if (name === "mutate") {
+        mutationResponse = response;
+        return;
+      }
+      if (name === "hang") {
+        response.writeHead(200);
+        response.write(`{"jsonrpc":"2.0","id":${String(rpc.id)},"result":`);
+        return;
+      }
+      reply({ content: [{ type: "text", text: "read completed" }], isError: false });
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  cleanups.push(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No fixture address");
+  return {
+    url: `http://127.0.0.1:${String(address.port)}`,
+    calls,
+    bridgeRequests,
+    health,
+    initializes: () => initializes,
+    peerRequests: () => peerRequests,
+    mailboxRequests: () => mailboxRequests,
+    setPeerMessages: (value: "on" | "off") => {
+      peerMessages = value;
+    },
+    refuseTools: (value: typeof toolRefusal) => {
+      toolRefusal = value;
+    },
+    refusePeers: (value: typeof peerRefusal) => {
+      peerRefusal = value;
+    },
+    prematureCall: () => prematureCall,
+    releaseHandshake,
+    releaseCatalog,
+    failDiscovery: (value: boolean) => {
+      discoveryFails = value;
+    },
+    failPeers: (value: boolean) => {
+      peersFail = value;
+    },
+    disablePeers: () => {
+      peersOff = true;
+    },
+    loseMutationReply: () => mutationResponse?.destroy(),
+  };
+}
+
+it.each([
+  { status: 403, error: "worker_grant_unavailable", reason: "Local fleet membership unavailable" },
+  {
+    status: 504,
+    error: "worker_request_failed",
+    reason: "Worker request body timed out or was cancelled: worker deadline expired",
+  },
+])(
+  "surfaces the real $status reason without withdrawing verified tools or replaying a call",
+  async (refusal) => {
+    const service = await recoveryService({ peerMessages: "on" });
+    const home = await linkedHome(service.url, true);
+    const bridge = rawReceiptBridge("fleet", home, service.url, false, 1_000);
+    await bridge.init();
+    const names = ["message_clankie", "clankie_tools", "clankie_call", "list_fleet_seats", "message_peer"];
+    expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names);
+    service.refuseTools(refusal);
+    service.refusePeers({
+      status: 403,
+      error: "native_peer_sender_required",
+      reason: "The admitted seat has no current native binding",
+    });
+    const denied = await bridge.tool("clankie_tools", { query: "Linear" });
+    expect(denied.result.isError).toBe(true);
+    expect(denied.result.content[0]?.text).toContain(
+      `${refusal.status}: ${refusal.reason}: ${refusal.error}`,
+    );
+    expect(service.calls).toEqual(["clankie_tools"]);
+    expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names);
+    await expect
+      .poll(() =>
+        service.health.some((entry) => entry.reason.includes(`${refusal.reason}: ${refusal.error}`)),
+      )
+      .toBe(true);
+    const peers = await bridge.tool("list_fleet_seats");
+    expect(peers.error?.message).toContain(
+      "The admitted seat has no current native binding: native_peer_sender_required",
+    );
+    const unproved = rawReceiptBridge("fleet", home, service.url, false, 1_000);
+    await unproved.init();
+    const initial = await unproved.list();
+    expect(initial.error?.message).toContain(`${refusal.reason}: ${refusal.error}`);
+    expect(initial).not.toHaveProperty("result");
+    expect(service.calls).toEqual(["clankie_tools"]);
+  },
+);
+
+it.each(["held", "refused"] as const)(
+  "holds a hired Claude mailbox until its %s expected catalog is verified",
+  async (state) => {
+    const service = await recoveryService({ peerMessages: "on", holdCatalog: state === "held" });
+    service.failDiscovery(state === "refused");
+    const names = ["message_clankie", "clankie_tools", "clankie_call", "list_fleet_seats", "message_peer"];
+    const bridge = rawReceiptBridge(
+      "fleet",
+      await linkedHome(service.url, true),
+      service.url,
+      true,
+      1_000,
+      JSON.stringify(names),
+    );
+    await bridge.init();
+    bridge.initialized();
+    await expect.poll(() => service.bridgeRequests.some((entry) => entry.method === "tools/list")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(service.mailboxRequests()).toBe(0);
+    // The native list and the background readiness read share the same lookup.
+    const nativeList = state === "held" ? bridge.list() : undefined;
+    service.releaseCatalog();
+    service.failDiscovery(false);
+    await expect.poll(service.mailboxRequests).toBeGreaterThan(0);
+    expect((await (nativeList ?? bridge.list())).result.tools.map((tool) => tool.name)).toEqual(names);
+  },
+);
+
+it("never starts a hired Claude mailbox from a malformed catalog expectation", async () => {
+  const service = await recoveryService({ peerMessages: "on" });
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, true, 500, "{");
+  await bridge.init();
+  bridge.initialized();
+  expect((await bridge.list()).error?.message).toContain("Invalid Clankie tool catalog expectation");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(service.mailboxRequests()).toBe(0);
+  expect(service.bridgeRequests).toEqual([]);
+});
+
+it("identifies each bridge process across HTTP session reconnects", async () => {
+  const service = await recoveryService({ peerMessages: "on" });
+  const home = await linkedHome(service.url, true);
+  const first = rawReceiptBridge("fleet", home, service.url, false, 1_000);
+  await first.init();
+  await first.list();
+  const firstId = service.bridgeRequests[0]?.bridgeId;
+  service.failDiscovery(true);
+  await first.list();
+  service.failDiscovery(false);
+  await first.tool("read");
+  expect(service.initializes()).toBe(2);
+  const second = rawReceiptBridge("fleet", home, service.url, false, 1_000);
+  await second.init();
+  await second.list();
+  await expect
+    .poll(
+      () =>
+        new Set(
+          service.bridgeRequests
+            .filter((entry) => entry.method === "notifications/clankie/bridge_status")
+            .map((entry) => entry.bridgeId),
+        ).size,
+    )
+    .toBe(2);
+  const ids = new Set(service.bridgeRequests.map((entry) => entry.bridgeId));
+  expect(ids.size).toBe(2);
+  for (const id of ids)
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+  expect(
+    service.bridgeRequests.filter((entry) => entry.bridgeId === firstId && entry.method === "initialize"),
+  ).toHaveLength(2);
+  expect(
+    new Set(
+      service.bridgeRequests
+        .filter((entry) => entry.bridgeId === firstId && entry.session)
+        .map((entry) => entry.session),
+    ).size,
+  ).toBe(2);
+  expect(new Set(service.bridgeRequests.map((entry) => entry.method))).toEqual(
+    new Set([
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/call",
+      "notifications/clankie/bridge_status",
+    ]),
+  );
+});
+
+it("shares the whole initialized handshake and bounds a hanging response body, including initialization time", async () => {
+  const service = await recoveryService({ holdInitialized: true });
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, false, 500);
+  await bridge.init();
+  bridge.initialized();
+  const started = performance.now();
+  const hung = bridge.tool("hang");
+  const listed = bridge.list();
+  await expect.poll(service.initializes).toBe(1);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(service.calls).toEqual([]);
+  service.releaseHandshake();
+  expect((await listed).result.tools.map((tool) => tool.name)).toEqual([
+    "message_clankie",
+    "clankie_tools",
+    "clankie_call",
+    "list_fleet_seats",
+    "message_peer",
+  ]);
+  const result = await hung;
+  expect(result.result.isError).toBe(true);
+  expect(result.result.content[0]?.text).toContain("timed out within its 500 ms request budget");
+  expect(performance.now() - started).toBeGreaterThanOrEqual(450);
+  expect(performance.now() - started).toBeLessThan(1_200);
+  expect(service.initializes()).toBe(1);
+  expect(service.prematureCall()).toBe(false);
+  expect(service.calls).toEqual(["hang"]);
+  await expect.poll(() => service.health.some((entry) => entry.status === "stalled")).toBe(true);
+  expect((await bridge.tool("read")).result.content[0]?.text).toBe("read completed");
+  await expect.poll(() => service.health.at(-1)?.status).toBe("ready");
+});
+
+it("retains proven catalogs while discovery fails, and never replays an admitted mutation after its result is lost", async () => {
+  const service = await recoveryService();
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, false, 1_000);
+  await bridge.init();
+  const names = ["message_clankie", "clankie_tools", "clankie_call", "list_fleet_seats", "message_peer"];
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names);
+  const mutated = bridge.tool("mutate");
+  await expect.poll(() => service.calls).toEqual(["mutate"]);
+  service.failDiscovery(true);
+  service.failPeers(true);
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names);
+  await expect
+    .poll(() => service.health.some((entry) => entry.reason.includes("catalog_observation_failed")))
+    .toBe(true);
+  service.failDiscovery(false);
+  service.failPeers(false);
+  expect((await bridge.tool("read")).result.isError).toBe(false);
+  expect(service.initializes()).toBe(2);
+  service.loseMutationReply();
+  expect((await mutated).result.isError).toBe(true);
+  expect((await bridge.tool("read")).result.isError).toBe(false);
+  expect(service.initializes()).toBe(2);
+  expect(service.calls.filter((name) => name === "mutate")).toHaveLength(1);
+  service.disablePeers();
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names.slice(0, 3));
+});
+
+it("advertises authenticated peer settings before native proof settles, while invocations still require fresh proof", async () => {
+  const service = await recoveryService({ peerMessages: "on", nativePeerProofRequired: true });
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, false, 500);
+  await bridge.init();
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
+    "message_clankie",
+    "clankie_tools",
+    "clankie_call",
+    "list_fleet_seats",
+    "message_peer",
+  ]);
+  expect(service.peerRequests()).toBe(0);
+  const denied = await bridge.tool("list_fleet_seats");
+  expect(denied.error?.message).toContain("403: native_peer_sender_required");
+  expect(service.peerRequests()).toBe(1);
+  service.setPeerMessages("off");
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
+    "message_clankie",
+    "clankie_tools",
+    "clankie_call",
+  ]);
+  expect(service.peerRequests()).toBe(1);
 });

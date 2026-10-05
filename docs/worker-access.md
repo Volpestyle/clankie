@@ -2,9 +2,11 @@
 
 Admitted fleet panes receive standing access to every connected MCP server whose
 account is verified. Provider credentials stay in Clankie's broker. The bridge
-exposes `clankie_tools` and `clankie_call` for connected accounts. The native
-worker bridge separately supplies `message_clankie` and, with stronger native
-identity proof, `list_fleet_seats` and `message_peer`. Manual grants keep their selected direct tools.
+exposes `clankie_tools` and `clankie_call` from fleet settings and admission;
+provider discovery and verified account checks happen on invocation. The native
+worker bridge separately supplies `message_clankie` and, when peer messages are
+enabled, `list_fleet_seats` and `message_peer`. Peer invocations require stronger
+native identity proof. Manual grants keep their selected direct tools.
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) supersedes the
 project-tool gate in ADR 0216. Projects still own roles, caps, hiring and tracker binding.
 
@@ -32,9 +34,10 @@ read-before-write and editing rules.
 
 The fleet bridge checks its catalog every five seconds and emits MCP
 `notifications/tools/list_changed` for added, removed or changed definitions.
-An explicit admission refusal withdraws tools. Other failed discovery keeps the
-previous catalog; calls still pass through Clankie's current admission and
-account checks. A notification never replays a tool call.
+Temporary discovery failures, including admission refusals, keep the previously
+verified schemas. Explicit settings metadata removes disabled tools. Calls still
+pass through Clankie's current admission and account checks, and a refusal reports
+the service's reason. A notification never replays a tool call.
 
 Codex 0.160.0 logs this notification without updating its executable catalog.
 Plain `config/mcpServer/reload` also reuses an unchanged ready connection.
@@ -91,8 +94,10 @@ also fences account and server configuration.
 
 These checks do not provide atomic revocation. A call already past its last
 asynchronous check can still reach the provider after tools-off or lost admission;
-this is not limited to operations already dispatched. No global concurrent-call
-or time bound has been proven. This is the chosen contract (VUH-1585,
+this is not limited to operations already dispatched. Worker requests have a
+thirty-second total deadline; six concurrent native-first hires and issue reads
+are covered against an isolated tracker. Those bounds do not make revocation
+atomic. This is the chosen contract (VUH-1585,
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md)): the switch stops new
 calls rather than promising atomic revocation. The original strict guarantee was
 not met and was replaced by this decision, not shown to pass. An operation already
@@ -285,9 +290,13 @@ source-managed/symlinked harness configuration. The existing PC Node bridge
 proxies list/call and needs no new wire protocol for the two-tool catalog.
 
 The bridge retries initial discovery with backoff for up to 20 seconds while a
-pane settles, including stalled HTTP requests. A persistent connected-tool
-failure retains the separately available worker tools. Later lists and calls check current access; discovery never
-retries a mutation. Codex can retain its startup catalog despite tool-list-change
+pane settles, including stalled HTTP requests. An unproved initial catalog fails
+with its real reason; hired Claude and Codex panes wait for the expected wrapper
+and enabled peer tools before their brief. Verified catalogs remain present
+through temporary failures. Lists and calls use bounded initialization and body
+reads, with a thirty-second total request budget. Replacing a service provider
+connection preserves already dispatched calls until they settle. Discovery never
+retries an uncertain mutation. Codex can retain its startup catalog despite tool-list-change
 notifications, so the owner may need to reconnect MCP or restart a pane after
 cutover. A displayed stale tool never bypasses current service authorization.
 
@@ -309,6 +318,11 @@ transport presence from `freshness: older-than-runtime`: the observed bridge
 started before the running service, so the seat needs reloading. This is a reload
 hint, including after a same-build service restart, not proof of an obsolete
 build or successful delivery. Missing start-time facts remain `unknown`.
+The separate `workerTools` field records served/reported catalogs, missing tools
+and stalled calls with their real reason. A new authenticated bridge process
+starts a new observation cohort; late reports cannot overwrite it. Cached schemas
+and diagnostic observations grant no authority. `No durable native binding` on
+a message receipt means no new message was sent; inspect the native binding.
 Operator bridge presence does not prove worker bridge readiness; reconcile an
 uncertain original receipt before another attempt. Live PC acceptance is a separate native
 check after landing and re-pin: two connected bridge tools plus `message_clankie`,

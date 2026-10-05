@@ -18,11 +18,15 @@ import {
 } from "@clankie/credential-broker";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  InitializeRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
 import { isLinearWorkerTool } from "./linear-publishing.ts";
-import { MinecraftActionSchema } from "@clankie/protocol";
+import { MinecraftActionSchema, type WorkerBridgeStatus } from "@clankie/protocol";
 import type { MinecraftService } from "./minecraft.ts";
 
 const minecraftWorkerSchemas = {
@@ -82,6 +86,9 @@ type WorkerAuthorization = {
   grantId?: string;
   /** Standing fleet records are synthesized from the current connected catalog, never persisted. */
   fleet?: string;
+  pane?: string;
+  /** Observational process generation; never part of authorization. */
+  bridgeId?: string;
   validateFleet?(): boolean | Promise<boolean>;
   /** Optional author attribution only; this never changes the connected tool grant. */
   nativeWriteProof?(): Promise<ProjectProcessProof | undefined>;
@@ -115,6 +122,34 @@ const FLEET_TOOLS = [
 ];
 const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
+export const WORKER_REQUEST_TIMEOUT_MS = 30_000;
+async function beforeWorkerDeadline<T>(
+  signal: AbortSignal,
+  name: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  signal.throwIfAborted();
+  let aborted!: () => void;
+  try {
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      aborted = () => reject(new Error(`${name} timed out or was cancelled: ${String(signal.reason)}`));
+      signal.addEventListener("abort", aborted, { once: true });
+    });
+    return await Promise.race([operation(), cancelled]);
+  } finally {
+    signal.removeEventListener("abort", aborted);
+  }
+}
+const BridgeNotificationSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  method: z.literal("notifications/clankie/bridge_status"),
+  id: z.never().optional(),
+  params: z.object({
+    status: z.enum(["ready", "missing", "stalled"]),
+    reason: z.string().max(500),
+    tools: z.array(z.string().min(1).max(256)).max(128).optional(),
+  }),
+});
 
 /** Immutable grants plus a durable revocation marker; only the service writes them. */
 export class WorkerMcp {
@@ -125,6 +160,9 @@ export class WorkerMcp {
     host: McpHost;
     projects?(): Promise<ProjectsSettings>;
     fleetTools?(): Promise<FleetSettings["tools"]>;
+    fleetPeerMessages?(): Promise<FleetSettings["peerMessages"]>;
+    /** The entire worker operation, including admission and provider discovery. */
+    requestTimeoutMs?: number;
     /** Canonical settings generation, checked without yielding at provider dispatch. */
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
     minecraft?: Pick<MinecraftService, "workerCommand">;
@@ -136,6 +174,7 @@ export class WorkerMcp {
     {
       grantId?: string;
       principalKey: string;
+      bridgeId?: string;
       server: Server;
       transport: WebStandardStreamableHTTPServerTransport;
       expiresAt: number;
@@ -143,8 +182,169 @@ export class WorkerMcp {
       pluginNoticeVersion?: string;
     }
   >();
+  private readonly requestTimeoutMs: number;
+  private closed = false;
   constructor(options: WorkerMcp["options"]) {
     this.options = options;
+    const timeout = options.requestTimeoutMs ?? WORKER_REQUEST_TIMEOUT_MS;
+    if (!Number.isInteger(timeout) || timeout <= 0) throw new Error("Invalid worker request timeout");
+    this.requestTimeoutMs = Math.min(timeout, WORKER_REQUEST_TIMEOUT_MS);
+  }
+
+  private readonly bridges = new Map<
+    string,
+    {
+      generation: string | undefined;
+      last?: WorkerBridgeStatus;
+      active: Map<symbol, { since: number; operation: string }>;
+    }
+  >();
+  private readonly fleetRequests = new Map<
+    string,
+    { authorize(): Promise<WorkerAuthorization>; signal: AbortSignal; deadline: number }
+  >();
+
+  private bridge(authority: WorkerAuthorization) {
+    if (this.closed || authority.fleet === undefined || authority.pane === undefined) return undefined;
+    const key = JSON.stringify([authority.fleet, authority.pane]);
+    let state = this.bridges.get(key);
+    if (!state) {
+      state = { generation: authority.bridgeId, active: new Map() };
+      this.bridges.set(key, state);
+    }
+    return state.generation === authority.bridgeId ? state : undefined;
+  }
+
+  /** Observations explain bridge health; they never grant native or provider authority. */
+  bridgeStatus(fleet: string, pane: string): WorkerBridgeStatus {
+    const state = this.bridges.get(JSON.stringify([fleet, pane]));
+    const pending = state && [...state.active.values()].sort((a, b) => a.since - b.since)[0];
+    if (pending) {
+      const stalled = Date.now() - pending.since >= this.requestTimeoutMs;
+      return {
+        status: stalled ? "stalled" : "pending",
+        reason: `${pending.operation}${stalled ? " exceeded the worker deadline" : " is pending"}`,
+        pendingSince: new Date(pending.since).toISOString(),
+        ...(state.last?.tools ? { tools: state.last.tools } : {}),
+      };
+    }
+    return state?.last ?? { status: "not-observed", reason: "Worker bridge catalog has not been observed" };
+  }
+
+  private catalogServed(authority: WorkerAuthorization, tools: string[], connected: boolean): void {
+    const state = this.bridge(authority);
+    if (
+      !state ||
+      (connected &&
+        (state.last?.reason.startsWith("Native bridge reported") || state.last?.status === "stalled"))
+    )
+      return;
+    state.last = {
+      status: connected ? "ready" : "missing",
+      reason: connected
+        ? "Authenticated connected-tool catalog served; native catalog is unverified"
+        : "Fleet connected tools are off",
+      tools,
+      observedAt: new Date().toISOString(),
+    };
+  }
+
+  private async bridgeReported(
+    authority: WorkerAuthorization,
+    reported: z.infer<typeof BridgeNotificationSchema>["params"],
+    signal: AbortSignal,
+  ): Promise<void> {
+    const state = this.bridge(authority);
+    if (!state) return;
+    const expected = await beforeWorkerDeadline(signal, "Worker bridge health settings", () =>
+      this.expectedFleetToolNames(),
+    );
+    signal.throwIfAborted();
+    if (this.bridge(authority) !== state || authority.currentFleet?.() === false) return;
+    const missing = expected.filter((name) => !reported.tools?.includes(name));
+    if (state.last?.status === "stalled" && reported.status === "ready") return;
+    state.last = {
+      status: reported.status === "ready" && missing.length ? "missing" : reported.status,
+      reason:
+        `Native bridge reported: ${reported.status === "ready" && missing.length ? `missing ${missing.join(", ")}` : reported.reason}`.slice(
+          0,
+          500,
+        ),
+      ...(reported.tools ? { tools: reported.tools } : {}),
+      observedAt: new Date().toISOString(),
+    };
+  }
+
+  private async operation<T>(
+    authority: WorkerAuthorization,
+    token: string,
+    cancellation: AbortSignal,
+    name: string,
+    work: (signal: AbortSignal, remaining: () => number) => Promise<T>,
+  ): Promise<T> {
+    const request = this.fleetRequests.get(token);
+    const duration = this.requestTimeoutMs;
+    const deadline = request?.deadline ?? Date.now() + duration;
+    const signal = AbortSignal.any([cancellation, request?.signal ?? AbortSignal.timeout(duration)]);
+    const remaining = () => Math.max(1, deadline - Date.now());
+    const state = this.bridge(authority);
+    const id = Symbol(name);
+    state?.active.set(id, { since: Date.now(), operation: name });
+    try {
+      const result = await beforeWorkerDeadline(signal, name, () => work(signal, remaining));
+      return result;
+    } catch (error) {
+      if (signal.aborted && state)
+        state.last = {
+          status: "stalled",
+          reason: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+          observedAt: new Date().toISOString(),
+          ...(state.last?.tools ? { tools: state.last.tools } : {}),
+        };
+      throw error;
+    } finally {
+      state?.active.delete(id);
+    }
+  }
+
+  private async fleetRequest(
+    request: Request,
+    authorize: () => Promise<WorkerAuthorization>,
+    observed?: (response: Response, signal: AbortSignal) => Promise<void>,
+  ): Promise<Response> {
+    const proof = randomUUID();
+    const duration = this.requestTimeoutMs;
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(duration)]);
+    const bridgeId = uuid.safeParse(request.headers.get("x-clankie-bridge-id"));
+    this.fleetRequests.set(proof, { authorize, signal, deadline: Date.now() + duration });
+    const headers = new Headers(request.headers);
+    headers.set("authorization", `Bearer ${proof}`);
+    try {
+      const response = await this.handleAuthorized(
+        new Request(request, { headers, signal }),
+        async (token) => {
+          const current = this.fleetRequests.get(token);
+          if (!current) throw new Error("Fleet request no longer active");
+          current.signal.throwIfAborted();
+          const authority = await beforeWorkerDeadline(
+            current.signal,
+            "Worker fleet authentication",
+            current.authorize,
+          );
+          current.signal.throwIfAborted();
+          return { ...authority, ...(bridgeId.success ? { bridgeId: bridgeId.data } : {}) };
+        },
+      );
+      if (observed) {
+        const noticeSignal = AbortSignal.any([signal, AbortSignal.timeout(2_000)]);
+        await beforeWorkerDeadline(noticeSignal, "Worker plugin notice", () =>
+          observed(response, noticeSignal),
+        ).catch(() => undefined);
+      }
+      return response;
+    } finally {
+      this.fleetRequests.delete(proof);
+    }
   }
 
   private issuer(): Promise<CapabilityTokenIssuer> {
@@ -358,64 +558,47 @@ export class WorkerMcp {
     });
   }
 
-  /** Per-request proofs live only in service memory, never in HTTP responses or worker files. */
-  private readonly localRequests = new Map<string, LocalFleetIdentity>();
-
   async handleLocalFleet(request: Request, identity: LocalFleetIdentity): Promise<Response> {
-    let version = this.sessions.get(request.headers.get("mcp-session-id") ?? "")?.pluginVersion;
-    if (request.method === "POST" && request.headers.get("mcp-session-id") === null) {
-      const input = await request
-        .clone()
-        .json()
-        .catch(() => undefined);
-      if (input?.method === "initialize" && input.params?.clientInfo?.name === "clankie-worker")
-        version = input.params.clientInfo.version;
-    }
-    const proof = randomUUID();
-    this.localRequests.set(proof, identity);
-    const headers = new Headers(request.headers);
-    headers.set("authorization", `Bearer ${proof}`);
-    try {
-      const response = await this.handleAuthorized(new Request(request, { headers }), async (token) => {
-        const current = this.localRequests.get(token);
-        if (!current || !(await current.validate())) throw new Error("Local fleet membership unavailable");
-        const fleet = current.fleet ?? "default";
+    return this.fleetRequest(
+      request,
+      async () => {
+        if (!(await identity.validate())) throw new Error("Local fleet membership unavailable");
+        const fleet = identity.fleet ?? "default";
         return this.fleetAuthorization(
           fleet,
-          () => current.validate(),
-          current.current === undefined ? undefined : () => current.current!(),
-          current.pane,
+          () => identity.validate(),
+          identity.current === undefined ? undefined : () => identity.current!(),
+          identity.pane,
           async () => {
-            if (!(await current.validate())) return undefined;
-            const observed = await current.projectProof?.();
-            if (observed?.fleet !== fleet || observed.pane !== current.pane || !(await current.validate()))
+            if (!(await identity.validate())) return undefined;
+            const observed = await identity.projectProof?.();
+            if (observed?.fleet !== fleet || observed.pane !== identity.pane || !(await identity.validate()))
               return undefined;
             return observed;
           },
         );
-      });
-      if (response.ok && typeof version === "string") {
-        const session = this.sessions.get(
-          response.headers.get("mcp-session-id") ?? request.headers.get("mcp-session-id") ?? "",
-        );
-        if (session) session.pluginVersion = version;
-        // A display failure must not deny tools or prompt an uncertain tool replay.
+      },
+      async (response, signal) => {
+        const id = response.headers.get("mcp-session-id") ?? request.headers.get("mcp-session-id") ?? "";
+        const session = this.sessions.get(id);
+        const version = session?.pluginVersion;
+        if (!response.ok || !session || typeof version !== "string") return;
+        // Display delivery is bounded and cannot deny tools or cause an uncertain replay.
         const expected = this.options.pluginExpectedVersion?.();
-        if (session?.pluginNoticeVersion !== expected || session?.pluginNoticeVersion === undefined) {
-          if (await this.options.pluginVersionObserved?.(identity, version).catch(() => false))
-            if (session && expected !== undefined) session.pluginNoticeVersion = expected;
-        }
-      }
-      return response;
-    } finally {
-      this.localRequests.delete(proof);
-    }
+        if (session.pluginNoticeVersion === expected && expected !== undefined) return;
+        const delivered = await this.options.pluginVersionObserved?.(identity, version);
+        signal.throwIfAborted();
+        if (delivered && expected !== undefined && this.sessions.get(id) === session)
+          session.pluginNoticeVersion = expected;
+      },
+    );
   }
 
   /** A bearer link admits its fleet, without claiming a verified pane or native occupant. */
   async handleFleet(fleet: string, request: Request, linked: (token: string) => boolean): Promise<Response> {
-    return this.handleAuthorized(request, async (token) => {
-      if (!linked(token)) throw new Error("Not this fleet's link");
+    const token = request.headers.get("authorization")?.match(/^Bearer (\S+)$/u)?.[1];
+    return this.fleetRequest(request, async () => {
+      if (token === undefined || !linked(token)) throw new Error("Not this fleet's link");
       return this.fleetAuthorization(
         fleet,
         () => linked(token),
@@ -426,7 +609,14 @@ export class WorkerMcp {
 
   /** Read-only startup expectation. This never authorizes a request or creates an identity. */
   async expectedProjectToolNames(_projectId: string): Promise<readonly string[]> {
-    return (await this.fleetToolsEnabled()) ? FLEET_TOOLS.map((tool) => tool.name) : [];
+    return this.expectedFleetToolNames();
+  }
+
+  async expectedFleetToolNames(): Promise<readonly string[]> {
+    return [
+      ...((await this.fleetToolsEnabled()) ? FLEET_TOOLS.map((tool) => tool.name) : []),
+      ...((await this.options.fleetPeerMessages?.()) === "on" ? ["list_fleet_seats", "message_peer"] : []),
+    ];
   }
 
   private async fleetToolsEnabled(): Promise<boolean> {
@@ -443,6 +633,25 @@ export class WorkerMcp {
     FleetIdSchema.parse(fleet);
     const principalId = `fleet:${fleet}:pane:${pane ?? "unverified"}`;
     const expiresAt = Math.floor(Date.now() / 1000) + 900;
+    return {
+      key: JSON.stringify(pane === undefined ? ["fleet", fleet] : ["fleet", fleet, pane]),
+      principalId,
+      records: [],
+      expiresAt,
+      fleet,
+      ...(pane === undefined ? {} : { pane }),
+      validateFleet,
+      ...(nativeWriteProof ? { nativeWriteProof } : {}),
+      currentFleet,
+    };
+  }
+
+  /** Provider/account discovery happens on invocation, never wrapper discovery or initialize. */
+  private async connectedFleetRecords(
+    authority: WorkerAuthorization,
+    wanted?: string,
+  ): Promise<GrantRecord[]> {
+    const { principalId, expiresAt, fleet } = authority;
     const records: GrantRecord[] = [];
     if (await this.fleetToolsEnabled()) {
       const catalog = (await this.options.host.catalog("operator")).filter(
@@ -477,35 +686,31 @@ export class WorkerMcp {
               nonce: randomUUID(),
             },
           });
-        } catch {
+        } catch (error) {
+          if (wanted?.startsWith(`${server}_`)) throw error;
           // One unverified/unavailable account never removes the other servers.
         }
       }
     }
-    return {
-      key: JSON.stringify(pane === undefined ? ["fleet", fleet] : ["fleet", fleet, pane]),
-      principalId,
-      records,
-      expiresAt,
-      fleet,
-      validateFleet,
-      ...(nativeWriteProof ? { nativeWriteProof } : {}),
-      currentFleet,
-    };
+    return records;
   }
 
   private async handleAuthorized(
     request: Request,
     authenticate: (token: string) => Promise<WorkerAuthorization>,
   ): Promise<Response> {
+    if (this.closed) return Response.json({ error: "worker_bridge_closed" }, { status: 503 });
     const token = request.headers.get("authorization")?.match(/^Bearer (\S+)$/u)?.[1];
     if (token === undefined)
       return Response.json({ error: "worker_authentication_required" }, { status: 401 });
     let authority: WorkerAuthorization;
     try {
       authority = await authenticate(token);
-    } catch {
-      return Response.json({ error: "worker_grant_unavailable" }, { status: 403 });
+    } catch (error) {
+      return Response.json(
+        { error: "worker_grant_unavailable", reason: error instanceof Error ? error.message : String(error) },
+        { status: 403 },
+      );
     }
     const id = request.headers.get("mcp-session-id");
     for (const [sessionId, session] of this.sessions) {
@@ -517,9 +722,36 @@ export class WorkerMcp {
     if (id !== null) {
       const session = this.sessions.get(id);
       if (session === undefined) return Response.json({ error: "unknown_session" }, { status: 404 });
-      if (session.principalKey !== authority.key)
+      if (session.principalKey !== authority.key || session.bridgeId !== authority.bridgeId)
         return Response.json({ error: "worker_session_forbidden" }, { status: 403 });
       session.expiresAt = Math.max(session.expiresAt, authority.expiresAt);
+      if (request.method === "POST") {
+        try {
+          const body = await beforeWorkerDeadline(request.signal, "Worker request body", () =>
+            request
+              .clone()
+              .json()
+              .catch(() => undefined),
+          );
+          const notification = BridgeNotificationSchema.safeParse(body);
+          if (notification.success) {
+            // Notifications have no SDK auth extras. Their HTTP request has just
+            // passed the same fresh fleet and session checks as a tool request.
+            await this.operation(authority, token, request.signal, "Worker bridge health update", (signal) =>
+              this.bridgeReported(authority, notification.data.params, signal),
+            );
+            return new Response(null, { status: 202, headers: { "mcp-session-id": id } });
+          }
+        } catch (error) {
+          return Response.json(
+            {
+              error: "worker_request_failed",
+              reason: error instanceof Error ? error.message : String(error),
+            },
+            { status: request.signal.aborted ? 504 : 400 },
+          );
+        }
+      }
       const response = await session.transport.handleRequest(request, {
         authInfo: { token, clientId: authority.principalId, scopes: [] },
       });
@@ -530,6 +762,21 @@ export class WorkerMcp {
       return response;
     }
     if (request.method !== "POST") return Response.json({ error: "session_required" }, { status: 400 });
+    let parsedBody: unknown;
+    try {
+      parsedBody = await beforeWorkerDeadline(request.signal, "Worker initialize body", () =>
+        request
+          .clone()
+          .json()
+          .catch(() => undefined),
+      );
+    } catch (error) {
+      return Response.json(
+        { error: "worker_request_failed", reason: error instanceof Error ? error.message : String(error) },
+        { status: request.signal.aborted ? 504 : 400 },
+      );
+    }
+    const initialize = InitializeRequestSchema.safeParse(parsedBody);
     const server = new Server(
       { name: "clankie-worker", version: "1" },
       {
@@ -537,181 +784,233 @@ export class WorkerMcp {
         instructions: `Connected tools for worker ${authority.principalId}. Fleet members discover tools with clankie_tools and invoke them with clankie_call; manual grants expose their selected tools directly. You remain a worker; this is not Clankie's operator seat.`,
       },
     );
-    server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
-      const current = await authenticate(extra.authInfo?.token ?? "");
-      if (current.key !== authority.key) throw new Error("Worker session changed");
-      if (current.fleet !== undefined) {
-        if (!(await this.fleetToolsEnabled())) return { tools: [] };
-        // Name what is connected, so a worker reading the catalog knows Linear and the rest are here.
-        const servers = [...new Set(current.records.map((record) => record.server))];
-        return {
-          tools: FLEET_TOOLS.map((tool) =>
-            tool.name === "clankie_tools" && servers.length
-              ? { ...tool, description: `${tool.description} Connected now: ${servers.join(", ")}.` }
-              : tool,
-          ),
-        };
-      }
-      const catalog = current.records.length ? await this.options.host.catalog("operator") : [];
-      return {
-        tools: catalog
-          .filter((tool) =>
-            current.records.some(
-              (record) =>
-                record.server === tool.server && record.tools.some((rule) => rule.name === tool.name),
-            ),
-          )
-          .map((tool) => ({
-            name: tool.qualifiedName,
-            description: tool.description,
-            inputSchema: tool.inputSchema as { type: "object" },
-          })),
-      };
-    });
+    server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) =>
+      this.operation(
+        authority,
+        extra.authInfo?.token ?? "",
+        extra.signal,
+        "Worker catalog discovery",
+        async (signal) => {
+          const current = await authenticate(extra.authInfo?.token ?? "");
+          signal.throwIfAborted();
+          if (current.key !== authority.key) throw new Error("Worker session changed");
+          if (current.fleet !== undefined) {
+            const connected = await this.fleetToolsEnabled();
+            const peerMessages = (await this.options.fleetPeerMessages?.()) ?? "off";
+            signal.throwIfAborted();
+            const tools = connected ? FLEET_TOOLS : [];
+            this.catalogServed(
+              current,
+              tools.map((tool) => tool.name),
+              connected,
+            );
+            return {
+              tools,
+              _meta: {
+                clankie: {
+                  tools: connected ? "connected" : "off",
+                  peerMessages,
+                },
+              },
+            };
+          }
+          const catalog = current.records.length ? await this.options.host.catalog("operator") : [];
+          return {
+            tools: catalog
+              .filter((tool) =>
+                current.records.some(
+                  (record) =>
+                    record.server === tool.server && record.tools.some((rule) => rule.name === tool.name),
+                ),
+              )
+              .map((tool) => ({
+                name: tool.qualifiedName,
+                description: tool.description,
+                inputSchema: tool.inputSchema as { type: "object" },
+              })),
+          };
+        },
+      ),
+    );
     server.setRequestHandler(CallToolRequestSchema, async (call, extra) => {
       try {
-        const authorityNow = await authenticate(extra.authInfo?.token ?? "");
-        if (authorityNow.key !== authority.key) throw new Error("Worker session changed");
-        let name = call.params.name;
-        let args = call.params.arguments ?? {};
-        if (authorityNow.fleet !== undefined) {
-          if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
-          if (name === "clankie_tools") {
-            const search = FleetSearchSchema.parse(args);
-            const connected = (await this.options.host.catalog("operator")).filter((tool) =>
-              authorityNow.records.some(
-                (record) =>
-                  record.server === tool.server && record.tools.some((rule) => rule.name === tool.name),
-              ),
-            );
-            const catalog = [
-              ...connected,
-              ...(this.options.minecraft === undefined ? [] : minecraftWorkerCatalog),
-            ];
-            const terms = (search.query ?? "").toLowerCase().split(/\s+/u).filter(Boolean);
-            const text = search.names
-              ? JSON.stringify(
-                  catalog
-                    .filter((tool) => search.names!.includes(tool.qualifiedName))
-                    .map((tool) => ({
-                      name: tool.qualifiedName,
-                      description: tool.description,
-                      inputSchema: tool.inputSchema,
-                    })),
-                )
-              : (() => {
-                  // Rank by how many query words a tool matches: agents write
-                  // several words ("linear issue create"), and requiring all of
-                  // them in one tool returned nothing.
-                  const ranked = catalog
-                    .map((tool) => {
-                      const haystack = `${tool.qualifiedName} ${tool.description ?? ""}`.toLowerCase();
-                      return { tool, hits: terms.filter((term) => haystack.includes(term)).length };
-                    })
-                    .filter(({ hits }) => terms.length === 0 || hits > 0)
-                    .sort((a, b) => b.hits - a.hits)
-                    .slice(0, 20)
-                    .map(
-                      ({ tool }) =>
-                        `${tool.qualifiedName} — ${(tool.description ?? "").replace(/\s+/gu, " ").trim()}`,
-                    );
-                  return ranked.length > 0 || catalog.length === 0
-                    ? ranked.join("\n")
-                    : "No connected tool matches those words. Try one word, such as a service name.";
-                })();
-            return { content: [{ type: "text", text }], isError: false };
-          }
-          if (name !== "clankie_call") throw new Error("Use clankie_call for connected tools");
-          const invocation = FleetCallSchema.parse(args);
-          name = invocation.name;
-          args = invocation.arguments;
-        }
-        if (Object.hasOwn(minecraftWorkerSchemas, name)) {
-          if (authorityNow.fleet === undefined || this.options.minecraft === undefined)
-            throw new Error("Minecraft driver requires an admitted fleet channel");
-          const input = minecraftWorkerSchemas[name as keyof typeof minecraftWorkerSchemas].parse(args);
-          const action = name.slice("clankie_minecraft_".length) as "act" | "observe" | "status" | "cancel";
-          const result = await this.options.minecraft.workerCommand(
-            { action, ...input },
-            {
-              principalId: authorityNow.principalId,
-              guard: async () => {
-                if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
-                const snapshot = await this.options.fleetToolsSnapshot?.();
-                if (snapshot?.tools !== "connected") throw new Error("Fleet tools are off or unavailable");
-                snapshot.assertCurrent();
-                if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
-                return () => {
-                  snapshot.assertCurrent();
-                  if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
-                };
-              },
-            },
-          );
-          return { content: [{ type: "text", text: JSON.stringify(result) }], isError: false };
-        }
-        const current = authorityNow.records.find((record) =>
-          record.tools.some(
-            (rule) =>
-              `${record.server}_${rule.name}` === name &&
-              rule.forbiddenArguments.every((key) => !Object.hasOwn(args, key)) &&
-              Object.entries(rule.arguments).every(([key, value]) => isDeepStrictEqual(args[key], value)),
-          ),
-        );
-        if (!current || current.server === "minecraft") throw new Error("Tool or arguments are not granted");
-        const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === name)!;
-        // Manual authority stays durable; fleet authority comes from live admission and
-        // the current catalog. Both retain the host's final account/config fence.
-        await this.checkBinding(current);
-        if (authorityNow.fleet === undefined) {
-          const latest = await this.read(current.grant.grantId);
-          if (latest.revokedAt !== undefined || !isDeepStrictEqual(latest, current))
-            throw new Error("Worker grant revoked or changed");
-        } else {
-          if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
-          if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
-        }
-        const result = await this.options.host.call({
-          lane: current.lane,
-          server: current.server,
-          tool: rule.name,
-          arguments: args,
-          ...(authorityNow.nativeWriteProof ? { nativeWriteProof: authorityNow.nativeWriteProof } : {}),
-          delegation: {
-            binding: current.grant.profileHash,
-            grantId: current.grant.grantId,
-            principalId: current.grant.principalId,
-            workId: current.grant.missionId,
-          },
-          // The host awaits credentials and connections after these checks; recheck
-          // fleet authority at its last moment before the provider call.
-          ...(authorityNow.fleet === undefined
-            ? {}
-            : {
-                // Admission can await I/O; read the kill switch after it.
-                fence: async () => {
-                  if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
-                  const snapshot = await this.options.fleetToolsSnapshot?.();
-                  if (snapshot?.tools !== "connected") throw new Error("Fleet tools are off or unavailable");
-                  // The host still has account/configuration I/O to finish. These
-                  // canonical checks must not yield after that last awaited read.
-                  return () => {
+        return await this.operation(
+          authority,
+          extra.authInfo?.token ?? "",
+          extra.signal,
+          "Worker tool call",
+          async (signal, remaining) => {
+            const authorityNow = await authenticate(extra.authInfo?.token ?? "");
+            signal.throwIfAborted();
+            if (authorityNow.key !== authority.key) throw new Error("Worker session changed");
+            let name = call.params.name;
+            let args = call.params.arguments ?? {};
+            if (authorityNow.fleet !== undefined) {
+              if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+              if (name === "clankie_tools") {
+                const search = FleetSearchSchema.parse(args);
+                authorityNow.records = await this.connectedFleetRecords(authorityNow);
+                const connected = (await this.options.host.catalog("operator")).filter((tool) =>
+                  authorityNow.records.some(
+                    (record) =>
+                      record.server === tool.server && record.tools.some((rule) => rule.name === tool.name),
+                  ),
+                );
+                const catalog = [
+                  ...connected,
+                  ...(this.options.minecraft === undefined ? [] : minecraftWorkerCatalog),
+                ];
+                const terms = (search.query ?? "").toLowerCase().split(/\s+/u).filter(Boolean);
+                const text = search.names
+                  ? JSON.stringify(
+                      catalog
+                        .filter((tool) => search.names!.includes(tool.qualifiedName))
+                        .map((tool) => ({
+                          name: tool.qualifiedName,
+                          description: tool.description,
+                          inputSchema: tool.inputSchema,
+                        })),
+                    )
+                  : (() => {
+                      // Rank by how many query words a tool matches: agents write
+                      // several words ("linear issue create"), and requiring all of
+                      // them in one tool returned nothing.
+                      const ranked = catalog
+                        .map((tool) => {
+                          const haystack = `${tool.qualifiedName} ${tool.description ?? ""}`.toLowerCase();
+                          return { tool, hits: terms.filter((term) => haystack.includes(term)).length };
+                        })
+                        .filter(({ hits }) => terms.length === 0 || hits > 0)
+                        .sort((a, b) => b.hits - a.hits)
+                        .slice(0, 20)
+                        .map(
+                          ({ tool }) =>
+                            `${tool.qualifiedName} — ${(tool.description ?? "").replace(/\s+/gu, " ").trim()}`,
+                        );
+                      return ranked.length > 0 || catalog.length === 0
+                        ? ranked.join("\n")
+                        : "No connected tool matches those words. Try one word, such as a service name.";
+                    })();
+                return { content: [{ type: "text", text }], isError: false };
+              }
+              if (name !== "clankie_call") throw new Error("Use clankie_call for connected tools");
+              const invocation = FleetCallSchema.parse(args);
+              name = invocation.name;
+              args = invocation.arguments;
+            }
+            if (Object.hasOwn(minecraftWorkerSchemas, name)) {
+              if (authorityNow.fleet === undefined || this.options.minecraft === undefined)
+                throw new Error("Minecraft driver requires an admitted fleet channel");
+              const input = minecraftWorkerSchemas[name as keyof typeof minecraftWorkerSchemas].parse(args);
+              const action = name.slice("clankie_minecraft_".length) as
+                | "act"
+                | "observe"
+                | "status"
+                | "cancel";
+              const result = await this.options.minecraft.workerCommand(
+                { action, ...input },
+                {
+                  principalId: authorityNow.principalId,
+                  guard: async () => {
+                    signal.throwIfAborted();
+                    if (!(await authorityNow.validateFleet!()))
+                      throw new Error("Fleet admission unavailable");
+                    const snapshot = await this.options.fleetToolsSnapshot?.();
+                    if (snapshot?.tools !== "connected")
+                      throw new Error("Fleet tools are off or unavailable");
                     snapshot.assertCurrent();
                     if (authorityNow.currentFleet?.() !== true)
                       throw new Error("Fleet admission unavailable");
-                  };
+                    return () => {
+                      signal.throwIfAborted();
+                      snapshot.assertCurrent();
+                      if (authorityNow.currentFleet?.() !== true)
+                        throw new Error("Fleet admission unavailable");
+                    };
+                  },
                 },
-              }),
-        });
+              );
+              return { content: [{ type: "text", text: JSON.stringify(result) }], isError: false };
+            }
+            if (authorityNow.fleet !== undefined)
+              authorityNow.records = await this.connectedFleetRecords(authorityNow, name);
+            const current = authorityNow.records.find((record) =>
+              record.tools.some(
+                (rule) =>
+                  `${record.server}_${rule.name}` === name &&
+                  rule.forbiddenArguments.every((key) => !Object.hasOwn(args, key)) &&
+                  Object.entries(rule.arguments).every(([key, value]) => isDeepStrictEqual(args[key], value)),
+              ),
+            );
+            if (!current || current.server === "minecraft")
+              throw new Error("Tool or arguments are not granted");
+            const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === name)!;
+            // Manual authority stays durable; fleet authority comes from live admission and
+            // the current catalog. Both retain the host's final account/config fence.
+            await this.checkBinding(current);
+            if (authorityNow.fleet === undefined) {
+              const latest = await this.read(current.grant.grantId);
+              if (latest.revokedAt !== undefined || !isDeepStrictEqual(latest, current))
+                throw new Error("Worker grant revoked or changed");
+            } else {
+              if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+              if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
+            }
+            const result = await this.options.host.call({
+              timeoutMs: remaining(),
+              onDispatch: () => signal.throwIfAborted(),
+              lane: current.lane,
+              server: current.server,
+              tool: rule.name,
+              arguments: args,
+              ...(authorityNow.nativeWriteProof ? { nativeWriteProof: authorityNow.nativeWriteProof } : {}),
+              delegation: {
+                binding: current.grant.profileHash,
+                grantId: current.grant.grantId,
+                principalId: current.grant.principalId,
+                workId: current.grant.missionId,
+              },
+              // The host awaits credentials and connections after these checks; recheck
+              // fleet authority at its last moment before the provider call.
+              ...(authorityNow.fleet === undefined
+                ? {}
+                : {
+                    // Admission can await I/O; read the kill switch after it.
+                    fence: async () => {
+                      signal.throwIfAborted();
+                      if (!(await authorityNow.validateFleet!()))
+                        throw new Error("Fleet admission unavailable");
+                      const snapshot = await this.options.fleetToolsSnapshot?.();
+                      if (snapshot?.tools !== "connected")
+                        throw new Error("Fleet tools are off or unavailable");
+                      // The host still has account/configuration I/O to finish. These
+                      // canonical checks must not yield after that last awaited read.
+                      return () => {
+                        signal.throwIfAborted();
+                        snapshot.assertCurrent();
+                        if (authorityNow.currentFleet?.() !== true)
+                          throw new Error("Fleet admission unavailable");
+                      };
+                    },
+                  }),
+            });
+            const health = this.bridge(authorityNow);
+            if (result.outcome === "ok" && !result.isError && health?.last?.status === "stalled")
+              health.last = {
+                ...health.last,
+                status: "ready",
+                reason: "Connected tool call completed after the earlier timeout",
+                observedAt: new Date().toISOString(),
+              };
+            return {
+              content: [{ type: "text", text: result.outcome === "ok" ? result.content : result.detail }],
+              isError: result.outcome !== "ok" || result.isError,
+            };
+          },
+        );
+      } catch (error) {
         return {
-          content: [{ type: "text", text: result.outcome === "ok" ? result.content : result.detail }],
-          isError: result.outcome !== "ok" || result.isError,
-        };
-      } catch {
-        return {
-          content: [
-            { type: "text", text: "Worker tool access refused; inspect the current grant and account." },
-          ],
+          content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
           isError: true,
         };
       }
@@ -721,22 +1020,47 @@ export class WorkerMcp {
       enableJsonResponse: true,
     });
     await server.connect(transport as unknown as Transport);
-    const response = await transport.handleRequest(request, {
-      authInfo: { token, clientId: authority.principalId, scopes: [] },
-    });
+    let response: Response;
+    try {
+      response = await beforeWorkerDeadline(request.signal, "Worker session initialization", () =>
+        transport.handleRequest(request, {
+          authInfo: { token, clientId: authority.principalId, scopes: [] },
+          parsedBody,
+        }),
+      );
+    } catch (error) {
+      void server.close().catch(() => undefined);
+      return Response.json(
+        { error: "worker_request_failed", reason: error instanceof Error ? error.message : String(error) },
+        { status: request.signal.aborted ? 504 : 500 },
+      );
+    }
     if (transport.sessionId === undefined) await server.close();
-    else
+    else if (!this.closed && !request.signal.aborted) {
       this.sessions.set(transport.sessionId, {
         ...(authority.grantId === undefined ? {} : { grantId: authority.grantId }),
         principalKey: authority.key,
+        ...(initialize.success && initialize.data.params.clientInfo.name === "clankie-worker"
+          ? { pluginVersion: initialize.data.params.clientInfo.version }
+          : {}),
+        ...(authority.bridgeId ? { bridgeId: authority.bridgeId } : {}),
         server,
         transport,
         expiresAt: authority.expiresAt,
       });
+      if (authority.fleet !== undefined && authority.pane !== undefined) {
+        const key = JSON.stringify([authority.fleet, authority.pane]);
+        if (this.bridges.get(key)?.generation !== authority.bridgeId)
+          this.bridges.set(key, { generation: authority.bridgeId, active: new Map() });
+      }
+    } else await server.close();
     return response;
   }
 
   async close() {
+    this.closed = true;
+    this.bridges.clear();
+    this.fleetRequests.clear();
     await Promise.all([...this.sessions.values()].map((session) => session.server.close()));
     this.sessions.clear();
   }

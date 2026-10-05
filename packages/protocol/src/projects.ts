@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HireProfileSchema, HireEffortSchema } from "./hire-profile.ts";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
+import type { WorkerBridgeStatus } from "./index.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -353,6 +354,8 @@ export interface FleetPaneMembership {
   eligibility: "eligible" | "unsupported" | "unproven" | "stale" | "private-unbound" | "ineligible";
   reason: string;
   projectId?: string;
+  /** Read-only service bridge observations, independent of host project eligibility. */
+  workerTools?: WorkerBridgeStatus;
 }
 export interface FleetMembershipReport {
   machine: string;

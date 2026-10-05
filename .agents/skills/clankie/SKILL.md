@@ -67,6 +67,15 @@ permission for every write. If tools are absent, report the machine/session,
 catalog and refusal so the lead can inspect admission, the setting and account.
 Never substitute a harness's independent Linear connector.
 
+Worker connected-tool reads return or explain failure within thirty seconds,
+including initialization and response-body reads. The wrapper and enabled peer
+tool schemas stay present during temporary provider/discovery failures; calls
+still prove current admission and account or native peer authority. A timeout
+does not authorize replaying a mutation. Doctor and roster `workerTools` show
+observed missing/stalled catalogs and reasons; `not-observed` proves no failure.
+HTTP refusals retain their service reason. A `No durable native binding` receipt
+means no new message was sent; report the pane and inspect its native binding.
+
 The bridge reports catalog changes every five seconds. Locally hired Codex
 seats with a dedicated app-server and isolated config refresh at the next model
 step on the same thread. Codex 0.160.0 otherwise ignores MCP list-change

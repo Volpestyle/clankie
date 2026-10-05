@@ -268,6 +268,9 @@ export interface McpConnection {
 interface ServerState {
   readonly configuration: string;
   readonly credential: string;
+  activeCalls: number;
+  retired?: boolean;
+  closing?: Promise<void>;
   connection?: McpConnection;
   connecting?: Promise<McpConnection>;
   tools?: readonly McpToolDescriptor[];
@@ -288,6 +291,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   const connectImpl = options.connect ?? connectServer;
   const curated = options.curated ?? CURATED_MCP_SERVERS;
   const states = new Map<string, ServerState>();
+  const retired = new Set<ServerState>();
   const missingCredentials = new Set<string>();
   const opening = new Set<Promise<McpConnection>>();
   let closed = false;
@@ -381,9 +385,21 @@ export function createMcpHost(options: McpHostOptions): McpHost {
 
   async function retire(id: string, state: ServerState): Promise<void> {
     if (states.get(id) === state) states.delete(id);
+    if (!state.retired) {
+      state.retired = true;
+      retired.add(state);
+    }
     // A pending connection checks its generation when it settles and closes
     // itself. Retiring it must not wait for a stalled initialize to finish.
-    await state.connection?.close().catch(() => undefined);
+    await closeRetired(state);
+  }
+
+  function closeRetired(state: ServerState): Promise<void> {
+    if (!state.retired || (state.activeCalls > 0 && !closed)) return Promise.resolve();
+    return (state.closing ??= (async () => {
+      await state.connection?.close().catch(() => undefined);
+      retired.delete(state);
+    })());
   }
 
   async function credentialFingerprint(server: McpServerSettings, refresh = false): Promise<string> {
@@ -427,7 +443,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     const configuration = JSON.stringify(server);
     const existing = states.get(server.id);
     if (existing?.configuration === configuration && existing.credential === credential) return existing;
-    const created: ServerState = { configuration, credential };
+    const created: ServerState = { configuration, credential, activeCalls: 0 };
     // Publish the new generation before closing the old one; concurrent callers
     // must not replace each other's pending connection during that await.
     states.set(server.id, created);
@@ -872,59 +888,71 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           (input.tool === "search_issues" || state.nativeToolNames?.has(input.tool) === false)
             ? (aliases[input.tool] ?? input.tool)
             : input.tool;
-        const result = repositoryCall
-          ? {
-              content: JSON.stringify(
-                await options.trackerForRepo!({
-                  name: input.tool,
-                  repo: trackerRepo as string,
-                  args: Object.fromEntries(Object.entries(input.arguments).filter(([key]) => key !== "repo")),
-                  lane: input.lane,
-                  local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
-                  ...publication,
-                }),
-              ),
-              isError: false,
-            }
-          : isLocalTracker(server)
+        const selected = state;
+        selected.activeCalls += 1;
+        let result: Awaited<ReturnType<McpConnection["callTool"]>>;
+        try {
+          result = repositoryCall
             ? {
                 content: JSON.stringify(
-                  await options.localTracker!.call(input.tool, input.arguments, publication),
+                  await options.trackerForRepo!({
+                    name: input.tool,
+                    repo: trackerRepo as string,
+                    args: Object.fromEntries(
+                      Object.entries(input.arguments).filter(([key]) => key !== "repo"),
+                    ),
+                    lane: input.lane,
+                    local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
+                    ...publication,
+                  }),
                 ),
                 isError: false,
               }
-            : workerPost
-              ? await publishLinearWorker({
-                  tool: input.tool,
-                  args: input.arguments,
-                  credential,
-                  author: options.linearAuthor ?? (async () => undefined),
-                  beforeWrite: async () => {
-                    await refreshAttribution();
-                    const current = await input.fence?.();
-                    await assertCurrent(server, state!);
-                    current?.();
-                  },
-                  ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
-                })
-              : await dispatchFence.run(assertDispatch, () =>
-                  !isLocalTracker(server) &&
-                  options.localTracker &&
-                  server.id === "linear" &&
-                  upstreamTool === "list_issues"
-                    ? callPrioritySortedLinearIssues(
-                        input.arguments,
-                        async (args) => {
-                          await assertCurrent(server, state!);
-                          current?.();
-                          return client!.callTool(upstreamTool, args, input.timeoutMs);
-                        },
-                        connectedAccount?.binding ?? state!.credential,
-                      )
-                    : input.timeoutMs === undefined
-                      ? client!.callTool(upstreamTool, input.arguments)
-                      : client!.callTool(upstreamTool, input.arguments, input.timeoutMs),
-                );
+            : isLocalTracker(server)
+              ? {
+                  content: JSON.stringify(
+                    await options.localTracker!.call(input.tool, input.arguments, publication),
+                  ),
+                  isError: false,
+                }
+              : workerPost
+                ? await publishLinearWorker({
+                    tool: input.tool,
+                    args: input.arguments,
+                    credential,
+                    author: options.linearAuthor ?? (async () => undefined),
+                    beforeWrite: async () => {
+                      await refreshAttribution();
+                      const current = await input.fence?.();
+                      await assertCurrent(server, state!);
+                      current?.();
+                    },
+                    ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                  })
+                : await dispatchFence.run(assertDispatch, () =>
+                    !isLocalTracker(server) &&
+                    options.localTracker &&
+                    server.id === "linear" &&
+                    upstreamTool === "list_issues"
+                      ? callPrioritySortedLinearIssues(
+                          input.arguments,
+                          async (args) => {
+                            await assertCurrent(server, state!);
+                            current?.();
+                            return client!.callTool(upstreamTool, args, input.timeoutMs);
+                          },
+                          connectedAccount?.binding ?? state!.credential,
+                        )
+                      : input.timeoutMs === undefined
+                        ? client!.callTool(upstreamTool, input.arguments)
+                        : client!.callTool(upstreamTool, input.arguments, input.timeoutMs),
+                  );
+        } finally {
+          selected.activeCalls -= 1;
+          // Provider settlement releases the connection; receipt observers
+          // can still await without retaining an obsolete transport.
+          if (selected.retired) void closeRetired(selected);
+        }
         if (!result.isError && !confirmed) input.onSettled?.();
         options.logger.info(
           {
@@ -1015,6 +1043,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     async close() {
       closed = true;
       await Promise.all([...states].map(([id, state]) => retire(id, state)));
+      await Promise.all([...retired].map((state) => closeRetired(state)));
       await Promise.allSettled(opening);
     },
   };

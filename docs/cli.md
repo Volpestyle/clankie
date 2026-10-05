@@ -2775,6 +2775,24 @@ fleet tools are denied; `nativeTools: not-verified` still requires an actual nat
 catalog/call check. MCP sessions bind to fleet/pane (fleet only for bearer links)
 and expire after 15 minutes idle. See [worker access](worker-access.md).
 
+New Claude/Codex hires require the connected-tool wrapper pair and, when
+`fleet.peerMessages` is on, `list_fleet_seats` and `message_peer` before starting
+their brief, including native-first hires without a project allocation. The
+wrapper catalog depends on fleet settings and admission; provider account and
+native peer proofs are checked when invoking a tool. A temporary provider or
+discovery failure keeps previously verified schemas in the native catalog.
+Explicit settings changes remove disabled tools.
+
+Each worker connected-tool request has a thirty-second total budget covering
+initialization, catalog/account reads, remote invocation and the response body.
+Timeouts report a reason and never replay an uncertain mutation. Concurrent
+requests share one completed MCP handshake. Replacing a service provider
+connection lets already dispatched calls settle on their original connection.
+HTTP refusals retain the service's reason, including fleet admission errors;
+cached schemas do not authorize a refused call. A `No durable native binding`
+message receipt means the bridge could not prove its delivery binding and sent
+no new message; inspect the pane's native binding before retrying delivery.
+
 ### `project list` and `project update`
 
 `clankie project list` reads the current project settings and their revision.
@@ -3505,6 +3523,12 @@ inspections. It distinguishes missing proof, unsupported harnesses, pending
 native sessions, stale hires, and project eligibility. Changed observations are
 discarded. `nativeTools: "not-verified"` means the card has not tested that pane's
 bridge socket, catalog or reply delivery; use a native tool call to verify those.
+Doctor and roster additionally show `workerTools` for an authenticated served or
+bridge-reported catalog: `pending`, `ready`, `missing`, `stalled`, or
+`not-observed`, with the reason and observation time. An idle worker remains
+ready; an unobserved catalog is unknown. Catalog reads do not erase a tool-call
+timeout; a successful connected-tool call clears it. These diagnostics grant
+no account, project or native peer authority.
 Unregistered or disconnected machines never supply an arbitrary SSH target.
 
 On Windows, Codex detection resolves a unique installed native executable from

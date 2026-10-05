@@ -714,6 +714,7 @@ export interface ProjectHirePolicy {
 
 export class HerdrWatchStore implements HerdrWatchPort {
   private readonly projectHires: ProjectHires;
+  private readonly fleetHireTools: (() => Promise<readonly string[]>) | undefined;
   private readonly projectPolicy: ProjectHirePolicy | undefined;
   private readonly hireDefaultPolicies = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
@@ -774,6 +775,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly validateOwner?: (owner: ConversationOwner) => Promise<boolean>;
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly projectHirePolicy?: ProjectHirePolicy;
+      readonly fleetHireTools?: () => Promise<readonly string[]>;
       readonly hireDefaults?: () => Promise<HireProfile>;
       readonly resolveHireModel?: (harness: string, model: string) => Promise<string>;
       readonly claudeAccounts?: () => Promise<readonly CodexAccount[]>;
@@ -838,6 +840,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
     this.projectHires = new ProjectHires(`${path}.project-hires.json`);
     this.projectPolicy = options.projectHirePolicy;
+    this.fleetHireTools = options.fleetHireTools;
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
     this.hireDefaults = options.hireDefaults;
@@ -1526,11 +1529,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   private async expectedHireTools(input: SpawnOperatorSeat): Promise<readonly string[]> {
+    const fleetTools = (await this.fleetHireTools?.()) ?? [];
     const project = this.projectContexts.get(input)?.projectId;
-    if (!project) return [];
+    if (!project) return [...new Set(fleetTools)].sort();
     if (!this.projectPolicy?.tools)
       throw new Error("Project catalog expectation is unavailable; no brief was sent");
-    return [...new Set(await this.projectPolicy.tools(project))].sort();
+    return [...new Set([...fleetTools, ...(await this.projectPolicy.tools(project))])].sort();
   }
 
   private async resolveHireModels(input: SpawnOperatorSeat): Promise<SpawnOperatorSeat> {
@@ -2166,6 +2170,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let paneId: string;
     let nativePrepared: PreparedSeatLaunch | undefined;
     let nativeLaunch: SeatLaunch | undefined;
+    let startupTools: readonly string[] | undefined;
     let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = prepared ?? {
       args: [],
       ...(account ? { env: { CODEX_HOME: account.home } } : {}),
@@ -2198,6 +2203,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
           },
         };
       }
+      startupTools = ["claude", "codex"].includes(input.harness)
+        ? await this.expectedHireTools(input)
+        : undefined;
+      if (startupTools !== undefined)
+        skillLaunch = {
+          ...skillLaunch,
+          env: { ...skillLaunch.env, CLANKIE_EXPECTED_TOOL_NAMES: JSON.stringify(startupTools) },
+        };
       await this.nativeLaunchPolicy?.admit({
         seat: structuredClone(input),
         phase: "launch",
@@ -2344,8 +2357,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         (brief !== undefined || resume !== undefined || nativePrepared !== undefined)
       ) {
         const runInPane = this.runner.runInPane!;
-        const expectedToolNames =
-          adapter.harness === "codex" ? await this.expectedHireTools(input) : undefined;
+        const expectedToolNames = ["claude", "codex"].includes(adapter.harness) ? startupTools : undefined;
         const checkExpectedTools = async () => {
           if (
             expectedToolNames !== undefined &&

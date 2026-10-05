@@ -7,16 +7,22 @@ const fingerprint = (tools) => JSON.stringify([...tools].sort((a, b) => a.name.l
 export function createCatalogWatcher({ list, notify }) {
   let previous;
   let pending;
+  let observation = 0;
   return {
     observe(tools) {
+      observation += 1;
       previous = fingerprint(tools);
     },
     check() {
       pending ??= (async () => {
+        const started = observation;
         const tools = await list();
         const next = fingerprint(tools);
+        // A native tools/list may have observed a newer catalog while this
+        // background read was pending. Never overwrite that observation.
+        if (started !== observation) return;
         if (previous !== undefined && next !== previous) await notify();
-        previous = next;
+        if (started === observation) previous = next;
       })().finally(() => {
         pending = undefined;
       });
