@@ -1,20 +1,19 @@
 /**
  * Render definitions for the tools pi does not ship one for: every MCP tool the
- * service exposes as `${server}_${tool}` (`apps/clankie/src/mcp-host.ts`) plus
- * the authored captain bank.
+ * service exposes as `${server}_${tool}` (`apps/clankie/src/mcp-host.ts`), the
+ * authored captain bank, and native hired-seat tools.
  *
  * Without a definition `ToolExecutionComponent` falls back to the bold tool
  * name, `JSON.stringify(args, null, 2)`, and the first ten lines of raw output.
- * MCP results arrive as a `{ outcome, content }` envelope whose `content` is the
- * server's own JSON re-encoded into a single string, so a six-comment
- * `linear_list_comments` result is three lines, the ten-line cap never fires,
- * and the viewport fills with one enormous escaped-JSON line. Unwrapping the
- * envelope is what makes the preview a preview again.
+ * Native Codex parts and MCP envelopes can contain repeatedly encoded JSON.
+ * The app's shared output decoder unwraps those first; native exec results and
+ * message receipts then get compact text, with the usual ten-line preview.
  *
  * The service knows a nicer label for these (`linear: list_comments`, from the
  * catalog it registers in `captain/tools.ts`), but the operator protocol
  * projects only the tool name, so the row is titled by name here.
  */
+import { formatToolOutput } from "@clankie/protocol/tool-output";
 import { Text, type Component } from "@earendil-works/pi-tui";
 import {
   keyHint,
@@ -49,6 +48,7 @@ interface RenderContext {
   readonly lastComponent: Component | undefined;
   readonly expanded: boolean;
   readonly isError: boolean;
+  readonly args?: unknown;
 }
 
 interface ToolResultContent {
@@ -95,10 +95,7 @@ export function unwrapMcpResult(output: string): string {
   if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope)) return output;
   const record = envelope as Record<string, unknown>;
   if (typeof record.outcome !== "string") return output;
-  const content = record.content;
-  if (typeof content !== "string") return JSON.stringify(record, null, 2);
-  const inner = parseJson(content);
-  return inner === undefined ? content : JSON.stringify(inner, null, 2);
+  return formatNativeToolResult(output);
 }
 
 /** The lines a result row shows, and how many it holds back behind the expand key. */
@@ -112,11 +109,53 @@ export function previewLines(
   return { lines: lines.slice(0, PREVIEW_LINES), hidden: lines.length - PREVIEW_LINES };
 }
 
-function textOutput(result: ToolResultContent): string {
-  return (result.content ?? [])
-    .filter((part) => part.type === "text")
-    .map((part) => part.text ?? "")
-    .join("");
+/** Decode native Codex parts and MCP envelopes through the app's shared helper. */
+export function formatNativeToolResult(output: string, args?: unknown): string {
+  return formatToolOutput(output)
+    .map((part) => {
+      if (part.kind === "image") return "[Tool output image]";
+      const value = parseJson(part.text);
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return part.text;
+      const result = value as Record<string, unknown>;
+      if (
+        typeof result.received === "boolean" &&
+        typeof result.deliveryStage === "string" &&
+        ["stored", "delivered", "consumed", "responded", "uncertain"].includes(result.deliveryStage)
+      ) {
+        return result.received ? `report ${result.deliveryStage}` : "report not received";
+      }
+      if (
+        typeof result.output === "string" &&
+        (typeof result.exit_code === "number" ||
+          typeof result.wall_time_seconds === "number" ||
+          typeof result.chunk_id === "string")
+      ) {
+        const input = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+        const command = result.command ?? result.cmd ?? input.cmd ?? input.command;
+        const commandText =
+          typeof command === "string" ? command : Array.isArray(command) ? command.join(" ") : undefined;
+        const status =
+          typeof result.exit_code === "number"
+            ? `exit ${result.exit_code}`
+            : typeof result.session_id === "number"
+              ? `running · session ${result.session_id}`
+              : "exit unknown";
+        const time = typeof result.wall_time_seconds === "number" ? ` · ${result.wall_time_seconds}s` : "";
+        return [
+          commandText === undefined ? undefined : `Command: ${commandText}`,
+          status + time,
+          result.output || "(no output)",
+        ]
+          .filter((line) => line !== undefined)
+          .join("\n");
+      }
+      return part.text;
+    })
+    .join("\n");
+}
+
+function textOutput(result: ToolResultContent, args?: unknown): string {
+  return result.content?.length ? formatNativeToolResult(JSON.stringify(result.content), args) : "";
 }
 
 function reuseText(last: Component | undefined): Text {
@@ -151,7 +190,7 @@ export function genericToolRenderer(name: string): ToolDefinition | undefined {
       context: RenderContext,
     ): Component {
       const text = reuseText(context.lastComponent);
-      const output = unwrapMcpResult(textOutput(result));
+      const output = textOutput(result, context.args);
       if (output.length === 0) {
         text.setText("");
         return text;

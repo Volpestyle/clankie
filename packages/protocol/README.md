@@ -11,6 +11,12 @@ separate entry points cover device encryption, public gateway routes, connected
 accounts, work items, model keys, and hosted pairing/operation. Read the owning
 schema rather than copying a payload shape into documentation.
 
+`@clankie/protocol/tool-output` shares tool-result decoding between the TUI and
+companion app. It unwraps MCP content/envelopes, native Codex text parts, and
+repeated JSON encoding while retaining image order and unknown content. It has
+no Node dependencies. Host-specific exec and receipt presentation stays in the
+TUI; this helper preserves their decoded JSON for app detail views.
+
 ## Consumers and compatibility
 
 The private companion-app and managed-service repositories consume this package

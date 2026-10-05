@@ -24,7 +24,8 @@
     "./projects": "./src/projects.ts",
     "./presence": "./src/presence.ts",
     "./tool-catalog": "./src/tool-catalog.ts",
-    "./integrate": "./src/integrate.ts"
+    "./integrate": "./src/integrate.ts",
+    "./tool-output": "./src/tool-output.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

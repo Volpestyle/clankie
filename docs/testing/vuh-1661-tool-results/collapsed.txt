@@ -1,0 +1,30 @@
+
+
+ exec_command cmd=pnpm --filter @clankie/tui typecheck
+
+ Command: pnpm --filter @clankie/tui typecheck
+ exit 0 · 0.4s
+ $ tsc --noEmit -p tsconfig.json
+
+
+
+ mcp__clankie__message_clankie text=Progress
+
+ report stored
+
+
+
+ exec_command cmd=example of long output
+
+ Command: example of long output
+ exit 1 · 2s
+ output line 0
+ output line 1
+ output line 2
+ output line 3
+ output line 4
+ output line 5
+ output line 6
+ output line 7
+ ... (17 more lines,  to expand)
+
