@@ -69,7 +69,8 @@ it("retains observed native head ownership across restart and retires it only on
 /** Real Pi, provider streams, tool dispatch and durable goal state; no live credentials. */
 async function fixture(
   tools: (root: string, store: AutonomyStore) => ToolDefinition[] = () => [],
-  reportedUsage?: number,
+  reportedUsage?: number | ((message: AssistantMessage) => number),
+  retry = false,
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-goal-execution-"));
   roots.push(root);
@@ -88,7 +89,11 @@ async function fixture(
     streamSimple: (model, context, options) => {
       const stream = core.streamSimple(model, context, options);
       void stream.result().then((message) => {
-        if (reportedUsage !== undefined) message.usage = { ...message.usage, totalTokens: reportedUsage };
+        if (reportedUsage !== undefined)
+          message.usage = {
+            ...message.usage,
+            totalTokens: typeof reportedUsage === "number" ? reportedUsage : reportedUsage(message),
+          };
         responses.push(message);
       });
       return stream;
@@ -106,7 +111,7 @@ async function fixture(
     ],
   });
   const settings = SettingsManager.inMemory({
-    retry: { enabled: false },
+    retry: retry ? { enabled: true, maxRetries: 1, baseDelayMs: 1, maxAgentDelayMs: 1 } : { enabled: false },
     compaction: { enabled: false, keepRecentTokens: 100 },
   });
   const loader = new DefaultResourceLoader({
@@ -233,7 +238,7 @@ it.each(["complete", "blocked"] as const)(
 );
 
 it.each(
-  [0, Number.NaN, 0.5, Number.MAX_SAFE_INTEGER + 1].flatMap((usage) =>
+  [0, -1, Number.NaN, 0.5, Number.MAX_SAFE_INTEGER + 1].flatMap((usage) =>
     [true, false].map((autonomous) => ({ usage, autonomous })),
   ),
 )(
@@ -352,6 +357,74 @@ it("charges a failed provider response before its turn fails", async () => {
       goal.tokensUsed,
     );
   } finally {
+    release();
+    f.session.dispose();
+  }
+});
+
+it.each(["error", "aborted"] as const)(
+  "a zero-token %s response preserves the goal for a later interactive prompt",
+  async (stopReason) => {
+    const f = await fixture(
+      () => [],
+      (message) => (message.stopReason === stopReason ? 0 : 100),
+    );
+    const goal = f.store.createGoal("global-default", "Recover after an unpaid response", 1_000_000);
+    const release = enforceGoalBudget(f.session, f.store, "global-default", goal, true);
+    try {
+      f.core.setResponses([
+        fauxAssistantMessage("", { stopReason, errorMessage: "Controlled unpaid response" }),
+        fauxAssistantMessage("The next interactive prompt succeeds."),
+      ]);
+      await f.session.prompt("Run the unpaid response.");
+      expect(f.core.state.callCount).toBe(1);
+      expect(f.session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason });
+      expect(goal).toMatchObject({ status: "active", tokensUsed: 0 });
+      expect(new AutonomyStore(join(f.root, "autonomy.json")).getGoal("global-default")).toMatchObject({
+        status: "active",
+        tokensUsed: 0,
+      });
+
+      await f.session.prompt("Try the next interactive prompt.");
+      expect(f.core.state.callCount).toBe(2);
+      expect(f.session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
+      expect(goal).toMatchObject({ status: "active", tokensUsed: 100 });
+    } finally {
+      release();
+      f.session.dispose();
+    }
+  },
+);
+
+it("allows Pi to retry a zero-token provider error and charges the successful response once", async () => {
+  const f = await fixture(
+    () => [],
+    (message) => (message.stopReason === "error" ? 0 : 100),
+    true,
+  );
+  const goal = f.store.createGoal("global-default", "Recover a transient unpaid provider error", 1_000_000);
+  const release = enforceGoalBudget(f.session, f.store, "global-default", goal, true);
+  const retries: string[] = [];
+  const unsubscribe = f.session.subscribe((event) => {
+    if (event.type === "auto_retry_start" || event.type === "auto_retry_end") retries.push(event.type);
+  });
+  try {
+    f.core.setResponses([
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "HTTP 503 service unavailable" }),
+      fauxAssistantMessage("The retry succeeds."),
+    ]);
+    await f.session.prompt("Retry the controlled transient failure.");
+    expect(f.core.state.callCount).toBe(2);
+    expect(retries).toEqual(["auto_retry_start", "auto_retry_end"]);
+    expect(f.responses.map((message) => message.usage.totalTokens)).toEqual([0, 100]);
+    expect(f.session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
+    expect(goal).toMatchObject({ status: "active", tokensUsed: 100 });
+    expect(new AutonomyStore(join(f.root, "autonomy.json")).getGoal("global-default")).toMatchObject({
+      status: "active",
+      tokensUsed: 100,
+    });
+  } finally {
+    unsubscribe();
     release();
     f.session.dispose();
   }

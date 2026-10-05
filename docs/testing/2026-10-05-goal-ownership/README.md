@@ -18,6 +18,8 @@ or use a fresh Pi-owned conversation.
 
 Pi model calls persist `proposed` goals without starting a loop. `/goal accept`
 (owner API `accept_goal`) confirms one; owner `set_goal` can activate directly.
+The shared captain bearer does not enforce exclusive human confirmation; the
+remaining authority gap is recorded in [ADR 0130](../../adr/0130-goals-and-self-wakes-share-the-operator-thread.md).
 Pause/resume cannot turn a proposal active. Every service goal receives a finite
 1,000,000-token default; explicit positive integer overrides remain available.
 Legacy goals retain recorded usage and receive that budget before admission.
@@ -65,3 +67,23 @@ One already admitted provider response or compaction can exceed the remaining
 budget. Its actual usage is recorded, and subsequent requests are refused.
 Live harness delivery was intentionally not exercised: the selected behavior
 refuses service goal creation there. Landing and deployment remain Pell's work.
+
+## Review follow-up
+
+Zero-token provider responses with `stopReason: error` or `aborted` now record
+zero usage and preserve the goal. Successful zero-token responses and negative,
+fractional, non-finite or unsafe-integer usage still refuse subsequent requests.
+
+The real Pi integration proves a zero-token error and aborted response leave the
+goal active on disk and allow a later interactive prompt. A zero-token HTTP 503
+triggers Pi's own retry; exactly two provider calls produce usage `[0, 100]`,
+with 100 tokens persisted once. Existing paid-error and budget-limit checks pass.
+
+Review checks: **34/34 tests passed across three files** (`goal-execution`,
+`autonomy`, and native HTTP/MCP), including 23 real Pi integration cases.
+The service typecheck, changed-source lint/format, local Markdown links,
+retired-claim check and whitespace check passed. No live-service actions,
+evals or full check ran. `bindHeadSeat` retains its current ordering: its store
+operations already avoid repeated writes and still protect replacement occupants
+or an active goal found during census. The shared-bearer activation gap needs the
+separate authentication follow-up requested in review.

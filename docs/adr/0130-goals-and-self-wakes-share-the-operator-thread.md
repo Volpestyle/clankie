@@ -53,11 +53,24 @@ The model can finish or block an active goal. Completion remains a model audit
 against the fixed objective and concrete evidence; it is not a second model
 pretending to be an independent verifier.
 
+Activation must remain an explicit owner action. The dispatch endpoint currently
+accepts the same captain bearer that the owner TUI uses for autonomy `set_goal`
+and `accept_goal`; it does not distinguish a human command from a shell-capable
+turn using that credential. Such a turn can therefore activate or accept a goal
+through the API itself. [VUH-1676](https://linear.app/vuhlp/issue/VUH-1676)
+separates model-tool proposals from activation and enforces budgets and native
+seat refusal, but does not redesign this authentication boundary. A follow-up
+must bind activation to an owner-authenticated action independently of the
+machine execution credential before exclusive human confirmation is enforced.
+
 Every service goal has a finite model-token budget, defaulting to 1,000,000.
 The owner can override it with `/goal --tokens <positive integer> <objective>`.
 Legacy goals without a budget receive the same default, retaining their recorded
 usage; exhausted goals become `budget_limited` before admission. Usage is saved
 as each provider response settles, including failed turns, retries and compaction.
+An error or aborted response reporting zero tokens records zero usage, preserving
+Pi's retries and the next owner turn. Zero usage on a successful response, or
+negative, fractional or non-finite usage, remains unaccountable and stops the run.
 Background cache warming is disabled during goal work because it bypasses that
 accounting path. Reaching the budget
 stops the run before another provider request or continuation. A request already

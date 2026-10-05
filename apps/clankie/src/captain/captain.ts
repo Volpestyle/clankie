@@ -99,7 +99,7 @@ import {
 } from "@clankie/protocol";
 import { sanitizeForSupportBundle } from "@clankie/observability";
 import { type ModelPurpose, type PiModelSelection } from "@clankie/model-provider";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -713,11 +713,15 @@ export function enforceGoalBudget(
     return prepared ?? undefined;
   };
   session.agent.prepareRequest = guarded;
-  const charge = (tokens: number | undefined): void => {
+  const charge = (message: AssistantMessage): void => {
+    const tokens = message.usage?.totalTokens;
+    // Pi reports zero when a request fails or is cancelled before any usage.
+    // Keep its retries and the owner's next prompt available in those cases.
     const unaccounted =
       typeof tokens !== "number" ||
       !Number.isSafeInteger(tokens) ||
-      tokens <= 0 ||
+      tokens < 0 ||
+      (tokens === 0 && message.stopReason !== "error" && message.stopReason !== "aborted") ||
       !Number.isSafeInteger(goal.tokensUsed + tokens);
     if (unaccounted) accountingRefusal = "goal_usage_limited";
     const current = unaccounted
@@ -744,7 +748,7 @@ export function enforceGoalBudget(
     // failed retries, before the next request can pass the same guard.
     void stream
       .result()
-      .then((message) => charge(message.usage?.totalTokens))
+      .then(charge)
       .catch(() => {
         accountingRefusal = "goal_usage_limited";
         try {
