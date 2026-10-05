@@ -38,6 +38,7 @@ it("sets and clears images through the TUI Persona images choice", async () => {
   const selections = ["images", "set", "images", "status", "images", "clear", "done"];
   const rendered: string[] = [];
   const shell = {
+    insertCommandResult: (_command: string, result: string) => rendered.push(result),
     setupFlow: {
       begin() {},
       end() {},
@@ -48,7 +49,7 @@ it("sets and clears images through the TUI Persona images choice", async () => {
   } as unknown as ClankieFaceShell;
   await buildPersonaCommands({ settings })[0]!.run("", shell);
   expect((await settings.load()).persona.imagesDir).toBe("");
-  expect(rendered.join("\n")).toContain('"count": 3');
-  expect(rendered.join("\n")).toContain('"count": 0');
+  expect(rendered.join("\n")).toContain("3 images from");
+  expect(rendered.join("\n")).toContain("0 images from no folder");
   expect(rendered.join("\n")).toContain("Restart Clankie");
 });
