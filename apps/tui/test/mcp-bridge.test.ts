@@ -216,10 +216,15 @@ describe("clankie mcp", () => {
 
   it("keeps polling through a failed poll instead of dropping the seat", async () => {
     let polls = 0;
+    let retryObserved!: () => void;
+    const retried = new Promise<void>((resolve) => {
+      retryObserved = resolve;
+    });
     const upstream = {
       pollEvents: async () => {
         polls += 1;
         if (polls === 1) throw new Error("service restarting");
+        retryObserved();
         return [];
       },
     };
@@ -230,7 +235,7 @@ describe("clankie mcp", () => {
       retryMs: 1,
       onError: (error) => errors.push(error),
     });
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await retried;
     stop.abort();
     await pump;
     expect(errors).toHaveLength(1);
@@ -369,6 +374,10 @@ describe("clankie mcp", () => {
 
   it("retries a 404 fleet mailbox without throwing", async () => {
     let polls = 0;
+    let retryObserved!: () => void;
+    const retried = new Promise<void>((resolve) => {
+      retryObserved = resolve;
+    });
     let closed = false;
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     let written = "";
@@ -378,6 +387,7 @@ describe("clankie mcp", () => {
       connectSeatUpstream: async () => ({
         pollEvents: async () => {
           polls += 1;
+          if (polls > 1) retryObserved();
           throw new Error("fleet mailbox answered 404");
         },
         close: async () => {
@@ -391,7 +401,7 @@ describe("clankie mcp", () => {
     });
     const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
     await client.connect(clientTransport);
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await retried;
     await client.close();
     await expect(running).resolves.toBe(0);
     expect(polls).toBeGreaterThan(1);
