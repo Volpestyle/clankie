@@ -143,6 +143,8 @@ export type SeatStatus = "working" | "idle" | "blocked" | "released" | "offline"
 
 export interface SeatQuestion {
   readonly requestId: string | number;
+  /** Async Codex message-item questions use attributed native user input, not a server response. */
+  readonly delivery?: "async";
   readonly turnId: string;
   readonly itemId: string;
   readonly isBlocking: boolean;
@@ -220,7 +222,9 @@ export interface SeatControl {
     },
   ): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;
-  /** Answer one pending native request; never enqueue a turn or fall back to a terminal. */
+  /** Read-only native waiting detail for the roster; does not settle a completion watch. */
+  statusReason?(): Promise<string | undefined>;
+  /** Answer one pending native request through its native control, without terminal fallback. */
   answerQuestion?(
     answer: SeatQuestionAnswer,
     beforeDispatch?: () => Promise<void>,
