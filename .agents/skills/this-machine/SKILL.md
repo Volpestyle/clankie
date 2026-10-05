@@ -260,16 +260,27 @@ credential or device signing key. See ADR 0130 for that remaining boundary.
 
 ## Activity artifact shares
 
-Local owners use `clankie share list` or `clankie share request JSON`; `/share`
-in the local console uses the same API. Follow [the request contract](../../../docs/cli.md#activity-shares).
-The first non-game source is a hash-bound delivered PNG with exact conversation
-and artifact IDs, not an arbitrary path/URL or screen-capture grant. Share IDs
-and generations fence switch/stop. Viewer grants are read-only and separate
-from the operator/producer bearer; keep them in the viewer URL fragment.
-Stop, expiry or producer loss is terminal. Never replay an uncertain control:
-read active session metadata to reconcile. This core creates no Discord launch;
-hosted routing and Discord participant admission await the operator's official
-app decision. Hosted users never configure tunnels or applications.
+Owners use `clankie share list` or `clankie share request JSON`; `/share` in
+both consoles sends the same request. Local commands use the operator bearer;
+hosted commands use the existing encrypted paired-device connection. Follow
+[the request contract](../../../docs/cli.md#activity-shares).
+
+Start `sourceId:"play"` for Clankie's current authorized Pokémon/Minecraft
+producer. An image uses exact delivered conversation/artifact IDs. Registered
+`artifact:<conversationUUID>:<artifact48hex>` sources accept hash-checked PNG,
+GIF animation or finite MP4 demo; never substitute a path, URL or new capture
+grant. Switch selects one registered source or exact artifact pair. Use the
+returned share ID and generation for switch/stop.
+
+Preserve launch/stop receipts: confirmed, refused or uncertain, with request
+identity and exact session. Never replay an uncertain control; read active
+metadata and reconcile. Hosted viewers authenticate through the official SDK
+and server-derived scoped admission, with continuing audience checks and no
+anonymous fallback. Keep local read-only delegated grants in URL fragments;
+they expire for admitted viewers and do not prove Discord membership.
+Self-hosted delegated viewing does not automatically provide the official-app
+launch/admission adapter. Hosted users never configure tunnels or applications.
+Stop, expiry or producer loss clears media permanently.
 
 ## Presence and desktop body
 

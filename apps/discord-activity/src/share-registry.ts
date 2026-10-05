@@ -7,6 +7,7 @@ import {
   type ActivityShareSource,
 } from "@clankie/interactive-environment";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { ReadableStream } from "node:stream/web";
 import { ActivityShareHub, type RenderedSurfaceHubOptions, type RenderedSurfaceViewer } from "./frame-hub.ts";
 
 export interface ActivityShareRegistryOptions {
@@ -38,6 +39,15 @@ interface ShareRecord {
   producer: ActivityShareProducer | null;
   hub: ActivityShareHub;
   grants: Map<string, { generation: number; expiresAt: number }>;
+  viewers: Map<
+    RenderedSurfaceViewer,
+    {
+      grant: string | undefined;
+      expiresAt: number;
+      wrapper: RenderedSurfaceViewer;
+      expiry: ReturnType<typeof setTimeout>;
+    }
+  >;
   expiry: ReturnType<typeof setTimeout>;
 }
 
@@ -125,6 +135,7 @@ export class ActivityShareRegistry {
       producer: null,
       hub: new ActivityShareHub(session, this.hubOptions),
       grants: new Map(),
+      viewers: new Map(),
       expiry: setTimeout(() => this.end(record, "expired"), lifetime),
     };
     record.expiry.unref();
@@ -203,7 +214,7 @@ export class ActivityShareRegistry {
   public admit(shareId: string, grant: string, viewer: RenderedSurfaceViewer): boolean {
     this.expire();
     const record = this.shares.get(shareId);
-    if (record === undefined) return false;
+    if (record === undefined || record.viewers.has(viewer)) return false;
     // Never use a browser-provided scope or a control bearer as admission.
     // Iterate the bounded grant set and compare secrets without prefix leaks.
     let admitted = false;
@@ -217,11 +228,112 @@ export class ActivityShareRegistry {
         break;
       }
     }
-    return admitted && record.hub.addViewer(viewer);
+    if (!admitted) return false;
+    const admission = record.grants.get(grant)!;
+    return this.admitUntil(record, viewer, admission.expiresAt, grant);
+  }
+
+  private admitUntil(
+    record: ShareRecord,
+    viewer: RenderedSurfaceViewer,
+    expiresAt: number,
+    grant?: string,
+  ): boolean {
+    if (record.viewers.has(viewer)) return false;
+    const shareId = record.session.shareId;
+    const close = () => {
+      this.removeViewer(shareId, viewer);
+      viewer.close();
+    };
+    const wrapper: RenderedSurfaceViewer = {
+      send: (payload) => {
+        if (expiresAt <= this.now()) close();
+        else viewer.send(payload);
+      },
+      get bufferedAmount() {
+        return viewer.bufferedAmount;
+      },
+      close,
+    };
+    const expiry = setTimeout(close, expiresAt - this.now());
+    expiry.unref();
+    record.viewers.set(viewer, { grant, expiresAt, wrapper, expiry });
+    if (record.hub.addViewer(wrapper)) return true;
+    this.removeViewer(shareId, viewer);
+    return false;
   }
 
   public removeViewer(shareId: string, viewer: RenderedSurfaceViewer): void {
-    this.shares.get(shareId)?.hub.removeViewer(viewer);
+    const record = this.shares.get(shareId);
+    const admission = record?.viewers.get(viewer);
+    if (record === undefined || admission === undefined) return;
+    clearTimeout(admission.expiry);
+    record.viewers.delete(viewer);
+    record.hub.removeViewer(admission.wrapper);
+  }
+
+  /** Trusted audience revocation also terminates sockets already using the grant. */
+  public revokeGrant(shareId: string, grant: string): void {
+    const record = this.shares.get(shareId);
+    if (record === undefined) return;
+    record.grants.delete(grant);
+    for (const [viewer, admission] of record.viewers) {
+      if (admission.grant === undefined || !sameSecret(admission.grant, grant)) continue;
+      this.removeViewer(shareId, viewer);
+      viewer.close();
+    }
+  }
+
+  /** Private, bounded media projection; cancellation releases the audience slot. */
+  public openViewer(shareId: string, generation: number, grant: string): ReadableStream<Uint8Array> {
+    this.current(shareId, generation);
+    return this.viewerStream(shareId, (viewer) => this.admit(shareId, grant, viewer));
+  }
+
+  /** Controller bearer is checked by the private listener; caller enforces live audience authority. */
+  public openViewerFromController(shareId: string, generation: number): ReadableStream<Uint8Array> {
+    const record = this.current(shareId, generation);
+    return this.viewerStream(shareId, (viewer) =>
+      this.admitUntil(record, viewer, Date.parse(record.session.expiresAt)),
+    );
+  }
+
+  private viewerStream(
+    shareId: string,
+    admit: (viewer: RenderedSurfaceViewer) => boolean,
+  ): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    let viewer: RenderedSurfaceViewer;
+    let closed = false;
+    return new ReadableStream<Uint8Array>(
+      {
+        start: (controller) => {
+          viewer = {
+            send: (payload) => {
+              if (!closed) controller.enqueue(encoder.encode(`${payload}\n`));
+            },
+            get bufferedAmount() {
+              return Math.max(0, 512 * 1024 - (controller.desiredSize ?? 0));
+            },
+            close: () => {
+              if (closed) return;
+              closed = true;
+              this.removeViewer(shareId, viewer);
+              controller.close();
+            },
+          };
+          if (!admit(viewer)) {
+            closed = true;
+            throw new ActivityShareError("admission_denied", 403);
+          }
+        },
+        cancel: () => {
+          closed = true;
+          this.removeViewer(shareId, viewer);
+        },
+      },
+      { highWaterMark: 512 * 1024, size: (chunk) => chunk.byteLength },
+    );
   }
 
   public acquireProducer(
@@ -270,6 +382,12 @@ export class ActivityShareRegistry {
   public expire(): void {
     for (const record of this.shares.values()) {
       if (Date.parse(record.session.expiresAt) <= this.now()) this.end(record, "expired");
+      else
+        for (const [viewer, admission] of record.viewers) {
+          if (admission.expiresAt > this.now()) continue;
+          this.removeViewer(record.session.shareId, viewer);
+          viewer.close();
+        }
     }
   }
 
@@ -289,6 +407,8 @@ export class ActivityShareRegistry {
     clearTimeout(record.expiry);
     record.grants.clear();
     record.hub.stop(reason);
+    for (const admission of record.viewers.values()) clearTimeout(admission.expiry);
+    record.viewers.clear();
     const producer = record.producer;
     record.producer = null;
     producer?.close();

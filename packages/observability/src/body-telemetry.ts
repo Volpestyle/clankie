@@ -154,7 +154,7 @@ export const BodyTelemetryEventSchema = z.discriminatedUnion("event", [
       ...envelope,
       event: z.literal("body.heartbeat"),
       busy: z.boolean(),
-      reasons: z.array(z.enum(["captain-turn", "herdr-agent", "scheduled-job"])).max(3),
+      reasons: z.array(z.enum(["captain-turn", "herdr-agent", "scheduled-job", "activity-share"])).max(4),
       desired: z.enum(["running", "sleeping", "suspended"]).optional(),
     })
     .strict(),

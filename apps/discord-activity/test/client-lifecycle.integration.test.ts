@@ -142,6 +142,8 @@ function browser(html: string, port: number, hash: string) {
     WebSocket: BrowserSocket,
     AudioContext,
     URLSearchParams,
+    AbortController,
+    fetch: async () => ({ ok: true, json: async () => ({ mode: "local" }) }),
     atob: (value: string) => Buffer.from(value, "base64").toString("binary"),
     setInterval() {},
     setTimeout: (callback: () => void) => reconnects.push(callback),
@@ -178,11 +180,15 @@ it("renders game and image shares, fencing delayed decode/audio and terminal rec
     view = browser(html, v, `#share=${a.shareId}&grant=${grant.grant}`);
     const sink = client.sink(a);
     await vi.waitFor(() => expect(sink.connected && shares.stats()[0]?.viewerCount === 1).toBe(true));
+    expect(view.get("source-caption").textContent).toBe("game · FireRed");
+    expect(view.get("app").dataset.sourceKind).toBe("game");
     sink.publishFrame(frame(100));
     await vi.waitFor(() => expect(view!.images).toHaveLength(1));
     const b = await client.switchSource(a, { kind: "image", id: "hash-bound-artifact", title: "Image" });
     const next = client.sink(b);
     await vi.waitFor(() => expect(next.connected).toBe(true));
+    await vi.waitFor(() => expect(view!.get("source-caption").textContent).toBe("image · Image"));
+    expect(view.get("app").dataset.sourceKind).toBe("image");
     next.publishFrame(frame(1));
     await vi.waitFor(() => expect(view!.images).toHaveLength(2));
     view.images[0]!.complete();
@@ -209,6 +215,8 @@ it("renders game and image shares, fencing delayed decode/audio and terminal rec
     await vi.waitFor(() => expect(view!.images).toHaveLength(3));
     await client.stop(b);
     await vi.waitFor(() => expect(view!.get("empty-title").textContent).toBe("Session ended"));
+    expect(view.get("source-caption").textContent).toBe("");
+    expect(view.get("source-caption").hidden).toBe(true);
     view.images[2]!.complete();
     expect(view.draws).toHaveLength(1);
     expect(view.sounds.every((sound) => sound.stopped)).toBe(true);
@@ -230,7 +238,7 @@ it("a scoped launch with missing admission never opens the public legacy stream"
     const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     view = browser(html, port, "#share=e89ddcc6-7ddb-4a2f-83e2-649c6073f8cb");
     expect(view.sockets).toEqual([]);
-    expect(view.get("empty-title").textContent).toBe("Session ended");
+    await vi.waitFor(() => expect(view!.get("empty-title").textContent).toBe("Session ended"));
   } finally {
     view?.close();
     await activity.close();

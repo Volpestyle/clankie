@@ -72,6 +72,7 @@ import {
 export { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "POST", path: "/v1/activity/viewer", target: "control" },
   { method: "GET", path: COMPOSER_TRANSCRIPTION_STATUS_PATH, target: "control" },
   { method: "POST", path: COMPOSER_TRANSCRIPTION_BEGIN_PATH, target: "control" },
   { method: "POST", path: COMPOSER_TRANSCRIPTION_CHUNK_PATH, target: "control" },

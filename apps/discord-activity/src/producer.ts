@@ -6,6 +6,8 @@ import {
 } from "@clankie/interactive-environment";
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { RenderedSurfaceHub } from "./frame-hub.ts";
 import { ActivityShareError, type ActivityShareRegistry } from "./share-registry.ts";
@@ -205,7 +207,7 @@ async function handleShareControl(
       response.writeHead(404).end();
       return;
     }
-    const action = /^\/shares\/([a-f0-9-]+)\/(switch|grant|stop)$/u.exec(path);
+    const action = /^\/shares\/([a-f0-9-]+)\/(switch|grant|stop|viewer)$/u.exec(path);
     if (path !== "/shares" && action === null) {
       response.writeHead(404).end();
       return;
@@ -224,13 +226,35 @@ async function handleShareControl(
       const kind = action![2];
       exactKeys(
         body,
-        kind === "switch"
-          ? ["generation", "source"]
-          : kind === "grant"
-            ? ["generation", "ttlMs"]
-            : ["generation"],
+        kind === "viewer"
+          ? body.mode === "live"
+            ? ["generation", "mode"]
+            : ["generation", "grant"]
+          : kind === "switch"
+            ? ["generation", "source"]
+            : kind === "grant"
+              ? ["generation", "ttlMs"]
+              : ["generation"],
       );
       const generation = optionalNumber(body.generation) ?? 0;
+      if (kind === "viewer") {
+        if (body.mode !== "live" && (typeof body.grant !== "string" || body.grant.length > 128)) {
+          throw new ActivityShareError("admission_denied", 403);
+        }
+        const stream =
+          body.mode === "live"
+            ? options.shares.openViewerFromController(shareId, generation)
+            : options.shares.openViewer(shareId, generation, body.grant as string);
+        response.writeHead(200, {
+          "content-type": "application/x-ndjson",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        // Node's pipeline honors HTTP backpressure and cancels the registry
+        // stream when the audience gateway disconnects or revokes access.
+        await pipeline(Readable.fromWeb(stream), response).catch(() => undefined);
+        return;
+      }
       result =
         kind === "switch"
           ? options.shares.switch(shareId, generation, body.source as ActivityShareSource)

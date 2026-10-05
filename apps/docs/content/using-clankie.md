@@ -93,7 +93,7 @@ On a configured Mac, Clankie can join Discord conversations, speak in voice,
 play requested YouTube music, and play Pokémon from his own seat in a separate
 PokeAgents world. These are optional integrations, not part of basic setup.
 
-The official bot supports text, voice, and the watch-me-play Activity.
+The official bot supports text, voice, and Activity sharing for existing play, art, animations, demos and audio. Hosted Activity routing is included in the service; customers set up no application or tunnel. The official Activity application and its verification remain release gates.
 Watching someone else's screen share and publishing Discord Go Live use the
 separate personal-lab body, with its own explicit opt-in and restrictions.
 Those distinctions matter when you try something you saw in the promo. Start

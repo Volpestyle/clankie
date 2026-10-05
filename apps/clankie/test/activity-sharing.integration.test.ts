@@ -1,13 +1,16 @@
 import { serve } from "@hono/node-server";
 import { mintOperatorToken } from "@clankie/credential-broker";
 import { ActivityShareFrameSchema, type ActivityShareSession } from "@clankie/interactive-environment";
+import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import {
   createActivityFrameSink,
   createActivityShareClient,
   createActivityShareSink,
 } from "@clankie/rendered-surface-client";
-import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
@@ -17,7 +20,9 @@ import { createFrameProducerServer } from "../../discord-activity/src/producer.t
 import { createDiscordActivityServer } from "../../discord-activity/src/server.ts";
 import { ActivityShareRegistry } from "../../discord-activity/src/share-registry.ts";
 import { runShareCommand } from "../../tui/src/command/share.ts";
-import { ActivitySharing } from "../src/activity-sharing.ts";
+import { ActivitySharing, type ActivitySharingOptions } from "../src/activity-sharing.ts";
+import { createActivityArtifactSources } from "../src/activity-artifact-source.ts";
+import { ActivityPlaySource } from "../src/activity-play-source.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
@@ -72,6 +77,51 @@ async function plane(options: ConstructorParameters<typeof ActivityShareRegistry
     producerUrl: `http://127.0.0.1:${producerPort}`,
     viewerUrl: `ws://127.0.0.1:${viewerPort}`,
     httpViewerUrl: `http://127.0.0.1:${viewerPort}`,
+  };
+}
+
+async function ownerPlane(
+  p: Awaited<ReturnType<typeof plane>>,
+  options: Partial<ActivitySharingOptions> = {},
+) {
+  const root = await mkdtemp(join(tmpdir(), "clankie-share-owner-"));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "view.png"), PNG);
+  const files = new DeliveredFileStore(join(root, "artifacts"));
+  const artifact = await files.publish({ conversationId: "owner", sourceRoot: root, path: "view.png" });
+  const sharing = new ActivitySharing({
+    files,
+    token: async () => "control-secret",
+    url: p.producerUrl,
+    ...options,
+  });
+  const token = mintOperatorToken();
+  const service = await createClankieApp({
+    captain: createStubCaptain(),
+    activitySharing: sharing,
+    eventLogPath: join(root, "events.jsonl"),
+    authenticateOperator: async (req) =>
+      req.headers.get("authorization") === `Bearer ${token}` ? { operatorId: "owner" } : undefined,
+  });
+  const http = serve({ fetch: (req) => service.app.fetch(req), hostname: "127.0.0.1", port: 0 });
+  await new Promise<void>((done) => http.once("listening", done));
+  cleanup.push(async () => {
+    service.close();
+    await new Promise<void>((done) => http.close(() => done()));
+  });
+  const address = http.address();
+  if (address === null || typeof address === "string") throw new Error("missing owner fixture address");
+  const host = `http://127.0.0.1:${address.port}`;
+  return {
+    root,
+    files,
+    artifact,
+    sharing,
+    command: (input: unknown) =>
+      runShareCommand(["request", JSON.stringify(input)], {
+        host,
+        env: { CLANKIE_OPERATOR_TOKEN: token },
+      }),
   };
 }
 
@@ -366,8 +416,9 @@ it("validates bounded media at real ingress, keeps sound live-only, and expires 
   await vi.waitFor(() => expect(late.messages.map((m) => m.kind)).toEqual(["session", "frame"]));
   now += 10_001;
   expect(await p.client.status()).toEqual([]);
-  await Promise.all([v.closed, late.closed]);
-  expect(v.messages.at(-1)).toMatchObject({ kind: "stopped", reason: "expired" });
+  // Admission expires at the share deadline and closes media before another
+  // envelope can cross, even if the share's expiry notification is pending.
+  expect(await Promise.all([v.closed, late.closed])).toEqual([4403, 4403]);
   const ended = await viewer(p.viewerUrl, a, grant.grant);
   expect(await ended.closed).toBe(4403);
 });
@@ -471,3 +522,648 @@ it.each(["share", "public"] as const)(
     expect(socket!.bufferedAmount).toBeLessThanOrEqual(4_096);
   },
 );
+
+it("reconciles applied starts and switches after lost private receipts without replaying or exposing foreign installations", async () => {
+  const p = await plane();
+  let losePath: string | undefined = "/shares";
+  const writes: string[] = [];
+  const bridge: typeof fetch = async (input, init) => {
+    const request = new Request(input, init);
+    const path = new URL(request.url).pathname;
+    if (request.method === "POST") writes.push(path);
+    const response = await fetch(request);
+    if (request.method === "POST" && path === losePath) {
+      losePath = undefined;
+      await response.arrayBuffer();
+      throw new TypeError("Lost applied private response");
+    }
+    return response;
+  };
+  const f = await ownerPlane(p, {
+    tenantId: "customer",
+    installationId: "current-install",
+    authorizeDestination: async () => true,
+    fetch: bridge,
+  });
+  const foreign = await p.client.start({ scope: scope("foreign", "99"), source });
+  const restored = await p.client.start({
+    scope: { tenantId: "customer", installationId: "old-install", guildId: "98", channelId: "97" },
+    source,
+  });
+  const start = {
+    action: "image",
+    conversationId: "owner",
+    artifactId: f.artifact.artifactId,
+    guildId: "1",
+    channelId: "2",
+  };
+  expect(await f.command(start)).toMatchObject({
+    ok: false,
+    body: { outcome: "uncertain", operation: "start" },
+  });
+  const first = (await f.command({ action: "list" })).body as { sessions: ActivityShareSession[] };
+  expect(first.sessions).toHaveLength(1);
+  const orphan = first.sessions[0]!;
+  expect(orphan.scope).toEqual({
+    tenantId: "customer",
+    installationId: "current-install",
+    guildId: "1",
+    channelId: "2",
+  });
+  expect(writes).toEqual(["/shares"]);
+  expect((await f.command({ action: "stop", shareId: foreign.shareId, generation: 1 })).ok).toBe(false);
+  expect(await f.command({ action: "stop", shareId: orphan.shareId, generation: 1 })).toEqual({
+    ok: true,
+    body: { stopped: true },
+  });
+  const created = (await f.command(start)).body as { session: ActivityShareSession };
+  losePath = `/shares/${created.session.shareId}/switch`;
+  expect(
+    await f.command({
+      action: "switch",
+      shareId: created.session.shareId,
+      generation: 1,
+      conversationId: "owner",
+      artifactId: f.artifact.artifactId,
+    }),
+  ).toMatchObject({ ok: false, body: { outcome: "uncertain", operation: "switch" } });
+  const switched = ((await f.command({ action: "list" })).body as { sessions: ActivityShareSession[] })
+    .sessions;
+  expect(switched).toHaveLength(1);
+  expect(switched[0]).toMatchObject({ shareId: created.session.shareId, generation: 2 });
+  expect(writes.filter((path) => path.endsWith("/switch"))).toHaveLength(1);
+  expect((await f.command({ action: "stop", shareId: created.session.shareId, generation: 1 })).ok).toBe(
+    false,
+  );
+  expect((await f.command({ action: "stop", shareId: created.session.shareId, generation: 2 })).ok).toBe(
+    true,
+  );
+  expect((await f.command({ action: "list" })).body).toEqual({ sessions: [] });
+  expect(await p.client.status()).toEqual([foreign, restored]);
+});
+
+it("attaches an existing game producer, switches to an exact image, returns one-attempt receipts and releases busy on producer loss", async () => {
+  const p = await plane();
+  const busy: boolean[] = [];
+  const effects: { action: string; session: ActivityShareSession; requestId: string }[] = [];
+  let game: ActivityFrameSink | undefined;
+  let detached = 0;
+  let permit = true;
+  let loseLaunch = false;
+  const f = await ownerPlane(p, {
+    tenantId: "customer",
+    installationId: "current-install",
+    onBusyChange: (active) => busy.push(active),
+    authorizeDestination: async (destination) =>
+      permit && destination.guildId === "1" && destination.channelId === "2",
+    sources: {
+      resolve: async (id) =>
+        id === "existing-game"
+          ? {
+              source,
+              attach: (sink) => {
+                game = sink;
+                return () => {
+                  detached += 1;
+                };
+              },
+            }
+          : undefined,
+    },
+    launch: async (session, requestId) => {
+      effects.push({ action: "launch", session, requestId });
+      if (loseLaunch) throw new TypeError("Lost launch response");
+      return { outcome: "confirmed", receiptId: requestId, session, inviteUrl: "https://discord.gg/fixture" };
+    },
+    stop: async (session, requestId) => {
+      effects.push({ action: "stop", session, requestId });
+      return { outcome: "confirmed", receiptId: requestId, session };
+    },
+  });
+  permit = false;
+  expect(
+    (await f.command({ action: "start", sourceId: "existing-game", guildId: "1", channelId: "2" })).ok,
+  ).toBe(false);
+  expect(await p.client.status()).toEqual([]);
+  expect(effects).toEqual([]);
+  permit = true;
+  const created = (
+    await f.command({ action: "start", sourceId: "existing-game", guildId: "1", channelId: "2" })
+  ).body as { session: ActivityShareSession; receipt: { outcome: string } };
+  expect(created.receipt.outcome).toBe("confirmed");
+  expect(created.session.source.kind).toBe("game");
+  const otherRoom = await p.client.start({
+    scope: { tenantId: "customer", installationId: "current-install", guildId: "7", channelId: "8" },
+    source,
+  });
+  expect((await f.command({ action: "list" })).body).toEqual({ sessions: [created.session] });
+  expect((await f.command({ action: "stop", shareId: otherRoom.shareId, generation: 1 })).ok).toBe(false);
+  const grant = (await f.command({ action: "grant", shareId: created.session.shareId, generation: 1 }))
+    .body as { grant: string };
+  const v = await viewer(p.viewerUrl, created.session, grant.grant);
+  await expect(
+    f.sharing.openViewer(
+      { ...created.session, scope: { ...created.session.scope, tenantId: "foreign" } },
+      async () => true,
+    ),
+  ).rejects.toThrow("activity_destination_refused");
+  await expect(f.sharing.openViewer(created.session, async () => false)).rejects.toThrow(
+    "operator_authentication_required",
+  );
+  const streamAbort = new AbortController();
+  const stream = await f.sharing.openViewer(created.session, async () => true, streamAbort.signal);
+  const reader = stream.body!.getReader();
+  cleanup.push(async () => {
+    streamAbort.abort();
+    await reader.cancel().catch(() => undefined);
+  });
+  expect(JSON.parse(Buffer.from((await reader.read()).value!).toString())).toEqual({
+    kind: "session",
+    session: created.session,
+  });
+  game!.publishFrame({ ...frame(1), schemaVersion: 1, surface: "gba_emulator", frame: 42 });
+  game!.publishAudio({
+    schemaVersion: 1,
+    surface: "gba_emulator",
+    sequence: 1,
+    frame: 42,
+    encoding: "pcm_s16le",
+    sampleRate: 8_000,
+    channels: 2,
+    frames: 80,
+    data: Buffer.alloc(320).toString("base64"),
+    byteLength: 320,
+    capturedAt: new Date().toISOString(),
+  });
+  await vi.waitFor(() =>
+    expect(v.messages.map((message) => message.kind)).toEqual(["session", "frame", "audio"]),
+  );
+  expect(v.messages[1]).toMatchObject({ generation: 1, frame: { schemaVersion: 2, frame: 42 } });
+  expect(v.messages[1]!.frame).not.toHaveProperty("surface");
+  const streamed = Buffer.from((await reader.read()).value!)
+    .toString()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  expect(streamed[0]).toMatchObject({ kind: "frame", shareId: created.session.shareId, generation: 1 });
+  expect(JSON.stringify(streamed)).not.toContain("control-secret");
+  streamAbort.abort();
+  await reader.cancel().catch(() => undefined);
+  const oldGame = game!;
+  const switched = (
+    await f.command({
+      action: "switch",
+      shareId: created.session.shareId,
+      generation: 1,
+      conversationId: "owner",
+      artifactId: f.artifact.artifactId,
+    })
+  ).body as { session: ActivityShareSession; receipt: { outcome: string } };
+  expect(switched.receipt.outcome).toBe("confirmed");
+  await vi.waitFor(() =>
+    expect(v.messages.at(-1)).toMatchObject({ generation: 2, frame: { sha256: f.artifact.sha256 } }),
+  );
+  expect(v.messages.at(-1)!.frame).not.toHaveProperty("frame");
+  expect(detached).toBe(1);
+  oldGame.publishFrame({ ...frame(500), schemaVersion: 1, surface: "gba_emulator", frame: 500 });
+  expect(
+    (await f.command({ action: "stop", shareId: created.session.shareId, generation: 2 })).body,
+  ).toMatchObject({ stopped: true, receipt: { outcome: "confirmed" } });
+  await v.closed;
+  expect(effects.map(({ action, session }) => [action, session.generation])).toEqual([
+    ["launch", 1],
+    ["launch", 2],
+    ["stop", 2],
+  ]);
+  expect(new Set(effects.map(({ requestId }) => requestId)).size).toBe(3);
+  expect(busy.at(-1)).toBe(false);
+  loseLaunch = true;
+  const uncertain = (
+    await f.command({ action: "start", sourceId: "existing-game", guildId: "1", channelId: "2" })
+  ).body as { session: ActivityShareSession; receipt: { outcome: string } };
+  expect(uncertain.receipt.outcome).toBe("uncertain");
+  expect(effects.filter(({ action }) => action === "launch")).toHaveLength(3);
+  expect(busy.at(-1)).toBe(true);
+  game!.close();
+  await vi.waitFor(() => expect(busy.at(-1)).toBe(false));
+  expect(detached).toBe(2);
+  await vi.waitFor(async () => expect((await f.command({ action: "list" })).body).toEqual({ sessions: [] }));
+});
+
+it("decodes real delivered MP4 audio and GIF animation, fences switches and cleans its owned media on stop, TTL, EOF and shutdown", async () => {
+  const p = await plane();
+  const busy: boolean[] = [];
+  let artifacts: ReturnType<typeof createActivityArtifactSources>;
+  const f = await ownerPlane(p, {
+    tenantId: "customer",
+    installationId: "current-install",
+    authorizeDestination: async () => true,
+    onBusyChange: (active) => busy.push(active),
+    sources: { resolve: (id) => artifacts.resolve(id) },
+  });
+  const decoderRoot = join(f.root, "decoders");
+  artifacts = createActivityArtifactSources({ files: f.files, temporaryRoot: decoderRoot });
+  const run = promisify(execFile);
+  await run(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-threads",
+      "1",
+      "-filter_threads",
+      "1",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=size=32x32:rate=5",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:sample_rate=32000",
+      "-t",
+      "2",
+      "-c:v",
+      "mpeg4",
+      "-q:v",
+      "4",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-movflags",
+      "+faststart",
+      join(f.root, "demo.mp4"),
+    ],
+    { timeout: 20_000, maxBuffer: 16 * 1024 },
+  );
+  await run(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-threads",
+      "1",
+      "-filter_threads",
+      "1",
+      "-i",
+      join(f.root, "demo.mp4"),
+      "-t",
+      "1",
+      "-vf",
+      "fps=5,scale=32:32",
+      "-an",
+      join(f.root, "animation.gif"),
+    ],
+    { timeout: 20_000, maxBuffer: 16 * 1024 },
+  );
+  await run(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-threads",
+      "1",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=size=32x32:rate=1",
+      "-t",
+      "121",
+      "-c:v",
+      "mpeg4",
+      join(f.root, "too-long.mp4"),
+    ],
+    { timeout: 20_000, maxBuffer: 16 * 1024 },
+  );
+  await writeFile(join(f.root, "invalid.mp4"), PNG);
+  const conversationId = randomUUID();
+  const video = await f.files.publish({
+    conversationId,
+    sourceRoot: f.root,
+    path: "demo.mp4",
+    mediaType: "video/mp4",
+  });
+  const gif = await f.files.publish({
+    conversationId,
+    sourceRoot: f.root,
+    path: "animation.gif",
+    mediaType: "image/gif",
+  });
+  const png = await f.files.publish({ conversationId, sourceRoot: f.root, path: "view.png" });
+  for (const path of ["too-long.mp4", "invalid.mp4"]) {
+    const refused = await f.files.publish({
+      conversationId,
+      sourceRoot: f.root,
+      path,
+      mediaType: "video/mp4",
+    });
+    expect(
+      (
+        await f.command({
+          action: "start",
+          sourceId: `artifact:${conversationId}:${refused.artifactId}`,
+          guildId: "1",
+          channelId: "2",
+        })
+      ).ok,
+    ).toBe(false);
+    expect(await p.client.status()).toEqual([]);
+    expect(await readdir(decoderRoot)).toEqual([]);
+  }
+  const videoId = `artifact:${conversationId}:${video.artifactId}`;
+  const gifId = `artifact:${conversationId}:${gif.artifactId}`;
+  const imageId = `artifact:${conversationId}:${png.artifactId}`;
+  expect(
+    (
+      await f.command({
+        action: "start",
+        sourceId: `artifact:${randomUUID()}:${video.artifactId}`,
+        guildId: "1",
+        channelId: "2",
+      })
+    ).ok,
+  ).toBe(false);
+  expect(
+    (await f.command({ action: "start", sourceId: "http://127.0.0.1/capture", guildId: "1", channelId: "2" }))
+      .ok,
+  ).toBe(false);
+  expect(await p.client.status()).toEqual([]);
+  const created = (await f.command({ action: "start", sourceId: videoId, guildId: "1", channelId: "2" }))
+    .body as { session: ActivityShareSession };
+  expect(created.session.source).toMatchObject({ kind: "demo", id: videoId });
+  const grant = (await f.command({ action: "grant", shareId: created.session.shareId, generation: 1 }))
+    .body as { grant: string };
+  const v = await viewer(p.viewerUrl, created.session, grant.grant);
+  await vi.waitFor(
+    () => {
+      expect(v.messages.filter((message) => message.kind === "frame").length).toBeGreaterThanOrEqual(2);
+      expect(v.messages.some((message) => message.kind === "audio")).toBe(true);
+    },
+    { timeout: 5_000 },
+  );
+  for (const message of v.messages) {
+    if (message.kind === "frame") {
+      expect(message.frame.byteLength).toBeLessThanOrEqual(256 * 1024);
+      expect(message.frame).not.toHaveProperty("surface");
+      expect(message.frame).not.toHaveProperty("frame");
+    }
+    if (message.kind === "audio")
+      expect(message.audio.frames / message.audio.sampleRate).toBeLessThanOrEqual(0.2);
+  }
+  expect(await readdir(decoderRoot)).toHaveLength(1);
+  const switched = (
+    await f.command({ action: "switch", shareId: created.session.shareId, generation: 1, sourceId: gifId })
+  ).body as { session: ActivityShareSession };
+  expect(switched.session.source.kind).toBe("animation");
+  await vi.waitFor(
+    () =>
+      expect(v.messages.some((message) => message.kind === "frame" && message.generation === 2)).toBe(true),
+    { timeout: 5_000 },
+  );
+  const image = (
+    await f.command({ action: "switch", shareId: created.session.shareId, generation: 2, sourceId: imageId })
+  ).body as { session: ActivityShareSession };
+  expect(image.session.source.kind).toBe("image");
+  await vi.waitFor(() =>
+    expect(v.messages.at(-1)).toMatchObject({ kind: "frame", generation: 3, frame: { sha256: png.sha256 } }),
+  );
+  expect((await f.command({ action: "stop", shareId: created.session.shareId, generation: 3 })).ok).toBe(
+    true,
+  );
+  await v.closed;
+  await vi.waitFor(async () => expect(await readdir(decoderRoot)).toEqual([]));
+  expect(busy.at(-1)).toBe(false);
+  const expiring = (
+    await f.command({ action: "start", sourceId: videoId, guildId: "1", channelId: "2", ttlMs: 150 })
+  ).body as { session: ActivityShareSession };
+  expect(expiring.session.source.kind).toBe("demo");
+  await vi.waitFor(
+    async () => {
+      expect((await f.command({ action: "list" })).body).toEqual({ sessions: [] });
+      expect(await readdir(decoderRoot)).toEqual([]);
+      expect(busy.at(-1)).toBe(false);
+    },
+    { timeout: 5_000 },
+  );
+  const finite = (await f.command({ action: "start", sourceId: gifId, guildId: "1", channelId: "2" }))
+    .body as { session: ActivityShareSession };
+  expect(finite.session.source.kind).toBe("animation");
+  expect(busy.at(-1)).toBe(true);
+  await vi.waitFor(
+    async () => {
+      expect(await p.client.status()).toEqual([]);
+      expect(await readdir(decoderRoot)).toEqual([]);
+      expect(busy.at(-1)).toBe(false);
+    },
+    { timeout: 5_000 },
+  );
+  const closing = (await f.command({ action: "start", sourceId: videoId, guildId: "1", channelId: "2" }))
+    .body as { session: ActivityShareSession };
+  expect(closing.session.source.kind).toBe("demo");
+  expect(await readdir(decoderRoot)).toHaveLength(1);
+  f.sharing.close();
+  expect(busy.at(-1)).toBe(false);
+  await vi.waitFor(
+    async () => {
+      expect(await p.client.status()).toEqual([]);
+      expect(await readdir(decoderRoot)).toEqual([]);
+    },
+    { timeout: 5_000 },
+  );
+});
+
+it("ends the scoped share and busy lease when the production play fanout closes its existing producer", async () => {
+  const p = await plane();
+  const play = new ActivityPlaySource();
+  const producer = play.createSink("Existing game");
+  cleanup.push(() => producer.close());
+  const busy: boolean[] = [];
+  const f = await ownerPlane(p, {
+    tenantId: "customer",
+    installationId: "current-install",
+    authorizeDestination: async () => true,
+    onBusyChange: (active) => busy.push(active),
+    sources: { resolve: async (id) => play.resolve(id) },
+  });
+  const created = (await f.command({ action: "start", sourceId: "play", guildId: "1", channelId: "2" }))
+    .body as { session: ActivityShareSession };
+  expect(created.session.source).toMatchObject({ kind: "game", id: "play", title: "Existing game" });
+  const grant = (await f.command({ action: "grant", shareId: created.session.shareId, generation: 1 }))
+    .body as { grant: string };
+  const v = await viewer(p.viewerUrl, created.session, grant.grant);
+  producer.publishFrame({ ...frame(1), schemaVersion: 1, surface: "gba_emulator", frame: 55 });
+  await vi.waitFor(() => expect(v.messages.at(-1)).toMatchObject({ kind: "frame", frame: { frame: 55 } }));
+  expect(busy.at(-1)).toBe(true);
+  producer.close();
+  expect(busy.at(-1)).toBe(false);
+  expect(play.resolve("play")).toBeUndefined();
+  await v.closed;
+  await vi.waitFor(async () => expect(await p.client.status()).toEqual([]));
+  expect((await f.command({ action: "start", sourceId: "play", guildId: "1", channelId: "2" })).ok).toBe(
+    false,
+  );
+});
+
+it("plays exact delivered WAV and MP3 through scoped audio-only demos, switches generations and cleans on stop and expiry", async () => {
+  const p = await plane();
+  const busy: boolean[] = [];
+  let artifacts: ReturnType<typeof createActivityArtifactSources>;
+  const f = await ownerPlane(p, {
+    tenantId: "customer",
+    installationId: "current-install",
+    authorizeDestination: async () => true,
+    onBusyChange: (active) => busy.push(active),
+    sources: { resolve: (id) => artifacts.resolve(id) },
+  });
+  const decoderRoot = join(f.root, "audio-decoders");
+  artifacts = createActivityArtifactSources({ files: f.files, temporaryRoot: decoderRoot });
+  const run = promisify(execFile);
+  await run(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-threads",
+      "1",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:sample_rate=16000",
+      "-t",
+      "3",
+      "-c:a",
+      "pcm_s16le",
+      join(f.root, "sound.wav"),
+    ],
+    { timeout: 20_000, maxBuffer: 16 * 1024 },
+  );
+  await run(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-threads",
+      "1",
+      "-i",
+      join(f.root, "sound.wav"),
+      "-c:a",
+      "libmp3lame",
+      join(f.root, "sound.mp3"),
+    ],
+    { timeout: 20_000, maxBuffer: 16 * 1024 },
+  );
+  await run(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-threads",
+      "1",
+      "-f",
+      "lavfi",
+      "-i",
+      "anullsrc=sample_rate=16000:channel_layout=mono",
+      "-t",
+      "121",
+      "-c:a",
+      "pcm_s16le",
+      join(f.root, "too-long.wav"),
+    ],
+    { timeout: 20_000, maxBuffer: 16 * 1024 },
+  );
+  const conversationId = randomUUID();
+  const wav = await f.files.publish({
+    conversationId,
+    sourceRoot: f.root,
+    path: "sound.wav",
+    mediaType: "audio/wav",
+  });
+  const mp3 = await f.files.publish({
+    conversationId,
+    sourceRoot: f.root,
+    path: "sound.mp3",
+    mediaType: "audio/mpeg",
+  });
+  const long = await f.files.publish({
+    conversationId,
+    sourceRoot: f.root,
+    path: "too-long.wav",
+    mediaType: "audio/wav",
+  });
+  expect(
+    (
+      await f.command({
+        action: "start",
+        sourceId: `artifact:${conversationId}:${long.artifactId}`,
+        guildId: "1",
+        channelId: "2",
+      })
+    ).ok,
+  ).toBe(false);
+  expect(await p.client.status()).toEqual([]);
+  expect(await readdir(decoderRoot)).toEqual([]);
+  const wavId = `artifact:${conversationId}:${wav.artifactId}`;
+  const mp3Id = `artifact:${conversationId}:${mp3.artifactId}`;
+  const created = (await f.command({ action: "start", sourceId: wavId, guildId: "1", channelId: "2" }))
+    .body as { session: ActivityShareSession };
+  expect(created.session.source).toMatchObject({ kind: "demo", title: "sound.wav" });
+  const grant = (await f.command({ action: "grant", shareId: created.session.shareId, generation: 1 }))
+    .body as { grant: string };
+  const v = await viewer(p.viewerUrl, created.session, grant.grant);
+  await vi.waitFor(() => {
+    expect(v.messages.some((message) => message.kind === "audio" && message.generation === 1)).toBe(true);
+    expect(v.messages.some((message) => message.kind === "status" && message.status.phase === "acting")).toBe(
+      true,
+    );
+  });
+  const switched = (
+    await f.command({ action: "switch", shareId: created.session.shareId, generation: 1, sourceId: mp3Id })
+  ).body as { session: ActivityShareSession };
+  expect(switched.session.source).toMatchObject({ kind: "demo", title: "sound.mp3" });
+  await vi.waitFor(() =>
+    expect(v.messages.some((message) => message.kind === "audio" && message.generation === 2)).toBe(true),
+  );
+  expect(v.messages.some((message) => message.kind === "frame")).toBe(false);
+  const packets = v.messages.filter((message) => message.kind === "audio");
+  expect(
+    packets.some((message) => Buffer.from(message.audio.data, "base64").some((byte) => byte !== 0)),
+  ).toBe(true);
+  for (const { audio } of packets) {
+    expect(audio).toMatchObject({
+      schemaVersion: 2,
+      sampleRate: 32_000,
+      channels: 2,
+      frames: 640,
+      byteLength: 2560,
+    });
+    expect(audio).not.toHaveProperty("surface");
+    expect(audio).not.toHaveProperty("frame");
+  }
+  expect((await f.command({ action: "stop", shareId: created.session.shareId, generation: 2 })).ok).toBe(
+    true,
+  );
+  await v.closed;
+  await vi.waitFor(async () => expect(await readdir(decoderRoot)).toEqual([]));
+  expect(busy.at(-1)).toBe(false);
+  expect(
+    (await f.command({ action: "start", sourceId: mp3Id, guildId: "1", channelId: "2", ttlMs: 150 })).ok,
+  ).toBe(true);
+  await vi.waitFor(async () => {
+    expect(await p.client.status()).toEqual([]);
+    expect(await readdir(decoderRoot)).toEqual([]);
+    expect(busy.at(-1)).toBe(false);
+  });
+});

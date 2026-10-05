@@ -10,12 +10,12 @@ Clankie has three distinct ways to show or inspect moving pictures and one
 shared native voice path. They use different Discord capabilities and should
 not be described as one generic stream.
 
-| Surface                                     | Active body                   | Direction                   | What viewers get                                          |
-| ------------------------------------------- | ----------------------------- | --------------------------- | --------------------------------------------------------- |
-| Ordinary Discord voice and YouTube music    | Bot or personal-lab user body | Clankie to voice channel    | Audible voice/music through Vox's primary voice role      |
-| Embedded Activity at `activity.clankie.bot` | Official bot                  | Clankie to Activity viewers | Live GBA frames and synchronized cartridge sound          |
-| Go Live publish                             | Personal-lab user body only   | Clankie to Discord viewers  | H264 video through Vox; currently no source audio         |
-| Screen-share watch                          | Personal-lab user body only   | Discord sharer to Clankie   | Up to four chronological JPEG samples for `observe_share` |
+| Surface                                     | Active body                   | Direction                   | What viewers get                                                  |
+| ------------------------------------------- | ----------------------------- | --------------------------- | ----------------------------------------------------------------- |
+| Ordinary Discord voice and YouTube music    | Bot or personal-lab user body | Clankie to voice channel    | Audible voice/music through Vox's primary voice role              |
+| Embedded Activity at `activity.clankie.bot` | Official bot                  | Clankie to Activity viewers | Existing play, delivered art, animations, demos and bounded audio |
+| Go Live publish                             | Personal-lab user body only   | Clankie to Discord viewers  | H264 video through Vox; currently no source audio                 |
+| Screen-share watch                          | Personal-lab user body only   | Discord sharer to Clankie   | Up to four chronological JPEG samples for `observe_share`         |
 
 The canonical current media diagram is in
 [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md). The old
@@ -69,13 +69,14 @@ video-only surface.
 
 ## Embedded Activity
 
-The [scoped general-media core](../apps/discord-activity/README.md#scoped-general-media-core)
-supports finite game/image/animation/demo streams with separate viewer and
-producer credentials. Local owners can project a delivered PNG with
-[`clankie share`](cli.md#activity-shares). It neither launches Discord nor
-verifies a Discord audience. Hosted routing, official application registration,
-server-side participant admission and live Discord proof remain pending. Hosted
-customers will not configure accounts, applications or tunnels.
+[Activity sharing](activity.md) publishes existing game play and exact delivered
+PNG/GIF/MP4/WAV/MP3 artifacts with finite sessions and separate producer/viewer
+credentials. Owner controls work through the CLI, TUI and paired hosted device.
+The hosted gateway and edge verify SDK audiences and stream over the body's
+existing outbound connection; customers configure no Discord app or tunnel.
+Official Activity app selection, verification and live Discord checks remain
+James's decisions. Self-hosted local delegated grants keep working; a local
+official-bot admission adapter is outside this batch.
 
 The existing public watch-me-play transport below remains separate. Scoped
 sources never fall back to it or publish private artifacts there.

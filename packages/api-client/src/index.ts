@@ -18,6 +18,13 @@ import {
 export * from "./discord-setup.ts";
 import { createDiscordSetupApi } from "./discord-api.ts";
 import {
+  ACTIVITY_SHARES_PATH,
+  ActivitySharingRequestSchema,
+  ActivitySharingResponseSchema,
+  type ActivitySharingRequest,
+  type ActivitySharingResponse,
+} from "@clankie/protocol/activity-sharing";
+import {
   INTEGRATE_PATH,
   IntegrationRequestSchema,
   IntegrationResponseSchema,
@@ -259,6 +266,19 @@ export class ClankieApiClient {
     return parseProtocolResponse(
       FleetSettingsSnapshotSchema,
       await this.request(FLEET_SETTINGS_PATH, { headers: this.operatorHeaders(), redirect: "error" }),
+    );
+  }
+
+  /** Share existing authorized media on the current owner/device connection. */
+  public async activityShares(input: ActivitySharingRequest): Promise<ActivitySharingResponse> {
+    return parseProtocolResponse(
+      ActivitySharingResponseSchema,
+      await this.request(ACTIVITY_SHARES_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        redirect: "error",
+        body: JSON.stringify(ActivitySharingRequestSchema.parse(input)),
+      }),
     );
   }
 

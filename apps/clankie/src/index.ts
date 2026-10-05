@@ -1,4 +1,8 @@
 import { ComputerBody } from "./computer-body.ts";
+import { startHostedActivityRuntime } from "./activity-runtime.ts";
+import { ActivityPlaySource } from "./activity-play-source.ts";
+import { createActivityArtifactSources } from "./activity-artifact-source.ts";
+import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
 import { ActivitySharing } from "./activity-sharing.ts";
 import { resolveActivityProducerCredential } from "@clankie/credential-broker";
 import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
@@ -558,6 +562,32 @@ const discordUserPresenceRuntime = await loadDiscordPresenceRuntime(
 const activityObservations = new ActivityObservationProjection();
 const playSight = new PlaySightProjection({ journalRootDir: defaultGbaPlayJournalDir(process.env) });
 const hostedWorld = new HostedWorldSession();
+const activityPlay = new ActivityPlaySource();
+const activityArtifacts = createActivityArtifactSources({ files: deliveredFiles });
+const activityRuntime = hostedBody === undefined ? undefined : await startHostedActivityRuntime();
+const activitySharing = new ActivitySharing({
+  files: deliveredFiles,
+  token: activityRuntime ? async () => activityRuntime.token : () => resolveActivityProducerCredential(),
+  url:
+    activityRuntime?.url ??
+    (process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer")
+      .replace(/^ws/u, "http")
+      .replace(/\/producer$/u, ""),
+  sources: {
+    resolve: async (sourceId) =>
+      activityPlay.resolve(sourceId) ?? (await activityArtifacts.resolve(sourceId)),
+  },
+  ...(hostedBody === undefined
+    ? {}
+    : {
+        tenantId: hostedBody.bootstrap.tenantId,
+        installationId: hostedBody.bootstrap.installationId,
+        authorizeDestination: (scope) => hostedBody.authorizeActivityDestination(scope),
+        launch: (session, requestId) => hostedBody.launchActivity(session, requestId),
+        stop: (session, requestId) => hostedBody.stopActivity(session, requestId),
+        onBusyChange: (active) => hostedHeartbeat?.setExternal("activity-share", active),
+      }),
+});
 
 // The captain's tools reach the same in-process authorities the routes use.
 // The app needs the captain and the captain's deps need the app, so the app
@@ -871,6 +901,15 @@ minecraftCapture = new MinecraftCapture({
     viewerStatus: (session) => minecraft.viewerStatus(session),
   },
   producerUrl: process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer",
+  createSink: async () =>
+    activityPlay.createSink(
+      "Clankie's Minecraft",
+      hostedBody === undefined
+        ? await createBrokeredActivityFrameSink({
+            url: process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer",
+          })
+        : undefined,
+    ),
   onError: () => logger.warn({ event: "minecraft.capture_unavailable" }, "Minecraft capture unavailable"),
 });
 const runtimeUpdater =
@@ -906,6 +945,7 @@ const minecraftHost = new MinecraftHostService({
 let fleetProjectMembership: FleetProjectMembership | undefined;
 const captain = createCaptain(
   {
+    activitySharing,
     discordTracking,
     ...(runtimeUpdater === undefined
       ? {}
@@ -1345,15 +1385,8 @@ const clankie = await createClankieApp({
   },
   deliveredFiles,
   herdrRuntime: herdr.status,
-  // This local artifact projection requires the owner bearer. Hosted routing,
-  // app registration and audience admission are supplied by the private edge.
-  activitySharing: new ActivitySharing({
-    files: deliveredFiles,
-    token: () => resolveActivityProducerCredential(),
-    url: (process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer")
-      .replace(/^ws/u, "http")
-      .replace(/\/producer$/u, ""),
-  }),
+  activitySharing,
+  ...(hostedBody === undefined ? {} : { hostedActivity: hostedBody }),
   herdrBinding: herdr.binding,
   runtimes,
   memory,
@@ -1613,6 +1646,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     }
     await mcpHost.close().catch(() => undefined);
     clankie.close();
+    await activityRuntime?.close();
     if (result.status === "deadline_expired") {
       logger.error(
         { signal, sessionId: result.sessionId, deadlineMs: playShutdownDeadlineMs, exitCode: 1 },
@@ -1637,6 +1671,15 @@ function createConfiguredPlayExecution(): PlayExecution {
     playSight,
     hostedWorld,
     gameplay: startupSettings.gameplay,
+    createActivitySink: async () =>
+      activityPlay.createSink(
+        "Clankie's live play",
+        hostedBody === undefined
+          ? await createBrokeredActivityFrameSink({
+              url: process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer",
+            })
+          : undefined,
+      ),
     rememberWorldSession: (sessionId, target, state) =>
       bodyPlaySessions.rememberWorldSession(sessionId, target, state),
   });

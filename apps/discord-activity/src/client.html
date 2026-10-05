@@ -87,6 +87,33 @@
         color: var(--muted);
         font-size: 12px;
       }
+      #source-caption {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        left: 14px;
+        z-index: 2;
+        width: fit-content;
+        max-width: calc(100% - 28px);
+        margin: 0;
+        padding: 6px 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        pointer-events: none;
+      }
+      #app[data-source-kind]:not([data-source-kind="game"]) {
+        grid-template-rows: minmax(0, 1fr);
+      }
+      #app[data-source-kind]:not([data-source-kind="game"]) #lower-third {
+        display: none;
+      }
+      #app[data-source-kind]:not([data-source-kind="game"]) #stage {
+        aspect-ratio: auto;
+      }
       #sound-controls {
         position: absolute;
         right: 14px;
@@ -98,6 +125,7 @@
       }
       #volume {
         width: 90px;
+        height: 44px;
         accent-color: var(--live);
         cursor: pointer;
       }
@@ -106,6 +134,8 @@
         outline-offset: 3px;
       }
       #sound-toggle {
+        min-width: 44px;
+        min-height: 44px;
         padding: 8px 10px;
         border: 1px solid var(--text);
         border-radius: 3px;
@@ -342,6 +372,7 @@
           <strong id="empty-title">Waiting for Clankie</strong>
           <span id="empty-copy">A shared view appears here when a session starts.</span>
         </div>
+        <p id="source-caption" aria-live="polite" hidden></p>
         <div id="sound-controls">
           <input id="volume" type="range" min="0" max="1" step="0.01" value="0.2" aria-label="Volume" />
           <button id="sound-toggle" type="button" aria-pressed="false">Enable sound</button>
@@ -377,6 +408,8 @@
     </main>
     <script type="module">
       const canvas = document.getElementById("screen");
+      const app = document.getElementById("app");
+      const sourceCaption = document.getElementById("source-caption");
       const context = canvas.getContext("2d");
       const status = document.getElementById("status");
       const empty = document.getElementById("empty");
@@ -401,11 +434,23 @@
       let currentSession = null;
       let legacyGeneration = 0;
       const launch = new URLSearchParams(location.hash.slice(1));
-      const shareId = launch.get("share");
-      const viewerGrant = launch.get("grant");
+      let shareId = launch.get("share");
+      let viewerGrant = launch.get("grant");
       // Grants stay out of HTTP URLs, logs and referrers. A scoped request never
       // falls back to the deliberately public legacy game stream.
-      const scoped = launch.has("share") || launch.has("grant");
+      let scoped = launch.has("share") || launch.has("grant");
+      let mediaPath = null;
+      let admittedScope = null;
+      const lifetime = new AbortController();
+      globalThis.addEventListener?.(
+        "pagehide",
+        () => {
+          lifetime.abort();
+          endSession();
+          currentSocket?.close();
+        },
+        { once: true },
+      );
       let hasWorkStatus = false;
       const audio = { context: null, gain: null, enabled: false, nextAt: 0, sources: new Set() };
 
@@ -614,6 +659,19 @@
         setField(effect, null, "Waiting for a result");
       }
 
+      function renderSource(source) {
+        if (
+          !["game", "image", "animation", "demo"].includes(source?.kind) ||
+          typeof source.title !== "string" ||
+          source.title.length === 0 ||
+          source.title.length > 256
+        )
+          return;
+        sourceCaption.textContent = `${source.kind} · ${source.title}`;
+        sourceCaption.hidden = false;
+        app.dataset.sourceKind = source.kind;
+      }
+
       function resetView() {
         renderEpoch += 1;
         hasWorkStatus = false;
@@ -621,6 +679,9 @@
         lastOverlaySequence = -1;
         lastAudioSequence = -1;
         stopAudio();
+        sourceCaption.textContent = "";
+        sourceCaption.hidden = true;
+        app.dataset.sourceKind = scoped ? "pending" : "game";
         clearOverlay();
         showEmpty("Waiting for Clankie", "The shared view will appear here.");
         if (audio.enabled) soundToggle.textContent = "Sound ready";
@@ -644,8 +705,9 @@
         setStatus("Connecting", "idle");
         setWorkStatus("Connecting", "waiting");
         const scheme = location.protocol === "https:" ? "wss" : "ws";
-        const path = scoped ? `/shares/${encodeURIComponent(shareId)}/frames` : "/frames";
-        const socket = new WebSocket(`${scheme}://${location.host}/.proxy${path}`);
+        const path =
+          mediaPath ?? (scoped ? `/.proxy/shares/${encodeURIComponent(shareId)}/frames` : "/.proxy/frames");
+        const socket = new WebSocket(`${scheme}://${location.host}${path}`);
         currentSocket = socket;
         socket.addEventListener("open", () => {
           if (socket !== currentSocket || sessionEnded) return;
@@ -672,9 +734,17 @@
                 next.generation < 1
               )
                 return;
+              if (
+                admittedScope &&
+                ["tenantId", "installationId", "guildId", "channelId"].some(
+                  (key) => next.scope?.[key] !== admittedScope[key],
+                )
+              )
+                return;
               if (currentSession && next.generation < currentSession.generation) return;
               if (!currentSession || next.generation !== currentSession.generation) resetView();
               currentSession = next;
+              renderSource(next.source);
               return;
             }
             if (
@@ -732,7 +802,45 @@
         socket.addEventListener("error", () => socket.close());
       }
 
-      connect();
+      async function launchViewer() {
+        try {
+          // A failed official configuration/admission never opens the public
+          // compatibility stream, even when a forged fragment supplies a grant.
+          const response = await fetch("/.proxy/activity/config", {
+            cache: "no-store",
+            signal: lifetime.signal,
+          });
+          if (!response.ok) throw new Error("activity_configuration_unavailable");
+          const config = await response.json();
+          if (config.mode === "official") {
+            scoped = true;
+            shareId = null;
+            viewerGrant = null;
+            setStatus("Connecting to Discord", "idle");
+            const { admitOfficialActivity } = await import("/.proxy/activity-client.js");
+            const admitted = await admitOfficialActivity(config.applicationId, lifetime.signal);
+            if (lifetime.signal.aborted) return;
+            shareId = admitted.session.shareId;
+            viewerGrant = admitted.grant;
+            currentSession = admitted.session;
+            admittedScope = admitted.session.scope;
+            mediaPath = admitted.mediaPath;
+            setTimeout(
+              () => {
+                endSession();
+                currentSocket?.close();
+              },
+              Math.max(0, Date.parse(admitted.expiresAt) - Date.now()),
+            );
+          } else if (config.mode !== "local") throw new Error("activity_configuration_invalid");
+          if (!lifetime.signal.aborted) connect();
+        } catch {
+          endSession();
+          showEmpty("Access unavailable", "Open this shared view from its Discord Activity.");
+          setStatus("Access unavailable", "idle");
+        }
+      }
+      void launchViewer();
     </script>
   </body>
 </html>

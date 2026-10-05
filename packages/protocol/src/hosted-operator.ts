@@ -91,6 +91,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/support/grants",
     ],
     POST: [
+      "/v1/activity/shares",
       "/v1/discord/room-guidance",
       "/v1/discord/room-voice",
       "/v1/discord/settings",

@@ -505,6 +505,7 @@ export class PublicGatewayConnector {
         frame.path === "/v1/hooks/linear" ||
         frame.path === "/v1/hosted/pair-offer" ||
         frame.path === DISCORD_INGRESS_PATH ||
+        frame.path === "/v1/activity/viewer" ||
         discordWebEnvelope
           ? await this.fetcher(new URL(frame.path, baseUrl), {
               method: frame.method,
@@ -544,7 +545,7 @@ export class PublicGatewayConnector {
         ) {
           const chunk = item.value.subarray(offset, offset + PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX);
           responseBytes += chunk.byteLength;
-          if (responseBytes > RESPONSE_BYTES_MAX)
+          if (responseBytes > (frame.path === "/v1/activity/viewer" ? 256 * 1024 * 1024 : RESPONSE_BYTES_MAX))
             throw new Error("Local gateway response exceeded its limit");
           await sendFrame(socket, {
             schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,

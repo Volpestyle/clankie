@@ -1,3 +1,4 @@
+import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
@@ -607,6 +608,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
+  app.post("/v1/activity/viewer", bodyLimit({ maxSize: 32 * 1024 }), async (context) => {
+    if (!dependencies.hostedActivity || !dependencies.activitySharing)
+      return context.json({ error: "activity_unavailable" }, 503);
+    return hostedActivityViewer(
+      context.req.raw,
+      dependencies.hostedActivity,
+      dependencies.activitySharing,
+      () => clock().getTime(),
+    );
+  });
+
   app.post("/v1/activity/shares", async (context) => {
     const identity = await authenticateOperator(context.req.raw, dependencies);
     if (identity === "unavailable")
@@ -638,6 +650,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
       const name = error instanceof Error ? error.message : "";
       if (name === "operator_authentication_required") return context.json({ error: name }, 401);
+      if (name === "activity_destination_refused") return context.json({ error: name }, 403);
+      if (name === "activity_source_unavailable") return context.json({ error: name }, 404);
       if (name === "activity_share_generation_conflict") return context.json({ error: name }, 409);
       if (name === "activity_share_gone" || name === "activity_artifact_unavailable")
         return context.json({ error: name }, 404);

@@ -46,12 +46,15 @@ paths:
     post:
       tags: [Media]
       operationId: controlActivityShares
-      summary: Control local owner-authorized Activity artifact shares
+      summary: Control owner-authorized Activity media shares
       description: |
-        Projects a hash-bound delivered PNG in its exact conversation. Tenant
-        and installation scope are service-assigned. No source path/URL or new
-        capture permission is accepted. This creates no Discord launch or
-        participant authentication; hosted routing/admission remains pending.
+        Projects existing play or an exact hash-bound delivered PNG/GIF/MP4/WAV/MP3.
+        Tenant and installation scope are service-assigned. No source path/URL or
+        new capture permission is accepted. Hosted owner controls use the existing
+        encrypted paired-device operator bridge; the private edge verifies the
+        destination and returns a scoped launch/stop receipt. A confirmed invite
+        is not evidence that an audience opened it. Local delegated shares retain
+        their separate read grants; official local admission is a pending decision.
         Source switch advances generation and invalidates old media/grants.
         Stop, expiry and producer loss are terminal. Controls never retry;
         uncertainty carries operation and share/generation when known.
@@ -78,6 +81,23 @@ paths:
                     guildId: { type: string, pattern: "^[0-9]{1,32}$" }
                     channelId: { type: string, pattern: "^[0-9]{1,32}$" }
                     ttlMs: { type: integer, minimum: 1, maximum: 7200000 }
+                - type: object
+                  additionalProperties: false
+                  required: [action, sourceId, guildId, channelId]
+                  properties:
+                    action: { const: start }
+                    sourceId: { type: string, minLength: 1, maxLength: 128 }
+                    guildId: { type: string, pattern: "^[0-9]{1,32}$" }
+                    channelId: { type: string, pattern: "^[0-9]{1,32}$" }
+                    ttlMs: { type: integer, minimum: 1, maximum: 7200000 }
+                - type: object
+                  additionalProperties: false
+                  required: [action, shareId, generation, sourceId]
+                  properties:
+                    action: { const: switch }
+                    shareId: { type: string, format: uuid }
+                    generation: { type: integer, minimum: 1 }
+                    sourceId: { type: string, minLength: 1, maxLength: 128 }
                 - type: object
                   additionalProperties: false
                   required: [action, shareId, generation, conversationId, artifactId]
@@ -251,6 +271,44 @@ paths:
         "403": { description: Actual operator required }
         "409": { description: Unknown record, identity conflict, busy operation or refused landing }
         "503": { description: Repository integration unavailable }
+  /v1/activity/viewer:
+    post:
+      tags: [Media]
+      operationId: readAuthorizedActivityMedia
+      summary: Read hosted Activity media with a live audience authorization
+      description: |
+        Internal outbound-body route. Requires a fleet-signed media-only permit
+        bound to the exact session and opaque live edge authorization. The body
+        independently revalidates current audience authority and destination,
+        including on quiet streams. Neither operator nor captain bearer grants
+        this route. The gateway exposes read-only media to an admitted SDK viewer;
+        it never exposes controller credentials or chooses a host from browser input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [session, authorization, permit]
+              properties:
+                session:
+                  {
+                    type: object,
+                    description: Exact finite share,
+                    generation,
+                    trusted tenant/installation/room scope and source,
+                  }
+                authorization: { type: string, minLength: 32, maxLength: 128 }
+                permit: { type: string, minLength: 1, maxLength: 8192 }
+      responses:
+        "200":
+          description: Bounded read-only session and PNG/PCM lifecycle envelopes; live authority required throughout
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        "403": { description: Invalid, expired, cross-scope or revoked audience authority }
+        "503": { description: Hosted Activity unavailable }
   /v1/runtime-update:
     get:
       tags: [Operator]

@@ -201,6 +201,7 @@ export interface ClankieAppDependencies {
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
   /** Local owner-authorized projection of delivered artifacts; hosted launch/admission is separate. */
   activitySharing?: ActivitySharing;
+  hostedActivity?: Pick<HostedBodyClient, "bootstrap" | "keys" | "revalidateActivity">;
   memory?: MemoryStores;
   personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */

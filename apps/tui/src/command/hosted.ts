@@ -1,5 +1,6 @@
 import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
 import { runAccountsCommand } from "./accounts.ts";
+import { runShareCommand } from "./share.ts";
 import { gatewayEnableWithAccount } from "./gateway.ts";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
@@ -180,7 +181,6 @@ export async function disconnectHostedCli(env: NodeJS.ProcessEnv = process.env) 
 }
 export const HOSTED_LOCAL_ONLY = new Set([
   "integrate",
-  "share",
   "harness",
   "update",
   "restart",
@@ -216,6 +216,7 @@ export async function hostedCommand(
   transport: ReturnType<typeof createHostedTransport>,
 ): Promise<unknown> {
   const [command, action, value] = args;
+  if (command === "share") return (await runShareCommand(args.slice(1), { request: transport.request })).body;
   if (command === "status" || command === "health") {
     const health = await transport.request("/health");
     return { mode: "hosted", label: transport.label, status: transport.status(), health };

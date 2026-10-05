@@ -1,10 +1,13 @@
 import {
   ACTIVITY_SHARE_MAX_BUFFERED_BYTES,
   type ActivityShareAudio,
+  ActivityShareAudioSchema,
   type ActivityShareFrame,
+  ActivityShareFrameSchema,
   type ActivityShareGrant,
   ActivityShareGrantSchema,
   type ActivityShareOverlay,
+  ActivityShareOverlaySchema,
   type ActivityShareProducerMessage,
   ActivityShareScopeSchema,
   type ActivityShareSession,
@@ -13,9 +16,10 @@ import {
   ActivityShareSourceSchema,
   ActivityShareStartResultSchema,
   type ActivityShareStatus,
+  ActivityShareStatusSchema,
 } from "@clankie/interactive-environment";
 import { WebSocket } from "ws";
-import type { ActivityFrameSocket } from "./activity-frame-sink.ts";
+import type { ActivityFrameSink, ActivityFrameSocket } from "./activity-frame-sink.ts";
 
 // Client frames include masking and length fields: reserve the maximum 14-byte header.
 const MAX_CLIENT_FRAME_HEADER_BYTES = 14;
@@ -133,6 +137,8 @@ export interface ActivityShareClientOptions {
   requestTimeoutMs?: number;
   /** Bounds retained producer capabilities, including shares not yet attached. */
   maxCachedShares?: number;
+  /** Terminal producer loss; a caller can release its source and busy lease. */
+  onSessionEnded?: (session: ActivityShareSession) => void;
 }
 
 export interface ActivityShareClient {
@@ -145,12 +151,16 @@ export interface ActivityShareClient {
   stop(session: ActivityShareSession): Promise<void>;
   grant(session: ActivityShareSession, ttlMs?: number): Promise<ActivityShareGrant>;
   status(): Promise<ActivityShareSession[]>;
+  /** Private media-only stream; the controller credential never reaches a viewer. */
+  openViewer(session: ActivityShareSession, grant: string, signal?: AbortSignal): Promise<Response>;
+  /** Trusted controller admission lasts until share end; the caller owns live audience checks. */
+  openAuthorizedViewer(session: ActivityShareSession, signal?: AbortSignal): Promise<Response>;
   /** Only a session returned by this client's start/switch can publish. */
   sink(session: ActivityShareSession): ActivityShareSink;
   close(): void;
 }
 
-type Operation = "start" | "switch" | "stop" | "grant" | "status";
+type Operation = "start" | "switch" | "stop" | "grant" | "status" | "viewer";
 
 /** Failed effects are never retried automatically, including a lost response. */
 export class ActivityShareRequestError extends Error {
@@ -363,6 +373,50 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
     return () => mutations.delete(session.shareId);
   };
 
+  const openStream = async (
+    inputSession: ActivityShareSession,
+    admission: { grant: string } | { mode: "live" },
+    signal?: AbortSignal,
+  ): Promise<Response> => {
+    const session = fence(inputSession);
+    ensureOpen("viewer", session);
+    if ("grant" in admission) ActivityShareGrantSchema.shape.grant.parse(admission.grant);
+    let response: Response;
+    try {
+      response = await requestFetch(new URL(`/shares/${session.shareId}/viewer`, base), {
+        method: "POST",
+        headers: { authorization: `Bearer ${options.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ generation: session.generation, ...admission }),
+        ...(signal === undefined ? {} : { signal }),
+        redirect: "error",
+      });
+    } catch (cause) {
+      throw new ActivityShareRequestError(
+        "Activity viewer response unavailable",
+        "viewer",
+        "uncertain",
+        session.shareId,
+        session.generation,
+        { cause },
+      );
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new ActivityShareRequestError(
+        `Activity viewer returned HTTP ${response.status}`,
+        "viewer",
+        response.status >= 500 ? "uncertain" : "refused",
+        session.shareId,
+        session.generation,
+      );
+    }
+    if (closed) {
+      await response.body?.cancel();
+      ensureOpen("viewer", session);
+    }
+    return response;
+  };
+
   return {
     async start(input) {
       ensureOpen("start");
@@ -475,6 +529,12 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
       }
       return sessions;
     },
+    openViewer(inputSession, grant, signal) {
+      return openStream(inputSession, { grant }, signal);
+    },
+    openAuthorizedViewer(inputSession, signal) {
+      return openStream(inputSession, { mode: "live" }, signal);
+    },
     sink(inputSession) {
       ensureOpen("start", inputSession);
       prune();
@@ -494,6 +554,7 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
           if (records.get(session.shareId)?.session.generation === session.generation) {
             records.delete(session.shareId);
           }
+          options.onSessionEnded?.(structuredClone(session));
         },
       });
       return record.sink;
@@ -503,6 +564,42 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
       closed = true;
       for (const record of records.values()) record.sink?.close();
       records.clear();
+    },
+  };
+}
+
+/**
+ * Attach an already authorized rendered-surface producer to one scoped
+ * generation. This maps media, and grants no new capture authority. The old
+ * producer's surface/capture counter never chooses the viewer or destination.
+ */
+export function createActivityShareFrameSink(sink: ActivityShareSink): ActivityFrameSink {
+  return {
+    publishFrame({ surface: _surface, schemaVersion: _version, ...frame }) {
+      sink.publishFrame(ActivityShareFrameSchema.parse({ ...frame, schemaVersion: 2 }));
+    },
+    publishAudio({ surface: _surface, schemaVersion: _version, ...audio }) {
+      sink.publishAudio(ActivityShareAudioSchema.parse({ ...audio, schemaVersion: 2 }));
+    },
+    publishOverlay(overlay) {
+      if ("lines" in overlay) throw new Error("Scoped producers require structured overlays");
+      const { surface: _surface, schemaVersion: _version, ...fields } = overlay;
+      sink.publishOverlay(ActivityShareOverlaySchema.parse({ ...fields, schemaVersion: 2 }));
+    },
+    publishStatus({ surface: _surface, schemaVersion: _version, ...status }) {
+      sink.publishStatus(ActivityShareStatusSchema.parse({ ...status, schemaVersion: 2 }));
+    },
+    get connected() {
+      return sink.connected;
+    },
+    get droppedFrameCount() {
+      return sink.droppedFrameCount;
+    },
+    get droppedAudioPacketCount() {
+      return sink.droppedAudioPacketCount;
+    },
+    close() {
+      sink.close();
     },
   };
 }
