@@ -86,6 +86,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/agent-sessions",
       FLEET_SETTINGS_PATH,
       PROJECTS_PATH,
+      "/v1/support/grants",
     ],
     POST: [
       "/v1/discord/room-guidance",
@@ -109,7 +110,11 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/agent-hosts",
       FLEET_SETTINGS_PATH,
       PROJECT_UPDATE_SETTINGS_PATH,
+      "/v1/support/grants",
     ],
   };
-  return routes[method]?.includes(path) ?? false;
+  return (
+    (routes[method]?.includes(path) ?? false) ||
+    (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))
+  );
 }

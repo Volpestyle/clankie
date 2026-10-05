@@ -40,6 +40,25 @@ set; the [agent-host guide](../packages/agent-hosts/README.md) owns native
 worker support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
 records the separation between Clankie and his connections.
 
+## Customer support authority
+
+The body owns customer-issued support grants, durable revocation and mandatory
+audit. An owner operator or paired device with terminal control can create a
+referenced Read state or Shell window of at most 72 hours through
+[`clankie support`](cli.md). Read-state pairing carries no ordinary device
+grants: the relay admits only a closed state/history read allowlist and rechecks
+the live window before each disclosure, including streams. Shell windows refuse
+pairing; hosted shell enforcement belongs to private `clankie-ops`.
+
+Hosted account tickets bind the exact command, account, tenant, installation,
+browser key and nonce. The body durably fences replay before executing and seals
+the response. Neither account metadata nor captain authority creates a grant.
+Support audit uses keyed device references and a separate durable spool;
+disclosure fails closed without it. Independent sink acknowledgements govern
+spool pruning, regardless of diagnostic consent. Public/private artifacts and
+hosted rollout must be coordinated; source integration alone does not prove
+production enforcement.
+
 ## Approved commit integration
 
 The source-checkout service owns an approved-commit integration queue through

@@ -22,13 +22,18 @@ import {
   readFileSync,
   writeFileSync,
   renameSync,
+  openSync,
+  closeSync,
+  fsyncSync,
 } from "node:fs";
 import { cpus, freemem, loadavg, totalmem } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
 export const BODY_TELEMETRY_DIR_ENV = "CLANKIE_BODY_TELEMETRY_DIR";
-/** The spool never holds more than this; the oldest hour goes first. */
+/** Mandatory support audit is separate from the bounded diagnostic spool. */
+export const BODY_SUPPORT_AUDIT_DIR = "support-audit";
+/** The diagnostic spool never holds more than this; the oldest hour goes first. */
 export const BODY_TELEMETRY_SPOOL_BYTES_MAX = 1024 * 1024;
 const SPOOL_HOURS_MAX = 48;
 const LINE_BYTES_MAX = 2048;
@@ -168,6 +173,7 @@ export const BodyTelemetryEventSchema = z.discriminatedUnion("event", [
       action: z.enum(["granted", "accessed", "revoked", "expired"]),
       scope: z.enum(["read-state", "shell"]),
       deviceRef: OpaqueId.optional(),
+      routeClass: z.enum(["device-state", "device-session", "body-state", "other"]).optional(),
     })
     .strict(),
 ]);
@@ -183,7 +189,10 @@ export type BodyTelemetryInput = BodyTelemetryEvent extends infer E
 export interface BodyTelemetry {
   /** Records one event. Never throws: telemetry must not break the body. */
   emit(event: BodyTelemetryInput): void;
+  /** Durable mandatory support audit. Throws so an unaudited read cannot be admitted. */
+  audit?(event: SupportAuditInput): void;
 }
+export type SupportAuditInput = Extract<BodyTelemetryInput, { readonly event: "body.support" }>;
 
 /** Parses one spool line. Returns undefined for anything outside the schema. */
 export function parseBodyTelemetryLine(line: string): BodyTelemetryEvent | undefined {
@@ -213,9 +222,35 @@ export function createBodyTelemetry(input: {
   const clock = input.clock ?? Date.now;
   if (!/^[a-z0-9-]{1,32}$/u.test(input.writer)) throw new Error("telemetry writer must be a short code");
   let currentFile: string | undefined;
+  const audit = (event: SupportAuditInput): void => {
+    const parsed = BodyTelemetryEventSchema.parse({ ...event, v: 1, atMs: event.atMs ?? clock() });
+    if (parsed.event !== "body.support") throw new Error("support audit requires a support event");
+    const dir = join(input.dir, BODY_SUPPORT_AUDIT_DIR);
+    mkdirSync(dir, { recursive: true, mode: 0o755 });
+    // Name by write time, not event time: the shipper can safely remove older
+    // hours after both destinations acknowledge them, without racing a writer.
+    const file = openSync(join(dir, spoolFileName(clock(), input.writer)), "a", 0o644);
+    try {
+      appendFileSync(file, `${JSON.stringify(parsed)}\n`);
+      fsyncSync(file);
+    } finally {
+      closeSync(file);
+    }
+    const directory = openSync(dir, "r");
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
+  };
   return {
+    audit,
     emit(event) {
       try {
+        if (event.event === "body.support") {
+          audit(event);
+          return;
+        }
         const parsed = BodyTelemetryEventSchema.safeParse({ ...event, v: 1, atMs: event.atMs ?? clock() });
         if (!parsed.success) return;
         const file = spoolFileName(parsed.data.atMs, input.writer);

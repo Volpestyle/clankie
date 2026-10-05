@@ -55,6 +55,7 @@ import { runDiscordCommand } from "../src/command/discord.ts";
 import { runRestartCommand, runDownCommand } from "../src/command/restart.ts";
 import { runPairCommand } from "../src/command/pair.ts";
 import { runDevicesCommand } from "../src/command/devices.ts";
+import { runSupportCommand } from "../src/command/support.ts";
 import { runPlayCommand } from "../src/command/play.ts";
 import { runRivalsCommand } from "../src/command/rivals.ts";
 import { runMinecraftCommand } from "../src/command/minecraft.ts";
@@ -213,6 +214,7 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "pair") return await runPairCommand(rest, options);
     if (command === "devices") return await runDevicesCommand(rest, options);
+    if (command === "support") return await runSupportCommand(rest, options);
     if (command === "operator-credential") return await runOperatorCredentialCommand(rest, options);
     if (command === "gateway" || command === "remote-access") {
       const result = await runGatewayCommand(rest, {

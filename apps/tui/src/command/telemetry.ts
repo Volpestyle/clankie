@@ -8,7 +8,7 @@
 import {
   createCloudWatchLogSink,
   createInstanceMetadata,
-  shipSpool,
+  shipBodyTelemetry,
   type AwsCredentials,
   type ShipResult,
 } from "@clankie/observability/body-telemetry-shipper";
@@ -16,7 +16,7 @@ import {
 import { readBodyDiagnosticsConsent } from "@clankie/observability/body-telemetry";
 
 const TELEMETRY_USAGE =
-  "Usage: clankie telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval SECONDS]";
+  "Usage: clankie telemetry ship --spool DIR --cursor FILE --log-group NAME [--audit-log-group NAME] [--once] [--interval SECONDS]";
 const LOG_GROUP = /^[A-Za-z0-9_./#-]{1,512}$/u;
 const CREDENTIAL_REFRESH_MS = 5 * 60_000;
 
@@ -24,6 +24,7 @@ interface ShipArgs {
   readonly spool: string;
   readonly cursor: string;
   readonly logGroup: string;
+  readonly auditLogGroup?: string;
   readonly once: boolean;
   readonly intervalMs: number;
 }
@@ -39,7 +40,10 @@ function parseTelemetryArgs(args: readonly string[]): ShipArgs {
       continue;
     }
     const value = args[index + 1];
-    if (!["--spool", "--cursor", "--log-group", "--interval"].includes(flag) || value === undefined) {
+    if (
+      !["--spool", "--cursor", "--log-group", "--audit-log-group", "--interval"].includes(flag) ||
+      value === undefined
+    ) {
       throw new Error(TELEMETRY_USAGE);
     }
     values.set(flag, value);
@@ -48,12 +52,21 @@ function parseTelemetryArgs(args: readonly string[]): ShipArgs {
   const spool = values.get("--spool");
   const cursor = values.get("--cursor");
   const logGroup = values.get("--log-group");
+  const auditLogGroup = values.get("--audit-log-group");
   const interval = Number(values.get("--interval") ?? "60");
   if (spool === undefined || cursor === undefined || logGroup === undefined || !LOG_GROUP.test(logGroup)) {
     throw new Error(TELEMETRY_USAGE);
   }
   if (!Number.isInteger(interval) || interval < 10 || interval > 3_600) throw new Error(TELEMETRY_USAGE);
-  return { spool, cursor, logGroup, once, intervalMs: interval * 1000 };
+  if (auditLogGroup !== undefined && !LOG_GROUP.test(auditLogGroup)) throw new Error(TELEMETRY_USAGE);
+  return {
+    spool,
+    cursor,
+    logGroup,
+    ...(auditLogGroup === undefined ? {} : { auditLogGroup }),
+    once,
+    intervalMs: interval * 1000,
+  };
 }
 
 export async function runTelemetryCommand(
@@ -96,12 +109,23 @@ export async function runTelemetryCommand(
     credentials,
     ...(options.fetchImpl === undefined ? {} : { fetch: options.fetchImpl }),
   });
+  const auditSink =
+    parsed.auditLogGroup === undefined
+      ? undefined
+      : createCloudWatchLogSink({
+          region: identity.region,
+          logGroup: parsed.auditLogGroup,
+          credentials,
+          ...(options.fetchImpl === undefined ? {} : { fetch: options.fetchImpl }),
+        });
   const ship = () =>
-    shipSpool({
+    shipBodyTelemetry({
       spoolDir: parsed.spool,
       cursorPath: parsed.cursor,
       identity,
       sink,
+      ...(auditSink === undefined ? {} : { auditSink }),
+      pruneAcknowledgedSupport: true,
       diagnosticsEnabled: () => readBodyDiagnosticsConsent(parsed.spool),
     });
   const report = (result: ShipResult) => options.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`);

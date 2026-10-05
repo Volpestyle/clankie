@@ -7,6 +7,7 @@ export {
   type EffectiveHireProfile,
 } from "./hire-profile.ts";
 export * from "./presence.ts";
+export * from "./support-access.ts";
 export * from "./response.ts";
 export * from "./discord-settings.ts";
 export * from "./discord-setup.ts";

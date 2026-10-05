@@ -9,11 +9,25 @@
  * again; anything else is counted and dropped.
  */
 import { createHash, createHmac, type Hash, type Hmac } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { SignatureV4 } from "@smithy/signature-v4";
 import { z } from "zod";
-import { parseBodyTelemetryLine, type BodyTelemetryEvent } from "./body-telemetry.ts";
+import {
+  BODY_SUPPORT_AUDIT_DIR,
+  parseBodyTelemetryLine,
+  spoolFileName,
+  type BodyTelemetryEvent,
+} from "./body-telemetry.ts";
 
 export interface AwsCredentials {
   readonly accessKeyId: string;
@@ -64,6 +78,8 @@ export async function shipSpool(input: {
   readonly sink: LogSink;
   readonly now?: () => number;
   readonly diagnosticsEnabled?: () => boolean;
+  /** Mandatory audit is not subject to diagnostics consent or diagnostic age limits. */
+  readonly supportAudit?: boolean;
 }): Promise<ShipResult> {
   const now = (input.now ?? Date.now)();
   const cursor = readCursor(input.cursorPath);
@@ -86,7 +102,11 @@ export async function shipSpool(input: {
       for (const line of text.slice(0, complete).split("\n")) {
         if (line.length === 0) continue;
         const event = parseBodyTelemetryLine(line);
-        if (event === undefined || event.atMs < now - MAX_AGE_MS || event.atMs > now + MAX_FUTURE_MS) {
+        if (
+          event === undefined ||
+          (input.supportAudit ? event.event !== "body.support" : event.event === "body.support") ||
+          (!input.supportAudit && (event.atMs < now - MAX_AGE_MS || event.atMs > now + MAX_FUTURE_MS))
+        ) {
           dropped += 1;
           continue;
         }
@@ -109,6 +129,62 @@ export async function shipSpool(input: {
   // Files pruned from the spool drop out of the cursor with it.
   writeCursor(input.cursorPath, next);
   return { shipped, dropped, files: names.length };
+}
+
+/** Independent acknowledgements: a failed body sink cannot suppress the audit sink. */
+export async function shipBodyTelemetry(input: {
+  readonly spoolDir: string;
+  readonly cursorPath: string;
+  readonly identity: BodyIdentity;
+  readonly sink: LogSink;
+  readonly auditSink?: LogSink;
+  readonly diagnosticsEnabled: () => boolean;
+  readonly now?: () => number;
+  readonly pruneAcknowledgedSupport?: boolean;
+}): Promise<ShipResult> {
+  const supportDir = join(input.spoolDir, BODY_SUPPORT_AUDIT_DIR);
+  const supportBodyCursor = `${input.cursorPath}.support-body`;
+  const supportAuditCursor = `${input.cursorPath}.support-audit`;
+  const jobs = [shipSpool(input)];
+  const hasSupport = existsSync(supportDir);
+  if (hasSupport) {
+    const common = {
+      spoolDir: supportDir,
+      identity: input.identity,
+      supportAudit: true,
+      ...(input.now === undefined ? {} : { now: input.now }),
+    };
+    jobs.push(shipSpool({ ...common, cursorPath: supportBodyCursor, sink: input.sink }));
+    if (input.auditSink !== undefined)
+      jobs.push(shipSpool({ ...common, cursorPath: supportAuditCursor, sink: input.auditSink }));
+    else if (readdirSync(supportDir).some((name) => name.endsWith(".jsonl")))
+      jobs.push(Promise.reject(new Error("support audit shipping requires --audit-log-group")));
+  }
+  const results = await Promise.allSettled(jobs);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+  if (hasSupport && input.auditSink !== undefined && input.pruneAcknowledgedSupport) {
+    const body = readCursor(supportBodyCursor);
+    const audit = readCursor(supportAuditCursor);
+    const currentHour = spoolFileName((input.now ?? Date.now)(), "").slice(0, 10);
+    for (const name of readdirSync(supportDir)) {
+      if (!/^\d{10}-[a-z0-9-]{1,32}\.jsonl$/u.test(name) || name.slice(0, 10) >= currentHour) continue;
+      const path = join(supportDir, name);
+      const size = statSync(path).size;
+      if ((body.files[name] ?? 0) >= size && (audit.files[name] ?? 0) >= size) rmSync(path);
+    }
+  }
+  return results.reduce<ShipResult>(
+    (total, result) => {
+      if (result.status !== "fulfilled") return total;
+      return {
+        shipped: total.shipped + result.value.shipped,
+        dropped: total.dropped + result.value.dropped,
+        files: total.files + result.value.files,
+      };
+    },
+    { shipped: 0, dropped: 0, files: 0 },
+  );
 }
 
 function* batches(events: readonly ShippedEvent[]): Generator<ShippedEvent[]> {
@@ -240,6 +316,7 @@ export function createCloudWatchLogSink(input: {
   readonly logGroup: string;
   readonly credentials: () => Promise<AwsCredentials>;
   readonly fetch?: typeof fetch;
+  readonly now?: () => number;
 }): LogSink {
   const fetchImpl = input.fetch ?? fetch;
   const hostname = `logs.${input.region}.amazonaws.com`;
@@ -286,7 +363,17 @@ export function createCloudWatchLogSink(input: {
       const error = await call("PutLogEvents", {
         logGroupName: input.logGroup,
         logStreamName: stream,
-        logEvents: events.map((event) => ({ timestamp: event.atMs, message: JSON.stringify(event) })),
+        logEvents: events.map((event) => ({
+          // Keep the occurrence time in the immutable payload. Delayed mandatory
+          // audit uses ingestion time when CloudWatch would reject its timestamp.
+          timestamp:
+            event.event === "body.support" &&
+            (event.atMs < (input.now ?? Date.now)() - MAX_AGE_MS ||
+              event.atMs > (input.now ?? Date.now)() + MAX_FUTURE_MS)
+              ? (input.now ?? Date.now)()
+              : event.atMs,
+          message: JSON.stringify(event),
+        })),
       });
       if (error !== undefined) throw new Error(`PutLogEvents: ${error}`);
     },

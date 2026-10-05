@@ -9,6 +9,12 @@ import {
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
 import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
+import {
+  SupportAccessCommandSchema,
+  SupportGrantSyncSchema,
+  type SupportAccessCommand,
+  type SupportGrantMetadata,
+} from "@clankie/protocol/support-access";
 import type { CredentialStore } from "@clankie/credential-broker";
 import {
   loadConfig,
@@ -240,7 +246,7 @@ function hostedVerifyKeys(json: string): ReadonlyMap<string, KeyObject> {
 
 function signedClaims(
   token: string,
-  typ: "clankie-host" | "clankie-pair" | "clankie-security",
+  typ: "clankie-host" | "clankie-pair" | "clankie-security" | "clankie-support",
   keys: ReadonlyMap<string, KeyObject>,
 ): unknown {
   const parts = token.split(".");
@@ -279,6 +285,12 @@ const HostClaimsSchema = z
     aud: z.literal("clankie-gateway"),
     sub: BootstrapSchema.shape.accountId,
     inst: PublicGatewayInstallationIdSchema,
+  })
+  .strict();
+const SupportClaimsSchema = PairClaimsSchema.omit({ purpose: true })
+  .extend({
+    sub: BootstrapSchema.shape.accountId,
+    cmd: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
   })
   .strict();
 
@@ -423,6 +435,44 @@ export class HostedBodyClient {
     )
       throw new Error("Invalid pair ticket binding or lifetime");
     return claims;
+  }
+
+  verifySupportTicket(
+    ticket: string,
+    browserPublicKey: string,
+    nonce: string,
+    command: SupportAccessCommand,
+  ) {
+    const claims = SupportClaimsSchema.parse(signedClaims(ticket, "clankie-support", this.keys));
+    const now = Math.floor(this.clock() / 1000);
+    if (
+      claims.sub !== this.bootstrap.accountId ||
+      claims.tid !== this.bootstrap.tenantId ||
+      claims.hid !== this.hostId ||
+      claims.exp <= now ||
+      claims.iat > now + 60 ||
+      claims.exp <= claims.iat ||
+      claims.exp - claims.iat > 120 ||
+      claims.non !== nonce ||
+      claims.bkh !==
+        createHash("sha256").update(Buffer.from(browserPublicKey, "base64url")).digest("base64url") ||
+      claims.cmd !==
+        createHash("sha256")
+          .update(JSON.stringify(SupportAccessCommandSchema.parse(command)))
+          .digest("base64url")
+    )
+      throw new Error("Invalid support ticket binding or lifetime");
+    return claims;
+  }
+
+  async syncSupportGrants(snapshot: { revision: number; grants: SupportGrantMetadata[] }): Promise<void> {
+    const body = SupportGrantSyncSchema.parse({
+      schemaVersion: 1,
+      installationId: this.bootstrap.installationId,
+      ...snapshot,
+    });
+    const response = await this.post("support-grants", body);
+    if (!response.ok) throw new Error("Support grant sync unavailable");
   }
 
   async resolveHostToken(): Promise<{ token: string; expiresAt: number; refreshAt: number }> {
@@ -592,7 +642,14 @@ export class HostedBodyClient {
     this.credential = credential;
   }
   async post(
-    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "discord-key" | "devices/revoke" | "auth-key",
+    path:
+      | "wake-keys"
+      | "wake-keys/revoke"
+      | "heartbeat"
+      | "discord-key"
+      | "devices/revoke"
+      | "auth-key"
+      | "support-grants",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();

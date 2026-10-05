@@ -12,6 +12,11 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import type { CredentialStore } from "@clankie/credential-broker";
+import {
+  HostedSupportRequestSchema,
+  HOSTED_SUPPORT_DOMAIN,
+  type SupportAccessCommand,
+} from "@clankie/protocol/support-access";
 import { HostedBodyResourceError, type HostedBodyClient } from "./hosted-body.ts";
 
 const PAIR_DOMAIN = "clankie-hosted-pair-v2";
@@ -27,6 +32,7 @@ const ReplaySchema = z
   .object({
     used: z.array(z.tuple([z.string(), z.number().int().positive()])),
     offered: z.array(z.number().int().positive()),
+    supported: z.array(z.number().int().positive()).optional(),
   })
   .strict();
 
@@ -64,12 +70,15 @@ export async function createHostedPairing(
 export class HostedPairing {
   private readonly used = new Map<string, number>();
   private readonly offered: number[] = [];
-  private readonly client: Pick<HostedBodyClient, "verifyPairTicket" | "hostId">;
+  private readonly supported: number[] = [];
+  private readonly client: Pick<HostedBodyClient, "verifyPairTicket" | "hostId"> &
+    Partial<Pick<HostedBodyClient, "verifySupportTicket">>;
   private readonly key: KeyObject;
   private readonly path: string | undefined;
   private readonly clock: () => number;
   constructor(
-    client: Pick<HostedBodyClient, "verifyPairTicket" | "hostId">,
+    client: Pick<HostedBodyClient, "verifyPairTicket" | "hostId"> &
+      Partial<Pick<HostedBodyClient, "verifySupportTicket">>,
     key: KeyObject,
     options: { replayPath?: string; clock?: () => number } = {},
   ) {
@@ -82,6 +91,7 @@ export class HostedPairing {
         const state = ReplaySchema.parse(JSON.parse(readFileSync(this.path, "utf8")));
         for (const [id, expiry] of state.used) this.used.set(id, expiry);
         this.offered.push(...state.offered);
+        this.supported.push(...(state.supported ?? []));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT")
           throw new Error("Invalid hosted pairing replay store");
@@ -94,19 +104,52 @@ export class HostedPairing {
   ): Promise<Response> {
     const parsed = RequestSchema.safeParse(input);
     if (!parsed.success) return Response.json({ error: "unauthorized" }, { status: 401 });
-    const request = parsed.data,
-      now = this.clock();
-    let purpose: "operator" | undefined;
+    const request = parsed.data;
+    return this.exchange(
+      request,
+      PAIR_DOMAIN,
+      () => this.client.verifyPairTicket(request.pairTicket, request.browserPublicKey, request.nonce),
+      (claims) => mint(claims.purpose),
+    );
+  }
+
+  async support(
+    input: unknown,
+    dispatch: (command: SupportAccessCommand) => Promise<unknown>,
+  ): Promise<Response> {
+    const parsed = HostedSupportRequestSchema.safeParse(input);
+    if (!parsed.success || this.client.verifySupportTicket === undefined)
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    const request = parsed.data;
+    return this.exchange(
+      request,
+      HOSTED_SUPPORT_DOMAIN,
+      () =>
+        this.client.verifySupportTicket!(
+          request.supportTicket,
+          request.browserPublicKey,
+          request.nonce,
+          request.command,
+        ),
+      () => dispatch(request.command),
+    );
+  }
+
+  private async exchange(
+    request: { browserPublicKey: string; nonce: string },
+    domain: string,
+    verifyTicket: () => { jti: string; exp: number; purpose?: "operator" | undefined },
+    execute: (claims: { jti: string; exp: number; purpose?: "operator" | undefined }) => Promise<unknown>,
+  ): Promise<Response> {
+    const now = this.clock();
+    let claims: { jti: string; exp: number; purpose?: "operator" | undefined };
     let jti: string, exp: number, secret: Buffer, ephemeralPublicKey: string;
     try {
       for (const text of [request.browserPublicKey, request.nonce])
         if (Buffer.from(text, "base64url").toString("base64url") !== text)
           throw new Error("Noncanonical encoding");
-      ({ jti, exp, purpose } = this.client.verifyPairTicket(
-        request.pairTicket,
-        request.browserPublicKey,
-        request.nonce,
-      ));
+      claims = verifyTicket();
+      ({ jti, exp } = claims);
       for (const [id, expiry] of this.used) if (expiry <= now) this.used.delete(id);
       if (this.used.has(jti)) throw new Error("Consumed ticket");
       const ecdh = createECDH("prime256v1");
@@ -115,25 +158,30 @@ export class HostedPairing {
     } catch {
       return Response.json({ error: "unauthorized" }, { status: 401 });
     }
-    while (this.offered[0] !== undefined && this.offered[0] <= now - 60_000) this.offered.shift();
-    if (this.offered.length >= 5)
+    const budget = domain === HOSTED_SUPPORT_DOMAIN ? this.supported : this.offered;
+    while (budget[0] !== undefined && budget[0] <= now - 60_000) budget.shift();
+    if (budget.length >= (domain === HOSTED_SUPPORT_DOMAIN ? 30 : 5))
       return Response.json({ error: "rate_limited" }, { status: 429, headers: { "retry-after": "60" } });
     this.used.set(jti, exp * 1000);
-    this.offered.push(now);
+    budget.push(now);
     // No await until the replay fence is durable. A failed write never mints an offer.
     if (this.path !== undefined) {
       try {
         mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
         const temp = `${this.path}.tmp`;
-        writeFileSync(temp, JSON.stringify({ used: [...this.used], offered: this.offered }), { mode: 0o600 });
+        writeFileSync(
+          temp,
+          JSON.stringify({ used: [...this.used], offered: this.offered, supported: this.supported }),
+          { mode: 0o600 },
+        );
         renameSync(temp, this.path);
       } catch {
         return Response.json({ error: "pairing_unavailable" }, { status: 503 });
       }
     }
     try {
-      const offer = await mint(purpose);
-      const info = `${PAIR_DOMAIN}\n${this.client.hostId}`;
+      const offer = await execute(claims);
+      const info = `${domain}\n${this.client.hostId}`;
       const key = hkdfSync("sha256", secret, Buffer.from(request.nonce, "base64url"), info, 32);
       const ivBytes = randomBytes(12),
         cipher = createCipheriv("aes-256-gcm", Buffer.from(key), ivBytes);
@@ -145,7 +193,7 @@ export class HostedPairing {
         cipher.getAuthTag(),
       ]).toString("base64url");
       const transcript = [
-        PAIR_DOMAIN,
+        domain,
         this.client.hostId,
         jti,
         request.browserPublicKey,

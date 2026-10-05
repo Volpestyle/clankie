@@ -13,6 +13,7 @@ const DEVICE_ROUTE_PREFIXES = [
   "/v1/model-keys",
   "/v1/accounts",
   "/v1/captain/readiness",
+  "/v1/support/grants",
 ];
 
 export const DEFAULT_DEVICE_DOORWAY_PORT = 4311;

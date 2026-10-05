@@ -2386,7 +2386,26 @@ Filtered by lane exactly as the session's own injection is: operator-private
 notes reach only the operator lane. An empty store still returns a labeled
 card. An unchanged hook turn can print nothing, which is not an error.
 
-### `telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval SECONDS]`
+### `support [list | create read-state|shell --hours 1..72 --ref REFERENCE | revoke ID | offer ID]`
+
+Manage a customer-issued support grant through the owner-authenticated body API.
+`list` (the default) returns active and terminal grants. `create` requires a
+support reference, defaults to 24 hours and accepts at most 72 hours. Read state
+permits a support device to inspect conversation history and Clankie state;
+it cannot change settings, send commands or read terminal output. Shell permits
+commands and the content those commands can read during the grant window.
+
+`offer ID` requires a Read state grant and returns a short-lived, read-only
+pairing offer attached to it. The resulting device loses access on grant expiry
+or revocation. Shell grants refuse pairing with
+`support_pairing_requires_read_state` and authorize only the hosted Systems
+Manager `StartSession` path. `revoke ID`
+closes the grant. Responses are JSON. This command requires the operator
+credential; a captain bearer cannot issue support access. `/support` exposes
+the same command in the console. The hosted app and web account page provide
+the customer controls without requiring a CLI.
+
+### `telemetry ship --spool DIR --cursor FILE --log-group NAME [--audit-log-group NAME] [--once] [--interval SECONDS]`
 
 Hosted infrastructure only. Ships a body's metadata telemetry spool (what
 `CLANKIE_BODY_TELEMETRY_DIR` collects) to a CloudWatch Logs group, stream
@@ -2396,6 +2415,17 @@ instance ids and the credentials come from the instance, never from the
 spool. Every line is parsed against the event schema again before it leaves;
 anything else is counted as `dropped`. The cursor file records how far each
 spool file has shipped and advances only after CloudWatch accepts.
+
+Support grants and accesses use the mandatory `support-audit/` child spool,
+independent of diagnostic consent and diagnostic pruning. Hosted installations
+pass `--audit-log-group clankie-obs-<stage>-audit`: each support record goes to
+both the body and audit groups, with a separate acknowledgement cursor for
+each destination. A failed destination retries without suppressing the other.
+The host needs a writable mount for the support child directory so it can
+remove completed prior-hour files after both groups accept them. Unacknowledged
+support records remain; failed local audit persistence refuses support access.
+If an outage exceeds CloudWatch's event-age limit, the log timestamp is the
+ingestion time and the payload retains the original `atMs`.
 
 `--interval` is 10–3600 seconds (default 60). Without `--once` it runs until
 `SIGTERM`, printing `{"ok":true,"shipped":N,"dropped":N,"files":N}` per pass

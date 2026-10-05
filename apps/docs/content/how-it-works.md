@@ -171,6 +171,14 @@ network. Direct pairing does not require a Clankie account and retains the
 host's pairing and device-grant checks. See [pairing](/cli/#pair-json-timeout-sec-review-days-n-count-n)
 for supported routes and recovery.
 
+Customer support access has a separate owner-issued window of at most 72 hours.
+Read state can expose history and Clankie state while the grant remains live;
+it cannot send messages, change settings or read terminal output. Revocation or
+expiry closes the read device, including streams. Shell windows use the hosted
+service's separate enforcement and cannot mint a paired device. The owner-facing
+[`support` command](/cli/) documents the controls; hosted availability depends on
+the coordinated service rollout.
+
 ## Go deeper
 
 The [architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md)

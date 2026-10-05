@@ -424,6 +424,27 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/hosted/support",
+      {
+        access: "Signed single-use hosted account ticket bound to the exact support command",
+        purpose: "Apply an owner support command and return an authenticated encrypted response.",
+      },
+    ],
+    [
+      "GET /v1/support/grants",
+      {
+        access: "Owner operator or active device bearer with terminal-control access",
+        purpose: "Read the body's customer-issued support grants and lifecycle state.",
+      },
+    ],
+    [
+      "POST /v1/support/grants",
+      {
+        access: "Owner operator or active device bearer with terminal-control access",
+        purpose: "Create a referenced read-state or shell support window of at most 72 hours.",
+      },
+    ],
+    [
       "GET /v1/devices/self",
       {
         access: "Device bearer",

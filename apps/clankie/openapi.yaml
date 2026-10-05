@@ -37,6 +37,7 @@ tags:
   - name: Media
   - name: Pairing
   - name: Devices
+  - name: Support
   - name: Workers
 security: []
 
@@ -3822,6 +3823,112 @@ paths:
         "200":
           description: ok, pending, or refused
 
+  /v1/support/grants:
+    get:
+      tags: [Support]
+      operationId: listSupportGrants
+      summary: Read owner-issued support grants
+      description: Exact active owner device with terminalControl or the local operator; captain and support-device authority are refused. Hosted inner requests require the hosted account operator device and cannot fall back to local operator authority.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Grant history with body-only support references
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grants]
+                additionalProperties: false
+                properties:
+                  grants:
+                    type: array
+                    items: { $ref: "#/components/schemas/SupportGrant" }
+        "403": { description: Owner authority required }
+    post:
+      tags: [Support]
+      operationId: createSupportGrant
+      summary: Create a support window of at most 72 hours
+      description: Owner authority only. Mandatory audit failure refuses creation on hosted bodies; 1024 concurrent unexpired original windows includes revoked tombstones until their original expiry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SupportGrantCreateRequest" }
+      responses:
+        "200":
+          description: Active grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportGrant" }
+        "400": { description: Invalid support grant }
+        "403": { description: Owner authority required }
+        "409": { description: Support window capacity reached }
+        "503": { description: Support audit or storage unavailable }
+
+  /v1/support/grants/{id}/revoke:
+    post:
+      tags: [Support]
+      operationId: revokeSupportGrant
+      summary: Revoke support access
+      description: Owner authority only. Durable terminal state closes support reads before audit retries and remains closed after restart.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Current revoked or expired grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportGrant" }
+        "403": { description: Owner authority required }
+        "404": { description: Grant not found }
+
+  /v1/support/grants/{id}/pairing-offer:
+    post:
+      tags: [Support, Pairing]
+      operationId: createSupportPairingOffer
+      summary: Offer pairing for an active read-state support grant
+      description: Owner authority only. Offers expire no later than five minutes or the grant window. All four ordinary device grants are false; the relay admits only the closed state/history read allowlist. Shell grants refuse pairing. Publishing rechecks owner authority and live grant before installing the offer.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Read-state pairing offer wire }
+        "403": { description: Owner authority required }
+        "409": { description: support_pairing_requires_read_state }
+        "410": { description: Grant inactive or expired }
+        "503": { description: Public gateway unavailable }
+
+  /v1/hosted/support:
+    post:
+      tags: [Support]
+      operationId: hostedSupportCommand
+      summary: Apply an exact command authorized by a hosted account ticket
+      description: Separate support crypto domain and durable one-use ticket fence. The signed ticket binds account, tenant, installation, exact command digest, browser key and nonce, with at most 120 seconds lifetime. No bearer fallback. Replies use authenticated Ed25519 plus ECDH/HKDF/AES-GCM; support references remain outside fleet metadata and central audit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, supportTicket, browserPublicKey, nonce, command]
+              properties:
+                version: { const: 1 }
+                supportTicket: { type: string, minLength: 1, maxLength: 4096 }
+                browserPublicKey: { type: string, pattern: "^[A-Za-z0-9_-]{87}$" }
+                nonce: { type: string, pattern: "^[A-Za-z0-9_-]{22}$" }
+                command: { $ref: "#/components/schemas/SupportAccessCommand" }
+      responses:
+        "200":
+          { description: Encrypted version-2 response with ephemeralPublicKey, iv, ciphertext and signature }
+        "401": { description: Invalid, expired or replayed ticket }
+        "404": { description: Hosted pairing unavailable on this body }
+        "429": { description: Support ticket rate limit reached }
+        "503": { description: Durable ticket admission or command unavailable }
+
   /v1/pairing/offer:
     post:
       tags: [Pairing]
@@ -4082,6 +4189,54 @@ paths:
 
 components:
   schemas:
+    SupportGrantCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, durationSeconds, supportRef]
+      properties:
+        scope: { type: string, enum: [read-state, shell] }
+        durationSeconds: { type: integer, minimum: 1, maximum: 259200 }
+        supportRef:
+          { type: string, minLength: 1, maxLength: 128, description: Trimmed body-only customer reference }
+    SupportGrant:
+      type: object
+      additionalProperties: false
+      required: [grantId, scope, status, createdAt, expiresAt, supportRef]
+      properties:
+        grantId: { type: string, format: uuid }
+        scope: { type: string, enum: [read-state, shell] }
+        status: { type: string, enum: [active, revoked, expired] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, description: At most 72 hours after creation }
+        revokedAt: { type: string, format: date-time, description: Required only for revoked grants }
+        supportRef: { type: string, minLength: 1, maxLength: 128 }
+    SupportAccessCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [action]
+          properties:
+            action: { const: list }
+        - type: object
+          additionalProperties: false
+          required: [action, scope, durationSeconds, supportRef]
+          properties:
+            action: { const: create }
+            scope: { type: string, enum: [read-state, shell] }
+            durationSeconds: { type: integer, minimum: 1, maximum: 259200 }
+            supportRef: { type: string, minLength: 1, maxLength: 128 }
+        - type: object
+          additionalProperties: false
+          required: [action, grantId]
+          properties:
+            action: { const: revoke }
+            grantId: { type: string, format: uuid }
+        - type: object
+          additionalProperties: false
+          required: [action, grantId]
+          properties:
+            action: { const: pairing-offer }
+            grantId: { type: string, format: uuid }
     FleetReleasePolicy:
       description: Owner guidance for official tags, packages and store submissions; confers no account or tool authority. A time rule is checked by the agent, not evaluated by a scheduler.
       oneOf:

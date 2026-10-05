@@ -208,21 +208,28 @@ file or repository name, command, error message or credential is ever a field,
 and an event that does not match its schema is dropped.
 
 It is off unless `CLANKIE_BODY_TELEMETRY_DIR` names a directory on the state
-volume. The whole-body command and the service then append hourly JSONL files
-there, bounded to 1 MiB and 48 hours. Nothing leaves the container on its own:
+volume. The whole-body command and the service then append diagnostic hourly JSONL files
+there, bounded to 1 MiB and 48 hours. Support grant/access audit uses a separate
+mandatory `support-audit/` child directory, without diagnostic consent or
+age/size pruning; an unauditable support access fails closed. Nothing leaves the container on its own:
 the body holds no cloud credentials. A managed host ships the spool with the
 same pinned image, outside the body's network namespace:
 
 ```sh
 docker run --rm --network host --read-only --cap-drop ALL \
   -v /var/lib/clankie/state/telemetry:/spool:ro -v /var/lib/clankie-telemetry:/cursor \
-  "$image" clankie telemetry ship --spool /spool --cursor /cursor/cursor.json --log-group <group>
+  -v /var/lib/clankie/state/telemetry/support-audit:/spool/support-audit \
+  "$image" clankie telemetry ship --spool /spool --cursor /cursor/cursor.json \
+  --log-group <body-group> --audit-log-group <audit-group>
 ```
 
 The shipper reads the tenant and instance ids and its credentials from
 instance metadata, so a body cannot choose whose stream it writes. The
 instance role needs only `logs:CreateLogStream` and `logs:PutLogEvents` on that
-group. See [`telemetry ship`](../../docs/cli.md) for its output.
+groups. Support records ship to both groups through independent cursors;
+completed prior-hour support files are removed only after both acknowledge.
+Create the support child directory with the same body write ownership as the
+parent before mounting it. See [`telemetry ship`](../../docs/cli.md) for its output.
 
 Managed bodies also register paired-device P-256 wake keys with the fleet via
 `POST /v1/devices/wake-key`, inside the existing encrypted device channel. The

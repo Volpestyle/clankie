@@ -29,6 +29,18 @@ or transfer ownership. Recheck authority and reacquire when notified.
 under the reported service root for its exact fields and recovery behavior.
 Do not treat expiry or a process restart as proof that a send/session stopped.
 
+## Customer support access
+
+The customer chooses Read state or Shell, a support reference and at most 72
+hours in the hosted app or web account page. An owner can use the same body API
+through `clankie support` or `/support`; see `docs/cli.md` for exact arguments.
+Captain authority cannot issue grants. Read state includes conversation history
+and Clankie state but excludes mutations and terminal output. Its pairing offer
+mints a read-only device bound to the live grant, including during streams;
+revocation or expiry ends access. Shell also permits commands and the content
+they can read while its window is open. Treat the grant as the authority to
+inspect a customer's body; ordinary fleet health access does not supply it.
+
 ## Watching workers
 
 The local console stays in the current terminal. Its two-line live-agent dock

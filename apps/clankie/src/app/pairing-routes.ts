@@ -1,3 +1,12 @@
+import { SupportGrantStore, SupportGrantCapacityError } from "../support-access.ts";
+import type { QuestionAuthority } from "../captain/conversation-questions.ts";
+import {
+  SUPPORT_GRANTS_PATH,
+  HOSTED_SUPPORT_PATH,
+  SUPPORT_DEVICE_GRANTS,
+  SupportGrantCreateRequestSchema,
+  type SupportAccessCommand,
+} from "@clankie/protocol/support-access";
 import {
   DEVICE_PUSH_PATH,
   DeviceDirectRouteSchema,
@@ -43,6 +52,8 @@ import {
 export interface RegisterPairingRoutesContext {
   readonly dependencies: ClankieAppDependencies;
   readonly app: Hono;
+  readonly supportGrants: SupportGrantStore;
+  readonly questionOwnerAuthority: (request: Request) => Promise<QuestionAuthority | undefined>;
   readonly deviceSessionSigner: DeviceSessionSigner | undefined;
   readonly clock: () => Date;
   readonly pairingOffers: PairingOfferStore;
@@ -221,6 +232,13 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       now,
     );
     if (!taken.ok) return context.json({ error: taken.error }, taken.error === "consumed" ? 409 : 410);
+    const supportGrantId = taken.offer.supportGrantId;
+    const supportGrant = supportGrantId === undefined ? undefined : ctx.supportGrants.active(supportGrantId);
+    if (supportGrantId !== undefined && supportGrant === undefined)
+      return context.json({ error: "expired" }, 410);
+    if (supportGrant !== undefined && supportGrant.scope !== "read-state")
+      return context.json({ error: "support_pairing_requires_read_state" }, 409);
+    const offeredGrants = supportGrantId === undefined ? TAKE_CONTROL_GRANTS : SUPPORT_DEVICE_GRANTS;
     const deviceId = `device-${ctx.idFactory().slice(0, 12)}`;
     const pendingExpiresAt = new Date(now.getTime() + COMPLETION_TOKEN_TTL_MS).toISOString();
     const redeemed = ctx.recordEvent("device.pairing.redeemed", `device:${deviceId}`, now.toISOString(), {
@@ -229,8 +247,9 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       offerId: taken.offer.offerId,
       name: parsed.data.device.name,
       platform: parsed.data.device.platform,
-      offeredGrants: TAKE_CONTROL_GRANTS,
+      offeredGrants,
       mintedBy: taken.offer.mintedBy,
+      ...(supportGrantId === undefined ? {} : { supportGrantId }),
       ...(taken.offer.review === undefined ? {} : { review: true }),
       pendingExpiresAt,
     });
@@ -238,7 +257,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const completionToken = randomBytes(32).toString("base64url");
     ctx.completionTokens.set(hashCompletionToken(completionToken), {
       deviceId,
-      offeredGrants: TAKE_CONTROL_GRANTS,
+      offeredGrants,
       expiresAtMs: now.getTime() + COMPLETION_TOKEN_TTL_MS,
       consumed: false,
     });
@@ -249,7 +268,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       ...(ctx.dependencies.publicGatewayHostBaseUrl === undefined
         ? {}
         : { hostBaseUrl: ctx.dependencies.publicGatewayHostBaseUrl }),
-      offeredGrants: TAKE_CONTROL_GRANTS,
+      offeredGrants,
       completionToken,
       expiresAt: pendingExpiresAt,
     } satisfies PairingRedeemResponse);
@@ -273,17 +292,29 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const accepted = parsed.data.acceptedGrants;
     if (!isSubsetGrants(accepted, pending.offeredGrants)) return context.json({ error: "malformed" }, 400);
     return withSerializedLock(ctx.deviceLocks, pending.deviceId, async () => {
+      const now = ctx.clock();
       const record = ctx.devices.get(pending.deviceId);
       if (record === undefined || isDevicePendingExpired(record, now))
         return context.json({ error: "expired" }, 410);
       if (record.status === "revoked") return context.json({ error: "revoked" }, 403);
       if (record.status !== "pending") return context.json({ error: "consumed" }, 409);
+      const supportGrant =
+        record.supportGrantId === undefined ? undefined : ctx.supportGrants.active(record.supportGrantId);
+      const ttlSeconds =
+        supportGrant === undefined
+          ? undefined
+          : Math.floor(Date.parse(supportGrant.expiresAt) / 1000) - Math.floor(now.getTime() / 1000);
+      if (record.supportGrantId !== undefined && (supportGrant === undefined || (ttlSeconds ?? 0) <= 0))
+        return context.json({ error: "expired" }, 410);
+      if (supportGrant !== undefined && supportGrant.scope !== "read-state")
+        return context.json({ error: "support_pairing_requires_read_state" }, 409);
       const current = ctx.completionTokens.get(tokenHash);
       if (current === undefined || current.consumed) return context.json({ error: "consumed" }, 409);
       current.consumed = true;
       const claims = mintDeviceSessionClaims({
         deviceId: pending.deviceId,
         nowEpochSeconds: Math.floor(now.getTime() / 1000),
+        ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
       });
       const deviceToken = signer.issue(claims);
       const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
@@ -315,6 +346,9 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       return context.json({ error: "device_authentication_unavailable" }, 503);
     const signer = ctx.deviceSessionSigner;
     return withSerializedLock(ctx.deviceLocks, identity.deviceId, async () => {
+      const fresh = await ctx.authenticateDevice(context.req.raw);
+      if (fresh === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+      if ("denied" in fresh) return ctx.deviceDenialResponse(context, fresh);
       const record = ctx.devices.get(identity.deviceId);
       const now = ctx.clock();
       if (record === undefined || isDevicePendingExpired(record, now) || record.status !== "active") {
@@ -326,9 +360,20 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       const claims = mintDeviceSessionClaims({
         deviceId: identity.deviceId,
         nowEpochSeconds: Math.floor(now.getTime() / 1000),
+        ...(record.supportGrantId === undefined
+          ? {}
+          : {
+              ttlSeconds:
+                Math.floor(
+                  Date.parse(
+                    ctx.supportGrants.active(record.supportGrantId)?.expiresAt ?? now.toISOString(),
+                  ) / 1000,
+                ) - Math.floor(now.getTime() / 1000),
+            }),
       });
       const deviceToken = signer.issue(claims);
       const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
+      const grants = record.supportGrantId === undefined ? record.grants : SUPPORT_DEVICE_GRANTS;
       const refreshed = ctx.recordEvent(
         "device.session.refreshed",
         `device:${identity.deviceId}`,
@@ -336,14 +381,14 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         {
           schemaVersion: 1,
           deviceId: identity.deviceId,
-          grants: record.grants,
+          grants,
           sessionExpiresAt,
         },
       );
       applyDeviceEvent(ctx.devices, refreshed);
       return context.json({
         deviceToken,
-        grants: record.grants,
+        grants,
         sessionExpiresAt,
         ...advertisedRelayUrl(),
       } satisfies DeviceSessionRefreshResponse);
@@ -427,8 +472,14 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       deviceId: record.deviceId,
       name: record.name,
       platform: record.platform,
-      grants: record.grants,
+      grants: identity.grants,
       host: { name: ctx.hostDisplayName },
+      ...(record.supportGrantId === undefined
+        ? {}
+        : {
+            supportGrantId: record.supportGrantId,
+            supportScope: ctx.supportGrants.active(record.supportGrantId)?.scope,
+          }),
       sessionExpiresAt: identity.sessionExpiresAt,
       ...(ctx.dependencies.hostedPairing !== undefined || ctx.dependencies.hostedBody !== undefined
         ? { controlScope: "hosted" as const }
@@ -544,6 +595,98 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       const updated = ctx.devices.get(deviceId);
       return context.json(deviceListItem(updated ?? record));
     });
+  });
+
+  const supportCommand = async (
+    command: SupportAccessCommand,
+    current: () => Promise<boolean>,
+  ): Promise<Response> => {
+    if (!(await current())) return Response.json({ error: "owner_required" }, { status: 403 });
+    if (command.action === "list") return Response.json({ grants: ctx.supportGrants.list() });
+    if (command.action === "create") {
+      try {
+        return Response.json(
+          ctx.supportGrants.create({
+            scope: command.scope,
+            durationSeconds: command.durationSeconds,
+            supportRef: command.supportRef,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof SupportGrantCapacityError)
+          return Response.json({ error: "support_window_capacity" }, { status: 409 });
+        return Response.json({ error: "support_unavailable" }, { status: 503 });
+      }
+    }
+    if (command.action === "revoke") {
+      const grant = ctx.supportGrants.revoke(command.grantId);
+      return grant === undefined
+        ? Response.json({ error: "support_grant_not_found" }, { status: 404 })
+        : Response.json(grant);
+    }
+    const grant = ctx.supportGrants.active(command.grantId);
+    if (grant === undefined) return Response.json({ error: "support_grant_inactive" }, { status: 410 });
+    if (grant.scope !== "read-state")
+      return Response.json({ error: "support_pairing_requires_read_state" }, { status: 409 });
+    const direct = advertisedDirectRoute().directRoute?.controlPlaneUrl;
+    const publisher = ctx.dependencies.pairingOfferPublisher;
+    const doorway = ctx.dependencies.publicGatewayDoorway?.();
+    if (
+      publisher === undefined &&
+      direct === undefined &&
+      doorway !== undefined &&
+      doorway.state !== "disabled"
+    )
+      return Response.json({ error: "public_gateway_unavailable" }, { status: 503 });
+    const now = ctx.clock();
+    const offer = mintPairingOffer({
+      now,
+      mintedBy: `support:${grant.grantId}`,
+      supportGrantId: grant.grantId,
+      ttlMs: Math.min(5 * 60_000, Date.parse(grant.expiresAt) - now.getTime()),
+      idFactory: ctx.idFactory,
+    });
+    if (publisher !== undefined) {
+      try {
+        await publisher.publishPairingOffer(offer);
+      } catch {
+        return Response.json({ error: "public_gateway_unavailable" }, { status: 503 });
+      }
+    }
+    // Publishing may yield to owner revocation or expiry. Never install its capability afterward.
+    if (
+      !(await current()) ||
+      ctx.supportGrants.active(grant.grantId) === undefined ||
+      Date.parse(offer.expiresAt) <= ctx.clock().getTime()
+    )
+      return Response.json({ error: "support_grant_inactive" }, { status: 410 });
+    ctx.pairingOffers.add(pairingOfferRecord(offer));
+    const wire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    return Response.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
+  };
+  const serveSupportCommand = async (request: Request, command: SupportAccessCommand): Promise<Response> => {
+    const owner = await ctx.questionOwnerAuthority(request);
+    return supportCommand(command, async () =>
+      Boolean(owner && (await owner.authorize()) && owner.current()),
+    );
+  };
+  ctx.app.get(SUPPORT_GRANTS_PATH, (context) => serveSupportCommand(context.req.raw, { action: "list" }));
+  ctx.app.post(SUPPORT_GRANTS_PATH, bodyLimit({ maxSize: 2048 }), async (context) => {
+    const parsed = SupportGrantCreateRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_support_grant" }, 400);
+    return serveSupportCommand(context.req.raw, { action: "create", ...parsed.data });
+  });
+  ctx.app.post(`${SUPPORT_GRANTS_PATH}/:id/revoke`, (context) =>
+    serveSupportCommand(context.req.raw, { action: "revoke", grantId: context.req.param("id") }),
+  );
+  ctx.app.post(`${SUPPORT_GRANTS_PATH}/:id/pairing-offer`, (context) =>
+    serveSupportCommand(context.req.raw, { action: "pairing-offer", grantId: context.req.param("id") }),
+  );
+  ctx.app.post(HOSTED_SUPPORT_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
+    if (ctx.dependencies.hostedPairing === undefined) return context.json({ error: "not_found" }, 404);
+    return ctx.dependencies.hostedPairing.support(await readJson(context.req.raw), async (command) =>
+      (await supportCommand(command, () => Promise.resolve(true))).json(),
+    );
   });
   return { wakeRevocationTimer };
 }

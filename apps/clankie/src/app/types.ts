@@ -1,5 +1,6 @@
 import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
+import type { BodyTelemetry } from "@clankie/observability/body-telemetry";
 import type { IntegrationQueue } from "../integrate.ts";
 import type { DeployHolds } from "../deploy-holds.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
@@ -143,6 +144,11 @@ export interface ClankieAppDependencies {
   hostedPairing?: HostedPairing;
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
+  supportGrantSync?: Pick<HostedBodyClient, "syncSupportGrants">;
+  /** Mandatory support audit bypasses ordinary diagnostic consent. */
+  supportTelemetry?: BodyTelemetry;
+  /** Tenant telemetry key or a dedicated random key persisted on this body volume. */
+  supportDeviceRefKey?: Uint8Array;
   /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
   hostedCredits?: Pick<HostedBodyClient, "readCredits">;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;

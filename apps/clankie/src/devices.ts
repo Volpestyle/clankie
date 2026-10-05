@@ -21,8 +21,17 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
   const parsed = DeviceEventSchema.parse(event);
   switch (parsed.type) {
     case "device.pairing.redeemed": {
-      const { deviceId, offerId, name, platform, offeredGrants, mintedBy, review, pendingExpiresAt } =
-        parsed.data;
+      const {
+        deviceId,
+        offerId,
+        name,
+        platform,
+        offeredGrants,
+        mintedBy,
+        review,
+        supportGrantId,
+        pendingExpiresAt,
+      } = parsed.data;
       if (devices.has(deviceId)) throw new Error(`device ${deviceId} already exists on redeemed replay`);
       devices.set(
         deviceId,
@@ -35,6 +44,7 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
           offerId,
           mintedBy,
           ...(review === undefined ? {} : { review }),
+          ...(supportGrantId === undefined ? {} : { supportGrantId }),
           createdAt: event.occurredAt,
           pendingExpiresAt,
         }),
