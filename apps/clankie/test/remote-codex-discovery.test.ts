@@ -43,6 +43,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
   let turns = 0;
   let attempts = 0;
   let sessionStarts = 0;
+  const nativeThreadReads: { method: string; params: Record<string, unknown> | undefined }[] = [];
   const http = createServer((request, response) => {
     let bytes = "";
     request.on("data", (chunk) => (bytes += String(chunk)));
@@ -120,8 +121,14 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
   protocol.on("connection", (socket) => {
     peer = socket;
     socket.on("message", (bytes) => {
-      const rpc = JSON.parse(String(bytes)) as { id?: number; method: string };
+      const rpc = JSON.parse(String(bytes)) as {
+        id?: number;
+        method: string;
+        params?: Record<string, unknown>;
+      };
       if (rpc.id === undefined) return;
+      if (rpc.method === "thread/resume" || rpc.method === "thread/turns/list")
+        nativeThreadReads.push({ method: rpc.method, params: rpc.params });
       if (rpc.method === "mcpServerStatus/list") statusReads++;
       if (rpc.method === "turn/start") {
         expect(assigned && catalogReceived).toBe(true);
@@ -145,7 +152,11 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
               ? { data: ["thread"], nextCursor: null }
               : rpc.method === "thread/read"
                 ? { thread: { id: "thread" } }
-                : {};
+                : rpc.method === "thread/resume"
+                  ? { thread: { id: "thread", turns: [] } }
+                  : rpc.method === "thread/turns/list"
+                    ? { data: [], nextCursor: null }
+                    : {};
       socket.send(JSON.stringify({ id: rpc.id, result }));
     });
   });
@@ -211,6 +222,13 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       result: { tools: [{ name: "message_clankie" }, { name: "linear_get_issue" }] },
     });
     expect(sessionStarts).toBe(1);
+    expect(nativeThreadReads).toEqual([
+      { method: "thread/resume", params: { threadId: "thread", excludeTurns: true } },
+      {
+        method: "thread/turns/list",
+        params: { threadId: "thread", limit: 1, sortDirection: "desc", itemsView: "full" },
+      },
+    ]);
     expect(attempts).toBeGreaterThan(0);
     expect(await seats.allows(fleet, view, lifetime)).toBe(true);
     peer!.send(
