@@ -3,6 +3,12 @@ import { operatorHarness } from "./harness-command.ts";
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["integrate"],
+    lines: [
+      "  integrate SHA... [--app SHA]... [--push] | status UUID | push UUID | revert UUID | holds | hold | release  Compose, isolate the full gate, and land approved commits (JSON)",
+    ],
+  },
+  {
     nouns: ["harness"],
     lines: [
       "  harness install [--refresh-linked | --codex-source-setup SCRIPT]  Install or refresh linked native plugins",

@@ -6,6 +6,13 @@ import {
 } from "@clankie/protocol";
 export * from "./discord-setup.ts";
 import {
+  INTEGRATE_PATH,
+  IntegrationRequestSchema,
+  IntegrationResponseSchema,
+  type IntegrationRequest,
+  type IntegrationResponse,
+} from "@clankie/protocol/integrate";
+import {
   ISSUE_METRICS_PATH,
   IssueMetricsQuerySchema,
   IssueMetricsReportSchema,
@@ -224,6 +231,19 @@ export class ClankieApiClient {
           redirect: "error",
         },
       ),
+    );
+  }
+
+  public async integrate(input: IntegrationRequest): Promise<IntegrationResponse> {
+    return parseProtocolResponse(
+      IntegrationResponseSchema,
+      await this.request(INTEGRATE_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        body: JSON.stringify(IntegrationRequestSchema.parse(input)),
+        signal: AbortSignal.timeout(30_000),
+        redirect: "error",
+      }),
     );
   }
 

@@ -23,7 +23,8 @@
     "./discord-settings": "./src/discord-settings.ts",
     "./projects": "./src/projects.ts",
     "./presence": "./src/presence.ts",
-    "./tool-catalog": "./src/tool-catalog.ts"
+    "./tool-catalog": "./src/tool-catalog.ts",
+    "./integrate": "./src/integrate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

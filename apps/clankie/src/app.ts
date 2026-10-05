@@ -54,6 +54,9 @@ import type { PersonaImageSource } from "./persona-images.ts";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
+import { createIntegrationRoutes } from "./integrate-routes.ts";
+import type { IntegrationQueue } from "./integrate.ts";
+import type { DeployHolds } from "./deploy-holds.ts";
 import { createHostedCreditsRoutes } from "./hosted-credits-routes.ts";
 import { createAccountRoutes } from "./account-routes.ts";
 import type { AccountsPort } from "./accounts.ts";
@@ -450,6 +453,8 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
+  integration?: IntegrationQueue;
+  deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   refreshHarnesses?: () => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
@@ -1168,6 +1173,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       updater: dependencies.runtimeUpdater,
       refreshHarnesses: dependencies.refreshHarnesses,
       pluginVersionInstalled: dependencies.pluginVersionInstalled,
+      holds: dependencies.deployHolds,
       authorize: async (request) => {
         const identity = await authenticateOperator(request, dependencies);
         if (!identity || identity === "unavailable") return undefined;
@@ -1179,6 +1185,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
             current = Boolean(fresh && fresh !== "unavailable" && fresh.operatorId === identity.operatorId);
             if (!current) throw new Error("operator_revoked");
           },
+        };
+      },
+    }),
+  );
+  app.route(
+    "/",
+    createIntegrationRoutes({
+      queue: dependencies.integration,
+      holds: dependencies.deployHolds,
+      authorize: async (request) => {
+        const identity = await authenticateOperator(request, dependencies);
+        if (!identity || identity === "unavailable") return undefined;
+        return async () => {
+          const current = await authenticateOperator(request, dependencies);
+          if (!current || current === "unavailable" || current.operatorId !== identity.operatorId)
+            throw Error("operator_revoked");
         };
       },
     }),
