@@ -630,7 +630,25 @@ const discordTracking = new DiscordTracking({
     if (result.outcome !== "ok" || result.isError) throw new Error("Tracked Linear issue unavailable");
     return JSON.parse(result.content);
   },
-  serverAction: (action) => createDiscordCaptainActionClient(process.env).serverAction(action),
+  serverPermissions: async (serverId) => {
+    const current = await settingsStore.load();
+    const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
+    return readDiscordBodyPermissions(
+      { guildId: serverId },
+      {
+        body,
+        env: process.env,
+        token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+      },
+    );
+  },
+  serverAction: async (action) => {
+    const current = await settingsStore.load();
+    const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
+    return createDiscordCaptainActionClient({ ...process.env, DISCORD_ACTIVE_BODY: body }).serverAction(
+      action,
+    );
+  },
   onError: () => logger.warn("Discord project tracking retained an unavailable or uncertain delivery"),
 });
 

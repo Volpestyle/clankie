@@ -156,6 +156,7 @@ it("the sole destructive floor and cross-server references are refused before mu
     { method: "PATCH", path: "/guilds/10002", body: { name: "wrong server" } },
     { method: "PATCH", path: `/channels/${CHANNEL}`, body: { parent_id: OTHER } },
     { method: "POST", path: "/guilds/@server/channels", body: { name: "wrong parent", parent_id: OTHER } },
+    { method: "POST", path: `/channels/${CHANNEL}/followers`, body: { webhook_channel_id: OTHER } },
   ])
     expect((await f.execute(action)).ok).toBe(false);
   expect(f.calls.filter((call) => call.method !== "GET")).toEqual([]);

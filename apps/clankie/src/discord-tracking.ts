@@ -1,7 +1,12 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import type { DiscordServerAction, DiscordServerActionResult } from "@clankie/protocol";
+import {
+  DiscordPermissionsSnapshotSchema,
+  type DiscordPermissionsSnapshot,
+  type DiscordServerAction,
+  type DiscordServerActionResult,
+} from "@clankie/protocol";
 import type { ClankieSettings as Settings } from "@clankie/settings";
 import { createProjectWorkReader, projectWorkRepoId } from "./project-work-items.ts";
 import { linearActivityHeadline, linearActivityIssueId, type LinearActivityEvent } from "./linear-webhook.ts";
@@ -51,6 +56,8 @@ export interface DiscordTrackingOptions {
   resolveProject(query: string): Promise<unknown>;
   /** Read one canonical issue through the same verified connection; never a workspace-wide issue feed. */
   resolveIssueProject?(issueId: string): Promise<unknown>;
+  /** Authenticated permission evidence from the active body's own member in this guild. */
+  serverPermissions(serverId: string): Promise<DiscordPermissionsSnapshot>;
   serverAction(action: DiscordServerAction): Promise<DiscordServerActionResult>;
   onError?(error: unknown): void;
 }
@@ -243,11 +250,14 @@ export class DiscordTracking {
         const expected = read.convention.linear.label.trim().toLowerCase();
         if (!labels.some((label) => label.trim().toLowerCase() === expected)) continue;
       }
+      const memberId = discord.role === "admin" ? await this.verifiedMember(discord) : undefined;
       const guard = async () => {
         await validateRead();
         const fresh = (await this.options.settings()).discord;
         if (JSON.stringify(fresh) !== JSON.stringify(discord) || this.closed)
           throw new Error("Discord tracking settings changed before dispatch.");
+        if (memberId && (await this.verifiedMember(discord)) !== memberId)
+          throw new Error("Discord tracking body member changed before dispatch.");
       };
       await guard();
       if (discord.role === "participant") {
@@ -285,6 +295,10 @@ export class DiscordTracking {
                 name: channelName(project.name),
                 type: mode === "forum" ? 15 : 0,
                 topic: `Clankie tracking for ${project.name}`,
+                permission_overwrites: [
+                  { id: discord.serverId, type: 0, deny: "1024", allow: "0" },
+                  { id: memberId!, type: 1, allow: "1024", deny: "0" },
+                ],
               },
             },
             true,
@@ -313,6 +327,23 @@ export class DiscordTracking {
       event.state = event.completedProjects.length ? "done" : "skipped";
       this.save();
     }
+  }
+
+  private async verifiedMember(discord: TrackingSettings["discord"]): Promise<string> {
+    const snapshot = DiscordPermissionsSnapshotSchema.parse(
+      await this.options.serverPermissions(discord.serverId!),
+    );
+    if (
+      snapshot.body !== discord.activeBody ||
+      snapshot.guildId !== discord.serverId ||
+      snapshot.channelId !== undefined ||
+      !snapshot.actorId ||
+      snapshot.permissions.administrator !== "passed" ||
+      snapshot.permissions.manage_channels !== "passed" ||
+      snapshot.permissions.view_channel !== "passed"
+    )
+      throw new Error("Verified Discord admin member unavailable for private project tracking.");
+    return snapshot.actorId;
   }
 
   private async deliverToProjection(event: Event, projection: Projection, guard: () => Promise<void>) {

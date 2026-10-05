@@ -23,6 +23,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 const CHANNEL_REFERENCES = new Set([
   "channel_id",
+  "webhook_channel_id",
   "parent_id",
   "afk_channel_id",
   "system_channel_id",

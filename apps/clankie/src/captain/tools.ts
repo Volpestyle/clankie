@@ -40,7 +40,7 @@ import {
   type InlineExtension,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { readDiscordServerSettings, type GameplaySettings } from "@clankie/settings";
+import type { GameplaySettings } from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
@@ -1380,9 +1380,9 @@ function discordServerTools(
               representation: Type.Union([Type.Literal("channel"), Type.Literal("forum")]),
             }),
             execute: async (_callId, input) => {
-              const settings = await readDiscordServerSettings();
+              const settings = await deps.discordSettings?.();
               if (
-                settings.role !== "admin" ||
+                settings?.role !== "admin" ||
                 settings.serverId === undefined ||
                 (lane !== "operator" && turn.guildId !== settings.serverId)
               )

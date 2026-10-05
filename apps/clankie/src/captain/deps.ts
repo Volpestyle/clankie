@@ -46,6 +46,8 @@ import type { DiscordTracking } from "../discord-tracking.ts";
  */
 export interface CaptainDeps {
   readonly discordTracking?: Pick<DiscordTracking, "configureProject">;
+  /** This captain's fresh settings and explicit environment, supplied by its host. */
+  readonly discordSettings?: () => Promise<import("@clankie/protocol").DiscordSettings>;
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
   readonly minecraft?: import("../minecraft.ts").MinecraftService;
   readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;

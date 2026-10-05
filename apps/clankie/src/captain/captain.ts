@@ -1391,7 +1391,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const settingsStore = options.settings ?? new SettingsStore();
   const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
-  const desktopDeps = { ...deps, desktop };
+  const desktopDeps = {
+    ...deps,
+    desktop,
+    discordSettings: () => readDiscordServerSettings(options.discordEnvironment, settingsStore),
+  };
   const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];

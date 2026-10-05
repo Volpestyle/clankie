@@ -9,13 +9,16 @@ import { afterEach, expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { writeConvention } from "@clankie/work-items";
 import {
+  DiscordPermissionCache,
   executeDiscordServerAction,
   tryHandleCaptainDiscordActionRequest,
+  tryHandleDiscordSetupRequest,
 } from "@clankie/discord-presence-core";
 import type { DiscordServerAction } from "@clankie/protocol";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createDiscordCaptainActionClient } from "../src/discord-captain-actions.ts";
+import { readDiscordBodyPermissions } from "../src/discord-setup-body.ts";
 import { DiscordTracking } from "../src/discord-tracking.ts";
 
 // Real saved settings/tracker, signed service HTTP, shared body admission and
@@ -79,6 +82,24 @@ async function fixture() {
   let loseReceipt = false;
   let issueReads = 0;
   let accountReads = 0;
+  const memberId = "30001";
+  const bodyToken = randomUUID();
+  const permissionCache = new DiscordPermissionCache();
+  permissionCache.observe({ t: "READY", d: { user: { id: memberId, bot: true }, guilds: [] } });
+  permissionCache.observe({
+    t: "GUILD_CREATE",
+    d: {
+      id: "10001",
+      owner_id: "40001",
+      roles: [
+        { id: "10001", permissions: "0" },
+        { id: "10002", permissions: "8" },
+      ],
+      members: [{ user: { id: memberId }, roles: ["10002"] }],
+      channels: [],
+    },
+  });
+  let permissionEvidence: "valid" | "missing" | "guild" | "body" | "admin" = "valid";
   const effects: DiscordServerAction[] = [];
   const channels = new Map<string, { id: string; guild_id: string; type: number }>([
     ["20001", { id: "20001", guild_id: "10001", type: 0 }],
@@ -144,6 +165,30 @@ async function fixture() {
   const body = await listen(
     createServer((request, response) => {
       if (
+        tryHandleDiscordSetupRequest(request, response, {
+          token: bodyToken,
+          read: (query) => {
+            const snapshot = permissionCache.read(query, "bot", true);
+            if (permissionEvidence === "missing") {
+              const { actorId: _actor, ...missing } = snapshot;
+              return missing;
+            }
+            if (permissionEvidence === "guild") return { ...snapshot, guildId: "99999" };
+            if (permissionEvidence === "body") return { ...snapshot, body: "user_session" };
+            if (permissionEvidence === "admin")
+              return {
+                ...snapshot,
+                permissions: { ...snapshot.permissions, administrator: "failed" },
+              };
+            return snapshot;
+          },
+          post: async () => {
+            throw new Error("Tracking fixture does not permit setup posts");
+          },
+        })
+      )
+        return;
+      if (
         tryHandleCaptainDiscordActionRequest(request, response, async (input) => {
           if (input.action !== "server_action")
             return { ok: false, message: "Fixture only accepts server actions." };
@@ -186,6 +231,15 @@ async function fixture() {
       (await fetch(`${native.url}/linear/project?query=${encodeURIComponent(query)}`)).json(),
     resolveIssueProject: async (id: string) =>
       (await fetch(`${native.url}/linear/issue?id=${encodeURIComponent(id)}`)).json(),
+    serverPermissions: (serverId: string) =>
+      readDiscordBodyPermissions(
+        { guildId: serverId },
+        {
+          body: "bot",
+          token: bodyToken,
+          env: { CLANKIE_DISCORD_BRIDGE_CONTROL_PORT: String(body.port) },
+        },
+      ),
     serverAction: client.serverAction,
   };
   let tracking = new DiscordTracking(options);
@@ -262,6 +316,13 @@ async function fixture() {
     },
     issueReads: () => issueReads,
     accountReads: () => accountReads,
+    privateOverwrites: [
+      { id: "10001", type: 0, deny: "1024", allow: "0" },
+      { id: memberId, type: 1, allow: "1024", deny: "0" },
+    ],
+    setPermissionEvidence(value: typeof permissionEvidence) {
+      permissionEvidence = value;
+    },
     moveIssue() {
       issueProjectId = randomUUID();
     },
@@ -296,6 +357,7 @@ it("signed activity follows saved project scope and level, with one durable issu
     "/guilds/10001/channels",
     "/channels/50000/messages",
   ]);
+  expect(f.effects[0]?.body).toMatchObject({ permission_overwrites: f.privateOverwrites });
   await f.settings.update((current) => ({
     ...current,
     discord: { ...current.discord, trackingLevel: "project_activity" },
@@ -404,9 +466,20 @@ it("Clankie can choose a forum and issue updates remain in the same post", async
     discord: { ...current.discord, trackingLevel: "all_issues" },
   }));
   await f.tracking.configureProject("alpha", "forum");
-  await f.post(f.payload("Issue", "create", f.issue()));
+  const created = f.payload("Issue", "create", f.issue());
+  f.setPermissionEvidence("missing");
+  await f.post(created);
+  expect(f.effects).toHaveLength(0);
+  expect(f.tracking.snapshot().events.at(-1)?.state).toBe("pending");
+  for (const evidence of ["guild", "body", "admin"] as const) {
+    f.setPermissionEvidence(evidence);
+    await f.tracking.flush();
+    expect(f.effects).toHaveLength(0);
+  }
+  f.setPermissionEvidence("valid");
+  await f.tracking.flush();
   expect(f.effects).toHaveLength(2);
-  expect(f.effects[0]?.body).toMatchObject({ type: 15 });
+  expect(f.effects[0]?.body).toMatchObject({ type: 15, permission_overwrites: f.privateOverwrites });
   expect(f.effects[1]?.body).toMatchObject({ message: { allowed_mentions: { parse: [] } } });
   await f.post(f.payload("Issue", "update", f.issue("Forum issue updated")));
   expect(f.effects.at(-1)?.path).toBe("/channels/50001/messages");

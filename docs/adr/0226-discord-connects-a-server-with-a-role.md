@@ -42,6 +42,12 @@ Clankie chooses the representation. Participant posts in the designated channel.
 Private mappings survive disablement. An unconfirmed write remains uncertain
 and is not automatically replayed.
 
+New tracking channels and forums deny `View Channel` to `@everyone` and allow
+Clankie's verified member. Private tracker content never inherits a public
+server's default audience. Missing or mismatched member/grant evidence blocks
+creation. Clankie can then admit the right people through normal Admin actions;
+Discord's Administrator permission still bypasses channel overwrites.
+
 ```mermaid
 flowchart LR
   Setup[Server + role + fleet + tracking] --> Settings[Revision-fenced settings]

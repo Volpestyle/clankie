@@ -38,6 +38,13 @@ the Linear bridge was timing out.
   off retains destinations. Comments without a project require canonical issue
   lookup, so moving an issue does not reuse its old project mirror. Delivery
   receipts and uncertain writes persist across restart.
+- Lead review privacy fix: every new project text channel/forum denies
+  `VIEW_CHANNEL` to `@everyone` and allows the actual Clankie member from the
+  authenticated body's permission cache. Unknown/mismatched identity or denied
+  Administrator leaves the event pending without a Discord write. The tests
+  assert both representations' overwrites. Announcement-follow destinations
+  are included in the connected-server reference checks. Project-mirror tools
+  use the captain's injected settings store and explicit environment.
 
 ## Focused checks
 
@@ -95,6 +102,9 @@ is integrated and running; they authorize no live execution by this worker.
    the current authority.
 4. For a saved Linear project tracker in the connected workspace, ask Clankie
    to choose a forum with `discord_tracking_project` before its first delivery.
+   Verify a normal `@everyone` member cannot view the resulting forum or a
+   tracking text channel; Clankie's member and server administrators can.
+   Clankie can deliberately admit the appropriate people afterward.
    Set tracking to `off`; create a project update and issue activity: no posts.
    Select `project_updates`: a new project update posts, while a new issue and
    issue comment do not. Select `project_activity`: verify a milestone, project
