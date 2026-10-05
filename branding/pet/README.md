@@ -14,6 +14,7 @@ pixel offset (124, 108)). Nothing comes from an external sprite.
 | `build.py`                   | Renders the grids into everything below                                   |
 | `clankie-pet.png` / `.json`  | Main sheet, 1×, one row, Aseprite array JSON                              |
 | `clankie-mini.png` / `.json` | Mini sheet, same format                                                   |
+| `face-geometry.json`         | Approved body-frame offsets for the screen-only face overlays             |
 | `preview/<tag>.gif`          | Each tag at 6×, nearest-neighbour, on a flat warm background              |
 | `preview/contact-sheet.png`  | Every frame at 4×, labelled, with center (blue) and baseline (red) guides |
 
@@ -39,6 +40,63 @@ come from the files, so adding or removing frames needs no other change.
 
 The text grids are the only source. Nothing regenerates them, so hand edits
 are safe.
+
+### Screen faces (VUH-1679)
+
+The five `face_*` tags are overlays, not replacement bodies. Each is a full
+32×40 cell, transparent except for the **entire opaque 12×5 screen interior**:
+x 10–21, y 23–27, inclusive, on `idle` frame 0. Covering every screen pixel
+removes the underlying eyes and cheeks. Only existing face palette keys
+`c`, `d`, `e`, and `p` appear; there are no added colors.
+
+These tags are appended after `drop`, leaving all 85 existing main-sheet
+indices, crops, durations and body sources unchanged. The mini outputs are
+unchanged. Each first frame is a distinct static expression for Reduce Motion;
+the remaining frames make only small screen changes, with no body motion in
+the overlays.
+
+| Tag                | Frames | Durations (ms)  | Expression                                           |
+| ------------------ | ------ | --------------- | ---------------------------------------------------- |
+| `face_working`     | 85–87  | 1000, 650, 850  | Focused eyes and a quiet three-dot cadence           |
+| `face_new_message` | 88–90  | 1400, 500, 1100 | Attentive eyes, a small smile and a slow blink       |
+| `face_needs_you`   | 91–93  | 1600, 500, 1600 | An attentive gaze and a persistent small exclamation |
+| `face_error`       | 94–96  | 1800, 600, 1800 | Crossed eyes and a frown, without flashing           |
+| `face_voice`       | 97–99  | 700, 700, 700   | Calm eyes with three speaking mouth shapes           |
+
+`face-geometry.json` is generated from the builder's validated front-view
+screen map. Its top-level keys are body tag names; each array entry is the
+pixel offset `{ "x": 0, "y": … }` for that body frame relative to the
+overlay's `idle`-0 origin. Frame numbers are relative to their tag, not global
+sheet indices. The renderer can translate the full overlay cell by this
+offset at the same integer scale as the body.
+
+| Compatible body tag | Per-frame y offsets (x is always 0) |
+| ------------------- | ----------------------------------- |
+| `idle`              | 0, 1, 1, 0                          |
+| `blink`             | 0, 0                                |
+| `think`             | 0 for all 20 frames                 |
+| `talk`              | 0, 0, 0                             |
+| `lead`              | 1, 0, 1, 0                          |
+| `alert`             | 1, −2, −1                           |
+| `hop`               | 2, −3, −6, 2                        |
+
+All other body tags are absent from this map. In particular, do not apply a
+front-facing overlay to walk, run, sleep or offline artwork. The builder
+rejects a shifted/changed front-view screen, any face pixel outside its mask,
+any uncovered screen pixel, fast face frames, or duplicate static first faces.
+
+The sheet stores the transparent overlays. Their GIFs and contact-sheet rows
+show each face composited on the unchanged `idle`-0 body for visual review.
+The offline [frame strip](../../docs/testing/2026-10-05-pet-faces/frame-strip.png)
+also checks moving body anchors and the static Reduce Motion expression.
+Reproduce the art boundary evidence after rebuilding:
+
+```sh
+uv run --with pillow python3 docs/testing/2026-10-05-pet-faces/verify-art.py --baseline 05ccea2e
+```
+
+That comparison is scoped to this face addition's approved original-art
+commit; later intentional body work should supply its own approved baseline.
 
 ### Editing the walk cycle
 

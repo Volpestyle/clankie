@@ -280,6 +280,13 @@ short bubble. It publishes an expiring expression, not keyboard or mouse input.
 Desktop clients honor quiet hours and macOS Focus; publication is not proof a
 client displayed it. For app input, use `desktop-control` or a computer-use seat.
 
+The `presence` read with `includeFace: true` also carries a source-derived `face` for the desktop
+pet: working, new message, needs you, error or voice. Message and error faces
+come from live committed owner-conversation events and expire; they do not
+replay historical notifications. They leave the body animation and `desktop`
+expressions separate. Reduce Motion keeps a static face. A published face
+does not establish that the owner saw it.
+
 ## Agents in the linked fleet
 
 `doctor.harnessBridges` reports the worker bridge separately from the operator

@@ -280,18 +280,23 @@ export function createOperatorService(
           const inVoice = voice.some(
             (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
           );
-          return projectPresence({
-            expression: await ctx.desktop.current(),
-            thinking,
-            inVoice,
-            playing:
-              ctx.deps.hostedWorld?.inspect().outcome === "playing" ||
-              (play !== undefined && ["running", "stopping"].includes(play.state)),
-            ...(play === undefined ? {} : { playingSince: play.requestedAt }),
-            activeSeats,
-            ...(nativeSubagents === undefined ? {} : { nativeSubagents }),
-            pendingOwnerItem: ctx.conversations.pendingPresenceOwnerItem(),
-          });
+          return projectPresence(
+            {
+              expression: await ctx.desktop.current(),
+              thinking,
+              working: head?.status === "working" || (nativeSubagents ?? 0) > 0,
+              inVoice,
+              playing:
+                ctx.deps.hostedWorld?.inspect().outcome === "playing" ||
+                (play !== undefined && ["running", "stopping"].includes(play.state)),
+              ...(play === undefined ? {} : { playingSince: play.requestedAt }),
+              activeSeats,
+              ...(nativeSubagents === undefined ? {} : { nativeSubagents }),
+              pendingOwnerItem: ctx.conversations.pendingPresenceOwnerItem(),
+              ...ctx.conversations.recentPresenceActivity(),
+            },
+            request.includeFace === true,
+          );
         },
         request.cursor,
         request.waitMs ?? 0,

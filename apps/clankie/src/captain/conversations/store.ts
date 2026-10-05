@@ -90,6 +90,8 @@ import {
   OPERATOR_CONVERSATION_RETAINED_EVENTS_MAX,
   OPERATOR_CONVERSATION_RETAINED_MAX,
   OPERATOR_CONVERSATION_RETENTION_MS,
+  PRESENCE_ERROR_MS,
+  PRESENCE_NEW_MESSAGE_MS,
   SEAT_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM,
   SEAT_CONVERSATION_RETAINED_EVENTS_MAX,
   ZERO_CURSOR,
@@ -224,6 +226,9 @@ export class ConversationStore {
    * caused would name a conversation this one's devices cannot open.
    */
   private readonly durableMessageListeners = new Set<(notice: DurableMessageNotice) => void>();
+  /** Live owner-facing activity only; never rebuilt by scanning retained transcripts. */
+  private recentPresenceMessage: number | undefined;
+  private recentPresenceError: { conversationId: string; at: number } | undefined;
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
   private readonly deliveryAdmissions = new Map<
@@ -894,6 +899,22 @@ export class ConversationStore {
     this.durableMessageListeners.add(listener);
     return () => {
       this.durableMessageListeners.delete(listener);
+    };
+  }
+
+  /** Bounded event signals; an unrelated successful thread cannot hide a failed turn. */
+  public recentPresenceActivity(): { newMessage: boolean; error: boolean } {
+    const now = Date.now();
+    return {
+      newMessage:
+        this.recentPresenceMessage !== undefined &&
+        now >= this.recentPresenceMessage &&
+        now - this.recentPresenceMessage < PRESENCE_NEW_MESSAGE_MS,
+      error:
+        this.recentPresenceError !== undefined &&
+        this.metas.has(this.recentPresenceError.conversationId) &&
+        now >= this.recentPresenceError.at &&
+        now - this.recentPresenceError.at < PRESENCE_ERROR_MS,
     };
   }
 
@@ -2364,7 +2385,12 @@ export class ConversationStore {
     };
   }
 
-  private append(meta: ConversationMeta, body: OperatorConversationEventBody, occurredAt?: string): void {
+  private append(
+    meta: ConversationMeta,
+    body: OperatorConversationEventBody,
+    occurredAt?: string,
+    livePresence = occurredAt === undefined,
+  ): void {
     if (
       body.type === "turn" &&
       body.phase !== "accepted" &&
@@ -2390,6 +2416,33 @@ export class ConversationStore {
       ...body,
     } as OperatorConversationStreamEvent;
     this.journal.append(meta.conversationId, event);
+    // Captain owner threads are private to the authenticated operator. Room,
+    // channel, worker and side-fork activity must not become a desktop notice.
+    if (
+      (meta.scope.kind === "global" || meta.scope.kind === "workspace") &&
+      meta.parentConversationId === undefined &&
+      livePresence
+    ) {
+      const at = Date.parse(event.occurredAt);
+      if (Number.isFinite(at) && at <= Date.now()) {
+        if (
+          body.type === "message" &&
+          body.role === "captain" &&
+          !body.streaming &&
+          body.text.trim() &&
+          at >= (this.recentPresenceMessage ?? 0)
+        )
+          this.recentPresenceMessage = at;
+        if (body.type === "turn" && body.phase === "failed")
+          this.recentPresenceError = { conversationId: meta.conversationId, at };
+        if (
+          body.type === "turn" &&
+          body.phase === "completed" &&
+          this.recentPresenceError?.conversationId === meta.conversationId
+        )
+          this.recentPresenceError = undefined;
+      }
+    }
     this.counts.set(meta.conversationId, retainedCount + 1);
     this.sequences.set(meta.conversationId, sequence);
     if (body.type === "context") {

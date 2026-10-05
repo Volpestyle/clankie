@@ -80,6 +80,7 @@ export function syncConversationTranscript(
         meta,
         room && body.type === "message" && body.role === "operator" ? { ...body, role: "external" } : body,
         entry.occurredAt,
+        captainThread && checkpoint?.sessionKey === transcript.sessionKey,
       );
     }
     seen.add(entry.id);

@@ -10,6 +10,8 @@ export const OperatorPresenceMoodSchema = z.enum([
   "idle",
 ]);
 export type OperatorPresenceMood = z.infer<typeof OperatorPresenceMoodSchema>;
+export const OperatorPresenceFaceSchema = z.enum(["working", "new_message", "needs_you", "error", "voice"]);
+export type OperatorPresenceFace = z.infer<typeof OperatorPresenceFaceSchema>;
 export const OperatorPresenceOwnerItemSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(512),
@@ -58,6 +60,8 @@ export const OperatorPresenceSnapshotSchema = z
     schemaVersion: z.literal(1),
     cursor: z.string().trim().min(1).max(512),
     mood: OperatorPresenceMoodSchema,
+    /** Optional desktop face; absence is neutral and compatible with older services. */
+    face: OperatorPresenceFaceSchema.optional(),
     detail: z.string().max(200),
     /** Source timestamp; null when that source does not expose its start. */
     since: z.string().datetime().nullable(),
@@ -75,6 +79,8 @@ export const OperatorPresenceRequestSchema = z
     op: z.literal("presence"),
     schemaVersion: z.literal(1),
     cursor: z.string().trim().min(1).max(512).optional(),
+    /** Opt in to additive desktop face fields; strict legacy clients keep the old snapshot. */
+    includeFace: z.boolean().optional(),
     waitMs: z.number().int().min(0).max(OPERATOR_PRESENCE_WAIT_MS_MAX).optional(),
   })
   .strict();

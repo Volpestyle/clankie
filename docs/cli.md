@@ -3942,6 +3942,20 @@ when that source has no known start. An unreachable service has no mood; clients
 show that connection failure separately. The same read passes through the relay
 and hosted paired-device authority seam.
 
+The opt-in `includeFace: true` read adds an optional `face` field that drives
+the desktop pet's screen independently of his
+body animation. Its priority is `needs_you`, `error`, `new_message`, then
+`working` (thinking or leading) or `voice` (in voice). An observed working
+native captain or running native child also selects `working` without changing
+the mood. Otherwise idle and play have no override. A newly committed captain reply in an owner conversation shows
+`new_message` for ten seconds; a failed owner turn shows `error` for thirty
+seconds, or until that conversation completes a successful turn. Replayed
+history, worker threads, Discord rooms and forks do not raise these faces.
+The face and its expiry participate in the presence cursor. Reduce Motion
+holds a distinct static face, and an unreachable pet uses his offline art.
+Legacy reads omit the field. The desktop client retries without the opt-in
+when an older service rejects it, checking again after one minute.
+
 ## Computer body
 
 ```sh
