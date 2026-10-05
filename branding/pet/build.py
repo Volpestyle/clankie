@@ -30,7 +30,7 @@ SHEETS = {
         "tags": [
             "idle", "blink", "look_left", "look_right", "walk_left", "walk_right",
             "hop", "fall_asleep", "sleep", "wake", "think", "talk", "play",
-            "alert", "happy", "catch", "offline",
+            "alert", "happy", "catch", "offline", "rustle", "tap", "lead", "lift", "drop",
         ],
     },
     "clankie-mini": {
