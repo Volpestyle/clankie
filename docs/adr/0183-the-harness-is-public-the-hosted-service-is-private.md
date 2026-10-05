@@ -61,8 +61,12 @@ The public service defines an optional
 routes, credit accounting, plan model routing or hire limits. A host can select
 an installed module by its absolute path. The service loads its
 `createRuntimeProvider` factory on every index restart; a configured provider
-must initialize before Clankie starts. This is deployment configuration, never
-a tool argument or model-selected module.
+must initialize before Clankie starts. A managed bootstrap requires that module
+and complete quota, hire-capacity, heartbeat and worker-model hooks; a misbuilt
+managed image fails startup. Bootstrap validation remains strict, explicitly
+allowlisting the existing private routing and hire-limit fields before projecting
+generic identity. This is deployment configuration, never a tool argument or
+model-selected module.
 
 The hooks are generic: optional routes receive the existing owner/device
 authorizer and declare exact gateway routes; heartbeat hooks observe raw turn

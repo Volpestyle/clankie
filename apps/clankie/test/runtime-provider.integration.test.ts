@@ -227,51 +227,62 @@ it("injected quota routes keep paired-device authorization and heartbeat tracks 
       },
       contextMessages: [],
     };
-    const polled = f.captain.pollSeatEvents(5_000, undefined, f.roomId);
-    const result = f.captain.submitDiscordTurn(request);
-    const [event] = await polled;
-    expect(event?.content).toContain("Native room request");
-    expect(finishes).toBe(unprompted ? 1 : 0);
-    expect(await f.captain.replySeatEvent(event!.id, "Native room answer", f.roomId)).toBe(true);
-    expect(await result).toMatchObject({ state: "settled" });
-    await f.attach(f.roomId);
+    // No native parent is proved and no model is connected. Failure still closes the activity hook.
+    expect(await f.captain.submitDiscordTurn(request)).toMatchObject({
+      state: "failed",
+      code: "captain_session_failed",
+    });
+    expect(await f.captain.pollSeatEvents(0, undefined, f.roomId)).toEqual([]);
+    expect(finishes).toBe(unprompted ? 2 : 1);
   }
   expect(starts).toEqual([undefined, "wake"]);
   expect(finishes).toBe(2);
 
-  const polled = f.captain.pollSeatEvents(5_000, undefined, "global-default");
-  const current = await f.command({ schemaVersion: 1, op: "get", conversationId: "global-default" });
-  if (current.op !== "get" || !current.conversation) throw new Error("Missing default conversation");
-  const sending = f.command({
-    schemaVersion: 1,
-    op: "send",
-    turn: {
+  for (const completion of ["reply", "cancel"] as const) {
+    const before = finishes;
+    const polled = f.captain.pollSeatEvents(5_000, undefined, "global-default");
+    const current = await f.command({ schemaVersion: 1, op: "get", conversationId: "global-default" });
+    if (current.op !== "get" || !current.conversation) throw new Error("Missing default conversation");
+    const message = `Native operator turn: ${completion}`;
+    const sending = f.command({
       schemaVersion: 1,
-      kind: "message",
-      conversationId: "global-default",
-      surfaceClientId: "fixture",
-      expectedRevision: current.conversation.revision,
-      message: "Cancel this native turn",
-      delivery: "queue",
-    },
-  });
-  const [event] = await polled;
-  expect(event?.content).toContain("Cancel this native turn");
-  expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
-  expect((await sending).op).toBe("send");
-  expect(finishes).toBe(2);
-  const accepted = f.journal
-    .read("global-default")
-    .find((event) => event.type === "turn" && event.phase === "accepted");
-  if (accepted?.type !== "turn") throw new Error("Missing accepted turn");
-  expect(
-    await f.command({
-      schemaVersion: 1,
-      op: "cancel",
-      conversationId: "global-default",
-      runId: accepted.runId,
-    }),
-  ).toMatchObject({ op: "cancel", cancelled: true });
-  await expect.poll(() => finishes).toBe(3);
-  expect(starts).toEqual([undefined, "wake", undefined]);
+      op: "send",
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: "global-default",
+        surfaceClientId: "fixture",
+        expectedRevision: current.conversation.revision,
+        message,
+        delivery: "queue",
+      },
+    });
+    const [event] = await polled;
+    expect(event?.content).toContain(message);
+    expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
+    expect((await sending).op).toBe("send");
+    expect(finishes).toBe(before);
+    if (completion === "reply") {
+      expect(await f.captain.replySeatEvent(event!.id, "Native operator answer", "global-default")).toBe(
+        true,
+      );
+    } else {
+      const accepted = f.journal
+        .read("global-default")
+        .findLast((event) => event.type === "turn" && event.phase === "accepted");
+      if (accepted?.type !== "turn") throw new Error("Missing accepted turn");
+      expect(
+        await f.command({
+          schemaVersion: 1,
+          op: "cancel",
+          conversationId: "global-default",
+          runId: accepted.runId,
+        }),
+      ).toMatchObject({ op: "cancel", cancelled: true });
+    }
+    await expect.poll(() => finishes).toBe(before + 1);
+    await f.attach("global-default");
+  }
+  expect(starts).toEqual([undefined, "wake", undefined, undefined]);
+  expect(finishes).toBe(4);
 });
