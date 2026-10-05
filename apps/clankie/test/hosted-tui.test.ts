@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { FLEET_AUTONOMY_DEFAULTS } from "@clankie/protocol";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -240,7 +241,11 @@ it("persists fleet and project autonomy over the real signed encrypted operator 
     changes: { closure: "owner", machineSetup: "owner" },
   });
   const projects = await client.projects();
-  expect(projects.autonomyDefaults?.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
+  expect(projects.autonomyDefaults?.fleet).toEqual({
+    ...FLEET_AUTONOMY_DEFAULTS,
+    closure: "owner",
+    machineSetup: "owner",
+  });
   const changed = await client.updateProjectSettings({
     projectId: "garden",
     expectedRevision: projects.revision,
@@ -248,7 +253,11 @@ it("persists fleet and project autonomy over the real signed encrypted operator 
   });
   expect(changed.settings.projects[0]!.autonomy).toEqual({ fleet: { machineSetup: "lead" } });
   const saved = await new SettingsStore(f.serviceSettings.path).load();
-  expect(saved.autonomy.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
+  expect(saved.autonomy.fleet).toEqual({
+    ...FLEET_AUTONOMY_DEFAULTS,
+    closure: "owner",
+    machineSetup: "owner",
+  });
   expect(saved.projects.projects[0]!.autonomy).toEqual({ fleet: { machineSetup: "lead" } });
   for (const path of [
     "/v1/operator/fleet-settings/context",
@@ -270,10 +279,7 @@ it("persists fleet and project autonomy over the real signed encrypted operator 
   await expect(ordinaryTransport.request("/v1/operator/fleet-settings")).rejects.toThrow(
     "operator_device_required",
   );
-  expect((await ordinary.serviceSettings.load()).autonomy.fleet).toEqual({
-    closure: "lead",
-    machineSetup: "lead",
-  });
+  expect((await ordinary.serviceSettings.load()).autonomy.fleet).toEqual(FLEET_AUTONOMY_DEFAULTS);
 });
 it("refuses substituted pairing signatures without saving a device or hosted mode", async () => {
   const f = await fixture("operator", true);

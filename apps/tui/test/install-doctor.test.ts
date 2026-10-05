@@ -13,7 +13,6 @@ import { formatDoctorReport } from "../src/doctor-report.ts";
 import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
-import { formatDoctorReport } from "../src/doctor-report.ts";
 
 import { doctorCommand, formatDoctorSummary } from "../src/command/doctor.ts";
 

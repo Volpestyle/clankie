@@ -18,6 +18,7 @@ import {
 } from "@clankie/protocol";
 import {
   SettingsStore,
+  LinearWakeSettingsSchema,
   LEGACY_CLANKIE_RELEASE_RULE,
   projectsRevision,
   updateProjectSettings,
@@ -295,6 +296,41 @@ it("migrates the existing Clankie release policy once before defaults and never 
   }
   const unrelated = await fixture();
   expect((await unrelated.store.load()).projects.projects[0]!.autonomy).toBeUndefined();
+});
+
+it("migrates legacy Linear wake and working preferences together without writing during reads", async () => {
+  const f = await fixture({ projectId: "clankie", autonomy: { fleet: { closure: "owner" } } });
+  const stored = JSON.parse(await readFile(f.store.path, "utf8"));
+  stored.linearWebhook = {
+    following: true,
+    wake: {
+      ownerUserIds: ["configured-owner"],
+      actors: ["owner"],
+      userIds: [],
+      notificationTypes: [],
+      excludedNotificationTypes: ["issueSubscribed"],
+    },
+  };
+  await writeFile(f.store.path, JSON.stringify(stored));
+  const original = await readFile(f.store.path, "utf8");
+  const expectedWake = LinearWakeSettingsSchema.parse({ ownerUserIds: ["configured-owner"] });
+  const migrated = await f.store.load();
+  expect(migrated.linearWebhook).toMatchObject({ following: true, wake: expectedWake });
+  expect(migrated.autonomy.fleet).toEqual({ ...FLEET_AUTONOMY_DEFAULTS, closure: "owner" });
+  expect(migrated.projects.projects[0]!.autonomy).toEqual({
+    fleet: { release: { mode: "time_rule", rule: LEGACY_CLANKIE_RELEASE_RULE } },
+  });
+  const fenced = await f.store.loadFenced();
+  expect(fenced.settings).toEqual(migrated);
+  fenced.assertCurrent();
+  expect(await readFile(f.store.path, "utf8")).toBe(original);
+  await f.patch({ autonomy: { fleet: { release: null } } });
+  const persisted = JSON.parse(await readFile(f.store.path, "utf8"));
+  expect(persisted.linearWebhook.wake).toEqual(expectedWake);
+  expect(persisted.projects.projects[0]).not.toHaveProperty("autonomy");
+  const restarted = await new SettingsStore(f.store.path).load();
+  expect(restarted.linearWebhook.wake).toEqual(expectedWake);
+  expect(restarted.projects.projects[0]!.autonomy).toBeUndefined();
 });
 
 it("preserves older wire responses without inventing supported preferences and accepts nullable current policy edits", async () => {
