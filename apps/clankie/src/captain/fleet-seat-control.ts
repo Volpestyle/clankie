@@ -9,6 +9,7 @@ import { codexControlEndpoint, codexProcess, resolveCodexHome, resolveCodexSessi
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
+import { nativeSessionId } from "./native-session-resume.ts";
 import type { PeerDeliveryOptions } from "./peer-seat-messages.ts";
 
 /** Native control is shared by messages and watches; the adapters own its lifetime. */
@@ -39,8 +40,8 @@ export function createFleetSeatControl(
       available?.get(agent.agent) ?? available?.get(agent.session?.source.replace(/^herdr:/u, "") ?? "");
     const session = agent.session;
     if (adapter === undefined || session === undefined) return undefined;
-    // A transcript path names its session in the file name (Claude's `<uuid>.jsonl`).
-    const sessionId = session.kind === "id" ? session.value : basename(session.value, ".jsonl");
+    // Codex rollout names include a timestamp before the native thread UUID.
+    const sessionId = nativeSessionId(agent) ?? basename(session.value, ".jsonl");
     return adapter
       .attach({ harness: adapter.harness, sessionId, paneId: agent.paneId })
       .catch(() => undefined);
@@ -249,11 +250,9 @@ export function createFleetSeatControl(
       }
       const session = agent?.session;
       const sessionId =
-        session === undefined
+        agent === undefined || session === undefined
           ? undefined
-          : session.kind === "id"
-            ? session.value
-            : basename(session.value, ".jsonl");
+          : (nativeSessionId(agent) ?? basename(session.value, ".jsonl"));
       const pending =
         fence.pending(key) ??
         fence.pending(seatId) ??

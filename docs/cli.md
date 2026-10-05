@@ -2428,8 +2428,11 @@ stay visible. Existing unmanaged seats can use a supported native queue or
 channel. Automated messages never fall back to terminal typing. A `steered`
 receipt means guidance reached the active Codex turn, not an after-turn queue.
 
-When a hired Codex seat asks through native `requestUserInput`, its question text,
-question IDs, and request ID reach the hiring conversation as worker output.
+When a hired Codex seat asks through native `request_user_input` or
+`request_user_input_async`, its question text, question IDs, and request ID reach
+the hiring conversation as worker output. The roster summary shows
+“Waiting on a question” and the request ID while it is pending. Async request IDs
+are the tool's `call_id`, rather than an app-server request number.
 The lead answers the existing prompt with `message_seat`, omitting `message`:
 
 ```json
@@ -2443,15 +2446,27 @@ The lead answers the existing prompt with `message_seat`, omitting `message`:
 ```
 
 Use the observed request ID exactly (including its string or numeric type) and
-answer every question ID. This uses the seat's native control channel; it never
-queues another turn or types into the terminal. Ordinary follow-up messages are
-refused while a native question is pending. The owner can still answer in the
-pane: Codex takes the first answer, and already resolved requests are refused.
-`status: answered` requires a matching native tool-output record. If resolution
-does not expose the winning answer, the result is `unconfirmed`; inspect the
-native session instead of resending or sending a replacement turn. Approvals
-and folder-trust decisions remain with the owner. Hand-started Codex panes
-without this controller do not gain a prompt-answer channel.
+answer every question ID. This uses the seat's native control channel without
+interrupting the turn or typing into the terminal. Blocking sync questions hold
+ordinary follow-up messages; native async questions remain nonblocking. The owner can still answer in
+the pane. For sync questions, Codex takes the first answer and
+`status: answered` requires the matching winning native tool-output record.
+For async questions, Clankie sends the same attributed user-input envelope as
+the Codex 0.160 TUI: it steers the active turn, or starts the reply turn if the
+question's turn has already completed. Its receipt requires the exact native
+user-message client ID and content. Async answers have no upstream atomic
+first-answer arbitration; simultaneous owner and lead replies can both reach
+Codex. Observed answered requests are refused, and an uncertain answer is never
+sent twice. If no exact native receipt is visible, the result is `unconfirmed`;
+inspect the session instead of resending. Approvals and folder-trust decisions
+remain with the owner. Hand-started Codex panes without this controller do not
+gain a prompt-answer channel.
+
+An interrupted or failed native turn releases its active-turn marker and stale
+questions. If only an idle notification arrives, Clankie reads the native thread
+to verify that the exact active turn ended before releasing dispatch. A late
+completion from an older turn cannot release a newer one. Async questions
+survive normal completion until they are answered.
 
 A supplied `hire_agent` brief goes through the harness's own interface when a
 seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),

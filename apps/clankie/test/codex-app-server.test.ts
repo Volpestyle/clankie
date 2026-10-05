@@ -163,7 +163,7 @@ describe("trusted native seat policy", () => {
               : request.method === "thread/read"
                 ? { thread: { id: "root" } }
                 : request.method === "thread/resume"
-                  ? { thread: { turns: [] } }
+                  ? { thread: { id: "root", turns: [] } }
                   : request.method === "turn/start"
                     ? { turn: { id: "turn" } }
                     : request.method === "turn/steer"

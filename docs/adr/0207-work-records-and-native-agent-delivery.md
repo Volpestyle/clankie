@@ -35,6 +35,18 @@ from an uncertain attempt. An uncertain attempt must be reconciled before a retr
 it is not permission to type the message or launch another worker. Approvals and
 questions remain owner decisions. Explicit owner terminal control remains available.
 
+Informational questions from a hired worker may reach its exact hiring
+conversation for a lead reply through the same native control channel. This
+does not delegate permission prompts, folder trust, or privileged approvals.
+Codex 0.160 sync replies require the winning tool-output receipt; async replies
+use the native TUI's attributed user message and require its exact client ID,
+content, and returned turn. The async protocol has no atomic first-answer
+arbitration against a simultaneous owner reply. An uncertain answer never
+authorizes a replacement send. Native idle releases dispatch only after the
+exact active turn is observed terminal, preserving newer turns and pending
+async questions from normally completed turns. See the
+[VUH-1688 protocol evidence](../testing/2026-10-05-codex-worker-questions/README.md).
+
 ```mermaid
 flowchart LR
   Work["Repo tracker or task files"] <--> Clankie

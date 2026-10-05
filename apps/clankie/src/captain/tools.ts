@@ -849,7 +849,7 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
       "guidance reached the active turn, not an after-turn queue. deliveryStage reports stored, delivered, consumed or responded; native queue acceptance is consumed, never model-seen. Uncertain blocks every retry until the original receipt is reconciled. " +
       "This conversation adopts the seat as its lead; its future message_clankie reports return here. " +
-      "To answer an observed native Codex question, supply questionAnswer with its exact requestId and an answers map keyed by question ID ({answers: [text]} per ID), and omit message. This responds on the existing control channel; it never queues a new turn. The first native answer wins. Resolved IDs are refused, and uncertain acceptance must not be retried or replaced with an ordinary message. " +
+      "To answer an observed native Codex question, supply questionAnswer with its exact requestId and an answers map keyed by question ID ({answers: [text]} per ID), and omit message. Sync answers use the existing request and native first-answer arbitration. Async requestId is the function call_id; answers use attributed native user input, steering the active turn without interruption or starting its reply when idle. Async receipts prove acceptance, not first-answer arbitration. Resolved IDs are refused, and uncertain acceptance must not be retried or replaced with an ordinary message. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),

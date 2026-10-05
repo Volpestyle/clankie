@@ -2935,7 +2935,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       captainGoals = nextGoals;
       fleetChanges.touch();
     }
-    const seats = options.nativeCensusRunner
+    const workSeats = options.nativeCensusRunner
       ? personas.reconcile(fleet.seats)
       : await withRemoteGoals(
           withSeatWork(
@@ -2955,7 +2955,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           fleet.seats,
           remoteFleets,
         );
-    const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment, seat.harnessBridge]));
+    const seats = await herdrWatches.withNativeStatus(workSeats, fleet.seats);
+    const nextWork = JSON.stringify(
+      seats.map((seat) => [seat.goal, seat.assignment, seat.harnessBridge, seat.status, seat.summary]),
+    );
     if (seatWork !== nextWork) {
       seatWork = nextWork;
       fleetChanges.touch();

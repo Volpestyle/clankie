@@ -21,7 +21,7 @@ import {
   type CodexServerLauncher,
 } from "./codex-app-server.ts";
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
-import { codexQuestion } from "./codex-user-input.ts";
+import { codexAsyncQuestion, codexQuestion } from "./codex-user-input.ts";
 import type { CodexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
 import type { FleetSeatToolCatalogHealth } from "@clankie/protocol/tool-catalog";
 
@@ -81,8 +81,16 @@ export function createCodexSeatAdapter(
       let questionReporting: Promise<unknown> = Promise.resolve();
       let bound = false;
       let nativeInputWaiting = false;
+      let activeTurn: string | undefined;
+      const terminalTurns = new Set<string>();
       const questions = new Map<string | number, { threadId: string; question: SeatQuestion }>();
       const forwarded = new Set<string | number>();
+      const retiredQuestions = new Set<string | number>();
+      const retireQuestion = (id: string | number) => {
+        questions.delete(id);
+        retiredQuestions.add(id);
+        if (retiredQuestions.size > 256) retiredQuestions.delete(retiredQuestions.values().next().value!);
+      };
       const forwardQuestions = () => {
         if (!ref || !bound || closed || !view.question) return;
         for (const { threadId, question } of questions.values()) {
@@ -91,7 +99,15 @@ export function createCodexSeatAdapter(
           const identity = ref;
           questionReporting = questionReporting
             .catch(() => undefined)
-            .then(() => view.question!(identity, question));
+            .then(() => {
+              if (
+                closed ||
+                retiredQuestions.has(question.requestId) ||
+                JSON.stringify(questions.get(question.requestId)?.question) !== JSON.stringify(question)
+              )
+                return;
+              return view.question!(identity, question);
+            });
           void questionReporting.catch((error) =>
             console.warn("Codex native question forwarding failed:", view.paneId, String(error)),
           );
@@ -124,13 +140,35 @@ export function createCodexSeatAdapter(
         const turn = object(event.params.turn);
         const messageId = typeof turn.id === "string" ? turn.id : undefined;
         let settlement: SeatEvent | undefined;
-        if (event.method === "item/tool/requestUserInput") {
-          const question = codexQuestion(event.requestId, event.params);
+        if (
+          event.method === "item/tool/requestUserInput" ||
+          event.method === "clankie/question/updated" ||
+          event.method === "item/started" ||
+          event.method === "item/completed"
+        ) {
+          const question =
+            event.method === "item/tool/requestUserInput" || event.method === "clankie/question/updated"
+              ? codexQuestion(event.requestId ?? event.params.requestId, event.params)
+              : codexAsyncQuestion(event.params);
+          if (
+            !question &&
+            event.method !== "item/tool/requestUserInput" &&
+            event.method !== "clankie/question/updated"
+          )
+            return;
           if (!question) {
             state = "blocked";
             settlement = { type: "blocked", at, reason: "native_question_invalid_or_unattributed" };
           } else {
+            if (retiredQuestions.has(question.requestId)) return;
+            if (
+              question.isBlocking &&
+              (terminalTurns.has(question.turnId) ||
+                (activeTurn !== undefined && question.turnId !== activeTurn))
+            )
+              return;
             questions.set(question.requestId, { threadId: String(event.params.threadId), question });
+            if (event.method === "clankie/question/updated") forwarded.delete(question.requestId);
             if (question.isBlocking) {
               state = "blocked";
               nativeInputWaiting = true;
@@ -141,22 +179,50 @@ export function createCodexSeatAdapter(
             // completion watch armed instead of consuming it for this prompt.
             return;
           }
-        } else if (event.method === "serverRequest/resolved") {
+        } else if (
+          event.method === "serverRequest/resolved" ||
+          event.method === "clankie/question/resolved"
+        ) {
           const id = event.params.requestId;
           if (typeof id !== "string" && typeof id !== "number") return;
-          if (!questions.delete(id)) return;
+          const pending = questions.has(id);
+          retireQuestion(id);
+          if (!pending) return;
           nativeInputWaiting = [...questions.values()].some((q) => q.question.isBlocking);
-          if (state === "blocked" && !nativeInputWaiting) state = "working";
-        } else if (event.method === "turn/started") state = "working";
-        else if (event.method === "thread/status/changed" && object(event.params.status).type === "active") {
+          if (state === "blocked" && !nativeInputWaiting) state = activeTurn ? "working" : "idle";
+        } else if (event.method === "turn/started") {
+          if (!messageId || terminalTurns.has(messageId)) return;
+          activeTurn = messageId;
+          state = "working";
+        } else if (
+          event.method === "thread/status/changed" &&
+          object(event.params.status).type === "active"
+        ) {
           const flags = object(event.params.status).activeFlags;
-          nativeInputWaiting = Array.isArray(flags) && flags.includes("waitingOnUserInput");
+          nativeInputWaiting =
+            (Array.isArray(flags) && flags.includes("waitingOnUserInput")) ||
+            [...questions.values()].some((q) => q.question.isBlocking);
           if (Array.isArray(flags) && flags.length > 0) {
             state = "blocked";
             if (flags.some((flag) => flag !== "waitingOnUserInput"))
               settlement = { type: "blocked", at, reason: flags.join(", ") };
-          } else state = "working";
+          } else state = nativeInputWaiting ? "blocked" : "working";
         } else if (event.method === "turn/completed") {
+          if (
+            !messageId ||
+            messageId !== activeTurn ||
+            !["completed", "interrupted", "failed"].includes(String(turn.status))
+          )
+            return;
+          activeTurn = undefined;
+          terminalTurns.add(messageId);
+          if (terminalTurns.size > 64) terminalTurns.delete(terminalTurns.values().next().value!);
+          for (const [id, pending] of questions)
+            if (
+              pending.question.turnId === messageId &&
+              (pending.question.isBlocking || turn.status !== "completed")
+            )
+              retireQuestion(id);
           state = "idle";
           nativeInputWaiting = false;
           const text = Array.isArray(turn.items)
@@ -364,7 +430,7 @@ export function createCodexSeatAdapter(
                   deliveryStage: "unavailable",
                   detail: "Codex app-server is offline",
                 };
-              if (questions.size > 0)
+              if ([...questions.values()].some((pending) => pending.question.isBlocking))
                 return {
                   outcome: "offline",
                   deliveryStage: "unavailable",
@@ -394,6 +460,8 @@ export function createCodexSeatAdapter(
                     : undefined;
                 initialDispatch = false;
                 const accepted = guard ? await seat!.send(message, guard) : await seat!.send(message);
+                if (activeTurn === undefined && !terminalTurns.has(accepted.turnId))
+                  activeTurn = accepted.turnId;
                 return {
                   outcome: "accepted",
                   deliveryStage: "consumed",
@@ -419,6 +487,10 @@ export function createCodexSeatAdapter(
             },
             async status() {
               return state;
+            },
+            async statusReason() {
+              const pending = questions.keys().next();
+              return pending.done ? undefined : `Waiting on a question (${String(pending.value)})`;
             },
             async answerQuestion(answer, guard) {
               if (closed || state === "offline")

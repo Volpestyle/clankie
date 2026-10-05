@@ -106,6 +106,15 @@ control map is in memory, so a saved session reference alone cannot reattach it
 after a service restart. Codex sends stay bound to the original thread: if the
 owner switches the TUI to another thread, this connection does not follow UI
 focus. Report unavailable control without falling back to terminal input.
+Hired Codex 0.160 sync and async questions use that same native controller and
+reach the exact hiring conversation. `SeatControl.statusReason` projects a
+pending question into the roster without settling its completion watch. Sync
+answers respond to the app-server request and verify the winning tool output;
+async answers use the TUI's attributed user-input envelope and verify its exact
+client ID and content in the native thread. Async questions remain nonblocking
+and survive normal completion. Matching interrupted/failed turns release stale
+questions and active dispatch; idle alone requires a read-only terminal-turn
+proof. See [question protocol evidence](../../docs/testing/2026-10-05-codex-worker-questions/README.md).
 See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
 for the boundary between task records, native terminals and harness delivery.
 
