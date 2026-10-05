@@ -6,9 +6,10 @@ No live provider, eval, service restart, account change or deployment was run.
 
 ## Focused results
 
-- Real paired/encrypted composer HTTP and signed hosted-body transport:
-  **36/36 passed** across two files. Unchanged gateway and hosted-device-security
-  regressions previously passed **17/17**.
+- Review gate: real paired/encrypted composer HTTP, signed hosted-body transport,
+  hosted security, device projection and pairing regressions: **72/72 passed**
+  across five files. The unchanged gateway encryption regression evidence is
+  retained from the original gate.
 - Typechecks for `apps/clankie`, `packages/protocol` and `packages/api-client`:
   passed. Scoped lint and `git diff --check`: passed.
 - Public docs build: **10 pages, 56 network routes, 148 API operations**;
@@ -17,7 +18,7 @@ No live provider, eval, service restart, account change or deployment was run.
 Reproduce the HTTP gate explicitly from the core root:
 
 ```sh
-pnpm exec vitest run --config vitest.config.ts apps/clankie/test/composer-transcription.test.ts apps/clankie/test/hosted-body.test.ts
+pnpm exec vitest run --config vitest.config.ts apps/clankie/test/composer-transcription.test.ts apps/clankie/test/hosted-body.test.ts apps/clankie/test/hosted-device-security.test.ts apps/clankie/test/devices.test.ts apps/clankie/test/pairing.test.ts
 pnpm exec tsc --noEmit -p apps/clankie/tsconfig.json
 pnpm exec tsc --noEmit -p packages/protocol/tsconfig.json
 pnpm exec tsc --noEmit -p packages/api-client/tsconfig.json
@@ -37,6 +38,21 @@ event log and persisted SQLite contain no transcript/audio content.
 If the allowance fills during upload, a validated pre-dispatch refusal returns
 `failed` with `allowance_exhausted` for deliberate local recovery. An ambiguous
 network/503 response returns `uncertain`. Neither outcome repeats that request ID.
+
+The retention regression fills the actual SQLite table with 100,000 request
+records and exercises the HTTP boundary: it refuses another request before
+24 hours, then reclaims old records and accepts a new capture. Temporary audio
+still expires after ten minutes. The hosted accounting hold independently
+prevents replay after the body's 24-hour metadata retention ends.
+
+Support provenance uses VUH-1367's exact `supportGrantId` record/event/offer
+field. A hosted body confirms the immutable fleet marker from nonce-bound
+signed security state before issuing the support session, during restore and
+on first admission. An unconfirmed publication returns 503 without consuming
+the pending pairing token. A confirmed publication survives restart, and the
+device cannot use composer transcription. The fixture injects a trusted
+support offer because VUH-1367's full grant routes are on a separate approved
+branch; after integration its setup can use a real read-state grant/offer.
 
 The paired-device API and node-free client are the headless seam. The launcher
 does not store the companion app's paired session and has no new transcription

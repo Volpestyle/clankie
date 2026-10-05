@@ -24,6 +24,7 @@ import {
   ComposerTranscriptionRequestSchema,
   ComposerTranscriptionReceiptSchema,
   ComposerTranscriptionStatusSchema,
+  ComposerTranscriptionDeviceSchema,
   parseComposerWav,
   type ComposerTranscriptionDevice,
   type ComposerTranscriptionReceipt,
@@ -36,6 +37,7 @@ export interface ComposerDeviceAuthority {
   deviceId: string;
   sessionExpiresAtMs: number;
   authKeyId?: string;
+  support: boolean;
   current(): boolean;
   authorize(): Promise<boolean>;
 }
@@ -62,6 +64,7 @@ interface Record {
   state: ComposerTranscriptionReceipt["state"];
 }
 const TTL_MS = 10 * 60_000;
+const REQUEST_RETENTION_MS = 24 * 60 * 60_000;
 
 /** SQLite retains small request tombstones; neither audio nor draft text is persisted in receipts. */
 export class ComposerTranscriptions {
@@ -141,19 +144,19 @@ export class ComposerTranscriptions {
     });
   }
   private async guard(owner: ComposerDeviceAuthority) {
-    if (!owner.current() || !(await owner.authorize()) || !owner.current())
+    if (owner.support || !owner.current() || !(await owner.authorize()) || !owner.current())
       throw new Refusal(403, "forbidden");
   }
   private device(owner: ComposerDeviceAuthority): ComposerTranscriptionDevice {
     if (!this.options.installationId || !owner.authKeyId) throw new Refusal(503, "unavailable");
-    return {
+    return ComposerTranscriptionDeviceSchema.parse({
       installationId: this.options.installationId,
       deviceId: owner.deviceId,
       authKeyId: owner.authKeyId,
       sessionExpiresAtMs: owner.sessionExpiresAtMs,
       chat: true,
-      support: false,
-    };
+      support: owner.support,
+    });
   }
   async status(owner: ComposerDeviceAuthority): Promise<ComposerTranscriptionStatus> {
     await this.guard(owner);
@@ -352,6 +355,7 @@ export class ComposerTranscriptions {
       this.live.delete(id);
       this.removeAudio(id);
     }
+    this.db.prepare("DELETE FROM requests WHERE expires<=?").run(this.now() + TTL_MS - REQUEST_RETENTION_MS);
   }
   close() {
     if (this.closed) return;

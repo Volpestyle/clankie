@@ -17,7 +17,8 @@ type Identity = z.infer<typeof IdentitySchema>;
 /** Public body half of the fleet's security-state contract. No customer keys leave this machine. */
 export class HostedDeviceSecurity {
   private generation = -1;
-  private readonly client: Pick<HostedBodyClient, "readSecurityState" | "declareAuthKey" | "revokeDevice">;
+  private readonly client: Pick<HostedBodyClient, "readSecurityState" | "declareAuthKey" | "revokeDevice"> &
+    Partial<Pick<HostedBodyClient, "declareSupportDevice">>;
   private readonly identityPath: string;
   constructor(client: HostedDeviceSecurity["client"], identityPath: string) {
     this.client = client;
@@ -93,6 +94,19 @@ export class HostedDeviceSecurity {
 
   async revokeDevice(deviceId: string): Promise<void> {
     await this.client.revokeDevice(deviceId);
+  }
+
+  async publishSupportDevice(deviceId: string, supportGrantId: string): Promise<void> {
+    const existing = (await this.read()).sp?.find((entry) => entry.dev === deviceId);
+    if (existing !== undefined) {
+      if (existing.grant !== supportGrantId) throw new Error("Hosted support device purpose conflicts");
+      return;
+    }
+    if (this.client.declareSupportDevice === undefined)
+      throw new Error("Hosted support device publication unavailable");
+    await this.client.declareSupportDevice(deviceId, supportGrantId);
+    const confirmed = (await this.read()).sp?.find((entry) => entry.dev === deviceId);
+    if (confirmed?.grant !== supportGrantId) throw new Error("Hosted support device publication unconfirmed");
   }
 
   private async load(): Promise<Identity | undefined> {

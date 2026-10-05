@@ -13,6 +13,13 @@ Managed calls carry the body's signed tenant, installation and current device
 key binding; the hosted service checks current eligibility and device revocation
 before reserving usage and before calling its provider.
 
+Support identity comes from the durable device record's `supportGrantId`. A hosted
+body publishes that immutable marker through the signed device-purpose endpoint
+before issuing the support session and when restoring its device log. It requires
+confirmation in the fleet's signed security state; an uncertain publication
+cannot mint a session. The fleet retains the marker and refuses transcription for
+that device even if a later body request claims `support: false`.
+
 ## API
 
 The node-free contract is
@@ -57,7 +64,11 @@ public body or reaches the device. Numeric plan limits and the unpublished
 provider privacy copy are maintained in the private hosted-service repository.
 
 The body deletes audio and transient text at its ten-minute expiry, on Cancel
-and at restart. It keeps at most 100,000 metadata-only UUID tombstones so an old
-request cannot be submitted again after restoring disk state. New uploads are
+and at restart. It retains metadata-only UUID tombstones for 24 hours from Begin,
+with at most 100,000 records; expired records are deleted so capacity recovers.
+The body refuses repeat dispatch while a tombstone remains. After body metadata
+expires or its disk is restored, the hosted service's permanent request hold
+still prevents the same installation/device/UUID from dispatching to the provider
+again. New uploads are
 limited to eight globally, two per device and six starts per device per minute;
 capacity refusal leaves local dictation available.

@@ -146,7 +146,8 @@ export interface ClankieAppDependencies {
   hostedCredits?: Pick<HostedBodyClient, "readCredits">;
   composerTranscriptions?: ComposerTranscriptions;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
-  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
+  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice"> &
+    Partial<Pick<HostedDeviceSecurity, "publishSupportDevice">>;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */

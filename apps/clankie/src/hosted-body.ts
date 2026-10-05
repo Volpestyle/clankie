@@ -10,6 +10,10 @@ import {
 } from "@clankie/protocol/public-gateway";
 import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
 import type { CredentialStore } from "@clankie/credential-broker";
+import {
+  HostedDevicePurposeRequestSchema,
+  HostedSupportDeviceStateSchema,
+} from "@clankie/protocol/hosted-device-security";
 import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
 import {
   HOSTED_COMPOSER_STATUS_PATH,
@@ -328,11 +332,12 @@ const SecurityStateClaimsSchema = z
       .object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/u), gen: z.number().int().nonnegative() })
       .strict()
       .nullable(),
+    sp: z.array(HostedSupportDeviceStateSchema).max(1024).optional(),
   })
   .strict();
 export type HostedSecurityState = Pick<
   z.infer<typeof SecurityStateClaimsSchema>,
-  "gen" | "rev" | "ak" | "pk"
+  "gen" | "rev" | "ak" | "pk" | "sp"
 >;
 
 /** Resource/key refusal is not revocation of this body's entitlement. */
@@ -626,7 +631,14 @@ export class HostedBodyClient {
     this.credential = credential;
   }
   async post(
-    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "discord-key" | "devices/revoke" | "auth-key",
+    path:
+      | "wake-keys"
+      | "wake-keys/revoke"
+      | "heartbeat"
+      | "discord-key"
+      | "devices/revoke"
+      | "auth-key"
+      | "device-purpose",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();
@@ -641,7 +653,7 @@ export class HostedBodyClient {
       credential.token,
       async (response, nonce) => {
         const wire = z
-          .object({ state: z.string().max(256_000) })
+          .object({ state: z.string().max(1_048_576) })
           .strict()
           .parse(await response.json());
         const claims = SecurityStateClaimsSchema.parse(
@@ -657,11 +669,20 @@ export class HostedBodyClient {
           claims.exp <= claims.iat ||
           claims.exp - claims.iat > 60 ||
           claims.rev.some((entry) => entry.gen > claims.gen) ||
+          claims.sp?.some(
+            (entry) => entry.gen > claims.gen || entry.inst !== this.bootstrap.installationId,
+          ) ||
           (claims.ak !== null && claims.ak.gen > claims.gen) ||
           (claims.pk !== null && claims.pk.gen > claims.gen)
         )
           throw new Error("Invalid hosted security state");
-        state = { gen: claims.gen, rev: claims.rev, ak: claims.ak, pk: claims.pk };
+        state = {
+          gen: claims.gen,
+          rev: claims.rev,
+          ak: claims.ak,
+          pk: claims.pk,
+          ...(claims.sp === undefined ? {} : { sp: claims.sp }),
+        };
       },
     );
     if (state === undefined) throw new Error("Hosted security state unavailable");
@@ -672,6 +693,15 @@ export class HostedBodyClient {
     z.object({ generation: z.number().int().nonnegative() })
       .strict()
       .parse(await response.json());
+  }
+  async declareSupportDevice(deviceId: string, supportGrantId: string): Promise<void> {
+    const input = HostedDevicePurposeRequestSchema.parse({
+      installationId: this.bootstrap.installationId,
+      deviceId,
+      supportGrantId,
+    });
+    const response = await this.post("device-purpose", input);
+    await response.body?.cancel();
   }
   async declareAuthKey(keyId: string, previousKeyId?: string): Promise<void> {
     const response = await this.post("auth-key", {

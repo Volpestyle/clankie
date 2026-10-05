@@ -6,6 +6,7 @@ import {
   PairingOfferRequestSchema,
   PairingRedeemRequestSchema,
   TAKE_CONTROL_GRANTS,
+  type DeviceRecord,
   type DeviceSelfResponse,
   type DeviceSessionRefreshResponse,
   type DomainEvent,
@@ -57,6 +58,7 @@ export interface RegisterPairingRoutesContext {
   readonly authenticateDevice: (
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
+  readonly publishHostedSupportDevice: (record: DeviceRecord) => Promise<void>;
   readonly deviceDenialResponse: (context: Context, denial: DeviceAuthDenial) => Response;
   readonly deviceLocks: Map<string, Promise<unknown>>;
   readonly devices: DeviceRegistry;
@@ -231,6 +233,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       platform: parsed.data.device.platform,
       offeredGrants: TAKE_CONTROL_GRANTS,
       mintedBy: taken.offer.mintedBy,
+      ...(taken.offer.supportGrantId === undefined ? {} : { supportGrantId: taken.offer.supportGrantId }),
       ...(taken.offer.review === undefined ? {} : { review: true }),
       pendingExpiresAt,
     });
@@ -278,6 +281,14 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         return context.json({ error: "expired" }, 410);
       if (record.status === "revoked") return context.json({ error: "revoked" }, 403);
       if (record.status !== "pending") return context.json({ error: "consumed" }, 409);
+      try {
+        await ctx.publishHostedSupportDevice(record);
+      } catch {
+        return context.json({ error: "device_authentication_unavailable" }, 503);
+      }
+      const fresh = ctx.devices.get(pending.deviceId);
+      if (fresh?.status !== "pending" || isDevicePendingExpired(fresh, ctx.clock()))
+        return context.json({ error: "expired" }, 410);
       const current = ctx.completionTokens.get(tokenHash);
       if (current === undefined || current.consumed) return context.json({ error: "consumed" }, 409);
       current.consumed = true;

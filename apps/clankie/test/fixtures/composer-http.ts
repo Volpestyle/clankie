@@ -23,6 +23,10 @@ import { GatewayEncryptionHost, sealGatewayValue, openGatewayValue } from "../..
 import { HostedDeviceSecurity } from "../../src/hosted-device-security.ts";
 import { HostedBodyClient } from "../../src/hosted-body.ts";
 import { hostedFixture } from "./hosted-body.ts";
+import {
+  HostedDevicePurposeRequestSchema,
+  type HostedSupportDeviceState,
+} from "@clankie/protocol/hosted-device-security";
 
 const closes: Array<() => Promise<void>> = [];
 export async function closeComposerFixtures() {
@@ -78,6 +82,12 @@ export async function composerHttpFixture(managed = true) {
     loseResponse = false,
     providerGate: ReturnType<typeof gate> | undefined;
   let cloudState: "available" | "allowance_exhausted" | "unavailable" = "available";
+  const hosted = hostedFixture();
+  let gen = 0,
+    authKey: { kid: string; gen: number } | null = null;
+  const supportDevices: HostedSupportDeviceState[] = [];
+  const revoked: { dev: string; at: number; gen: number }[] = [];
+  let hideSupportAcknowledgement = false;
   const reached = gate(),
     attestations: ComposerTranscriptionDevice[] = [];
   const cloudUrl = await listen(
@@ -85,12 +95,49 @@ export async function composerHttpFixture(managed = true) {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      attestations.push(body);
       res.setHeader("content-type", "application/json");
       if (req.url === "/pairing-key") {
         res.end("{}");
         return;
       }
+      if (req.url === "/auth-key") {
+        authKey = { kid: body.keyId, gen: ++gen };
+        res.end(JSON.stringify({ generation: gen }));
+        return;
+      }
+      if (req.url === "/revoke") {
+        if (!revoked.some((entry) => entry.dev === body.deviceId))
+          revoked.push({ dev: body.deviceId, at: now, gen: ++gen });
+        res.end(JSON.stringify({ generation: gen }));
+        return;
+      }
+      if (req.url === "/device-purpose") {
+        const purpose = HostedDevicePurposeRequestSchema.parse(body);
+        expect(req.headers["x-clankie-body-signature"]).toBeTypeOf("string");
+        supportDevices.push({
+          inst: purpose.installationId,
+          dev: purpose.deviceId,
+          grant: purpose.supportGrantId,
+          at: now,
+          gen: ++gen,
+        });
+        res.end("{}");
+        return;
+      }
+      if (req.url === "/security-state") {
+        res.end(
+          JSON.stringify({
+            state: hosted.security(String(req.headers["x-clankie-body-nonce"]), {
+              gen,
+              rev: revoked,
+              ak: authKey,
+              sp: hideSupportAcknowledgement ? [] : supportDevices,
+            }),
+          }),
+        );
+        return;
+      }
+      attestations.push(body);
       if (req.url === "/status")
         res.end(
           JSON.stringify({
@@ -131,7 +178,6 @@ export async function composerHttpFixture(managed = true) {
       }
     }),
   );
-  const hosted = hostedFixture();
   const hostedClient = new HostedBodyClient(hosted.bootstrap, {
     clock: () => hosted.now,
     fetch: async (url, options) =>
@@ -155,20 +201,9 @@ export async function composerHttpFixture(managed = true) {
     installationId = "i".repeat(22),
     hostId = derivePublicGatewayHostId("fixture-owner", installationId);
   const host = new GatewayEncryptionHost(hostId, randomBytes(32));
-  let credential!: GatewayEncryptionCredential,
-    app!: ClankieApp,
-    gen = 0;
-  let authKey: { kid: string; gen: number } | null = null;
-  const security = new HostedDeviceSecurity(
-    {
-      readSecurityState: async () => ({ gen, rev: [], ak: authKey, pk: null }),
-      declareAuthKey: async (keyId) => {
-        authKey = { kid: keyId, gen: ++gen };
-      },
-      revokeDevice: async () => {},
-    },
-    join(root, "auth.json"),
-  );
+  let credential!: GatewayEncryptionCredential, app!: ClankieApp;
+  let nextSupportGrantId: string | undefined;
+  const security = new HostedDeviceSecurity(hostedClient, join(root, "auth.json"));
   const make = async () => {
     app = await createClankieApp({
       captain: createStubCaptain(),
@@ -189,6 +224,7 @@ export async function composerHttpFixture(managed = true) {
           : undefined,
       pairingOfferPublisher: {
         publishPairingOffer: async (offer) => {
+          if (nextSupportGrantId !== undefined) Reflect.set(offer, "supportGrantId", nextSupportGrantId);
           credential = host.pairingCredential(offer);
         },
       },
@@ -233,7 +269,25 @@ export async function composerHttpFixture(managed = true) {
       open: async (k, text, aad) => openGatewayValue(Buffer.from(k, "base64"), text, aad),
     },
   });
-  const pair = async (grants: DeviceGrantSet = SUPERVISE_GRANTS, ownerToken = "owner") => {
+  const finishPairing = async (completionToken: string, grants: DeviceGrantSet = SUPERVISE_GRANTS) => {
+    const complete = await encrypted(`${base}/v1/pairing/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ completionToken, acceptedGrants: grants }),
+    });
+    const device = await complete.json();
+    if (!complete.ok)
+      throw Object.assign(new Error(device.error), { status: complete.status, completionToken });
+    credential.ticket = complete.headers.get("x-clankie-encryption-ticket")!;
+    credential.key = complete.headers.get("x-clankie-encryption-key")!;
+    return { deviceId: device.deviceId as string, token: device.deviceToken as string };
+  };
+  const pair = async (
+    grants: DeviceGrantSet = SUPERVISE_GRANTS,
+    ownerToken = "owner",
+    supportGrantId?: string,
+  ) => {
+    nextSupportGrantId = supportGrantId;
     const offer = await (
       await fetch(`${bodyUrl}/v1/pairing/offer`, {
         method: "POST",
@@ -246,17 +300,10 @@ export async function composerHttpFixture(managed = true) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ offerSecret, device: { name: "Fixture phone", platform: "ios" } }),
     });
-    credential.ticket = redeem.headers.get("x-clankie-encryption-ticket")!;
     const pending = await redeem.json();
-    const complete = await encrypted(`${base}/v1/pairing/complete`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ completionToken: pending.completionToken, acceptedGrants: grants }),
-    });
-    credential.ticket = complete.headers.get("x-clankie-encryption-ticket")!;
-    credential.key = complete.headers.get("x-clankie-encryption-key")!;
-    const device = await complete.json();
-    return { deviceId: pending.deviceId as string, token: device.deviceToken as string };
+    if (!redeem.ok) throw Object.assign(new Error(pending.error), { status: redeem.status });
+    credential.ticket = redeem.headers.get("x-clankie-encryption-ticket")!;
+    return finishPairing(pending.completionToken, grants);
   };
   const device = await pair();
   const api = createComposerTranscriptionApi({
@@ -293,6 +340,11 @@ export async function composerHttpFixture(managed = true) {
     key,
     bodyUrl,
     pair,
+    finishPairing,
+    supportDevices,
+    hideSupportAcknowledgement: (hidden: boolean) => {
+      hideSupportAcknowledgement = hidden;
+    },
     upload,
     spent: () => spent,
     status: (state: typeof cloudState) => {

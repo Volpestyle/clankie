@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it } from "vitest";
 import { SUPERVISE_GRANTS } from "@clankie/protocol";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
@@ -88,7 +89,7 @@ it("refuses malformed audio, expired/read-only/revoked sessions before spend and
       })
     ).status,
   ).toBe(401);
-  const support = await f.pair(SUPERVISE_GRANTS, "support-owner");
+  const support = await f.pair(SUPERVISE_GRANTS, "owner", randomUUID());
   expect(
     (
       await fetch(`${f.bodyUrl}/v1/composer/transcription/status`, {
@@ -121,6 +122,67 @@ it("refuses malformed audio, expired/read-only/revoked sessions before spend and
     ).status,
   ).toBe(401);
   expect(second.spent()).toBe(before);
+});
+
+it("reclaims the SQLite request capacity at 24 hours while keeping the ten-minute audio lifetime", async () => {
+  const f = await fixture();
+  const database = () => new DatabaseSync(join(f.root, "composer/requests.sqlite"));
+  const seeded = database();
+  seeded
+    .prepare(`WITH RECURSIVE ids(value) AS (
+    SELECT 1 UNION ALL SELECT value+1 FROM ids WHERE value<100000
+  ) INSERT INTO requests(id,device,bytes,received,expires,state)
+  SELECT printf('00000000-0000-4000-8000-%012d',value),?,46,0,?,'cancelled' FROM ids`)
+    .run(f.device.deviceId, f.now() + 10 * 60_000);
+  seeded.close();
+  await expect(f.api.begin({ requestId: randomUUID(), audioBytes: 46 })).rejects.toMatchObject({
+    status: 429,
+  });
+  f.advance(24 * 60 * 60_000 - 1);
+  await expect(f.api.begin({ requestId: randomUUID(), audioBytes: 46 })).rejects.toMatchObject({
+    status: 429,
+  });
+  f.advance(2);
+  const resumed = await f.upload(wav());
+  const reclaimed = database();
+  expect(reclaimed.prepare("SELECT count(*) AS total FROM requests").get()?.total).toBe(1);
+  reclaimed.close();
+  await expect(f.api.receipt("00000000-0000-4000-8000-000000000001")).rejects.toMatchObject({ status: 404 });
+  expect(f.spent()).toBe(0);
+  f.advance(10 * 60_000);
+  expect((await f.api.receipt(resumed)).state).toBe("cancelled");
+  expect(readdirSync(join(f.root, "composer/audio"))).toEqual([]);
+});
+
+it("confirms the real support marker in signed fleet state before session mint, restores it and refuses composer authority", async () => {
+  const f = await fixture(),
+    grantId = randomUUID();
+  f.hideSupportAcknowledgement(true);
+  let pending!: { status: number; completionToken: string };
+  try {
+    await f.pair(SUPERVISE_GRANTS, "owner", grantId);
+  } catch (error) {
+    pending = error as typeof pending;
+  }
+  expect(pending.status).toBe(503);
+  const marker = f.supportDevices[0]!;
+  expect(marker.grant).toBe(grantId);
+  const devices = await (
+    await fetch(`${f.bodyUrl}/v1/devices`, {
+      headers: { authorization: "Bearer owner" },
+    })
+  ).json();
+  expect(devices.find((entry: { deviceId: string }) => entry.deviceId === marker.dev).status).toBe("pending");
+  f.hideSupportAcknowledgement(false);
+  const support = await f.finishPairing(pending.completionToken);
+  expect(support.deviceId).toBe(marker.dev);
+  await f.restart();
+  expect(f.supportDevices).toHaveLength(1);
+  const response = await fetch(`${f.bodyUrl}/v1/composer/transcription/status`, {
+    headers: { authorization: `Bearer ${support.token}` },
+  });
+  expect(response.status).toBe(401);
+  expect(f.spent()).toBe(0);
 });
 
 it("cleans restart/TTL captures and never resends audio after a lost provider receipt or body restart", async () => {
