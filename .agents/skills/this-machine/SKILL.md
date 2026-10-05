@@ -276,12 +276,16 @@ confirm those through the native harness. Unavailable observations stay unproven
 `clankie herdr prepare FLEET_ID [--project PROJECT] [--approve]` read the effective
 `fleet.machineSetup` policy. Under `lead`, existing authorized access may prepare
 Clankie's own setup on an already-linked machine; under `owner`, obtain explicit
-owner approval. Setup preserves source/account fences and never restarts or
+owner approval. `--approve` requires confirmation in an interactive terminal;
+it is refused headlessly. A new source setup script needs owner consent under
+either policy; automatic setup uses the native plugin manager or an exact,
+already-remembered source setup. The server records consent as a caller claim,
+not verified human presence. Setup preserves source/account fences and never restarts or
 steers an existing lane.
 Updates and checkout/release installs automatically refresh existing links on
 this machine and enabled SSH fleets with `clankie harness install --refresh-linked`.
 Direct refresh rechecks current policy and linkage for each target; supply the
-owner's explicit `--approve` under `owner`. Automatic installer refresh maintains
+owner's interactive `--approve` confirmation under `owner`. Automatic installer refresh maintains
 existing links within the already-authorized update.
 Check its per-profile/fleet receipts: missing managed Codex source setup stays
 `source-manager-required`, and a healthy runtime update may still report

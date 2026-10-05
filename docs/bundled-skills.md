@@ -55,7 +55,7 @@ The `lead` and `linear-issues` skills read the current effective
 owner-global `linear-grind` source follows the same closure policy; it remains
 unbundled. Defaults delegate closure and already-linked machine setup to the
 lead, while genuine owner-only actions retain their boundary. See
-[fleet responsibility](adr/0227-fleet-responsibility-is-owner-settings.md).
+[fleet responsibility](adr/0230-fleet-responsibility-is-owner-settings.md).
 
 Turning guidance off does not disable leading. `herdr` remains
 available as tool references. Disabled names and the merged `swarm-lead` and
@@ -210,5 +210,5 @@ his ordinary tools; the turn stays visible and interruptible.
 starts that skill through the console's normal conversation path. It tells
 Clankie to inspect and harvest before closing, give a one-line reason, and say
 what he closed. Saved reports and last output remain in roster history; Undo
-reopens and resumes within five minutes. See [ADR 0227](adr/0226-quick-actions-are-skills-and-tidy-keeps-results.md)
+reopens and resumes within five minutes. See [ADR 0230](adr/0226-quick-actions-are-skills-and-tidy-keeps-results.md)
 for native input evidence, refusal reasons and the remaining read/close race.

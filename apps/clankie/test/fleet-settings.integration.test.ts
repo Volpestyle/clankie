@@ -67,9 +67,11 @@ async function fixture() {
   let revokeAt = Infinity;
   let authCalls = 0;
   const prepared: Array<{ id: string; options: { codexSourceSetup?: string } }> = [];
+  const preparedTargets: Array<{ id: string; session: string; ssh: { host: string; shell: string } }> = [];
   const refreshed: string[] = [];
   let refreshCalls = 0;
   const refreshHooks: { beforeRemote?: (() => Promise<void>) | undefined } = {};
+  const authHooks: { beforeReturn?: (() => Promise<void>) | undefined } = {};
   const binding = { runtime: "external" as const, session: "default", socketPath: join(root, "herdr.sock") };
   const runtimes = new ExecutionConnections({
     settings,
@@ -84,12 +86,15 @@ async function fixture() {
     settings,
     runtimes,
     herdrBinding: () => binding,
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer owner" && authorized && ++authCalls < revokeAt
-        ? { operatorId: "owner" }
-        : undefined,
-    prepareFleet: async (id, options) => {
+    authenticateOperator: async (request) => {
+      if (request.headers.get("authorization") !== "Bearer owner" || !authorized || ++authCalls >= revokeAt)
+        return undefined;
+      await authHooks.beforeReturn?.();
+      return { operatorId: "owner" };
+    },
+    prepareFleet: async (id, options, target) => {
       prepared.push({ id, options });
+      preparedTargets.push(target);
       return { machine: "pc" };
     },
     refreshHarnesses: async (authority) => {
@@ -124,6 +129,8 @@ async function fixture() {
     client,
     request,
     prepared,
+    preparedTargets,
+    authHooks,
     refreshed,
     refreshHooks,
     refreshCalls: () => refreshCalls,
@@ -187,9 +194,13 @@ it("gates explicit linked refresh with canonical current source policy, per-targ
   ).toBe(400);
   expect((await f.request(path, { workingDirectory: f.cwd })).status).toBe(403);
   expect(f.refreshCalls()).toBe(0);
-  expect(
-    (await f.request(path, { workingDirectory: f.cwd, projectId: "garden", ownerApproved: true })).status,
-  ).toBe(200);
+  const approved = await f.request(path, {
+    workingDirectory: f.cwd,
+    projectId: "garden",
+    ownerApproved: true,
+  });
+  expect(approved.status).toBe(200);
+  expect((await approved.json()).ownerApproval).toBe("claimed");
   expect(f.refreshed).toEqual(["local", "pc-work"]);
   for (const input of [
     { workingDirectory: f.cwd, projectId: "other", ownerApproved: true },
@@ -215,7 +226,9 @@ it("gates explicit linked refresh with canonical current source policy, per-targ
       })),
     }),
   }));
-  expect((await f.request(path, { workingDirectory: f.cwd })).status).toBe(200);
+  const automatic = await f.request(path, { workingDirectory: f.cwd });
+  expect(automatic.status).toBe(200);
+  expect((await automatic.json()).ownerApproval).toBe("not_claimed");
   f.disconnect();
   const refreshedBefore = f.refreshed.length;
   const disconnected = await f.request(path, { workingDirectory: f.cwd });
@@ -305,12 +318,17 @@ it("derives policy from the real local source cwd, verifies aliases and current 
   const context = FleetSettingsContextSchema.parse(
     await f.client.fleetSettingsContext({ workingDirectory: alias, machine: "pc-work", projectId: "garden" }),
   );
-  expect(context).toEqual({
+  expect(context).toMatchObject({
     schemaVersion: 1,
     effective: { closure: "owner", machineSetup: "owner" },
     projectId: "garden",
     machine: { id: "pc", linked: true },
   });
+  expect(context.machine.targetRevision).toMatch(/^[a-f0-9]{64}$/u);
+  expect(
+    (await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "pc-work" })).machine
+      .targetRevision,
+  ).toBe(context.machine.targetRevision);
   expect(
     (await f.client.fleetSettingsContext({ workingDirectory: f.other, machine: "local" })).effective,
   ).toEqual({ closure: "lead", machineSetup: "lead" });
@@ -388,23 +406,34 @@ it("uses real Git registration for sibling worktree policy and denies unregister
   );
 });
 
-it("requires explicit approval under owner machineSetup and a linked target for automatic lead preparation", async () => {
+it("records caller approval claims and requires consent for owner policy or newly supplied source scripts", async () => {
   const f = await fixture();
   const path = "/v1/runtime-connections/pc-work/prepare";
   expect((await f.request(path, { workingDirectory: f.cwd })).status).toBe(403);
   expect(f.prepared).toEqual([]);
-  expect(
-    (
-      await f.request(path, {
-        workingDirectory: f.cwd,
-        projectId: "garden",
-        ownerApproved: true,
-        codexSourceSetup: "/owner/setup.py",
-      })
-    ).status,
-  ).toBe(200);
+  const approved = await f.request(path, {
+    workingDirectory: f.cwd,
+    projectId: "garden",
+    ownerApproved: true,
+    codexSourceSetup: "/owner/setup.py",
+  });
+  expect(approved.status).toBe(200);
+  expect(await approved.json()).toEqual({ ok: true, prepared: { machine: "pc" }, ownerApproval: "claimed" });
   expect(f.prepared).toEqual([{ id: "pc-work", options: { codexSourceSetup: "/owner/setup.py" } }]);
-  expect((await f.request(path, { workingDirectory: f.other })).status).toBe(200);
+  expect(f.preparedTargets).toEqual([
+    { id: "pc-work", session: "work", ssh: { host: "fixture.invalid", shell: "posix" } },
+  ]);
+  const freshSource = await f.request(path, { workingDirectory: f.other, codexSourceSetup: "/new/setup.py" });
+  expect(freshSource.status).toBe(403);
+  expect(await freshSource.json()).toEqual({ error: "machine_setup_owner_approval_required" });
+  expect(f.prepared).toHaveLength(1);
+  const automatic = await f.request(path, { workingDirectory: f.other });
+  expect(automatic.status).toBe(200);
+  expect(await automatic.json()).toEqual({
+    ok: true,
+    prepared: { machine: "pc" },
+    ownerApproval: "not_claimed",
+  });
   f.disconnect();
   expect((await f.request(path, { workingDirectory: f.other })).status).toBe(403);
   expect(
@@ -422,4 +451,114 @@ it("requires explicit approval under owner machineSetup and a linked target for 
   f.revoke();
   expect((await f.request(path, { workingDirectory: f.cwd, ownerApproved: true })).status).toBe(401);
   expect(f.prepared).toHaveLength(2);
+});
+
+it("refuses fleet retargeting during final owner authentication before preparing the captured target", async () => {
+  const f = await fixture();
+  let calls = 0;
+  f.authHooks.beforeReturn = async () => {
+    if (++calls !== 2) return;
+    await f.settings.update((current) => ({
+      ...current,
+      machines: current.machines.map((machine) => ({ ...machine, ssh: "retargeted-fixture.invalid" })),
+      agentHosts: {
+        connections: current.agentHosts.connections.map((host) => ({
+          ...host,
+          ssh: "retargeted-fixture.invalid",
+        })),
+      },
+      execution: {
+        connections: current.execution.connections.map((connection) => ({
+          ...connection,
+          session: "retargeted",
+          ssh: { ...connection.ssh!, host: "retargeted-fixture.invalid" },
+        })),
+      },
+    }));
+  };
+  const response = await f.request("/v1/runtime-connections/pc-work/prepare", {
+    workingDirectory: f.cwd,
+    ownerApproved: true,
+    codexSourceSetup: "/owner/setup.py",
+  });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    error: "fleet_prepare_failed",
+    detail: "Machine setup settings changed",
+  });
+  expect(f.prepared).toEqual([]);
+  expect(f.preparedTargets).toEqual([]);
+});
+
+it("pins preparation claims to the registered target shown during consent while legacy claims use the current alias", async () => {
+  const f = await fixture();
+  const path = "/v1/runtime-connections/pc-work/prepare";
+  const input = { workingDirectory: f.cwd, machine: "pc-work" };
+  const prompted = await f.client.fleetSettingsContext(input);
+  const claimed = await f.request(path, {
+    workingDirectory: f.cwd,
+    ownerApproved: true,
+    expectedMachineRevision: prompted.machine.targetRevision,
+  });
+  expect(claimed.status).toBe(200);
+  expect((await claimed.json()).ownerApproval).toBe("claimed");
+  await f.settings.update((current) => ({
+    ...current,
+    machines: current.machines.map((machine) => ({ ...machine, ssh: "new-fixture.invalid" })),
+    agentHosts: {
+      connections: current.agentHosts.connections.map((host) => ({ ...host, ssh: "new-fixture.invalid" })),
+    },
+    execution: {
+      connections: current.execution.connections.map((connection) => ({
+        ...connection,
+        session: "new-session",
+        ssh: { ...connection.ssh!, host: "new-fixture.invalid" },
+      })),
+    },
+  }));
+  const rebound = await f.client.fleetSettingsContext(input);
+  expect(rebound.machine.id).toBe(prompted.machine.id);
+  expect(rebound.machine.targetRevision).not.toBe(prompted.machine.targetRevision);
+  const stale = await f.request(path, {
+    workingDirectory: f.cwd,
+    ownerApproved: true,
+    expectedMachineRevision: prompted.machine.targetRevision,
+  });
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toEqual({ error: "machine_setup_target_changed" });
+  expect(f.prepared).toHaveLength(1);
+  expect(
+    (
+      await f.request(path, {
+        workingDirectory: f.cwd,
+        ownerApproved: true,
+        expectedMachineRevision: rebound.machine.targetRevision,
+      })
+    ).status,
+  ).toBe(200);
+  expect(f.preparedTargets.at(-1)).toEqual({
+    id: "pc-work",
+    session: "new-session",
+    ssh: { host: "new-fixture.invalid", shell: "posix" },
+  });
+  const currentAlias = await f.request(path, { workingDirectory: f.cwd, ownerApproved: true });
+  expect(currentAlias.status).toBe(200);
+  expect((await currentAlias.json()).ownerApproval).toBe("claimed");
+  const malformed = await f.request(path, {
+    workingDirectory: f.cwd,
+    ownerApproved: true,
+    expectedMachineRevision: "not-a-revision",
+  });
+  expect(malformed.status).toBe(400);
+  expect(f.prepared).toHaveLength(3);
+  expect(
+    (
+      await f.request("/v1/harness-refresh", {
+        workingDirectory: f.cwd,
+        ownerApproved: true,
+        expectedMachineRevision: rebound.machine.targetRevision,
+      })
+    ).status,
+  ).toBe(400);
+  expect(f.refreshCalls()).toBe(0);
 });

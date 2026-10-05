@@ -56,7 +56,14 @@ export const FleetSettingsContextSchema = z
     schemaVersion: z.literal(1),
     effective: z.object({ closure: FleetAutonomyModeSchema, machineSetup: FleetAutonomyModeSchema }).strict(),
     projectId: ProjectIdSchema.optional(),
-    machine: z.object({ id: MachineRefSchema, linked: z.boolean() }).strict(),
+    machine: z
+      .object({
+        id: MachineRefSchema,
+        linked: z.boolean(),
+        /** Nonsecret revision of the resolved registered target, including its transport and session. */
+        targetRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+      })
+      .strict(),
   })
   .strict();
 export type FleetSettingsContext = z.infer<typeof FleetSettingsContextSchema>;
@@ -66,12 +73,22 @@ export const FleetPrepareRequestSchema = z
   .object({
     workingDirectory: AbsolutePathSchema,
     projectId: ProjectIdSchema.optional(),
+    /** Caller-reported owner consent, still subject to current operator authority and policy fences. */
     ownerApproved: z.boolean().default(false),
+    /** Pins the target shown during caller consent; omission claims the current alias target. */
+    expectedMachineRevision: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+    /** A newly supplied source script always requires claimed owner consent. */
     codexSourceSetup: AbsolutePathSchema.optional(),
   })
   .strict();
 export type FleetPrepareRequest = z.infer<typeof FleetPrepareRequestSchema>;
 
 /** Refresh only existing links; source-manager approvals remain their own recorded proof. */
-export const FleetHarnessRefreshRequestSchema = FleetPrepareRequestSchema.omit({ codexSourceSetup: true });
+export const FleetHarnessRefreshRequestSchema = FleetPrepareRequestSchema.omit({
+  codexSourceSetup: true,
+  expectedMachineRevision: true,
+});
 export type FleetHarnessRefreshRequest = z.infer<typeof FleetHarnessRefreshRequestSchema>;

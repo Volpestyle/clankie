@@ -1312,7 +1312,7 @@ paths:
       tags: [Operator]
       operationId: prepareFleetHarnesses
       summary: Prepare Clankie's own harness setup on an existing machine
-      description: Resolves policy from the verified service-local source workspace and checks the target's current link independently. Lead setup requires an already-linked target. Owner policy requires explicit ownerApproved. This retains operator authority and never restarts or steers existing lanes.
+      description: Resolves policy from the verified service-local source workspace and checks the target's current link independently. Lead setup requires an already-linked target. Owner policy or a newly supplied source script requires the caller's ownerApproved consent claim. The service records that claim without verifying human confirmation. expectedMachineRevision pins the exact registered target shown to the caller; omission claims the alias's current target. This retains operator authority and never restarts or steers existing lanes.
       security: [{ operatorBearer: [] }]
       parameters:
         - {
@@ -1336,14 +1336,40 @@ paths:
                 projectId:
                   { type: string, description: Optional assertion matching verified source membership }
                 ownerApproved:
-                  { type: boolean, default: false, description: Explicit owner approval for this preparation }
+                  {
+                    type: boolean,
+                    default: false,
+                    description: Caller-reported owner consent; the service cannot verify human confirmation,
+                  }
+                expectedMachineRevision:
+                  {
+                    type: string,
+                    pattern: "^[a-f0-9]{64}$",
+                    description: Target revision from the context shown during consent; a mismatch refuses preparation. Omission claims the current alias target,
+                  }
                 codexSourceSetup:
                   {
                     type: string,
-                    description: Absolute source-owned script path on the target machine; existing source and configuration fences remain,
+                    description: Absolute source-owned script path on the target machine; supplying a script requires ownerApproved even under lead policy. Existing source and configuration fences remain,
                   }
       responses:
-        "200": { description: Existing harness preparation result }
+        "200":
+          description: Harness preparation result and the caller's consent claim
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, prepared, ownerApproval]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+                  prepared: { type: object }
+                  ownerApproval:
+                    {
+                      type: string,
+                      enum: [claimed, not_claimed],
+                      description: Caller-reported consent,
+                      never verified human approval,
+                    }
         "400": { description: Malformed request }
         "401": { description: Operator authentication required }
         "403": { description: Owner approval or existing linked target required }
@@ -1414,7 +1440,7 @@ paths:
       tags: [Operator]
       operationId: getFleetSettingsContext
       summary: Resolve current project policy and already-linked setup target
-      description: Verifies a local source directory and Git worktree separately from the registered target machine. Invalid or ambiguous project evidence fails closed. This filesystem route is excluded from hosted-device forwarding.
+      description: Verifies a local source directory and Git worktree separately from the registered target machine. Returns a nonsecret targetRevision hashing the resolved execution descriptor, including transport and session, so consent can be pinned across requests. Machine aliases hash their registration set rather than selecting an arbitrary runtime. Invalid or ambiguous project evidence fails closed. This filesystem route is excluded from hosted-device forwarding.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -1439,11 +1465,28 @@ paths:
           }
       responses:
         "200":
-          {
-            description: Effective closure and machineSetup,
-            matched projectId when present,
-            and target machine id/linked observation,
-          }
+          description: Effective policy, matched project and current target observation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, effective, machine]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  effective:
+                    type: object
+                    required: [closure, machineSetup]
+                    properties:
+                      closure: { type: string, enum: [lead, owner] }
+                      machineSetup: { type: string, enum: [lead, owner] }
+                  projectId: { type: string }
+                  machine:
+                    type: object
+                    required: [id, linked, targetRevision]
+                    properties:
+                      id: { type: string }
+                      linked: { type: boolean }
+                      targetRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
         "400": { description: Malformed query }
         "401": { description: Owner authentication required }
         "403": { description: Caller lacks owner authority }
@@ -1543,7 +1586,7 @@ paths:
       tags: [Operator]
       operationId: refreshLinkedHarnessPlugins
       summary: Refresh existing native worker plugin links locally and on enabled fleet machines
-      description: Uses the native harness installer without enrolling new profiles, changing channel policy or restarting panes. The canonical source workspace selects current machineSetup policy; owner mode requires explicit approval, and automatic lead refresh requires an already-linked target. Current operator authority, source context and each captured fleet destination are revalidated before refresh. Returns per-profile and per-fleet outcomes; ok is false for incomplete installation, missing source setup or unreachable machines.
+      description: Uses the native harness installer without enrolling new profiles, changing channel policy or restarting panes. The canonical source workspace selects current machineSetup policy; owner mode requires the caller's ownerApproved consent claim, and automatic lead refresh requires an already-linked target. The service records the claim without verifying human confirmation. Current operator authority, source context and each captured fleet destination are revalidated before refresh. Returns per-profile and per-fleet outcomes; ok is false for incomplete installation, missing source setup or unreachable machines.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1569,7 +1612,7 @@ paths:
                   {
                     type: boolean,
                     default: false,
-                    description: Explicit owner approval; confers no additional credential or lane authority,
+                    description: Caller-reported owner consent; the service cannot verify human confirmation and this confers no additional credential or lane authority,
                   }
       responses:
         "200":
@@ -1578,12 +1621,19 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, local, fleets, notices]
+                required: [ok, local, fleets, notices, ownerApproval]
                 properties:
                   ok: { type: boolean }
                   local: { type: array, items: { type: object } }
                   fleets: { type: array, items: { type: object } }
                   notices: { type: object }
+                  ownerApproval:
+                    {
+                      type: string,
+                      enum: [claimed, not_claimed],
+                      description: Caller-reported consent,
+                      never verified human approval,
+                    }
         "400": { description: Invalid refresh context request }
         "403":
           {

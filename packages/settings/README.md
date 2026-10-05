@@ -156,5 +156,5 @@ Global owner settings store `autonomy.fleet.closure` and
 `autonomy.fleet` leaves are optional and inherit independently; a null patch
 removes only one override. The logical CLI/API fleet view places them beside
 size/models. Configure through `clankie fleet set` and `clankie project settings`,
-not direct file edits. See [ADR 0227](../../docs/adr/0227-fleet-responsibility-is-owner-settings.md)
+not direct file edits. See [ADR 0230](../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)
 for responsibility, owner-only boundaries and future envelope alignment.

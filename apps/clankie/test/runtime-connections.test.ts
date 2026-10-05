@@ -359,9 +359,18 @@ it("prepares registered fleets only for the owner and passes remote source setup
       "C:\\Owner Source\\setup.py",
       "\\\\pc\\source\\setup.py",
     ]) {
-      expect(
-        await runRuntimeCommand(["prepare", "pc", "--codex-source-setup", codexSourceSetup], cli),
-      ).toMatchObject({ ok: true });
+      const before = seen.length;
+      await expect(
+        runRuntimeCommand(["prepare", "pc", "--codex-source-setup", codexSourceSetup], cli),
+      ).rejects.toThrow();
+      expect(seen).toHaveLength(before);
+      const claimed = await app.app.request("/v1/runtime-connections/pc/prepare", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer owner" },
+        body: JSON.stringify({ workingDirectory: f.root, ownerApproved: true, codexSourceSetup }),
+      });
+      expect(claimed.status).toBe(200);
+      expect(await claimed.json()).toMatchObject({ ok: true, ownerApproval: "claimed" });
     }
     expect(seen).toEqual([
       { id: "pc", options: {} },

@@ -58,7 +58,7 @@ describe("clankie herdr", () => {
 
 describe("clankie herdr prepare", () => {
   it.each([undefined, "/owner/source/setup.py", "C:\\Owner Source\\setup.py", "\\\\pc\\source\\setup.py"])(
-    "passes the remote source setup %s through the runtime prepare request",
+    "passes automatic prepare or refuses new remote source setup %s without owner consent",
     async (codexSourceSetup) => {
       const args = [
         "prepare",
@@ -72,26 +72,31 @@ describe("clankie herdr prepare", () => {
           return Response.json({
             schemaVersion: 1,
             effective: { closure: "lead", machineSetup: "lead" },
-            machine: { id: "pc", linked: true },
+            machine: { id: "pc", linked: true, targetRevision: "a".repeat(64) },
           });
         expect(String(url)).toBe("http://fixture/v1/runtime-connections/pc%20fleet/prepare");
         expect(init?.method).toBe("POST");
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture");
         expect(JSON.parse(init!.body as string)).toEqual({
           workingDirectory: process.cwd(),
+          expectedMachineRevision: "a".repeat(64),
           ownerApproved: false,
           ...(codexSourceSetup === undefined ? {} : { codexSourceSetup }),
         });
         return Response.json({ ok: true });
       });
-      expect(
-        await runRuntimeCommand(runtimeArgs, {
-          host: "http://fixture",
-          env: { CLANKIE_OPERATOR_TOKEN: "fixture" },
-          fetchImpl: fetchImpl as typeof fetch,
-        }),
-      ).toEqual({ ok: true });
-      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const operation = runRuntimeCommand(runtimeArgs, {
+        host: "http://fixture",
+        env: { CLANKIE_OPERATOR_TOKEN: "fixture" },
+        fetchImpl: fetchImpl as typeof fetch,
+      });
+      if (codexSourceSetup === undefined) {
+        expect(await operation).toEqual({ ok: true });
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+      } else {
+        await expect(operation).rejects.toThrow("interactive owner approval");
+        expect(fetchImpl).not.toHaveBeenCalled();
+      }
     },
   );
 
