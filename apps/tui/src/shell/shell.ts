@@ -13,7 +13,7 @@
  * onPrompt, footerData) so the clankie service stays behind
  * `@clankie/api-client`.
  */
-import { LiveAgentPicker, LiveAgentStrip } from "./live-agents.ts";
+import { agentTint, ConversationHeader, LiveAgentPicker, LiveAgentStrip } from "./live-agents.ts";
 import type { LiveAgent } from "../observation/herdr-roster.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -139,6 +139,8 @@ export interface FaceShellOptions {
   readonly onLeaveLiveAgent?: () => Promise<void>;
   readonly onOpenAgentWorkspace?: () => Promise<void>;
   readonly expandedAgent?: () => string | undefined;
+  /** The seat behind the expanded agent, when it is seated, for its tint and state. */
+  readonly expandedAgentSeatId?: () => string | undefined;
   readonly allowLocalShell?: boolean;
   readonly onHerdrJump?: (target: string) => Promise<HerdrJumpResult>;
   readonly commands: readonly FaceShellCommand[];
@@ -297,6 +299,7 @@ export class ClankieFaceShell {
   private readonly commandTypeaheadPanel: ClankieCommandTypeaheadPanel;
   private readonly footer: ClankieFooterComponent;
   private readonly liveAgents: LiveAgentStrip;
+  private readonly conversationHeader: ConversationHeader;
   private agentNavigationBusy = false;
   private liveAgentOverlay: OverlayHandle | undefined;
 
@@ -408,6 +411,16 @@ export class ClankieFaceShell {
     this.liveAgents = new LiveAgentStrip(() => this.options.liveAgents?.() ?? [], this.theme, {
       maxRows: () => Math.max(3, Math.floor(this.tui.terminal.rows * 0.5)),
     });
+    this.conversationHeader = new ConversationHeader(this.theme, () => {
+      const name = this.options.expandedAgent?.();
+      const title = this.options.footerData?.().title;
+      return {
+        ...(title === undefined ? {} : { title }),
+        ...(name === undefined ? {} : { agent: { name, ...this.viewedAgent() } }),
+      };
+    });
+    // Computed per frame: bash mode, an agent's conversation, or the quiet default.
+    this.editor.borderColor = (text) => this.editorBorder()(text);
     this.footer = new ClankieFooterComponent(this.theme.ansi, () => ({
       cwd: this.cwdValue,
       extras: this.footerExtras(),
@@ -458,6 +471,7 @@ export class ClankieFaceShell {
     this.document.addChild(this.banner);
     this.document.addChild(this.chat);
     for (const component of [
+      this.conversationHeader,
       this.document,
       this.statusContainer,
       this.pendingPrompts,
@@ -478,6 +492,7 @@ export class ClankieFaceShell {
     ]);
     this.tui.setLayoutRoot(
       new VStack([
+        { component: this.conversationHeader, basis: "auto", grow: 0, shrink: 0, minSize: 0 },
         { component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
         { component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
       ]),
@@ -1165,6 +1180,22 @@ export class ClankieFaceShell {
     return undefined;
   }
 
+  private viewedAgent(): { readonly live?: LiveAgent } {
+    const seatId = this.options.expandedAgentSeatId?.();
+    const live =
+      seatId === undefined
+        ? undefined
+        : (this.options.liveAgents?.() ?? []).find((agent) => agent.seat.seatId === seatId);
+    return live === undefined ? {} : { live };
+  }
+
+  private editorBorder(): (text: string) => string {
+    // pi's bash-mode color is the success green.
+    if (this.bashMode) return this.theme.ansi.success;
+    if (this.options.expandedAgent?.() !== undefined) return agentTint(this.viewedAgent().live, this.theme);
+    return this.theme.ansi.dim;
+  }
+
   private navigateAgent(run: () => Promise<void>): void {
     this.agentNavigationBusy = true;
     void run()
@@ -1553,8 +1584,6 @@ export class ClankieFaceShell {
   private setBashMode(on: boolean): void {
     if (this.bashMode === on) return;
     this.bashMode = on;
-    // pi's bash-mode color is the success green.
-    this.editor.borderColor = on ? this.theme.ansi.success : this.theme.ansi.dim;
     this.refreshCommandSurface(this.editor.getText());
     this.refreshStatusView();
     this.tui.requestRender();

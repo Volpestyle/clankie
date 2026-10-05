@@ -180,7 +180,7 @@ let currentDriver: import("@clankie/protocol").OperatorConversation["driver"];
 let evaluatorStatus: readonly string[] = [];
 const conversationDrafts = new Map<string, string>();
 let expandedAgent:
-  | { readonly parent: string; readonly seatId: string; readonly personaId: string; readonly name: string }
+  | { readonly parent: string; readonly seatId?: string; readonly personaId: string; readonly name: string }
   | undefined;
 let sideConversation: { readonly parentConversationId: string; readonly conversationId: string } | undefined;
 // The console is a seat only inside the fleet the service leads (ADR 0164):
@@ -267,6 +267,8 @@ const conversationsContext = {
     return (await conversationClient.fleet()).personas;
   },
   openAgent: async (agent: import("@clankie/protocol").OperatorAgentPersona) => {
+    // Whichever way an agent opens, Esc returns to where the owner came from.
+    const parent = expandedAgent?.parent ?? conversationSelection.conversationId;
     const id =
       agent.conversationId ??
       (
@@ -275,7 +277,17 @@ const conversationsContext = {
           title: agent.name,
         })
       ).conversationId;
-    return conversationsContext.select(id);
+    const selected = await conversationsContext.select(id);
+    const seatId = herdrRoster.snapshot().liveAgents?.find((live) => live.seat.personaId === agent.personaId)
+      ?.seat.seatId;
+    if (parent !== undefined && parent !== id)
+      expandedAgent = {
+        parent,
+        personaId: agent.personaId,
+        name: agent.name,
+        ...(seatId === undefined ? {} : { seatId }),
+      };
+    return selected;
   },
   close: (conversationId: string) => conversationClient.close(conversationId),
   reset: async () => {
@@ -527,6 +539,7 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
   onHerdrJump: jumpToFleetAgent,
   liveAgents: () => herdrRoster.snapshot().liveAgents ?? [],
   expandedAgent: () => expandedAgent?.name,
+  expandedAgentSeatId: () => expandedAgent?.seatId,
   onOpenLiveAgent: async ({ seat, name }) => {
     const parent = expandedAgent?.parent ?? conversationSelection.conversationId;
     if (!parent) throw new Error("No conversation is selected");
@@ -557,7 +570,8 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
     const agent = expandedAgent;
     if (!agent) return;
     const current = (await conversationClient.roster()).find(
-      (seat) => seat.seatId === agent.seatId && seat.personaId === agent.personaId,
+      (seat) =>
+        (agent.seatId === undefined || seat.seatId === agent.seatId) && seat.personaId === agent.personaId,
     );
     if (!current) throw new Error("That agent is no longer seated; its saved conversation remains available");
     const terminal = await readAgentHerdrTerminal(current, herdrOptions);
@@ -576,12 +590,7 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
     model: currentDriver === undefined ? currentModelDisplay : `${currentDriver.harness ?? "harness"} seat`,
     title: currentConversationTitle,
   }),
-  statusExtras: () => [
-    "This Mac",
-    ...evaluatorStatus,
-    ...sideConversationStatus(),
-    ...(expandedAgent ? [`${expandedAgent.name} · esc conversation · ctrl+y workspace`] : []),
-  ],
+  statusExtras: () => ["This Mac", ...evaluatorStatus, ...sideConversationStatus()],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;
