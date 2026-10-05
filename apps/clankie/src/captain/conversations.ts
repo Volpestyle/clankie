@@ -2940,6 +2940,7 @@ export class ConversationStore {
         personaId === "operator" || personaId === CHANNEL_NOTICE_AUTHOR
           ? { username: personaId }
           : ((await this.personaPresentation?.(personaId)) ?? { username: personaId });
+      if (meta.channelDiscordAutoProvision === "disabled") return;
       if (
         await this.projection.participantPost?.({
           username: presentation.username,
