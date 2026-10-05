@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -215,6 +217,63 @@ it("ordinary hosted pairing cannot become an operator by claiming macOS", async 
   await expect(createHostedTransport(session, f.store, f.fetchImpl).request("/health")).rejects.toThrow(
     "operator_device_required",
   );
+});
+it("persists fleet and project autonomy over the real signed encrypted operator bridge while preserving its route boundary", async () => {
+  const f = await fixture(),
+    session = await f.pair();
+  await f.serviceSettings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      projects: [{ id: "garden", name: "Garden", autonomy: { fleet: { closure: "owner" } } }],
+    }),
+  }));
+  const transport = createHostedTransport(session, f.store, f.fetchImpl);
+  const client = new ClankieApiClient({
+    baseUrl: transport.host,
+    operatorToken: session.deviceToken,
+    fetchImpl: transport.fetchImpl,
+  });
+  const fleet = await client.fleetSettings();
+  await client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: fleet.revision,
+    changes: { closure: "owner", machineSetup: "owner" },
+  });
+  const projects = await client.projects();
+  expect(projects.autonomyDefaults?.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
+  const changed = await client.updateProjectSettings({
+    projectId: "garden",
+    expectedRevision: projects.revision,
+    changes: { autonomy: { fleet: { closure: null, machineSetup: "lead" } } },
+  });
+  expect(changed.settings.projects[0]!.autonomy).toEqual({ fleet: { machineSetup: "lead" } });
+  const saved = await new SettingsStore(f.serviceSettings.path).load();
+  expect(saved.autonomy.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
+  expect(saved.projects.projects[0]!.autonomy).toEqual({ fleet: { machineSetup: "lead" } });
+  for (const path of [
+    "/v1/operator/fleet-settings/context",
+    "/v1/operator/projects/create",
+    "/v1/operator/projects?includeAutonomy=true&unknown=true",
+    "/v1/operator/projects?includeAutonomy=true&includeAutonomy=true",
+  ]) {
+    await expect(transport.request(path)).rejects.toThrow();
+    const direct = await f.app.app.request("/v1/hosted/operator", {
+      method: "POST",
+      headers: { authorization: `Bearer ${session.deviceToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ method: "GET", path }),
+    });
+    expect(direct.status).toBe(400);
+  }
+  const ordinary = await fixture(null),
+    ordinarySession = await ordinary.pair();
+  const ordinaryTransport = createHostedTransport(ordinarySession, ordinary.store, ordinary.fetchImpl);
+  await expect(ordinaryTransport.request("/v1/operator/fleet-settings")).rejects.toThrow(
+    "operator_device_required",
+  );
+  expect((await ordinary.serviceSettings.load()).autonomy.fleet).toEqual({
+    closure: "lead",
+    machineSetup: "lead",
+  });
 });
 it("refuses substituted pairing signatures without saving a device or hosted mode", async () => {
   const f = await fixture("operator", true);

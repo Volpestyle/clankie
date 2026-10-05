@@ -15,11 +15,13 @@ import type {
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { PeerSeatAuthority } from "./captain/peer-seat-messages.ts";
 import { isDeepStrictEqual } from "node:util";
-import { posix, win32 } from "node:path";
 import { FLEET_PEER_SEATS_PATH, FLEET_PEER_MESSAGES_PATH, FleetPeerMessageSchema } from "@clankie/protocol";
 import { createFleetProjectMembershipRoutes } from "./fleet-project-membership-routes.ts";
 import { createProjectRoutes } from "./project-routes.ts";
-import { createRuntimeUpdateRoutes } from "./runtime-update-routes.ts";
+import { createFleetSettingsRoutes } from "./fleet-settings-routes.ts";
+import { resolveFleetSettingsContext } from "./fleet-settings-context.ts";
+import { FleetPrepareRequestSchema } from "@clankie/protocol";
+import { createRuntimeUpdateRoutes, type HarnessRefreshAuthority } from "./runtime-update-routes.ts";
 import { resolveDiscordSettings } from "@clankie/settings";
 import {
   DISCORD_ROOM_VOICE_PATH,
@@ -350,18 +352,6 @@ const DiscordPersonMemoryReadQuerySchema = z
   })
   .strict();
 
-const FleetPrepareRequestSchema = z
-  .object({
-    codexSourceSetup: z
-      .string()
-      .refine(
-        (path) => !/\p{Cc}/u.test(path) && (posix.isAbsolute(path) || win32.isAbsolute(path)),
-        "Codex source setup must be an absolute script path on the remote machine",
-      )
-      .optional(),
-  })
-  .strict();
-
 /**
  * A redeemed-but-not-yet-completed pairing, held in memory only (single-use,
  * ~10 min). A restart drops these, so an in-flight pairing must restart —
@@ -456,7 +446,7 @@ export interface ClankieAppDependencies {
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../tui/bin/runtime-updater.ts").RuntimeUpdater;
-  refreshHarnesses?: () => Promise<unknown>;
+  refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
@@ -944,7 +934,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = z
       .object({
         method: z.enum(["GET", "POST"]),
-        path: z.string().regex(/^(?:\/health|\/operator\/v1\/dispatch|\/v1\/[A-Za-z0-9_/-]+)$/u),
+        path: z
+          .string()
+          .regex(/^(?:\/health|\/operator\/v1\/dispatch|\/v1\/[A-Za-z0-9_/-]+)(?:\?includeAutonomy=true)?$/u),
         body: z
           .string()
           .max(1024 * 1024)
@@ -1172,6 +1164,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     createRuntimeUpdateRoutes({
       updater: dependencies.runtimeUpdater,
       refreshHarnesses: dependencies.refreshHarnesses,
+      settings: settingsSource,
+      setup: { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },
       pluginVersionInstalled: dependencies.pluginVersionInstalled,
       holds: dependencies.deployHolds,
       authorize: async (request) => {
@@ -1228,6 +1222,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       settingsSource,
       dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {},
     ),
+  );
+  app.route(
+    "/",
+    createFleetSettingsRoutes(authorizeOwnerSecrets, settingsSource, {
+      runtimes: dependencies.runtimes,
+      herdrBinding: dependencies.herdrBinding,
+    }),
   );
   /**
    * Owner operator or any active paired device: account data that is not a
@@ -1448,6 +1449,29 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const options =
       input.data.codexSourceSetup === undefined ? {} : { codexSourceSetup: input.data.codexSourceSetup };
     try {
+      const current = await settingsSource.load();
+      const policy = await resolveFleetSettingsContext(
+        current,
+        {
+          workingDirectory: input.data.workingDirectory,
+          machine: context.req.param("id"),
+          ...(input.data.projectId === undefined ? {} : { projectId: input.data.projectId }),
+        },
+        { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },
+      );
+      if (!input.data.ownerApproved && policy.effective.machineSetup === "owner")
+        return context.json({ error: "machine_setup_owner_approval_required" }, 403);
+      if (!input.data.ownerApproved && !policy.machine.linked)
+        return context.json({ error: "machine_setup_link_required" }, 403);
+      if (JSON.stringify(await settingsSource.load()) !== JSON.stringify(current))
+        throw new Error("Machine setup settings changed");
+      const currentOperator = await authenticateOperator(context.req.raw, dependencies);
+      if (
+        !currentOperator ||
+        currentOperator === "unavailable" ||
+        currentOperator.operatorId !== operator.operatorId
+      )
+        return context.json({ error: "operator_authentication_required" }, 401);
       return context.json({
         ok: true,
         prepared: await dependencies.prepareFleet(context.req.param("id"), options),

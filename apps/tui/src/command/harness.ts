@@ -1,39 +1,142 @@
-import { isAbsolute } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { installHarnessBridges } from "../harness-install.ts";
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { refreshLinkedHarnesses } from "../harness-refresh.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
-import { codexSourceSetupCommand } from "../../../../integrations/claude-plugin/worker/bin/harness-install.mjs";
+import { codexSourceSetupCommand, installHarnessBridges } from "../harness-install.ts";
+import { machineSetupContext } from "./machine-setup.ts";
 
 export async function runHarnessCommand(
   args: readonly string[],
-  options: BrowserCommandOptions & { repoRoot: string },
+  options: BrowserCommandOptions & {
+    repoRoot: string;
+    cwd?: string;
+    execute?: NonNullable<Parameters<typeof installHarnessBridges>[0]["execute"]>;
+    prepareSkills?: NonNullable<Parameters<typeof installHarnessBridges>[0]["prepareSkills"]>;
+  },
 ) {
-  if (args.length === 2 && args[0] === "install" && args[1] === "--refresh-linked")
-    return refreshLinkedHarnesses(options);
+  const usage =
+    "Usage: clankie harness install [--refresh-linked | --codex-source-setup /absolute/source-owned/script] [--project PROJECT] [--approve]";
+  if (args[0] !== "install") throw new Error(usage);
+  const flags = new Map<string, string>();
+  let approved = false;
+  let refreshLinked = false;
+  for (let index = 1; index < args.length; index++) {
+    const flag = args[index]!;
+    if (flag === "--approve" && !approved) {
+      approved = true;
+      continue;
+    }
+    if (flag === "--refresh-linked" && !refreshLinked) {
+      refreshLinked = true;
+      continue;
+    }
+    if (
+      !["--codex-source-setup", "--project"].includes(flag) ||
+      flags.has(flag) ||
+      args[index + 1] === undefined
+    )
+      throw new Error(usage);
+    flags.set(flag, args[++index]!);
+  }
+  const sourceSetup = flags.get("--codex-source-setup");
+  if (refreshLinked && sourceSetup !== undefined) throw new Error(usage);
+  if (sourceSetup !== undefined && (!isAbsolute(sourceSetup) || /\p{Cc}/u.test(sourceSetup)))
+    throw new Error("Source setup must be an absolute source-owned script path");
+  const requestedProject = flags.get("--project");
+  const contextOptions = {
+    ...options,
+    ...(requestedProject === undefined ? {} : { projectId: requestedProject }),
+  };
+  const initial = await machineSetupContext("local", contextOptions);
+  if (refreshLinked) {
+    const refreshSettings = options.settings ?? new SettingsStore(defaultSettingsPath(options.env));
+    const authorizeSetup: NonNullable<
+      Parameters<typeof refreshLinkedHarnesses>[0]["authorizeSetup"]
+    > = async (machine, fleet) => {
+      const current = await machineSetupContext(machine, contextOptions);
+      if (current.projectId !== initial.projectId || current.workingDirectory !== initial.workingDirectory)
+        throw new Error("The setup workspace or project changed; inspect its policy before proceeding.");
+      if (current.effective.machineSetup === "owner" && !approved)
+        throw new Error("Harness refresh requires the owner's explicit --approve under owner policy.");
+      if (!current.machine.linked && !approved)
+        throw new Error("Automatic harness refresh needs an already-linked machine.");
+      if (fleet) {
+        const connection = (await refreshSettings.load()).execution.connections.find(
+          (entry) => entry.id === machine,
+        );
+        if (
+          fleet.id !== machine ||
+          !connection?.enabled ||
+          connection.session !== fleet.session ||
+          connection.ssh?.host !== fleet.ssh.host ||
+          connection.ssh.shell !== fleet.ssh.shell
+        )
+          throw new Error("The linked setup destination changed; inspect its connection before proceeding.");
+      }
+    };
+    await authorizeSetup("local");
+    return refreshLinkedHarnesses({ ...options, settings: refreshSettings, authorizeSetup });
+  }
+  if (initial.effective.machineSetup === "lead" && !initial.machine.linked && !approved)
+    throw new Error(
+      "Automatic harness setup needs an already-linked machine; ask the owner to approve setup or connect it.",
+    );
   if (
-    args[0] !== "install" ||
-    ![1, 3].includes(args.length) ||
-    (args.length === 3 && args[1] !== "--codex-source-setup")
+    initial.effective.machineSetup === "owner" &&
+    !approved &&
+    (!process.stdin.isTTY || !process.stdout.isTTY)
   )
     throw new Error(
-      "Usage: clankie harness install [--refresh-linked | --codex-source-setup /absolute/source-owned/script]",
+      "Harness setup requires owner approval. Use an interactive terminal or the owner's explicit --approve. No changes made.",
     );
-  if (args[2] && !isAbsolute(args[2]))
-    throw new Error("Source setup must be an absolute source-owned script path");
-  if (!process.stdin.isTTY || !process.stdout.isTTY)
-    throw new Error(
-      "Harness install needs an interactive terminal to review consent for each harness. No changes made.",
-    );
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  const terminal =
+    initial.effective.machineSetup === "owner" && !approved
+      ? createInterface({ input: process.stdin, output: process.stdout })
+      : undefined;
+  const env = options.env ?? process.env;
+  const home = env.HOME || env.USERPROFILE || homedir();
+  const claudeProfile = env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+  const codexProfile = env.CODEX_HOME || join(home, ".codex");
+  const claudeExists = await stat(claudeProfile)
+    .then((entry) => entry.isDirectory())
+    .catch(() => false);
+  const codexExists = await stat(codexProfile)
+    .then((entry) => entry.isDirectory())
+    .catch(() => false);
+  const claudeSource = await realpath(join(claudeProfile, "settings.json")).catch(() =>
+    join(claudeProfile, "settings.json"),
+  );
+  const marketplace = join(options.repoRoot, "integrations", "claude-plugin");
+  const selectedClaudeDetails = [
+    `Install and enable clankie-worker@clankie from ${marketplace} for profile ${claudeProfile} (bridge, native hooks and packaged skills).`,
+    `Update the existing clankie-worker cache for alias profile ${claudeProfile}; shared settings at ${claudeSource} stay unchanged.`,
+  ];
   try {
     return await installHarnessBridges({
       ...options,
-      ...(args[2] ? { codexSourceSetup: codexSourceSetupCommand(args[2]) } : {}),
-      consent: async (_harness, detail) =>
-        /^y(?:es)?$/iu.test((await terminal.question(`${detail}\nProceed? [y/N] `)).trim()),
+      ...(sourceSetup ? { codexSourceSetup: codexSourceSetupCommand(sourceSetup) } : {}),
+      consent: async (harness, detail) => {
+        const current = await machineSetupContext("local", contextOptions);
+        if (current.projectId !== initial.projectId || current.workingDirectory !== initial.workingDirectory)
+          throw new Error("The setup project changed; inspect its policy before proceeding.");
+        if (current.effective.machineSetup === "lead" || approved) {
+          if (!current.machine.linked && !approved) throw new Error("The setup machine is no longer linked.");
+          return harness === "codex" ? codexExists : claudeExists && selectedClaudeDetails.includes(detail);
+        }
+        if (!terminal)
+          throw new Error("Machine setup now requires owner approval; review the current policy.");
+        if (!/^y(?:es)?$/iu.test((await terminal.question(`${detail}\nProceed? [y/N] `)).trim()))
+          return false;
+        const after = await machineSetupContext("local", contextOptions);
+        if (after.projectId !== initial.projectId || after.workingDirectory !== initial.workingDirectory)
+          throw new Error("The setup project changed during approval.");
+        return true;
+      },
     });
   } finally {
-    terminal.close();
+    terminal?.close();
   }
 }

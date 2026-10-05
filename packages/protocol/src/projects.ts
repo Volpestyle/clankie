@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HireProfileSchema, HireEffortSchema } from "./hire-profile.ts";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
+import { AutonomySettingsSchema, ProjectAutonomySchema, ProjectAutonomyPatchSchema } from "./autonomy.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -71,6 +72,7 @@ export const ProjectSchema = z
       .optional(),
     roles: z.array(ProjectRoleSchema).max(256).default([]),
     workerCap: z.number().int().min(0).max(1000).optional(),
+    autonomy: ProjectAutonomySchema.optional(),
     fleet: z
       .object({
         size: z.enum(["max", "large", "small", "solo"]).optional(),
@@ -180,6 +182,8 @@ export const ProjectsSnapshotSchema = z
   .object({
     settings: ProjectsSettingsSchema,
     hireDefaults: HireProfileSchema.optional(),
+    /** Included only by clients opting into the autonomy-aware project view. */
+    autonomyDefaults: AutonomySettingsSchema.optional(),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict();
@@ -288,7 +292,7 @@ export const ProjectProposalResultSchema = z
   .strict();
 export type ProjectProposalResult = z.infer<typeof ProjectProposalResultSchema>;
 
-/** Omitted fields stay unchanged; null removes an optional limit or tracker binding. */
+/** Omitted fields stay unchanged; null removes optional policy, including a single autonomy leaf. */
 export const UpdateProjectSettingsSchema = z
   .object({
     projectId: ProjectIdSchema,
@@ -298,6 +302,7 @@ export const UpdateProjectSettingsSchema = z
         name: z.string().trim().min(1).max(100).optional(),
         roles: z.array(ProjectRoleSchema).max(256).optional(),
         workerCap: z.number().int().min(0).max(1000).nullable().optional(),
+        autonomy: ProjectAutonomyPatchSchema.optional(),
         trackerRef: z
           .object({ workspaceId: ProjectIdSchema, path: z.literal(".clankie/tracking.json") })
           .strict()

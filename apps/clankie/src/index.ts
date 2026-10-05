@@ -1180,10 +1180,11 @@ const clankie = await createClankieApp({
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
-  refreshHarnesses: async () =>
+  refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({
       repoRoot,
       settings: settingsStore,
+      authorizeSetup: authority.authorizeSetup,
       fleets: await runtimes.fleets(),
       shell: (fleet) => runtimes.fleetShell(fleet),
     }),

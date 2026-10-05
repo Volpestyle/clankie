@@ -334,7 +334,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "project") {
       outputJson(
         stdout,
-        await (["list", "update", "create", "membership"].includes(rest[0] ?? "")
+        await (["list", "settings", "update", "create", "membership"].includes(rest[0] ?? "")
           ? runProjectSettingsCommand(rest, options)
           : runProjectCommand(rest, options)),
       );

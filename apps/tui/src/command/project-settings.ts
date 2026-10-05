@@ -12,7 +12,9 @@ import {
   PROJECT_UPDATE_SETTINGS_PATH,
   ProjectsSnapshotSchema,
   UpdateProjectSettingsSchema,
+  type ProjectsSnapshot,
 } from "@clankie/protocol/projects";
+import { effectiveFleetAutonomy, type FleetAutonomy, type FleetAutonomyMode } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
 /** Revision-bearing API client shared by the CLI and the console's /project entry. */
@@ -23,8 +25,10 @@ export async function runProjectSettingsCommand(
     host?: string;
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
+    includeAutonomy?: boolean;
   } = {},
 ) {
+  if (args[0] === "settings") return runProjectFleetSettings(args, options);
   const membership = args.length === 3 && args[0] === "membership";
   const list = args.length === 1 && args[0] === "list";
   const create = args[0] === "create";
@@ -39,7 +43,7 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
   if (!list && !membership) {
@@ -101,7 +105,7 @@ export async function runProjectSettingsCommand(
   }
   const response = await (options.fetchImpl ?? fetch)(
     new URL(
-      list ? PROJECTS_PATH : create ? PROJECT_CREATE_SETTINGS_PATH : PROJECT_UPDATE_SETTINGS_PATH,
+      `${list ? PROJECTS_PATH : create ? PROJECT_CREATE_SETTINGS_PATH : PROJECT_UPDATE_SETTINGS_PATH}${options.includeAutonomy ? "?includeAutonomy=true" : ""}`,
       commandHost(options),
     ),
     {
@@ -135,4 +139,73 @@ export async function runProjectSettingsCommand(
   const text = await response.text();
   if (Buffer.byteLength(text) > 2 * 1024 * 1024) throw new Error("Project settings response is too large");
   return ProjectsSnapshotSchema.parse(JSON.parse(text));
+}
+
+interface ProjectFleetSettingsResult extends ProjectsSnapshot {
+  projectId: string;
+  fleet: {
+    closure: FleetAutonomyMode | "inherit";
+    machineSetup: FleetAutonomyMode | "inherit";
+    effective: FleetAutonomy;
+  };
+}
+
+/** Change only the selected project leaves, using the latest revision and owner API. */
+async function runProjectFleetSettings(
+  args: readonly string[],
+  options: Parameters<typeof runProjectSettingsCommand>[1],
+): Promise<ProjectFleetSettingsResult> {
+  if (!args[1] || args.length % 2 !== 0)
+    throw new Error(
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]",
+    );
+  const changes: Partial<Record<keyof FleetAutonomy, FleetAutonomyMode | null>> = {};
+  for (let index = 2; index < args.length; index += 2) {
+    const field =
+      args[index] === "--closure"
+        ? "closure"
+        : args[index] === "--machine-setup"
+          ? "machineSetup"
+          : undefined;
+    const value = args[index + 1];
+    if (!field || field in changes || !["lead", "owner", "inherit"].includes(value ?? ""))
+      throw new Error("Project fleet settings require each field once with lead, owner or inherit.");
+    changes[field] = value === "inherit" ? null : (value as FleetAutonomyMode);
+  }
+  const client = { ...options, includeAutonomy: true };
+  let snapshot = await runProjectSettingsCommand(["list"], client);
+  if (!snapshot || !("settings" in snapshot) || snapshot.autonomyDefaults === undefined)
+    throw new Error(
+      "This service does not expose current fleet autonomy settings; update it before editing project autonomy.",
+    );
+  if (!snapshot.settings.projects.some((project) => project.id === args[1]))
+    throw new Error("Unknown project");
+  if (Object.keys(changes).length) {
+    snapshot = await runProjectSettingsCommand(
+      [
+        "update",
+        args[1]!,
+        "--changes-json",
+        JSON.stringify({ autonomy: { fleet: changes } }),
+        "--revision",
+        snapshot.revision,
+      ],
+      client,
+    );
+    if (!snapshot || !("settings" in snapshot) || snapshot.autonomyDefaults === undefined)
+      throw new Error(
+        "Project autonomy was submitted, but current policy could not be read; inspect it before retrying.",
+      );
+  }
+  const project = snapshot.settings.projects.find((entry) => entry.id === args[1]);
+  if (!project) throw new Error("Project disappeared; inspect its saved settings.");
+  return {
+    ...snapshot,
+    projectId: project.id,
+    fleet: {
+      closure: project.autonomy?.fleet?.closure ?? "inherit",
+      machineSetup: project.autonomy?.fleet?.machineSetup ?? "inherit",
+      effective: effectiveFleetAutonomy(snapshot.autonomyDefaults, project.autonomy),
+    },
+  };
 }

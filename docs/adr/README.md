@@ -75,3 +75,4 @@ remains a separate reviewed effort.
 - [0225 — Minecraft keeps playing with one driver](0225-minecraft-keeps-playing-with-one-driver.md)
 
 - [0226 — Quick actions are skills, and tidy keeps results](0226-quick-actions-are-skills-and-tidy-keeps-results.md)
+- [0227 — Fleet responsibility is owner settings](0227-fleet-responsibility-is-owner-settings.md)

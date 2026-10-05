@@ -1,10 +1,15 @@
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
+import { randomBytes, randomUUID } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayTunnelFrameSchema,
+  publicGatewayTargetFor,
   type PublicGatewayPairingRouteFrame,
   type PublicGatewayResponseChunkFrame,
   type PublicGatewayTunnelFrame,
@@ -17,12 +22,25 @@ import {
   type ProviderCredential,
 } from "@clankie/credential-broker";
 import { PublicGatewayConnector } from "../src/public-gateway-connector.ts";
+import { gatewayRequestAad } from "@clankie/protocol/gateway-encryption";
+import { ProjectsSettingsSchema, TAKE_CONTROL_GRANTS } from "@clankie/protocol";
+import { SettingsStore } from "@clankie/settings";
+import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
+import { createGatewayEncryptedFetch } from "../../../packages/api-client/src/gateway-encryption.ts";
+import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
+import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
+import { createClankieApp, type ClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
+import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
+import { sealGatewayValue, openGatewayValue } from "../src/gateway-encryption.ts";
 
 const hostId = "mac_james_12345678";
 const hostToken = "gateway-host-token-that-is-longer-than-thirty-two-characters";
 const servers: Server[] = [];
 const connectors: PublicGatewayConnector[] = [];
 const sockets: WebSocket[] = [];
+const apps: ClankieApp[] = [];
+const roots: string[] = [];
 
 afterEach(async () => {
   for (const connector of connectors.splice(0)) connector.close();
@@ -35,9 +53,275 @@ afterEach(async () => {
         }),
     ),
   );
+  apps.splice(0).forEach((app) => app.close());
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("public gateway Mac connector", () => {
+  it("carries encrypted original-device fleet/project settings through the real socket, relay, service and persistence without losing the opt-in query", async () => {
+    const root = await mkdtemp(join(tmpdir(), "encrypted-fleet-settings-"));
+    roots.push(root);
+    const settings = new SettingsStore(join(root, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      projects: ProjectsSettingsSchema.parse({
+        projects: [{ id: "garden", name: "Garden", autonomy: { fleet: { closure: "owner" } } }],
+      }),
+    }));
+    const now = Date.now(),
+      deviceKey = randomBytes(32),
+      signer = new DeviceSessionSigner(deviceKey);
+    const deviceToken = signer.issue(
+      mintDeviceSessionClaims({
+        deviceId: "control",
+        nowEpochSeconds: Math.floor(now / 1000),
+        ttlSeconds: 600,
+      }),
+    );
+    const base = {
+      occurredAt: new Date(now).toISOString(),
+      missionId: "device:control",
+      correlationId: "fixture",
+      profileHash: "fixture",
+    };
+    const eventLogPath = join(root, "events.jsonl");
+    await writeFile(
+      eventLogPath,
+      [
+        {
+          ...base,
+          id: randomUUID(),
+          type: "device.pairing.redeemed",
+          data: {
+            schemaVersion: 1,
+            deviceId: "control",
+            offerId: "fixture",
+            name: "Phone",
+            platform: "ios",
+            offeredGrants: TAKE_CONTROL_GRANTS,
+            mintedBy: "local-owner",
+            pendingExpiresAt: new Date(now + 600_000).toISOString(),
+          },
+        },
+        {
+          ...base,
+          id: randomUUID(),
+          type: "device.activated",
+          data: {
+            schemaVersion: 1,
+            deviceId: "control",
+            grants: TAKE_CONTROL_GRANTS,
+            sessionExpiresAt: new Date(now + 600_000).toISOString(),
+          },
+        },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join("\n") + "\n",
+    );
+    const app = await createClankieApp({
+      captain: createStubCaptain(),
+      settings,
+      eventLogPath,
+      deviceSessionKey: deviceKey,
+      authenticateOperator: async () => undefined,
+    });
+    apps.push(app);
+    const control = await listen(
+      createServer(async (request, response) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(request.headers)) {
+          if (typeof value === "string") headers.set(name, value);
+          else if (value) value.forEach((entry) => headers.append(name, entry));
+        }
+        const body = Buffer.concat(chunks);
+        const result = await app.app.fetch(
+          new Request(`http://${request.headers.host}${request.url}`, {
+            method: request.method ?? "GET",
+            headers,
+            ...(body.length ? { body } : {}),
+          }),
+        );
+        response.statusCode = result.status;
+        result.headers.forEach((value, name) => response.setHeader(name, value));
+        response.end(Buffer.from(await result.arrayBuffer()));
+      }),
+    );
+    const forwarded: Array<{ path: string; token: string }> = [];
+    const handler = createOperatorConversationRelayHandler({
+      authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: control }),
+      dispatch: async () => {
+        throw new Error("Settings must not use captain dispatch");
+      },
+      roomRequest: async (path, method, token, body) => {
+        forwarded.push({ path, token });
+        return fetch(new URL(path, control), {
+          method,
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          ...(body === undefined ? {} : { body }),
+          redirect: "error",
+        });
+      },
+    });
+    const relay = await listen(
+      createServer((request, response) => {
+        void handler(request, response).then((handled) => {
+          if (!handled) {
+            response.statusCode = 404;
+            response.end();
+          }
+        });
+      }),
+    );
+    const gateway = await fakeGateway(),
+      wrappingKey = randomBytes(32),
+      key = randomBytes(32).toString("base64");
+    const credential = {
+      hostId,
+      key,
+      ticket: sealGatewayValue(
+        wrappingKey,
+        JSON.stringify({ key, subject: "control", stage: "device", expiresAt: now + 600_000 }),
+        `clankie-gateway-ticket-v1:${hostId}`,
+      ),
+    };
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      hostToken,
+      encryptionKey: wrappingKey,
+      controlPlaneUrl: control,
+      relayUrl: relay,
+      logger: { info: () => {}, warn: () => {} },
+    });
+    connectors.push(connector);
+    connector.start();
+    const connection = await gateway.nextConnection();
+    const outer: string[] = [];
+    const raw: typeof fetch = async (input, init) => {
+      const request = new Request(input, init),
+        url = new URL(request.url),
+        path = url.pathname.slice(`/h/${hostId}`.length);
+      const body = await request.text();
+      outer.push(JSON.stringify({ path, headers: [...request.headers], body }));
+      const method = request.method === "GET" ? "GET" : "POST",
+        target = publicGatewayTargetFor(method, path);
+      if (target === undefined) throw new Error("Unroutable fixture envelope");
+      connection.send({
+        schemaVersion: 1,
+        kind: "request",
+        requestId: randomBytes(16).toString("hex"),
+        target,
+        method,
+        path,
+        headers: Array.from(request.headers, ([name, value]) => ({ name, value })),
+        ...(body ? { bodyBase64: Buffer.from(body).toString("base64") } : {}),
+      });
+      const frames = await connection.framesThrough("response_end"),
+        start = frames.find((frame) => frame.kind === "response_start");
+      if (!start || start.kind !== "response_start") throw new Error("Missing connector response");
+      const bytes = Buffer.concat(
+        frames
+          .filter((frame): frame is PublicGatewayResponseChunkFrame => frame.kind === "response_chunk")
+          .map((frame) => Buffer.from(frame.bodyBase64, "base64")),
+      );
+      return new Response(bytes, {
+        status: start.status,
+        headers: start.headers.map(({ name, value }): [string, string] => [name, value]),
+      });
+    };
+    const encrypted = createGatewayEncryptedFetch({
+      credential: () => credential,
+      crypto: {
+        randomBytes,
+        seal: async (cipherKey, value, aad) => sealGatewayValue(Buffer.from(cipherKey, "base64"), value, aad),
+        open: async (cipherKey, value, aad) => openGatewayValue(Buffer.from(cipherKey, "base64"), value, aad),
+      },
+      fetchImpl: raw,
+    });
+    const client = new ClankieApiClient({
+      baseUrl: "http://device.clankie.invalid",
+      operatorToken: deviceToken,
+      fetchImpl: (input, init) => {
+        const url = new URL(String(input));
+        return encrypted(`${gateway.origin}/h/${hostId}${url.pathname}${url.search}`, init);
+      },
+    });
+    const fleet = await client.fleetSettings();
+    await client.updateFleetSettings({
+      schemaVersion: 1,
+      expectedRevision: fleet.revision,
+      changes: { machineSetup: "owner" },
+    });
+    const projects = await client.projects();
+    expect(projects.autonomyDefaults?.fleet.machineSetup).toBe("owner");
+    expect(projects.settings.projects[0]!.autonomy?.fleet?.closure).toBe("owner");
+    await client.updateProjectSettings({
+      projectId: "garden",
+      expectedRevision: projects.revision,
+      changes: { autonomy: { fleet: { closure: null, machineSetup: "lead" } } },
+    });
+    expect(forwarded.map((entry) => entry.path)).toEqual([
+      "/v1/operator/fleet-settings",
+      "/v1/operator/fleet-settings",
+      "/v1/operator/projects?includeAutonomy=true",
+      "/v1/operator/projects/update?includeAutonomy=true",
+    ]);
+    expect(forwarded.every((entry) => entry.token === deviceToken)).toBe(true);
+    const saved = await new SettingsStore(settings.path).load();
+    expect(saved.autonomy.fleet.machineSetup).toBe("owner");
+    expect(saved.projects.projects[0]!.autonomy).toEqual({ fleet: { machineSetup: "lead" } });
+    expect(JSON.stringify(outer)).not.toContain(deviceToken);
+    expect(JSON.stringify(outer)).not.toContain("includeAutonomy");
+    for (const path of [
+      "/v1/operator/projects?includeAutonomy=true&unknown=true",
+      "/v1/operator/projects?includeAutonomy=true&includeAutonomy=true",
+      "/v1/operator/projects?include%41utonomy=true",
+    ])
+      await expect(
+        encrypted(`${gateway.origin}/h/${hostId}${path}`, {
+          headers: { authorization: `Bearer ${deviceToken}` },
+        }),
+      ).rejects.toThrow("identity mismatch");
+    // Bypass the client's URL admission with valid cryptography: the host still
+    // refuses query tricks and filesystem authority before reaching the relay.
+    for (const path of [
+      "/v1/operator/fleet-settings/context",
+      "/v1/operator/projects/create",
+      "/v1/operator/projects?includeAutonomy=true&unknown=true",
+      "/v1/operator/projects?includeAutonomy=true&includeAutonomy=true",
+      "/v1/operator/projects?include%41utonomy=true",
+      "/v1/operator/%70rojects?includeAutonomy=true",
+    ]) {
+      const challenge = (await (await raw(`${gateway.origin}/h/${hostId}/v1/gateway/challenge`)).json()) as {
+        challenge: string;
+      };
+      const context = {
+        ticket: credential.ticket,
+        challenge: challenge.challenge,
+        requestId: randomBytes(32).toString("hex"),
+      };
+      const sealed = sealGatewayValue(
+        Buffer.from(key, "base64"),
+        JSON.stringify({
+          method: "GET",
+          path,
+          headers: [{ name: "authorization", value: `Bearer ${deviceToken}` }],
+          responseKey: randomBytes(32).toString("base64"),
+        }),
+        gatewayRequestAad(hostId, context),
+      );
+      const result = await raw(`${gateway.origin}/h/${hostId}/v1/gateway/encrypted`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, ...context, sealed }),
+      });
+      expect(result.status).toBe(401);
+      expect(await result.json()).toEqual({ error: "invalid_encrypted_request" });
+    }
+    expect(forwarded).toHaveLength(4);
+  });
   it("registers hashed offers and refuses plaintext application forwarding", async () => {
     const relayRequests: Array<{ readonly authorization?: string; readonly body: string }> = [];
     const relay = await listen(

@@ -32,6 +32,8 @@ const conversationHandler = createOperatorConversationRelayHandler({
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { body }),
       signal: AbortSignal.timeout(5000),
+      redirect: "error",
+      cache: "no-store",
     }),
   readBodyLeases: (deviceToken) =>
     fetch(new URL("/v1/body-leases", controlPlaneUrl), {

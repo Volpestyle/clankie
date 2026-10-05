@@ -27,16 +27,25 @@ export async function refreshLinkedHarnesses(
     settings?: SettingsStore;
     fleets?: readonly HerdrFleet[];
     shell?: (fleet: HerdrFleet) => FleetShellRun;
+    authorizeSetup?: (machine: string, fleet?: HerdrFleet) => Promise<void>;
+    execute?: NonNullable<Parameters<typeof installHarnessBridges>[0]["execute"]>;
+    prepareSkills?: NonNullable<Parameters<typeof installHarnessBridges>[0]["prepareSkills"]>;
   },
 ): Promise<HarnessRefreshResult> {
   const env = options.env ?? process.env;
   const settings = await (options.settings ?? new SettingsStore(defaultSettingsPath(env))).load();
+  await options.authorizeSetup?.("local");
   const local = await installHarnessBridges({
     repoRoot: options.repoRoot,
     env,
     linkedOnly: true,
-    consent: async () => true,
+    consent: async () => {
+      await options.authorizeSetup?.("local");
+      return true;
+    },
     codexHomes: settings.codexAccounts.map((entry) => entry.home),
+    ...(options.execute === undefined ? {} : { execute: options.execute }),
+    ...(options.prepareSkills === undefined ? {} : { prepareSkills: options.prepareSkills }),
   });
   const configured =
     options.fleets ??
@@ -48,13 +57,16 @@ export async function refreshLinkedHarnesses(
   const destinations = new Map<string, HarnessRefreshResult["fleets"][number]>();
   for (const fleet of configured) {
     const key = JSON.stringify([fleet.ssh.host, fleet.ssh.shell]);
-    const previous = destinations.get(key);
-    if (previous) {
-      fleets.push({ ...previous, fleet: fleet.id });
-      continue;
-    }
     let receipt: HarnessRefreshResult["fleets"][number];
+    let attempted = false;
     try {
+      await options.authorizeSetup?.(fleet.id, fleet);
+      const previous = destinations.get(key);
+      if (previous) {
+        fleets.push({ ...previous, fleet: fleet.id });
+        continue;
+      }
+      attempted = true;
       const result = await prepareFleet(fleet, {
         shell:
           options.shell?.(fleet) ??
@@ -72,7 +84,7 @@ export async function refreshLinkedHarnesses(
     } catch (error) {
       receipt = { fleet: fleet.id, ok: false, error: error instanceof Error ? error.message : String(error) };
     }
-    destinations.set(key, receipt);
+    if (attempted) destinations.set(key, receipt);
     fleets.push(receipt);
   }
   const notices = await announceInstalledPlugin(options);

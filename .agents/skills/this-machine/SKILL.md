@@ -136,6 +136,8 @@ index). Configure through the headless CLI:
 | Explicit Discord test post            | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe  |
 | Desktop expressions / quiet hours     | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`    |
 | Minecraft profiles and play           | `clankie minecraft configure`, `profiles`, `status`, `join PROFILE`, `leave`; load `minecraft`         |
+| Fleet responsibility defaults         | `clankie fleet set --closure lead\|owner --machine-setup lead\|owner`; both default to lead            |
+| Project responsibility overrides      | `clankie project settings PROJECT --closure lead\|owner\|inherit --machine-setup lead\|owner\|inherit` |
 | Fleet connected tools / peer messages | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`       |
 | Native conversation seats             | `clankie claude`, `codex`, `opencode`, `grok` with `--conversation ID`; inspect with `--dry-run`       |
 | Herdr session                         | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                        |
@@ -270,10 +272,17 @@ The selected remote machine also reports host-observed eligibility per pane,
 including actual cwd, native session and hire state. `nativeTools: "not-verified"`
 means it has not checked that pane's bridge socket, catalog or reply delivery;
 confirm those through the native harness. Unavailable observations stay unproven.
-The owner's `clankie harness install` asks per local Claude/Codex profile;
-`clankie herdr prepare FLEET_ID` explicitly ships/enables remote profiles.
+`clankie harness install [--project PROJECT] [--approve]` and
+`clankie herdr prepare FLEET_ID [--project PROJECT] [--approve]` read the effective
+`fleet.machineSetup` policy. Under `lead`, existing authorized access may prepare
+Clankie's own setup on an already-linked machine; under `owner`, obtain explicit
+owner approval. Setup preserves source/account fences and never restarts or
+steers an existing lane.
 Updates and checkout/release installs automatically refresh existing links on
 this machine and enabled SSH fleets with `clankie harness install --refresh-linked`.
+Direct refresh rechecks current policy and linkage for each target; supply the
+owner's explicit `--approve` under `owner`. Automatic installer refresh maintains
+existing links within the already-authorized update.
 Check its per-profile/fleet receipts: missing managed Codex source setup stays
 `source-manager-required`, and a healthy runtime update may still report
 `harness-refresh-incomplete`. Owner-approved source setup is remembered for the

@@ -380,7 +380,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       description: "Create or edit projects, roles, limits and tracked work; read live membership",
       takesArgument: true,
       argumentHint:
-        "[list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID]",
+        "[list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID]",
       async run(argument, shell): Promise<void> {
         if (!argument.trim()) {
           await runProjectsMenu(shell, {

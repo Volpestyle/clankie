@@ -1,5 +1,5 @@
 import { DesktopSettingsSchema } from "./desktop.ts";
-import { HireProfileSchema } from "@clankie/protocol";
+import { AutonomySettingsSchema, HireProfileSchema } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol";
@@ -770,6 +770,7 @@ export const ClankieSettingsSchema = z
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
     skills: SkillsSettingsSchema.default(() => SkillsSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
+    autonomy: AutonomySettingsSchema.default(() => AutonomySettingsSchema.parse({})),
     projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),

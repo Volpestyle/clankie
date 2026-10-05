@@ -1307,12 +1307,208 @@ paths:
         "400": { description: Invalid inner request or forbidden route }
         "401": { description: Missing, expired or revoked device session }
         "403": { description: Not an account-paired operator device }
+  /v1/runtime-connections/{id}/prepare:
+    post:
+      tags: [Operator]
+      operationId: prepareFleetHarnesses
+      summary: Prepare Clankie's own harness setup on an existing machine
+      description: Resolves policy from the verified service-local source workspace and checks the target's current link independently. Lead setup requires an already-linked target. Owner policy requires explicit ownerApproved. This retains operator authority and never restarts or steers existing lanes.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string },
+            description: Existing runtime connection ID,
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [workingDirectory]
+              properties:
+                workingDirectory:
+                  { type: string, description: Existing absolute source directory on the service host }
+                projectId:
+                  { type: string, description: Optional assertion matching verified source membership }
+                ownerApproved:
+                  { type: boolean, default: false, description: Explicit owner approval for this preparation }
+                codexSourceSetup:
+                  {
+                    type: string,
+                    description: Absolute source-owned script path on the target machine; existing source and configuration fences remain,
+                  }
+      responses:
+        "200": { description: Existing harness preparation result }
+        "400": { description: Malformed request }
+        "401": { description: Operator authentication required }
+        "403": { description: Owner approval or existing linked target required }
+        "409": { description: Preparation or context verification failed }
+  /v1/operator/fleet-settings:
+    get:
+      tags: [Operator]
+      operationId: getFleetSettings
+      summary: Read fleet size, model mode, and owner responsibility settings
+      description: Both closure and machineSetup default to lead. Existing owner or Take Control device authority is required; settings confer no credentials or new machine access.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Current fleet settings and SHA-256 revision
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [schemaVersion, revision, fleet]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  revision: { type: string, pattern: "^[a-f0-9]{64}$" }
+                  fleet:
+                    type: object
+                    additionalProperties: false
+                    required: [size, models, closure, machineSetup]
+                    properties:
+                      size: { type: string, enum: [max, large, small, solo] }
+                      models: { type: string, enum: [optimal, efficient] }
+                      closure: { type: string, enum: [lead, owner] }
+                      machineSetup: { type: string, enum: [lead, owner] }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller lacks owner authority }
+    post:
+      tags: [Operator]
+      operationId: updateFleetSettings
+      summary: Update fleet budget and responsibility with revision fencing
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, expectedRevision, changes]
+              properties:
+                schemaVersion: { type: integer, enum: [1] }
+                expectedRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
+                changes:
+                  type: object
+                  additionalProperties: false
+                  minProperties: 1
+                  properties:
+                    size: { type: string, enum: [max, large, small, solo] }
+                    models: { type: string, enum: [optimal, efficient] }
+                    closure: { type: string, enum: [lead, owner] }
+                    machineSetup: { type: string, enum: [lead, owner] }
+      responses:
+        "200": { description: Updated fleet snapshot and revision }
+        "400": { description: Malformed request }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller lacks owner authority }
+        "409": { description: Settings or owner authority changed before commit }
+  /v1/operator/fleet-settings/context:
+    get:
+      tags: [Operator]
+      operationId: getFleetSettingsContext
+      summary: Resolve current project policy and already-linked setup target
+      description: Verifies a local source directory and Git worktree separately from the registered target machine. Invalid or ambiguous project evidence fails closed. This filesystem route is excluded from hosted-device forwarding.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - {
+            name: workingDirectory,
+            in: query,
+            required: true,
+            schema: { type: string },
+            description: Existing absolute source directory on the service host,
+          }
+        - {
+            name: machine,
+            in: query,
+            required: true,
+            schema: { type: string },
+            description: Existing runtime or machine ID,
+          }
+        - {
+            name: projectId,
+            in: query,
+            schema: { type: string },
+            description: Optional project assertion; must match verified directory membership,
+          }
+      responses:
+        "200":
+          {
+            description: Effective closure and machineSetup,
+            matched projectId when present,
+            and target machine id/linked observation,
+          }
+        "400": { description: Malformed query }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller lacks owner authority }
+        "409": { description: Context could not be verified or settings changed }
+  /v1/operator/projects/update:
+    post:
+      tags: [Operator]
+      operationId: updateProjectSettings
+      summary: Update project policy while preserving independent inheritance
+      description: An autonomy.fleet closure or machineSetup change accepts lead or owner; null clears only that override. Omitted leaves retain their current value. Responses omit autonomy fields unless includeAutonomy=true. The expectedRevision fences the full underlying project settings even for legacy projections.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - {
+            name: includeAutonomy,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into project autonomy overrides and global autonomyDefaults,
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, expectedRevision, changes]
+              properties:
+                projectId: { type: string }
+                expectedRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
+                changes:
+                  type: object
+                  description: Validated project fields, including independent autonomy.fleet overrides
+                  properties:
+                    autonomy:
+                      type: object
+                      additionalProperties: false
+                      required: [fleet]
+                      properties:
+                        fleet:
+                          type: object
+                          additionalProperties: false
+                          minProperties: 1
+                          properties:
+                            closure: { type: string, enum: [lead, owner, null], nullable: true }
+                            machineSetup: { type: string, enum: [lead, owner, null], nullable: true }
+      responses:
+        "200": { description: Updated project snapshot and revision }
+        "400": { description: Malformed request }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller lacks owner authority }
+        "409": { description: Project settings or owner authority changed }
   /v1/operator/projects:
     get:
       tags: [Operator]
       operationId: getOperatorProjects
       summary: Read owner project settings and their current revision
-      security: [{ operatorBearer: [] }]
+      description: Legacy responses omit autonomy fields. includeAutonomy=true adds optional project autonomy.fleet overrides and global autonomyDefaults without changing the full settings revision.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - {
+            name: includeAutonomy,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into project autonomy overrides and global autonomyDefaults,
+          }
       responses:
         "200": { description: Project settings and SHA-256 revision }
         "401": { description: Owner authentication required }
@@ -1347,8 +1543,34 @@ paths:
       tags: [Operator]
       operationId: refreshLinkedHarnessPlugins
       summary: Refresh existing native worker plugin links locally and on enabled fleet machines
-      description: Uses the native harness installer without enrolling new profiles, changing channel policy or restarting panes. Returns per-profile and per-fleet outcomes; ok is false for incomplete installation, missing source setup or unreachable machines.
+      description: Uses the native harness installer without enrolling new profiles, changing channel policy or restarting panes. The canonical source workspace selects current machineSetup policy; owner mode requires explicit approval, and automatic lead refresh requires an already-linked target. Current operator authority, source context and each captured fleet destination are revalidated before refresh. Returns per-profile and per-fleet outcomes; ok is false for incomplete installation, missing source setup or unreachable machines.
       security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [workingDirectory]
+              properties:
+                workingDirectory:
+                  {
+                    type: string,
+                    description: Existing absolute source directory,
+                    resolved canonically on the service machine,
+                  }
+                projectId:
+                  {
+                    type: string,
+                    description: Must match the project derived from the current source workspace or registered worktree,
+                  }
+                ownerApproved:
+                  {
+                    type: boolean,
+                    default: false,
+                    description: Explicit owner approval; confers no additional credential or lane authority,
+                  }
       responses:
         "200":
           description: Plugin refresh receipts, including incomplete outcomes
@@ -1362,8 +1584,15 @@ paths:
                   local: { type: array, items: { type: object } }
                   fleets: { type: array, items: { type: object } }
                   notices: { type: object }
-        "403": { description: Operator required or revoked }
-        "503": { description: Harness refresh unavailable }
+        "400": { description: Invalid refresh context request }
+        "403":
+          {
+            description: Operator required or revoked,
+            owner approval required,
+            or automatic target is not already linked,
+          }
+        "409": { description: Source context, settings or captured target changed or could not be verified }
+        "503": { description: Harness refresh or policy context unavailable }
   /v1/harness-plugin-version:
     post:
       tags: [Operator]

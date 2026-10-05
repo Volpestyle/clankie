@@ -11,7 +11,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["harness"],
     lines: [
-      "  harness install [--refresh-linked | --codex-source-setup SCRIPT]  Install or refresh linked native plugins",
+      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh native plugins under current fleet policy",
     ],
   },
   {
@@ -19,6 +19,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  project create PROJECT --settings FILE.json --revision REVISION  Create a new local project from reviewed settings",
       "  project list | update PROJECT --changes FILE.json --revision REVISION  Read or edit project roles, models, limits and tracker binding",
+      "  project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]  Read effective fleet policy or edit project overrides",
       "  project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)",
       "  project add NAME --worktree-root ROOT --repo APPROVED_REPO [--machine ID --platform windows|posix]  Enroll a linked-worktree root",
       "  project remove-worktree-root NAME --worktree-root ROOT [--machine ID --platform windows|posix]  Remove a root enrollment",
@@ -64,6 +65,7 @@ const HEADLESS_COMMAND_HELP = [
       "  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID",
       "          workspaces ID (--repo /checkout | --dir /directory)... | workspaces ID --clear",
       "          capacity ID N|--clear (default 16; clear = unlimited)",
+      "          prepare ID [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]",
       "                           Manage named execution connections (JSON)",
     ],
   },
@@ -299,7 +301,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["fleet"],
     lines: [
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",
-      "                           Read or set how he routes work and how big a swarm he aims for",
+      "          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]",
+      "                           Read or set fleet routing, budget, autonomy and connected tools",
     ],
   },
   {
@@ -315,6 +318,7 @@ const HEADLESS_COMMAND_HELP = [
       "  herdr [status|open|create|disable] | use NAME",
       "                           Open his workspace or choose your Herdr session",
       "  herdr [--connection ID] <herdr command>    Run against a selected runtime",
+      "  herdr prepare NAME [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]",
     ],
   },
   {
