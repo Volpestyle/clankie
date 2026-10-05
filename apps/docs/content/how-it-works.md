@@ -118,6 +118,11 @@ their own fleet through `list_fleet_seats` and `message_peer`, using the same na
 delivery and receipts. Peer messages are agent output and grant no owner authority;
 the owner can switch them off in `/fleet`.
 
+For a local source-checkout service, `clankie integrate` composes approved core
+and app commits, runs full checks in private worktrees and retains the tested
+commit evidence before landing. Named deploy holds block landing and runtime
+updates, with explicit audited owner overrides. See the [CLI reference](/cli/).
+
 ## Finding your way in the console
 
 A local console opens the existing main conversation unless you select another

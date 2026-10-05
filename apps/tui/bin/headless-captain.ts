@@ -37,6 +37,7 @@ import { runGamesCommand } from "../src/command/games.ts";
 import { runLinearCommand } from "../src/command/linear.ts";
 import { runAccountsCommand } from "../src/command/accounts.ts";
 import { runWorkCommand } from "../src/command/work.ts";
+import { runIntegrationCommand } from "../src/command/integrate.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
 import { forwardsToFleetHerdr, herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
@@ -285,6 +286,11 @@ export async function runHeadlessCaptainCommand(
     if (command === "work") {
       const result = await runWorkCommand(rest, options);
       outputJson(stdout, result.body);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "integrate") {
+      const result = await runIntegrationCommand(rest, options);
+      outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     if (command === "connections") {

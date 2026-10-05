@@ -9,6 +9,10 @@ import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
+import { IntegrationQueue, integrationSources } from "./integrate.ts";
+import { DeployHolds } from "./deploy-holds.ts";
+import { deployHoldPresence } from "./deploy-hold-presence.ts";
+import { herdrConnection } from "../../tui/src/session/herdr-connection.ts";
 import { DiscordRoomVoice } from "./discord-room-voice.ts";
 import { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
@@ -603,6 +607,34 @@ const runtimes = new ExecutionConnections({
   primary: herdr,
   sshControlDirectory: join(stateRoot, "ssh"),
 });
+const integrationDirectory = join(stateRoot, "integration");
+const deployHolds = new DeployHolds(integrationDirectory, (hold) =>
+  deployHoldPresence(hold, async (fleetId) => {
+    if (fleetId !== "default") {
+      const fleet = (await runtimes.fleets()).find((f) => f.id === fleetId);
+      if (!fleet) throw Error("Fleet unavailable");
+      return runtimes.fleetRun(fleet)(["api", "snapshot"], undefined, 5_000);
+    }
+    const binding = herdr.binding();
+    if (!binding) throw Error("Herdr unavailable");
+    const connection = herdrConnection(binding, { repoRoot });
+    return (
+      await promisify(execFile)(connection.command, ["api", "snapshot"], {
+        env: connection.env,
+        timeout: 5_000,
+        maxBuffer: 8 * 1024 * 1024,
+      })
+    ).stdout;
+  }),
+);
+const integration =
+  hostedBody === undefined && existsSync(join(repoRoot, ".git"))
+    ? new IntegrationQueue({
+        directory: integrationDirectory,
+        ...(await integrationSources(repoRoot)),
+        holds: deployHolds,
+      })
+    : undefined;
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
 const agentSessions = createAgentSessions(
@@ -789,7 +821,15 @@ const minecraftHost = new MinecraftHostService({
 let fleetProjectMembership: FleetProjectMembership | undefined;
 const captain = createCaptain(
   {
-    ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
+    ...(runtimeUpdater === undefined
+      ? {}
+      : {
+          runtimeUpdater: {
+            status: runtimeUpdater.status,
+            request: (ref: string, authority: import("../../tui/bin/runtime-updater.ts").UpdateAuthority) =>
+              deployHolds.landing(`runtime-tool:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
+          },
+        }),
     roomObservations,
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
@@ -1186,6 +1226,8 @@ const clankie = await createClankieApp({
   agentSessions,
   workItems,
   workerMcp,
+  deployHolds,
+  ...(integration === undefined ? {} : { integration }),
   captain,
   fleetLinks,
   inspectFleetHarnesses: async (id: string) => {

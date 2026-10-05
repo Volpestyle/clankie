@@ -8,25 +8,26 @@ This directory and the module READMEs hold the technical references.
 
 ## Operate and configure
 
-| Reference                                       | Canonical scope                                                           |
-| ----------------------------------------------- | ------------------------------------------------------------------------- |
-| [CLI](cli.md)                                   | Headless commands, flags, output, and local/hosted modes                  |
-| [Console](../apps/tui/README.md)                | Terminal interaction, workspaces, and launcher behavior                   |
-| [Distribution](distribution.md)                 | Installed layout, runtime ownership, release build and verification       |
-| [Credentials](credentials.md)                   | Secret identities, setup, rotation, and authority                         |
-| [Always on](always-on.md)                       | Host sleep, the awake-Mac option, and the hosted-body alternative         |
-| [Memory](memory.md)                             | Episodes, person facts, visibility, retention, and operator control       |
-| [Bundled skills](bundled-skills.md)             | Skill sources, discovery, and worker distribution                         |
-| [Model keys](model-keys.md)                     | Paired-device API for model credentials and selection                     |
-| [Worker access](worker-access.md)               | Connected tools, native peer messages and manual grants                   |
-| [Tracker identity](worker-tracker-identity.md)  | Connected-account enforcement and remaining isolation work                |
-| [Worker posts](linear-worker-posts.md)          | One Linear app, worker names and portraits, compact handoffs              |
-| [Discord media](discord-media.md)               | Voice, music, Activity, Go Live, and screen-share differences             |
-| [Remote Discord ingress](discord-ingress.md)    | Authenticated sealed text ingress protocol, independent of rollout        |
-| [Desktop control](desktop-control.md)           | Native computer-use workflow and evidence limits                          |
-| [Rivals integration](rivals.md)                 | Separate game bridge, including its explicit disabled status              |
-| [Minecraft](minecraft.md)                       | Approved offline Java worlds, action evidence, play ownership and viewing |
-| [Linux self-hosting](../infra/hosted/README.md) | Single-owner container deployment and supported capability set            |
+| Reference                                       | Canonical scope                                                            |
+| ----------------------------------------------- | -------------------------------------------------------------------------- |
+| [CLI](cli.md)                                   | Headless commands, flags, output, and local/hosted modes                   |
+| [Integration](integration.md)                   | Approved commit batches, isolated gates, landing evidence and deploy holds |
+| [Console](../apps/tui/README.md)                | Terminal interaction, workspaces, and launcher behavior                    |
+| [Distribution](distribution.md)                 | Installed layout, runtime ownership, release build and verification        |
+| [Credentials](credentials.md)                   | Secret identities, setup, rotation, and authority                          |
+| [Always on](always-on.md)                       | Host sleep, the awake-Mac option, and the hosted-body alternative          |
+| [Memory](memory.md)                             | Episodes, person facts, visibility, retention, and operator control        |
+| [Bundled skills](bundled-skills.md)             | Skill sources, discovery, and worker distribution                          |
+| [Model keys](model-keys.md)                     | Paired-device API for model credentials and selection                      |
+| [Worker access](worker-access.md)               | Connected tools, native peer messages and manual grants                    |
+| [Tracker identity](worker-tracker-identity.md)  | Connected-account enforcement and remaining isolation work                 |
+| [Worker posts](linear-worker-posts.md)          | One Linear app, worker names and portraits, compact handoffs               |
+| [Discord media](discord-media.md)               | Voice, music, Activity, Go Live, and screen-share differences              |
+| [Remote Discord ingress](discord-ingress.md)    | Authenticated sealed text ingress protocol, independent of rollout         |
+| [Desktop control](desktop-control.md)           | Native computer-use workflow and evidence limits                           |
+| [Rivals integration](rivals.md)                 | Separate game bridge, including its explicit disabled status               |
+| [Minecraft](minecraft.md)                       | Approved offline Java worlds, action evidence, play ownership and viewing  |
+| [Linux self-hosting](../infra/hosted/README.md) | Single-owner container deployment and supported capability set             |
 
 ## Understand and extend
 

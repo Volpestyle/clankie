@@ -41,6 +41,182 @@ tags:
 security: []
 
 paths:
+  /v1/integrate:
+    post:
+      tags: [Operator]
+      operationId: integrate
+      summary: Compose, gate and land an ordered approved commit batch
+      description: |
+        Source-checkout service only. Run returns a durable batch immediately; poll status.
+        Independent clones and detached core/app sibling worktrees install real packages
+        and run pnpm check with private home, state, credentials and caches. Only the
+        recorded zero-exit exact HEAD may land. Core pushes first; app failure retains
+        partial core-landed/app-pending evidence. Revert selects a passed batch via restore
+        and creates a new commit restoring its tree. No force push or automatic push retry.
+        Holds never expire; explicit overrides name every hold, actor and reason and are
+        durably audited. Only the authenticated operator can invoke this route.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action, id]
+                  properties:
+                    action: { const: run }
+                    id: { type: string, format: uuid }
+                    core:
+                      type: array
+                      maxItems: 100
+                      items: { type: string, pattern: "^[a-f0-9]{7,64}$" }
+                      default: []
+                    app:
+                      type: array
+                      maxItems: 100
+                      items: { type: string, pattern: "^[a-f0-9]{7,64}$" }
+                    restore:
+                      {
+                        type: string,
+                        format: uuid,
+                        description: Passed batch whose tree to restore; mutually exclusive with core/app commits,
+                      }
+                    push: { type: boolean, default: false }
+                    overrides:
+                      {
+                        type: array,
+                        maxItems: 32,
+                        items: { $ref: "#/components/schemas/DeployHoldOverride" },
+                      }
+                - type: object
+                  additionalProperties: false
+                  required: [action, id]
+                  properties:
+                    action: { const: status }
+                    id: { type: string, format: uuid }
+                - type: object
+                  additionalProperties: false
+                  required: [action, id]
+                  properties:
+                    action: { const: push }
+                    id: { type: string, format: uuid }
+                    overrides:
+                      {
+                        type: array,
+                        maxItems: 32,
+                        items: { $ref: "#/components/schemas/DeployHoldOverride" },
+                      }
+                - type: object
+                  additionalProperties: false
+                  required: [action]
+                  properties:
+                    action: { const: holds }
+                - type: object
+                  additionalProperties: false
+                  required: [action, id, holder, reason]
+                  properties:
+                    action: { const: hold }
+                    id: { type: string, format: uuid }
+                    holder: { type: string, minLength: 1, maxLength: 512 }
+                    reason: { type: string, minLength: 1, maxLength: 512 }
+                    pane: { type: string, description: Herdr pane ID; fleet-qualified for remote holders }
+                    seat:
+                      {
+                        type: string,
+                        description: Native seat/terminal ID; fleet-qualified for remote holders,
+                      }
+                - type: object
+                  additionalProperties: false
+                  required: [action, id, actor, reason]
+                  properties:
+                    action: { const: release }
+                    id: { type: string, format: uuid }
+                    actor: { type: string, minLength: 1, maxLength: 512 }
+                    reason: { type: string, minLength: 1, maxLength: 512 }
+      responses:
+        "200":
+          description: Durable batch or holds; inspect ok and batch.state for failures/partial landing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  error: { type: string }
+                  holds: { type: array, items: { $ref: "#/components/schemas/DeployHold" } }
+                  batch:
+                    type: object
+                    required: [schemaVersion, id, state, evidence, repos, createdAt, updatedAt, request]
+                    properties:
+                      schemaVersion: { const: 1 }
+                      id: { type: string, format: uuid }
+                      state:
+                        {
+                          type: string,
+                          enum:
+                            [
+                              queued,
+                              composing,
+                              conflict,
+                              installing,
+                              gating,
+                              failed,
+                              passed,
+                              held,
+                              pushing,
+                              pushed,
+                              partial,
+                              interrupted,
+                            ],
+                        }
+                      evidence: { type: string, description: Durable local record.json path }
+                      error: { type: string }
+                      createdAt: { type: string, format: date-time }
+                      updatedAt: { type: string, format: date-time }
+                      request: { type: object }
+                      repos:
+                        type: array
+                        items:
+                          type: object
+                          description: Source/origin/base, directory, HEAD, per-commit conflict results, install/gate exit and tested HEAD, per-repo push outcome and logs
+        "400": { description: Malformed request }
+        "403": { description: Actual operator required }
+        "409": { description: Unknown record, identity conflict, busy operation or refused landing }
+        "503": { description: Repository integration unavailable }
+  /v1/runtime-update:
+    get:
+      tags: [Operator]
+      operationId: runtimeUpdateStatus
+      summary: Read runtime-update status and current deploy holds
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Runtime boot identity, durable operation status and holds with holder presence }
+        "403": { description: Operator required }
+        "503": { description: Runtime updater unavailable }
+    post:
+      tags: [Operator]
+      operationId: runtimeUpdate
+      summary: Admit a local pinned-runtime deployment after the deploy-hold check
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                ref: { type: string, minLength: 1, maxLength: 256, default: main }
+                overrides:
+                  { type: array, maxItems: 32, items: { $ref: "#/components/schemas/DeployHoldOverride" } }
+      responses:
+        "202": { description: Accepted durable update, not completed deployment }
+        "409": { description: Named deploy hold or other refusal; detail describes the blocker }
+        "403": { description: Operator required or revoked }
+        "400": { description: Invalid update request }
+        "503": { description: Runtime updater unavailable }
   /v1/discord/setup/test-post:
     post:
       tags: [Discord]
@@ -3482,6 +3658,36 @@ paths:
 
 components:
   schemas:
+    DeployHoldOverride:
+      type: object
+      additionalProperties: false
+      required: [holdId, actor, reason]
+      properties:
+        holdId: { type: string, format: uuid }
+        actor:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 512,
+            description: Audit label; operator bearer establishes authority,
+          }
+        reason: { type: string, minLength: 1, maxLength: 512 }
+    DeployHold:
+      type: object
+      required: [id, holder, reason, createdAt, presence]
+      properties:
+        id: { type: string, format: uuid }
+        holder: { type: string }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+        pane: { type: string }
+        seat: { type: string }
+        presence:
+          {
+            type: string,
+            enum: [present, gone, unknown, person],
+            description: Gone/unknown holds remain in force until explicitly released,
+          }
     LinearWakeRules:
       type: object
       additionalProperties: false

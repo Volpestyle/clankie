@@ -1,6 +1,7 @@
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
+import { HoldOverrideSchema } from "@clankie/protocol/integrate";
 
 export async function runUpdateCommand(
   args: readonly string[],
@@ -8,11 +9,28 @@ export async function runUpdateCommand(
 ): Promise<unknown> {
   const status = args.length === 1 && args[0] === "status";
   let ref = "main";
-  if (!status && args.length !== 0) {
-    if (args.length !== 2 || args[0] !== "--ref" || !args[1] || args[1].startsWith("-"))
-      throw Error("Usage: clankie update [--ref REF] | status");
-    ref = args[1];
+  const holdIds: string[] = [];
+  let actor: string | undefined, reason: string | undefined;
+  if (!status) {
+    for (let i = 0; i < args.length; i += 2) {
+      const key = args[i],
+        value = args[i + 1];
+      if (
+        !value ||
+        value.startsWith("-") ||
+        !["--ref", "--override-hold", "--actor", "--reason"].includes(key ?? "")
+      )
+        throw Error(
+          "Usage: clankie update [--ref REF] [--override-hold UUID --actor NAME --reason TEXT] | status",
+        );
+      if (key === "--ref") ref = value;
+      else if (key === "--override-hold") holdIds.push(value);
+      else if (key === "--actor") actor = value;
+      else reason = value;
+    }
   }
+  if ((actor || reason) && !holdIds.length) throw Error("--actor and --reason require --override-hold");
+  const overrides = holdIds.map((holdId) => HoldOverrideSchema.parse({ holdId, actor, reason }));
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
     env,
@@ -23,7 +41,7 @@ export async function runUpdateCommand(
   const response = await (options.fetchImpl ?? fetch)(new URL("/v1/runtime-update", commandHost(options)), {
     method: status ? "GET" : "POST",
     headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-    ...(status ? {} : { body: JSON.stringify({ ref }) }),
+    ...(status ? {} : { body: JSON.stringify({ ref, ...(overrides.length ? { overrides } : {}) }) }),
     signal: AbortSignal.timeout(30_000),
   });
   const result: unknown = await response.json();

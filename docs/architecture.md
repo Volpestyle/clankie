@@ -37,6 +37,28 @@ set; the [agent-host guide](../packages/agent-hosts/README.md) owns native
 worker support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
 records the separation between Clankie and his connections.
 
+## Approved commit integration
+
+The source-checkout service owns an approved-commit integration queue through
+`POST /v1/integrate` and `clankie integrate`. Each batch has independent Git clones
+and detached sibling worktrees, private gate environments and durable tested-HEAD
+records. Exact passed trees land core before app; partial landings preserve each
+confirmed SHA. Named deploy holds guard landing and runtime-update admission,
+with explicit audited operator overrides. [Integration](integration.md) owns the
+contract, isolation boundary and recovery rules.
+
+```mermaid
+flowchart LR
+  Approvals["Ordered approved SHAs"] --> Queue["Service integration queue"]
+  Queue --> Compose["Fresh origin + detached sibling worktrees"]
+  Compose --> Gate["Private installs + full checks"]
+  Gate --> Record["Durable exit code + tested HEAD"]
+  Record --> Verify["Exact HEAD + clean tree + current origin"]
+  Verify --> Hold["Deploy holds / audited owner override"]
+  Hold --> Core["Fast-forward core"]
+  Core --> App["Fast-forward app / retain partial result"]
+```
+
 ## Device and host authority
 
 The host issues pairing offers and device sessions and decides every grant.

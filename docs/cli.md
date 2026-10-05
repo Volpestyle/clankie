@@ -276,6 +276,12 @@ sessions and recheck their captured source before acceptance. Social sessions
 cannot gain the tool through a later permission change. Accepted host operations
 may finish or roll back after the original turn/service exits.
 
+Deploy holds also block runtime-update admission. `update status` includes holds
+and holder presence. An operator may override explicitly with
+`--override-hold UUID --actor NAME --reason TEXT` (repeat the hold flag for every
+hold); the registry records the override and retains the hold. The API accepts
+an `overrides` array of `{holdId, actor, reason}`. See [integration](integration.md).
+
 Supported `clankie mcp` operator bridges reinitialize after an explicit
 `unknown_session` rejection before tool admission and retry that rejected request
 once. Concurrent requests share the new session; reconnect drains old HTTP clients
@@ -299,6 +305,28 @@ Fleet bridges retain their separate exact-link refresh and durable receipt rules
 Already-loaded older operator bridges need their MCP process refreshed to gain
 these protocols; refreshing only the fleet mailbox is insufficient. The native
 seat need not be restarted for a supported bridge.
+
+### `integrate`
+
+```bash
+clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]
+clankie integrate status UUID
+clankie integrate push UUID [--override-hold UUID --actor NAME --reason TEXT]
+clankie integrate revert PASSED_BATCH_UUID [--push]
+clankie integrate holds
+clankie integrate hold --holder NAME --reason TEXT [--pane ID|--seat ID] [--id UUID]
+clankie integrate release UUID --actor NAME --reason TEXT
+```
+
+An ordered approved batch composes on fresh origin in independent throwaway
+core/app worktrees, performs real installs and full checks with private home,
+state, credentials and package stores, and records tested HEAD and exit codes
+durably. It only lands a clean exact HEAD with a recorded pass. Core lands first;
+app rejection retains a partial record and retries skip already landed core.
+Revert creates a new commit restoring a passed tree. Named holds block push and
+deploy; explicit owner overrides name the hold, actor and reason and are audited.
+Requires a local source-checkout service. See [integration](integration.md) for
+evidence paths, isolation limits, uncertain sends and crash recovery.
 
 ### `restart [service]`
 
