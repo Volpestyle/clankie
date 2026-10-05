@@ -828,9 +828,11 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               type: "realtime",
               model,
               output_modalities: [outputModality],
-              // Runaway backstops with room for a deliberate 20–30 second riff.
-              // Audio tokens also consume this budget; text feeds an external mouth.
-              max_output_tokens: outputModality === "audio" ? 4_096 : 1_024,
+              // Runaway backstops, not the length control: the voice register
+              // asks for about a sentence. Text feeds an external mouth, and
+              // ~200 tokens (~150 words) already outlasts the 45 s speech
+              // ceiling. Audio tokens also count against the audio budget.
+              max_output_tokens: outputModality === "audio" ? 800 : 200,
               instructions,
               audio: {
                 input: {

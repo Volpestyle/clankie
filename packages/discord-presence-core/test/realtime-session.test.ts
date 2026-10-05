@@ -745,10 +745,10 @@ it.each(["openai", "xai"] as const)(
 );
 
 it.each([
-  ["audio", 4_096],
-  ["text", 1_024],
+  ["audio", 800],
+  ["text", 200],
 ] as const)(
-  "gives %s responses generous runaway bounds that every response inherits",
+  "gives %s responses a runaway bound that every response inherits",
   async (outputModality, limit) => {
     const { session, socket } = await openConversation({ outputModality, onTextDelta: () => undefined });
     expect(framesOfType(socket, "session.update")[0]).toMatchObject({

@@ -149,13 +149,13 @@ speech, and keeps late handoff results silent.
 Repeated identical asks from the same person join pending work. For paraphrases,
 `ask_clankie.join_call_id` joins only that authenticated speaker's handoff;
 changed requests remain refinements. Slow work offers one brief acknowledgment
-after 1.2 seconds, canceled if the room moves on or work finishes. Voice matches
-the length to the moment: most turns are short, while stories, strong opinions,
-invested bits, and fuller answers have room. Handoff results follow the same
-proportion, with details available in text. OpenAI output is bounded to 4096
-audio / 1024 text tokens per response, and all Discord mouths have a 45-second
-PCM ceiling. These runaway backstops leave room for deliberate 20–30 second
-riffs; live taste and transcription latency still require a call.
+after 1.2 seconds, canceled if the room moves on or work finishes. Spoken
+length and register come from the service-composed instructions (one rule:
+usually a short sentence, longer only when asked); handoff results get the
+gist in a sentence with the rest offered in text. OpenAI output is bounded to
+800 audio / 200 text tokens per response, and all Discord mouths have a
+45-second PCM ceiling. These are runaway backstops, not the length control;
+live taste and transcription latency still require a call.
 
 Opt-in voice transcripts include Clankie's generated wording from native audio
 transcripts or external TTS text, correlated with item/playback ids and outcomes.

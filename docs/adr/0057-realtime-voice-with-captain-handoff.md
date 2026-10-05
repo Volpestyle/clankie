@@ -187,6 +187,36 @@ flowchart LR
   Result --> Fresh
 ```
 
+### The voice is Clankie, not a voice for him (2026-10-04)
+
+A 2026-10-05 call (evidence: `voice-character-20261005` in the Clankie backlog
+handoffs) sounded like a generic voice assistant: every turn offered a menu
+and asked a question back, and "what are we working on right now?" got
+"nothing's locked in yet" while he was leading a batch. The voice prompt had
+no `# Identity`, framed `ask_clankie` as a separate "captain mind", restated
+the 2026-09-29 length paragraph three times (each licensing more room), and
+knew nothing about his current work.
+
+- Voice instructions now open with the same `# Identity` section of
+  `captain/instructions.md` every lane gets (only that section; the rest names
+  tools the realtime session lacks). `ask_clankie` is how he thinks something
+  through or acts with his full tools, still him. Trust and routing rules are
+  unchanged.
+- One register, stated once in `captain/voice-lane.ts`: react like a friend in
+  the call, usually one short sentence, go longer only when asked for the
+  story or detail; say the thing, no menus, no restating, no closing question
+  unless he needs the answer. Handoff results: the gist in a sentence, the
+  rest in text. This tightens the 2026-09-29 calibration above after it
+  produced assistant-style turns; stories and requested detail still get room.
+- OpenAI output backstops drop to 200 tokens for text (about 150 words, past
+  the 45-second PCM ceiling) and 800 for native audio.
+- A bounded "What you're up to" card (fleet seats with their stated work,
+  active goals, the last exchange in this guild's text rooms; never the
+  console lane) rides in the session instructions, which are never
+  truncated, rather than the seeded briefing that a long call drops first. It
+  is a snapshot from when the session opened; `ask_clankie` covers anything
+  newer. Console episodes stay `operator_private`.
+
 ### Room membership is context, departure is his decision (2026-09-28)
 
 The gateway supplies participant joins and leaves, display names, and the

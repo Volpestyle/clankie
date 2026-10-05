@@ -3805,7 +3805,7 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
   expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE, BOB]);
   expect(conversation.functionResults[0]?.output).toContain('"displayName":"Alice"');
   expect(conversation.functionResults[0]?.output).toContain(
-    "Give this person the gist and match the length to the moment",
+    "Give this person the gist in a sentence; offer the rest in text.",
   );
   conversation.input.onAudioDelta(pcmDelta(480), "alice-answer");
   done();
@@ -3952,7 +3952,7 @@ describe("snappy conversation absorption", () => {
     expect(harness.timers.pending().some((timer) => timer.delayMs === 1_200)).toBe(false);
     resolveCaptain(settledResult("linear", "Long detailed result"));
     await flush();
-    expect(conversation.functionResults[0]?.output).toContain("match the length to the moment");
+    expect(conversation.functionResults[0]?.output).toContain("gist in a sentence; offer the rest in text");
     conversation.input.onAudioDelta(pcmDelta(480), "result");
     done(conversation);
     await flush();

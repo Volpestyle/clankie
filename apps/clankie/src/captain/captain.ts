@@ -142,6 +142,7 @@ import {
 import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
 import { ConversationServiceRun, waitForConversationRun } from "./conversation-run.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
+import { composeVoiceLaneInstructions } from "./voice-lane.ts";
 import { createStanceStore } from "./stances.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
@@ -367,6 +368,11 @@ export function instructionsForHarness<T extends { readonly path: string }>(
   );
 }
 
+/** The captain's instructions.md: identity, trust and where things live, re-read per call. */
+export function captainInstructions(): string {
+  return readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
+}
+
 /** The sections a pi session is built with; the model card is refreshed per run instead. */
 const SESSION_PROMPT_SECTIONS: readonly CaptainPromptSection[] = [
   "identity",
@@ -391,7 +397,7 @@ export function assembleLanePrompt(
   extra: Readonly<Partial<Record<CaptainPromptSection, string>>> = {},
   computerUse: readonly ComputerUseHarness[] = [],
 ): string {
-  const identity = readFileSync(join(import.meta.dirname, "instructions.md"), "utf8");
+  const identity = captainInstructions();
   const persona = personaInstructions(currentSettings.persona, REGISTER_FOR_LANE[lane]);
   // Machine access says only whether this room has a shell. The herdr contract —
   // joining, the census, the bare-`herdr-lead` hang — is identity, stated once in
@@ -4612,16 +4618,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     readIssueMetrics: (query) => readIssueMetrics(options.stateDir, query),
 
     voiceLaneInstructions(): string {
-      return (
-        "You are present in a Discord voice channel. You hear only participants permitted by the room's consent policy and you speak " +
-        "aloud as a friend hanging out in a call. Match the length to the moment; most turns are short, " +
-        "sometimes just a few words. A story, a strong opinion, a bit you are invested in, or a real " +
-        "question that needs a real answer can earn more room. Keep your personality without constantly " +
-        "performing. No lists, assistant padding, menus of options, or restating the request. Handoff " +
-        "results follow the same proportion: give the gist, expand when the substance warrants it, " +
-        "and you can offer details in text chat. Text can be thorough. Leave room for people and absorb the latest conversation " +
-        "instead of answering each fragment. No markdown, links, or file paths spoken aloud."
-      );
+      // The same Identity every lane starts from, then the one voice register.
+      return composeVoiceLaneInstructions(captainInstructions());
     },
 
     seatContext,

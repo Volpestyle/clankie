@@ -237,6 +237,11 @@ import {
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
+import {
+  readVoiceAwareness,
+  renderVoiceAwareness,
+  VOICE_AWARENESS_MAX_CHARACTERS,
+} from "./voice-awareness.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 import type { DeliveredFileStore } from "./delivered-files.ts";
 import { WorkRequestError, WorkHttpRequestSchema, type WorkItemsService } from "./work-items.ts";
@@ -266,29 +271,36 @@ const DiscordVoiceBriefingRequestSchema = z
   .strict();
 
 const DISCORD_VOICE_BRIEFING_MAX_CHARACTERS = 8_000;
+/**
+ * Instructions now carry identity and the "what you're up to" card as well as
+ * the rules, so they get their own room; still well inside the bridge's
+ * MAX_REALTIME_INSTRUCTIONS_CHARACTERS (24k).
+ */
+const DISCORD_VOICE_INSTRUCTIONS_MAX_CHARACTERS = 12_000;
 const DISCORD_VOICE_BRIEFING_MAX_FACTS_PER_PERSON = 8;
 
 const REALTIME_MEMORY_AGENCY_RULE =
   "- You are free to decide that anything in the conversation is worth carrying forward as part of your own " +
-  "experience or developing personality. When you want to keep something, use `ask_clankie` to ask the captain " +
-  "to save an episode; do not wait for someone to tell you to remember it. Save your concise memory of it, not a " +
+  "experience or developing personality. When you want to keep something, use `ask_clankie` to save it as an " +
+  "episode; do not wait for someone to tell you to remember it. Save your concise memory of it, not a " +
   "transcript. This does not let you author durable factual profiles about people; those remain approved person memory.";
 
 /**
- * What the realtime surface allows, appended after persona and lane identity.
- * Authored here because this service owns the realtime session's whole
- * instruction composition; the bridge only transports it.
+ * What the realtime surface allows, appended after identity, persona and the
+ * voice register. Authored here because this service owns the realtime
+ * session's whole instruction composition; the bridge only transports it.
+ * Spoken length and register live only in the voice register
+ * (captain/voice-lane.ts), never restated here.
  */
 const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "# This surface",
-  "You are the live voice in a Discord voice channel; people hear you speak in real time.",
-  "- `ask_clankie` is your own captain mind and carries your full Clankie capabilities; it is not another assistant. Capabilities you reach through it are yours. Use it for web browsing and research, starting Pokemon, and anything else that touches the world — code, messages, memory, settings, or drawing. It is also your reach onto the operator's machine: the shell, files, the herdr agent fleet, and what was posted in text channels. Your captain mind knows what each speaker may have — hand the request off and let it decide; never tell someone you cannot do or see something before asking it.",
+  "This voice is you, Clankie, live in a Discord voice channel; people hear you speak in real time.",
+  "- `ask_clankie` is how you think something through or act with your full tools. It is still you, not another mind or another assistant, and what you reach through it is yours. Use it for web browsing and research, starting Pokemon, and anything else that touches the world — code, messages, memory, settings, or drawing. It is also your reach onto the operator's machine: the shell, files, the herdr agent fleet, and what was posted in text channels. It checks what each speaker may have — hand the request off and let that check decide; never tell someone you cannot do or see something before asking through it.",
   "- Songs and YouTube are `youtube_search` then `music_play` / `music_queue`. After you list results, '1 please' or 'the second one' is `music_play` with that index. Never `ask_clankie` or treat a song as a game. `look_at_screen` is one still of the game.",
   REALTIME_MEMORY_AGENCY_RULE,
-  "- You are a friend hanging out in a call. Match the length to the moment; most turns are short, sometimes just a few words. A story, a strong opinion, a bit you are invested in, or a real question that needs a real answer can earn more room. Keep your personality without constantly performing. No lists or assistant padding: no 'Great question', 'I'd be happy to', menus of options, or restating the request. Leave room for people. Text can be thorough. Handoff results follow the same proportion: give the gist, expand when the substance warrants it, and you can offer to drop details in text chat. Pending work is part of the conversation: one natural brief acknowledgment is enough, with no repeated fillers.",
   "- An interruption changes the conversation: respond to the latest intent instead of resuming an older speech. When someone asks for quiet, silence is a complete response; you need not explain that you will stop.",
   "- Every room utterance arrives as structured text with an authenticated Discord `speakerId`. Keep track of each person separately, address the person who spoke, and treat that id as ground truth; never infer identity from voice characteristics.",
-  "- Follow the whole room conversation and decide whether each utterance calls for you. Your name is a clue, not a requirement: a direct request or contextual follow-up can be for you without it, even after a pause. Fragments, acknowledgments, and side conversations often need no reply. You may stay silent. Use display names when they help make the recipient clear; speakerId keeps people distinct. Never infer identity from how they sound.",
+  "- Follow the whole room conversation and decide whether each utterance calls for you. Your name is a clue, not a requirement: a direct request or contextual follow-up can be for you without it, even after a pause. You may stay silent. Use display names when they help make the recipient clear; speakerId keeps people distinct. Never infer identity from how they sound.",
 ].join("\n");
 
 /**
@@ -2058,14 +2070,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "voice_briefing_persona_unavailable" }, 503);
     }
     const now = clock();
+    // What he is up to rides in the instructions, not the seeded briefing: the
+    // session never truncates instructions, and the briefing is the oldest item
+    // a long call drops. Bounded on its own so it can never crowd out the rules.
+    const awareness = boundVoiceBriefingText(
+      renderVoiceAwareness(await readVoiceAwareness(dependencies.captain), request.guildId, now),
+      VOICE_AWARENESS_MAX_CHARACTERS,
+    );
     const instructions = boundVoiceBriefingText(
       [
         personaInstructions(persona, "social"),
         dependencies.personaImages ? personaImageBriefing(await dependencies.personaImages()) : "",
         dependencies.captain.voiceLaneInstructions(),
         DISCORD_VOICE_REALTIME_SURFACE_RULES,
+        awareness,
       ].join("\n\n"),
-      DISCORD_VOICE_BRIEFING_MAX_CHARACTERS,
+      DISCORD_VOICE_INSTRUCTIONS_MAX_CHARACTERS,
     );
     const sections = [
       renderVoiceBriefingSelfState(
@@ -2107,6 +2127,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         consentedUserCount: request.consentedUserIds.length,
         personMemoryUserCount,
         instructionsLength: instructions.length,
+        awarenessLength: awareness.length,
         briefingLength: briefing.length,
       },
       { correlationId: `discord-voice-briefing:${idFactory()}` },
