@@ -115,7 +115,9 @@ async function api(path: string, request: unknown, secret?: string, base = API_B
       throw new PlayitApiError(
         result.data === "RequiresVerifiedAccount"
           ? "playit-email-verification-required"
-          : "playit-api-rejected",
+          : result.data === "AgentVersionTooOld"
+            ? "playit-agent-version-too-old"
+            : "playit-api-rejected",
       );
     }
     if (result.status === "error") {
@@ -126,7 +128,9 @@ async function api(path: string, request: unknown, secret?: string, base = API_B
           ? "playit-email-verification-required"
           : remote.data.type === "internal"
             ? "playit-api-unavailable"
-            : "playit-api-rejected",
+            : remote.data.type === "validation"
+              ? "playit-api-invalid-request"
+              : "playit-api-rejected",
       );
     }
     if (!response.ok) throw new PlayitApiError("playit-api-unavailable");
@@ -235,6 +239,8 @@ export class MinecraftTunnel {
   private attempts = 0;
   private operation: Promise<TunnelStatus> | undefined;
   private readonly secretPath: string;
+  private ownsSecretProjection = false;
+  private releaseRuntime: (() => Promise<void>) | undefined;
 
   constructor(options: TunnelOptions) {
     if (!Number.isInteger(options.originPort) || options.originPort < 1 || options.originPort > 65535) {
@@ -398,32 +404,58 @@ export class MinecraftTunnel {
       if (!/^[a-fA-F0-9]{32,512}$/.test(secret)) throw new Error("playit-credential-invalid");
       const binary = await (this.options.install ?? installedPlayit)(this.options.dataDir);
       if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
-      const address = await this.ensureTunnel(secret);
-      if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
-      const runtime = join(this.options.dataDir, "playit-runtime");
-      await mkdir(runtime, { recursive: true, mode: 0o700 });
-      await chmod(runtime, 0o700);
-      await rm(this.secretPath, { force: true });
-      await writeFile(this.secretPath, secret, { mode: 0o600, flag: "wx" });
-      const child = (this.options.launch ?? launch)(
-        binary,
-        ["--secret_path", this.secretPath, "--stdout", "start"],
-        runtime,
-      );
-      this.child = child;
-      const onExit = () => {
-        void this.exited(child);
+      const launchAgent = async () => {
+        if (this.child) return;
+        if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
+        const runtime = join(this.options.dataDir, "playit-runtime");
+        await mkdir(runtime, { recursive: true, mode: 0o700 });
+        await chmod(runtime, 0o700);
+        try {
+          this.releaseRuntime = await lockfile.lock(this.secretPath, {
+            realpath: false,
+            stale: 60_000,
+            update: 10_000,
+            retries: 0,
+            onCompromised: () => {
+              this.state = { phase: "failed", error: "playit-process-error" };
+              void this.stop();
+            },
+          });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ELOCKED") {
+            throw new Error("playit-tunnel-allocation-pending");
+          }
+          throw error;
+        }
+        if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
+        await rm(this.secretPath, { force: true });
+        await writeFile(this.secretPath, secret, { mode: 0o600, flag: "wx" });
+        this.ownsSecretProjection = true;
+        const child = (this.options.launch ?? launch)(
+          binary,
+          ["--secret_path", this.secretPath, "--stdout", "start"],
+          runtime,
+        );
+        this.child = child;
+        const onExit = () => {
+          void this.exited(child);
+        };
+        child.once("exit", onExit);
+        child.once("error", () => {
+          // Spawn failures have no process; a failed signal is not proof of termination.
+          if (!child.pid) onExit();
+          else this.state = { phase: "failed", error: "playit-process-error" };
+        });
+        await new Promise<void>((resolve, reject) => {
+          child.once("spawn", resolve);
+          child.once("error", () => reject(new Error("playit-start-failed")));
+        });
       };
-      child.once("exit", onExit);
-      child.once("error", () => {
-        // Spawn failures have no process; a failed signal is not proof of termination.
-        if (!child.pid) onExit();
-        else this.state = { phase: "failed", error: "playit-process-error" };
-      });
-      await new Promise<void>((resolve, reject) => {
-        child.once("spawn", resolve);
-        child.once("error", () => reject(new Error("playit-start-failed")));
-      });
+      const address = await this.ensureTunnel(secret, true, launchAgent);
+      if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
+      await launchAgent();
+      const child = this.child;
+      if (!child) throw new Error("playit-start-failed");
       this.state = { phase: "running", ...address };
       this.monitor = setInterval(() => {
         void this.checkHealth(child, secret);
@@ -431,7 +463,18 @@ export class MinecraftTunnel {
       this.monitor.unref();
       return this.status();
     } catch (error) {
-      if (!this.child) await rm(this.secretPath, { force: true });
+      this.desired = false;
+      if (this.retry) {
+        clearTimeout(this.retry);
+        this.retry = undefined;
+      }
+      const child = this.child;
+      if (child && !(await this.terminateChild(child))) {
+        this.state = { phase: "failed", error: "playit-stop-unconfirmed" };
+        return this.status();
+      }
+      await this.cleanup;
+      if (!this.child) await this.removeSecretProjection();
       const safe = MinecraftTunnelErrorSchema.safeParse(error instanceof Error ? error.message : undefined);
       this.state = { phase: "failed", error: safe.success ? safe.data : "playit-start-failed" };
       return this.status();
@@ -440,6 +483,7 @@ export class MinecraftTunnel {
   private async ensureTunnel(
     secret: string,
     allowCreate = true,
+    beforeCreate?: () => Promise<void>,
   ): Promise<{ tunnelId: string; publicAddress: string }> {
     const ownedPath = join(this.options.dataDir, "playit-tunnel-id");
     await mkdir(this.options.dataDir, { recursive: true, mode: 0o700 });
@@ -465,7 +509,7 @@ export class MinecraftTunnel {
       if (compromised) throw new Error("playit-tunnel-allocation-pending");
     };
     try {
-      const address = await this.ensureTunnelLocked(secret, allowCreate, assertHeld);
+      const address = await this.ensureTunnelLocked(secret, allowCreate, assertHeld, beforeCreate);
       assertHeld();
       return address;
     } finally {
@@ -476,6 +520,7 @@ export class MinecraftTunnel {
     secret: string,
     allowCreate: boolean,
     assertHeld: () => void,
+    beforeCreate?: () => Promise<void>,
   ): Promise<{ tunnelId: string; publicAddress: string }> {
     const ownedPath = join(this.options.dataDir, "playit-tunnel-id");
     const intentPath = `${ownedPath}.intent`;
@@ -575,46 +620,64 @@ export class MinecraftTunnel {
       if (data.permissions.account_status !== "verified") {
         throw new PlayitApiError("playit-email-verification-required");
       }
+      // The official agent registers its numeric version through /proto/register.
+      // Rundata ownership is checked first, and the lease covers launch and allocation.
+      await beforeCreate?.();
       // Persist uncertainty before external creation: an interrupted request must never allocate twice.
       assertHeld();
       intent = { agent_id: agentId, outcome: "uncertain" };
       await writeFile(intentPath, `${JSON.stringify(intent)}\n`, { mode: 0o600, flag: "wx" });
       await writeFile(ownedPath, `${ALLOCATION_PENDING}\n`, { mode: 0o600, flag: "wx" });
       let response: unknown;
-      try {
-        assertHeld();
-        response = await this.request(
-          "/v1/tunnels/create",
-          {
-            ports: { type: "tunnel-type", details: "minecraft-java" },
-            origin: {
-              type: "agent",
-              data: {
-                agent_id: agentId,
-                config: {
-                  fields: [
-                    { name: "local_ip", value: "127.0.0.1" },
-                    { name: "local_port", value: String(this.options.originPort) },
-                    { name: "proxy_protocol", value: "proxy-protocol-v2" },
-                  ],
+      for (let attempt = 0; ; attempt++) {
+        try {
+          assertHeld();
+          if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
+          if (beforeCreate && !this.child) throw new Error("playit-start-failed");
+          response = await this.request(
+            "/v1/tunnels/create",
+            {
+              protocol: { type: "tunnel-type", details: "minecraft-java" },
+              origin: {
+                type: "agent",
+                data: {
+                  agent_id: agentId,
+                  config: {
+                    fields: [
+                      { name: "local_ip", value: "127.0.0.1" },
+                      { name: "local_port", value: String(this.options.originPort) },
+                      { name: "proxy_protocol", value: "proxy-protocol-v2" },
+                    ],
+                  },
                 },
               },
+              enabled: true,
+              endpoint: { type: "region", details: { region: "global", port: null } },
+              name: TUNNEL_NAME,
+              firewall_id: null,
             },
-            enabled: true,
-            alloc: null,
-            name: TUNNEL_NAME,
-            firewall_id: null,
-          },
-          secret,
-        );
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          (error.message === "playit-api-rejected" || error.message === "playit-email-verification-required")
-        ) {
-          await save(intentPath, JSON.stringify({ agent_id: agentId, outcome: "rejected" }));
+            secret,
+          );
+          break;
+        } catch (error) {
+          if (
+            error instanceof PlayitApiError &&
+            [
+              "playit-api-rejected",
+              "playit-email-verification-required",
+              "playit-agent-version-too-old",
+              "playit-api-invalid-request",
+            ].includes(error.message)
+          ) {
+            await save(intentPath, JSON.stringify({ agent_id: agentId, outcome: "rejected" }));
+            if (error.message === "playit-agent-version-too-old" && beforeCreate && attempt < 20) {
+              await this.waitForAllocation();
+              await save(intentPath, JSON.stringify({ agent_id: agentId, outcome: "uncertain" }));
+              continue;
+            }
+          }
+          throw error;
         }
-        throw error;
       }
       const created = z.object({ id: z.uuid() }).safeParse(response);
       if (!created.success) throw new PlayitApiError("playit-api-invalid-response");
@@ -672,7 +735,7 @@ export class MinecraftTunnel {
       clearInterval(this.monitor);
       this.monitor = undefined;
     }
-    this.cleanup = rm(this.secretPath, { force: true });
+    this.cleanup = this.removeSecretProjection();
     await this.cleanup;
     this.child = undefined;
     if (!this.desired) {
@@ -727,32 +790,50 @@ export class MinecraftTunnel {
     await this.operation;
     const child = this.child;
     if (child) {
-      const confirmed = await new Promise<boolean>((resolve) => {
-        const deadline = setTimeout(() => {
-          clearTimeout(killTimer);
-          resolve(false);
-        }, 10_000);
-        const killTimer = setTimeout(() => {
-          child.kill("SIGKILL");
-        }, 5000);
-        child.once("exit", () => {
-          clearTimeout(killTimer);
-          clearTimeout(deadline);
-          resolve(true);
-        });
-        child.kill("SIGTERM");
-      });
-      if (!confirmed) {
+      if (!(await this.terminateChild(child))) {
         this.state = { phase: "failed", error: "playit-stop-unconfirmed" };
         return this.status();
       }
-      this.child = undefined;
     }
     await this.cleanup;
-    await rm(this.secretPath, { force: true });
+    await this.removeSecretProjection();
     this.attempts = 0;
     this.state = { phase: "stopped" };
     return this.status();
+  }
+  private async terminateChild(child: ChildProcess): Promise<boolean> {
+    if (!child.pid || child.exitCode != null || child.signalCode != null) {
+      if (this.child === child) this.child = undefined;
+      return true;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => {
+      const deadline = setTimeout(() => {
+        clearTimeout(killTimer);
+        resolve(false);
+      }, 10_000);
+      const killTimer = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, 5000);
+      child.once("exit", () => {
+        clearTimeout(killTimer);
+        clearTimeout(deadline);
+        resolve(true);
+      });
+      child.kill("SIGTERM");
+    });
+    if (confirmed && this.child === child) this.child = undefined;
+    return confirmed;
+  }
+  private async removeSecretProjection(): Promise<void> {
+    if (this.ownsSecretProjection) {
+      await rm(this.secretPath, { force: true });
+      this.ownsSecretProjection = false;
+    }
+    const release = this.releaseRuntime;
+    this.releaseRuntime = undefined;
+    // A compromised lease may already be released by the lock implementation.
+    // The child is confirmed gone before its projection and lease are retired.
+    await release?.().catch(() => {});
   }
   private now(): number {
     return (this.options.now ?? Date.now)();

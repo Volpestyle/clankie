@@ -1,0 +1,10 @@
+{
+  "httpStatus": 400,
+  "body": {
+    "status": "error",
+    "data": {
+      "type": "validation",
+      "message": "failed to parse body"
+    }
+  }
+}

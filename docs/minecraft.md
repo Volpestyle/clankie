@@ -158,6 +158,12 @@ cached executable. No router forwarding is needed. Public address and genuine
 remote connectivity remain unverified until an account claim and remote join.
 
 Claim completion authenticates the agent; it does not confirm tunnel allocation.
+Start launches the pinned agent before requesting its first tunnel, allowing
+playit to register its supported version and configuration. Initial registration
+may take a short time. A persistent `playit-agent-version-too-old` means playit
+has not accepted that agent version; `playit-api-invalid-request` reports an
+integration/API compatibility failure. Neither code proves that a paid plan is
+required.
 `clankie minecraft host status` reports a safe `tunnel.error` code when startup
 fails. `playit-email-verification-required` means the owner must verify their
 playit account email, then retry `clankie minecraft host start`. Failed allocation

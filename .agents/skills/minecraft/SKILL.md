@@ -39,7 +39,12 @@ tunnels, provision AWS resources or raise limits. Tool checks enforce this.
   three seconds and stores the approved agent secret in the broker automatically,
   even after the caller exits; `minecraft_host_claim_complete` also reads status.
   Pending is not completion; resolve expired/rejected claims before starting.
-  A claimed account still needs tunnel allocation. If host status reports
+  A claimed account still needs tunnel allocation. Start registers the claimed
+  pinned agent with playit before requesting its first tunnel; initial
+  registration can take a short time. `playit-agent-version-too-old` reports
+  that playit has not accepted the agent version, and `playit-api-invalid-request`
+  reports an integration/API compatibility failure. Neither is evidence that
+  the owner needs a paid plan or another claim. If host status reports
   `playit-email-verification-required`, tell the owner to verify their playit
   account email, then retry start. Other safe `tunnel.error` codes describe a
   failed public connection even when Paper is running and auth-ready.

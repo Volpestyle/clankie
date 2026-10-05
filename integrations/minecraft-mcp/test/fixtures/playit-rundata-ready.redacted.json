@@ -1,0 +1,42 @@
+{
+  "status": "success",
+  "data": {
+    "agent_id": "00000000-0000-4000-8000-000000000001",
+    "tunnels": [
+      {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "internal_id": 1,
+        "name": "Clankie Minecraft",
+        "display_address": "clankie-fixture.example:25565",
+        "port_type": "tcp",
+        "port_count": 1,
+        "tunnel_type": "minecraft-java",
+        "tunnel_type_display": "minecraft-java",
+        "agent_config": {
+          "fields": [
+            {
+              "name": "local_ip",
+              "value": "127.0.0.1"
+            },
+            {
+              "name": "local_port",
+              "value": "25684"
+            },
+            {
+              "name": "proxy_protocol",
+              "value": "proxy-protocol-v2"
+            }
+          ]
+        },
+        "disabled_reason": null
+      }
+    ],
+    "pending": [],
+    "notices": [],
+    "permissions": {
+      "is_self_managed": true,
+      "has_premium": false,
+      "account_status": "verified"
+    }
+  }
+}

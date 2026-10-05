@@ -105,6 +105,8 @@ export const MinecraftTunnelErrorSchema = z.enum([
   "playit-stop-unconfirmed",
   "playit-api-unavailable",
   "playit-api-invalid-response",
+  "playit-api-invalid-request",
+  "playit-agent-version-too-old",
   "playit-email-verification-required",
   "playit-api-rejected",
 ]);

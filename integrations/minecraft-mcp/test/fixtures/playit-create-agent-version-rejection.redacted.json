@@ -1,0 +1,7 @@
+{
+  "httpStatus": 400,
+  "body": {
+    "status": "fail",
+    "data": "AgentVersionTooOld"
+  }
+}

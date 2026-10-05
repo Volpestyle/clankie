@@ -165,6 +165,8 @@ describe("Minecraft playit tunnel", () => {
     expect(f.api).toHaveBeenCalledWith(
       "/v1/tunnels/create",
       expect.objectContaining({
+        protocol: { type: "tunnel-type", details: "minecraft-java" },
+        endpoint: { type: "region", details: { region: "global", port: null } },
         origin: {
           type: "agent",
           data: {

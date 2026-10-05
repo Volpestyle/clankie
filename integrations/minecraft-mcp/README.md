@@ -152,6 +152,11 @@ Tunnel status includes only stable public error codes; provider response bodies
 and credentials never cross the status projection into Clankie's tools. Account
 claim completion is separate from allocation: `playit-email-verification-required`
 requires the owner to verify their playit account email before retrying start.
+Startup launches the claimed pinned agent before its first allocation request,
+so playit can register the executable's supported version and configuration.
+`playit-agent-version-too-old` reports a registration/version rejection;
+`playit-api-invalid-request` reports an incompatible request, without exposing
+the upstream validation message.
 An interrupted allocation is reconciled against the agent's actual tunnels on
 the next start, adopting the matching owned tunnel. A filesystem lease excludes
 concurrent creates; a private allocation receipt distinguishes confirmed rejection
@@ -179,6 +184,17 @@ relicense downloaded plugins. Playit's pinned official source is
 [BSD-2-Clause](https://github.com/playit-cloud/playit-agent/blob/3adf0fd4fb72c866511890eabb766732734f3cda/LICENSE.txt).
 The Mac installer verifies its source archive and compiles with `--locked`.
 No plugin or playit binary is bundled into the release archive.
+
+The binary pin establishes executable provenance; the hosted HTTP API evolves
+separately. Allocation follows the official Minecraft plugin's
+[HTTP request schema](https://github.com/playit-cloud/playit-minecraft-plugin/blob/4888f44ef09c30b7fb76fc64fa2f6c0ad1adbc8a/agentkey_schema.ts):
+`protocol: { type: "tunnel-type", details: "minecraft-java" }` and
+`endpoint: { type: "region", details: { region: "global", port: null } }`,
+with the authenticated agent origin and mandatory PROXY V2 configuration.
+The pinned native client's older `ports`/`alloc` request was rejected by the
+hosted API even though a fixture copied from that source passed. Keep live
+redacted response goldens separate from simulated scenarios: agreement with
+an old source shape does not establish hosted API acceptance.
 
 The isolated compatibility check downloads the pinned real stack into a temporary
 world and broker, authenticates 26.3/1.21.11 friends and the 1.21.4 bot, and

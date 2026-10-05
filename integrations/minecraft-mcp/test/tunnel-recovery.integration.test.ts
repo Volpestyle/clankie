@@ -9,29 +9,28 @@ const agentId = "00000000-0000-4000-8000-000000000001";
 const tunnelId = "00000000-0000-4000-8000-000000000002";
 const secret = "abcdef0123456789".repeat(4);
 const originPort = 25684;
-const publicAddress = "fixture.gl.joinmc.link:12345";
-const fields = [
-  { name: "local_ip", value: "127.0.0.1" },
-  { name: "local_port", value: String(originPort) },
-  { name: "proxy_protocol", value: "proxy-protocol-v2" },
-];
-// Complete AgentTunnelV1 scenario data from the pinned official source;
-// the live read-only golden was captured before allocation.
-const readyTunnel = {
-  id: tunnelId,
-  internal_id: 1,
-  name: "Clankie Minecraft",
-  display_address: publicAddress,
-  port_type: "tcp",
-  port_count: 1,
-  tunnel_type: "minecraft-java",
-  tunnel_type_display: "Minecraft Java",
-  agent_config: { fields },
-  disabled_reason: null,
+type ReadyTunnel = {
+  id: string;
+  internal_id: number;
+  name: string;
+  display_address: string;
+  port_type: string;
+  port_count: number;
+  tunnel_type: string;
+  tunnel_type_display: string;
+  agent_config: { fields: { name: string; value: string }[] };
+  disabled_reason: string | null;
 };
+// Actual successful AgentTunnelV1 response, with identity/address redacted.
+const readyGolden = JSON.parse(
+  await readFile(new URL("fixtures/playit-rundata-ready.redacted.json", import.meta.url), "utf8"),
+) as { status: "success"; data: RunData };
+const readyTunnel = readyGolden.data.tunnels[0]!;
+const publicAddress = readyTunnel.display_address;
+const fields = readyTunnel.agent_config.fields;
 type RunData = {
   agent_id: string;
-  tunnels: (typeof readyTunnel)[];
+  tunnels: ReadyTunnel[];
   pending: {
     id: string;
     name: string;
@@ -46,7 +45,14 @@ type RunData = {
 };
 
 async function harness(
-  mode: "success" | "lost-response" | "lost-empty" | "held-create" | "rejected-once" | "unverified",
+  mode:
+    | "success"
+    | "lost-response"
+    | "lost-empty"
+    | "held-create"
+    | "rejected-once"
+    | "version-registers"
+    | "unverified",
 ) {
   const dataDir = await mkdtemp(join(tmpdir(), "minecraft-tunnel-recovery-"));
   const golden = JSON.parse(
@@ -61,6 +67,18 @@ async function harness(
     ),
   ) as { status: "success"; data: RunData };
   const rundata = structuredClone(golden.data);
+  const rejectionGolden = JSON.parse(
+    await readFile(new URL("fixtures/playit-create-rejection.redacted.json", import.meta.url), "utf8"),
+  ) as { httpStatus: number; body: unknown };
+  const versionRejectionGolden = JSON.parse(
+    await readFile(
+      new URL("fixtures/playit-create-agent-version-rejection.redacted.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { httpStatus: number; body: unknown };
+  const successGolden = JSON.parse(
+    await readFile(new URL("fixtures/playit-create-success.redacted.json", import.meta.url), "utf8"),
+  ) as { httpStatus: number; body: unknown };
   if (mode !== "unverified") {
     rundata.permissions.account_status = "verified";
     rundata.notices = [];
@@ -89,17 +107,29 @@ async function harness(
       }
       expect(request.url).toBe("/v1/tunnels/create");
       expect(await readFile(join(dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
+      // Native startup is required to register the agent's version/schema before allocation.
+      await expect
+        .poll(async () =>
+          JSON.parse(await readFile(join(dataDir, "playit-runtime/fixture-start.json"), "utf8")),
+        )
+        .toMatchObject({ pid: expect.any(Number) });
       expect(input).toEqual({
-        ports: { type: "tunnel-type", details: "minecraft-java" },
+        protocol: { type: "tunnel-type", details: "minecraft-java" },
         origin: { type: "agent", data: { agent_id: agentId, config: { fields } } },
         enabled: true,
-        alloc: null,
+        endpoint: { type: "region", details: { region: "global", port: null } },
         name: "Clankie Minecraft",
         firewall_id: null,
       });
       attempts++;
       if (mode === "rejected-once" && attempts === 1) {
-        response.end(JSON.stringify({ status: "fail", data: "RequiresVerifiedAccount" }));
+        response.statusCode = rejectionGolden.httpStatus;
+        response.end(JSON.stringify(rejectionGolden.body));
+        return;
+      }
+      if (mode === "version-registers" && attempts === 1) {
+        response.statusCode = versionRejectionGolden.httpStatus;
+        response.end(JSON.stringify(versionRejectionGolden.body));
         return;
       }
       if (mode === "lost-empty") {
@@ -116,7 +146,8 @@ async function harness(
         response.destroy();
         return;
       }
-      response.end(JSON.stringify({ status: "success", data: { id: tunnelId } }));
+      response.statusCode = successGolden.httpStatus;
+      response.end(JSON.stringify(successGolden.body));
     } catch (error) {
       providerError = error;
       response.statusCode = 500;
@@ -136,6 +167,7 @@ const args = process.argv.slice(2);
 const secretPath = args[args.indexOf("--secret_path") + 1];
 if (!/^[a-f0-9]{64}$/.test(fs.readFileSync(secretPath, "utf8"))) process.exit(2);
 fs.writeFileSync(path.join(process.cwd(), "fixture-start.json"), JSON.stringify({pid: process.pid, args}));
+fs.appendFileSync(path.join(process.cwd(), "fixture-starts"), process.pid + "\\n");
 process.on("SIGTERM", () => {
   fs.writeFileSync(path.join(process.cwd(), "fixture-stopped"), "SIGTERM\\n");
   process.exit(0);
@@ -186,8 +218,11 @@ async function closeProvider(provider: Server): Promise<void> {
   );
 }
 
-async function assertRealProcess(tunnel: MinecraftTunnel, dataDir: string) {
+async function assertRealProcess(tunnel: MinecraftTunnel, dataDir: string, starts = 1) {
   const runtime = join(dataDir, "playit-runtime");
+  await expect
+    .poll(async () => (await readFile(join(runtime, "fixture-starts"), "utf8")).trim().split("\n"))
+    .toHaveLength(starts);
   await expect
     .poll(async () => JSON.parse(await readFile(join(runtime, "fixture-start.json"), "utf8")))
     .toEqual({
@@ -195,6 +230,7 @@ async function assertRealProcess(tunnel: MinecraftTunnel, dataDir: string) {
       args: ["--secret_path", join(runtime, "agent.secret"), "--stdout", "start"],
     });
   expect((await stat(runtime)).mode & 0o777).toBe(0o700);
+  expect((await readFile(join(runtime, "fixture-starts"), "utf8")).trim().split("\n")).toHaveLength(starts);
   expect((await stat(join(runtime, "agent.secret"))).mode & 0o777).toBe(0o600);
   expect(await readFile(join(runtime, "agent.secret"), "utf8")).toBe(secret);
   expect(JSON.stringify(tunnel.status())).not.toContain(secret);
@@ -209,7 +245,10 @@ test("real HTTP create response lost after marker survives restart and adopts on
     const first = f.restart();
     expect(await first.start()).toEqual({ phase: "failed", error: "playit-api-unavailable" });
     expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
-    await expect(stat(join(f.dataDir, "playit-runtime"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(f.dataDir, "playit-runtime/fixture-stopped"), "utf8")).toBe("SIGTERM\n");
+    await expect(stat(join(f.dataDir, "playit-runtime/agent.secret"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await first.stop();
     const restarted = f.restart();
     const [one, two] = await Promise.all([restarted.start(), restarted.start()]);
@@ -217,21 +256,26 @@ test("real HTTP create response lost after marker survives restart and adopts on
     expect(two).toEqual(one);
     expect(f.attempts()).toBe(1);
     expect(f.allocations()).toBe(1);
+    expect(f.rundata).toEqual(readyGolden.data);
     expect(f.requests).toEqual(["/v1/agents/rundata", "/v1/tunnels/create", "/v1/agents/rundata"]);
     expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe(`${tunnelId}\n`);
-    await assertRealProcess(restarted, f.dataDir);
+    await assertRealProcess(restarted, f.dataDir, 2);
     f.checkProvider();
   } finally {
     await f.close();
   }
 });
 
-test("real create rejection is safely reported, then empty reconciliation clears marker and allocates once", async () => {
+test("recorded HTTP400 create rejection is safely reported, then restart clears marker and allocates once", async () => {
   const f = await harness("rejected-once");
   try {
     const first = f.restart();
-    expect(await first.start()).toEqual({ phase: "failed", error: "playit-email-verification-required" });
+    expect(await first.start()).toEqual({ phase: "failed", error: "playit-api-invalid-request" });
     expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
+    expect(await readFile(join(f.dataDir, "playit-runtime/fixture-stopped"), "utf8")).toBe("SIGTERM\n");
+    await expect(stat(join(f.dataDir, "playit-runtime/agent.secret"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await first.stop();
     const restarted = f.restart();
     expect(await restarted.start()).toEqual({ phase: "running", publicAddress, tunnelId });
@@ -244,7 +288,7 @@ test("real create rejection is safely reported, then empty reconciliation clears
       "/v1/tunnels/create",
       "/v1/agents/rundata",
     ]);
-    await assertRealProcess(restarted, f.dataDir);
+    await assertRealProcess(restarted, f.dataDir, 2);
     f.checkProvider();
   } finally {
     await f.close();
@@ -290,7 +334,10 @@ test("unknown create outcome stays pending when restart cannot yet see an alloca
     expect(f.attempts()).toBe(1);
     expect(f.requests.filter((path) => path === "/v1/tunnels/create")).toHaveLength(1);
     expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
-    await expect(stat(join(f.dataDir, "playit-runtime"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(f.dataDir, "playit-runtime/fixture-stopped"), "utf8")).toBe("SIGTERM\n");
+    await expect(stat(join(f.dataDir, "playit-runtime/agent.secret"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     f.checkProvider();
   } finally {
     await f.close();
@@ -307,6 +354,44 @@ test("create succeeds with the official request, response envelope, and full v1 
     expect(f.requests).toEqual(["/v1/agents/rundata", "/v1/tunnels/create", "/v1/agents/rundata"]);
     expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe(`${tunnelId}\n`);
     await assertRealProcess(tunnel, f.dataDir);
+    f.checkProvider();
+  } finally {
+    await f.close();
+  }
+});
+
+test("native startup precedes create and a recorded version rejection retries to one successful allocation", async () => {
+  const f = await harness("version-registers");
+  try {
+    const tunnel = f.restart();
+    expect(await tunnel.start()).toEqual({ phase: "running", publicAddress, tunnelId });
+    expect(f.attempts()).toBe(2);
+    expect(f.allocations()).toBe(1);
+    expect(f.requests.filter((path) => path === "/v1/tunnels/create")).toHaveLength(2);
+    expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe(`${tunnelId}\n`);
+    await assertRealProcess(tunnel, f.dataDir);
+    f.checkProvider();
+  } finally {
+    await f.close();
+  }
+});
+
+test("another instance starting and stopping an owned tunnel preserves its live process and secret", async () => {
+  const f = await harness("success");
+  try {
+    const first = f.restart();
+    expect(await first.start()).toEqual({ phase: "running", publicAddress, tunnelId });
+    const second = f.restart();
+    expect(await second.start()).toEqual({
+      phase: "failed",
+      error: "playit-tunnel-allocation-pending",
+    });
+    expect(await second.stop()).toEqual({ phase: "stopped" });
+    expect(first.status()).toEqual({ phase: "running", publicAddress, tunnelId });
+    expect(await readFile(join(f.dataDir, "playit-runtime/agent.secret"), "utf8")).toBe(secret);
+    expect(f.attempts()).toBe(1);
+    expect(f.allocations()).toBe(1);
+    await assertRealProcess(first, f.dataDir);
     f.checkProvider();
   } finally {
     await f.close();
