@@ -83,7 +83,7 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, showEfficiency = tru
     // This Mac is the default; only a seat on another machine names where it is.
     seat.fleet === undefined ? undefined : theme.ansi.dim(clean(seat.machine ?? seat.fleet)),
     bridgeWarning(agent, theme),
-    ...(showEfficiency ? seat.efficiency?.flags.map((flag) => theme.ansi.red(clean(flag))) ?? [] : []),
+    ...(showEfficiency ? (seat.efficiency?.flags.map((flag) => theme.ansi.red(clean(flag))) ?? []) : []),
   ]
     .filter((part): part is string => part !== undefined)
     .join(theme.ansi.dim(" · "));
