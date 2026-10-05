@@ -2789,7 +2789,15 @@ replayed automatically. Service goals require a Pi-owned conversation. Native
 harness MCP seats refuse `create_goal` with `native_goal_unsupported`; owner
 activation or resume also refuses while a native head owns the conversation.
 Queued or restored service goals pause on finding a native head, so they cannot
-start another Pi lead alongside the seat. Model calls in Pi create inactive
+start another Pi lead alongside the seat. Internal self-wakes, watch notifications
+and worker messages also keep the native receiver while its polling channel is
+offline; they do not start a Pi lead. Failed self-wakes remain scheduled and
+retry after 5 seconds, doubling to a maximum interval of 5 minutes. Each chat
+has its own retry delay, and a replacement wake starts with a fresh delay.
+`/autonomy clear` cancels the selected chat's scheduled wake; it does not cancel
+an already running turn. Worker reports retain their original delivery IDs and
+require explicit read acknowledgment after delivery.
+Model calls in Pi create inactive
 proposals; `/goal accept` confirms one. `/goal <objective>` creates an active goal
 directly. Starting, accepting and resuming a goal, and `/autonomy on`, require the
 owner/device credential; the shared captain bearer receives HTTP 403
