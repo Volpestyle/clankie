@@ -10,6 +10,7 @@
     "./captain-readiness": "./src/captain-readiness.ts",
     "./model-keys": "./src/model-keys.ts",
     "./hosted-credits": "./src/hosted-credits.ts",
+    "./composer-transcription": "./src/composer-transcription.ts",
     "./accounts": "./src/accounts.ts",
     "./wake": "./src/wake.ts",
     "./host-power": "./src/host-power.ts",

@@ -59,9 +59,23 @@ export const LINEAR_WEBHOOK_PATH = "/v1/hooks/linear";
 export const HOSTED_PAIR_OFFER_PATH = "/v1/hosted/pair-offer";
 
 import { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
+import {
+  COMPOSER_TRANSCRIPTION_STATUS_PATH,
+  COMPOSER_TRANSCRIPTION_BEGIN_PATH,
+  COMPOSER_TRANSCRIPTION_CHUNK_PATH,
+  COMPOSER_TRANSCRIPTION_COMMIT_PATH,
+  COMPOSER_TRANSCRIPTION_CANCEL_PATH,
+  COMPOSER_TRANSCRIPTION_RECEIPT_PATH,
+} from "./composer-transcription.ts";
 export { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "GET", path: COMPOSER_TRANSCRIPTION_STATUS_PATH, target: "control" },
+  { method: "POST", path: COMPOSER_TRANSCRIPTION_BEGIN_PATH, target: "control" },
+  { method: "POST", path: COMPOSER_TRANSCRIPTION_CHUNK_PATH, target: "control" },
+  { method: "POST", path: COMPOSER_TRANSCRIPTION_COMMIT_PATH, target: "control" },
+  { method: "POST", path: COMPOSER_TRANSCRIPTION_CANCEL_PATH, target: "control" },
+  { method: "POST", path: COMPOSER_TRANSCRIPTION_RECEIPT_PATH, target: "control" },
   { method: "GET", path: ACCOUNT_DIAGNOSTICS_PATH, target: "control" },
   { method: "GET", path: CAPTAIN_READINESS_PATH, target: "control" },
   { method: "POST", path: HOSTED_OPERATOR_PATH, target: "control" },

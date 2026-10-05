@@ -10,6 +10,21 @@ import {
 } from "@clankie/protocol/public-gateway";
 import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
 import type { CredentialStore } from "@clankie/credential-broker";
+import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
+import {
+  HOSTED_COMPOSER_STATUS_PATH,
+  HOSTED_COMPOSER_TRANSCRIBE_PATH,
+  HOSTED_COMPOSER_RECEIPT_PATH,
+  ComposerTranscriptionDeviceSchema,
+  HostedComposerTranscriptionSchema,
+  HostedComposerReceiptSchema,
+  ComposerTranscriptionStatusSchema,
+  ComposerTranscriptionReceiptSchema,
+  ComposerTranscriptionErrorSchema,
+  type ComposerTranscriptionDevice,
+  type HostedComposerTranscription,
+  type HostedComposerReceipt,
+} from "@clankie/protocol/composer-transcription";
 import {
   loadConfig,
   parseModelRef,
@@ -354,6 +369,25 @@ export class HostedBodyDeniedError extends Error {
     this.name = "HostedBodyDeniedError";
   }
 }
+
+/** A validated composer admission refusal; it contains no upstream response text. */
+export class HostedComposerRefusedError extends Error {
+  readonly code: z.infer<typeof ComposerTranscriptionErrorSchema>["error"];
+  constructor(code: HostedComposerRefusedError["code"]) {
+    super(code);
+    this.name = "HostedComposerRefusedError";
+    this.code = code;
+  }
+}
+const COMPOSER_ADMISSION_REFUSALS = new Set([
+  "authentication_required",
+  "forbidden",
+  "ineligible",
+  "allowance_exhausted",
+  "invalid_request",
+  "invalid_audio",
+  "capacity",
+]);
 
 /** One renewable credential for the connector and every fleet call. Secrets stay in the broker. */
 export class HostedBodyClient {
@@ -708,6 +742,64 @@ export class HostedBodyClient {
       return response;
     }
   }
+  /** Signed, one-attempt paired-device composer transport. No audio resend after uncertainty. */
+  private async composerRequest(path: string, input: unknown, signal?: AbortSignal) {
+    await this.pairingRegistration;
+    const { token } = await this.resolveHostToken();
+    const bytes = JSON.stringify(input);
+    const digest = createHash("sha256").update(bytes).digest("base64url");
+    // An uncertain upload is never resent, even when a model forwarder would retry it.
+    const response = await this.fetcher(new URL(path, this.bootstrap.gatewayOrigin), {
+      method: "POST",
+      redirect: "error",
+      body: bytes,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        ...this.signature(path, digest),
+      },
+      signal: signal ?? AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      if ([400, 401, 403, 429].includes(response.status)) {
+        const refusal = safeParseProtocolResponse(
+          ComposerTranscriptionErrorSchema,
+          await response.json().catch(() => undefined),
+        );
+        if (refusal.success && COMPOSER_ADMISSION_REFUSALS.has(refusal.data.error))
+          throw new HostedComposerRefusedError(refusal.data.error);
+      }
+      await response.body?.cancel();
+      throw new Error("Composer transcription unavailable");
+    }
+    return response.json() as Promise<unknown>;
+  }
+  async composerTranscriptionStatus(device: ComposerTranscriptionDevice) {
+    return parseProtocolResponse(
+      ComposerTranscriptionStatusSchema,
+      await this.composerRequest(
+        HOSTED_COMPOSER_STATUS_PATH,
+        ComposerTranscriptionDeviceSchema.parse(device),
+      ),
+    );
+  }
+  async composerTranscribe(input: HostedComposerTranscription, signal: AbortSignal) {
+    return parseProtocolResponse(
+      ComposerTranscriptionReceiptSchema,
+      await this.composerRequest(
+        HOSTED_COMPOSER_TRANSCRIBE_PATH,
+        HostedComposerTranscriptionSchema.parse(input),
+        signal,
+      ),
+    );
+  }
+  async composerTranscriptionReceipt(input: HostedComposerReceipt) {
+    return parseProtocolResponse(
+      ComposerTranscriptionReceiptSchema,
+      await this.composerRequest(HOSTED_COMPOSER_RECEIPT_PATH, HostedComposerReceiptSchema.parse(input)),
+    );
+  }
+
   /** Signed, read-only account default; no other account fields leave the fleet. */
   async readAccountSettings(): Promise<
     import("@clankie/protocol/account-diagnostics").AccountDiagnosticsDefault

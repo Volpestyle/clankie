@@ -31,7 +31,14 @@ export class HostedDeviceSecurity {
     return state;
   }
 
-  async prepare(localKey: Uint8Array | undefined, locallyRevoked: readonly string[]) {
+  async prepare(
+    localKey: Uint8Array | undefined,
+    locallyRevoked: readonly string[],
+  ): Promise<{
+    key: Uint8Array<ArrayBuffer>;
+    keyId?: string;
+    revocations: { dev: string; at: number; gen: number }[];
+  }> {
     let state = await this.read(); // No disk identity mutation before a verified, nonce-bound read.
     const remote = new Set(state.rev.map((entry) => entry.dev));
     for (const deviceId of locallyRevoked) {
@@ -75,7 +82,11 @@ export class HostedDeviceSecurity {
       // response is recoverable next boot because the same key/id is on disk.
       state = await this.read();
       if (state.ak?.kid !== identity.keyId) continue;
-      return { key: Uint8Array.from(Buffer.from(identity.key, "base64url")), revocations: state.rev };
+      return {
+        key: Uint8Array.from(Buffer.from(identity.key, "base64url")),
+        keyId: identity.keyId,
+        revocations: state.rev,
+      };
     }
     throw new Error("Hosted authentication key changed during recovery");
   }

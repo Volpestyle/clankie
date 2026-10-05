@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./gateway-encryption": "./src/gateway-encryption.ts"
+    "./gateway-encryption": "./src/gateway-encryption.ts",
+    "./composer-transcription": "./src/composer-transcription.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

@@ -40,6 +40,7 @@ import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { HostedBodyClient } from "../hosted-body.ts";
+import type { ComposerTranscriptions } from "../composer-transcription.ts";
 import type { HostedDeviceSecurity } from "../hosted-device-security.ts";
 import type { HostedPairing } from "../hosted-pairing.ts";
 import { type LinearActivityEvent, type LinearWriteReceipts } from "../linear-webhook.ts";
@@ -143,6 +144,7 @@ export interface ClankieAppDependencies {
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
   /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
   hostedCredits?: Pick<HostedBodyClient, "readCredits">;
+  composerTranscriptions?: ComposerTranscriptions;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
   hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */

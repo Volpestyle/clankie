@@ -69,6 +69,7 @@ import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../even
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
 import { createHostedCreditsRoutes } from "../hosted-credits-routes.ts";
+import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
@@ -186,6 +187,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? undefined
       : new DeviceSessionSigner(dependencies.deviceSessionKey);
   let securityClosed = false;
+  let composerAuthKeyId: string | undefined;
   const reconcileHostedSecurity = async () => {
     if (securityClosed || deviceSessionSigner !== undefined) return;
     try {
@@ -217,6 +219,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       // Publish the signer last. Pairing, refresh and relay self-authorize
       // remain unavailable throughout reconciliation or any failed retry.
       deviceSessionSigner = new DeviceSessionSigner(restored.key);
+      composerAuthKeyId = restored.keyId;
     } catch {
       logger.warn({ event: "hosted.security.unavailable" }, "hosted device admission unavailable");
     }
@@ -762,6 +765,42 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
   app.route("/", createHostedCreditsRoutes(dependencies.hostedCredits, authorizeOwnerDevice));
+  app.route(
+    "/",
+    createComposerTranscriptionRoutes(dependencies.composerTranscriptions, async (request) => {
+      const original = hostedOriginalRequests.get(request) ?? request;
+      const identity = await authenticateDevice(original);
+      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
+      const eligible = () => {
+        const record = devices.get(identity.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.chat &&
+          !Reflect.get(record, "supportGrantId") &&
+          !record.mintedBy.startsWith("support") &&
+          !original.signal.aborted &&
+          clock().getTime() < Date.parse(identity.sessionExpiresAt)
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        deviceId: identity.deviceId,
+        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
+        ...(composerAuthKeyId === undefined ? {} : { authKeyId: composerAuthKeyId }),
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(original);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === identity.deviceId &&
+            fresh.grants.chat &&
+            eligible()
+          );
+        },
+      };
+    }),
+  );
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
   const authenticateCaptainOrOperator = async (
@@ -2145,6 +2184,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     close: () => {
       stopBodyRequests();
       securityClosed = true;
+      dependencies.composerTranscriptions?.close();
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
       stopObservingMessages?.();
