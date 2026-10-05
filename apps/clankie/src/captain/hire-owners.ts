@@ -20,6 +20,7 @@ const RecordSchema = z
     seatId: z.string().min(1).optional(),
     occupantId: z.string().min(1).optional(),
     sessionKey: z.string().min(1).optional(),
+    hired: z.boolean().optional(),
     owner: ConversationOwnerSchema,
   })
   .strict();
@@ -60,6 +61,14 @@ export class HireOwners {
     const entry = this.state.hires.find((item) => item.sessionKey === sessionKey);
     return entry === undefined ? undefined : ConversationOwnerSchema.parse(entry.owner);
   }
+  /** Historical hire provenance is distinct from fresh native delivery admission. */
+  public tidyRecord(paneId: string, seatId: string, occupantId: string, sessionKey: string) {
+    const held = this.state.hires.find(
+      (entry) => entry.sessionKey === sessionKey && entry.occupantId === occupantId,
+    );
+    if (held) return { ...held, owner: ConversationOwnerSchema.parse(held.owner) };
+    return this.hasClaim(paneId, seatId) ? ("unknown" as const) : undefined;
+  }
   /** An admitted message adopts the exact native worker, before it can report back. */
   public adopt(
     paneId: string,
@@ -90,6 +99,11 @@ export class HireOwners {
           seatId,
           occupantId,
           owner,
+          ...(prior === undefined
+            ? { hired: false }
+            : prior.hired === undefined
+              ? {}
+              : { hired: prior.hired }),
           ...(nativeSession === undefined ? {} : { sessionKey: nativeSession }),
         },
       ],
@@ -131,6 +145,7 @@ export class HireOwners {
           id: intentId ?? randomUUID(),
           paneId,
           owner: held ?? owner,
+          hired: true,
           ...(seatId === undefined ? {} : { seatId }),
           ...(occupantId === undefined ? {} : { occupantId }),
           ...(sessionKey === undefined ? {} : { sessionKey }),

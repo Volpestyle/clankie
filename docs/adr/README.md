@@ -72,3 +72,5 @@ E2E, integration and golden coverage for new work; existing unit-test pruning
 remains a separate reviewed effort.
 
 - [0222 — Discord setup has one shared definition](0222-discord-setup-has-one-shared-definition.md)
+
+- [0225 — Quick actions are skills, and tidy keeps results](0225-quick-actions-are-skills-and-tidy-keeps-results.md)

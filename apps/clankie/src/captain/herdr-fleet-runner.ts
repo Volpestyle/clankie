@@ -201,6 +201,11 @@ export function routeHerdrFleets(
       if (runner.read === undefined) throw new Error("Herdr read is unavailable");
       return runner.read(id, harness, source);
     },
+    readPane: async (target, source, format) => {
+      const { runner, id } = await route(target);
+      if (!runner.readPane) throw new Error("Styled pane input is unavailable");
+      return runner.readPane(id, source, format);
+    },
     paneProcesses: async (paneId) => {
       const { runner, id } = await route(paneId);
       if (runner.paneProcesses === undefined) throw new Error("Herdr process info is unavailable");

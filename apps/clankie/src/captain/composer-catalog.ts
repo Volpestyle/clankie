@@ -1,15 +1,16 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import {
   OPERATOR_COMPOSER_CATALOG_MAX,
+  SkillQuickActionSchema,
   type OperatorComposerCatalog,
   type OperatorFleetSeat,
 } from "@clankie/protocol";
 import { clankieSkillRoots, type SkillsSettings } from "@clankie/settings";
-import { getAgentDir, loadSkills } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, loadSkills, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9:_-]*$/u;
 const CODEX_SKILLS_TIMEOUT_MS = 5_000;
@@ -19,6 +20,7 @@ function catalogSkills(
     readonly name: string;
     readonly description: string;
     readonly disableModelInvocation: boolean;
+    readonly filePath?: string;
   }[],
   source: string,
   invocation: (name: string) => string,
@@ -28,11 +30,24 @@ function catalogSkills(
     if (skill.disableModelInvocation || !SKILL_NAME.test(skill.name) || unique.has(skill.name)) continue;
     const description = skill.description.trim().slice(0, 512);
     if (description.length === 0) continue;
+    let quickAction: OperatorComposerCatalog["skills"][number]["quickAction"];
+    if (skill.filePath) {
+      try {
+        const { frontmatter } = parseFrontmatter<Record<string, unknown>>(
+          readFileSync(skill.filePath, "utf8"),
+        );
+        const parsed = SkillQuickActionSchema.safeParse(frontmatter["quick-action"]);
+        if (parsed.success) quickAction = parsed.data;
+      } catch {
+        /* An unreadable declaration does not invent an action. */
+      }
+    }
     unique.set(skill.name, {
       name: skill.name,
       description,
       source,
       invocation: invocation(skill.name),
+      ...(quickAction ? { quickAction } : {}),
     });
   }
   return [...unique.values()]
@@ -52,6 +67,7 @@ export function codexCatalogSkills(result: unknown): OperatorComposerCatalog["sk
       name: string;
       description: string;
       disableModelInvocation: boolean;
+      filePath?: string;
     }> => {
       if (entry === null || typeof entry !== "object") return [];
       const values = (entry as { readonly skills?: unknown }).skills;
@@ -65,6 +81,7 @@ export function codexCatalogSkills(result: unknown): OperatorComposerCatalog["sk
                 name: skill.name,
                 description: skill.description,
                 disableModelInvocation: skill.enabled !== true,
+                ...(typeof skill.path === "string" ? { filePath: skill.path } : {}),
               },
             ]
           : [];
@@ -210,4 +227,14 @@ export async function seatComposerCatalog(
     commands: [],
     skills: catalogSkills(skills, harness, invocation),
   };
+}
+
+/** Older strict clients keep the original skill shape unless they request action metadata. */
+export function composerCatalogResponse(
+  catalog: OperatorComposerCatalog,
+  includeQuickActions = false,
+): OperatorComposerCatalog {
+  return includeQuickActions
+    ? catalog
+    : { ...catalog, skills: catalog.skills.map(({ quickAction: _action, ...skill }) => skill) };
 }

@@ -1,6 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { loadSkills } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { SkillQuickActionSchema } from "@clankie/protocol";
+import { loadSkills, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { clankieSkillRoots, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import type { ClankieAutocompleteSkill } from "./face/clankie-autocomplete.ts";
 
@@ -52,7 +54,21 @@ export async function discoverClankieSkills(
     });
     for (const skill of loaded.skills) {
       if (!skill.disableModelInvocation && !skills.has(skill.name)) {
-        skills.set(skill.name, { name: skill.name, description: skill.description });
+        let quickAction: ClankieAutocompleteSkill["quickAction"];
+        try {
+          const { frontmatter } = parseFrontmatter<Record<string, unknown>>(
+            readFileSync(skill.filePath, "utf8"),
+          );
+          const parsed = SkillQuickActionSchema.safeParse(frontmatter["quick-action"]);
+          if (parsed.success) quickAction = parsed.data;
+        } catch {
+          /* Keep the skill loadable without inventing a quick action. */
+        }
+        skills.set(skill.name, {
+          name: skill.name,
+          description: skill.description,
+          ...(quickAction ? { quickAction } : {}),
+        });
       }
     }
   }

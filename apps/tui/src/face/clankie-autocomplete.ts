@@ -21,6 +21,7 @@ export type ClankieAutocompleteOptions = {
 };
 
 export type ClankieAutocompleteSkill = {
+  readonly quickAction?: import("@clankie/protocol").SkillQuickAction | undefined;
   readonly name: string;
   readonly description: string;
 };

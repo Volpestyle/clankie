@@ -4,7 +4,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { codexCatalogSkills, seatComposerCatalog } from "../src/captain/composer-catalog.ts";
+import {
+  captainComposerCatalog,
+  composerCatalogResponse,
+  codexCatalogSkills,
+  seatComposerCatalog,
+} from "../src/captain/composer-catalog.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -65,4 +70,46 @@ describe("composer catalog", () => {
       { name: "review", description: "Review work", source: "codex", invocation: "$review" },
     ]);
   });
+});
+
+it("publishes a skill's validated quick-action declaration through Clankie and native seat catalogs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-quick-action-"));
+  temporaryDirectories.push(root);
+  const skillPath = join(root, ".agents", "skills", "tidy");
+  await mkdir(skillPath, { recursive: true });
+  const filePath = join(skillPath, "SKILL.md");
+  await writeFile(
+    filePath,
+    "---\nname: tidy\ndescription: Tidy finished worker panes\nquick-action:\n  name: Tidy up\n  icon: broom\n  selectionArg: selection\n---\nJudge the work, then close with a reason.\n",
+  );
+  const declaration = { name: "Tidy up", icon: "broom", selectionArg: "selection" };
+  const catalog = captainComposerCatalog({ cwd: root, repoRoot: root });
+  expect(
+    composerCatalogResponse(catalog).skills.find((skill) => skill.name === "tidy")?.quickAction,
+  ).toBeUndefined();
+  expect(
+    composerCatalogResponse(catalog, true).skills.find((skill) => skill.name === "tidy")?.quickAction,
+  ).toEqual(declaration);
+  expect(
+    captainComposerCatalog({ cwd: root, repoRoot: root }).skills.find((skill) => skill.name === "tidy"),
+  ).toMatchObject({ quickAction: declaration });
+  expect(
+    (await seatComposerCatalog({ harness: "claude", workingDirectory: root }, join(root, "home"))).skills,
+  ).toMatchObject([{ name: "tidy", quickAction: declaration }]);
+  expect(
+    codexCatalogSkills({
+      data: [
+        { skills: [{ name: "tidy", description: "Tidy finished panes", enabled: true, path: filePath }] },
+      ],
+    }),
+  ).toMatchObject([{ name: "tidy", quickAction: declaration }]);
+  await writeFile(
+    filePath,
+    "---\nname: tidy\ndescription: Tidy finished worker panes\nquick-action:\n  name: Tidy up\n  icon: ../unsafe\n---\nJudge the work.\n",
+  );
+  const invalid = (
+    await seatComposerCatalog({ harness: "claude", workingDirectory: root }, join(root, "home"))
+  ).skills[0]!;
+  expect(invalid.name).toBe("tidy");
+  expect(invalid.quickAction).toBeUndefined();
 });
