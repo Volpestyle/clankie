@@ -1,4 +1,4 @@
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserServer, type Page } from "playwright-core";
 import {
   computerPoint,
   type ComputerInput,
@@ -12,7 +12,9 @@ export class FixtureComputer implements ComputerAdapter {
   readonly bodyId = "fixture:chromium";
   readonly browser: Browser;
   readonly page: Page;
-  private constructor(browser: Browser, page: Page) {
+  private readonly server: BrowserServer;
+  private constructor(server: BrowserServer, browser: Browser, page: Page) {
+    this.server = server;
     this.browser = browser;
     this.page = page;
   }
@@ -21,14 +23,16 @@ export class FixtureComputer implements ComputerAdapter {
       process.platform === "darwin"
         ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         : process.env.CLANKIE_TEST_CHROMIUM;
-    const browser = await chromium.launch({
+    const server = await chromium.launchServer({
       ...(executablePath === undefined ? {} : { executablePath }),
       headless: true,
+      host: "127.0.0.1",
     });
+    const browser = await chromium.connect(server.wsEndpoint());
     const context = await browser.newContext({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 2 });
     const page = await context.newPage();
     await page.goto(url);
-    return new FixtureComputer(browser, page);
+    return new FixtureComputer(server, browser, page);
   }
   async inventory(guard: () => Promise<void>) {
     await guard();
@@ -114,7 +118,17 @@ export class FixtureComputer implements ComputerAdapter {
   }
   async stop(guard: () => Promise<void>): Promise<boolean> {
     await guard();
-    await this.browser.close();
-    return !this.browser.isConnected();
+    await this.close();
+    const process = this.server.process();
+    return !this.browser.isConnected() && (process.exitCode !== null || process.signalCode !== null);
+  }
+  async close(): Promise<void> {
+    const disconnected = this.browser.isConnected()
+      ? new Promise<void>((resolve) => this.browser.once("disconnected", () => resolve()))
+      : Promise.resolve();
+    // Terminate only this fixture's owned process and await its actual exit.
+    // Graceful browser.close can hang after Chromium has already exited.
+    await this.server.kill();
+    await disconnected;
   }
 }

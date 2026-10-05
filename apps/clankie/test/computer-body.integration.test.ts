@@ -47,7 +47,7 @@ async function fixture(
   });
   cleanup.push(() => site.close());
   driver = await FixtureComputer.launch(site.url + "/boundary/lease-revocation");
-  cleanup.push(() => driver.browser.close());
+  cleanup.push(() => driver.close());
   const store = new BodyLeaseStore(join(directory, "lease"));
   cleanup.push(() => store.close());
   const body = new ComputerBody(driver, store, join(directory, "journal"));

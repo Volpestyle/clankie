@@ -1,8 +1,8 @@
 ---
 name: desktop-control
 description: >-
-  Use when Clankie needs general native computer use: macOS hands or read-only Windows
-  observations through the shared computer body. Screenshots,
+  Use when Clankie needs general native computer use: macOS hands or native Windows
+  control through the shared computer body. Screenshots,
   accessibility inspection, clicking, typing, scrolling, dragging, or menus.
   Use browser tools for web pages and purpose-built APIs when they cover the task.
 ---
@@ -35,20 +35,39 @@ replay an uncertain input. Its macOS adapter preserves Peekaboo's limitations;
 recovery needs host stop proof. Contract and examples:
 [desktop control](../../../docs/desktop-control.md#shared-computer-body).
 
-## Windows observations
+## Windows native control
 
 On a Windows machine, use the native Codex computer-use plugin's trusted
-`node_repl` and `@oai/sky` through the Windows observation host, not Peekaboo.
+`node_repl` and `@oai/sky` through the Windows computer host, not Peekaboo.
 The host exposes the same computer contract, bound to the owning conversation
 and the machine (`windows:pc:console`, for example). Use an SSH loopback forward
 when leading from another machine. Setup and limits:
 [Windows observation host](../../../docs/desktop-control.md#windows-observation-host).
 
-Only inventory and exact-window PNG capture ship through this adapter; frames
-have `inputReady: false`. Missing geometry or a changed window binding refuses.
-A configured harness in `browser harnesses` does not prove its app grants or
-input. Do not introduce a second driver, bypass native app grants, or fall back
-to `C:\desk` input. Windows action proof waits for an approved fixture window.
+Every attachment defaults to read-only, even with the full `sky` client. An owner
+must deliberately pass `allowInput: true` in a clear driving window before
+acquiring a new input lease; lease and status record this choice. An explicitly
+enabled full client supports click, literal type, key, scroll and drag. Inspect the exact-window PNG and raw
+`accessibility` fields before choosing one primitive. Every Windows input
+requires explicit `foreground: true` and `expect: {field, equals}` for an intended
+changed native UIA field (`tree`, `focused_element`, `document_text` or
+`selected_text`). Only an exact changed value in a fresh same-window observation
+confirms the action. A returned call or repaint alone cannot. Re-capture after
+each primitive; clear-and-type, control characters and guessed element IDs
+refuse. Scroll requires an explicit image-pixel `at` point.
+
+A configured harness in `browser harnesses` does not prove app grants, a free
+driving window, or live input readiness. Arrange the driving window with the
+person; never overlap their use or another driver. Host Win32 person-activity
+checks run before each dispatch; wait two seconds between primitives. A new
+input stamp, failed query or session mismatch fences the attachment. Every
+native error, revocation and uncertain receipt stops continuation; recovery requires
+independent native stop proof. Keep ADR 0127's sign-ins, codes, CAPTCHAs, payments,
+account changes and destructive steps with the person. Respect the installed
+Windows plugin's app/shortcut denies. Do not bypass native grants or fall back
+to `C:\desk`. The adapter denies shell/system apps, Explorer Run, Windows-key
+aliases, Ctrl+Escape, Ctrl+Shift+Escape, Alt+F4 and Alt+Tab. Input release remains
+gated on James's W8 live stop evidence in the manual release fixture.
 
 ## Discover the target
 

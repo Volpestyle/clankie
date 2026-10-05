@@ -28,11 +28,14 @@ export interface ComputerObservation {
   readonly coordinates: ComputerCoordinates;
   readonly inputReady: boolean;
   readonly elements: ComputerScreenshot["elements"];
+  readonly accessibility?: ComputerScreenshot["accessibility"];
   /** Provider-owned snapshot/reference stays inside the body host. */
   readonly reference: unknown;
 }
 export interface ComputerAdapter {
   readonly bodyId: string;
+  readonly allowInput?: boolean;
+  readonly inputReady?: boolean;
   inventory(
     guard: () => Promise<void>,
   ): Promise<Omit<ComputerInventory, "schemaVersion" | "bodyId" | "observedAt">>;
@@ -54,6 +57,7 @@ const RecordSchema = z.strictObject({ fingerprint: z.string(), receipt: Computer
 const JournalSchema = z.strictObject({
   bodyId: z.string(),
   leaseId: z.string(),
+  allowInput: z.boolean().optional(),
   requests: z.record(z.string(), RecordSchema),
 });
 type Ref = NonNullable<ReturnType<BodyLeaseStore["recoveryReference"]>>;
@@ -124,8 +128,25 @@ export class ComputerBody {
   async dispatch(identity: BodyConversationIdentity, raw: unknown): Promise<unknown> {
     const command = ComputerCommandSchema.parse(raw);
     await this.authorized(identity);
-    if (command.action === "status")
-      return { bodyId: this.adapter.bodyId, lease: this.store.status("computer") ?? null, busy: this.active };
+    if (command.action === "status") {
+      const lease = this.store.status("computer");
+      return {
+        bodyId: this.adapter.bodyId,
+        lease:
+          lease === undefined
+            ? null
+            : {
+                ...lease,
+                ...(this.adapter.allowInput === undefined
+                  ? {}
+                  : { allowInput: this.journal.allowInput === true }),
+              },
+        busy: this.active,
+        ...(this.adapter.allowInput === undefined
+          ? {}
+          : { allowInput: this.adapter.allowInput, inputReady: this.adapter.inputReady === true }),
+      };
+    }
     if (command.action === "revoke") {
       const ref = this.reference(identity, command.leaseId);
       const begun = this.store.beginRecovery(ref);
@@ -143,11 +164,17 @@ export class ComputerBody {
         bodyId: this.adapter.bodyId,
         conversationId: identity.conversationId,
         leaseId: result.lease.token,
+        ...(this.adapter.allowInput === undefined ? {} : { allowInput: this.adapter.allowInput }),
         issuedAt: now,
         heartbeatAt: now,
         expiresAt: new Date(result.expiresAt).toISOString(),
       });
-      this.journal = { bodyId: this.adapter.bodyId, leaseId: result.lease.token, requests: {} };
+      this.journal = {
+        bodyId: this.adapter.bodyId,
+        leaseId: result.lease.token,
+        requests: {},
+        ...(this.adapter.allowInput === undefined ? {} : { allowInput: this.adapter.allowInput }),
+      };
       this.frames.clear();
       this.save();
       return { outcome: "acquired", lease: structuredClone(this.lease) };
@@ -266,6 +293,7 @@ export class ComputerBody {
           height: png.readUInt32BE(20),
           coordinates: observation.coordinates,
           inputReady: observation.inputReady && command.capture !== "classic_read_only",
+          ...(observation.accessibility === undefined ? {} : { accessibility: observation.accessibility }),
           elements: observation.elements,
           sha256: createHash("sha256").update(png).digest("hex"),
         });
@@ -298,6 +326,11 @@ export class ComputerBody {
         });
       if (!frame.screenshot.inputReady || frame.screenshot.sequence !== this.sequence - 1)
         throw new Error("Screenshot is not the latest action-ready capture");
+      if (
+        this.adapter.allowInput !== undefined &&
+        (!this.adapter.allowInput || this.journal.allowInput !== true)
+      )
+        throw new Error("Computer lease is observation-only; input requires explicit owner opt-in");
       if (Object.keys(this.journal.requests).length >= 256)
         throw new Error("Lease input budget exhausted; release and acquire a new lease");
       this.journal.requests[command.requestId] = {
@@ -314,6 +347,7 @@ export class ComputerBody {
         }
         try {
           if (input.kind === "click") computerPoint(frame.screenshot, input.at);
+          if (input.kind === "scroll" && input.at !== undefined) computerPoint(frame.screenshot, input.at);
           if (input.kind === "drag") {
             computerPoint(frame.screenshot, input.from);
             computerPoint(frame.screenshot, input.to);

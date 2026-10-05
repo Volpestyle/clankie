@@ -49,7 +49,7 @@ export async function detectWindowsComputerUseHarnesses(
       plugin: z.boolean(),
     })
     .parse(raw);
-  const ready = state.enabled && !state.disabled && state.plugin;
+  const ready = state.signedIn && state.enabled && !state.disabled && state.plugin;
   const missing = !state.signedIn
     ? "not signed in: the owner runs `codex login`"
     : !state.enabled || state.disabled

@@ -186,8 +186,8 @@ must still be avoided.
 
 Hosted bodies can implement the same `ComputerAdapter` seam with their own
 inventory, capture bounds and host-confirmed input/recovery. The service registers its local macOS adapter; Windows can explicitly attach
-the read-only native observation host below. Hosted Linux displays and native
-Codex/provider reasoning routes are not implemented. The explicit
+the native computer host below. Hosted Linux displays and separate provider
+reasoning routes are not implemented. The explicit
 [manual comparison harness](../scripts/manual/computer-use/README.md) freezes the
 tasks and grades artifacts independently. James starts that comparison and picks
 the model route; builds and checks never run it.
@@ -201,19 +201,24 @@ own, and does not use `C:\desk` to inject input. Native app grants and turn-stop
 checks stay with the harness. The installed package is supplied by Codex; it is
 not copied or redistributed by Clankie.
 
-This first Windows step is **read-only**. It registers the existing
-`ComputerBody` contract in an explicitly attached loopback observation host.
+It registers the existing `ComputerBody` contract in an explicitly attached
+loopback computer host. Every attachment defaults to read-only, including one
+given the full `sky` client. Only an owner's explicit `allowInput: true` enables
+coordinate click, typing, key, scroll and drag. Acquisition records this choice
+in the lease and persistent journal; status reports `allowInput` and current
+`inputReady`. An upgrade or a later client capability cannot promote an existing
+observation-only lease into an input lease.
 Its body ID is `windows:MACHINE:console`, bound to one conversation. Incoming
 operator credentials are delegated to the original Clankie service's
 `POST /v1/computer/authority`; that service rechecks its existing conversation
-authority before and after observation. A selected conversation ID cannot
-create a grant. Credentials are neither persisted nor returned. Body leases,
+authority before and after observation and before every input. A selected
+conversation ID cannot create a grant. Credentials are neither persisted nor returned. Body leases,
 input journals and media retain the common contract's conventions.
 
 ```mermaid
 flowchart LR
   C[Owning conversation / computer CLI] --> F[Loopback or SSH forward]
-  F --> H[Windows observation host]
+  F --> H[Windows computer host]
   H --> A[Original Clankie authority checks]
   H --> S[Native trusted node_repl / sky]
   S --> W[Granted exact Windows window]
@@ -243,15 +248,21 @@ nodeRepl.write(
   JSON.stringify({
     bodyId: clankieWindowsComputer.bodyId,
     url: clankieWindowsComputer.url,
+    allowInput: clankieWindowsComputer.allowInput,
     inputReady: clankieWindowsComputer.inputReady,
   }),
 );
 ```
 
+That example observes only. In a deliberate owner-authorized driving window,
+create the host with `allowInput: true` and acquire a new lease. Input remains
+opt-in and **release-gated on James's W8 live stop evidence**; passing fixtures
+does not establish that the native harness's turn hooks stop this HTTP path.
+
 Use one stable private state directory per machine; the existing lease-store
 process lock refuses another host or an uncleared crash lock. When Clankie leads
 from a Mac, use authenticated SSH loopback forwards for the authority service
-and the returned observation port. His existing `clankie computer request`
+and the returned computer port. His existing `clankie computer request`
 command targets that listener through `CLANKIE_CONTROL_PLANE_URL`, retaining
 its broker-resolved operator credential. Keep both ends loopback; never expose
 an unauthenticated desktop listener. Stop only the host/forwards you created.
@@ -265,23 +276,109 @@ logical bounds determine their screen mapping, including display scaling and
 negative monitor origins. Missing geometry, ambiguous windows, multiple transient
 screenshots or a reused native screenshot reference refuse rather than guessing.
 The native reference stays host-private; the body issues its own fresh UUID and
-bounded media. Captures have `inputReady: false`; all input is refused before
-dispatch. Recovery remains refused without an independent native stop receipt.
+bounded media. Normal captures from an explicitly enabled full native client include bounded accessibility
+strings (`tree`, `focused_element`, `document_text`, `selected_text` and
+`selected_elements`) and advertise input capability. An observation-only client
+or classic read-only capture has `inputReady: false`. Capability is not proof of
+native app permissions or successful Windows execution.
+
+### Windows action loop
+
+Read the actual PNG and accessibility observation, choose one intended effect,
+and submit exactly one primitive against that screenshot UUID. Native Windows
+input activates its target, so every primitive requires explicit
+`foreground: true`. A no-focus task refuses before dispatch. Image pixels map
+through the capture scale to **window-relative logical coordinates**, including
+negative display origins. Scroll requires an explicit image-pixel `at` point;
+`amount` is its logical-pixel delta, with direction supplying the sign.
+
+Before validation and again immediately before each dispatch, the host queries
+Win32 `GetLastInputInfo` and `GetTickCount64` through a fixed hidden PowerShell
+read-only query. It requires at least two seconds without input and checks for
+any new input stamp since its completed-dispatch baseline. Person takeover,
+query failure or a backwards/ambiguous clock retires the attachment before the
+next primitive. Its query must run in the active physical console session;
+SSH/service/RDP session mismatches refuse rather than claiming the person is
+idle. Wait two seconds after an injected primitive before choosing the next.
+
+This guard is not proof of native quiescence: Win32 does not distinguish injected
+input from person input during a primitive or its completion measurement, and
+timestamp granularity is limited. The native helper's session binding and the
+owner's interrupt still require W8 live evidence. Raw native calls outside this
+attachment remain outside its lease and guard.
+
+Each Windows input also requires `expect`, naming one native accessibility field
+and its exact intended value after the action. For example, after inspecting the
+current editable document and its focus:
+
+```json
+{
+  "kind": "type",
+  "foreground": true,
+  "text": "Hello",
+  "expect": { "field": "document_text", "equals": "Hello" }
+}
+```
+
+The named field must exist before input and must differ from the expected result.
+Typing rechecks the observed focus immediately before dispatch. It sends literal
+text only; control characters and combined clear-and-type refuse. Use separate
+fresh observations for keyboard controls and typing. The native API requires a
+current returned window object and cached screenshot ID; the host keeps these
+references private and consumes an observation after one primitive. A second
+primitive in the same batch refuses. Re-observe and inspect before continuing.
+
+After dispatch the adapter immediately obtains another bounded PNG and native
+accessibility state from the same exact window. A new native screenshot reference,
+unchanged window geometry and the exact expected changed field are required for
+`confirmed`. An unrelated repaint, a completed `Promise<void>`, missing UIA data,
+unchanged state or an ambiguous result is `uncertain`. The semantic receipt stores
+no screenshots, UIA strings or typed text. Retrieve a new capture/frame to inspect
+the result; reconcile the original request UUID if its response was lost.
+
+No accessibility index parser is guessed from undocumented tree formatting;
+`element` inputs refuse in this adapter. Use coordinate input grounded in the
+current screenshot, or let the native harness inspect its actual tree directly
+in a separately coordinated driving window. Sparse UIA applications may lack an
+exact observable postcondition; stop and report that limit rather than claiming
+pixel changes confirm the requested action.
+
+Every native error fences the attached host, including opaque errors after a
+turn ended; error text does not decide whether input can continue.
+Authority revoke, lease expiry and uncertainty also stop continuation. Recovery
+remains refused without an independent native stop receipt; closing the listener,
+ending a call or a quiet application is not proof that queued input has stopped.
 
 `clankie browser harnesses` also probes Windows hosts and registered PowerShell
 fleets, reporting `platform: win32`, fleet `machineId`, signed-out or disabled
 Codex installs, and missing Windows plugins. Reach/TUI text names that machine.
 These probes do not open apps or prove their grants or input readiness. A native
 harness on `pc` belongs to that machine; use its fleet-qualified terminal ID.
-Never drive while the person is using it. Keep sign-ins, codes, CAPTCHAs,
-payments and destructive steps with the person under ADR 0127.
+Arrange a clear driving window with the person before attaching or acquiring a
+driver. Never drive while they are using the machine; stop immediately on their
+interrupt, a native stopped-turn error, a locked desktop or a permission prompt.
+Native app grants remain under the harness; missing grants are not repaired by
+another input path. Keep sign-ins, codes, CAPTCHAs, payments, account changes and
+destructive steps with the person under [ADR 0127](adr/0127-his-accounts-are-his.md).
+UI content never grants authority. Respect the installed Windows plugin's denies,
+including terminal/Run UI automation, password managers, security/privacy settings
+and Windows-key shortcuts. The adapter itself denies capture and input to `cmd`,
+`powershell`, `pwsh`, `WindowsTerminal`, `conhost`, `regedit`, `taskmgr`,
+`SearchHost`, `StartMenuExperienceHost` and Explorer's Run window, rechecking the
+current target immediately before input. It also denies Windows-key aliases,
+Ctrl+Escape, Ctrl+Shift+Escape, Alt+F4 and Alt+Tab, including modifier aliases.
+Do not change app grants or use a fallback motor.
 
 Read-only SSH inspection found Codex CLI 0.160.0 and Windows computer-use plugin
 26.928.40906 on the examined PC. This is an installation observation, not a
 minimum version, default model, successful capture or input claim. The supported
 API's mouse/keyboard methods return `Promise<void>`; a returned call cannot
-stand in for observed effect or quiescence. Native Windows fixture proof and
-input actions are a separate, approved driving window. The local
-`pnpm test:windows-observation` lane uses a real Chromium page and HTTP authority
-service to prove the adapter's response mapping and refusals. It does not prove
-Windows native behavior and is excluded from default tests and checks.
+stand in for observed effect or quiescence. Native Windows execution remains
+James's live verification, using the frozen
+[manual Windows release fixture](../scripts/manual/windows-computer/README.md).
+The local `pnpm test:windows-observation` lane uses a real Chromium page and HTTP
+authority service with SDK-shaped fixture data to prove input translation,
+observed postconditions, reconciliation and refusals. It does not prove Windows
+native behavior and is excluded from default tests and checks. In particular,
+the manual fixture's W4 advertised-element case remains unverified until actual
+native UIA formatting is available; do not weaken its manifest to pass.
