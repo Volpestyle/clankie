@@ -10,6 +10,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FleetLinkFile } from "@clankie/protocol";
 import {
   SSH_BASE_OPTIONS,
+  SSH_CONTROL_MAX_AGE_MS,
   posixQuote,
   posixScriptCommand,
   powershellLiteral,
@@ -18,6 +19,7 @@ import {
   type FleetShellRun,
   type HerdrFleet,
 } from "./herdr-fleet.ts";
+import { decodeRemoteShellError } from "./remote-shell-error.ts";
 
 /**
  * Windows fleets use a service-authored loopback relay over the configured SSH
@@ -119,6 +121,7 @@ class FleetLink {
   private closed = false;
   private backoff = RESTART_MIN_MS;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   readonly token = randomBytes(32).toString("base64url");
   readonly fleet: HerdrFleet;
   private readonly options: {
@@ -127,6 +130,7 @@ class FleetLink {
     readonly stream?: (command: string) => ChildProcess;
     readonly spawn?: typeof spawn;
     readonly log?: (message: string) => void;
+    readonly maxAgeMs?: number;
   };
 
   constructor(fleet: HerdrFleet, options: FleetLink["options"]) {
@@ -152,6 +156,7 @@ class FleetLink {
       });
       this.child = child;
       let stderr = "";
+      let failure: string | undefined;
       let port: number | undefined;
       const publish = (allocatedPort: number) => {
         if (port !== undefined) return;
@@ -169,9 +174,16 @@ class FleetLink {
             this.backoff = RESTART_MIN_MS;
             this.current = { state: "ready", since: new Date().toISOString(), port: port! };
             this.options.log?.(`fleet ${this.fleet.id}: link ready on its port ${String(port)}`);
+            // The resident relay also inherits the login environment. Refresh
+            // only this link's own children, never terminate an SSH master.
+            this.refreshTimer = setTimeout(() => {
+              child.kill();
+              this.lost(child, "Refreshing remote login environment");
+            }, this.options.maxAgeMs ?? SSH_CONTROL_MAX_AGE_MS);
+            this.refreshTimer.unref?.();
           })
           .catch((error: unknown) => {
-            stderr = `could not write the link file: ${error instanceof Error ? error.message : String(error)}`;
+            failure = `could not publish the link: ${decodeRemoteShellError(error instanceof Error ? error.message : String(error))}`;
             child.kill();
           });
       };
@@ -187,29 +199,38 @@ class FleetLink {
         if (this.relayChild) return;
         const relayChild = this.options.stream!(windowsFleetRelayCommand(Number(allocated[1])));
         this.relayChild = relayChild;
-        relayChild.stderr?.on("data", () => {});
+        let relayStderr = "";
+        relayChild.stderr?.setEncoding("utf8");
+        relayChild.stderr?.on("data", (chunk: string) => {
+          // Decode the complete bootstrap diagnostic before status truncates
+          // it; progress records can otherwise hide the XML opening tag.
+          relayStderr += chunk;
+        });
         this.relay = new RemoteFleetRelay({
           child: relayChild,
           localPort: this.options.localPort,
           ready: publish,
           responseServer: responseServer!,
         });
-        relayChild.once("exit", () => {
+        relayChild.once("close", () => {
           if (this.child === child) {
             child.kill();
-            this.lost(child, "Remote proof relay disconnected");
+            this.lost(child, decodeRemoteShellError(relayStderr) || "Remote proof relay disconnected");
           }
         });
-        relayChild.once("error", () => {
+        relayChild.once("error", (error) => {
           if (this.child === child) {
             child.kill();
-            this.lost(child, "Remote proof relay unavailable");
+            this.lost(child, error.message || "Remote proof relay unavailable");
           }
         });
       });
       child.on("error", (error) => this.lost(child, error.message));
       child.on("exit", (code, signal) =>
-        this.lost(child, stderr.trim().split("\n").at(-1) || `ssh exited (${String(code ?? signal)})`),
+        this.lost(
+          child,
+          failure ?? (decodeRemoteShellError(stderr) || `ssh exited (${String(code ?? signal)})`),
+        ),
       );
     };
     if (!trustedRelay) {
@@ -266,6 +287,7 @@ class FleetLink {
     this.responseServer?.close();
     this.responseServer = undefined;
     if (this.timer !== undefined) clearTimeout(this.timer);
+    if (this.refreshTimer !== undefined) clearTimeout(this.refreshTimer);
     this.child?.kill();
     this.child = undefined;
   }
@@ -273,6 +295,8 @@ class FleetLink {
   private lost(child: ChildProcess, error: string): void {
     if (this.child !== child) return;
     this.child = undefined;
+    if (this.refreshTimer !== undefined) clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
     this.relay?.close();
     this.relay = undefined;
     this.relayChild?.kill();
@@ -305,6 +329,7 @@ export class FleetLinks {
     ) => Promise<ProjectProcessProof | undefined>;
     readonly spawn?: typeof spawn;
     readonly log?: (message: string) => void;
+    readonly maxAgeMs?: number;
   };
 
   constructor(options: FleetLinks["options"]) {
@@ -328,6 +353,7 @@ export class FleetLinks {
         ...(this.options.stream ? { stream: this.options.stream(fleet) } : {}),
         ...(this.options.spawn === undefined ? {} : { spawn: this.options.spawn }),
         ...(this.options.log === undefined ? {} : { log: this.options.log }),
+        ...(this.options.maxAgeMs === undefined ? {} : { maxAgeMs: this.options.maxAgeMs }),
       });
       this.links.set(fleet.id, link);
       link.start();

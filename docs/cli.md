@@ -1948,7 +1948,15 @@ What crosses the link, and what cannot:
 - Every call runs `herdr --session SESSION <verb> …` on the remote host with an
   exact argv (a Windows command line is built for `CommandLineToArgvW` and
   handed to `ProcessStartInfo`, so PowerShell never parses it). One multiplexed
-  ssh connection per fleet carries them (`~/.clankie/ssh/%C`, `ControlPersist=600`).
+  ssh connection per fleet carries them through service-owned control sockets
+  under `~/.clankie/ssh/` (`ControlPersist=600`). New service lifetimes and
+  connections older than ten minutes use a fresh socket. A failure before the
+  remote program starts retries once with a fresh login environment; failures
+  from an already running program are reported without replaying the command.
+  Resident fleet links also refresh every ten minutes. Retired masters retain
+  existing clients and expire when idle, leaving other SSH sessions intact.
+  PowerShell progress is suppressed and serialized errors are decoded before
+  appearing in link status and logs.
 - Only read and pane verbs pass: `agent list|get|read|wait|prompt|send-keys|start`,
   `pane list|get|read|send-text|send-keys|close|process-info|layout`,
   `tab|workspace create|list`, `api snapshot`, `session list`. Nothing that
@@ -3388,9 +3396,13 @@ An absent Codex executable remains an absent harness. After updating the owning
 source setup and completing preparation, verify `clankie doctor --machine NAME`.
 Do not restart unrelated panes; installation alone cannot prove a live receiver.
 `clankie doctor` reports local profiles and
-connected remote fleets; `clankie doctor --machine NAME` inspects one registered
-fleet through `GET /v1/runtime-connections/NAME/harnesses` and
-`GET /v1/runtime-connections/NAME/membership`. The membership card reads native
+connected remote fleets, including their `linkState` and decoded failure reason.
+The human `/doctor` checklist also shows each observed fleet link's state and
+reason. `clankie doctor --machine NAME` inspects one registered fleet through
+`GET /v1/runtime-connections/NAME/harnesses`,
+`GET /v1/runtime-connections/NAME/membership`, and the connection inventory at
+`GET /v1/runtime-connections`. Its `linkState` remains visible even when the
+native harness diagnostics answer successfully. The membership card reads native
 process and actual cwd observations for at most 64 panes, with two concurrent
 inspections. It distinguishes missing proof, unsupported harnesses, pending
 native sessions, stale hires, and project eligibility. Changed observations are
