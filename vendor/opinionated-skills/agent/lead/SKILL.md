@@ -14,6 +14,15 @@ and a tracker owns ticket maintenance, consume their decisions and exceptions;
 do not repeat their queue audit, rewrite their tickets, or make every worker
 report through all three roles. Keep one dispatch/integration authority.
 
+The tracker's priority field is the owner's ordering. When choosing what to
+start, re-task an idle seat onto, or land next, take the highest-priority open
+work first (Urgent, then High, Medium, Low; unprioritized last), and within a
+level prefer what unblocks other work. Read priority from the tracker each time
+you pick, not from memory. Skip work the owner paused or deferred even when its
+priority is high, and say so. Deviate only for a concrete reason (a blocker, a
+dependency, an idle seat that fits lower work), and name it when you report. If
+priorities look wrong, propose the change; don't silently reorder.
+
 Leadership is independent of the conversation portal and execution runtime.
 Compose the selected communication workflow with the available process tools and
 optional tracker; do not require the user to create agents in a particular host.
@@ -49,6 +58,17 @@ a review of a delta, a focused check, or a slice you will integrate yourself.
 Hire a pane when the work needs its own lifetime beyond this turn, its own
 worktree, a different harness, model or account, or long parallel work the owner
 should be able to watch. Workers follow the same rule inside their own panes.
+
+## Use the best harness for the task
+
+You are the lead and the character, not the best tool for every job. Route each
+piece of work to whichever harness does it best, and do it yourself only when
+you are that harness: talking with people, voice and Discord, play, memory, and
+leading. Hard desktop or native-app work goes to a Codex computer-use seat;
+browser work in the owner's signed-in Chrome goes to a seat with Chrome; code
+follows the project's hire profile. Choose by the task and by results you have
+actually seen, not by habit or brand, and expect the best choice to change as
+the harnesses do (`clankie browser harnesses` lists what is configured here).
 
 ## Decide by default
 
@@ -181,6 +201,25 @@ such and is never a PASS. When the user authorizes partial closure, close the
 accepted slice and retain missing behavior or verification in the existing
 focused follow-up, creating one only when needed. Keep known failures explicit.
 
+For Clankie's source-checkout service, hand approved commits to `clankie integrate`
+in order (repeat `--app SHA` for the app) and use `--push` for an authorized landing.
+The service composes fresh origin in independent worktrees, installs real packages,
+runs isolated full gates and retains tested HEAD/exit evidence. Read the batch
+record before declaring delivery: a passing gate is not a confirmed push, and a
+partial batch may say core landed while app remains pending. A deliberate retry
+after a definite app rejection skips landed core; reconcile uncertain sends through
+origin before another action. Never switch a worktree while its gate is running,
+accept a pass for another HEAD, run a full gate against live shared state, or force
+push a rollback. `integrate revert PASSED_BATCH_UUID` restores a known good tree
+with a new gated commit. The installed CLI reference owns flags and recovery.
+
+Protect live tests with `integrate hold --holder NAME --reason TEXT --pane ID`
+(or `--seat ID`). Read `integrate holds`: gone/unknown holders remain visible and
+holds never auto-expire. Push and runtime-update admission refuse named holds.
+An owner override must explicitly name each hold with `--override-hold UUID`,
+`--actor NAME` and `--reason TEXT`; retain its audit and do not silently release
+the hold. Release completed holds explicitly with actor and reason.
+
 ## Dispatch an owned result
 
 Use the selected coordination skill for launch, delivery and waits. Verify the
@@ -240,6 +279,30 @@ harvest owner explicit. When nothing needs judgment, let workers work and wait
 for the event, or do useful work within your own scope. Do not manufacture
 supervision to keep a lead turn active. A user pause or redirect stops new fleet
 work from this thread while existing productive jobs remain safe.
+
+## Keep workers efficient
+
+Keeping the fleet efficient is a standing part of leading. A pane that says
+`working` can be working on the wrong thing. Whenever a wake, report or roster
+read brings a seat in front of you, and on a cheap roster pass when you return
+to the fleet, check every seat you lead:
+
+- **On task:** its current work matches its assignment, and that assignment is
+  not paused, canceled or superseded. Drift onto adjacent or paused work is the
+  common failure.
+- **Reporting:** its reports reach you. A failed `message_clankie`, or a result
+  sitting only in the pane, is a delivery fault: fix the route or harvest it.
+- **Right-sized:** its effort and model fit the job (routine lanes don't need the
+  top effort), its context isn't near full (hand off to a fresh session first),
+  and it hasn't gone long without a commit, finding or report.
+- **Done or idle:** harvest it, then close it or give it the next ready item.
+- **No overlap:** two seats aren't covering the same ground.
+
+Act on what you can: redirect, lower effort, hand off, re-task or tidy. Tell the
+owner only what needs them. Use roster signals and the seat's own reports; read a
+pane only when a signal is wrong or missing. This is not a timer on worker output.
+When you can't reach a seat, say so and name the fix; never fall back to typing
+into it.
 
 ## Keep the durable record small
 
