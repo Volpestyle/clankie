@@ -69,6 +69,7 @@ test("claim preparation survives returned requests and reuses one real delayed C
   const address = provider.address();
   if (!address || typeof address === "string") throw new Error("claim fixture listen failed");
   let installs = 0;
+  let closeTunnel: (() => Promise<unknown>) | undefined;
   try {
     await mkdir(join(dataDir, "src"));
     await writeFile(
@@ -118,6 +119,7 @@ test("claim preparation survives returned requests and reuses one real delayed C
         return result.data;
       },
     });
+    closeTunnel = () => tunnel.close();
     const before = performance.now();
     expect(await tunnel.prepareClaim()).toEqual({ phase: "preparing", claimed: false });
     expect(performance.now() - before).toBeLessThan(500);
@@ -131,6 +133,8 @@ test("claim preparation survives returned requests and reuses one real delayed C
     expect(ready.claimUrl).toMatch(/^https:\/\/playit.gg\/claim\/[a-f0-9]{10}$/);
     expect(await tunnel.prepareClaim()).toEqual(ready);
     expect(installs).toBe(1);
+    // Pending publishes the URL before the first real setup request reaches the provider.
+    await expect.poll(() => setups, { timeout: 5000 }).toBe(1);
     expect(setups).toBe(1);
     await expect.poll(() => tunnel.claimStatus().phase, { timeout: 5000 }).toBe("claimed");
     expect(await tunnel.completeClaim()).toEqual({ phase: "claimed", claimed: true });
@@ -140,6 +144,7 @@ test("claim preparation survives returned requests and reuses one real delayed C
     expect(exchanges).toBe(1);
     expect(JSON.stringify([ready, tunnel.claimStatus()])).not.toContain(secret);
   } finally {
+    await closeTunnel?.();
     await new Promise<void>((resolve, reject) =>
       provider.close((error) => (error ? reject(error) : resolve())),
     );

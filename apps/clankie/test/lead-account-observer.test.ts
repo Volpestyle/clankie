@@ -244,21 +244,28 @@ it.each(["hardlink", "mode", "token"])(
 );
 
 it("refuses auth mutation while a backend quota observation is suspended", async () => {
-  const f = await fixture();
+  // Coverage expiry is exercised separately; this admission holds its observed clock.
+  const f = await fixture({ now: () => 1000 });
   await f.observer.start();
   let resolve!: (value: unknown) => void;
+  let requested!: () => void;
+  const requestStarted = new Promise<void>((done) => {
+    requested = done;
+  });
   const original = f.replaceRequest(async (method) =>
     method === "account/rateLimits/read"
       ? new Promise((done) => {
           resolve = done;
+          requested();
         })
       : original(method),
   );
   const pending = f.observer.selectedCredential();
-  await vi.waitFor(() => expect(resolve).toBeTypeOf("function"));
+  const rejected = expect(pending).rejects.toThrow();
+  await requestStarted;
   writeFileSync(f.authPath, JSON.stringify({ ...f.auth, tokens: { access_token: "changed" } }));
   resolve(f.quota);
-  await expect(pending).rejects.toThrow();
+  await rejected;
   expect(f.observer.signal.aborted).toBe(true);
   expect(JSON.stringify(f.observer.evidence())).not.toContain("changed");
 });
