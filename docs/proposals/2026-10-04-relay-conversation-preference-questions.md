@@ -66,6 +66,13 @@ client. A local encrypted transport fixture uses the existing public encryption
 host and client. Stub runners request a preference and record the continuation;
 no model, provider, owner settings or native-agent action is involved.
 
+Cancellation hooks observe the upstream dispatch's original `AbortSignal` and
+check it before registering a listener, including after asynchronous body reads.
+Request clones remain useful for body inspection, but on Node 26 their dependent
+abort controllers can be garbage-collected while the clone is still held. A
+clone's signal can then miss a caller disconnect and stall the test's latch;
+extending the test timeout does not repair that lost notification.
+
 These fixtures do not establish mobile rendering or hosted production acceptance.
 The app still needs exact-ID snapshot reconciliation and choice/text submission,
 including its iPhone and iPad checks. Typed project CREATE confirmation remains a

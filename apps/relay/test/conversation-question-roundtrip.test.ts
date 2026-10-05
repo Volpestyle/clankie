@@ -196,24 +196,27 @@ async function fixture(hosted = false, text = false) {
   const seen: { path: string; token: string | null; body: unknown }[] = [];
   let selfCount = 0;
   const hooks: {
-    before?: (request: Request) => Promise<void>;
-    after?: (request: Request, response: Response) => Promise<Response>;
+    before?: (request: Request, signal: AbortSignal) => Promise<void>;
+    after?: (request: Request, response: Response, signal: AbortSignal) => Promise<Response>;
     self?: (response: Response, count: number) => Promise<Response>;
   } = {};
   const controlFetch: typeof fetch = async (input, init) => {
     const request = new Request(input, init);
+    // Observe the dispatch signal: Node 26 Request.clone() weakly retains its
+    // dependent controller, so GC can stop a clone from following cancellation.
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : request.signal);
     expect(new URL(request.url).origin).toBe("http://control.fixture");
     seen.push({
       path: new URL(request.url).pathname,
       token: request.headers.get("authorization"),
       body: request.method === "POST" ? await request.clone().json() : undefined,
     });
-    await hooks.before?.(request);
+    await hooks.before?.(request, signal);
     const hookRequest = request.clone();
     let response = await service.app.fetch(request);
     if (new URL(request.url).pathname === "/v1/devices/self")
       response = (await hooks.self?.(response, ++selfCount)) ?? response;
-    return (await hooks.after?.(hookRequest, response)) ?? response;
+    return (await hooks.after?.(hookRequest, response, signal)) ?? response;
   };
   const authorizer = new ControlPlaneDeviceAuthorizer({
     baseUrl: "http://control.fixture",
@@ -562,19 +565,17 @@ it("disconnect during owner work aborts its fetch and cleans handler listeners",
   const f = await fixture();
   const began = latch(),
     aborted = latch();
-  f.hooks.before = async (request) => {
+  f.hooks.before = async (request, signal) => {
     if (new URL(request.url).pathname !== "/operator/v1/dispatch") return;
     began.resolve();
-    await new Promise<void>((_resolve, reject) =>
-      request.signal.addEventListener(
-        "abort",
-        () => {
-          aborted.resolve();
-          reject(new Error("aborted"));
-        },
-        { once: true },
-      ),
-    );
+    await new Promise<void>((_resolve, reject) => {
+      const onAbort = () => {
+        aborted.resolve();
+        reject(new Error("aborted"));
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
   };
   const controller = new AbortController();
   const pending = f.raw(
@@ -738,19 +739,17 @@ it("disconnect after stored answer never cancels or retries its accepted continu
   const target = await f.target();
   const committed = latch(),
     aborted = latch();
-  f.hooks.after = async (request, response) => {
+  f.hooks.after = async (request, response, signal) => {
     if (request.method === "POST" && (await request.clone().json()).op === "input_answer") {
       committed.resolve();
-      await new Promise<void>((_resolve, reject) =>
-        request.signal.addEventListener(
-          "abort",
-          () => {
-            aborted.resolve();
-            reject(new Error("caller disconnected"));
-          },
-          { once: true },
-        ),
-      );
+      await new Promise<void>((_resolve, reject) => {
+        const onAbort = () => {
+          aborted.resolve();
+          reject(new Error("caller disconnected"));
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
     }
     return response;
   };
