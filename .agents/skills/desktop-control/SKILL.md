@@ -40,7 +40,7 @@ recovery needs host stop proof. Contract and examples:
 On a Windows machine, use the native Codex computer-use plugin's trusted
 `node_repl` and `@oai/sky` through the Windows computer host, not Peekaboo.
 The host exposes the same computer contract, bound to the owning conversation
-and the machine (`windows:pc:console`, for example). Use an SSH loopback forward
+and the machine (`windows:studio:console`, for example). Use an SSH loopback forward
 when leading from another machine. Setup and limits:
 [Windows observation host](../../../docs/desktop-control.md#windows-observation-host).
 
@@ -66,8 +66,8 @@ independent native stop proof. Keep ADR 0127's sign-ins, codes, CAPTCHAs, paymen
 account changes and destructive steps with the person. Respect the installed
 Windows plugin's app/shortcut denies. Do not bypass native grants or fall back
 to `C:\desk`. The adapter denies shell/system apps, Explorer Run, Windows-key
-aliases, Ctrl+Escape, Ctrl+Shift+Escape, Alt+F4 and Alt+Tab. Input release remains
-gated on James's W8 live stop evidence in the manual release fixture.
+aliases, Ctrl+Escape, Ctrl+Shift+Escape, Alt+F4 and Alt+Tab. Treat Windows input
+as unreleased until owner-run live stop evidence passes the manual release fixture.
 
 ## Discover the target
 

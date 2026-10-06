@@ -31,8 +31,8 @@ _their_ sessions and apps.
   person may be at the machine.
 - A harness marked "hire with `chrome: true`" (claude) gets that flag on
   `hire_agent`, or it starts without its browser.
-- Each run spends that harness's plan: James's Codex weekly limit, for
-  example. Read `fleet.notes` for their preference, and say which you picked
+- Each run spends that harness's plan, such as the owner's Codex weekly
+  limit. Read `fleet.notes` for their preference, and say which you picked
   when it isn't obvious.
 
 ## One driver, and not while they're using it

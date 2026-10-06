@@ -237,7 +237,7 @@ before a requested resume: resuming can launch or address a native agent and is
 not read-only. Reconcile an uncertain start or send instead of launching twice.
 Never deliver automated messages by typing terminal keys.
 
-Fleet addresses are qualified, for example `kh2/term_…`; local default pane IDs
+Fleet addresses are qualified, for example `studio/term_…`; local default pane IDs
 stay bare. Machine, fleet/session, pane and native occupant are distinct. Keep
 remote cwd and workspace policy on the remote machine. Do not close or restart
 other agents as a diagnostic step. Existing leads retain their assignments.
