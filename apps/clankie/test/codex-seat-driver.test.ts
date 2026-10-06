@@ -251,39 +251,45 @@ it("honors a caller's native thread discovery deadline and cleans up", async () 
   expect(spawn.mock.results[0]?.value.kill).toHaveBeenCalledWith("SIGTERM");
 });
 
-it("keeps the socket alive past discovery deadline and continues after native owner review", async () => {
-  const f = fixture();
-  let pending!: () => void;
-  const waiting = new Promise<void>((resolve) => {
-    pending = resolve;
-  });
-  const onServerStarted = vi.fn();
-  const onServerStopped = vi.fn();
-  const start = startCodexAppServerSeat({
-    onServerStarted,
-    onServerStopped,
-    cwd: "/tmp",
-    threadStartTimeoutMs: 0,
-    startView: async () => {
-      throw new Error("agent_not_ready: blocked");
-    },
-    onThreadPending: pending,
-  });
-  await waiting;
-  expect(onServerStarted).toHaveBeenCalledExactlyOnceWith(12345);
-  expect(onServerStopped).not.toHaveBeenCalled();
-  expect(spawn.mock.results[0]?.value.kill).not.toHaveBeenCalled();
-  expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
-  // The fixture's native client creates its thread only after owner review.
-  await f.startView();
-  const seat = await start;
-  cleanup.push(seat.close);
-  await expect(seat.send("original brief")).resolves.toMatchObject({ state: "started" });
-  expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
-  await seat.close();
-  await seat.close();
-  expect(onServerStopped).toHaveBeenCalledOnce();
-});
+it.each([
+  "agent_not_ready: blocked",
+  '{"error":{"code":"trust_required","message":"3 hooks are new or changed"}}',
+])(
+  "keeps the socket alive past discovery deadline after %s and continues after native owner review",
+  async (failure) => {
+    const f = fixture();
+    let pending!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      pending = resolve;
+    });
+    const onServerStarted = vi.fn();
+    const onServerStopped = vi.fn();
+    const start = startCodexAppServerSeat({
+      onServerStarted,
+      onServerStopped,
+      cwd: "/tmp",
+      threadStartTimeoutMs: 0,
+      startView: async () => {
+        throw new Error(failure);
+      },
+      onThreadPending: pending,
+    });
+    await waiting;
+    expect(onServerStarted).toHaveBeenCalledExactlyOnceWith(12345);
+    expect(onServerStopped).not.toHaveBeenCalled();
+    expect(spawn.mock.results[0]?.value.kill).not.toHaveBeenCalled();
+    expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
+    // The fixture's native client creates its thread only after owner review.
+    await f.startView();
+    const seat = await start;
+    cleanup.push(seat.close);
+    await expect(seat.send("original brief")).resolves.toMatchObject({ state: "started" });
+    expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
+    await seat.close();
+    await seat.close();
+    expect(onServerStopped).toHaveBeenCalledOnce();
+  },
+);
 
 it.each([
   { receipt: {}, outcome: "answered" },
