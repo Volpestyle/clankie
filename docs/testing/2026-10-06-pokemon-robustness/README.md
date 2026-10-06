@@ -39,7 +39,8 @@ stop dollar-capped sessions. API/CLI/TUI fixtures round-trip validated caps.
 
 A continuous room stream permits two preemptions per turn and completes both
 turns; later lines remain queued. A 32-slot burst fixture proves ordered retention
-and bounded overflow. The queue's existing default behavior remains unchanged
+and overflow retention. A follow-up 40-line fixture uses full 500-character
+lines, completes 50 turns and reconstructs every deferred character in order. The queue's existing default behavior remains unchanged
 for other consumers, including Minecraft.
 
 Failure fixtures prove exponential backoff, recovery reset, stop during retry,
@@ -58,8 +59,9 @@ cannot enqueue it.
 
 Caps apply between model calls; the last call can exceed a threshold. Missing
 usage reserves 16,000 charged tokens and leaves estimated cost unknown, rather
-than inventing an invoice figure. FIFO overflow merges into the last bounded
-slot. Conversation admission gets at most two seconds at termination; unavailable
+than inventing an invoice figure. FIFO overflow merges into the last batch without truncation; each proposal
+takes at most 500 characters and leaves the remainder queued. Unread text can
+grow with room traffic, as retaining all deferred words requires. Conversation admission gets at most two seconds at termination; unavailable
 delivery is logged and never gates play.
 
 VUH-1616 is deferred. These fixes fit the existing Pokémon body seam; completing
