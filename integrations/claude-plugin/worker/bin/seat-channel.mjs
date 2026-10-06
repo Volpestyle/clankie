@@ -417,12 +417,17 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   };
   const advertised = () =>
     link ? [MESSAGE_TOOL, ...(verifiedTools ?? []), ...(verifiedPeers ? PEER_TOOLS : [])] : [];
-  const report = (status, reason = "", tools = advertised()) =>
+  let reportObservation;
+  let toolObservation = { status: "missing", reason: "Catalog not observed" };
+  const report = (status, reason = "", tools = advertised()) => {
+    toolObservation = { status, reason };
     granted.report({
+      ...(reportObservation === undefined ? {} : { report: reportObservation }),
       status,
       reason: reason.slice(0, 500),
       tools: tools.map((tool) => tool.name).slice(0, 128),
     });
+  };
   const readCatalog = async (signal) => {
     refresh();
     if (!link) return { tools: [], reason: "No linked fleet connection" };
@@ -651,6 +656,10 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   }
 
   const sendInbound = createInboundSender({
+    onObservation: (observation) => {
+      reportObservation = observation;
+      report(toolObservation.status, toolObservation.reason);
+    },
     directory: join(homedir(), ".clankie", "inbound-receipts"),
     scope: JSON.stringify([process.env.HERDR_SOCKET_PATH ?? "", paneId]),
     request: async (suffix, init) => {
@@ -658,7 +667,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         return await fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
           ...init,
           headers: { ...authorization(link), "content-type": "application/json" },
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(Math.min(20_000, requestTimeoutMs)),
         });
       } catch (error) {
         // Preserve the refused-connection link refresh. Reads can follow the
@@ -666,7 +675,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         if (refused(error) && refresh() && !init)
           return fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
             headers: authorization(link),
-            signal: AbortSignal.timeout(20_000),
+            signal: AbortSignal.timeout(Math.min(20_000, requestTimeoutMs)),
           });
         throw error;
       }

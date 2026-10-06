@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
+import type { WorkerReportBridgeStatus } from "@clankie/protocol";
 import { afterEach, expect, it } from "vitest";
 import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
+import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -62,7 +66,7 @@ class HeldSettings extends SettingsStore {
 const wrappers = ["clankie_tools", "clankie_call"];
 const requestTimeoutMs = 250;
 
-async function fixture() {
+async function fixture(slowBinding = false) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-bridge-health-"));
   const settings = new HeldSettings(join(root, "settings.json"));
   await settings.update((current) => ({
@@ -71,6 +75,7 @@ async function fixture() {
   }));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
+  const metrics = new FleetHealthMetrics();
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
@@ -78,6 +83,7 @@ async function fixture() {
     requestTimeoutMs,
     fleetTools: async () => (await settings.load()).fleet.tools,
     fleetPeerMessages: async () => (await settings.load()).fleet.peerMessages,
+    reportBridgeObserved: (fleet, pane, report) => metrics.observeReport(fleet, pane, report),
   });
   let valid = true;
   let validations = 0;
@@ -90,10 +96,22 @@ async function fixture() {
       return valid;
     },
   });
+  let bindingGets = 0;
+  let messagePosts = 0;
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (request) => worker.handleLocalFleet(request, identity()),
+    fetch: async (request) => {
+      if (new URL(request.url).pathname.endsWith("/messages")) {
+        if (request.method === "POST") messagePosts++;
+        else {
+          bindingGets++;
+          if (slowBinding) await new Promise((resolve) => setTimeout(resolve, 750));
+        }
+        return Response.json({ binding: "a".repeat(64) });
+      }
+      return worker.handleLocalFleet(request, identity());
+    },
   });
   await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
   const address = server.address();
@@ -151,13 +169,16 @@ async function fixture() {
     status: "ready" | "missing" | "stalled",
     reason: string,
     tools = wrappers,
+    reportHealth?: WorkerReportBridgeStatus,
   ) =>
     post(bridgeId, session, {
       method: "notifications/clankie/bridge_status",
-      params: { status, reason, tools },
+      params: { status, reason, tools, ...(reportHealth ? { report: reportHealth } : {}) },
     });
   return {
     worker,
+    root,
+    metrics,
     settings,
     initialize,
     report,
@@ -165,12 +186,129 @@ async function fixture() {
     headers,
     identity,
     status: () => worker.bridgeStatus("default", "w1:p1"),
+    reportStatus: () => worker.reportBridgeStatus("default", "w1:p1"),
+    bindingGets: () => bindingGets,
+    messagePosts: () => messagePosts,
     validations: () => validations,
     revoke() {
       valid = false;
     },
   };
 }
+
+it("records a real subprocess binding timeout independently of its healthy tool catalog", async () => {
+  const f = await fixture(true);
+  const socket = join(f.root, "herdr.sock");
+  await mkdir(join(f.root, ".clankie", "links"), { recursive: true });
+  await writeFile(
+    join(f.root, ".clankie", "links", "default.json"),
+    JSON.stringify({
+      schemaVersion: 2,
+      fleet: "default",
+      socket,
+      url: new URL(f.url).origin,
+      authentication: "local-process",
+    }),
+  );
+  const bridge = pathToFileURL(
+    join(import.meta.dirname, "../../../integrations/claude-plugin/worker/bin/seat-channel.mjs"),
+  );
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:"w1:p1",parentArgv:"test",requestTimeoutMs:250});`,
+    ],
+    { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: "w1:p1" } },
+  );
+  cleanup.push(async () => {
+    if (child.exitCode !== null) return;
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    child.kill();
+    await exited;
+  });
+  const replies = new Map<number, { result?: { content?: { text: string }[] }; error?: unknown }>();
+  let buffer = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    buffer += String(chunk);
+    while (buffer.includes("\n")) {
+      const at = buffer.indexOf("\n");
+      const message = JSON.parse(buffer.slice(0, at));
+      buffer = buffer.slice(at + 1);
+      if (message.id !== undefined) replies.set(message.id, message);
+    }
+  });
+  let id = 0;
+  const call = async (method: string, params: unknown) => {
+    const current = ++id;
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: current, method, params })}\n`);
+    await expect.poll(() => replies.has(current), { timeout: 5000 }).toBe(true);
+    const response = replies.get(current)!;
+    expect(response.error).toBeUndefined();
+    return response;
+  };
+  await call("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "test", version: "1" },
+  });
+  await call("tools/list", {});
+  await expect.poll(() => f.status().status).toBe("ready");
+  const reply = await call("tools/call", {
+    name: "message_clankie",
+    arguments: { text: "private report body must remain local" },
+  });
+  expect(JSON.parse(reply.result!.content![0]!.text)).toMatchObject({
+    received: false,
+    deliveryStage: "uncertain",
+  });
+  await expect
+    .poll(() => f.reportStatus())
+    .toMatchObject({ outcome: "uncertain", reason: "binding_timeout" });
+  expect(f.status().status).toBe("ready");
+  expect(f.bindingGets()).toBe(1);
+  expect(f.messagePosts()).toBe(0);
+  expect(JSON.stringify(f.reportStatus())).not.toContain("private report body");
+  expect(f.metrics.snapshot().totals.reports).toEqual({
+    attempts: 1,
+    failures: 1,
+    byReason: { binding_timeout: 1 },
+  });
+});
+
+it("preserves stored report time across failures and fences old bridge generations", async () => {
+  const f = await fixture();
+  const first = randomUUID();
+  const session = await f.initialize(first);
+  const stored = {
+    outcome: "stored" as const,
+    reason: "stored" as const,
+    observedAt: "2026-10-05T12:00:00.000Z",
+  };
+  await f.report(first, session, "ready", "Ready catalog", wrappers, stored);
+  await f.report(first, session, "stalled", "Tools have stalled", wrappers);
+  const failed = {
+    outcome: "unavailable" as const,
+    reason: "binding_timeout" as const,
+    observedAt: "2026-10-05T12:01:00.000Z",
+  };
+  await f.report(first, session, "ready", "Ready catalog", wrappers, failed);
+  await f.report(first, session, "ready", "Repeated unchanged report heartbeat", wrappers, failed);
+  expect(f.reportStatus()).toEqual({ ...failed, lastStoredAt: stored.observedAt });
+  expect(f.status().status).toBe("stalled");
+  expect(f.metrics.snapshot().totals.reports).toEqual({
+    attempts: 2,
+    failures: 1,
+    byReason: { binding_timeout: 1 },
+  });
+  const replacement = randomUUID();
+  await f.initialize(replacement);
+  expect(f.reportStatus()).toBeUndefined();
+  await f.report(first, session, "ready", "Late previous process", wrappers, failed);
+  expect(f.reportStatus()).toBeUndefined();
+  expect(f.metrics.snapshot().totals.reports.attempts).toBe(2);
+});
 
 it.each(["stalled", "missing"] as const)(
   "replaces %s health on a new authenticated bridge process, preserves reconnects and rejects old observations",

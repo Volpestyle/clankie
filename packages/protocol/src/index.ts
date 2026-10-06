@@ -694,3 +694,10 @@ export {
 } from "./operator-conversations.ts";
 
 export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";
+export {
+  WorkerReportBridgeReasonSchema,
+  WorkerReportBridgeStatusSchema,
+  type WorkerReportBridgeStatus,
+} from "./worker-report-health.ts";
+
+export * from "./fleet-health-metrics.ts";

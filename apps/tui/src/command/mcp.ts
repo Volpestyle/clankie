@@ -878,6 +878,20 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   const sendInbound = createInboundSender({
     directory: join(env.HOME ?? homedir(), ".clankie", "inbound-receipts"),
     scope: JSON.stringify([env.HERDR_SOCKET_PATH ?? "", paneId]),
+    onObservation: async (observation) => {
+      const credential = await resolveOperatorCredential({
+        env,
+        ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+      });
+      if (!credential || !paneId) return;
+      await fetch(new URL(`${fleetSeatMessagesPath(paneId)}/health`, commandHost({ ...options, env })), {
+        method: "POST",
+        redirect: "error",
+        headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+        body: JSON.stringify(observation),
+        signal: AbortSignal.timeout(2_000),
+      });
+    },
     request: async (suffix, init) => {
       const credential = await resolveOperatorCredential({
         env,

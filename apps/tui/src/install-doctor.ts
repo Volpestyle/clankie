@@ -127,6 +127,17 @@ export interface InstallDoctorReport {
     })[];
     readonly error?: string;
   };
+  readonly workerReports?: {
+    readonly workers: readonly {
+      readonly seatId: string;
+      readonly title: string;
+      readonly fleet?: string;
+      readonly report?: import("@clankie/protocol").WorkerReportBridgeStatus;
+      readonly flags: readonly string[];
+    }[];
+    readonly error?: string;
+  };
+  readonly fleetHealthMetrics?: import("@clankie/protocol").FleetHealthMetricsSnapshot;
   readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };

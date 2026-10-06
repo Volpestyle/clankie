@@ -44,6 +44,10 @@ export interface CaptainOptions {
     fleet: string,
     pane: string,
   ) => import("@clankie/protocol").WorkerBridgeStatus;
+  readonly workerReportBridgeStatus?: (
+    fleet: string,
+    pane: string,
+  ) => import("@clankie/protocol").WorkerReportBridgeStatus | undefined;
   /** The same native membership producer exposed by the HTTP app, created after the captain. */
   readonly fleetProjectMembership?: () => Pick<FleetProjectMembership, "read"> | undefined;
   readonly projectHireWorkspace?: (proof: ProjectHireProcessProof) => Promise<string | undefined>;
