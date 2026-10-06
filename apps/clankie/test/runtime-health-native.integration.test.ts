@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Server as HttpServer } from "node:http";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -36,6 +38,12 @@ it.skipIf(process.platform !== "darwin")(
       fullDuration ? "../../../.local/kai/native-health-defaults" : "../../../.local/kai/native-health",
     );
     await mkdir(logs, { recursive: true });
+    // Source checkouts need the same real kernel helper shipped in releases.
+    await promisify(execFile)(
+      process.execPath,
+      [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")],
+      { timeout: 65000 },
+    );
     const herdr = await isolatedHerdr(logs);
     cleanups.push(herdr.close);
     await writeFile(join(logs, "owned.json"), JSON.stringify({ root: herdr.root }));
