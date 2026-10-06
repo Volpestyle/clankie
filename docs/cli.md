@@ -876,23 +876,57 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
-### `accounts [list]` / `accounts connect github|linear` / `accounts disconnect PROVIDER` / `accounts apps`
+### `accounts [list]` / `accounts connect PROVIDER` / `accounts disconnect PROVIDER` / `accounts apps`
 
-The owner's own GitHub and Linear accounts, linked to this body
+The owner's own GitHub, Linear and Google accounts, linked to this body
 ([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)). The
 service runs each flow and keeps the token in the credential broker (`github`,
 `linear-api` for registered Linear API OAuth); nothing here prints a token. `accounts` lists each provider's
-`status` (`connected`, `not_connected`, `unconfigured`), account, scopes and
-where to manage it. `accounts connect github` prints the code to type at
+`status`, account, scopes and where to manage it. The body supplies the catalog's
+name, purpose, permission disclosure and read-only flag. App, account dashboard
+and `/connect accounts` (also `/connections` → Accounts) use that same catalog.
+Google rows can report `awaiting_consent`, `expired`, `reconnect_required`,
+`unavailable` or `disconnected`, together with the last check and pending revocation.
+An unconfigured row means an operator has not configured the developer OAuth client.
+`accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
 `accounts start github` and `accounts poll github --flow-id ID` expose the same
 flow as separate steps for interactive clients.
-`accounts disconnect github|linear` revokes at the provider when it can and
+`accounts disconnect PROVIDER` revokes at the provider when it can and
 always deletes the local token; `revoked: false` comes with the `manageUrl`
 to revoke by hand. Disconnecting Linear clears its API and legacy MCP/app lanes
 and pending flows. The app's Connections settings and the account page use the
 same encrypted lifecycle. `/connections` exposes account identity, granted
 scopes, connect and disconnect beside machines in the console.
+
+`accounts connect google-gmail|google-calendar|google-drive` (or `start` with the
+same provider) returns a browser consent URL, single-use state and expiry.
+`accounts complete google-gmail|google-calendar|google-drive --json-stdin`
+consumes `{state,code}` for Gmail/Calendar or `{state,code,pickedFileIds}` for
+Drive; the provider comes from the command selector. Google's file picker
+returns selected IDs in `picked_file_ids`; clients validate and forward them
+as the `pickedFileIds` array.
+`accounts check google-gmail|google-calendar|google-drive` verifies the selected
+authorized access. Google refresh, token exchange and revoke run on the body;
+the console accepts the `clankie://accounts/google/callback` link through a
+masked prompt. Gmail requests `gmail.readonly`; Calendar requests
+`calendar.calendarlist.readonly` and `calendar.events.readonly`; Drive requests
+only `drive.file` through Google's file picker, with no other scope combined.
+The body reads files selected in that flow. Google's selected-file permission
+also permits editing those files; Clankie's implemented Drive tools only read.
+Gmail and Calendar consent also request `openid email` to verify identity.
+Drive identity is verified through the Drive API. No mail-send or calendar-write
+scope is granted, and the shipped Google tools expose no writes. The
+[Google Picker guide](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker)
+describes the selected-file consent flow.
+
+Google grants share an application and account lifecycle. Disconnecting any
+Google row disables all three Google connections on this body. If the provider
+cannot confirm revocation, local access stays disabled and the catalog reports
+pending revocation; retry disconnect or review the grant at Google's management
+URL. A connection is never reported as revoked until Google confirms it.
+Real Google access requires developer client registration and the owner's
+browser consent; fixture checks do not establish a consented production read.
 
 `accounts connect linear` returns the registered app's authorize URL, single-use
 state and expiry. The body retains the S256 verifier and exchanges the callback
@@ -911,7 +945,8 @@ Changing the active app identity requires new worker grants. Setup and scope:
 [worker posts](linear-worker-posts.md).
 
 `accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID]
-[--linear-redirect-uri URL]` reads or writes the public OAuth client settings
+[--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL]`
+reads or writes the public OAuth client settings
 (`oauthApps` in `settings.json`); they apply without a restart.
 `CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
 `CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
@@ -928,6 +963,17 @@ Hosted public app
 IDs and the exact gateway `/account/connections/callback` arrive through body
 bootstrap; developer secrets are excluded. Provider app registration and terms
 acceptance remain owner actions.
+
+For a local development Google web OAuth client, set its public client ID and
+registered redirect URI through `accounts apps set`. The callback path is
+`/account/connections/google/callback`; HTTPS is required except for local
+loopback HTTP development. Store the matching developer secret with
+`accounts apps google-secret --client-id ID --secret-stdin`. This is a local
+operator command, writes broker entry `google-oauth-app` with its client ID,
+and refuses hosted bodies and remote transports. The secret never enters argv,
+environment variables, settings, output or device responses. Google public
+settings also support `CLANKIE_GOOGLE_OAUTH_CLIENT_ID` and
+`CLANKIE_GOOGLE_OAUTH_REDIRECT_URI` overrides; neither variable accepts a secret.
 
 ### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
 

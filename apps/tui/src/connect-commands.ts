@@ -17,6 +17,7 @@ import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
 import { runLinearCommand } from "./command/linear.ts";
 import { describeRedactedCredential, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
+import { providerAccountsSection, type ConnectionsMenuServices } from "./connections-menu.ts";
 
 const LINEAR_PROVIDER_ID = "linear";
 const EMAIL_PROVIDER_ID = "email";
@@ -69,6 +70,8 @@ export interface ConnectCommandServices {
   probeLinear?: typeof probeLinearKey;
   probeLinearMcp?: typeof probeLinearMcp;
   connectLinearApp?: typeof connectLinearApp;
+  /** Body-owned account catalog and consent lifecycle; secrets stay on the body. */
+  accounts?: ConnectionsMenuServices["accounts"];
   /**
    * The doorway this Mac answers on, for the webhook URL an owner pastes into
    * Linear (ADR 0165). Absent means remote access is not configured yet, which
@@ -82,11 +85,18 @@ export function buildConnectCommands(services: ConnectCommandServices): FaceShel
     {
       name: "connect",
       aliases: ["integrations"],
-      description: "Connect Linear, email, and Discord so Clankie can use them",
-      argumentHint: "[status|linear|email|discord]",
+      description: "Connect accounts and configure local services for Clankie",
+      argumentHint: "[accounts|status|linear|email|discord]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const selector = normalizeConnectArgument(argument);
+        if (selector === "accounts") {
+          if (!services.accounts) throw new Error("Account connections unavailable");
+          await withFlow(shell, "connect accounts", () =>
+            providerAccountsSection(shell.setupFlow, services.accounts!),
+          );
+          return;
+        }
         if (selector === "status") {
           await showConnectStatus(shell, services);
           return;
@@ -240,6 +250,16 @@ async function runConnectWizard(shell: ClankieFaceShell, services: ConnectComman
       const action = await flow.readSelect({
         message: "Give Clankie access to your services",
         options: [
+          ...(services.accounts
+            ? [
+                {
+                  value: "accounts",
+                  label: "Account connections",
+                  hint: "Body catalog · consent and access",
+                  description: "Review available services and authorize Google access in your browser.",
+                },
+              ]
+            : []),
           {
             value: "discord",
             label: "Discord",
@@ -267,6 +287,10 @@ async function runConnectWizard(shell: ClankieFaceShell, services: ConnectComman
       });
       const choice = action;
       if (choice === undefined || choice === "done") break;
+      if (choice === "accounts" && services.accounts) {
+        await providerAccountsSection(flow, services.accounts);
+        continue;
+      }
       if (choice === "status") {
         await showConnectStatus(shell, services);
         continue;

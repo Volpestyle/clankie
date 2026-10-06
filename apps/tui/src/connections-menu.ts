@@ -15,8 +15,16 @@ import {
   AccountLinearStartResultSchema,
   AccountDisconnectResultSchema,
   AccountLinearCompleteResultSchema,
+  AccountGoogleStartResultSchema,
+  AccountGoogleCompleteResultSchema,
+  GoogleAccountProviderSchema,
 } from "@clankie/protocol/accounts";
-import { parseLinearAccountCallback, validateLinearAccountStart } from "@clankie/api-client/accounts";
+import {
+  parseLinearAccountCallback,
+  validateLinearAccountStart,
+  parseGoogleAccountCallback,
+  validateGoogleAccountStart,
+} from "@clankie/api-client/accounts";
 
 type Json = Record<string, unknown>;
 type Run = (args: readonly string[]) => Promise<unknown>;
@@ -170,7 +178,7 @@ export async function runConnectionsMenu(
   }
 }
 
-async function providerAccountsSection(
+export async function providerAccountsSection(
   flow: SetupFlow,
   run: NonNullable<ConnectionsMenuServices["accounts"]>,
 ): Promise<void> {
@@ -181,11 +189,23 @@ async function providerAccountsSection(
       message: "Account connections",
       options: parsed.data.connections.map((connection) => ({
         value: connection.provider,
-        label: connection.provider === "github" ? "GitHub" : "Linear",
-        hint: `${connection.status.replaceAll("_", " ")}${connection.account ? ` · ${connection.account}` : ""}`,
-        description: connection.scopes.length
-          ? `Granted scopes: ${connection.scopes.join(", ")}`
-          : "No granted scopes",
+        label:
+          connection.name ??
+          (connection.provider === "github"
+            ? "GitHub"
+            : connection.provider === "linear"
+              ? "Linear"
+              : connection.provider),
+        hint: `${connection.status.replaceAll("_", " ")}${connection.account ? ` · ${connection.account}` : ""}${connection.revocationPending ? " · revocation pending" : ""}`,
+        description: [
+          connection.description,
+          connection.access,
+          connection.readOnly ? "Read-only" : undefined,
+          connection.scopes.length ? `Granted scopes: ${connection.scopes.join(", ")}` : "No granted scopes",
+          connection.lastCheckedAt ? `Last checked: ${connection.lastCheckedAt}` : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n"),
       })),
       allowBack: true,
     });
@@ -196,18 +216,53 @@ async function providerAccountsSection(
       continue;
     }
     const action = await flow.readSelect({
-      message: connection.provider === "github" ? "GitHub" : "Linear",
+      message:
+        connection.name ??
+        (connection.provider === "github"
+          ? "GitHub"
+          : connection.provider === "linear"
+            ? "Linear"
+            : connection.provider),
       options: [
         {
           value: connection.status === "connected" ? "disconnect" : "connect",
           label: connection.status === "connected" ? "Disconnect" : "Connect",
+          ...(GoogleAccountProviderSchema.safeParse(connection.provider).success &&
+          connection.status === "connected"
+            ? {
+                description:
+                  "Disconnecting Google access also disconnects Gmail, Calendar and Drive on this Clankie.",
+              }
+            : {}),
         },
+        ...(GoogleAccountProviderSchema.safeParse(connection.provider).success
+          ? [
+              { value: "check", label: "Check connection", hint: "Verify authorized access" },
+              ...(connection.revocationPending
+                ? [
+                    {
+                      value: "disconnect",
+                      label: "Retry Google revocation",
+                      hint: "Access is disconnected on this Clankie",
+                    },
+                  ]
+                : []),
+            ]
+          : []),
       ],
       allowBack: true,
     });
     if (!action) continue;
     try {
-      if (action === "disconnect") {
+      const google = GoogleAccountProviderSchema.safeParse(connection.provider);
+      if (action === "check" && google.success) {
+        const result = AccountGoogleCompleteResultSchema.safeParse(await run(["check", google.data]));
+        if (!result.success || !result.data.ok) throw new Error("Account check unavailable");
+        flow.renderLine(
+          `${result.data.connection.name ?? connection.name ?? google.data}: ${result.data.connection.status.replaceAll("_", " ")}`,
+          result.data.connection.status === "connected" ? "success" : "info",
+        );
+      } else if (action === "disconnect") {
         const result = AccountDisconnectResultSchema.safeParse(
           await run(["disconnect", connection.provider]),
         );
@@ -215,7 +270,9 @@ async function providerAccountsSection(
         flow.renderLine(
           result.data.revoked
             ? "Disconnected and revoked."
-            : "Disconnected on this Clankie. Revoke the remaining grant at the provider.",
+            : google.success
+              ? "Google access is disconnected on this Clankie. Provider revocation is pending; retry it or revoke the grant at Google."
+              : "Disconnected on this Clankie. Revoke the remaining grant at the provider.",
           result.data.revoked ? "success" : "info",
         );
         if (!result.data.revoked && result.data.manageUrl) flow.renderLine(result.data.manageUrl, "info");
@@ -240,6 +297,33 @@ async function providerAccountsSection(
           }
           flow.renderLine(`Still waiting; check again after ${result.data.interval} seconds.`, "info");
         }
+      } else if (google.success) {
+        const start = AccountGoogleStartResultSchema.safeParse(await run(["connect", google.data]));
+        if (!start.success || !start.data.ok) throw new Error("Google connection unavailable");
+        const pending = { ...start.data, provider: google.data };
+        validateGoogleAccountStart(pending);
+        flow.renderLine(`Open ${pending.authorizeUrl}`, "info");
+        const callback = await flow.readSecret({
+          message: "Paste the Open Clankie callback link after Google authorization",
+          allowBack: true,
+        });
+        if (!callback) continue;
+        const input = parseGoogleAccountCallback(callback, pending);
+        if ("error" in input) throw new Error("Google authorization did not complete");
+        const result = AccountGoogleCompleteResultSchema.safeParse(
+          await run(["complete", google.data, "--json-stdin"], JSON.stringify(input)),
+        );
+        if (
+          !result.success ||
+          !result.data.ok ||
+          result.data.connection.provider !== google.data ||
+          result.data.connection.status !== "connected"
+        )
+          throw new Error("Google connection unavailable");
+        flow.renderLine(
+          `${result.data.connection.name ?? connection.name ?? google.data} connected.`,
+          "success",
+        );
       } else {
         const start = AccountLinearStartResultSchema.safeParse(await run(["connect", "linear"]));
         if (!start.success || !start.data.ok) throw new Error("Linear connection unavailable");
@@ -260,7 +344,11 @@ async function providerAccountsSection(
       }
     } catch {
       flow.renderLine(
-        "Account authorization did not complete. Start a fresh connection to try again.",
+        action === "check"
+          ? "Access could not be verified. Read the connection status and try again."
+          : action === "disconnect"
+            ? "Account access could not be disconnected. Try again."
+            : "Account authorization did not complete. Start a fresh connection to try again.",
         "error",
       );
     }

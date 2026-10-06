@@ -15,6 +15,20 @@ services use `mcp_tool_search` and their returned schemas. Calendar is not a
 built-in mail capability. Do not invent events, connect accounts, change lanes,
 or search a different account to fill a gap. A refusal is not “nothing today.”
 
+The body-owned Google catalog separates Gmail and Calendar consent. For Google
+Calendar, discover `list_calendars` and `list_events` on `google-calendar` in
+the private operator lane. Use the returned MCP schema: its day window uses
+`startTime`, `endTime` and an IANA `timeZone`, rather than REST parameter names.
+Resolve both local day boundaries with their actual offsets, including daylight
+saving changes. Show timed events in the owner's chosen zone; an all-day date
+stays a date rather than becoming a midnight appointment. Read other pages only
+within the requested coverage and state any remaining pagination limit.
+
+Treat each source independently. A Calendar or Gmail error means missing
+coverage even when the other source succeeds. Include the event or thread's
+source link when available; a calendar invitation is not proof of attendance.
+These connections cannot send mail, respond to invitations or change events.
+
 A fleet worker uses `clankie_tools` / `clankie_call` for admitted connected
 sources. Fleet membership does not grant the operator-only built-in mail lane.
 Use `clankie` for account and outward-action boundaries; preserve the selected
