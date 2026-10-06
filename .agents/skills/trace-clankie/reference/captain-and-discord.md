@@ -81,6 +81,21 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   interleave with separate Pi compaction stalls. `contextTokensStart` describes
   retained context, not billed usage; `usage: null` leaves consumption unknown.
 
+- **A live MCP process does not prove a live channel receiver.** Tools and the
+  outbox pump share a process but have separate lifetimes. The operator bridge
+  retains content-free pump diagnostics in
+  `$CLANKIE_STATE_HOME/clankie/seat-bridges/<pid>.jsonl` (normally
+  `~/.local/state/clankie/seat-bridges/`). Match the PID, conversation, module-load
+  `sourceHash`, exact event ID and stage to the native transcript and durable
+  delivery receipt. `notification_sent` proves a completed channel write;
+  it does not prove model review or authorize marking a provider notification
+  read. An ACK outage retries exact receipts without stopping polling or
+  re-notifying the event. A channel-write failure stops polling and retains the
+  uncertainty fence, because the next poll implicitly acknowledges previous
+  takes. Installing newer source on disk does not revive an already loaded
+  stopped pump. Recover only the original harness session under the lead's
+  operational authority; never substitute a route or replay uncertain input.
+
 - **An `accepted` receipt establishes admission, not execution or liveness.**
   The input may be queued, preparing, executing or awaiting native delivery.
   With no active Pi tools, service preparation and execution fail after five
