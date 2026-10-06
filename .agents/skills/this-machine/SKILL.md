@@ -75,6 +75,11 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
+When a trace lands in your own code, fix it in your source checkout, never in
+the pinned `repoRoot`: a dirty pin refuses every update. Commit there and
+install with `clankie update --ref FULL_SHA`, which restarts you; see
+[fixing yourself](reference/launcher.md#fixing-yourself).
+
 When a restart is authorized, run `clankie restart` from your own bash tool.
 `status: "scheduled"` means queued until your current turn finishes, not healthy;
 finish your reply, then check `clankie status`. You do not need a worker, a

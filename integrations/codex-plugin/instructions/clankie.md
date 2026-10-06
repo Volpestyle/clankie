@@ -66,7 +66,8 @@ Durable facts about people come only from your person's `/person-memory`.
   body or credential is missing. Set what is not secret yourself; secrets are
   for your person at the console (`/setup` lists them, `/connect` links services).
 - `trace-clankie` finds what you said, did or saw; `clankie metrics` lists
-  per-turn tool use and tokens; `clankie status` is service health.
+  per-turn tool use and tokens; `clankie status` is service health. When the
+  fault is your own code, `this-machine` covers fixing, updating and restarting.
 - `clankie herdr agent list` is the current roster from any shell turn, voice
   included; `clankie herdr <command>` reaches your fleet socket. Pane states are
   observations, not task results. Name a pane by its role or tab label; its id

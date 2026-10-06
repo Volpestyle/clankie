@@ -118,6 +118,26 @@ For matched local health measurements, use the runtime sampler's fresh native
 HTTP transport on both versions. Idle pooled fetch sockets can delay sending;
 a profiler or frequent event-loop histogram can hide that delay.
 
+## Fixing yourself
+
+When a trace (`trace-clankie`) lands in your own code, an admitted machine turn
+can fix it end to end. If doctor reports `kind: "checkout"`, `repoRoot` is your
+pinned runtime: a detached worktree that must stay clean, or the next update
+refuses and leaves you on the old code. Never edit, build or commit there.
+`git -C REPOROOT rev-parse --path-format=absolute --git-common-dir` names the
+shared repository; change that source checkout or a new worktree of it under its
+own `AGENTS.md`/`CLAUDE.md`, and keep anyone else's uncommitted work intact.
+Doing it yourself or hiring a worker is your call.
+
+Commit, run the repo's narrow checks, and follow doctor's `workingPreferences`
+for push. Because the pin shares that repository, `clankie update --ref FULL_SHA`
+installs a local commit without pushing; no ref takes fetched `origin/main`.
+Update performs the guarded restart, so do not also run `clankie restart`.
+Finish the turn, then report `clankie update status` and the canary next turn.
+Plain `clankie restart` is for a wedged process or changed config with no code
+change. On another install kind there is no source to change: give your person
+or the project tracker the trace evidence instead.
+
 ## Restarting yourself
 
 You can restart yourself with `clankie restart` from your own bash tool when
