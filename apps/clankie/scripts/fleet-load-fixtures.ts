@@ -170,7 +170,7 @@ export async function startLinearFixture() {
   };
 }
 
-export async function listen(server: HttpServer) {
+async function listen(server: HttpServer) {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);

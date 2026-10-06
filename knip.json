@@ -61,6 +61,7 @@
         "scripts/fleet-load.ts",
         "scripts/fleet-load-worker.mjs",
         "test/fixtures/mcp-stdio-bridge.ts",
+        "test/fixtures/inbound-receipt-0.6.2.d.mts",
         "src/computer-windows-host.ts",
         "src/hosted-body.ts",
         "test/fixtures/fleet-ssh-recovery/*.mjs",
