@@ -4,12 +4,12 @@ On 2026-10-06 the explicit owned-native run passed both defensive OS cases.
 [Actual counter snapshots](native.json) contain no PIDs, paths or argv. The
 unchanged production native helper produced these four previously unmet reasons:
 
-| Fixed reason | Actual producer | Counter |
-| --- | --- | ---: |
-| `ancestry_bounds` | Real 65-parent ancestry; only the leaf opens the TCP socket | 1 |
-| `process_census_unavailable` | Owned helper sandbox denies OS process-list inspection | 1 |
-| `fd_list_unavailable` | Owned helper sandbox denies OS FD inspection on a real TCP connection | 1 |
-| `argv_unavailable` | Owned helper sandbox denies its OS argv sysctl reads | 1 |
+| Fixed reason                 | Actual producer                                                       | Counter |
+| ---------------------------- | --------------------------------------------------------------------- | ------: |
+| `ancestry_bounds`            | Real 65-parent ancestry; only the leaf opens the TCP socket           |       1 |
+| `process_census_unavailable` | Owned helper sandbox denies OS process-list inspection                |       1 |
+| `fd_list_unavailable`        | Owned helper sandbox denies OS FD inspection on a real TCP connection |       1 |
+| `argv_unavailable`           | Owned helper sandbox denies its OS argv sysctl reads                  |       1 |
 
 The ancestry test uses real Herdr, TCP, kernel processes and the production
 socket proof. The sandbox tests run the unchanged installed helper on actual
