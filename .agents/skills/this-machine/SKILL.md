@@ -55,6 +55,16 @@ state or a successful workspace focus as a delivery receipt or model-seen proof;
 messages still use native delivery and unconfirmed sends must not be retried
 blindly.
 
+Claude's pane tool-check warning names timeout, connection refusal or the exact
+HTTP/native-binding refusal. The idle observer retries through fresh link
+discovery; each cause is logged once per process, even across healthy checks.
+For persistent native binding failures, use `/mcp` → reconnect `clankie-worker`,
+then save and restart/resume Claude if needed. Transport failures need the PC
+fleet link/SSH diagnosis from Clankie's machine (`clankie doctor --machine pc`),
+not another pane's restart. A remote observer timeout appears as
+`remote_observation_timeout` and in the fleet-link log; its original late reply
+is never accepted as fresh proof. Keep uncertain message receipts untouched.
+
 For a fenced native remote hire, `clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID`
 can seal only a host-authenticated, recorded no-launch window. The native UUID is
 distinct from an MCP call ID or a `seat-…` message acknowledgement. Legacy missing

@@ -1,0 +1,36 @@
+{
+  "baseline": {
+    "exitCode": 1,
+    "observations": [
+      {
+        "first": "Remote observation timed out",
+        "aliveAfterTimeout": false
+      }
+    ]
+  },
+  "patched": {
+    "exitCode": 0,
+    "observations": [
+      {
+        "diagnostic": "remote observation 1 timed out after 250 ms; relay retained"
+      },
+      {
+        "first": "Remote observation timed out",
+        "aliveAfterTimeout": true
+      },
+      {
+        "second": "fresh-proof",
+        "aliveAfterLateReply": true
+      },
+      {
+        "socketResult": "isolated-stream-survived",
+        "tuple": {
+          "clientPort": 61119,
+          "serverPort": 61116
+        },
+        "result": "PASS"
+      }
+    ]
+  },
+  "scope": "Isolated real Windows relay; new TCP stream opened after late-reply recovery. No native Claude pane acceptance."
+}

@@ -36,6 +36,7 @@ import { splitFleetQualified } from "../herdr-fleet.ts";
 import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
 import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-authority.ts";
+import { RemoteObservationError } from "../remote-fleet-relay.ts";
 /**
  * A headless read of a lane's prompt (VUH-1086). The lane defaults to the one
  * the bearer speaks for; sections default to what the pi session starts with.
@@ -220,11 +221,17 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const fleet = token === undefined ? undefined : ctx.dependencies.fleetLinks?.authenticate(token);
     const remote = ctx.dependencies.fleetLinks?.identity?.(context.req.raw);
     if (remote) {
-      const proof =
-        remote.pane === raw && (await remote.validate()) ? await remote.projectProof?.() : undefined;
-      return proof && proof.pane === raw && proof.fleet !== "default" && (await remote.validate())
-        ? { paneId: `${proof.fleet}/${raw}` }
-        : { denial: context.json({ error: "remote_pane_required" }, 403) };
+      try {
+        const proof =
+          remote.pane === raw && (await remote.validate()) ? await remote.projectProof?.() : undefined;
+        return proof && proof.pane === raw && proof.fleet !== "default" && (await remote.validate())
+          ? { paneId: `${proof.fleet}/${raw}` }
+          : { denial: context.json({ error: "remote_pane_required" }, 403) };
+      } catch (error) {
+        if (error instanceof RemoteObservationError)
+          return { denial: context.json({ error: error.code }, 503) };
+        throw error;
+      }
     }
     if (fleet !== undefined)
       return { denial: context.json({ error: "remote_process_membership_required" }, 403) };
@@ -403,18 +410,23 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const identity =
       ctx.dependencies.localFleet?.identity(context.req.raw) ??
       ctx.dependencies.fleetLinks?.identity?.(context.req.raw);
-    const proof = identity && (await identity.validate()) ? await identity.projectProof?.() : undefined;
-    if (identity && (!proof || !(await identity.validate())))
-      return context.json({ error: "native_session_required" }, 403);
-    const workerTools =
-      (await ctx.dependencies.workerMcp?.expectedProjectToolNames(DEFAULT_PROJECT_ID)) ?? [];
-    const health = await ctx.dependencies.captain.recordSeatToolCatalog(
-      pane.paneId,
-      parsed.data,
-      workerTools,
-      proof,
-    );
-    return health ? context.json(health) : context.json({ error: "native_session_required" }, 403);
+    try {
+      const proof = identity && (await identity.validate()) ? await identity.projectProof?.() : undefined;
+      if (identity && (!proof || !(await identity.validate())))
+        return context.json({ error: "native_session_required" }, 403);
+      const workerTools =
+        (await ctx.dependencies.workerMcp?.expectedProjectToolNames(DEFAULT_PROJECT_ID)) ?? [];
+      const health = await ctx.dependencies.captain.recordSeatToolCatalog(
+        pane.paneId,
+        parsed.data,
+        workerTools,
+        proof,
+      );
+      return health ? context.json(health) : context.json({ error: "native_session_required" }, 403);
+    } catch (error) {
+      if (error instanceof RemoteObservationError) return context.json({ error: error.code }, 503);
+      throw error;
+    }
   });
 
   // A hired seat's worker plugin reports each settled turn (VUH-1458), from

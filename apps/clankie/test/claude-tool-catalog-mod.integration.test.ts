@@ -23,6 +23,13 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "clankie-claude-catalog-mod-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const reports: Event[] = [];
+  let reply = {
+    status: 200,
+    body: { status: "matched" } as Event,
+    stall: false,
+    disconnect: false,
+    disconnectBody: false,
+  };
   const server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => (body += String(chunk)));
@@ -30,8 +37,22 @@ async function fixture() {
       expect(request.url).toBe("/v1/fleet/seats/w1%3Ap1/tool-catalog");
       expect(request.headers["x-clankie-pane"]).toBe("w1:p1");
       reports.push(JSON.parse(body));
+      if (reply.disconnect) {
+        request.socket.destroy();
+        return;
+      }
       response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ status: "matched" }));
+      response.statusCode = reply.status;
+      if (reply.disconnectBody) {
+        response.flushHeaders();
+        setTimeout(() => request.socket.destroy(), 30);
+        return;
+      }
+      if (reply.stall) {
+        response.flushHeaders();
+        return;
+      }
+      response.end(JSON.stringify(reply.body));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -147,6 +168,16 @@ async function fixture() {
     reports,
     emit,
     drain,
+    url: `http://127.0.0.1:${address.port}`,
+    reply: (status: number, body: Event, stall = false) =>
+      (reply = { status, body, stall, disconnect: false, disconnectBody: false }),
+    disconnect: () => (reply.disconnect = true),
+    disconnectBody: () => (reply.disconnectBody = true),
+    link: async (url: string) => {
+      const path = join(directory, "links", "test.json");
+      const link = JSON.parse(await readFile(path, "utf8"));
+      await writeFile(path, JSON.stringify({ ...link, url }));
+    },
     switch: (id: string) => (sessionId = id),
     start: async () => {
       await emit("session.start", { isInteractive: true });
@@ -172,6 +203,105 @@ test("original Claude mod reports its exact native server catalog repeatedly thr
   expect(f.api.mcp.connect).toHaveBeenCalledTimes(2);
   expect(f.api.mcp.connect).toHaveBeenCalledWith("clankie");
   expect(f.api.ui.log).not.toHaveBeenCalled();
+});
+
+test("native pane refusals retain their code and print once across turns and intermittent recovery", async () => {
+  const f = await fixture();
+  await f.start();
+  f.reply(403, { error: "remote_pane_required", detail: "Bearer do-not-display" });
+  await f.tick();
+  const warning = f.api.ui.log.mock.calls[0]![0];
+  expect(warning).toContain("HTTP 403, remote_pane_required");
+  expect(warning).toContain("/mcp → reconnect clankie-worker");
+  expect(warning).not.toContain("do-not-display");
+  const reports = f.reports.length;
+  await f.emit("turn.start", { turnId: "another-turn" });
+  await f.emit("turn.complete", { turnId: "another-turn" });
+  await f.drain();
+  expect(f.reports).toHaveLength(reports);
+  await f.tick();
+  await f.tick();
+  expect(f.api.ui.log).toHaveBeenCalledTimes(1);
+  f.reply(200, { status: "matched" });
+  for (let i = 0; i < 4; i++) await f.tick();
+  expect(f.api.ui.status).toHaveBeenLastCalledWith(undefined);
+  f.reply(403, { error: "remote_pane_required" });
+  await f.tick();
+  expect(f.api.ui.log).toHaveBeenCalledTimes(1);
+  f.reply(403, { error: "native_session_required" });
+  await f.tick();
+  await f.tick();
+  expect(f.api.ui.log).toHaveBeenCalledTimes(2);
+  expect(f.api.ui.log.mock.calls[1]![0]).toContain("native_session_required");
+});
+
+test("helper distinguishes a refused loopback link and rereads replacement discovery without a restart", async () => {
+  const f = await fixture();
+  await f.start();
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  // A genuinely closed local port, not a simulated fetch exception.
+  await f.link(`http://127.0.0.1:${port}`);
+  await f.tick();
+  expect(f.api.ui.log).toHaveBeenCalledTimes(1);
+  expect(f.api.ui.log.mock.calls[0]![0]).toContain("connection was refused");
+  expect(f.api.ui.log.mock.calls[0]![0]).not.toContain("authenticated link");
+  await f.link(f.url);
+  await f.tick();
+  await f.tick();
+  expect(f.api.ui.status).toHaveBeenLastCalledWith(undefined);
+  expect(f.api.ui.log).toHaveBeenCalledTimes(1);
+});
+
+test("remote observer timeout and ordinary HTTP refusal remain distinct safe warning causes", async () => {
+  const f = await fixture();
+  await f.start();
+  f.reply(503, { error: "remote_observation_timeout", detail: "server secret" });
+  await f.tick();
+  expect(f.api.ui.log.mock.calls[0]![0]).toContain("timed out during remote pane verification");
+  expect(f.api.ui.log.mock.calls[0]![0]).toContain("HTTP 503, remote_observation_timeout");
+  expect(f.api.ui.log.mock.calls[0]![0]).not.toContain("server secret");
+  f.reply(401, { error: "authorization secret" });
+  await f.tick();
+  await f.tick();
+  expect(f.api.ui.log.mock.calls[1]![0]).toContain("was refused (HTTP 401)");
+  expect(f.api.ui.log.mock.calls[1]![0]).not.toContain("authorization secret");
+});
+
+test("a real stalled report times out with a bounded diagnostic and cannot display server secrets", async () => {
+  const f = await fixture();
+  await f.start();
+  // Refusal headers arrive immediately; its stalled body still shares the
+  // request deadline and must not swallow timeout into an ordinary HTTP error.
+  f.reply(503, {}, true);
+  await f.tick();
+  expect(f.api.ui.log).toHaveBeenCalledTimes(1);
+  expect(f.api.ui.log.mock.calls[0]![0]).toContain("timed out after 20s");
+  expect(f.api.process.run.mock.calls.at(-1)![1].timeoutMs).toBe(25_000);
+}, 30_000);
+
+test("a real reset link is diagnosed separately and recovers through the same idle observer", async () => {
+  const f = await fixture();
+  await f.start();
+  f.disconnect();
+  await f.tick();
+  expect(f.api.ui.log.mock.calls[0]![0]).toContain("lost its fleet link before a reply arrived");
+  f.reply(200, { status: "matched" });
+  await f.tick();
+  await f.tick();
+  expect(f.api.ui.status).toHaveBeenLastCalledWith(undefined);
+});
+
+test("a reset while reading a refusal body retains the transport cause", async () => {
+  const f = await fixture();
+  await f.start();
+  f.reply(503, {});
+  f.disconnectBody();
+  await f.tick();
+  expect(f.api.ui.log.mock.calls[0]![0]).toContain("lost its fleet link before a reply arrived");
+  expect(f.api.ui.log.mock.calls[0]![0]).not.toContain("was refused (HTTP 503)");
 });
 
 test("native turns, in-flight tools and background agents hold probes without touching their connection", async () => {

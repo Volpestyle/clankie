@@ -13,6 +13,7 @@ import {
 } from "../src/remote-project-proof.ts";
 import { windowsProcessCommand } from "../src/windows-process-probe.ts";
 import { classifyWindowsCodexArgv } from "../src/windows-codex-argv.ts";
+import { RemoteObservationError } from "../src/remote-fleet-relay.ts";
 
 const fleet = { id: "pc", session: "kh2-desktop", ssh: { host: "pc", shell: "powershell" as const } };
 function scriptFromCommand(command: string): string {
@@ -257,6 +258,14 @@ describe("remote project process proof", () => {
     changed.registered.mockResolvedValueOnce(fleet).mockResolvedValue(undefined);
     expect(await changed.observe("pc", "w3:p8", stream)).toBeUndefined();
     expect(await setup().observe("kh2", "w3:p8", stream)).toBeUndefined();
+  });
+  it("preserves safe relay transport reasons only on a trusted live stream; discovery still denies proof", async () => {
+    const failure = setup();
+    const timeout = new RemoteObservationError("remote_observation_timeout");
+    failure.shell.mockReset().mockRejectedValue(timeout);
+    await expect(failure.observe("pc", "w3:p8", stream)).rejects.toBe(timeout);
+    expect(await failure.observe("pc", "w3:p8")).toBeUndefined();
+    expect(await failure.observe("pc", "w3:p8", { ...stream, alive: () => false })).toBeUndefined();
   });
   it("builds an encoded script with kernel cwd reads and exact TCP tuple queries", () => {
     const command = windowsProcessCommand({

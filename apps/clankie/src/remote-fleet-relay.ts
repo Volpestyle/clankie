@@ -5,6 +5,17 @@ import type { RemoteStream } from "./remote-project-proof.ts";
 
 const MAX_FRAME = 65536;
 const MAX_PENDING = 4 * 1024 * 1024;
+const OBSERVATION_GRACE_MS = 30_000;
+/** Safe transport reasons; never carries the observation script or its output. */
+export class RemoteObservationError extends Error {
+  readonly code: "remote_observation_timeout" | "remote_observer_unavailable";
+  constructor(code: "remote_observation_timeout" | "remote_observer_unavailable") {
+    super(
+      code === "remote_observation_timeout" ? "Remote observation timed out" : "Remote observer unavailable",
+    );
+    this.code = code;
+  }
+}
 interface Stream extends RemoteStream {
   socket: Socket;
   id: number;
@@ -28,7 +39,12 @@ export class RemoteFleetRelay {
   private commandId = 0;
   private readonly commands = new Map<
     number,
-    { resolve(value: string): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
+    {
+      resolve(value: string): void;
+      reject(error: Error): void;
+      timer: ReturnType<typeof setTimeout>;
+      expired: boolean;
+    }
   >();
   private readonly options: {
     child: ChildProcess;
@@ -36,6 +52,7 @@ export class RemoteFleetRelay {
     ready(port: number): void;
     connect?: typeof createConnection;
     responseServer?: Server;
+    log?(message: string): void;
   };
   constructor(options: RemoteFleetRelay["options"]) {
     this.options = options;
@@ -128,18 +145,33 @@ export class RemoteFleetRelay {
       command,
     )?.[1];
     if (!this.open || !this.readyNotified || !encoded || this.commands.size >= 16)
-      return Promise.reject(new Error("Remote observer unavailable"));
+      return Promise.reject(new RemoteObservationError("remote_observer_unavailable"));
     const script = Buffer.from(Buffer.from(encoded, "base64").toString("utf16le"), "utf8");
     if (script.length > MAX_FRAME || this.commandId >= 0xffffffff)
       return Promise.reject(new Error("Remote observation too large"));
     const id = ++this.commandId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.commands.delete(id);
-        reject(new Error("Remote observation timed out"));
-        this.close();
+        const command = this.commands.get(id);
+        if (!command) return;
+        // Windows executes these read-only observations serially. One queued
+        // caller timing out must not kill every pane's authenticated stream.
+        // Keep its exact ID and capacity until the original reply arrives;
+        // an expired result can never become proof or satisfy a later request.
+        command.expired = true;
+        reject(new RemoteObservationError("remote_observation_timeout"));
+        this.options.log?.(`remote observation ${id} timed out after ${timeoutMs} ms; relay retained`);
+        // A truly hung script stops Windows' serial observer queue. Bound the
+        // original's late-reply grace, including retirement, so it cannot hold
+        // an old relay or consume its 16 slots forever. Never replay it.
+        command.timer = setTimeout(() => {
+          this.options.log?.(
+            `remote observation ${id} remained unresolved for ${OBSERVATION_GRACE_MS} ms after timeout; closing stalled relay`,
+          );
+          this.close();
+        }, OBSERVATION_GRACE_MS);
       }, timeoutMs);
-      this.commands.set(id, { resolve, reject, timer });
+      this.commands.set(id, { resolve, reject, timer, expired: false });
       this.send(4, id, script);
     });
   }
@@ -225,7 +257,7 @@ export class RemoteFleetRelay {
       if (!command) throw new Error("Unknown relay observation");
       this.commands.delete(id);
       clearTimeout(command.timer);
-      command.resolve(bytes.toString("utf8"));
+      if (!command.expired) command.resolve(bytes.toString("utf8"));
       this.finishDrain();
       return;
     }
@@ -312,7 +344,7 @@ export class RemoteFleetRelay {
     this.nonce = undefined;
     for (const command of this.commands.values()) {
       clearTimeout(command.timer);
-      command.reject(new Error("Remote observer disconnected"));
+      command.reject(new RemoteObservationError("remote_observer_unavailable"));
     }
     this.commands.clear();
     this.finishDrain();

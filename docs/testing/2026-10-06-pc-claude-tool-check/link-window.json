@@ -1,0 +1,117 @@
+[
+  {
+    "time": "2026-10-06T15:15:34.205Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 57949"
+  },
+  {
+    "time": "2026-10-06T15:15:47.716Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: mux_client_request_session: session request failed: Session open refused by peer"
+  },
+  {
+    "time": "2026-10-06T15:15:55.729Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 57991"
+  },
+  {
+    "time": "2026-10-06T15:16:09.914Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: Remote proof relay disconnected"
+  },
+  {
+    "time": "2026-10-06T15:16:18.626Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 58054"
+  },
+  {
+    "time": "2026-10-06T15:16:34.254Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: mux_client_request_session: session request failed: Session open refused by peer"
+  },
+  {
+    "time": "2026-10-06T15:16:41.321Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 58108"
+  },
+  {
+    "time": "2026-10-06T15:16:53.976Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: mux_client_request_session: session request failed: Session open refused by peer"
+  },
+  {
+    "time": "2026-10-06T15:17:01.540Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 58168"
+  },
+  {
+    "time": "2026-10-06T15:17:19.998Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: Remote proof relay disconnected"
+  },
+  {
+    "time": "2026-10-06T15:17:26.759Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 58226"
+  },
+  {
+    "time": "2026-10-06T15:17:43.626Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: Remote proof relay disconnected"
+  },
+  {
+    "time": "2026-10-06T15:17:50.546Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 58290"
+  },
+  {
+    "time": "2026-10-06T15:18:04.655Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: Remote proof relay disconnected"
+  },
+  {
+    "time": "2026-10-06T15:18:10.840Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 58342"
+  },
+  {
+    "time": "2026-10-06T15:18:27.280Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: Remote proof relay disconnected"
+  },
+  {
+    "time": "2026-10-06T15:18:33.223Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 58394"
+  },
+  {
+    "time": "2026-10-06T15:18:49.471Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: Remote proof relay disconnected"
+  },
+  {
+    "time": "2026-10-06T15:18:56.588Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 60204"
+  },
+  {
+    "time": "2026-10-06T15:19:10.260Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: Remote proof relay disconnected"
+  },
+  {
+    "time": "2026-10-06T15:19:17.626Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 60270"
+  },
+  {
+    "time": "2026-10-06T15:19:36.205Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link down: mux_client_request_session: session request failed: Session open refused by peer"
+  },
+  {
+    "time": "2026-10-06T15:19:43.117Z",
+    "event": "fleet.link",
+    "msg": "fleet pc: link ready on its port 60329"
+  }
+]

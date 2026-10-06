@@ -120,6 +120,68 @@ describe("trusted remote SSH relay", () => {
     child.emit("exit", 1);
     expect(proof.alive()).toBe(false);
   });
+  it("an observation timeout fails only that caller; late replies cannot become fresh proof", async () => {
+    const { child, relay, sockets } = await setup();
+    child.stdout.write(frame(1, 1, ports(4321, 1234)));
+    await settle(() => sockets.length === 1);
+    const proof = relay.stream(sockets[0]!)!;
+    const command =
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+      Buffer.from("'read-only'", "utf16le").toString("base64");
+    await expect(relay.execute(command, 10)).rejects.toThrow("Remote observation timed out");
+    expect(proof.alive()).toBe(true);
+    expect(child.kill).not.toHaveBeenCalled();
+    const next = relay.execute(command);
+    child.stdout.write(frame(4, 1, Buffer.from("expired-proof")));
+    child.stdout.write(frame(4, 2, Buffer.from("fresh-proof")));
+    await expect(next).resolves.toBe("fresh-proof");
+    const bytes: Buffer[] = [];
+    sockets[0]!.on("data", (data) => bytes.push(data));
+    child.stdout.write(frame(2, 1, Buffer.from("other-pane-still-connected")));
+    await settle(() => bytes.length > 0);
+    expect(Buffer.concat(bytes).toString()).toBe("other-pane-still-connected");
+    expect(proof.alive()).toBe(true);
+    // A replay of an already settled identity still invalidates the relay.
+    child.stdout.write(frame(4, 1, Buffer.from("replayed-expired-proof")));
+    expect(proof.alive()).toBe(false);
+  });
+  it("expired observations keep their bounded capacity and drain identity until original replies settle", async () => {
+    const { child, relay } = await setup();
+    const command =
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+      Buffer.from("'read-only'", "utf16le").toString("base64");
+    const attempts = Array.from({ length: 16 }, () =>
+      relay.execute(command, 10).catch((error: Error) => error.message),
+    );
+    expect(await Promise.all(attempts)).toEqual(Array(16).fill("Remote observation timed out"));
+    await expect(relay.execute(command)).rejects.toThrow("Remote observer unavailable");
+    const drained = vi.fn();
+    relay.drain(drained);
+    child.stdout.write(frame(6, 0));
+    expect(drained).not.toHaveBeenCalled();
+    for (let id = 1; id <= 16; id++) child.stdout.write(frame(4, id, Buffer.from("late-proof")));
+    expect(drained).toHaveBeenCalledTimes(1);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+  it("a genuinely stalled observer has bounded grace and cannot retain a retired relay indefinitely", async () => {
+    const { child, relay, sockets } = await setup();
+    child.stdout.write(frame(1, 1, ports(4321, 1234)));
+    await settle(() => sockets.length === 1);
+    const proof = relay.stream(sockets[0]!)!;
+    const command =
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+      Buffer.from("'read-only'", "utf16le").toString("base64");
+    await expect(relay.execute(command, 10)).rejects.toThrow("Remote observation timed out");
+    const drained = vi.fn();
+    relay.drain(drained);
+    child.stdout.write(frame(6, 0));
+    expect(proof.alive()).toBe(true);
+    expect(drained).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledTimes(1), { timeout: 32_000 });
+    expect(proof.alive()).toBe(false);
+    expect(drained).toHaveBeenCalledTimes(1);
+    await expect(relay.execute(command)).rejects.toThrow("unavailable");
+  }, 35_000);
   it("binds the return channel to a one-use nonce learned only from SSH stdout", async () => {
     const server = createServer();
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

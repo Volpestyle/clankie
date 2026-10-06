@@ -11,7 +11,8 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { RemoteObservationError } from "../src/remote-fleet-relay.ts";
 import {
   FleetSeatToolCatalogSchema,
   FleetToolCatalogHealthPageSchema,
@@ -122,6 +123,88 @@ describe("native catalog report boundary", () => {
       detail: "Native thread introspection is unavailable",
     });
   });
+});
+
+it("remote report transport failures return safe 503 reasons at either proof without recording evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-remote-catalog-error-"));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const captain = createCaptain({ herdrAvailable: () => false } as CaptainDeps, {
+    repoRoot: root,
+    stateDir: root,
+    settings,
+  });
+  const recorded = vi.spyOn(captain, "recordSeatToolCatalog");
+  let calls = 0;
+  let failAt = 1;
+  let unavailable = false;
+  // Explicit native-identity surrogate: real HTTP routing/schema/captain, with
+  // transport failure injection instead of a Windows harness in this test.
+  const service = await createClankieApp({
+    captain,
+    settings,
+    fleetLinks: {
+      authenticate: () => undefined,
+      identity: () => ({
+        fleet: "pc",
+        pane: identity.paneId,
+        current: () => true,
+        validate: async () => true,
+        projectProof: async () => {
+          calls += 1;
+          if (calls === failAt) throw new RemoteObservationError("remote_observation_timeout");
+          if (unavailable) return undefined;
+          return {
+            fleet: "pc",
+            pane: identity.paneId,
+            nativeOccupantId: identity.occupantId,
+            binding: { socketPath: "native-fixture" },
+            shell: { pid: 1, startTime: "native-fixture" },
+            processes: [{ pid: 2, startTime: "native-fixture" }],
+          };
+        },
+      }),
+    },
+  });
+  const server = serve({ fetch: fleetLinkFetch(service.app.fetch), hostname: "127.0.0.1", port: 0 });
+  try {
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const port = (server.address() as { port: number }).port;
+    const post = (pane = identity.paneId) =>
+      fetch(`http://127.0.0.1:${port}` + fleetSeatToolCatalogPath(pane), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(report(workerTools)),
+        signal: AbortSignal.timeout(5_000),
+      });
+    for (failAt of [1, 2]) {
+      calls = 0;
+      const response = await post();
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "remote_observation_timeout" });
+      expect(calls).toBe(failAt);
+      expect(recorded).not.toHaveBeenCalled();
+    }
+    calls = 0;
+    const wrongPane = await post("w1:p1");
+    expect(wrongPane.status).toBe(403);
+    expect(calls).toBe(0);
+    failAt = 0;
+    unavailable = true;
+    const noProof = await post();
+    expect(noProof.status).toBe(403);
+    expect(await noProof.json()).toEqual({ error: "remote_pane_required" });
+    expect(recorded).not.toHaveBeenCalled();
+    expect((await captain.toolCatalogHealth()).seats).toEqual([]);
+  } finally {
+    recorded.mockRestore();
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      if ("closeAllConnections" in server) server.closeAllConnections();
+    });
+    service.close();
+    await captain.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it("admits catalog reports through real local and remote listeners while keeping health and native identity protected", async () => {
