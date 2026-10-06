@@ -1821,7 +1821,9 @@ are 409. These routes retain the existing operator owner boundary.
 The manual `pnpm check:resources -- --run` proof starts an isolated Captain and
 service embedding plus ten bounded command processes. Run its whole lifetime
 through the active fleet limiter. It checks a two-slot pool, actual queueing,
-process cleanup, service CPU and 250 ms health p95. It runs no coding model or
+process cleanup, service CPU and 250 ms health p95. Its fixed ten-by-two-second
+workload must finish within 30 seconds, with the empty-pool first start within
+five seconds; these are fixture regression budgets. It runs no coding model or
 CoreSimulator; the VUH-1706 release gate remains the worker-bridge load proof.
 The command is excluded from `pnpm check` and push, PR and scheduled CI.
 

@@ -18,7 +18,7 @@ import {
   type SimulatorReservation,
   type SimulatorUpdate,
 } from "./model.ts";
-import { processIdentity, processSnapshot, resourceNativeHelperPath, resourcePython } from "./process.ts";
+import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
 import { resourceCapacity, ResourcePressureSampler } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
 
@@ -62,24 +62,29 @@ export function createResourceGovernor(
   const active = new Set<Promise<unknown>>();
   async function reconcile(state: ResourceState): Promise<void> {
     if (!state.leases.some((lease) => lease.kind === "heavy") && state.queue.length === 0) return;
-    let rows: ProcessIdentity[];
-    try {
-      rows = await processSnapshot();
-    } catch {
-      // An unrelated protected PID can deny the broad census. It supplies no
-      // absence proof: exact recorded owners below are still probed, and unknown
-      // identities retain their leases while the kernel holds surviving groups.
-      rows = [];
-    }
-    const observe = async (proof: ProcessIdentity) => {
-      const row = rows.find((entry) => entry.pid === proof.pid);
-      // A new runner may have registered after the cached census was taken.
-      return matches(row, proof) ? row : await processIdentity(proof.pid);
+    // This state and its exact recorded PIDs belong to the held OS lock. Avoid
+    // broad census authority, cross-transaction caches and one fork per ticket.
+    const observations = await observeProcesses([
+      ...state.queue.map((entry) => entry.owner.pid),
+      ...state.leases.flatMap((lease) =>
+        lease.kind !== "heavy"
+          ? []
+          : lease.state === "starting"
+            ? [lease.claimOwner.pid]
+            : lease.runner
+              ? [lease.runner.pid]
+              : [],
+      ),
+    ]);
+    const observe = (proof: ProcessIdentity) => {
+      const observation = observations.get(proof.pid);
+      if (!observation || observation.status === "unknown") throw new Error("Process identity unavailable");
+      return observation.status === "live" ? observation.identity : undefined;
     };
     const queue = [];
     for (const entry of state.queue) {
       try {
-        if (matches(await observe(entry.owner), entry.owner)) queue.push(entry);
+        if (matches(observe(entry.owner), entry.owner)) queue.push(entry);
       } catch {
         queue.push(entry);
       }
@@ -95,27 +100,22 @@ export function createResourceGovernor(
         if (lease.state === "starting") {
           // The runner checks this same identity while holding this OS lock.
           // A dead owner therefore cannot have an unregistered future launch.
-          if (matches(await observe(lease.claimOwner), lease.claimOwner)) retained.push(lease);
+          if (matches(observe(lease.claimOwner), lease.claimOwner)) retained.push(lease);
           continue;
         }
         if (!lease.runner) {
           retained.push(lease);
           continue;
         }
-        const root = await observe(lease.runner);
+        const root = observe(lease.runner);
         if (matches(root, lease.runner)) {
-          const descendants = rows
-            .filter((row) => row.pgid === lease.runner!.pgid && row.pid !== lease.runner!.pid)
-            .slice(0, 128)
-            .map(({ pid, startTime }) => ({ pid, startTime }));
-          if (descendants.length) lease.descendants = descendants;
           retained.push(lease);
         } else if (root && root.pgid === root.pid) {
           // The original process group ended before this reused PID became a
           // new group leader. It is not authority to signal that new process.
         } else if (groupAlive(lease.runner.pgid)) {
-          // Snapshot enumeration can race a surviving descendant's fork.
-          // The kernel group-existence check prevents early reclamation.
+          // A dead runner can leave living descendants in its process group.
+          // Kernel group existence prevents early reclamation without a census.
           retained.push(lease);
         }
       } catch {
@@ -197,11 +197,16 @@ export function createResourceGovernor(
     try {
       for (;;) {
         if (signal.aborted) throw abort();
+        let advisory: ResourceState | undefined;
         const lease = await store.transaction(async (state) => {
           await reconcile(state);
-          if (state.queue[0]?.id !== id || state.leases.length >= resourceCapacity(state.policy))
+          const blocked = () => {
+            if (options.onWait) advisory = structuredClone(state);
             return undefined;
-          if (!(await pressure.sample(state.policy)).healthy) return undefined;
+          };
+          if (state.queue[0]?.id !== id || state.leases.length >= resourceCapacity(state.policy))
+            return blocked();
+          if (!(await pressure.sample(state.policy)).healthy) return blocked();
           if (simulator) {
             const external =
               typeof simulator.externalActive === "function"
@@ -213,7 +218,7 @@ export function createResourceGovernor(
               external + state.leases.filter((entry) => entry.kind === "simulator").length >=
               state.policy.simulatorSlots
             )
-              return undefined;
+              return blocked();
           }
           if (signal.aborted) throw abort();
           const at = Date.now();
@@ -253,7 +258,9 @@ export function createResourceGovernor(
           admitted = true;
           return lease;
         }
-        options.onWait?.(await snapshot());
+        // This is advisory status from the same attempt, projected after the
+        // transaction commits; publishing a wait must not acquire another lock.
+        if (advisory) options.onWait?.(await project(advisory));
         await wait(500, signal);
       }
     } finally {

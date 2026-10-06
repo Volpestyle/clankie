@@ -1,9 +1,12 @@
 import { writeFile, access } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { createResourceGovernor } from "../../src/governor.ts";
+import { processIdentity } from "../../src/process.ts";
 
 const [mode, receipt, release, directory] = process.argv.slice(2);
-await writeFile(receipt, JSON.stringify({ pid: process.pid }));
+const identity = await processIdentity();
+if (!identity) throw new Error("Owned command identity unavailable");
+await writeFile(receipt, JSON.stringify({ pid: identity.pid, startTime: identity.startTime }));
 if (mode === "nested") {
   const governor = createResourceGovernor({ directory });
   try {

@@ -108,6 +108,33 @@ def snapshot():
     return [value for value in (identity(pid, census=True) for pid in pids) if value is not None]
 
 
+def observe_processes():
+    raw = sys.stdin.read(16385)
+    if len(raw) > 16384:
+        raise RuntimeError("Process identity request too large")
+    request = json.loads(raw)
+    if not isinstance(request, dict) or set(request) != {"pids"}:
+        raise RuntimeError("Process identity request unavailable")
+    pids = request["pids"]
+    if not isinstance(pids, list) or len(pids) > 640 or any(
+        type(pid) is not int or pid < 2 or pid > 2147483647 for pid in pids
+    ) or len(set(pids)) != len(pids):
+        raise RuntimeError("Process identity request unavailable")
+    observations = []
+    for pid in pids:
+        try:
+            current = identity(pid)
+            row = {"pid": pid, "status": "live" if current is not None else "exited"}
+            if current is not None:
+                row["identity"] = current
+        except Exception:
+            # One denied native read cannot supply absence evidence or poison
+            # independent exact observations of other journal processes.
+            row = {"pid": pid, "status": "unknown"}
+        observations.append(row)
+    return {"schemaVersion": 1, "observations": observations}
+
+
 def group_occupied(pgid):
     """Count occupancy only, across all UIDs; this is never signal authority."""
     observer = subprocess.Popen(["/bin/ps", "-axo", "pid=,pgid=,stat="], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -237,6 +264,10 @@ if __name__ == "__main__":
             print("true")
         elif mode == "snapshot":
             print(json.dumps(snapshot()))
+        elif mode == "observe":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Process identity request unavailable")
+            print(json.dumps(observe_processes(), separators=(",", ":")))
         elif mode == "lock":
             locked_pipe(sys.argv[2])
         elif mode == "run":

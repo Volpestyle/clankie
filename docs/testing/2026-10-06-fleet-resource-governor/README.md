@@ -55,11 +55,14 @@ Discord, models and other body providers are absent. CPU is the service
 process and excludes helper/command CPU. This complements the existing release
 worker-bridge gate; it does not replace it.
 
-The run took **67.1 seconds** for ten two-second jobs, with the first command at
-13.9 seconds. Those admission delays have not been profiled. No command startup
-latency budget is claimed. Linux failure branches have captured fixtures but no
-live Linux kernel/container proof; the Docker daemon was unavailable. Python 3
-is an explicit self-hosted dependency and is installed by the hosted image.
+This original run took **67.1 seconds** for ten two-second jobs, with the first
+command at 13.9 seconds. The
+[admission follow-up](../2026-10-06-resource-admission-latency/README.md) profiles
+and fixes that delay, records a 15.9-second rerun and introduces budgets for this
+fixed fixture. Linux failure branches have captured fixtures but no live Linux
+kernel/container proof; the Docker daemon was unavailable. The
+[exact container procedure](linux-validation.md) records the remaining validation.
+Python 3 is an explicit self-hosted dependency and is installed by the hosted image.
 Existing harness/plugin caches were not refreshed; standalone packages must be
 updated as complete artifacts, including the companion skill and receipt.
 

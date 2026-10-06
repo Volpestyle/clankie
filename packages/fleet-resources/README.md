@@ -21,9 +21,12 @@ The heavy runner registers its process birth under the journal's kernel file loc
 before receiving execution permission. A dead claim owner cannot authorize a late
 runner. A registered runner owns its process group independently of its wrapper;
 surviving group members retain capacity after either process is killed. Native
-read failures remain unknown. A failed broad census falls back to exact recorded
-process proofs; kernel group existence still retains capacity. Runner settlement
-counts all UIDs in its group, excluding its own bounded observer and proved
+read failures remain unknown. Reconciliation batches only the current journal
+owner and runner PIDs under the OS lock; it never treats a missing census row as
+exit or reuses a cached observation as admission authority. Unrelated protected
+processes cannot force serial per-owner helper forks. Kernel group existence
+still retains capacity. Runner settlement counts all UIDs in its group,
+excluding its own bounded observer and proved
 zombies, so privileged descendants also retain the permit. Nested
 heavy commands reuse an inherited permit only when the caller belongs to the
 registered group. Signals require the exact observed process birth. Journal and
