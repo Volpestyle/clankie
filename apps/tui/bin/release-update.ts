@@ -29,10 +29,10 @@ import {
 } from "./runtime-update.ts";
 
 /** Releases built before targets were recorded are all macOS arm64. */
-export const DEFAULT_RELEASE_TARGET = "darwin-arm64";
+const DEFAULT_RELEASE_TARGET = "darwin-arm64";
 const TARGET = /^(darwin-arm64|linux-arm64|linux-x64)$/u;
 
-export function releaseTarget(value: unknown): string {
+function releaseTarget(value: unknown): string {
   if (value === undefined) return DEFAULT_RELEASE_TARGET;
   const target = boundedString(value, 32);
   if (!TARGET.test(target)) throw Error("Invalid release target");
