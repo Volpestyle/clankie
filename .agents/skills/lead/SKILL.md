@@ -53,6 +53,10 @@ before naming why something failed; until then, call the cause unverified, and
 keep calling it that when you explain it again. Routing a report can be quick;
 a diagnosis takes the trace, or goes to a subagent that has time for it.
 
+A worker's report is your only completion signal, and silence is not progress.
+When one is overdue, read the worker's pane state and `clankie status` rather
+than waiting on its push.
+
 Size toward the owner's targets in "Your fleet" (`clankie fleet status`):
 
 | Size    | Aim for                                                         |

@@ -48,6 +48,9 @@ const SEAT_PERMISSIONS = {
 const SEAT_SETTINGS = {
   ...SEAT_PERMISSIONS,
   enabledPlugins: { [SEAT_PLUGIN_ID]: false, "clankie@inline": true },
+  // His notes live in the service's `memory`, which every harness and room
+  // reads; Claude Code's own memory would be a second copy only this seat sees.
+  autoMemoryEnabled: false,
 };
 
 /** The seat's settings, also denying every other tracker connector this session would inherit. */
