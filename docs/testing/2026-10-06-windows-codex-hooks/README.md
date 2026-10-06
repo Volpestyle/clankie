@@ -1,5 +1,9 @@
 # Windows Codex hook command loading (VUH-1709)
 
+Live Windows acceptance passed after the normal PC update and James's explicit
+authorization to accept the known worker hooks. The [trusted native run](#trusted-native-windows-acceptance)
+shows actual hook output and the matching seat in Clankie's service roster.
+
 Candidate built from `origin/main` `1eb8ea93`, tested 2026-10-06. Both the worker
 and operator Codex hook commands now read `PLUGIN_ROOT` inside Node, convert the
 path with `pathToFileURL`, and import their existing entrypoints. The worker
@@ -25,11 +29,8 @@ Focused Mac checks:
 - Clankie and TUI typechecks passed.
 - Scoped oxlint passed; changed-file formatting and `git diff --check` passed.
 
-Remaining acceptance: an owned fresh Codex pane must run SessionStart, prompt
-and Stop without hook errors and show its session seated in Clankie's roster.
-Changed native hook definitions require the owner's `/hooks` trust review.
-Linux was not run; POSIX behavior has Mac shell evidence only. Leave the issue
-open until live evidence covers its acceptance criteria.
+The shell checks preceded the owned fresh-pane acceptance below. Linux was not
+run; POSIX behavior has Mac shell evidence only.
 
 Native contract confirmation: the [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks)
 identifies `PLUGIN_ROOT` as the installed plugin root supplied to hooks. The local
@@ -42,7 +43,7 @@ native contract without depending on either shell's variable syntax.
 The additional harness-profile version check passed, 9 tests (28 focused tests
 in total). No executable inputs changed after those checks.
 
-## Deployed PC update and native trust boundary
+## Initial deployed PC update and native trust boundary
 
 Clankie confirmed and authorized runtime `f6260751` on 2026-10-06. The normal
 update succeeded from the registered `/Users/james/dev/clankie` project context:
@@ -59,9 +60,48 @@ to complete with `TESS_VUH1709_WINDOWS_HOOKS_OK`, while those hooks stayed
 untrusted. That answer establishes account/model availability, not hook execution
 or Clankie seating. [Native observation](live/native-hook-review.txt).
 
-No hook trust records were changed. The test pane was idle with an empty prompt
+In this initial run, no hook trust records were changed. The test pane was idle with an empty prompt
 before closing; [cleanup](live/cleanup.json) confirms it is absent. The original
-five PC panes were preserved. VUH-1709 remains open. The next decision is owner
-review/trust of the changed worker hooks through native `/hooks`, followed by a
-fresh owned-pane hook/seating check. A controller-owned trust fix is being tracked
-separately in VUH-1738; this run does not assume that fix is deployed.
+five PC panes were preserved. VUH-1709 remained open pending owner authorization
+to trust the changed worker hooks and a fresh hook/seating check. A controller-owned
+trust fix is being tracked separately in VUH-1738; this run did not assume that fix
+was deployed.
+
+## Trusted native Windows acceptance
+
+James explicitly authorized the lead's fleet to answer startup trust prompts in
+owned PC test panes. Before accepting trust, native `/hooks` review showed that
+all three changed definitions were from `clankie-worker@clankie-fleet`:
+SessionStart, UserPromptSubmit and Stop. Each used the deployed Node environment
+lookup above. The existing user SessionStart hook was already trusted.
+[Reviewed worker definitions](live/trusted/reviewed-hooks.txt).
+
+In owned pane `w9:pA`, the selected native option was **Trust all and continue**.
+It succeeded and the model turn completed without a reconnect failure.
+[Trust choice and key result](live/trusted/trust-choice.txt). Two subsequent fresh
+owned native Codex 0.160.1 panes started without another trust prompt and completed
+their bounded initial turns using `--no-daemon`.
+
+The final fresh pane `w9:pC` (`term_65d25baabbec611`, session
+`01a10fce-0729-7ab0-8a5c-cfcc8cc80fea`) produced the worker's actual SessionStart
+output, `Hook · Clankie tools: …`, and completed its prompt/Stop cycle without a
+hook failure or exit-code-1 warning. Herdr reported `done`, with an empty draft.
+[Native turn and session identity](live/trusted/native-turn.txt).
+Clankie's authenticated service roster independently reported that exact seat
+and Codex session, with its worker bridge ready and a passed outcome.
+[Service seating evidence](live/trusted/seated.json).
+
+This embedded test session's native tool catalog remains `unverified`, as the
+hook output explains; catalog verification and native message delivery belong to
+the managed-hire acceptance on VUH-1527. Quiet UserPromptSubmit and Stop callbacks
+did not leave individual exit-status records in the captured UI. The evidence
+combines reviewed trusted definitions, a complete native lifecycle without hook
+errors, positive SessionStart execution and independently observed seating.
+It does not claim a `--remote` reconnect check or a fix for VUH-1738.
+
+Every test pane created in these checks was closed after checking identity, idle
+state and an empty draft. The final [cleanup census](live/trusted/cleanup.json)
+contains exactly the original five pane identities. No accounts or Codex config
+were changed; only the explicitly authorized native hook trust was accepted.
+The executable source and plugin package inputs are unchanged from the 28 focused
+tests, two typechecks, scoped lint and 22 Windows shell invocations above.

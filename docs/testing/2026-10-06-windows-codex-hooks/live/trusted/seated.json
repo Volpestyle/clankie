@@ -1,0 +1,56 @@
+{
+  "at": "2026-10-06T06:04:12.502Z",
+  "needle": "term_65d25baabbec611",
+  "seats": [
+    {
+      "toolCatalog": {
+        "status": "unverified",
+        "detail": "This embedded Codex session exposes no native catalog endpoint. Start a Clankie-managed hire to verify its tools.",
+        "missing": [],
+        "remediation": "Ask Clankie to launch this work with hire_agent so the managed Codex controller can verify its native tools.",
+        "harness": "codex",
+        "sessionId": "01a10fce-0729-7ab0-8a5c-cfcc8cc80fea",
+        "bridge": "worker",
+        "checkedAt": "2026-10-06T06:02:08.533Z"
+      },
+      "workerTools": {
+        "status": "ready",
+        "reason": "Native bridge reported: ",
+        "observedAt": "2026-10-06T06:02:06.038Z",
+        "tools": ["message_clankie", "clankie_tools", "clankie_call", "list_fleet_seats", "message_peer"]
+      },
+      "seatId": "pc/term_65d25baabbec611",
+      "occupantId": "session-155569004d4791e4270ca922718582b5e0571071cb1094844a6282fb8619ca36",
+      "personaId": "agent-8ff68701-a78b-449c-b2df-7fd8668e1ada",
+      "harness": "codex",
+      "status": "done",
+      "title": "tess-vuh1709-observed-lifecycle",
+      "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+      "placement": {
+        "workspace": {
+          "id": "w9",
+          "label": "repos",
+          "number": 1
+        },
+        "tab": {
+          "id": "w9:tB",
+          "label": "tess-vuh1709-observed-lifecycle",
+          "number": 11
+        }
+      },
+      "machine": "volpe@supedupsilly",
+      "herdrSession": "default",
+      "fleet": "pc",
+      "lastOutcome": {
+        "result": "passed",
+        "at": "2026-10-06T06:02:21.722Z"
+      },
+      "workerReportRouting": {
+        "source": "unadopted",
+        "reason": "no_parent",
+        "conversationId": "global-default"
+      },
+      "workerReports": []
+    }
+  ]
+}
