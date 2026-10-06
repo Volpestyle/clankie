@@ -41,11 +41,13 @@ export interface UpdateAuthority {
   current(): boolean;
   readonly initiator?: RuntimeUpdateInitiator;
 }
-interface RuntimeUpdateStatus {
+export interface RuntimeUpdateStatus {
   readonly runtime: RuntimeBootIdentity;
   readonly latest?: RuntimeUpdateResult;
   readonly pending?: string;
   readonly needsReconciliation?: boolean;
+  /** A release install already runs the requested official release. */
+  readonly upToDate?: boolean;
   readonly error?: "update_record_unreadable";
 }
 export interface RuntimeUpdater {
@@ -94,8 +96,11 @@ export function updateHoldingServices(
     return undefined;
   }
   if (!IN_FLIGHT_PHASES.includes(phase) || env.CLANKIE_UPDATE_OPERATION === id) return undefined;
-  const helper = join(updates, id, "runtime-update-helper.mjs");
-  const helpers = processes().filter(([, command]) => command.includes(helper));
+  // Checkout helpers run from the operation directory; release helpers are handed it.
+  const operation = join(updates, id);
+  const helpers = processes().filter(
+    ([, command]) => command.includes(operation) && command.includes("update-helper"),
+  );
   if (helpers.length === 0 || helpers.some(([pid]) => pid === parentPid)) return undefined;
   return { id, phase };
 }
@@ -159,20 +164,15 @@ export function verifyUpdateHelper(directory: string, files: Readonly<Record<str
       throw Error("Materialized update helper changed");
   }
 }
-export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpdater {
-  const env = options.env ?? process.env;
-  const run = options.run ?? installCommand;
-  const home = realpathSync(env.HOME || homedir());
-  const checkout = realpathSync(options.repoRoot);
-  const runtimePath = resolve(env.CLANKIE_RUNTIME_DIR || join(home, ".clankie", "pinned"));
+/** The install the running service booted from, proven intact; throws when it cannot be. */
+export interface ActiveInstall {
+  readonly root: string;
+  readonly commit: string;
+}
+/** One private operation lock and journal under ~/.clankie/updates, shared by every install kind. */
+export function createUpdateJournal(home: string, boot: RuntimeBootIdentity, active: () => ActiveInstall) {
   const updates = join(home, ".clankie", "updates");
   const lock = join(updates, "active");
-  const boot = Object.freeze({
-    root: checkout,
-    commit: pinnedCommit(checkout, "HEAD", run),
-    instanceId: randomUUID(),
-    pid: process.pid,
-  });
   const initialize = () => {
     const parent = join(home, ".clankie");
     if (!existsSync(parent)) mkdirSync(parent, { mode: 0o700 });
@@ -238,15 +238,16 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
     if (result.id !== id || !["stop-unconfirmed", "failed"].includes(result.phase) || safeTerminal(result))
       return undefined;
     if (!helperFinished(directory, result)) return undefined;
+    let root: string;
     let commit: string;
     try {
-      commit = assertPinnedRuntime(checkout, runtimePath, run);
+      ({ root, commit } = active());
     } catch {
-      // A missing, moved or edited pin needs the owner; nothing here repairs it.
+      // A missing, moved or edited install needs the owner; nothing here repairs it.
       return undefined;
     }
     if (
-      boot.root !== realpathSync(runtimePath) ||
+      boot.root !== root ||
       boot.commit !== commit ||
       (commit !== result.oldCommit && commit !== result.newCommit)
     )
@@ -264,6 +265,44 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       );
     return reconciled;
   };
+  /** Before scheduling: reconcile, then retire a terminal lock. False while an operation still holds it. */
+  const admit = (): boolean => {
+    reconcile();
+    const current = activeId();
+    if (current === undefined) return true;
+    if (!existsSync(join(updates, current, "result.json"))) return false;
+    const previous = readRuntimeUpdate(join(updates, current));
+    if (previous.id !== current || !safeTerminal(previous)) return false;
+    // Terminal result is written only after helper effects finish. PID is never recovery proof.
+    // A cross-process retirement claim prevents two callers deleting each other's new lock.
+    try {
+      closeSync(openSync(join(lock, "retiring"), "wx", 0o600));
+    } catch {
+      return false;
+    }
+    if (activeId() !== current) throw Error("Update lock changed during retirement");
+    rmSync(lock, { recursive: true });
+    return true;
+  };
+  return { updates, lock, initialize, activeId, status, reconcile, admit };
+}
+export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpdater {
+  const env = options.env ?? process.env;
+  const run = options.run ?? installCommand;
+  const home = realpathSync(env.HOME || homedir());
+  const checkout = realpathSync(options.repoRoot);
+  const runtimePath = resolve(env.CLANKIE_RUNTIME_DIR || join(home, ".clankie", "pinned"));
+  const boot = Object.freeze({
+    root: checkout,
+    commit: pinnedCommit(checkout, "HEAD", run),
+    instanceId: randomUUID(),
+    pid: process.pid,
+  });
+  const journal = createUpdateJournal(home, boot, () => ({
+    root: realpathSync(runtimePath),
+    commit: assertPinnedRuntime(checkout, runtimePath, run),
+  }));
+  const { updates, lock, initialize, activeId, status, reconcile } = journal;
   return {
     runtime: boot,
     status,
@@ -272,22 +311,7 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       await authority.guard();
       if (!authority.current()) throw Error("Update authority expired");
       initialize();
-      reconcile();
-      const active = activeId();
-      if (active !== undefined) {
-        if (!existsSync(join(updates, active, "result.json"))) return { ...status(), accepted: false };
-        const previous = readRuntimeUpdate(join(updates, active));
-        if (previous.id !== active || !safeTerminal(previous)) return { ...status(), accepted: false };
-        // Terminal result is written only after helper effects finish. PID is never recovery proof.
-        // A cross-process retirement claim prevents two callers deleting each other's new lock.
-        try {
-          closeSync(openSync(join(lock, "retiring"), "wx", 0o600));
-        } catch {
-          return { ...status(), accepted: false };
-        }
-        if (activeId() !== active) throw Error("Update lock changed during retirement");
-        rmSync(lock, { recursive: true });
-      }
+      if (!journal.admit()) return { ...status(), accepted: false };
       const oldCommit = assertPinnedRuntime(checkout, runtimePath, run);
       if (boot.root !== realpathSync(runtimePath) || boot.commit !== oldCommit)
         throw Error("Running service is not the exact pinned runtime");

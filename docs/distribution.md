@@ -27,6 +27,19 @@ panes with an older plugin get a once-only save/restart/resume flag. Their
 harnesses are never restarted by installation. See [harness linking](cli.md#linking-native-fleet-harnesses)
 for receipts, source setup and manual remediation.
 
+## Updating
+
+`clankie update` moves a release install to the latest official release; Clankie
+can do the same through `update_runtime`. It verifies the archive exactly as the
+installer does, unpacks it into its own `releases/vX.Y.Z`, stops the services
+through the running release, switches `current`, and starts them from the new
+release. The new service must report the new release's revision, or `current`
+switches back and the previous release restarts. The same five-minute health
+canary, status record and self-healing apply as for a source checkout
+([`clankie update`](cli.md#service-lifecycle)). Already on the latest release, it
+reports `upToDate` and changes nothing. `clankie update --ref vX.Y.Z` moves to a
+specific release, including an older one, with an `older-than-current-pin` warning.
+
 Install a specific release with:
 
 ```bash

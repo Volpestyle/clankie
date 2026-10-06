@@ -19,6 +19,7 @@ import { createBodyDiagnostics } from "./account-diagnostics.ts";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative, remoteFleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
+import { createReleaseUpdater } from "../../tui/bin/release-updater.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { RuntimeCanary } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
@@ -948,10 +949,15 @@ minecraftCapture = new MinecraftCapture({
     ),
   onError: () => logger.warn({ event: "minecraft.capture_unavailable" }, "Minecraft capture unavailable"),
 });
+// A checkout follows origin/main; a release install follows official releases.
 const runtimeUpdater =
-  hostedBody === undefined && existsSync(join(repoRoot, ".git"))
-    ? createRuntimeUpdater({ repoRoot })
-    : undefined;
+  hostedBody !== undefined
+    ? undefined
+    : existsSync(join(repoRoot, ".git"))
+      ? createRuntimeUpdater({ repoRoot })
+      : existsSync(join(repoRoot, "release.json"))
+        ? createReleaseUpdater({ releaseRoot: repoRoot })
+        : undefined;
 try {
   const reconciled = runtimeUpdater?.reconcile?.();
   if (reconciled)

@@ -45,6 +45,7 @@ const packageMetadata = JSON.parse(await readFile(join(repoRoot, "package.json")
 const releaseVersion = `v${packageMetadata.version}`;
 const entrypoints = [
   "apps/tui/bin/clankie.ts",
+  "apps/tui/bin/release-update-helper.ts",
   "apps/clankie/src/index.ts",
   "apps/clankie/src/herdr-runtime.ts",
   "apps/clankie/src/captain/remote-opencode-helper.ts",

@@ -59,6 +59,11 @@ JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 
 ## Updating the runtime
 
+On a release install (`clankie doctor` says `kind: release`), `update_runtime` or
+`clankie update` moves to the latest official release, or `--ref vX.Y.Z`, and
+answers `upToDate` when already current; read status the same way. The rest of
+this section is a source checkout.
+
 Landed code is not live until the pinned runtime is updated. From an admitted
 machine turn, use `update_runtime` or `clankie update [--ref REF]` to fetch the
 requested branch from origin, install its exact commit and detach a guarded

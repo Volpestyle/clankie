@@ -61,7 +61,7 @@ export interface RuntimeBootIdentity {
   readonly instanceId: string;
   readonly pid: number;
 }
-interface RuntimeServiceReceipt {
+export interface RuntimeServiceReceipt {
   readonly ok: boolean;
   readonly services: readonly {
     readonly id: string;
@@ -73,7 +73,7 @@ interface RuntimeServiceReceipt {
   }[];
   readonly runtime?: RuntimeBootIdentity;
 }
-function parseServiceReceipt(input: unknown): RuntimeServiceReceipt {
+export function parseServiceReceipt(input: unknown): RuntimeServiceReceipt {
   const value = object(input);
   if (
     typeof value.ok !== "boolean" ||
@@ -164,6 +164,8 @@ export interface RuntimeUpdateResult {
   readonly initiator?: RuntimeUpdateInitiator;
   /** An uncertain ending the running service later proved safe; it retires the lock. */
   readonly reconciled?: RuntimeUpdateReconciliation;
+  /** Release installs: the official versions behind `oldCommit` and `newCommit`. */
+  readonly versions?: { readonly old: string; readonly new: string };
 }
 interface RuntimeUpdateReconciliation {
   readonly at: string;
@@ -270,6 +272,14 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
       : { harnessRefresh: parseHarnessRefresh(value.harnessRefresh) }),
     ...(value.canary === undefined ? {} : { canary: parseRuntimeCanary(value.canary) }),
     ...(value.reconciled === undefined ? {} : { reconciled: parseReconciliation(value.reconciled) }),
+    ...(value.versions === undefined
+      ? {}
+      : {
+          versions: {
+            old: boundedString(object(value.versions).old, 64),
+            new: boundedString(object(value.versions).new, 64),
+          },
+        }),
   };
 }
 
@@ -353,7 +363,7 @@ function parseHarnessRefresh(input: unknown): NonNullable<RuntimeUpdateResult["h
   };
 }
 
-function errorText(error: unknown): string {
+export function errorText(error: unknown): string {
   return (
     (error instanceof Error ? error.message : String(error)).replaceAll("\0", "").slice(0, 1024) ||
     "Unknown update failure"

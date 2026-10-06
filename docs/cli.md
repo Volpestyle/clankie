@@ -338,6 +338,13 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 ### `update [--ref REF]` / `update status` / `update canary`
 
+What `clankie update` installs depends on the install. A release install moves to
+the latest official GitHub release, or `--ref vX.Y.Z`; it reports `upToDate` when
+already there, and otherwise stages that verified release beside the running one,
+switches `current`, and switches back if the new release does not come up healthy
+([release updates](distribution.md#updating)). Everything below about status, the
+canary, locks and reconciliation applies to both. A source checkout follows `main`:
+
 `clankie update` fetches `origin/main` and stages its exact commit. Named branches
 (including `origin/BRANCH` and `refs/heads/BRANCH`) fetch that branch from origin;
 failed fetches refuse the update without using a cached or local tip. Use a full
