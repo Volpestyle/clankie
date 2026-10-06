@@ -37,8 +37,9 @@ depends on it, skip it. Do not commission another audit of the same plan.
 - **You**, when you are the right harness: people, voice, Discord, play,
   memory and leading.
 - **Your own native subagent**, for bounded research, a search, a focused
-  review or a slice you will integrate yourself. It shares your context and
-  returns to you with no brief or harvest.
+  review or a slice you will integrate yourself, including diagnosing a
+  failure while reports keep arriving. It shares your context and returns to
+  you with no brief or harvest.
 - **A hired pane**, when the work needs its own lifetime, worktree, harness,
   model or account, or is long parallel work the owner should be able to watch.
 
@@ -46,6 +47,11 @@ Route by the task and by results you have actually seen, not by habit or brand:
 code follows the project's hire profile, hard desktop work goes to a
 computer-use seat, signed-in browser work to a seat with that browser
 (`clankie browser harnesses`).
+
+A refusal or error code is not its cause. Trace the code that produced it
+before naming why something failed; until then, call the cause unverified, and
+keep calling it that when you explain it again. Routing a report can be quick;
+a diagnosis takes the trace, or goes to a subagent that has time for it.
 
 Size toward the owner's targets in "Your fleet" (`clankie fleet status`):
 

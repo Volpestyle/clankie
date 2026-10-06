@@ -8,6 +8,13 @@ import type { ConversationTurnContext } from "./captain/conversations.ts";
 import type { PiSeatModel } from "./captain/herdr-watch.ts";
 import type { HostedBodyClient } from "./hosted-body.ts";
 import type { ComposerTranscriptionCloud } from "./composer-transcription.ts";
+import providerApi from "./runtime-provider-api.json" with { type: "json" };
+
+/**
+ * The provider contract this runtime implements. A release records it in
+ * release.json; a body only installs a release its provider serves (ADR 0237).
+ */
+export const RUNTIME_PROVIDER_API: number = providerApi.version;
 
 type RuntimeAuthorization = (request: Request) => Promise<true | "authentication_required" | "forbidden">;
 
@@ -32,6 +39,8 @@ export interface RuntimeProvider {
     onChanged(): Promise<void>;
     close(): Promise<void>;
   };
+  /** Provider API versions the installed module serves; set by the loader, not the module. */
+  readonly apis?: readonly number[];
 }
 
 export interface RuntimeProviderContext {
@@ -70,6 +79,16 @@ export async function loadRuntimeProvider(context: RuntimeProviderContext): Prom
   const module: unknown = await import(pathToFileURL(path).href);
   if (!record(module) || typeof module.createRuntimeProvider !== "function")
     throw new Error("runtime_provider_factory_required");
+  // A module that predates versioning serves the first contract.
+  const apis = module.runtimeProviderApis ?? [1];
+  if (
+    !Array.isArray(apis) ||
+    apis.length === 0 ||
+    apis.length > 16 ||
+    !apis.every((api) => Number.isSafeInteger(api) && api > 0)
+  )
+    throw new Error("runtime_provider_apis_invalid");
+  if (!apis.includes(RUNTIME_PROVIDER_API)) throw new Error("runtime_provider_api_unsupported");
   const provider: unknown = await module.createRuntimeProvider(context);
   if (
     !record(provider) ||
@@ -99,7 +118,7 @@ export async function loadRuntimeProvider(context: RuntimeProviderContext): Prom
       typeof provider.model.piSeatModel !== "function")
   )
     throw new Error("managed_runtime_provider_incomplete");
-  return provider as RuntimeProvider;
+  return { ...(provider as RuntimeProvider), apis: Object.freeze([...apis] as number[]) };
 }
 
 /** Host-selected routes remain exact additions; transport and administrative routes stay core-owned. */

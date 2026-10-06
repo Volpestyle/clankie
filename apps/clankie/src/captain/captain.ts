@@ -249,6 +249,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     runDiscordWatchTurn,
     dispatchDiscordTurn,
     forkIntoRoom,
+    roomForkGrant,
   } = createDiscordTurns({
     get buildSession() {
       return buildSession;
@@ -4110,6 +4111,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     laneToolBank: laneToolBankFor,
+    roomForkGrant,
 
     async pollSeatEvents(waitMs, signal, conversationId) {
       const binding = seatContext(conversationId);

@@ -31,10 +31,21 @@ function writeRelease(
   revision: string,
   restart: "ok" | "fail" = "ok",
   replaceCurrentOnDown = false,
+  target?: string,
+  runtimeProviderApi?: number,
 ) {
   mkdirSync(join(root, "bin"), { recursive: true });
   writeFileSync(join(root, "VERSION"), `${version}\n`);
-  writeFileSync(join(root, "release.json"), JSON.stringify({ schemaVersion: 1, version, revision }));
+  writeFileSync(
+    join(root, "release.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      version,
+      revision,
+      ...(target === undefined ? {} : { target }),
+      ...(runtimeProviderApi === undefined ? {} : { runtimeProviderApi }),
+    }),
+  );
   const launcher = join(root, "bin", "clankie");
   writeFileSync(
     launcher,
@@ -65,13 +76,20 @@ async function fixture(
     readonly restart?: "ok" | "fail";
     readonly badChecksum?: boolean;
     readonly replaceCurrentOnDown?: "old" | "new";
+    /** The installed release's target; older releases record none (macOS). */
+    readonly target?: string;
+    /** The target the published archive's manifest claims, when it differs. */
+    readonly publishedTarget?: string;
+    /** The provider API the published release expects, and what the installed provider serves. */
+    readonly publishedProviderApi?: number;
+    readonly providerApis?: readonly number[];
   } = {},
 ) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const install = join(home, "install");
   const old = join(install, "releases", "v1.0.0");
-  writeRelease(old, "v1.0.0", "a".repeat(40), "ok", input.replaceCurrentOnDown === "old");
+  writeRelease(old, "v1.0.0", "a".repeat(40), "ok", input.replaceCurrentOnDown === "old", input.target);
   writeRelease(join(install, "releases", "v1.2.0"), "v1.2.0", "c".repeat(40));
   symlinkSync(join("releases", "v1.0.0"), join(install, "current"));
   mkdirSync(join(home, ".clankie"), { mode: 0o700 });
@@ -83,8 +101,11 @@ async function fixture(
     "b".repeat(40),
     input.restart,
     input.replaceCurrentOnDown === "new",
+    input.publishedTarget ?? input.target,
+    input.publishedProviderApi,
   );
-  const archive = join(home, "clankie-darwin-arm64.tar.gz");
+  const archiveName = `clankie-${input.target ?? "darwin-arm64"}.tar.gz`;
+  const archive = join(home, archiveName);
   execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
   const digest = input.badChecksum
     ? "0".repeat(64)
@@ -96,10 +117,9 @@ async function fixture(
     };
     if (request.url === "/api/releases/latest") return send(200, JSON.stringify({ tag_name: "v1.1.0" }));
     if (request.url === "/api/commits/v1.1.0") return send(200, JSON.stringify({ sha: "b".repeat(40) }));
-    if (request.url === "/download/v1.1.0/clankie-darwin-arm64.tar.gz")
-      return send(200, readFileSync(archive));
-    if (request.url === "/download/v1.1.0/clankie-darwin-arm64.tar.gz.sha256")
-      return send(200, `${digest}  clankie-darwin-arm64.tar.gz\n`);
+    if (request.url === `/download/v1.1.0/${archiveName}`) return send(200, readFileSync(archive));
+    if (request.url === `/download/v1.1.0/${archiveName}.sha256`)
+      return send(200, `${digest}  ${archiveName}\n`);
     send(404, "missing");
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -111,6 +131,7 @@ async function fixture(
       releaseRoot,
       env,
       helperPath,
+      ...(input.providerApis === undefined ? {} : { providerApis: input.providerApis }),
       source: { api: `http://127.0.0.1:${port}/api`, download: `http://127.0.0.1:${port}/download` },
     });
   const settled = async (id: string): Promise<RuntimeUpdateResult> => {
@@ -164,6 +185,42 @@ it("updates a release install to the latest official release and then reports it
     canary: { state: "passed", holdReleased: true },
   });
   expect(await f.updater(next).request("main", authority)).toMatchObject({ accepted: false, upToDate: true });
+});
+
+it("updates a Linux release install from its own target's archive", async () => {
+  const f = await fixture({ target: "linux-arm64" });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(accepted).toMatchObject({ accepted: true });
+  expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy", healthy: true });
+  const next = realpathSync(join(f.install, "releases", "v1.1.0"));
+  expect(JSON.parse(readFileSync(join(next, "release.json"), "utf8")).target).toBe("linux-arm64");
+});
+
+it("refuses an archive built for another target before stopping anything", async () => {
+  const f = await fixture({ target: "linux-arm64", publishedTarget: "linux-x64" });
+  const accepted = await f.updater(f.old).request("main", authority);
+  const result = await f.settled(accepted.pending!);
+  expect(result).toMatchObject({ phase: "failed", reason: "pre-cutover-failed" });
+  expect(result.error).toContain("another target");
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+  expect(f.calls().filter((call) => call.action === "down")).toEqual([]);
+});
+
+it("refuses a release the installed runtime provider cannot serve before stopping anything", async () => {
+  const f = await fixture({ publishedProviderApi: 2, providerApis: [1] });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "refused",
+    reason: "provider-api-unsupported",
+  });
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+  expect(f.calls().filter((call) => call.action === "down")).toEqual([]);
+});
+
+it("installs a release whose provider API the installed provider serves", async () => {
+  const f = await fixture({ publishedProviderApi: 2, providerApis: [1, 2] });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
 });
 
 it("restores the previous release when the new one fails to come up", async () => {

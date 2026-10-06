@@ -5,8 +5,8 @@ import { closeSync, existsSync, mkdirSync, openSync, realpathSync, rmSync, write
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
-  RELEASE_ARCHIVE,
   currentRelease,
+  releaseArchive,
   releaseManifest,
   releaseUrl,
   releaseVersion,
@@ -28,6 +28,8 @@ const OFFICIAL_RELEASES: ReleaseSource = {
 
 export interface ReleaseUpdaterOptions {
   readonly releaseRoot: string;
+  /** The installed runtime provider's API versions; a release outside them is refused. */
+  readonly providerApis?: readonly number[];
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
   readonly source?: ReleaseSource;
@@ -118,8 +120,12 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
         newVersion: target.version,
         oldCommit: manifest.revision,
         newCommit: target.commit,
-        archiveUrl: releaseUrl(`${source.download}/${target.version}/${RELEASE_ARCHIVE}`),
-        checksumUrl: releaseUrl(`${source.download}/${target.version}/${RELEASE_ARCHIVE}.sha256`),
+        target: manifest.target,
+        ...(options.providerApis === undefined ? {} : { providerApis: options.providerApis }),
+        archiveUrl: releaseUrl(`${source.download}/${target.version}/${releaseArchive(manifest.target)}`),
+        checksumUrl: releaseUrl(
+          `${source.download}/${target.version}/${releaseArchive(manifest.target)}.sha256`,
+        ),
         oldInstanceId: boot.instanceId,
         ...(olderThan(target.version, manifest.version)
           ? { warning: "older-than-current-pin" as const }

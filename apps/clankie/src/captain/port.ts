@@ -354,6 +354,11 @@ export interface CaptainPort {
    */
   laneToolBank(lane: CaptainSessionLaneV2, conversationId?: string): Promise<LaneToolBank>;
   /**
+   * The in-flight owner-directed room turn (`room_turn`, ADR 0218) a Discord
+   * route names by fork ID. Its authority replaces a delivery receipt.
+   */
+  roomForkGrant?(id: string): import("./captain-discord-turns.ts").RoomForkGrant | undefined;
+  /**
    * Subscribe to durable messages this captain's conversations write, for
    * delivery that happens outside the conversation (push wakes, ADR 0159). The
    * notice is metadata; the subscription is this captain's, so a second service

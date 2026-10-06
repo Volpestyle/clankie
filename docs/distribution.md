@@ -46,8 +46,12 @@ specific release, including an older one, with an `older-than-current-pin` warni
 Install a specific release with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh -s -- --version v0.3.3
+curl -fsSL https://clankie.bot/install | sh -s -- --version v0.3.3
 ```
+
+`https://clankie.bot/install` is a redirect to `install.sh` on this repository's
+`main` (the landing site's CloudFront function), so both URLs serve the same
+script.
 
 The release binaries are ad-hoc signed. The command-line installer uses
 `curl`, so the archive does not acquire a browser quarantine attribute.

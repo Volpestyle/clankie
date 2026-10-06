@@ -35,7 +35,7 @@ The bundle supports **Apple silicon and macOS 14 or newer** and includes its
 own runtime.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+curl -fsSL https://clankie.bot/install | sh
 ```
 
 Open a new Terminal window, run `clankie`, and choose **Run Clankie on this

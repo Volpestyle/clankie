@@ -399,11 +399,25 @@ tool. It is in the operator lane's bank only, so only the owner-authenticated
 seat holds it. Workers, peers, rooms and room-attached seat banks never get it.
 
 - **Authority stays the room's.** The fork runs as that room's own turn, with
-  the owner as its Discord actor. It takes the room's current grants (machine
-  tools only where the room grants them to the owner), body lease and mouth,
-  and it posts through the existing `send_reply`/`post_message` captain actions
-  and their per-call receipts. The seat holds no Discord credential and chooses
-  no channel ID; the room conversation names it.
+  the owner as its Discord actor. It takes the room's current grants, body lease
+  and mouth, and it posts through the existing `send_reply`/`post_message`
+  captain actions and their per-call receipts. The seat holds no Discord
+  credential and chooses no channel ID; the room conversation names it.
+- **Its own authority basis, not a borrowed receipt.** An ordinary room turn
+  proves its route with the Discord delivery receipt of the message it
+  answers. A fork has no such message: `replyTo` is only a reply reference,
+  often another member's message. While the fork is in flight, the captain
+  holds a grant for it, and only `room_turn` creates one. The fork's origin
+  names the grant (`deliveryId: room-fork-<id>`, owner as actor). The app's
+  route check accepts that exact grant plus a connected bot presence that can
+  reply. The presence-action route accepts a captain-action write keyed to
+  that grant for the same channel. Grants end when the fork settles. No
+  receipt is ever written for someone else's message. A refusal before
+  dispatch, such as no live body, is never recorded, so the same `requestId`
+  can retry.
+- **Tools follow the room, not the owner.** The fork gets machine tools only
+  when the room itself holds a guild or channel machine grant. The owner's
+  personal machine access never turns a shared room's turn into a shell.
 - **Context: brief in, bounded result out, no transcript inheritance.** The
   fork starts a one-shot session from the room's own history, projected with
   the same `projectConversation` and budget used by the service handoff. That

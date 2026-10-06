@@ -28,7 +28,7 @@ The [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-ma
 installs a self-contained bundle on **Apple silicon, macOS 14 or newer**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+curl -fsSL https://clankie.bot/install | sh
 clankie
 ```
 
@@ -89,7 +89,7 @@ credentials, tool authority, and device access.
 - [CLI](docs/cli.md) and [HTTP catalog](apps/clankie/openapi.yaml): command and route contracts
 
 This repository holds the service, console, relay, and public contracts. The
-companion app and the hosted service are private
+Clankie app and the hosted service are private
 ([repository boundary](docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
 
 ## Contribute

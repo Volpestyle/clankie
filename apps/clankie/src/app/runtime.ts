@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+import { roomForkIdOf } from "../captain/captain-discord-turns.ts";
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
@@ -314,6 +316,30 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   ): boolean => {
     if (!bodyRequestsOpen) return false;
     const origin = owner.discord;
+    const forkId = roomForkIdOf(origin?.deliveryId);
+    if (origin !== undefined && forkId !== undefined) {
+      // An owner-directed room turn: the owner's operator-lane fork is the
+      // authority, not a receipt for someone's message. The room's bot presence
+      // must still be live and able to reply.
+      const grant = dependencies.captain.roomForkGrant?.(forkId);
+      if (
+        grant === undefined ||
+        grant.room !== owner.conversationId ||
+        !isDeepStrictEqual(grant.origin, origin)
+      )
+        return false;
+      const live = discordPresenceLiveSessions.get(
+        discordPresenceBindingKey({
+          transportKind: "bot",
+          characterId: "clankie",
+          credentialRef: "discord_bot",
+        }),
+      );
+      return (
+        live?.gatewayConnected === true &&
+        isDiscordPresenceActionAvailable({ action: "discord.presence.reply", session: live })
+      );
+    }
     if (origin !== undefined) {
       const source = discordTurnReceipts.get(`discord:${origin.deliveryId ?? origin.messageId}`)?.origin;
       if (

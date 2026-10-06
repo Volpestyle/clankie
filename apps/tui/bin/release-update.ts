@@ -28,7 +28,21 @@ import {
   type RuntimeUpdateResult,
 } from "./runtime-update.ts";
 
-export const RELEASE_ARCHIVE = "clankie-darwin-arm64.tar.gz";
+/** Releases built before targets were recorded are all macOS arm64. */
+export const DEFAULT_RELEASE_TARGET = "darwin-arm64";
+const TARGET = /^(darwin-arm64|linux-arm64|linux-x64)$/u;
+
+export function releaseTarget(value: unknown): string {
+  if (value === undefined) return DEFAULT_RELEASE_TARGET;
+  const target = boundedString(value, 32);
+  if (!TARGET.test(target)) throw Error("Invalid release target");
+  return target;
+}
+
+/** Each official release publishes one archive per target. */
+export function releaseArchive(target: string): string {
+  return `clankie-${releaseTarget(target)}.tar.gz`;
+}
 const VERSION = /^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$/u;
 
 export function releaseVersion(value: unknown): string {
@@ -54,12 +68,25 @@ function readReleaseFile(path: string): string {
 }
 
 /** The identity a release directory declares in its own manifest. */
-export function releaseManifest(root: string): { readonly version: string; readonly revision: string } {
+export function releaseManifest(root: string): {
+  readonly version: string;
+  readonly revision: string;
+  readonly target: string;
+  readonly runtimeProviderApi: number;
+} {
   const manifest = object(JSON.parse(readReleaseFile(join(root, "release.json"))));
   const version = releaseVersion(manifest.version);
   if (readReleaseFile(join(root, "VERSION")).split("\n")[0] !== version)
     throw Error("Release VERSION does not match its manifest");
-  return { version, revision: commitString(manifest.revision) };
+  const runtimeProviderApi = manifest.runtimeProviderApi ?? 1;
+  if (!Number.isSafeInteger(runtimeProviderApi) || Number(runtimeProviderApi) < 1)
+    throw Error("Invalid release provider API");
+  return {
+    version,
+    revision: commitString(manifest.revision),
+    target: releaseTarget(manifest.target),
+    runtimeProviderApi: Number(runtimeProviderApi),
+  };
 }
 
 /** `<install>/current` must be a symlink into `<install>/releases/`; returns the release it names. */
@@ -95,6 +122,9 @@ export interface ReleaseUpdatePlan {
   readonly newVersion: string;
   readonly oldCommit: string;
   readonly newCommit: string;
+  readonly target: string;
+  /** The installed runtime provider's API versions; absent without a provider. */
+  readonly providerApis?: readonly number[];
   readonly archiveUrl: string;
   readonly checksumUrl: string;
   readonly oldInstanceId: string;
@@ -119,12 +149,25 @@ export function parseReleasePlan(input: unknown): ReleaseUpdatePlan {
     newVersion: releaseVersion(value.newVersion),
     oldCommit: commitString(value.oldCommit),
     newCommit: commitString(value.newCommit),
+    target: releaseTarget(value.target),
+    ...(value.providerApis === undefined ? {} : { providerApis: providerApis(value.providerApis) }),
     archiveUrl: releaseUrl(value.archiveUrl),
     checksumUrl: releaseUrl(value.checksumUrl),
     oldInstanceId: operationId(value.oldInstanceId),
     ...(value.warning === undefined ? {} : { warning: "older-than-current-pin" as const }),
     ...(value.initiator === undefined ? {} : { initiator: parseUpdateInitiator(value.initiator) }),
   };
+}
+
+function providerApis(value: unknown): readonly number[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 16 ||
+    !value.every((api) => Number.isSafeInteger(api) && api > 0)
+  )
+    throw Error("Invalid provider APIs");
+  return value as number[];
 }
 
 interface ReleaseUpdatePorts {
@@ -148,7 +191,7 @@ async function download(url: string, path: string, fetchImpl: typeof fetch): Pro
 
 /** Download, verify and unpack exactly as install.sh does; returns the staged `clankie` tree. */
 async function stageRelease(plan: ReleaseUpdatePlan, fetchImpl: typeof fetch): Promise<string> {
-  const archive = join(plan.directory, RELEASE_ARCHIVE);
+  const archive = join(plan.directory, releaseArchive(plan.target));
   const checksum = `${archive}.sha256`;
   await download(plan.archiveUrl, archive, fetchImpl);
   await download(plan.checksumUrl, checksum, fetchImpl);
@@ -167,6 +210,7 @@ async function stageRelease(plan: ReleaseUpdatePlan, fetchImpl: typeof fetch): P
   const manifest = releaseManifest(staged);
   if (manifest.version !== plan.newVersion || manifest.revision !== plan.newCommit)
     throw Error("Release archive is not the accepted version");
+  if (manifest.target !== plan.target) throw Error("Release archive is for another target");
   return staged;
 }
 
@@ -218,6 +262,9 @@ export async function executeReleaseUpdate(
       return persist("refused", { reason: "current-release-changed" });
     persist("installing");
     const staged = await stageRelease(plan, ports.fetchImpl ?? fetch);
+    // Managed policy must keep working: never install a release its provider cannot serve.
+    if (plan.providerApis && !plan.providerApis.includes(releaseManifest(staged).runtimeProviderApi))
+      return persist("refused", { reason: "provider-api-unsupported" });
     if (existsSync(target)) {
       // An earlier install of this version is reused only when it is that exact release.
       if (releaseManifest(target).revision !== plan.newCommit)
