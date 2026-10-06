@@ -104,7 +104,7 @@ Native contracts: [plugin packaging](https://developers.openai.com/plugins/build
 ## Working beside Clankie
 
 The generated skill catalog includes the product `clankie` skill from
-`.agents/skills/clankie/SKILL.md`, even when optional opinionated guidance is off.
+`.agents/skills/clankie/SKILL.md` with every other shipped skill.
 It explains fleet connected tools through the two-tool bridge, connected actors and delivery receipts.
 Fleet workers use the separate `clankie-worker@clankie-fleet` package under
 `integrations/claude-plugin/worker`; its regular skill snapshot is built before

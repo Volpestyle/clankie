@@ -26,22 +26,21 @@ intervals, and a paired comparison that says when a difference is within noise.
 
 [`configurations.json`](../scripts/evals/configurations.json) defines named arms:
 
-| Name       | Instructions                                                                                 | Skills                   |
-| ---------- | -------------------------------------------------------------------------------------------- | ------------------------ |
-| `bare`     | None: the harness alone                                                                      | None                     |
-| `current`  | Current `apps/clankie/src/captain/instructions.md`                                           | Bundled                  |
-| `plain`    | Same current instructions                                                                    | Product/tool skills only |
-| `pre-1456` | The instructions before the VUH-1456 cut, frozen in `scripts/evals/instructions-pre-1456.md` | Bundled                  |
-| `trimmed`  | Versioned experimental `scripts/evals/trimmed.md`                                            | Bundled                  |
+| Name       | Instructions                                                                                 | Skills  |
+| ---------- | -------------------------------------------------------------------------------------------- | ------- |
+| `bare`     | None: the harness alone                                                                      | None    |
+| `current`  | Current `apps/clankie/src/captain/instructions.md`                                           | Bundled |
+| `pre-1456` | The instructions before the VUH-1456 cut, frozen in `scripts/evals/instructions-pre-1456.md` | Bundled |
+| `trimmed`  | Versioned experimental `scripts/evals/trimmed.md`                                            | Bundled |
 
-`bare` against `current` measures the whole Clankie layer; `plain` against
-`current` isolates the opinionated skills (VUH-1457); `trimmed` against `current`
-tests the next instruction cut. `trimmed.md` holds the candidate text; when a cut
+`bare` against `current` measures the whole Clankie layer; `trimmed` against `current`
+tests the next instruction cut. The former `plain` arm, which isolated the
+opinionated skills (VUH-1457), was retired when every shipped skill became an
+ordinary always-on skill. `trimmed.md` holds the candidate text; when a cut
 lands, the file matches `current` until the next candidate. `pre-1456` keeps
 comparisons that started before the VUH-1456 cut on the old prompt
-([results](testing/2026-09-30-instruction-trim/README.md)). The skill selection calls the same
-`bundledSkills` selector as `clankie skills opinionated on|off` and `hire_agent`'s
-`skills: bundled|plain`, and never toggles the owner's settings. The current arm
+([results](testing/2026-09-30-instruction-trim/README.md)). Bundled arms copy every
+skill `bundledSkills` lists, the same catalog a hire receives. The current arm
 is the versioned Clankie prompt in a headless harness, not the live service's
 persona, memory, tools or transport prompt.
 

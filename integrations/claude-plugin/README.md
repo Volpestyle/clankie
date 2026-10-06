@@ -67,27 +67,20 @@ Numbered Claude commands load your interactive
 
 `clankie claude` needs Claude Code on `PATH` and a TTY. It projects this plugin into
 a fresh private directory, linking the same identity, hooks and MCP config with
-only skills included by `skills.opinionated` and `skills.exclude`. A bundled skill
-whose name is already installed in the Claude profile's own `skills/` is left
-out too, so the owner's copy wins and each skill is listed once (plain `claude`
-only; a numbered command's profile is not visible to the launcher). This supports
-arbitrary exclusions as well as a product-only seat without generating a separate
-build for every combination. The output-style generator remains the single source
-for both settings.
+every shipped skill. A bundled skill whose name is already installed in the
+Claude profile's own `skills/` is left out, so the owner's copy wins and each
+skill is listed once (plain `claude` only; a numbered command's profile is not
+visible to the launcher).
 
 The launcher passes the permission allowlist for `clankie` commands, disables an
 older installed `clankie@clankie` for this session, enables the projected
 `clankie@inline`, and addresses that identity with the development channel flag.
 Claude's [session plugin identity and precedence](https://code.claude.com/docs/en/plugins/loading)
-keep the old marketplace skill catalog from leaking into this seat. The session
-keeps its MCP tools, hooks and wake channel with either skill setting. It starts
+keep the old marketplace skill catalog from leaking into this seat. It starts
 with `--name Clankie`. An explicit `--conversation global-default` names the
 Herdr pane `clankie` inside the service's fleet.
-`--plugin-dir` chooses the component source while retaining skill filtering.
-
-Use `clankie skills opinionated off` or `/skills` to change the selection.
-`--dry-run` shows the plugin projection and catalog; start a fresh session when
-changing conditions because resumed history can contain previously loaded skills.
+`--plugin-dir` chooses the component source; the projection still supplies the
+shipped skills. `--dry-run` shows the plugin projection and catalog.
 
 `--conversation ID` resolves an existing global/workspace or Discord room conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and

@@ -22,14 +22,14 @@ authority.
 ## Install, settings and removal
 
 The plugin ships with Clankie; no global OpenCode plugin install is required.
-The launcher adds its file URL and the selected bundled skills to
+The launcher adds its file URL and the shipped skills to
 `OPENCODE_CONFIG_CONTENT`. Existing inline settings and unrelated MCP servers
 remain. The plugin replaces the `clankie` MCP entry with
 `clankie mcp --lane operator` and disables inherited Linear-named/Linear-hosted
 MCP connectors for this launch, so tracker work uses Clankie's connected account.
 The native permission settings are unchanged. The launcher sets
-`autoupdate:false` for its own process. `/skills` controls the shared bundled
-skill selection. Neither installation nor launch edits owner configuration.
+`autoupdate:false` for its own process. `/skills` lists the shipped skills.
+Neither installation nor launch edits owner configuration.
 
 Identity and the current operator memory card are loaded from the service in
 `experimental.chat.system.transform`, before each model request. The native

@@ -85,7 +85,7 @@ Do not edit `~/.config/clankie/clankie.json`,
 | [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`                 |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                            |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`                                      |
-| [Choose working skills](#skill-setup)                  | `skills`                                                |
+| [List shipped skills](#skill-setup)                    | `skills`                                                |
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`         |
 | [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr` |
 | [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`               |
@@ -3015,45 +3015,30 @@ retried from the same cursor. See [hosted bodies](../infra/hosted/README.md#body
 
 <a id="skill-setup"></a>
 
-### `skills [opinionated on|off | exclude NAME | include NAME]`
+### `skills`
 
-The selected `tidy` skill exposes `/tidy` in the console. It starts an ordinary
+List the skills shipped with this body as JSON (`name` and `path`). Every skill
+authored in `.agents/skills` ships and is always on; there is no selection to
+change. `/skills` lists the same catalog in the console, and `clankie doctor`
+includes it.
+
+```bash
+clankie skills
+```
+
+The shipped `tidy` skill exposes `/tidy` in the console. It starts an ordinary
 visible, stoppable Clankie turn to inspect, harvest and close finished hired
 panes with reasons. Output and saved reports remain in roster history, with a
 five-minute reopen/resume Undo. Optional context can be passed as
 `/tidy selection=w1:p1`. See [bundled skill declarations](bundled-skills.md#quick-action-declarations).
 
-List the bundled skill catalog as JSON, with `class` (`product` or `opinionated`)
-and `included` for each skill. `clankie doctor` includes the same selection.
-
-```bash
-clankie skills
-clankie skills opinionated off
-clankie skills opinionated on
-clankie skills exclude reflect
-clankie skills include reflect
-```
-
-`skills.opinionated` defaults to `true`; `skills.exclude` defaults to `[]`.
-Product/tool and repo-authored skills always stay on; excluding one is refused.
-`include` removes an exclusion and leaves the class switch unchanged. The console
-has the same controls in `/skills` and `/setup rooms` → Working skills.
-
-Changes apply to new service sessions, local hires and Claude seats; existing
-context is not erased. Reset a service conversation or start a fresh seat after
-changing the selection, and reopen the console for its initial autocomplete.
-No service restart is needed for selection changes once this code is running.
-
 Existing service conversations discover added, changed or removed skill files and
-workspace instructions before their next turn, keeping their history and selected
-skill exclusions. Native seats keep their harness's own resource-loading behavior.
+workspace instructions before their next turn, keeping their history. Native
+seats keep their harness's own resource-loading behavior.
 
-`hire_agent` accepts `skills: "bundled" | "plain"` for one local Claude, Pi or
-Codex hire; omission follows the owner setting. `bundled` still honors exclusions.
-The result records the condition and supplied names. Unsupported/remote routes
-cannot honor an explicit override and refuse it. Independent global or project
-skills can still be discovered by Claude/Codex; this switch does not rewrite
-owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
+Local Claude, Pi, Codex and Grok hires receive every shipped skill. Independent
+global or project skills can still be discovered by Claude/Codex; owner-global
+selection is untouched. See [how harnesses receive them](bundled-skills.md).
 
 Local briefed Codex hires use a dedicated app-server with a native Codex TUI in
 Herdr. Briefs and `message_seat` use protocol receipts; completion comes from turn
