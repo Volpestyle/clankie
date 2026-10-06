@@ -352,7 +352,9 @@ acquired after the prompt still blocks. Legacy per-hold flags remain available:
 `--override-hold UUID [--actor NAME] --reason TEXT`; the server derives the
 audit actor from authentication regardless of the supplied name.
 
-What `clankie update` installs depends on the install. A release install moves to
+What `clankie update` installs depends on the install. A hosted image never
+updates itself; its deployment replaces the image, and the request answers
+`runtime_updates_unavailable`. A Mac release install moves to
 the latest official GitHub release, or `--ref vX.Y.Z`; it reports `upToDate` when
 already there, and otherwise stages that verified release beside the running one,
 switches `current`, and switches back if the new release does not come up healthy

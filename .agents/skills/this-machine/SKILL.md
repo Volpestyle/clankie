@@ -93,6 +93,11 @@ every hold gets an audited override with the server-derived owner identity.
 Never override without the owner's reviewed reason. Overrides retain the holds;
 only an explicit owner release clears historical holds.
 
+When a trace lands in your own code on a self-hosted source checkout, fix it in
+that checkout, never in the pinned `repoRoot`: a dirty pin refuses every update. Commit there and
+install with `clankie update --ref FULL_SHA`, which restarts you; see
+[fixing yourself](reference/launcher.md#fixing-yourself).
+
 When a restart is authorized, run `clankie restart` from your own bash tool.
 `status: "scheduled"` means queued until your current turn finishes, not healthy;
 finish your reply, then check `clankie status`. You do not need a worker, a
