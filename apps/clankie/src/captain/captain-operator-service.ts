@@ -525,6 +525,19 @@ export function createOperatorService(
         sessions: await ctx.terminals.catalog(),
       };
     }
+    if (request.op === "settle_hire_receipt") {
+      if (!authority) throw new ConversationRefusedError("Operator settlement authority is required");
+      await authorizeQuestion(authority);
+      return {
+        op: "settle_hire_receipt",
+        schemaVersion: 1,
+        result: await ctx.herdrWatches.settleHireReceipt(
+          request.receiptId,
+          () => authorizeQuestion(authority),
+          request.disposition,
+        ),
+      };
+    }
     if (request.op === "close_seat") {
       const closed = await ctx.herdrWatches.closeSeat(request.seatId);
       if (closed) {

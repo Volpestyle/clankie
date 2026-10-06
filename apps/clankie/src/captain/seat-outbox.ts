@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import {
   headSeatDeliveryStage,
+  type HireRecoveryEvidence,
   type DeliveryStage,
   type OperatorSeatEvent,
   type OperatorSeatEventKind,
@@ -123,6 +124,52 @@ export class SeatOutbox {
     this.now = options.now ?? Date.now;
   }
 
+  /** Read the exact original from the live mailbox or its retained acknowledgment. */
+  public recoveryReceipt(id: string) {
+    if (this.active.has(id)) throw new Error("Original channel event is still active");
+    const originals = this.fence.all().filter(([, receipt]) => receipt.messageId === id);
+    const acknowledgments = this.delivered.all().filter(([, receipt]) => receipt.messageId === id);
+    if (originals.length > 1 || acknowledgments.length > 1)
+      throw new Error("Original channel receipt is ambiguous");
+    const pending = originals[0]?.[1],
+      acknowledged = acknowledgments[0]?.[1];
+    if (
+      pending &&
+      acknowledged &&
+      (pending.fingerprint !== acknowledged.fingerprint ||
+        pending.sessionId !== acknowledged.sessionId ||
+        (pending.settlement &&
+          acknowledged.settlement &&
+          JSON.stringify(pending.settlement) !== JSON.stringify(acknowledged.settlement)))
+    )
+      throw new Error("Original channel receipt conflicts with its acknowledgment");
+    return pending ?? acknowledged;
+  }
+  public recoveryAcknowledged(id: string): boolean {
+    const original = this.recoveryReceipt(id);
+    const acknowledged = this.delivered.all().find(([, receipt]) => receipt.messageId === id)?.[1];
+    return (
+      !!original &&
+      !!acknowledged &&
+      original.fingerprint === acknowledged.fingerprint &&
+      original.sessionId === acknowledged.sessionId
+    );
+  }
+  public settleRecoveredDelivery(id: string, evidence: HireRecoveryEvidence): void {
+    if (this.active.has(id)) throw new Error("Original channel event is still active");
+    const store = this.fence.all().some(([, receipt]) => receipt.messageId === id)
+      ? this.fence
+      : this.delivered;
+    const original = store.all().find(([, receipt]) => receipt.messageId === id);
+    if (!original) throw new Error("Original channel event is missing");
+    if (original[1].settlement) {
+      if (JSON.stringify(original[1].settlement) !== JSON.stringify(evidence))
+        throw new Error("Original recovery evidence changed");
+      return;
+    }
+    store.settleRecovery(original[0], id, evidence);
+  }
+
   public uncertain(): boolean {
     return this.fence.entries().some(([id]) => !this.active.has(id));
   }
@@ -130,7 +177,7 @@ export class SeatOutbox {
   /** Exact acknowledged content, retained for read-only reconciliation after restart. */
   public receipt(content: string): SeatDelivery | undefined {
     const fingerprint = deliveryFingerprint(content);
-    const match = this.delivered.entries().find(([, receipt]) => receipt.fingerprint === fingerprint);
+    const match = this.delivered.all().find(([, receipt]) => receipt.fingerprint === fingerprint);
     return match ? { outcome: "delivered", deliveryStage: "delivered" } : undefined;
   }
 
@@ -316,7 +363,7 @@ export class SeatOutbox {
     if (pending === undefined) {
       const original = this.fence.pending(eventId);
       if (!original) {
-        const delivered = this.delivered.pending(eventId);
+        const delivered = this.delivered.all().find(([, receipt]) => receipt.messageId === eventId)?.[1];
         return (
           delivered?.messageId === eventId &&
           (delivered.sessionId === undefined || delivered.sessionId === recipientBinding)

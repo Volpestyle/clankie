@@ -1,0 +1,66 @@
+{
+  "at": "2026-10-06T03:54:04.924Z",
+  "scope": "Isolated test receipt; real authenticated PC native event and census. Does not settle or change production originals.",
+  "testReceiptId": "019319db-0275-42d0-a3f9-61ad17b69ab5",
+  "commandCharacters": 28682,
+  "delivered": {
+    "receiptId": "019319db-0275-42d0-a3f9-61ad17b69ab5",
+    "receiptKey": "[\"pc\",\"claude\",\"C:\\\\Users\\\\volpe\\\\.local\\\\share\\\\clankie-swarm\\\\vuh1381-schema15\",\"tess-recovery-program-proof-019319db-0275-42d0-a3f9-61ad17b69ab5\"]",
+    "fingerprint": "5eecdeee972e2506ff530342c7dfc6a1b0b18bf58ead7383abdf03cfb4dfb8f5",
+    "target": {
+      "fleet": "pc",
+      "host": "volpe@supedupsilly",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "hostIdentity": "33f0512ba73f037faf1b7683c5be31b50d4a224ed51d44158a0efc16930a9bda",
+    "census": {
+      "observedAt": 1791258846749,
+      "panes": 5,
+      "processes": 552,
+      "sessions": 4,
+      "sha256": "bda6e4b08b9928f1d50a8bdbd517fd2bd5714a63986fcb3dcd060a5305b607cb"
+    },
+    "disposition": "delivered",
+    "journal": "authenticated-recovery",
+    "allocation": {
+      "paneId": "pc/wA:p3",
+      "present": false
+    },
+    "delivery": {
+      "receiptId": "seat-71022bcd-8afe-44cd-9d83-bd71d1ceab42",
+      "seatId": "pc/term_65d0fb67ead087",
+      "sessionId": "20e06e9d-7fc0-40e6-849a-e12611824b19",
+      "entryId": "35e39c22-ee00-4d5c-bd13-2222ea6997e4",
+      "binding": "historical-native-event",
+      "transcriptSha256": "170154d3c844c66f4bce0aae734409b104a2e1660ca1cbe5acf195bdcf481b8b",
+      "at": "2026-10-05T03:45:39.657Z"
+    }
+  },
+  "abandoned": {
+    "receiptId": "019319db-0275-42d0-a3f9-61ad17b69ab5",
+    "receiptKey": "[\"pc\",\"claude\",\"C:\\\\Users\\\\volpe\\\\.local\\\\share\\\\clankie-swarm\\\\vuh1381-schema15\",\"tess-recovery-program-proof-019319db-0275-42d0-a3f9-61ad17b69ab5\"]",
+    "fingerprint": "5eecdeee972e2506ff530342c7dfc6a1b0b18bf58ead7383abdf03cfb4dfb8f5",
+    "target": {
+      "fleet": "pc",
+      "host": "volpe@supedupsilly",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "hostIdentity": "33f0512ba73f037faf1b7683c5be31b50d4a224ed51d44158a0efc16930a9bda",
+    "census": {
+      "observedAt": 1791258848288,
+      "panes": 5,
+      "processes": 559,
+      "sessions": 4,
+      "sha256": "ef6db0850a12fba726bf45294edec958fabc8e599ee354b2ef2b93d55c7c9531"
+    },
+    "disposition": "abandoned",
+    "journal": "authenticated-recovery",
+    "allocation": {
+      "paneId": "pc/wA:p3",
+      "present": false
+    }
+  },
+  "productionOriginalUnchanged": true
+}

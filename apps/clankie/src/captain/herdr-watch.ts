@@ -12,7 +12,7 @@ import {
 } from "./conversation-owner.ts";
 import { DiscordWatchOriginSchema, type DiscordWatchOrigin } from "./conversation-owner.ts";
 export type { DiscordWatchOrigin } from "./conversation-owner.ts";
-import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+import { DeliveryFence, deliveryFingerprint, type UncertainReceipt } from "./delivery-fence.ts";
 import { channelBody } from "./claude-worker-seat.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { codexProxyControl, type ExternalCodexControl } from "./external-codex-control.ts";
@@ -88,6 +88,8 @@ import {
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
+import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
+import type { HireReceiptSettlement, HireRecoveryEvidence } from "@clankie/protocol";
 import { workerSkills } from "./worker-skills.ts";
 import {
   readHerdrSeatTranscript,
@@ -738,6 +740,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly hireOwners: HireOwners;
   private readonly validateOwner: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   private readonly activeHires = new Set<string>();
+  private readonly remoteHireReceipts: RemoteHireReceipts | undefined;
+  private readonly channelReceipt:
+    | ((id: string) => Promise<
+        | {
+            seatId: string;
+            receipt: UncertainReceipt;
+            acknowledged: boolean;
+            settle(evidence: HireRecoveryEvidence): void;
+          }
+        | undefined
+      >)
+    | undefined;
+  private readonly remoteLaunches = new Set<string>();
   private readonly runner: HerdrWatchRunner;
   private readonly seatAdapters: ReadonlyMap<string, HarnessSeatAdapter>;
   private readonly remoteSeatAdapters:
@@ -776,6 +791,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     path: string,
     options: {
       readonly validateOwner?: (owner: ConversationOwner) => Promise<boolean>;
+      readonly remoteHireReceipts?: RemoteHireReceipts;
+      readonly channelReceipt?: HerdrWatchStore["channelReceipt"];
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly projectHirePolicy?: ProjectHirePolicy;
       readonly fleetHireTools?: () => Promise<readonly string[]>;
@@ -839,6 +856,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } = {},
   ) {
     this.path = path;
+    this.remoteHireReceipts = options.remoteHireReceipts;
+    this.channelReceipt = options.channelReceipt;
     this.validateOwner = options.validateOwner;
     this.hireOwners = new HireOwners(`${path}.owners.json`);
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
@@ -1691,7 +1710,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
       input.workingDirectory,
       resume?.sessionId ?? "new",
     ]);
+    const settled = this.hireReceipts.settled(receiptKey);
+    if (settled)
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: `Original hire ${settled.messageId} is settled. Its receipt is retained; this original intent cannot dispatch again.`,
+      };
     let pending = this.hireReceipts.pending(receiptKey);
+    if (pending?.recoveryRequested)
+      return {
+        outcome: "failed",
+        reason: "delivery_unconfirmed",
+        deliveryStage: "uncertain",
+        detail:
+          "This original intent is under explicit operator recovery. It cannot launch, adopt or reconcile through a hire retry.",
+      };
     if (
       pending?.paneId !== undefined &&
       input.fleet === undefined &&
@@ -1705,78 +1739,101 @@ export class HerdrWatchStore implements HerdrWatchPort {
       pending = undefined;
     }
     if (pending !== undefined) {
-      const agent =
-        !this.activeHires.has(receiptKey) && pending.paneId !== undefined
-          ? await this.runner.get(pending.paneId).catch(() => undefined)
-          : undefined;
-      const matchingOwner =
-        authority === undefined ||
-        (pending.paneId !== undefined &&
-          (agent?.session === undefined
-            ? this.hireOwners.pendingOwner(pending.paneId)
-            : (this.hireOwners.owner(
-                pending.paneId,
+      if (this.activeHires.has(receiptKey))
+        return {
+          outcome: "failed",
+          reason: "delivery_unconfirmed",
+          deliveryStage: "uncertain",
+          detail: "Original hire is still active; no recovery or new dispatch began.",
+        };
+      this.activeHires.add(receiptKey);
+      try {
+        const agent =
+          pending.paneId !== undefined
+            ? await this.runner.get(pending.paneId).catch(() => undefined)
+            : undefined;
+        const matchingOwner =
+          authority === undefined ||
+          (pending.paneId !== undefined &&
+            (agent?.session === undefined
+              ? this.hireOwners.pendingOwner(pending.paneId)
+              : (this.hireOwners.owner(
+                  pending.paneId,
+                  agent.terminalId,
+                  occupantIdForHerdrSession(agent.session),
+                ) ?? this.hireOwners.pendingOwner(pending.paneId))
+            )?.conversationId === authority.owner.conversationId);
+        const exact =
+          matchingOwner &&
+          agent !== undefined &&
+          agent.agent === input.harness &&
+          agent.session !== undefined &&
+          (pending.sessionId !== undefined || pending.occupantId !== undefined) &&
+          (pending.sessionId === undefined || nativeSessionId(agent) === pending.sessionId) &&
+          (pending.occupantId === undefined ||
+            occupantIdForHerdrSession(agent.session) === pending.occupantId);
+        const transcript =
+          exact && agent !== undefined
+            ? await this.runner.transcript?.(agent).catch(() => undefined)
+            : undefined;
+        const received =
+          brief === undefined
+            ? exact
+            : input.harness !== "pi" &&
+              transcript?.entries.some(
+                (entry) =>
+                  entry.type === "message" &&
+                  entry.role === "operator" &&
+                  pending.beforeIds !== undefined &&
+                  !pending.beforeIds.includes(entry.id) &&
+                  deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
+              ) === true;
+        if (
+          exact &&
+          received &&
+          pending.fingerprint === deliveryFingerprint(brief ?? "") &&
+          agent !== undefined
+        ) {
+          let watch: HerdrWatchRecord | undefined;
+          if (authority !== undefined) {
+            await assertConversationAuthority(authority);
+            await this.bindHireOwner(agent, input, authority);
+            watch = this.watchHiredSeat(
+              agent.terminalId,
+              occupantIdForHerdrSession(agent.session!),
+              this.hireOwners.owner(
+                agent.paneId,
                 agent.terminalId,
-                occupantIdForHerdrSession(agent.session),
-              ) ?? this.hireOwners.pendingOwner(pending.paneId))
-          )?.conversationId === authority.owner.conversationId);
-      const exact =
-        matchingOwner &&
-        agent !== undefined &&
-        agent.agent === input.harness &&
-        agent.session !== undefined &&
-        (pending.sessionId !== undefined || pending.occupantId !== undefined) &&
-        (pending.sessionId === undefined || nativeSessionId(agent) === pending.sessionId) &&
-        (pending.occupantId === undefined || occupantIdForHerdrSession(agent.session) === pending.occupantId);
-      const transcript =
-        exact && agent !== undefined
-          ? await this.runner.transcript?.(agent).catch(() => undefined)
-          : undefined;
-      const received =
-        brief === undefined
-          ? exact
-          : input.harness !== "pi" &&
-            transcript?.entries.some(
-              (entry) =>
-                entry.type === "message" &&
-                entry.role === "operator" &&
-                pending.beforeIds !== undefined &&
-                !pending.beforeIds.includes(entry.id) &&
-                deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
-            ) === true;
-      if (
-        exact &&
-        received &&
-        pending.fingerprint === deliveryFingerprint(brief ?? "") &&
-        agent !== undefined
-      ) {
-        let watch: HerdrWatchRecord | undefined;
-        if (authority !== undefined) {
-          await assertConversationAuthority(authority);
-          await this.bindHireOwner(agent, input, authority);
-          watch = this.watchHiredSeat(
-            agent.terminalId,
-            occupantIdForHerdrSession(agent.session!),
-            this.hireOwners.owner(agent.paneId, agent.terminalId, occupantIdForHerdrSession(agent.session!))!,
-            false,
+                occupantIdForHerdrSession(agent.session!),
+              )!,
+              false,
+            );
+          }
+          const recovered = spawnedSeat(
+            agent,
+            agent.paneId,
+            agent.name ?? agent.terminalId,
+            input,
+            undefined,
           );
+          await this.observeHireIdentity(receiptKey, agent, input, authority);
+          adopt?.(recovered, this.projectContexts.get(input)?.projectId);
+          this.hireReceipts.reconcile(receiptKey, pending.messageId);
+          // Adoption and the exact delivery receipt commit synchronously above.
+          // Its own metadata flush must precede a watch's project policy probes.
+          if (flushAdoption) await this.runProjectPolicy(flushAdoption).catch(() => {});
+          if (watch) this.launch(watch);
+          return { ...recovered, deliveryStage: hireDeliveryStage(recovered, brief !== undefined) };
         }
-        const recovered = spawnedSeat(agent, agent.paneId, agent.name ?? agent.terminalId, input, undefined);
-        await this.observeHireIdentity(receiptKey, agent, input, authority);
-        adopt?.(recovered, this.projectContexts.get(input)?.projectId);
-        this.hireReceipts.reconcile(receiptKey, pending.messageId);
-        // Adoption and the exact delivery receipt commit synchronously above.
-        // Its own metadata flush must precede a watch's project policy probes.
-        if (flushAdoption) await this.runProjectPolicy(flushAdoption).catch(() => {});
-        if (watch) this.launch(watch);
-        return { ...recovered, deliveryStage: hireDeliveryStage(recovered, brief !== undefined) };
+        return {
+          outcome: "failed",
+          reason: "delivery_unconfirmed",
+          deliveryStage: "uncertain",
+          detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
+        };
+      } finally {
+        this.activeHires.delete(receiptKey);
       }
-      return {
-        outcome: "failed",
-        reason: "delivery_unconfirmed",
-        deliveryStage: "uncertain",
-        detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
-      };
     }
     if (this.projectRecoveryOnly.has(input))
       return {
@@ -1793,6 +1850,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let result: HerdrSeatSpawnResult;
     let watch: HerdrWatchRecord | undefined;
     try {
+      if (input.fleet && this.remoteHireReceipts) {
+        const claim = await this.remoteHireReceipts.claim(input.fleet, {
+          receiptId: receipt.messageId,
+          receiptKey,
+          fingerprint: receipt.fingerprint,
+        });
+        if (claim) {
+          // Persist the exact target/nonce before crossing SSH, including lost reserve ACKs.
+          this.hireReceipts.update(receiptKey, receipt.messageId, {
+            remoteAdmission: { target: claim.target, nonce: claim.nonce },
+          });
+          await this.remoteHireReceipts.reserve(claim);
+          await this.assertRemoteHireAuthority(input, receiptKey, authority);
+        }
+      }
       result =
         resume === undefined
           ? await this.startSeat(input, subjectOverride, brief, undefined, receiptKey, authority)
@@ -1816,6 +1888,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         );
       }
       if (result.outcome === "spawned") adopt?.(result, this.projectContexts.get(input)?.projectId);
+      if (result.outcome !== "spawned" && this.hireReceipts.pending(receiptKey)?.remoteLaunchCommitted)
+        result = { ...result, reason: "start_unconfirmed", deliveryStage: "uncertain" };
       if (
         result.outcome === "spawned" ||
         !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason)
@@ -1830,6 +1904,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       result = { outcome: "failed", reason: "start_unconfirmed", detail: String(error) };
     } finally {
       this.activeHires.delete(receiptKey);
+      this.remoteLaunches.delete(receiptKey);
     }
     console.info(
       "hire_agent:",
@@ -1852,6 +1927,191 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return { ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) };
   }
 
+  private remoteClaim(
+    key: string,
+    receipt: import("./delivery-fence.ts").UncertainReceipt,
+  ): RemoteHireClaim | undefined {
+    return receipt.remoteAdmission
+      ? {
+          receiptId: receipt.messageId,
+          receiptKey: key,
+          fingerprint: receipt.fingerprint,
+          ...receipt.remoteAdmission,
+        }
+      : undefined;
+  }
+
+  /** Irreversible local guard plus the remote host's exclusive launch CAS, before every effect. */
+  private async commitRemoteLaunch(key?: string): Promise<void> {
+    if (!key || this.remoteLaunches.has(key)) return;
+    const receipt = this.hireReceipts.pending(key);
+    if (!receipt) throw new Error("Original hire receipt is unavailable");
+    const claim = this.remoteClaim(key, receipt);
+    if (!claim) return;
+    if (!this.remoteHireReceipts || receipt.remoteLaunchCommitted)
+      throw new Error("Original remote launch cannot dispatch again");
+    this.hireReceipts.update(key, receipt.messageId, { remoteLaunchCommitted: true });
+    await this.remoteHireReceipts.launch(claim);
+    this.remoteLaunches.add(key);
+  }
+
+  /** SSH receipt operations do not retain the turn's authority or project/target grant. */
+  private async assertRemoteHireAuthority(
+    input: SpawnOperatorSeat,
+    key: string | undefined,
+    authority: HireAuthority | undefined,
+  ): Promise<void> {
+    const receipt = key === undefined ? undefined : this.hireReceipts.pending(key);
+    if (!receipt?.remoteAdmission) return;
+    if (this.closed) throw new Error("Native hire service is closed");
+    if (authority !== undefined) await assertConversationAuthority(authority);
+    const current = await this.remoteHireReceipts?.claim(input.fleet!, {
+      receiptId: receipt.messageId,
+      receiptKey: key!,
+      fingerprint: receipt.fingerprint,
+    });
+    // This lookup performs no host operation; its unused nonce never replaces the original.
+    if (!current || !isDeepStrictEqual(current.target, receipt.remoteAdmission.target))
+      throw new Error("Original remote hire target changed or disconnected");
+    await this.admitProjectLaunch(input);
+    if (authority !== undefined) await assertConversationAuthority(authority);
+    if (this.closed) throw new Error("Native hire service is closed");
+  }
+
+  /** Operator recovery only. Takes identity, never caller-supplied evidence or a launch request. */
+  public async settleHireReceipt(
+    receiptId: string,
+    guard?: () => Promise<void>,
+    disposition: "not-launched" | "delivered" | "abandoned" = "not-launched",
+  ): Promise<HireReceiptSettlement> {
+    const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
+    if (!guard) return refused("Operator settlement authority is required; nothing settled.");
+    try {
+      await guard();
+    } catch {
+      return refused("Operator settlement authority is unavailable; nothing settled.");
+    }
+    if (disposition !== "not-launched") return this.recoverHireReceipt(receiptId, guard, disposition);
+    const settled = this.hireReceipts.settlement(receiptId);
+    if (settled)
+      return settled.journal === "reserved-to-sealed-without-launch"
+        ? { state: "settled-not-launched", receiptId, evidence: settled }
+        : refused("Original receipt already has a different retained disposition.");
+    const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
+    if (!original) return refused("No unresolved original native hire receipt; nothing dispatched.");
+    const [key, receipt] = original;
+    if (this.activeHires.has(key)) return refused("Original hire is still active; nothing settled.");
+    const claim = this.remoteClaim(key, receipt);
+    if (
+      !claim ||
+      !this.remoteHireReceipts ||
+      receipt.remoteLaunchCommitted ||
+      receipt.paneId ||
+      receipt.sessionId ||
+      receipt.occupantId
+    )
+      return refused(
+        "Original receipt lacks a complete no-launch window, or already allocated a pane/process/session. Current absence is insufficient.",
+      );
+    try {
+      await guard();
+      const evidence = await this.remoteHireReceipts.seal(claim);
+      await guard();
+      if (this.activeHires.has(key))
+        return refused("Original hire became active during census; local receipt remains fenced.");
+      this.hireReceipts.settleNotLaunched(key, receiptId, evidence);
+      return { state: "settled-not-launched", receiptId, evidence };
+    } catch (error) {
+      return refused(
+        `Authenticated host settlement unavailable: ${reasonDetail(error)}. Original receipt retained.`,
+      );
+    }
+  }
+
+  private async recoverHireReceipt(
+    receiptId: string,
+    guard: () => Promise<void>,
+    disposition: "delivered" | "abandoned",
+  ): Promise<HireReceiptSettlement> {
+    const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
+    try {
+      const channel = disposition === "delivered" ? await this.channelReceipt?.(receiptId) : undefined;
+      if (disposition === "delivered" && !channel)
+        return refused("Exact original channel receipt is unavailable.");
+      if (channel && !channel.receipt.sessionId && !channel.acknowledged)
+        return refused("Legacy channel recovery requires its retained exact bridge acknowledgment.");
+      const settled = channel?.receipt.settlement ?? this.hireReceipts.settlement(receiptId);
+      if (settled && settled.journal === "authenticated-recovery" && settled.disposition === disposition)
+        return {
+          state: disposition === "delivered" ? "settled-delivered" : "abandoned",
+          receiptId,
+          evidence: settled,
+        };
+      if (settled) return refused("Original receipt already has a different retained disposition.");
+      const originals = this.hireReceipts
+        .entries()
+        .filter(([, receipt]) =>
+          disposition === "abandoned"
+            ? receipt.messageId === receiptId
+            : receipt.fingerprint === channel!.receipt.fingerprint &&
+              splitFleetQualified(receipt.paneId ?? "")?.fleet ===
+                splitFleetQualified(channel!.seatId)?.fleet,
+        );
+      if (originals.length !== 1 || !this.remoteHireReceipts)
+        return refused("Original allocated remote hire is missing or ambiguous.");
+      const [key, receipt] = originals[0]!;
+      if (!receipt.paneId || this.activeHires.has(key))
+        return refused("Original allocation is missing or still active.");
+      const [fleet, harness, cwd] = JSON.parse(key) as string[];
+      if (!fleet || !harness || !cwd || splitFleetQualified(receipt.paneId)?.fleet !== fleet)
+        return refused("Original remote allocation identity is incomplete.");
+      let claim = this.remoteClaim(key, receipt);
+      await guard();
+      if (this.activeHires.has(key)) return refused("Original hire is active; recovery cannot begin.");
+      this.hireReceipts.update(key, receipt.messageId, { recoveryRequested: true });
+      if (!claim) {
+        claim = await this.remoteHireReceipts.claim(fleet, {
+          receiptId: receipt.messageId,
+          receiptKey: key,
+          fingerprint: receipt.fingerprint,
+        });
+        if (!claim) return refused("Original allocation is not a configured remote host.");
+        await guard();
+        // A legacy recovery claim cannot masquerade as a historical no-launch window.
+        this.hireReceipts.update(key, receipt.messageId, {
+          remoteAdmission: { target: claim.target, nonce: claim.nonce },
+          remoteLaunchCommitted: true,
+        });
+      }
+      await guard();
+      const evidence = await this.remoteHireReceipts.recover(claim, {
+        disposition,
+        paneId: receipt.paneId,
+        cwd,
+        harness,
+        ...(receipt.beforeIds ? { beforeIds: receipt.beforeIds } : {}),
+        ...(channel
+          ? {
+              message: {
+                receiptId,
+                seatId: channel.seatId,
+                ...(channel.receipt.sessionId ? { binding: channel.receipt.sessionId } : {}),
+              },
+            }
+          : {}),
+      });
+      await guard();
+      if (this.activeHires.has(key)) return refused("Original hire became active; receipt remains fenced.");
+      if (channel) channel.settle(evidence);
+      else this.hireReceipts.settleRecovery(key, receiptId, evidence);
+      return { state: disposition === "delivered" ? "settled-delivered" : "abandoned", receiptId, evidence };
+    } catch (error) {
+      return refused(
+        `Authenticated recovery refused: ${reasonDetail(error)}. Original retained; nothing sent or relaunched.`,
+      );
+    }
+  }
+
   private async resumeSeat(
     input: SpawnOperatorSeat,
     session: SavedAgentSession,
@@ -1861,6 +2121,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrSeatSpawnResult> {
     try {
       if (this.closed) throw new Error("Native hire service is closed");
+      await this.commitRemoteLaunch(receiptKey);
+      await this.assertRemoteHireAuthority(input, receiptKey, authority);
       if (authority !== undefined) {
         const held = this.hireOwners.sessionOwner(
           JSON.stringify([input.fleet ?? "local", input.harness, session.sessionId]),
@@ -2168,6 +2430,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
         control: { mode: "unavailable", reason: unavailableReason, detail },
       };
     }
+    if (this.nativeLaunchPolicy?.prepare) {
+      await this.commitRemoteLaunch(receiptKey);
+      await this.assertRemoteHireAuthority(input, receiptKey, authority);
+    }
     const prepared = await this.nativeLaunchPolicy?.prepare?.({
       seat: structuredClone(input),
       resumed: resume !== undefined,
@@ -2295,6 +2561,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       });
       if (authority !== undefined) await assertConversationAuthority(authority);
       await this.admitProjectLaunch(input);
+      await this.commitRemoteLaunch(receiptKey);
+      await this.assertRemoteHireAuthority(input, receiptKey, authority);
       if (adapter?.prepare) {
         if (input.chrome) throw new Error(`${input.harness} has no supported Chrome launch option`);
         const requestedModel =
@@ -2319,6 +2587,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
           harnessArgs: skillLaunch.args,
         };
+        await this.assertRemoteHireAuthority(input, receiptKey, authority);
         nativePrepared = await adapter.prepare(nativeLaunch);
         if (authority !== undefined) await assertConversationAuthority(authority);
         await this.admitProjectLaunch(input);
@@ -2328,6 +2597,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         if (!current || (await realpath(current.home).catch(() => undefined)) !== claudeHome)
           throw new Error("Claude account profile changed during startup");
       }
+      await this.assertRemoteHireAuthority(input, receiptKey, authority);
       paneId = await createTab({
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),

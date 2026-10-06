@@ -58,6 +58,8 @@
     },
     "apps/clankie": {
       "entry": [
+        "scripts/fleet-load.ts",
+        "scripts/fleet-load-worker.mjs",
         "test/fixtures/mcp-stdio-bridge.ts",
         "src/computer-windows-host.ts",
         "src/hosted-body.ts",

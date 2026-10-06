@@ -88,6 +88,7 @@ when the contract changes, then run:
 
 ```bash
 pnpm check
+pnpm check:load
 pnpm release:build
 pnpm release:smoke
 (cd dist && shasum -a 256 -c clankie-darwin-arm64.tar.gz.sha256)

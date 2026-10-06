@@ -4,6 +4,7 @@ import {
   type WorkerReportPage,
 } from "./worker-reports.ts";
 import { ClosedWorkerPaneSchema } from "./operator-conversations.ts";
+import { HireReceiptIdSchema, HireReceiptSettlementSchema } from "./hire-receipts.ts";
 import { z } from "zod";
 import {
   ProjectProposalLocatorSchema,
@@ -481,6 +482,14 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       seatId: OperatorConversationEventRefSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("settle_hire_receipt"),
+      schemaVersion: z.literal(1),
+      receiptId: HireReceiptIdSchema,
+      disposition: z.enum(["not-launched", "delivered", "abandoned"]).optional(),
+    })
+    .strict(),
   /**
    * Staff the fleet by starting a conversation (ADR 0013). Operator-only for
    * the same reason `channel` is: an agent that can hire is an agent that can
@@ -886,6 +895,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
       closed: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("settle_hire_receipt"),
+      schemaVersion: z.literal(1),
+      result: HireReceiptSettlementSchema,
     })
     .strict(),
   z

@@ -78,7 +78,7 @@ describe("Codex original native startup catalog", () => {
     const pluginRoot = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
     const manifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
     const hooks = JSON.parse(await readFile(join(pluginRoot, manifest.hooks), "utf8"));
-    expect(hooks.hooks.SessionStart[0].hooks[0].command).toContain("$PLUGIN_ROOT/bin/seat-hook.mjs");
+    expect(hooks.hooks.SessionStart[0].hooks[0].command).toContain("process.env.PLUGIN_ROOT");
     expect(hooks.hooks.SessionStart[0].hooks[0].command).toContain("--codex");
     const received: unknown[] = [];
     const verdict = {
@@ -110,9 +110,11 @@ describe("Codex original native startup catalog", () => {
       );
       const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
         (resolve, reject) => {
-          const child = spawn(process.execPath, [join(pluginRoot, "bin/seat-hook.mjs"), "--codex"], {
+          const child = spawn(hooks.hooks.SessionStart[0].hooks[0].command, {
+            shell: true,
             env: {
               ...process.env,
+              PLUGIN_ROOT: pluginRoot,
               CLANKIE_STATE: root,
               HERDR_PANE_ID: "w1:p2",
               HERDR_SOCKET_PATH: "/tmp/catalog-test.sock",

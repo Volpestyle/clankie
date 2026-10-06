@@ -50,7 +50,7 @@ import {
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
@@ -58,6 +58,7 @@ import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
+import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
@@ -448,6 +449,52 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return selectHireProject(source, destination, input.projectId);
   };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    ...(deps.fleets?.shell === undefined
+      ? {}
+      : {
+          remoteHireReceipts: createRemoteHireReceipts({
+            fleet: async (id) => {
+              await refreshFleets();
+              return remoteFleets.find((fleet) => fleet.id === id);
+            },
+            local: async (id) => {
+              await refreshFleets();
+              return namedLocal.some((fleet) => fleet.id === id);
+            },
+            shell: (fleet) => deps.fleets!.shell!(fleet),
+          }),
+        }),
+    channelReceipt: async (id) => {
+      const directory = join(options.stateDir, "delivery-receipts", "fleet");
+      const ids = new Set(fleetMailboxes.keys());
+      if (existsSync(directory))
+        for (const file of readdirSync(directory)) {
+          const name = file.endsWith(".json.delivered")
+            ? file.slice(0, -15)
+            : file.endsWith(".json")
+              ? file.slice(0, -5)
+              : undefined;
+          if (name !== undefined) {
+            const seatId = decodeURIComponent(name);
+            if (encodeURIComponent(seatId) !== name) throw new Error("Mailbox receipt path is noncanonical");
+            ids.add(seatId);
+          }
+        }
+      const matches = [...ids]
+        .map((seatId) => {
+          const mailbox = fleetSeatMailbox(fleetMailboxes, seatId, directory);
+          return { seatId, mailbox, receipt: mailbox.recoveryReceipt(id) };
+        })
+        .filter((item) => item.receipt !== undefined);
+      if (matches.length !== 1) return undefined;
+      const original = matches[0]!;
+      return {
+        seatId: original.seatId,
+        receipt: original.receipt!,
+        acknowledged: original.mailbox.recoveryAcknowledged(id),
+        settle: (evidence) => original.mailbox.settleRecoveredDelivery(id, evidence),
+      };
+    },
     ...(options.fleetHireTools ? { fleetHireTools: options.fleetHireTools } : {}),
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},

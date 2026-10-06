@@ -1168,12 +1168,17 @@ it.each([
   { op: "readopt_seat", seatId: "term_aaa" },
   { op: "worker_reports" },
   { op: "acknowledge_worker_reports", deliveryIds: [randomUUID()] },
+  { op: "settle_hire_receipt", receiptId: randomUUID() },
 ])("refuses non-api captain authority for $op", async (request) => {
   const f = await fixture({ parent: false, nonApiCaptain: true });
   const response = await f.service.app.app.request("/operator/v1/dispatch", {
     method: "POST",
     headers: { authorization: "Bearer discord-text", "content-type": "application/json" },
-    body: JSON.stringify({ schemaVersion: 1, conversationId: "global-default", ...request }),
+    body: JSON.stringify({
+      schemaVersion: 1,
+      ...(request.op === "settle_hire_receipt" ? {} : { conversationId: "global-default" }),
+      ...request,
+    }),
   });
   expect(response.status).toBe(403);
   expect(await response.json()).toEqual({ error: "operator_authority_required" });

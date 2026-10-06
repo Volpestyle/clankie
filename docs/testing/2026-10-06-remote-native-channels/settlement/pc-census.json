@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-06T03:22:07.134Z",
+  "target": {
+    "fleet": "pc",
+    "host": "volpe@supedupsilly",
+    "session": "default",
+    "shell": "powershell"
+  },
+  "receiptId": "0c4e936d-4afa-4886-9f6d-310a0e9e6686",
+  "commandCharacters": 15562,
+  "reserved": true,
+  "evidence": {
+    "receiptId": "0c4e936d-4afa-4886-9f6d-310a0e9e6686",
+    "receiptKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\",\"tess-census-only-0c4e936d-4afa-4886-9f6d-310a0e9e6686\"]",
+    "fingerprint": "fa0c7b4624fb4aeb775fed104ecf1cc84cdea85443cf5c3958637c4ed73867cf",
+    "target": {
+      "fleet": "pc",
+      "host": "volpe@supedupsilly",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "hostIdentity": "33f0512ba73f037faf1b7683c5be31b50d4a224ed51d44158a0efc16930a9bda",
+    "window": {
+      "openedAt": 1791256927970,
+      "sealedAt": 1791256929195
+    },
+    "census": {
+      "observedAt": 1791256929195,
+      "panes": 5,
+      "processes": 534,
+      "sessions": 4,
+      "sha256": "c06e8f47a9977b70cba4b1f8f15d3d4396f771b7046a57ae8f408c2093ac4283"
+    },
+    "journal": "reserved-to-sealed-without-launch"
+  },
+  "repeatEvidenceMatches": true,
+  "lateLaunch": "HerdrFleetError: fleet_command_failed: fleet pc: Original host receipt cannot launch again"
+}

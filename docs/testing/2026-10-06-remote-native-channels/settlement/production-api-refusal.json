@@ -1,0 +1,9 @@
+{
+  "at": "2026-10-06T03:45:31.734Z",
+  "operation": "settle_hire_receipt",
+  "receiptId": "seat-71022bcd-8afe-44cd-9d83-bd71d1ceab42",
+  "disposition": "delivered",
+  "originalSha256": "16ad094ea91ba2852ccd32d59e85b40ccd15c4ad6fef4f2d6c26f2ec9426cc6b",
+  "error": "Error: Hire settlement returned 400; inspect original receipt, never resend",
+  "originalUnchanged": true
+}
