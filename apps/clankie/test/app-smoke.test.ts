@@ -6,6 +6,7 @@ import {
   HERDR_BINDING_PATH,
   HERDR_SOCKET_HEADER,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  ProcessHealthSnapshotSchema,
   type ObservableCaptainLane,
   type OperatorAgentPersona,
   type OperatorFleetSeat,
@@ -161,10 +162,14 @@ describe("clankie app smoke", () => {
     try {
       const recovering = await clankie.app.request("/health");
       expect(recovering.status).toBe(200);
-      await expect(recovering.json()).resolves.toEqual({
+      const body = await recovering.json();
+      const processHealth = ProcessHealthSnapshotSchema.parse(body.processHealth);
+      expect(processHealth.pid).toBe(process.pid);
+      expect(body).toEqual({
         ok: true,
         service: "clankie",
         herdr: "recovering",
+        processHealth,
       });
       state = "healthy";
       expect((await clankie.app.request("/health")).status).toBe(200);
