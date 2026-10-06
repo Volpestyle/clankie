@@ -44,6 +44,7 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         CLANKIE_STATE_HOME: stateHome,
         CLANKIE_SETTINGS_FILE: join(configHome, "clankie", "settings.json"),
         PATH: `${commands}:${process.env.PATH}`,
+        SHELL: "/bin/zsh",
         CLANKIE_INSTALL_ROOT: installation,
         CLANKIE_BIN_DIR: bin,
         INSTALL_TEST_DOWNLOADS: downloads,
@@ -98,6 +99,10 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
           args: ["harness", "install", "--refresh-linked"],
         })),
       );
+      // A fresh login shell finds the command: one profile line across reinstalls.
+      expect(
+        (await readFile(join(home, ".zprofile"), "utf8")).split(`export PATH="${bin}:$PATH"`),
+      ).toHaveLength(2);
       const retained = join(installation, "releases", "v0.1.0", "retained");
       await writeFile(retained, "immutable directory");
       expect(spawnSync("sh", [installer, "--version", "v0.1.0"], { env }).status).toBe(0);

@@ -36,11 +36,11 @@ own runtime.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
-clankie
 ```
 
-Choose **Run Clankie on this Mac**. The launcher starts his service and opens
-the console, and `/setup` walks you through the rest:
+Open a new Terminal window, run `clankie`, and choose **Run Clankie on this
+Mac**. The launcher starts his service and opens the console, and `/setup`
+walks you through the rest:
 
 1. **A model.** Connect a subscription, API key, or local provider, then pick a
    model. Sign-ins and keys go into the credential broker.

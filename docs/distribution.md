@@ -15,7 +15,10 @@ reports the installed release.
 The installer verifies the archive's published SHA-256 checksum and installs
 each version immutably under `~/.local/share/clankie/releases/`. It updates
 `~/.local/share/clankie/current` and links
-`~/.local/bin/clankie` to the current launcher. Set `CLANKIE_INSTALL_ROOT` or
+`~/.local/bin/clankie` to the current launcher. When that directory is not on
+`PATH`, it appends one `export PATH=...` line to `~/.zprofile` (zsh) or
+`~/.bash_profile` (bash), so a new Terminal window finds `clankie`. Set
+`CLANKIE_NO_MODIFY_PATH=1` to only print that line, and `CLANKIE_INSTALL_ROOT` or
 `CLANKIE_BIN_DIR` before running the installer to choose different roots.
 
 Both release installation and `clankie update` refresh already-linked Claude and
