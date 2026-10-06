@@ -127,7 +127,27 @@ async function fixture() {
     workingDirectory: root,
     settings: new SettingsStore(join(root, "settings.json")),
     personaImages: async () => ({ images: [], hash: "fake", files: [] }),
-    nativeCensusRunner: async () => ({ stdout: "", stderr: "" }),
+    nativeCensusRunner: async (_command, args) => {
+      // Use the same current native identity as agent/get. A stored worker
+      // report needs fresh census proof, not an empty display-only fixture.
+      const row = {
+        pane_id: agent.paneId,
+        terminal_id: agent.terminalId,
+        agent: agent.agent,
+        agent_status: agent.status,
+        title: agent.title,
+        agent_session: agent.session,
+      };
+      let result: unknown;
+      if (args[0] === "agent" && args[1] === "list") result = { agents: [row] };
+      else if (args[0] === "agent" && args[1] === "get") result = { agent: row };
+      else if (args[0] === "pane" && args[1] === "list") result = { panes: [row] };
+      else if (args[0] === "workspace" && args[1] === "list") result = { workspaces: [] };
+      else if (args[0] === "api" && args[1] === "snapshot")
+        result = { snapshot: { agents: [row], panes: [row], workspaces: [], tabs: [] } };
+      else throw new Error(`Unexpected external Herdr command: ${args.join(" ")}`);
+      return { stdout: JSON.stringify({ result }), stderr: "" };
+    },
   });
   const service = await createClankieApp({
     captain,
