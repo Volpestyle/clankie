@@ -22,10 +22,6 @@ A model-decided free-play loop sits beside the deterministic drivers. Every
 action still passes through `EnvironmentRuntime`; free play changes who decides,
 not how the emulator validates an action.
 
-The retained diagram is the historical evidence model at ratification:
-
-![ADR 0049: Free play is model-decided, and asserts something other than determinism](../diagrams/0049-free-play-agency-and-non-deterministic-evidence.jpg)
-
 A non-deterministic run asserts different properties:
 
 | Property  | Evidence                                                                        |

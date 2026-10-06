@@ -79,8 +79,6 @@ during voice sessions.
 
 **3. Exactly one author per surface, always.**
 
-![ADR 0074: The room hears one voice](../diagrams/0074-the-room-hears-one-voice.jpg)
-
 When nobody is in voice, the Voice agent authors and the overlay is the only
 surface — unchanged from ADR 0056. When a room is listening, the realtime
 session authors, and it authors from events plus the audio it already hears.

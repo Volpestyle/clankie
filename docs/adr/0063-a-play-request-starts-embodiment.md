@@ -31,10 +31,6 @@ enabled while the play host holds one live session across them.
 It decides whether to ask; the service-owned play runner resolves the body,
 validates the request, and reports what actually happened.
 
-![ADR 0063 play request and embodiment](../diagrams/0063-a-play-request-starts-embodiment.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 - **Agent-owned intent.** No keyword matcher decides that a message means play.
   The captain chooses a typed capability from the conversation.
 - **Host-grounded identity.** Actor and room come from authenticated turn

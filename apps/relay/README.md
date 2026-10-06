@@ -96,10 +96,6 @@ flowchart LR
   B --> G
 ```
 
-![Relay device-request architecture](../../docs/diagrams/relay-architecture.jpg)
-
-[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
-
 ## Run
 
 ```bash

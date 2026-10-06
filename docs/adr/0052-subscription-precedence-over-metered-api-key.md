@@ -22,8 +22,6 @@ model the Codex backend serves. The shared subscription policy redirects an
 `openai/<model>` ref to `openai-codex/<model>` before any credential lookup;
 `gpt-5.6` maps to `gpt-5.6-sol`, the slug the backend answers.
 
-![ADR 0052: A stored subscription outranks the metered API key](../diagrams/0052-subscription-precedence-over-metered-api-key.jpg)
-
 This is a redirect of provider identity, not credential borrowing: the resolved
 identity becomes `openai-codex`, the request goes over the Codex transport, and
 the context budget narrows to the backend's window. A model the subscription

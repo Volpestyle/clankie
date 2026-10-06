@@ -51,8 +51,7 @@ credentials required by that role cross the bounded IPC process boundary. They
 are held for the role lifetime and are not broker entries or receipt fields
 ([ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md)).
 
-The older [credential-routing JPG](diagrams/credential-routing.jpg) is a
-historical snapshot. Current credential ownership is:
+Current credential ownership is:
 
 ```mermaid
 flowchart LR

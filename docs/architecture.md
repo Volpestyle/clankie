@@ -16,21 +16,34 @@ and cross-component request flows. Historical diagrams remain in the ADR archive
 
 ```mermaid
 flowchart LR
-  App["iPhone / iPad app"] <-->|"encrypted device exchanges"| Gateway["Public gateway"]
-  App <-->|"optional direct device route"| Service
-  Gateway <-->|"authenticated outbound connection"| Service["Clankie's service<br/>pi · conversations · goals · tools"]
-  Console["Console / CLI"] --> Service
-  Native["Optional native operator seat"] -->|"MCP + transcript bridge"| Service
-  Discord["Configured Discord body"] --> Service
-  Service --> State["Host-owned state<br/>memory · files · credential broker"]
-  Service --> Models["Configured models and services"]
-  Service --> Runtime["Execution connections<br/>built-in route: Herdr"]
-  Runtime --> Workers["Native interactive worker agents"]
-  Service <-->|"harness channels / session APIs"| Workers
-  Service <--> Work["Repo tracker or task files"]
-  Service --> World["Clankie's own PokeAgents seat"]
-  World --> Viewer["Optional game watch surface"]
-  Discord --> Vox["One native Vox child<br/>when media is enabled"]
+  subgraph Clients
+    App["Clankie app<br/>iPhone · iPad · Mac"]
+    Console["TUI / CLI"]
+    Head["Optional native head<br/>Claude · Codex seat"]
+  end
+  Gateway["Public gateway<br/>api.clankie.bot"]
+  subgraph Host["One host: owner Mac or managed Linux"]
+    Relay["Relay<br/>device grants · tails · terminal lease"]
+    Service["Clankie's service<br/>pi · conversations · goals · tools · body leases"]
+    State["Host-owned state<br/>memory · conversations · settings"]
+    Broker["Credential broker"]
+    Herdr["Herdr<br/>native worker panes"]
+    Mouth["Active Discord body<br/>+ one Vox child for media"]
+  end
+  App <-->|"encrypted device envelope"| Gateway
+  Gateway <-->|"outbound connection the host holds"| Relay
+  App <-.->|"optional direct route"| Relay
+  Relay -->|"granted requests"| Service
+  Console --> Service
+  Head -->|"clankie mcp: lane tools + channel"| Service
+  Mouth <-->|"room turns"| Service
+  Service --> State
+  Broker --> Service
+  Service -->|"hire · message · watch"| Herdr
+  Herdr -->|"reports · clankie_call"| Service
+  Service --> Models["Models and media providers"]
+  Service <--> Work["Tracker or task files"]
+  Service --> Bodies["Bodies: PokeAgents seat ·<br/>Minecraft motor · browser"]
 ```
 
 Capabilities are configured per host. A managed Linux deployment does not
@@ -117,10 +130,25 @@ runs or steers the turn, retains its result and exposes replay or live tails.
 Discord transport, operator clients and native seats use the paths below;
 autonomous continuations re-enter the same conversation queue.
 
-### Discord ingress
+```mermaid
+flowchart LR
+  Discord["Discord message<br/>exact delivery id"] -->|"durable receipt"| Lane
+  Voice["Voice room floor"] -->|"realtime thread asks him to act"| Lane
+  Operator["TUI · app · CLI"] -->|"revision-fenced send"| Lane
+  Auto["Goal · self-wake ·<br/>worker report · watch"] --> Lane
+  Lane["Authenticate → lane + grant<br/>→ conversation"] --> Busy{"Run already<br/>streaming?"}
+  Busy -->|yes| Steer["Steer into it<br/>(absorbed)"]
+  Busy -->|no| Driver{"Native seat<br/>attached?"}
+  Driver -->|no| Pi["pi session<br/>durable lane, or one-shot<br/>for a privileged shared-room turn"]
+  Driver -->|yes| Seat["Native head<br/>via its channel"]
+  Pi --> Tools["Tools under the lane's grant<br/>body leases for mouth · voice ·<br/>browser · computer · play"]
+  Seat --> Tools
+  Tools --> Settle["Settle: event log + live tail ·<br/>receipt · turn metrics"]
+  Steer --> Settle
+  Settle --> Reply["Reply on the original route"]
+```
 
-The older [message-to-captain JPG](diagrams/clankie-message-turn-sequence.jpg)
-is a historical snapshot; the present flow is described below.
+### Discord ingress
 
 A Discord message reaches the active bridge. A text-only message in the live
 voice channel's attached chat enters that room's existing `VoiceFloor`; the
@@ -209,6 +237,20 @@ seat, channel, and stance changes advance the same cursor. Foreground apps
 therefore render one current seats/personas/channels moment without polling or
 persisting a second world projection
 ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)).
+
+```mermaid
+flowchart LR
+  Lead["Lead conversation<br/>pi or native head"] -->|"hire_agent · message_seat"| Adapter["Harness adapter<br/>Claude · Codex · Pi · OpenCode · Grok"]
+  Adapter -->|"channel event · app-server turn"| Pane["Worker's native TUI<br/>in a Herdr pane"]
+  Owner["Owner"] -.->|"watches and types"| Pane
+  Pane -->|"receipts · turn completed"| Adapter
+  Pane -->|"message_clankie · reports"| Lead
+  Pane -->|"clankie_tools / clankie_call"| Accounts["Connected accounts<br/>Linear · GitHub · mail"]
+  Lead --> Work["Tracker or task files"]
+  Pane --> Work
+  Herdr["Herdr native events"] --> Cursor["Fleet cursor<br/>personas · seats · channels"]
+  Cursor --> Views["TUI dock · app · Discord"]
+```
 
 ### Native operator seats
 

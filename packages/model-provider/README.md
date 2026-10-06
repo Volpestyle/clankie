@@ -22,10 +22,6 @@ flowchart LR
   Broker --> Adapters
 ```
 
-The [older pipeline export](../../docs/diagrams/model-provider.jpg) is a
-historical snapshot; its [editable source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
-remains in the archive.
-
 `registerConfiguredPiProviders`
 projects custom Clankie provider declarations into Pi, while Pi's `ModelRuntime`
 owns its catalog, auth, implementation, and thinking levels

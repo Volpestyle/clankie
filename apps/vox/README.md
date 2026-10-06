@@ -9,9 +9,7 @@ concurrent screen-watch and Go Live roles in the user body
 ([ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md)).
 
 The canonical current diagram is in
-[ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md). The old
-JPG/tldraw export under `docs/diagrams/` is a historical screen-watch rollout
-snapshot.
+[ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md).
 
 Discord is the only platform ClankVox targets today, and this package
 documents that Discord transport. Another platform's media transport would live

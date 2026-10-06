@@ -15,8 +15,6 @@ conversation owns one pi `SessionManager` JSONL tree and one revision-fenced
 event log under `~/.clankie/captain/`. The service owns the mapping; clients see
 only `conversationId`, revision, and replay cursors.
 
-![ADR 0032: Conversation-scoped operator lanes](../diagrams/0032-conversation-scoped-operator-lanes.jpg)
-
 There is one non-deletable default global conversation. Operators may create
 additional global or workspace-scoped conversations. Different conversations
 run concurrently; sends to the same conversation serialize. A stale revision is

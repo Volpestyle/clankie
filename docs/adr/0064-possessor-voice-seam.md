@@ -8,7 +8,7 @@ Status: superseded in scope (2026-08-19) by
 The no-script, push-only, loopback design survives as neutral
 `@clankie/play-voice`, but only for Clankie's own local or hosted play. External
 harnesses receive no bearer, narration path, room state, or room input. The
-possessor terminology, `clankie_possessor_voice` credential, and diagram below
+possessor terminology and `clankie_possessor_voice` credential below
 describe the retired architecture.
 
 ## Context
@@ -40,8 +40,6 @@ Two further constraints shape the answer:
 
 A possessor never speaks directly. It reports to the process that owns the body
 in Discord, over a loopback seam, and that process speaks.
-
-![ADR 0064: The possessor voice seam](../diagrams/0064-possessor-voice-seam.jpg)
 
 Four properties make this the same fence rather than a hole in it:
 

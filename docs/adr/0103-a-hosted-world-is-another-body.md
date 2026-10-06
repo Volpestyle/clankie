@@ -98,10 +98,6 @@ the host, and does not reimplement the wire format — he links the contract tha
 defines it. `@pokeagent-mmo/firered` remains usable as transport-free cartridge
 knowledge. The world CLI remains an operator debugging fallback.
 
-![ADR 0103 local and hosted play bodies](../diagrams/0103-a-hosted-world-is-another-body.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams-2.tldraw)
-
 `apps/clankie/test/pokeagent-mmo-boundary.test.ts` enforces this: exactly
 transport-free FireRed knowledge and the published
 `@pokeagents/world-protocol` client contract may be imported by product source;

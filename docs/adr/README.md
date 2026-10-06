@@ -30,25 +30,17 @@ below identifies decisions whose former implementation or scope is historical.
 | ADR 0191 (reply routing)       | [A reply to his post goes to whoever owns the work](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) |
 | ADR 0191 (work tracking)       | [Work is tracked where the repo tracks it](0191-work-is-tracked-where-the-repo-tracks-it.md)                   |
 
-## Diagram sources
+## Diagrams
 
 [ADR 0210](0210-objectives-outlive-agent-turns.md) records the separation of
 native goals, explicit session assignments and current activity.
 
-| Editable source                                                                          | Export                                                                                                      |
-| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [`clankie-current-architecture.tldraw`](../diagrams/clankie-current-architecture.tldraw) | Historical [`clankie-current-architecture.jpg`](../diagrams/clankie-current-architecture.jpg)               |
-| [`vox-architecture.tldraw`](../diagrams/vox-architecture.tldraw)                         | Historical [`vox-architecture.jpg`](../diagrams/vox-architecture.jpg)                                       |
-| [`clankie-memory.tldraw`](../diagrams/clankie-memory.tldraw)                             | Historical [`clankie-memory.jpg`](../diagrams/clankie-memory.jpg)                                           |
-| [`clankie-docs-diagrams.tldraw`](../diagrams/clankie-docs-diagrams.tldraw)               | Historical per-ADR JPG exports that remain linked                                                           |
-| [`clankie-docs-diagrams-2.tldraw`](../diagrams/clankie-docs-diagrams-2.tldraw)           | Historical app, package, and ADR JPG exports that remain linked                                             |
-| [`seat-conversations.tldraw`](../diagrams/seat-conversations.tldraw)                     | [`0135-a-herdr-seat-is-a-conversation.jpg`](../diagrams/0135-a-herdr-seat-is-a-conversation.jpg) (ADR 0135) |
-
-Current architecture decisions use Mermaid in the owning Markdown; a decision
-whose system spans repos may additionally keep an editable tldraw source listed
-here with its export. Retained JPG exports preserve the architecture at their
-publication date; do not treat them as current or hand-edit/fabricate a binary
-render without its source.
+Diagrams are Mermaid in the Markdown that owns the subject, so they render on
+GitHub and in Linear and change in the same commit as the code. The
+[architecture](../architecture.md) keeps the system map, the message-to-turn
+flow and the fleet flow; subsystem diagrams live in their package or app
+README. The former tldraw sources and JPG exports were removed on 2026-10-06;
+git history keeps them.
 
 [ADR 0215](0215-conversations-lease-one-body.md) records exclusive body-resource
 leases for parallel conversations belonging to one Clankie.

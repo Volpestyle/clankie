@@ -55,8 +55,6 @@ Party identities carry the real game id (`emerald-species-<id>`), and dialog
 speaker and semantic-refusal text are game-aware. Game-specific extras the
 selected schema does not verify stay fail-closed.
 
-![ADR 0090: Emerald plays from the screen](../diagrams/0090-emerald-plays-from-the-screen.jpg)
-
 ## Options weighed
 
 - **Interpret Emerald through FireRed offsets** — rejected because wrong state

@@ -32,8 +32,6 @@ Clankie gains an **activity plane**: a Discord Embedded App launched by the bot
 into a voice channel. It receives bounded rendered media from the host and holds
 no ROM, core, savestate, Discord credential, or machine authority.
 
-![ADR 0047 rendered-frame subpath](../diagrams/0047-discord-activity-presence-plane.jpg)
-
 | Plane             | Process                     | Role                                    |
 | ----------------- | --------------------------- | --------------------------------------- |
 | Official bot      | `apps/discord-bridge`       | text, voice, and activity launch        |

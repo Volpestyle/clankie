@@ -47,10 +47,6 @@ conversation in the current scope. The console's banner, shell escape, path
 completion, and `/status` follow the selected conversation
 ([ADR 0111](0111-a-console-process-starts-one-conversation.md)).
 
-![ADR 0104 workspace-scoped operator conversations](../diagrams/0104-clankie-works-where-you-launched-him.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams-2.tldraw)
-
 A workspace is fixed for the life of a conversation. `/cd` switches rooms rather
 than repointing a live session, so a session's cwd never changes underneath a
 turn and no session has to be torn down to move.

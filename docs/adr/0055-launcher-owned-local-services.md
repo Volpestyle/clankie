@@ -9,8 +9,6 @@ Clankie is present through several long-lived local processes. Starting them by
 hand leaves no durable ownership record, no dependency-aware restart, and no
 reliable health gate.
 
-![ADR 0055: The launcher owns every local service](../diagrams/0055-launcher-owned-local-services.jpg)
-
 ## Decision
 
 `apps/tui/bin/service-supervisor.ts` owns the process mechanics and
@@ -54,10 +52,6 @@ launcher uses its conversation's append-only event log to wait for that turn's
 terminal event before stopping the service. The operator face retries only a
 dropped durable tail read, then resumes from its persisted cursor. It never
 replays the prompt or any tools that already ran.
-
-![ADR 0055 launcher-owned local services](../diagrams/0055-launcher-owned-local-services.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 The compatibility aliases `captain`, `captain-eve`, `eve`, `control-plane`, and
 `cp` all resolve to `clankie`; they do not name separate processes.

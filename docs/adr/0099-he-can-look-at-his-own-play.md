@@ -45,10 +45,6 @@ He may **pull** two things, and only those two:
 `ask_clankie` remains the only privileged tool. Room audio still cannot
 press a button, write memory, or start play.
 
-![ADR 0099 Clankie observes current and recalled play](../diagrams/0099-he-can-look-at-his-own-play.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams-2.tldraw)
-
 ## Consequences
 
 - Looking at his own screen is the same kind of act as looking at a share:

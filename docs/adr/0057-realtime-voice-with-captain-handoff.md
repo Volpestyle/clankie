@@ -46,10 +46,6 @@ experience; if it selects `ask_clankie`, the voice session settles that tool
 locally and continues the narration. It never guesses the last room speaker or
 emits a captain failure for a request no person made.
 
-![ADR 0057 realtime voice with captain handoff](../diagrams/0057-realtime-voice-with-captain-handoff.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 ### One character, two jobs
 
 The realtime session receives the same owner-authored persona and social

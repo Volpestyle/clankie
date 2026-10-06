@@ -35,8 +35,6 @@ completion and failure arrive as later results and semantic events.
 
 Tool exposure was a deterministic projection of session phase and lane:
 
-![ADR 0016: Versioned interactive-environment contract and lane-scoped tools](../diagrams/0016-versioned-interactive-environment-contract.jpg)
-
 The runner owned the lease, credentials, connection, and cancellation. Lease
 schemas name server, world, character, quotas, and capabilities but reject
 credential fields. Ticks, chunks, packets, audio, and video never enter the

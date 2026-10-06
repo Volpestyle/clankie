@@ -47,8 +47,6 @@ state, chooses one bounded action, executes it through `EnvironmentRuntime`,
 and verifies that frames and expected state advance. It carries no input
 transcript.
 
-![ADR 0043: FireRed gameplay uses a version-pinned decoded state profile](../diagrams/0043-version-pinned-firered-gameplay-profile.jpg)
-
 The controller opens the start menu, observes party and bag data, closes
 menus, waits through callback-locked field transitions using bounded frame
 advance, routes by BFS over verified tiles, engages the trainer, advances

@@ -36,10 +36,6 @@ process owns the world protocol, local transport, capability-filtered tools,
 and session bearer. Clankie owns only his intent, tool calls, personality, and
 presentation.
 
-![ADR 0102 PokeAgent MMO external MCP world](../diagrams/0102-pokeagent-mmo-is-an-external-mcp-world.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams-2.tldraw)
-
 Clankie does not import the world protocol, server, emulator, mailbox, or
 persistence packages, does not invoke the world CLI as an application
 integration, and does not implement the world socket protocol. The CLI remains

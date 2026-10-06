@@ -6,7 +6,7 @@ Status: accepted (2026-07-25). Current-status addendum (2026-08-19):
 decisions. Consent, Discord attribution, DAVE-positive join, allowlists, floor,
 memory-only PCM, and live-evidence requirements remain authoritative here.
 [ADR 0057](0057-realtime-voice-with-captain-handoff.md) defines the realtime
-speech path. The rationale and diagram below are retained as historical.
+speech path. The rationale below is retained as historical.
 
 ## Context
 
@@ -30,8 +30,6 @@ media owner: `@discordjs/voice`. This decision supersedes ADR 0025's ClankVox
 placement and direct `guild.voiceAdapterCreator` plan for official-bot voice.
 The AGPL Vox source now lives in the explicit mixed-license `apps/vox` package
 under ADR 0100, but it is not executed for official-bot voice.
-
-![ADR 0045: Official-bot group voice uses the maintained Discord media stack](../diagrams/0045-official-bot-dave-group-voice.jpg)
 
 ### Consent and privacy
 

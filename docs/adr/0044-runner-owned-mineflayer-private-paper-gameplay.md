@@ -41,8 +41,6 @@ advertises only observe, navigate, collect, craft, place, and wait. Each action
 is checked against lease capabilities, allowed dimensions, origin radius,
 duration, block-change quota, and no-combat policy.
 
-![ADR 0044: The runner owns Mineflayer while Paper owns Minecraft success](../diagrams/0044-runner-owned-mineflayer-private-paper-gameplay.jpg)
-
 ### Interruptible adapter settlement
 
 An adapter may return `{status: "running", completion}`. The runtime records

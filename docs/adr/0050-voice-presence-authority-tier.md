@@ -18,10 +18,6 @@ Voice presence receives its own actor policy. `DISCORD_VOICE_JOIN_POLICY`
 selects `ambient` or `guild_members`, while `DISCORD_AMBIENT_USER_IDS` can name
 individual ambient operators alongside role ids.
 
-![ADR 0050 voice-presence authority tier](../diagrams/0050-voice-presence-authority-tier.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 `guild_members` widens voice presence and nothing else. Guild and channel
 allowlists still apply first, and leave cannot target a call in another guild.
 Unrecognized or absent policy values resolve to `ambient`; the wider policy is

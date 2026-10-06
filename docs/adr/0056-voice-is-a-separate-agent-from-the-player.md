@@ -57,8 +57,6 @@ task it shares a call with.
 
 Split the loop into two agents with different jobs and different authority.
 
-![ADR 0056: Voice is a separate agent from the player](../diagrams/0056-voice-is-a-separate-agent-from-the-player.jpg)
-
 - **Player** decides actions and writes monologue. It has `io.act`.
 - **Voice** receives the frame, the player's monologue, recent effects, and
   anything people say. It decides to speak or stay silent. It has no `io.act`.

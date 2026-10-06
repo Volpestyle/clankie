@@ -58,10 +58,6 @@ Vox is a workspace package, not an independently supervised daemon: media
 credentials and process lifetime remain scoped to the body that opened the
 Discord user gateway.
 
-![Vox native media architecture](../diagrams/vox-architecture.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/vox-architecture.tldraw)
-
 ## Options weighed
 
 - **Continue resolving an external binary.** Rejected because source, build,

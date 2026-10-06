@@ -30,10 +30,6 @@ contracts remain transport-neutral and declare which bodies can perform them.
 Exactly one configured body is active: the launcher starts either the official
 bot or `apps/discord-user-session`, and voice/media attach to that one mouth.
 
-![ADR 0048 Discord user-session transport](../diagrams/0048-discord-user-session-transport.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 | Action family                                | Bot | User session |
 | -------------------------------------------- | --- | ------------ |
 | text, reactions, threads, voice, attachments | yes | yes          |

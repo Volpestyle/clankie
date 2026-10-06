@@ -50,8 +50,6 @@ whose **text** turns get the operator's machine tools.
 - Mail stays operator-console only. Dumping an inbox into Discord is a
   disclosure, not a machine-control grant.
 
-![ADR 0095: Discord system actors](../diagrams/0095-discord-system-actors.jpg)
-
 The herdr skill's `HERDR_ENV=1` stop is for agents sitting in a pane. The
 captain is a service. His instructions say so, and `herdr` talks to
 `~/.config/herdr/herdr.sock` from here.

@@ -28,9 +28,6 @@ flowchart LR
   Operator --> Facts
 ```
 
-The [older memory export](diagrams/clankie-memory.jpg) and its
-[editable source](diagrams/clankie-memory.tldraw) are historical snapshots.
-
 ## Notes — what he remembers experiencing
 
 A note is his own short memory of something that happened in a room or

@@ -24,12 +24,7 @@ is `@clankie/discord-presence-core`, shared with the bot bridge.
 The [credential guide](../../docs/credentials.md) distinguishes the bare normal-
 user token from the official bot token and Clankie's four local bridge bearers.
 
-![Discord user-session transport architecture](../../docs/diagrams/discord-user-session-architecture.jpg)
-
-[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
-
-This image is the historical credential-isolation view. The canonical current
-media diagram is
+The canonical current media diagram is
 [ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md).
 
 ## Admission, all fail-closed

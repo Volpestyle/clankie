@@ -14,8 +14,6 @@ model-authored memory or another framework's private session stream.
 the TUI lanes view. With no arguments it lists rooms; with `(lane, targetId)` it
 returns recent `heard` and `said` entries.
 
-![ADR 0084: The head can read his branches](../diagrams/0084-the-head-can-read-his-branches.jpg)
-
 The tool is available to every captain lane, but visibility is asymmetric. An
 operator turn may read every room. A Discord, voice, or gameplay turn may read
 non-operator rooms and can never list or read the operator lane. The gate comes

@@ -105,9 +105,20 @@ display.
 The launcher owns the long-lived local processes and restarts them in dependency
 order ([ADR 0055](../../docs/adr/0055-launcher-owned-local-services.md)):
 
-![Launcher-owned local process architecture](../../docs/diagrams/tui-supervision.jpg)
-
-[Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)
+```mermaid
+flowchart LR
+  Launcher["clankie launcher<br/>pid record + health gate each"] --> Service["clankie<br/>service"]
+  Launcher --> Relay["relay<br/>app devices"]
+  Launcher --> Mouth["discord-bridge <i>or</i><br/>discord-user-session<br/>(the active body)"]
+  Launcher --> Activity["activity<br/>watch surface"]
+  Launcher --> Tunnel["tunnel<br/>cloudflared to the Activity"]
+  Launcher -.-> Awake["awake (opt-in)<br/>keeps the Mac up"]
+  Relay --> Service
+  Mouth --> Service
+  Mouth --> Vox["one clankvox child<br/>when media is enabled"]
+  Tunnel --> Activity
+  LaunchAgent["login LaunchAgent<br/>(clankie autostart)"] -.->|"clankie restart clankie"| Launcher
+```
 
 `clankie autostart enable` installs a user LaunchAgent that runs
 `clankie restart clankie` at login, so the same dependency-ordered start happens

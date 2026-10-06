@@ -38,8 +38,6 @@ Options weighed:
 **`/connect` is the catalog.** Aliased as `/integrations`. `/auth` stays
 provider keys and subscriptions; typing `/auth mcp` redirects here.
 
-![ADR 0093: Owner-authored service connections](../diagrams/0093-owner-authored-service-connections.jpg)
-
 **Discord remains a body.** `/connect discord` opens the existing wizard and
 adds a portal primer plus an invite URL derived from the application id. Any
 user can create their own application; Clankie is not a hosted multi-tenant

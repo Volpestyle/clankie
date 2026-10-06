@@ -43,8 +43,6 @@ flows through `EnvironmentRuntime.startAction`, and each dispatch is verified
 by re-observation before the next decision. Uncertain or stale observations
 pause the session and fail closed rather than replaying input.
 
-![ADR 0039: GBA emulator embodiment and the deterministic core boundary](../diagrams/0039-gba-emulator-embodiment-and-deterministic-core-boundary.jpg)
-
 ### What this slice does and does not do
 
 This slice drives `DeterministicGbaCoreDouble`, a clearly-labeled **test

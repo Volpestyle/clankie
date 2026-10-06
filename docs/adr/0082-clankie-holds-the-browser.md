@@ -28,10 +28,6 @@ set starts active; tool search activates uncommon browser actions additively.
 If the process is unavailable, the captain receives one truthful unavailable
 result rather than a partial catalog.
 
-![ADR 0082 Clankie holds the browser](../diagrams/0082-clankie-holds-the-browser.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 Browser access does not grant system tools.
 [ADR 0095](0095-discord-system-actors.md) separately limits shell and filesystem
 access by authenticated actor and lane.

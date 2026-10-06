@@ -39,15 +39,14 @@ needs a read of the other.
 
 ## Diagrams
 
-Current-state diagrams are Mermaid in the owning Markdown, and they change in
-the same commit as the architecture they draw. The `docs/diagrams/*.jpg`
-exports are dated historical records of the decision that cites them: do not
-update them to match today's system, and never hand-edit or fabricate a render.
-Each export's editable source is a page of the same name in one of the
-`.tldraw` files listed in the [ADR README](../../../docs/adr/README.md#diagram-sources)
-(`clankie-docs-diagrams.tldraw` and `-2` hold one page per diagram). Use the
-`tldraw-offline` skill to edit one; add a tldraw source only for a decision
-that spans repos, and list it in that table.
+Diagrams are Mermaid in the owning Markdown, never image exports or tldraw
+files, and they change in the same commit as the architecture they draw.
+Prefer a few diagrams that carry the whole picture over one per section:
+[`docs/architecture.md`](../../../docs/architecture.md) holds the system map,
+the message-to-turn flow and the fleet flow; a package or app README draws
+only its own subsystem. Before adding one, update or replace the existing
+diagram that covers the subject. An ADR may draw its decision; it is not
+redrawn later to match today's system.
 
 ## Voice
 

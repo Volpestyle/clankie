@@ -3,8 +3,8 @@
 Status: superseded. [ADR 0128](0128-vox-is-the-sole-discord-media-owner.md)
 governs the current sole-owner process/role model; owned native media placement,
 licensing, and the live IPC client use
-[ADR 0100](0100-vox-is-an-owned-native-media-package.md). The proposal and
-diagram below remain historical.
+[ADR 0100](0100-vox-is-an-owned-native-media-package.md). The proposal below
+remains historical.
 
 ## Context
 
@@ -78,8 +78,6 @@ and creates `DAVESession(protocolVersion, userId, channelId)`. The v1 ClankVox s
 its DAVE manager from the same `user_id` and voice `channel_id`. This confirms credential-field
 sufficiency, not live interoperability. VUH-807 must prove `dave_state=ready` and audible outbound
 voice using bot credentials only before the path is treated as live-proven.
-
-![ADR 0025: ClankVox is an in-repo voice sidecar behind versioned bridge IPC](../diagrams/0025-clankvox-placement-and-ipc.jpg)
 
 ### IPC transport
 

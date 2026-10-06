@@ -24,10 +24,6 @@ both sides of the request, write mode-0600 artifacts, and hash the exact written
 bytes. The package reads no ambient provider credentials and imports no provider
 SDK.
 
-![ADR 0029 media-generation connector](../diagrams/0029-media-generation-connector.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 At ratification callers projected `media.generate.image` and
 `media.generate.video` through compiled doctrine. That policy engine no longer
 exists. The enduring separation is that generation creates a local, hash-bound

@@ -40,10 +40,6 @@ origin lane and target; model input cannot aim a write or recall at another
 room. Operator-private episodes remain operator-only, while ambient recall sees
 only entries visible to its destination.
 
-![ADR 0054 cross-lane presence and episodic self-memory](../diagrams/0054-cross-lane-presence-and-episodic-self-memory.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 Recall is injected by the host rather than exposed as a destination-selecting
 tool. The write tool accepts bounded content and visibility, while the host
 stamps lane and target from authenticated turn context.

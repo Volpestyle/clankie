@@ -28,10 +28,6 @@ live play surface. The host grounds reactions/threads in the trigger message;
 the body resolves live-watch actions from the authenticated speaker's fresh
 voice state. Raw user, guild, channel, and message ids are never tool arguments.
 
-![ADR 0062 voice join by asking](../diagrams/0062-voice-join-by-asking.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 - **Agent-owned intent.** No phrase matcher, voice-token gate, classifier model,
   or pending-retry state runs ahead of the captain. An admitted message reaches
   the same agent that handles the rest of the conversation; that agent decides

@@ -46,8 +46,6 @@ heuristic.
 Add `advance_dialog` to the catalogued action set: one action that reads the
 open conversation to its next real decision point.
 
-![ADR 0066: Dialog is one action, not one press per box](../diagrams/0066-dialog-is-one-action-not-one-press-per-box.jpg)
-
 Three properties make it a catalogued action rather than a caller-side loop,
 which is the same argument that supports `walk_to` for collision:
 

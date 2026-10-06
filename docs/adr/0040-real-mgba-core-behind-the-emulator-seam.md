@@ -32,8 +32,6 @@ implements; `GbaEmulatorAdapter` takes a core factory (defaulting to the
 double), so CI runs unchanged without a ROM and the governed dispatch path is
 byte-for-byte the same for both cores.
 
-![ADR 0040: Real headless mGBA core behind the emulator seam](../diagrams/0040-real-mgba-core-behind-the-emulator-seam.jpg)
-
 ### Determinism anchors and identity pins
 
 The frozen fixture (`integrations/gba-emulator/fixtures/firered-bedroom-route/v1`)

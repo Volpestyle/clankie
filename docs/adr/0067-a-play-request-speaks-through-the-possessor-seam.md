@@ -11,7 +11,7 @@ and the realtime room session authors the words.
 The bidirectional event/utterance behavior remains for Clankie's own play under
 the neutral `@clankie/play-voice` name. [ADR 0129](0129-each-player-owns-a-body.md)
 supersedes the possessor scope: external harnesses receive no voice seam or room
-input. The diagram and terminology below are historical.
+input. The terminology below is historical.
 
 ## Context
 
@@ -41,10 +41,6 @@ volition separately says whether that update may ask for speech. It does not
 send `FreePlayTurn.speak`, `reply`, or any other finished sentence. The
 gateway-owning realtime session inherits the experience and is the sole author
 of what the room hears.
-
-![ADR 0067 play requests through the possessor seam](../diagrams/0067-a-play-request-speaks-through-the-possessor-seam.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
 
 Judgement and carriage remain separate: the play loop decides whether a moment
 is worth offering; the seam carries the event; the room session decides the

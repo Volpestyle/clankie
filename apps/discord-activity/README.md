@@ -30,9 +30,7 @@ an immutable cache header. Discord webhook `avatar_url` requires this publicly
 reachable HTTPS path; data URIs and local app assets are not fetchable by
 Discord. The content hash changes the URL whenever the bytes change.
 
-The older
-[rendered-frame architecture JPG](../../docs/diagrams/discord-activity-architecture.jpg)
-is a historical snapshot. Current game-body ownership is diagrammed in
+Current game-body ownership is diagrammed in
 [ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md).
 
 ## Scoped general media core

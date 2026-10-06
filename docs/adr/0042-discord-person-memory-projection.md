@@ -23,10 +23,6 @@ kind, confidence, visibility, optional expiry, correction lineage, and
 content-free provenance. Raw transcripts and audio are not stored through this
 boundary.
 
-![ADR 0042 Discord person-memory projection](../diagrams/0042-discord-person-memory-projection.jpg)
-
-[Editable Turbopuffer tldraw source](../diagrams/clankie-docs-diagrams.tldraw)
-
 An authenticated Discord turn may propose and recall facts visible to that
 room. The operator may inspect, edit, export, and delete the projection. Identity
 and source provenance do not change when content is corrected. Mutation events

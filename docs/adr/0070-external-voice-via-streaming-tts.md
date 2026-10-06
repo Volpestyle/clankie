@@ -23,8 +23,6 @@ ears, conversation, and `ask_clankie`, but emits text. Text deltas stream throug
 an external TTS session whose PCM enters the existing Discord playback path.
 The media owner sees the same conversation port in either mode.
 
-![ADR 0070: An external voice is a swappable mouth, not a second architecture](../diagrams/0070-external-voice-via-streaming-tts.jpg)
-
 Configuration is owner-authored and settings-first. Credentials stay in the
 broker; provider API keys in ambient environment variables fail closed. The
 external boundary enforces secure-or-loopback transport, bounded text and audio,
