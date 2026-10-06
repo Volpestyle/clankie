@@ -30,6 +30,7 @@ import {
   type RealtimeSocketFactory,
   type RealtimeTimers,
   type RealtimeFunctionCall,
+  type ExternalVoiceRealtimePort,
   type VoiceRealtimeEnvConfig,
   type VoiceRealtimeProvider,
   type VoiceTtsProvider,
@@ -609,7 +610,7 @@ export async function probeVoiceWakeTransition(
         capabilityCalled = true;
         settle?.();
       };
-      const engaged = await withTimeout(
+      const engaged = await withTimeout<ExternalVoiceRealtimePort>(
         options.config.realtimeProvider === "anthropic"
           ? openAnthropicVoiceConversation({
               apiKey: options.apiKey,
