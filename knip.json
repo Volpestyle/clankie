@@ -66,6 +66,7 @@
         "test/fixtures/runtime-canary-cpu-preload.mjs",
         "test/fixtures/runtime-canary-service.ts",
         "test/fixtures/mcp-stdio-bridge.ts",
+        "test/fixtures/seat-pump-stdio.ts",
         "test/fixtures/inbound-receipt-0.6.2.d.mts",
         "src/computer-windows-host.ts",
         "src/hosted-body.ts",
