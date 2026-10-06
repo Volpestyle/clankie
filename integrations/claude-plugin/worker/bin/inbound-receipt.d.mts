@@ -17,3 +17,6 @@ export function createInboundSender(options: {
   /** Inspect only the retained original; an empty journal sends nothing. */
   reconcilePending(): Promise<InboundReceipt | undefined>;
 };
+
+/** True for retained claims, locks or unreadable local state. Never mutates a receipt. */
+export function hasPendingInboundClaim(directory: string, scope: string): boolean;

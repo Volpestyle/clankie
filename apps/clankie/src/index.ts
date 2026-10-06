@@ -985,12 +985,10 @@ const fleetResources = await createFleetResourceRuntime({
 });
 const fleetHealthMetrics = new FleetHealthMetrics({
   onProofAlert: (pane, window) =>
-    captain
-      .notifyFleetHealthAlert(
-        pane,
-        `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
-      )
-      .then(() => undefined),
+    captain.notifyFleetHealthAlert(
+      pane,
+      `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
+    ),
 });
 const captain = createCaptain(
   {
