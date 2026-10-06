@@ -1,0 +1,8 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/lark-projects
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  23:23:53
+   Duration  4.78s (transform 1.75s, setup 16ms, import 3.04s, tests 1.65s, environment 0ms)

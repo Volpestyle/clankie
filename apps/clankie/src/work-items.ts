@@ -6,12 +6,10 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
-  WorkBackendKindSchema,
-  WorkConventionSchema,
+  WorkInitSettingsSchema,
   WorkEvidenceSchema,
   WorkItemStatusSchema,
   WorkItemPrioritySchema,
-  WorkLinearLabelSchema,
   type WorkConvention,
   type WorkItem,
   type WorkRepo,
@@ -25,7 +23,9 @@ import {
   backendFor,
   trackerToolsFor,
   type WorkItemPatch,
-  writeConvention,
+  initializeConvention,
+  WorkInitDecisionRequired,
+  WorkInitInvalid,
   type CommandRunner,
   githubRestApi,
   type GhRunner,
@@ -63,20 +63,7 @@ const COMMAND_TIMEOUT_MS = 30_000;
 export const WorkRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("repos") }).strict(),
   z.object({ action: z.literal("discover"), repo: z.string().min(1).max(4096) }).strict(),
-  z
-    .object({
-      action: z.literal("init"),
-      repo: z.string().min(1).max(4096),
-      backend: WorkBackendKindSchema.optional(),
-      directory: z.string().min(1).max(256).optional(),
-      githubRepo: z.string().min(1).max(200).optional(),
-      linearTeam: z.string().min(1).max(64).optional(),
-      linearProject: z.string().min(1).max(200).optional(),
-      linearLabel: WorkLinearLabelSchema.optional(),
-      decisions: z.string().min(1).max(256).optional(),
-      note: z.string().max(1000).optional(),
-    })
-    .strict(),
+  WorkInitSettingsSchema.extend({ action: z.literal("init"), repo: z.string().min(1).max(4096) }).strict(),
   z
     .object({
       action: z.literal("list"),
@@ -874,46 +861,18 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "init": {
           if (!local) throw new WorkRequestError("invalid", "Only this machine records a convention");
           let convention: WorkConvention;
-          if (request.backend === undefined) {
-            const discovery = await discoverConvention(entry.path, run);
-            if (discovery.suggestion === undefined)
-              throw new WorkRequestError("needs_decision", discovery.question ?? "Choose a backend", {
-                ...(discovery.question === undefined ? {} : { question: discovery.question }),
-                signals: discovery.signals,
+          try {
+            const { action: _action, repo: _repo, ...inputs } = request;
+            convention = await initializeConvention(entry.path, inputs, { run, clock });
+          } catch (error) {
+            if (error instanceof WorkInitDecisionRequired)
+              throw new WorkRequestError("needs_decision", error.message, {
+                question: error.message,
+                signals: error.signals,
               });
-            convention = { ...discovery.suggestion, decidedAt: clock().toISOString() };
-          } else {
-            convention = WorkConventionSchema.parse({
-              schemaVersion: 1,
-              backend: request.backend,
-              ...(request.directory === undefined ? {} : { directory: request.directory }),
-              ...(request.githubRepo === undefined ? {} : { github: { repo: request.githubRepo } }),
-              ...(request.linearTeam === undefined
-                ? {}
-                : {
-                    linear: {
-                      team: request.linearTeam,
-                      ...(request.linearProject === undefined ? {} : { project: request.linearProject }),
-                    },
-                  }),
-              ...(request.decisions === undefined ? {} : { decisions: request.decisions }),
-              decidedBy: "owner",
-              decidedAt: clock().toISOString(),
-              ...(request.note === undefined ? {} : { note: request.note }),
-            });
+            if (error instanceof WorkInitInvalid) throw new WorkRequestError("invalid", error.message);
+            throw error;
           }
-          if (request.linearLabel !== undefined) {
-            if (convention.backend !== "linear" || convention.linear === undefined)
-              throw new WorkRequestError(
-                "invalid",
-                "A Linear board label requires a linear convention with a team",
-              );
-            convention = WorkConventionSchema.parse({
-              ...convention,
-              linear: { ...convention.linear, label: request.linearLabel },
-            });
-          }
-          await writeConvention(entry.path, convention);
           return { repo: await describe(entry), convention };
         }
         case "list": {

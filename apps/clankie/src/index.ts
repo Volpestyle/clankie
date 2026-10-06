@@ -12,7 +12,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createBodyDiagnostics } from "./account-diagnostics.ts";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
-import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
+import { fleetMembershipNative, remoteFleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
@@ -1145,7 +1145,22 @@ fleetProjectMembership = new FleetProjectMembership({
   settings: async () => (await settingsStore.load()).projects,
   binding: localFleetBinding,
   hires: captain,
-  ...fleetMembershipNative(localFleetBinding),
+  ...fleetMembershipNative(localFleetBinding, async () => (await settingsStore.load()).projects),
+  remoteOptions: async (id) => {
+    const current = async () => (await runtimes.fleets()).find((fleet) => fleet.id === id);
+    const fleet = await current();
+    if (!fleet || fleet.ssh.shell !== "powershell") return undefined;
+    return {
+      settings: async () => (await settingsStore.load()).projects,
+      hires: captain,
+      ...remoteFleetMembershipNative(
+        fleet,
+        current,
+        async () => (await settingsStore.load()).projects,
+        join(stateRoot, "ssh"),
+      ),
+    };
+  },
 });
 const fleetLinks = new FleetLinks({
   shell: (fleet) => runtimes.fleetShell(fleet),

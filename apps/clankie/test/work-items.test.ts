@@ -90,6 +90,20 @@ describe("the work-items service", () => {
     expect(existsSync(join(ambiguous.repo, ".clankie/work"))).toBe(false);
   });
 
+  it("keeps explicit owner work init able to replace a saved tracking choice", async () => {
+    const { service, repo } = await fixture();
+    await service.handle({ action: "init", repo, backend: "default" }, true);
+    const before = await readFile(join(repo, ".clankie/tracking.json"), "utf8");
+    await service.handle({ action: "init", repo, backend: "markdown", directory: "docs/work" }, true);
+    const saved = await readFile(join(repo, ".clankie/tracking.json"), "utf8");
+    expect(saved).not.toBe(before);
+    expect(JSON.parse(saved)).toMatchObject({
+      backend: "markdown",
+      directory: "docs/work",
+      decidedBy: "owner",
+    });
+  });
+
   it("persists a Linear-shaped local fallback in the saved repo scope when Linear is disconnected", async () => {
     const { service, repo, stateDirectory, workspace } = await fixture();
     await service.handle(

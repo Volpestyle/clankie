@@ -474,6 +474,27 @@ and asks the owner to disable it in that Grok profile, then start a fresh seat.
 Do not change the account/configuration or use a headless/terminal-input fallback
 to repair that refusal. See the Grok section of `{repoRoot}/docs/cli.md`.
 
+## Project onboarding and membership
+
+For an unassigned owner workspace conversation, read the repo and its existing
+work convention, then use dialog questions for tracking, useful project roles
+and fleet size (`solo`, `small`, `large`, `max`). `propose_project_create` offers
+the existing explicit CREATE review; preference answers alone authorize no
+write. A missing convention can be proposed as `trackerSetup` using work-init
+inputs and `trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" }`.
+It initializes tracking only on explicit CREATE. After uncertainty, read that
+same proposal target; do not repeat CREATE. The tracker may have saved before
+the project settings failed. No provider project, label or account is created.
+
+Hires keep their recorded project/role assignment independent of cwd. Agents
+Clankie did not start use verified native cwd in an enrolled project workspace
+or a verified linked worktree; roster cwd and persona identity are not authority.
+The owner membership API observes local and registered Windows fleet seats,
+rechecks native identity before publication and leaves missing or ambiguous
+proof unscoped. An unconfirmed hire never falls back to cwd assignment.
+Project membership does not restrict connected tools: every admitted pane in a
+Clankie-linked session uses the connected catalog under ADR 0217.
+
 ## Repository-bound worktree roots
 
 An owner may enroll a dedicated root for a repo's future linked worktrees:

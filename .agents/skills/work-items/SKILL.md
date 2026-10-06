@@ -60,6 +60,14 @@ authorization; the command never creates labels or selects another account.
 Edits and attachments keep existing labels and uploaded media; an ambiguous
 Evidence heading is refused rather than replaced.
 
+During conversational project onboarding, a missing convention can be included
+in `propose_project_create` as `trackerSetup` with these same explicit work-init
+inputs. The existing CREATE review covers both tracker initialization and the
+project config. Preference answers do not write either. An existing convention
+must be read and reused; initialization refuses to replace it. A partial failure
+may leave a saved tracker without a project, so reconcile the original proposal
+rather than repeating confirmation.
+
 ## Rules
 
 For an existing project's team settings, `clankie project list` returns the

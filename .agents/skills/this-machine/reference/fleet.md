@@ -74,7 +74,8 @@ agent at that station and reads its backlog from work items labelled with the
 role. Prefer a role already in use (`clankie agents roles`) over a near-duplicate.
 `clankie agents role NAME "ROLE"|none [--project PROJECT]` changes a current
 member's saved role in that project; omission selects `default`. The host checks
-the exact native seat and confirmed hire membership, refusing offline, unknown
+the exact native seat and original hire assignment or verified workspace
+membership for agents Clankie did not start, refusing offline, unknown
 or other-project agents. This changes the semantic station role without changing
 the live harness's launch profile. With one positional role,
 `clankie agents role ROLE --project PROJECT [profile flags]` still edits the

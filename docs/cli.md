@@ -1812,7 +1812,8 @@ live or not, through the existing fleet API.
 
 `clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]` assigns a current
 member's role in the selected project. Omit `--project` for the default project.
-The host verifies the agent's current native seat and confirmed hire membership;
+The host verifies the agent's current native seat and project membership through
+its original hire assignment or, for agents Clankie did not start, verified cwd;
 offline agents, unknown membership and members of a different project are refused.
 The assignment changes the project's semantic role, preserving the live harness
 and its launch profile
@@ -3125,7 +3126,7 @@ preference answers do not authorize creation.
 
 The file requires `name` and `workspacePath`; `PROJECT` and `REVISION` are explicit
 arguments and cannot be supplied or overridden by the file. Optional `roles`,
-`workerCap`, `trackerRef` and `fleet` use the existing project policy vocabulary. Role and
+`workerCap`, `trackerRef`, `trackerSetup` and `fleet` use the existing project policy vocabulary. Role and
 project caps may be `null` to inherit; zero stays an explicit zero. Fleet size
 and model preferences do not imply numeric caps or new hiring guidance.
 
@@ -3139,10 +3140,27 @@ observations, not cross-process compare-and-swap or atomic authority checks.
 
 An optional tracker binding must be
 `{"workspaceId":"primary","path":".clankie/tracking.json"}` and the valid saved
-convention must already exist. This command does not initialize a tracker or
-choose an account. Missing/changed sources report a conflict. See the
-[creation boundary](testing/2026-10-04-project-create/README.md) for exact checks
-and the remaining conversational onboarding and station work.
+convention must already exist unless `trackerSetup` is supplied. For a workspace
+without a saved convention, `trackerSetup` includes an explicit `backend`
+(`default`, `markdown`, `github`, `linear`) and the existing work-init inputs:
+`directory`, `githubRepo`, `linearTeam`, `linearProject`, `linearLabel`,
+`decisions` and `note`. It requires that tracker binding and writes the same
+`.clankie/tracking.json` as `clankie work init`, within the reviewed CREATE.
+An existing convention or changed workspace, parent directory, owner authority
+or project revision refuses initialization. It chooses no account and creates
+no provider project or label.
+
+In an unassigned owner workspace conversation, Clankie receives the onboarding
+opportunity and can read the repo, ask about tracking, propose useful roles and
+ask about fleet size through the existing dialog questions. Answers are context;
+`propose_project_create` puts their complete configuration into the existing
+explicit CREATE review. Confirmation consumes that proposal once. Tracker and
+project settings are two file writes: a failure after tracker save can leave
+only the tracker. An uncertain confirmation stays uncertain and is checked
+with the original proposal target, never replayed. See the
+[closure evidence](testing/2026-10-05-project-onboarding/README.md) for source
+checks and the remaining live acceptance. Project village visuals belong to
+VUH-1710.
 
 ### `project list`, `project settings` and `project update`
 

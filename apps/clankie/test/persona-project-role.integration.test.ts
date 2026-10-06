@@ -34,7 +34,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture() {
+async function fixture(mode: "hire" | "workspace" | "remote" = "hire") {
   const directory = await mkdtemp(join(tmpdir(), "persona-project-role-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const settings = new SettingsStore(join(directory, "settings.json"));
@@ -52,7 +52,7 @@ async function fixture() {
   };
   const panes = ["Pixel Smith", "Default Member", "Unconfirmed Worker"].map((name, index) => ({
     pane_id: `w1:p${index + 1}`,
-    terminal_id: `term_${index + 1}`,
+    terminal_id: mode === "remote" && index === 0 ? "pc/term_1" : `term_${index + 1}`,
     name,
     agent: "codex",
     agent_status: "idle",
@@ -61,7 +61,10 @@ async function fixture() {
     agent_session: { source: "herdr:codex", kind: "id", value: `native-${index + 1}` },
   }));
   const proofs: ProjectProcessProof[] = panes.map((pane, index) => ({
-    fleet: "default",
+    fleet: mode === "remote" && index === 0 ? "pc" : "default",
+    ...(mode === "remote" && index === 0
+      ? { workspace: { machineId: "pc", platform: "windows" as const, canonicalPath: "C:\\Project" } }
+      : {}),
     pane: pane.pane_id,
     nativeOccupantId: occupantIdForHerdrSession({ ...pane.agent_session, kind: "id" }),
     binding: { socketPath: binding.socketPath, session: binding.session },
@@ -75,11 +78,17 @@ async function fixture() {
       harness: "codex",
       title: panes[index]!.name,
       workingDirectory: join(directory, String(index)),
+      ...(mode === "remote" && index === 0 ? { fleet: "pc" } : {}),
       role: "builder",
     });
     hires.launch(allocation.id, projects);
     hires.pane(allocation.id, panes[index]!.pane_id);
-    hires.observe(allocation.id, panes[index]!.terminal_id, proofs[index]!.nativeOccupantId, proofs[index]);
+    hires.observe(
+      allocation.id,
+      mode === "remote" && index === 0 ? "term_1" : panes[index]!.terminal_id,
+      proofs[index]!.nativeOccupantId,
+      proofs[index],
+    );
     hires.confirmed(allocation.id);
   }
   const native = async (args: readonly string[]) => {
@@ -121,15 +130,30 @@ async function fixture() {
   });
   cleanups.push(() => captain.close());
   let onObserve: (() => Promise<void>) | undefined;
-  membership = new FleetProjectMembership({
+  const membershipOptions = {
     settings: async () => (await settings.load()).projects,
     binding: async () => binding,
     hires: captain,
     roster: async () => parseHerdrAgentList(await native(["agent", "list"])),
-    observe: async (pane) => {
+    observe: async (pane: string) => {
       await onObserve?.();
       return structuredClone(proofs.find((proof) => proof.pane === pane));
     },
+    ...(mode === "workspace"
+      ? {
+          workspace: async (proof: ProjectProcessProof) =>
+            proof.pane === panes[2]!.pane_id ? "repo" : undefined,
+        }
+      : {}),
+  };
+  membership = new FleetProjectMembership({
+    ...membershipOptions,
+    ...(mode === "remote"
+      ? {
+          remoteOptions: async (fleet: string) =>
+            fleet === "pc" ? { ...membershipOptions, fleet: "pc" } : undefined,
+        }
+      : {}),
   });
   let authenticated = true;
   const operatorToken = mintOperatorToken();
@@ -191,6 +215,7 @@ async function fixture() {
           {
             seatId: panes[index]!.terminal_id,
             occupantId: proofs[index]!.nativeOccupantId,
+            ...(mode === "remote" && index === 0 ? { fleet: "pc" } : {}),
           },
         ],
       }),
@@ -241,6 +266,33 @@ it("writes and clears a nondefault member's role through the owner CLI and proje
   const identities = JSON.parse(await readFile(join(f.directory, "personas.json"), "utf8"));
   expect(identities.personas.every((persona: Record<string, unknown>) => !("role" in persona))).toBe(true);
 });
+
+it.each(["workspace", "remote"] as const)(
+  "assigns a %s member's role through the owner CLI without changing its hire ledger",
+  async (mode) => {
+    const f = await fixture(mode);
+    const index = mode === "workspace" ? 2 : 0;
+    const name = mode === "workspace" ? ["Unconfirmed", "Worker"] : ["Pixel", "Smith"];
+    const ledger = await readFile(join(f.directory, "herdr-watches.json.project-hires.json"), "utf8");
+    expect(await runAgentsCommand(["role", ...name, "tester", "--project", "repo"], f.options)).toMatchObject(
+      { personaId: f.ids[index], role: "tester" },
+    );
+    expect(projectRoleForPersona((await f.settings.load()).projects, f.ids[index]!, "repo")).toBe("tester");
+    expect(await f.readMembership(index)).toMatchObject({
+      seats: [
+        {
+          membership: {
+            outcome: "member",
+            source: mode === "workspace" ? "workspace" : "hire",
+            projectId: "repo",
+            role: "tester",
+          },
+        },
+      ],
+    });
+    expect(await readFile(join(f.directory, "herdr-watches.json.project-hires.json"), "utf8")).toBe(ledger);
+  },
+);
 
 it("keeps old-client omission on a real default member and refuses foreign or unconfirmed members", async () => {
   const f = await fixture();
