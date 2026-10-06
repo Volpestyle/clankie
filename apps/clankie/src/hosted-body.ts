@@ -30,6 +30,7 @@ import {
   type ManagedDiscordPolicyRequest,
   type ManagedDiscordPolicyState,
 } from "@clankie/protocol/managed-discord";
+import { BodyReleaseSchema } from "@clankie/protocol/body-release";
 import { HostedDiscordAuthorizationClaimsSchema } from "@clankie/protocol/hosted-discord";
 import { verifyHostedDiscordPermit } from "@clankie/protocol/hosted-discord-crypto";
 import type { DiscordDirectoryRequest, DiscordPermissionsRequest } from "@clankie/protocol";
@@ -607,6 +608,12 @@ export class HostedBodyClient {
     if (credential.refreshAt <= this.clock()) throw new Error("Fleet returned an expired renewal");
     await this.persist?.(credential.token, credential.expiresAt);
     this.credential = credential;
+  }
+  /** The release the fleet approves for this body; `null` holds it in place (ADR 0237). */
+  async approvedRelease(): Promise<string | null> {
+    const response = await this.post("release", {});
+    if (!response.ok) throw new Error(`Fleet release approval unavailable (${response.status})`);
+    return BodyReleaseSchema.parse(await response.json()).approved;
   }
   async post(path: string, body: Readonly<Record<string, unknown>>): Promise<Response> {
     const credential = await this.resolveHostToken();

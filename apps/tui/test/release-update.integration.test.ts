@@ -83,6 +83,8 @@ async function fixture(
     /** The provider API the published release expects, and what the installed provider serves. */
     readonly publishedProviderApi?: number;
     readonly providerApis?: readonly number[];
+    /** A managed body's fleet answer; absent for a self-run body. */
+    readonly approved?: string | null;
   } = {},
 ) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
@@ -132,6 +134,7 @@ async function fixture(
       env,
       helperPath,
       ...(input.providerApis === undefined ? {} : { providerApis: input.providerApis }),
+      ...(input.approved === undefined ? {} : { approvedRelease: async () => input.approved! }),
       source: { api: `http://127.0.0.1:${port}/api`, download: `http://127.0.0.1:${port}/download` },
     });
   const settled = async (id: string): Promise<RuntimeUpdateResult> => {
@@ -221,6 +224,23 @@ it("installs a release whose provider API the installed provider serves", async 
   const f = await fixture({ publishedProviderApi: 2, providerApis: [1, 2] });
   const accepted = await f.updater(f.old).request("main", authority);
   expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
+});
+
+it("a managed body installs the fleet-approved release and nothing newer", async () => {
+  const held = await fixture({ approved: null });
+  await expect(held.updater(held.old).request("main", authority)).rejects.toThrow("holding releases");
+  const current = await fixture({ approved: "v1.0.0" });
+  expect(await current.updater(current.old).request("main", authority)).toMatchObject({
+    accepted: false,
+    upToDate: true,
+  });
+  await expect(current.updater(current.old).request("v1.1.0", authority)).rejects.toThrow(
+    "not approved for this body",
+  );
+  const approved = await fixture({ approved: "v1.1.0" });
+  const accepted = await approved.updater(approved.old).request("main", authority);
+  expect(await approved.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
+  expect(readlinkSync(join(approved.install, "current"))).toBe(join("releases", "v1.1.0"));
 });
 
 it("restores the previous release when the new one fails to come up", async () => {

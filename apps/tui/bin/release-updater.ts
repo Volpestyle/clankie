@@ -30,6 +30,8 @@ export interface ReleaseUpdaterOptions {
   readonly releaseRoot: string;
   /** The installed runtime provider's API versions; a release outside them is refused. */
   readonly providerApis?: readonly number[];
+  /** A managed body's fleet-approved release; `null` holds it. Nothing newer installs. */
+  readonly approvedRelease?: () => Promise<string | null>;
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
   readonly source?: ReleaseSource;
@@ -83,13 +85,20 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
     if (!response.ok) throw Error(`Release lookup failed (${response.status})`);
     return object(await response.json());
   };
-  /** `main`/`latest` mean the newest official release; `vX.Y.Z` pins one. */
+  /** `main`/`latest` mean the newest official (or fleet-approved) release; `vX.Y.Z` pins one. */
   const resolveRelease = async (ref: string) => {
-    const version = ["", "main", "latest"].includes(ref)
-      ? releaseVersion((await api("/releases/latest")).tag_name)
-      : releaseVersion(ref.replace(/^refs\/tags\//u, ""));
-    const commit = commitString((await api(`/commits/${version}`)).sha);
-    return { version, commit };
+    const approved = options.approvedRelease === undefined ? undefined : await options.approvedRelease();
+    if (approved === null) throw Error("The fleet is holding releases for this body");
+    const latest = ["", "main", "latest"].includes(ref);
+    const version =
+      latest && approved !== undefined
+        ? releaseVersion(approved)
+        : latest
+          ? releaseVersion((await api("/releases/latest")).tag_name)
+          : releaseVersion(ref.replace(/^refs\/tags\//u, ""));
+    if (approved !== undefined && olderThan(approved, version))
+      throw Error(`Release ${version} is not approved for this body (approved: ${approved})`);
+    return version;
   };
   return {
     runtime: boot,
@@ -102,8 +111,9 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
       if (!journal.admit()) return { ...status(), accepted: false };
       if (currentRelease(installRoot) !== releaseRoot)
         throw Error("Running service is not the current release");
-      const target = await resolveRelease(ref);
-      if (target.version === manifest.version) return { ...status(), accepted: false, upToDate: true };
+      const version = await resolveRelease(ref);
+      if (version === manifest.version) return { ...status(), accepted: false, upToDate: true };
+      const target = { version, commit: commitString((await api(`/commits/${version}`)).sha) };
       if (!existsSync(helperPath)) throw Error("This release has no update helper");
       const initiator = parseUpdateInitiator(authority.initiator ?? { kind: "operator" });
       const id = randomUUID();

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hostedFixture } from "./fixtures/hosted-body.ts";
 import { describe, expect, it, vi } from "vitest";
+import { FLEET_BODY_RELEASE_PATH } from "@clankie/protocol/body-release";
 import { SettingsStore } from "@clankie/settings";
 import {
   applyHostedAccountApps,
@@ -229,14 +230,16 @@ function verifyCall(url: string | URL | Request, init: RequestInit | undefined, 
 }
 
 describe("signed body fleet calls", () => {
-  it("registers before half-life renewal, then signs all four routes over exact UTF-8 bytes", async () => {
+  it("registers before half-life renewal, then signs every body route over exact UTF-8 bytes", async () => {
     const f = hostedFixture(),
       signing = generateKeyPairSync("ed25519");
     const now = f.now + 10_800_000;
     const fetcher = vi.fn<typeof fetch>(async (url) =>
       String(url).endsWith("host-credential")
         ? Response.json({ credential: f.host(now / 1000), expiresAtMs: now + 21_600_000 })
-        : Response.json({}),
+        : String(url).endsWith("/release")
+          ? Response.json({ approved: "v1.2.3" })
+          : Response.json({}),
     );
     const client = new HostedBodyClient(f.bootstrap, { clock: () => now, fetch: fetcher });
     await expect(client.post("heartbeat", {})).rejects.toThrow("not registered");
@@ -250,11 +253,13 @@ describe("signed body fleet calls", () => {
     await client.post("heartbeat", { busy: true, reasons: ["captain-turn"], note: '☃\nquoted"' });
     await client.registerWakeKey("device", "public-key");
     await client.revokeWakeKey("device");
+    expect(await client.approvedRelease()).toBe("v1.2.3");
     expect(fetcher.mock.calls.slice(1).map(([url]) => new URL(String(url)).pathname)).toEqual([
       "/fleet/v1/body/host-credential",
       "/fleet/v1/body/heartbeat",
       "/fleet/v1/body/wake-keys",
       "/fleet/v1/body/wake-keys/revoke",
+      FLEET_BODY_RELEASE_PATH,
     ]);
     expect(fetcher.mock.calls[1]![1]?.body).toBe("{}");
     for (const [url, init] of fetcher.mock.calls.slice(1)) verifyCall(url, init, signing.publicKey);
