@@ -423,6 +423,11 @@ After an owner-authorized same-thread reattach, `clankie agents readopt SEAT
 --conversation ID` repairs the existing owning conversation's occupant binding.
 Unread worker output is available through `clankie agents reports --conversation ID`;
 reading leaves it unread until the lead acknowledges the fully offered IDs.
+Use `clankie agents reports ack --json-stdin --conversation ID` with the exact
+returned page, or pass its `ackDeliveryIds` as positional arguments. For an
+owner-authorized history cleanup, `reports ack-history DELIVERY_ID...` accepts
+up to 1,000 explicitly selected retained IDs and requires operator credentials.
+Never clear new unread reports as part of a migration cleanup.
 
 The roster's `harnessBridge` flags the same process facts; `Ctrl+G` in the
 console reveals the selected pane's full fix. `live-process` verifies process

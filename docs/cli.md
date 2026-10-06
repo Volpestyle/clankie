@@ -3205,6 +3205,16 @@ returns the oldest unread reports with their original delivery IDs and exact tex
 Reading does not mark them read. After reviewing every offered report, run
 `clankie agents reports ack DELIVERY_ID... --conversation ID` (or
 `acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.
+You can pass the unmodified returned page on standard input with
+`clankie agents reports ack --json-stdin --conversation ID`; the page must name
+the same conversation. A page holds at most 100 IDs.
+For reviewed, retained history, the owner can run
+`clankie agents reports ack-history DELIVERY_ID... --conversation ID` to
+acknowledge up to 1,000 explicitly selected IDs, including migrated receipts
+that were never offered by the current runtime. This requires operator
+authentication; captain and paired-device credentials cannot use it. Unknown
+IDs or IDs from another conversation reject the entire operation. New reports
+and reports outside the selected IDs remain unread.
 The roster exposes per-worker unread receipts and the fleet retains report rows
 for disappeared panes. A finished worker with pending or uncertain output shows
 “done, report not delivered”; confirmed transport alone still shows “report unread”.
@@ -3216,7 +3226,8 @@ legacy receipts remain uncertain and readable; they are never blindly resent.
 A matching original thread may retain its output while requiring re-adoption;
 that retention grants no control or dispatch until the owner repairs the binding.
 The API uses authenticated operator dispatch operations `readopt_seat`,
-`worker_reports`, and `acknowledge_worker_reports`, each naming the exact owning
+`worker_reports`, `acknowledge_worker_reports`, and the owner-only
+`acknowledge_worker_report_history`, each naming the exact owning
 `conversationId`. Credential and conversation authority are checked again at
 admission.
 

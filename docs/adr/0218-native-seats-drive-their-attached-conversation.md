@@ -237,6 +237,29 @@ complete bounded payloads; only a recipient's explicit acknowledgment of offered
 IDs clears unread state. Roster and console expose pending/uncertain results and
 unread delivered results even after the worker leaves.
 
+### Reviewed history acknowledgment (VUH-1690)
+
+Ordinary acknowledgment retains the offered-ID requirement. The CLI accepts an
+unchanged returned JSON page with its conversation binding and validates exact
+delivery IDs before dispatch, so malformed arguments fail locally rather than
+as an opaque HTTP 400.
+
+An explicitly authenticated operator can retire up to 1,000 selected retained
+history IDs through `acknowledge_worker_report_history` (`reports ack-history`).
+Captain and paired-device principals cannot invoke it. Every selected receipt
+must belong to the named conversation; a missing or foreign ID rejects the
+whole write. The existing metadata transaction persists the read state and
+notifies the same roster projection. It never resends content or marks newly
+arriving reports read. Migration itself stays conservative: historical transport
+success cannot prove that the lead read a report.
+
+Focused HTTP integration checks exercise the production CLI, authenticated
+route, operator service and persisted journal: 20/100 returned IDs, unchanged
+JSON-page binding, owner-only 165-record cleanup, surviving fresh unread output,
+roster removal and restart persistence. The historical live 400 is not reproduced
+by these current-source checks; its original runtime inputs remain a separate
+diagnostic gap.
+
 ## Consequences and verification
 
 Conversation identity and worker ownership survive harness changes. The native

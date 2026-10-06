@@ -141,11 +141,16 @@ export function acknowledgeInboundReports(
   ctx: ConversationStore,
   conversationId: string,
   deliveryIds: readonly string[],
+  options: { reviewedHistory?: boolean } = {},
 ): boolean {
   const meta = ctx["metas"].get(conversationId);
-  if (!meta || deliveryIds.length === 0 || deliveryIds.length > 100) return false;
+  if (!meta || deliveryIds.length === 0 || deliveryIds.length > (options.reviewedHistory ? 1000 : 100))
+    return false;
   const receipts = deliveryIds.map((id) => meta.inboundAcceptances?.[id]);
-  if (receipts.some((receipt) => !receipt || !receipt.reportDelivery?.offeredAt)) return false;
+  if (
+    receipts.some((receipt) => !receipt || (!options.reviewedHistory && !receipt.reportDelivery?.offeredAt))
+  )
+    return false;
   const before = structuredClone(meta.inboundAcceptances);
   for (const receipt of receipts) {
     receipt!.reportDelivery = {
