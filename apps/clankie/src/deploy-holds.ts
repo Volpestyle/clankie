@@ -5,7 +5,7 @@ import { z } from "zod";
 import { DeployHoldSchema, type DeployHold, type HoldOverride } from "@clankie/protocol/integrate";
 
 /** Atomic replacement plus fsync: a process exit cannot turn a pass into a partial JSON file. */
-export async function durableJson(path: string, value: unknown): Promise<void> {
+export async function durableJson(path: string, value: unknown, guard?: () => Promise<void>): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temp = `${path}.${randomUUID()}.tmp`;
   const file = await open(temp, "wx", 0o600);
@@ -15,12 +15,18 @@ export async function durableJson(path: string, value: unknown): Promise<void> {
   } finally {
     await file.close();
   }
-  await rename(temp, path);
-  const directory = await open(dirname(path), "r");
   try {
-    await directory.sync();
-  } finally {
-    await directory.close();
+    await guard?.();
+    await rename(temp, path);
+    const directory = await open(dirname(path), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -104,11 +110,24 @@ export class DeployHolds {
       return this.list();
     });
   }
-  async release(id: string, actor: string, reason: string): Promise<DeployHold[]> {
+  async release(
+    id: string,
+    actor: string,
+    reason: string,
+    expected?: Pick<DeployHold, "holder" | "reason" | "pane" | "seat">,
+  ): Promise<DeployHold[]> {
     return withDirectoryLock(join(this.directory, "landing.lock"), async () => {
       const registry = await this.read();
       const hold = registry.holds.find((h) => h.id === id);
       if (!hold) throw Error("Unknown hold");
+      if (
+        expected &&
+        (hold.holder !== expected.holder ||
+          hold.reason !== expected.reason ||
+          hold.pane !== expected.pane ||
+          hold.seat !== expected.seat)
+      )
+        throw Error("Hold ownership changed before release");
       registry.events.push({
         action: "release",
         hold,

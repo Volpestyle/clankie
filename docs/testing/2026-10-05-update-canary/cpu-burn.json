@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-06T03:24:34.626Z",
+  "completedAt": "2026-10-06T03:25:14.660Z",
+  "head": "8fcf47a54b578629386bdbc306db3ae2205d57f4",
+  "node": "v26.7.0",
+  "outcome": "live",
+  "path": "apps/clankie/src/index.ts -> /health -> runtime canary -> /v1/runtime-update",
+  "policy": {
+    "windowMs": 30000,
+    "sampleIntervalMs": 1000,
+    "cpuPercent": 10,
+    "healthLatencyMs": 250
+  },
+  "limitations": [
+    "The preceding healthy cutover and previous healthy checkpoint are seeded; no updater helper is executed.",
+    "The observation uses an accelerated 30-second window, not the default 300-second window.",
+    "No model turn, provider call, Discord body, browser, Herdr fleet or AWS deployment is exercised."
+  ],
+  "sourceDigests": {
+    "apps/clankie/src/index.ts": "dee8d3513aa4ee60ecc1f9825b31f1f4940b3031f44e83a6b14a838550a48ae6",
+    "apps/clankie/src/runtime-canary.ts": "5b7aade28ffe3c67ad8b3a54077985bfd528a75f860db2e8bd4872c8495ac855",
+    "apps/clankie/src/runtime-health-sample.ts": "a2b07ac97461c2cc590746c77c6f40460bc18ece98d708e4262662fa0151122d"
+  },
+  "uncommittedInput": true,
+  "processExit": {
+    "code": 143,
+    "signal": null
+  },
+  "canary": {
+    "state": "failed",
+    "policy": {
+      "windowMs": 30000,
+      "sampleIntervalMs": 1000,
+      "cpuPercent": 10,
+      "healthLatencyMs": 250
+    },
+    "previousHealthyCommit": "1eb8ea938630eea2c404896314d95b768cc39c8c",
+    "holdEstablished": true,
+    "startedAt": "2026-10-06T03:24:43.057Z",
+    "completedAt": "2026-10-06T03:25:13.895Z",
+    "samples": 29,
+    "cpuMeanPercent": 39.04798412065368,
+    "healthP95Ms": 102.45954099999653,
+    "error": "runtime-canary-cpu-budget-exceeded",
+    "alertState": "unavailable"
+  },
+  "cutoverPhase": "healthy",
+  "cutoverHealthy": true,
+  "holds": [
+    {
+      "holder": "Clankie runtime canary",
+      "reason": "Runtime canary for 8fcf47a54b578629386bdbc306db3ae2205d57f4; previous healthy 1eb8ea938630eea2c404896314d95b768cc39c8c"
+    }
+  ],
+  "nextUpdate": {
+    "status": 409,
+    "error": "update_refused",
+    "detail": "Error: Deploy held: e756a884-b4ae-4f17-801e-15f10562baf3 by Clankie runtime canary: Runtime canary for 8fcf47a54b578629386bdbc306db3ae2205d57f4; previous healthy 1eb8ea938630eea2c404896314d95b768cc39c8c (since 2026-10-06T03:24:43.035Z)",
+    "helperScheduled": false
+  },
+  "retainedCheckpoint": {
+    "commit": "1eb8ea938630eea2c404896314d95b768cc39c8c"
+  }
+}

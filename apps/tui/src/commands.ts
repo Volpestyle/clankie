@@ -198,7 +198,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     name: "update",
     aliases: [],
     description: "Stage a runtime update or read its durable result",
-    argumentHint: "[--ref REF | status]",
+    argumentHint: "[--ref REF | status | canary]",
     takesArgument: true,
     async run(argument, shell) {
       if (!context.commandUpdate) {

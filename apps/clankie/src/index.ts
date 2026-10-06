@@ -15,6 +15,8 @@ import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative, remoteFleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
+import { RuntimeCanary } from "./runtime-canary.ts";
+import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
 import { DeployHolds } from "./deploy-holds.ts";
 import { deployHoldPresence } from "./deploy-hold-presence.ts";
@@ -606,13 +608,17 @@ const boundApp = (): ClankieApp => {
 // Durable revision receipts distinguish captain echoes from delegated worker
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
-let notifyLinearBudgetWarning: ((text: string) => Promise<boolean>) | undefined;
+let bindLinearBudgetWarning!: (notify: (text: string) => Promise<boolean>) => void;
+const linearBudgetWarningReady = new Promise<(text: string) => Promise<boolean>>((resolve) => {
+  bindLinearBudgetWarning = resolve;
+});
 const linearRequestBudget = new LinearRequestBudget({
   onAlert: (account) => {
     const text = `Linear request budget reached ${Math.round(account.utilization * 100)}% (${account.used}/${account.limit} requests in an hour) at ${new Date().toISOString()}. Background reads slow at 80%; writes retain priority. Inspect clankie linear budget.`;
     logger.warn({ event: "linear.request_budget.warning", ...account }, text);
-    if (notifyLinearBudgetWarning) return notifyLinearBudgetWarning(text);
-    return false;
+    // Keep boot-time warnings tied to the original admission result. A text-only
+    // queue loses false/rejected results and cannot safely retry the incident.
+    return linearBudgetWarningReady.then((notify) => notify(text));
   },
 });
 const mcpHost = createMcpHost({
@@ -981,6 +987,7 @@ const captain = createCaptain(
       ? {}
       : {
           runtimeUpdater: {
+            runtime: runtimeUpdater.runtime,
             status: runtimeUpdater.status,
             request: (ref: string, authority: import("../../tui/bin/runtime-updater.ts").UpdateAuthority) =>
               deployHolds.landing(`runtime-tool:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
@@ -1244,6 +1251,41 @@ const workerPluginNotices = new WorkerPluginNotices({
     return runtimes.fleetRun(fleet)(metadata);
   },
 });
+const runtimeCanary =
+  runtimeUpdater === undefined
+    ? undefined
+    : new RuntimeCanary({
+        updatesDirectory: join(process.env.HOME || homedir(), ".clankie", "updates"),
+        runtime: runtimeUpdater.runtime,
+        holds: deployHolds,
+        sample: createRuntimeHealthSampler({ healthUrl: `http://127.0.0.1:${port}/health` }),
+        alert: async (text) => {
+          const alerts = captain as typeof captain & {
+            notifyRuntimeHealthAlert?: (text: string) => Promise<boolean>;
+          };
+          if (!alerts.notifyRuntimeHealthAlert) {
+            logger.warn(
+              { event: "runtime.canary.alert_unavailable" },
+              "Runtime canary alert delivery is unavailable",
+            );
+            return false;
+          }
+          return alerts.notifyRuntimeHealthAlert(text);
+        },
+        onError: (error) =>
+          logger.warn(
+            { event: "runtime.canary.unavailable", error },
+            "Runtime canary requires reconciliation",
+          ),
+      });
+await runtimeCanary
+  ?.recover()
+  .catch((error) =>
+    logger.error(
+      { event: "runtime.canary.recovery_failed", error },
+      "Runtime canary recovery failed; update remains unresolved",
+    ),
+  );
 const workerMcp = new WorkerMcp({
   directory: join(stateRoot, "worker-grants"),
   credentials: operatorCredentialStore,
@@ -1261,7 +1303,7 @@ const workerMcp = new WorkerMcp({
   },
 });
 
-notifyLinearBudgetWarning = (text) => captain.notifyRuntimeHealthAlert(text);
+bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
 const runtimeHealth = new RuntimeHealthObserver({
   settings: async () => (await settingsStore.load()).runtimeHealth,
   healthUrl: `http://127.0.0.1:${port}/health`,
@@ -1315,6 +1357,7 @@ const clankie = await createClankieApp({
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
+  ...(runtimeCanary === undefined ? {} : { runtimeCanary }),
   refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({
       repoRoot,
@@ -1625,6 +1668,7 @@ const server = serve({
 });
 if (server.listening) runtimeHealth.start();
 else server.once("listening", () => runtimeHealth.start());
+runtimeCanary?.start();
 // ADR 0204: opt-in LAN door for a self-hosted phone, device routes only.
 const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
 const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
@@ -1676,6 +1720,7 @@ let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
+  linearRequestBudget.close();
   const exitCode = signal === "SIGINT" ? 130 : 143;
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
@@ -1702,6 +1747,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await discordTracking.close();
+    await runtimeCanary?.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);

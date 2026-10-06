@@ -314,7 +314,7 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 <a id="service-lifecycle"></a>
 
-### `update [--ref REF]` / `update status`
+### `update [--ref REF]` / `update status` / `update canary`
 
 `clankie update` stages the local landed `main` (or an explicit local Git ref),
 installs dependencies in an independent detached worktree, and schedules a fixed
@@ -336,6 +336,26 @@ healthy service running and report `harness-refresh-incomplete`; they do not
 roll back the service. `harnessRefresh` in update status links the complete
 per-profile receipt in `harness-refresh.json` beside the transaction record.
 
+After the new service responds with its exact boot identity, a persistent
+post-update canary observes it for five minutes. The default budgets are 10%
+captain-process CPU (100% means one core) and 250 ms `/health` p95, sampled every
+10 seconds. Health latency includes TCP setup and the complete response on a
+fresh loopback HTTP connection. Its deploy hold blocks further updates and integration landings
+during observation. A pass releases only that canary's hold. A regression or
+missing health signal records a failed canary, retains the hold, names the
+previous healthy commit, and attempts the runtime-health alert path. The new
+pin keeps running; rollback requires an explicit owner decision. Alert status
+distinguishes submitted, unavailable, and an uncertain claimed attempt.
+Submitted means the native notification path accepted the attempt; it does not
+claim a confirmed recipient receipt.
+
+`clankie update canary` reads the policy and last canary. Configure the next
+update with `--window-seconds N`, `--sample-seconds N`, `--cpu-percent N`, and
+`--health-ms N`; omitted fields retain their values. Policy changes do not
+change an in-flight observation. `/update` offers the same settings in the TUI.
+A restart of the observed service starts a fresh full window for its new boot
+identity; elapsed downtime never counts as healthy observation.
+
 The CLI and TUI `/update` return an accepted/pending operation, not a success
 claim. `clankie update status` and `/update status` read the durable old/new commit,
 phase, per-service receipts and exact service boot identity. Results live in
@@ -351,6 +371,21 @@ caller-supplied lane, actor and path claims confer no authority. Captain tools
 sessions and recheck their captured source before acceptance. Social sessions
 cannot gain the tool through a later permission change. Accepted host operations
 may finish or roll back after the original turn/service exits.
+Targets predating the canary coordinator are refused before installation or
+service shutdown (`target-runtime-canary-unsupported`); their health parser
+cannot complete the new observation. An owner choosing a legacy rollback must
+review it through the installer rather than bypassing the pending update record.
+
+`GET /v1/runtime-update/canary` returns `{policy, canary}`;
+`PUT /v1/runtime-update/canary` accepts a partial policy with `windowMs`,
+`sampleIntervalMs`, `cpuPercent`, and `healthLatencyMs` and applies it to the next
+canary. Both require current operator authority; policy publication rechecks it
+inside the lock and immediately before replacing the durable file. Revocation
+retains the previous policy. The local `/health` response
+also exposes `processHealth`: a boot UUID, PID, uptime and cumulative process
+CPU microseconds. Boot identity comes from the running updater's immutable
+identity; liveness probes do not reread update transaction files. The response
+carries no messages, prompts, tenant content or credentials.
 
 Deploy holds also block runtime-update admission. `update status` includes holds
 and holder presence. An operator may override explicitly with
@@ -696,10 +731,13 @@ actor share one budget across OAuth audiences. Counters reset on service restart
 provider remaining/reset headers account for usage by other clients after the
 next provider response. No credentials or request bodies appear in the report.
 
-At 50% of the 5,000-request hourly budget, Clankie emits one warning through
-native runtime alerts and shows `warning` in `/doctor`. Unaccepted warnings retry
-on subsequent budget observations after at least one minute; a pending delivery
-cannot start another warning. At 80%, device Work refreshes
+At 50% of the 5,000-request hourly budget, Clankie shows `warning` in `/doctor`
+and submits one warning through native runtime alerts. A refused, thrown or
+rejected admission remains pending and retries after 60 seconds, including when
+provider requests stop or the hard budget refuses them. Only one admission can
+be in flight per actor. Native acceptance stops retries even if its original
+receipt is unconfirmed; acceptance does not prove the recipient read the alert.
+Boot-time warnings await the native handler's result. At 80%, device Work refreshes
 and explicitly marked background reads
 share a one-minute minimum interval per actor; excess calls are refused before
 dispatch with a retry time. Existing issue-list caching continues to apply.

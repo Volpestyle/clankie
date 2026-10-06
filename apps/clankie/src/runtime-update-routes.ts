@@ -8,6 +8,7 @@ import { HoldOverrideSchema } from "@clankie/protocol/integrate";
 import type { DeployHolds } from "./deploy-holds.ts";
 import { FleetHarnessRefreshRequestSchema } from "@clankie/protocol/fleet-settings";
 import type { SettingsStore } from "@clankie/settings";
+import { RuntimeCanaryPolicySchema, type RuntimeCanary } from "./runtime-canary.ts";
 import type { HerdrFleet } from "./herdr-fleet.ts";
 import {
   resolveFleetSettingsContext,
@@ -25,8 +26,11 @@ class HarnessRefreshPolicyError extends Error {
   }
 }
 
+class CanaryPolicyAuthorityError extends Error {}
+
 export function createRuntimeUpdateRoutes(options: {
   readonly updater?: RuntimeUpdater | undefined;
+  readonly canary?: RuntimeCanary | undefined;
   readonly holds?: DeployHolds | undefined;
   readonly refreshHarnesses?: ((authority: HarnessRefreshAuthority) => Promise<unknown>) | undefined;
   readonly settings?: Pick<SettingsStore, "load"> | undefined;
@@ -35,6 +39,58 @@ export function createRuntimeUpdateRoutes(options: {
   readonly authorize: (request: Request) => Promise<UpdateAuthority | undefined>;
 }): Hono {
   const app = new Hono();
+  app.use("/v1/runtime-update/canary", bodyLimit({ maxSize: 1024 }));
+  app.get("/v1/runtime-update/canary", async (context) => {
+    const authority = await options.authorize(context.req.raw);
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    if (!options.canary) return context.json({ error: "runtime_canary_unavailable" }, 503);
+    try {
+      await authority.guard();
+    } catch {
+      return context.json({ error: "operator_revoked" }, 403);
+    }
+    if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+    return context.json({ policy: options.canary.policy(), canary: options.canary.status() ?? null }, 200, {
+      "Cache-Control": "no-store",
+    });
+  });
+  app.put("/v1/runtime-update/canary", async (context) => {
+    const authority = await options.authorize(context.req.raw);
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    if (!options.canary) return context.json({ error: "runtime_canary_unavailable" }, 503);
+    const parsed = z
+      .strictObject({
+        windowMs: RuntimeCanaryPolicySchema.shape.windowMs.removeDefault().optional(),
+        sampleIntervalMs: RuntimeCanaryPolicySchema.shape.sampleIntervalMs.removeDefault().optional(),
+        cpuPercent: RuntimeCanaryPolicySchema.shape.cpuPercent.removeDefault().optional(),
+        healthLatencyMs: RuntimeCanaryPolicySchema.shape.healthLatencyMs.removeDefault().optional(),
+      })
+      .safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_canary_policy" }, 400);
+    try {
+      await authority.guard();
+    } catch {
+      return context.json({ error: "operator_revoked" }, 403);
+    }
+    if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+    let policy;
+    try {
+      policy = await options.canary.configure(parsed.data, async () => {
+        try {
+          await authority.guard();
+        } catch {
+          throw new CanaryPolicyAuthorityError("Operator authority changed");
+        }
+        if (!authority.current()) throw new CanaryPolicyAuthorityError("Operator authority changed");
+      });
+    } catch (error) {
+      if (error instanceof CanaryPolicyAuthorityError)
+        return context.json({ error: "operator_revoked" }, 403);
+      if (error instanceof z.ZodError) return context.json({ error: "invalid_canary_policy" }, 400);
+      throw error;
+    }
+    return context.json({ policy, appliesTo: "next_canary" }, 200, { "Cache-Control": "no-store" });
+  });
   app.post("/v1/harness-plugin-version", bodyLimit({ maxSize: 1024 }), async (context) => {
     const authority = await options.authorize(context.req.raw);
     if (!authority) return context.json({ error: "operator_required" }, 403);
@@ -135,7 +191,11 @@ export function createRuntimeUpdateRoutes(options: {
     }
     if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
     context.header("Cache-Control", "no-store");
-    return context.json({ ...result, ...(options.holds ? { holds: await options.holds.list() } : {}) });
+    return context.json({
+      ...result,
+      ...(options.holds ? { holds: await options.holds.list() } : {}),
+      ...(options.canary ? { canaryPolicy: options.canary.policy() } : {}),
+    });
   });
   app.post("/v1/runtime-update", async (context) => {
     const authority = await options.authorize(context.req.raw);

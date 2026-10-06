@@ -28,7 +28,8 @@ export function readPrivateJson(path: string): unknown {
     const stat = fstatSync(fd);
     if (
       !stat.isFile() ||
-      stat.nlink !== 1 ||
+      // Atomic replacement can unlink this already-open, owned inode. Hard links remain forbidden.
+      stat.nlink > 1 ||
       stat.size > 32_768 ||
       (stat.mode & 0o077) !== 0 ||
       (process.getuid && stat.uid !== process.getuid())

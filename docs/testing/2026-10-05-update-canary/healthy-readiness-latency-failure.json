@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-06T03:33:19.618Z",
+  "completedAt": "2026-10-06T03:34:05.471Z",
+  "head": "8fcf47a54b578629386bdbc306db3ae2205d57f4",
+  "node": "v26.7.0",
+  "outcome": "unproven",
+  "mode": "healthy",
+  "path": "apps/clankie/src/index.ts -> /health -> runtime canary -> /v1/runtime-update",
+  "policy": {
+    "windowMs": 30000,
+    "sampleIntervalMs": 1000,
+    "cpuPercent": 10,
+    "healthLatencyMs": 250
+  },
+  "limitations": [
+    "The preceding healthy cutover and previous healthy checkpoint are seeded; no updater helper is executed.",
+    "The observation uses an accelerated 30-second window, not the default 300-second window.",
+    "No model turn, provider call, Discord body, browser, Herdr fleet or AWS deployment is exercised."
+  ],
+  "sourceDigests": {
+    "apps/clankie/src/index.ts": "dee8d3513aa4ee60ecc1f9825b31f1f4940b3031f44e83a6b14a838550a48ae6",
+    "apps/clankie/src/runtime-canary.ts": "5b7aade28ffe3c67ad8b3a54077985bfd528a75f860db2e8bd4872c8495ac855",
+    "apps/clankie/src/runtime-health-sample.ts": "a2b07ac97461c2cc590746c77c6f40460bc18ece98d708e4262662fa0151122d"
+  },
+  "uncommittedInput": true,
+  "firstHealthyAt": "2026-10-06T03:33:27.302Z",
+  "warmup": [
+    {
+      "measuredAt": "2026-10-06T03:33:27.309Z",
+      "healthRttMs": 2.315999999998894
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:27.779Z",
+      "healthRttMs": 219.40779199999997
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:28.281Z",
+      "healthRttMs": 252.81229200000053
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:28.781Z",
+      "healthRttMs": 250.2202500000003
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:29.282Z",
+      "healthRttMs": 249.24379200000112
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:29.563Z",
+      "healthRttMs": 30.471958000000086
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:30.032Z",
+      "healthRttMs": 218.68591599999854
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:30.306Z",
+      "healthRttMs": 23.125207999999475
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:31.035Z",
+      "healthRttMs": 478.0696250000001
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:31.536Z",
+      "healthRttMs": 249.1095830000013
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:31.818Z",
+      "healthRttMs": 30.826334000001225
+    },
+    {
+      "measuredAt": "2026-10-06T03:33:32.293Z",
+      "healthRttMs": 225.68870799999968
+    }
+  ],
+  "warmupLimitation": "A five-second real health warmup precedes seeded helper confirmation; this diagnoses startup timing and is not production policy.",
+  "healthyConfirmedAt": "2026-10-06T03:33:32.546Z",
+  "samplerHttpTimings": [
+    {
+      "ordinal": 1,
+      "completedAt": "2026-10-06T03:33:33.258Z",
+      "requestLatencyMs": 7.287834000000657
+    },
+    {
+      "ordinal": 2,
+      "completedAt": "2026-10-06T03:33:34.750Z",
+      "requestLatencyMs": 479.41858299999876
+    },
+    {
+      "ordinal": 3,
+      "completedAt": "2026-10-06T03:33:35.795Z",
+      "requestLatencyMs": 33.09204099999988
+    },
+    {
+      "ordinal": 4,
+      "completedAt": "2026-10-06T03:33:37.003Z",
+      "requestLatencyMs": 191.78220900000088
+    },
+    {
+      "ordinal": 5,
+      "completedAt": "2026-10-06T03:33:38.223Z",
+      "requestLatencyMs": 202.51941699999952
+    },
+    {
+      "ordinal": 6,
+      "completedAt": "2026-10-06T03:33:39.273Z",
+      "requestLatencyMs": 24.528375000001688
+    },
+    {
+      "ordinal": 7,
+      "completedAt": "2026-10-06T03:33:40.305Z",
+      "requestLatencyMs": 9.623374999999214
+    },
+    {
+      "ordinal": 8,
+      "completedAt": "2026-10-06T03:33:41.607Z",
+      "requestLatencyMs": 242.64870800000062
+    },
+    {
+      "ordinal": 9,
+      "completedAt": "2026-10-06T03:33:42.880Z",
+      "requestLatencyMs": 210.06624999999985
+    },
+    {
+      "ordinal": 10,
+      "completedAt": "2026-10-06T03:33:44.004Z",
+      "requestLatencyMs": 82.28383300000132
+    },
+    {
+      "ordinal": 11,
+      "completedAt": "2026-10-06T03:33:45.107Z",
+      "requestLatencyMs": 80.38908299999821
+    },
+    {
+      "ordinal": 12,
+      "completedAt": "2026-10-06T03:33:46.249Z",
+      "requestLatencyMs": 72.26687500000116
+    },
+    {
+      "ordinal": 13,
+      "completedAt": "2026-10-06T03:33:47.276Z",
+      "requestLatencyMs": 4.292207999998936
+    },
+    {
+      "ordinal": 14,
+      "completedAt": "2026-10-06T03:33:48.371Z",
+      "requestLatencyMs": 50.925624999999854
+    },
+    {
+      "ordinal": 15,
+      "completedAt": "2026-10-06T03:33:49.496Z",
+      "requestLatencyMs": 77.02249999999913
+    },
+    {
+      "ordinal": 16,
+      "completedAt": "2026-10-06T03:33:50.889Z",
+      "requestLatencyMs": 344.50916700000016
+    },
+    {
+      "ordinal": 17,
+      "completedAt": "2026-10-06T03:33:52.004Z",
+      "requestLatencyMs": 82.2033330000013
+    },
+    {
+      "ordinal": 18,
+      "completedAt": "2026-10-06T03:33:53.032Z",
+      "requestLatencyMs": 6.559124999999767
+    },
+    {
+      "ordinal": 19,
+      "completedAt": "2026-10-06T03:33:54.281Z",
+      "requestLatencyMs": 227.23854199999914
+    },
+    {
+      "ordinal": 20,
+      "completedAt": "2026-10-06T03:33:55.547Z",
+      "requestLatencyMs": 156.53066699999908
+    },
+    {
+      "ordinal": 21,
+      "completedAt": "2026-10-06T03:33:56.831Z",
+      "requestLatencyMs": 259.40295799999876
+    },
+    {
+      "ordinal": 22,
+      "completedAt": "2026-10-06T03:33:57.881Z",
+      "requestLatencyMs": 5.164708000003884
+    },
+    {
+      "ordinal": 23,
+      "completedAt": "2026-10-06T03:33:59.004Z",
+      "requestLatencyMs": 105.08420800000022
+    },
+    {
+      "ordinal": 24,
+      "completedAt": "2026-10-06T03:34:00.278Z",
+      "requestLatencyMs": 248.23083400000178
+    },
+    {
+      "ordinal": 25,
+      "completedAt": "2026-10-06T03:34:01.337Z",
+      "requestLatencyMs": 12.61083299999882
+    },
+    {
+      "ordinal": 26,
+      "completedAt": "2026-10-06T03:34:02.406Z",
+      "requestLatencyMs": 34.04979099999764
+    },
+    {
+      "ordinal": 27,
+      "completedAt": "2026-10-06T03:34:03.862Z",
+      "requestLatencyMs": 435.36491699999897
+    }
+  ],
+  "processExit": {
+    "code": 143,
+    "signal": null
+  },
+  "canary": {
+    "state": "failed",
+    "policy": {
+      "windowMs": 30000,
+      "sampleIntervalMs": 1000,
+      "cpuPercent": 10,
+      "healthLatencyMs": 250
+    },
+    "previousHealthyCommit": "1eb8ea938630eea2c404896314d95b768cc39c8c",
+    "holdEstablished": true,
+    "startedAt": "2026-10-06T03:33:33.237Z",
+    "completedAt": "2026-10-06T03:34:03.864Z",
+    "samples": 27,
+    "cpuMeanPercent": 1.3304432491426827,
+    "healthP95Ms": 437.20683299999655,
+    "error": "runtime-canary-latency-budget-exceeded",
+    "alertState": "unavailable"
+  },
+  "cutoverPhase": "healthy",
+  "cutoverHealthy": true,
+  "holds": [
+    {
+      "holder": "Independent proof reviewer",
+      "reason": "Retain a separate owner hold through a healthy canary"
+    },
+    {
+      "holder": "Clankie runtime canary",
+      "reason": "Runtime canary for 8fcf47a54b578629386bdbc306db3ae2205d57f4; previous healthy 1eb8ea938630eea2c404896314d95b768cc39c8c"
+    }
+  ],
+  "gap": "Expected values to be strictly equal:\n\n'failed' !== 'passed'\n"
+}
