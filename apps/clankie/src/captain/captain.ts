@@ -33,7 +33,6 @@ import {
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
 import {
-  clankieSkillRoots,
   codexAccounts,
   readDiscordServerSettings,
   resolveDiscordSettings,
@@ -180,7 +179,7 @@ import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
 import { withSeatSubagents } from "./seat-subagents.ts";
-import { listedSkillRoots, quietMachineSkills, skillSearchExtension } from "./skill-catalog.ts";
+import { CaptainResourceLoader, skillSearchExtension } from "./skill-catalog.ts";
 import { createStanceStore } from "./stances.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "./tool-catalog-health.ts";
@@ -1003,9 +1002,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const quietSkills = new Set<string>();
     const loader: ResourceLoader =
       options.evalSessionBoundary?.resources(cwd) ??
-      new DefaultResourceLoader({
+      new CaptainResourceLoader({
         cwd,
         agentDir: getAgentDir(),
+        repoRoot: options.repoRoot,
+        home: homedir(),
+        skills: currentSettings.skills,
+        quieted: quietSkills,
         systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
         noExtensions: true,
         extensionFactories: [
@@ -1053,21 +1056,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ...(systemTools ? [skillSearchExtension(() => loader.getSkills().skills, quietSkills)] : []),
         ],
         noPromptTemplates: true,
-        // Every root explicitly: the loader is given in-memory settings and
-        // resolves no defaults of its own, so a path absent here is a skill he
-        // cannot load however plainly it is named.
         noSkills: true,
-        additionalSkillPaths: clankieSkillRoots({
-          skills: currentSettings.skills,
-          repoRoot: options.repoRoot,
-          agentDir: getAgentDir(),
-          home: homedir(),
-          cwd,
-        }).filter((path) => existsSync(path)),
-        skillsOverride: (base) => ({
-          ...base,
-          skills: quietMachineSkills(base.skills, listedSkillRoots(options.repoRoot, cwd), quietSkills),
-        }),
         settingsManager: piSettings,
       });
     await prepare("session resources and connected tools", () => loader.reload());
@@ -1177,6 +1166,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     if (lane.session.thinkingLevel !== selection.thinkingLevel) {
       lane.session.setThinkingLevel(selection.thinkingLevel);
+    }
+    if (lane.session.resourceLoader instanceof CaptainResourceLoader) {
+      lane.session.setActiveToolsByName(lane.session.getActiveToolNames());
     }
   }
 

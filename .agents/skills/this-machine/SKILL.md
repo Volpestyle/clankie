@@ -105,6 +105,9 @@ when it is off, tell the owner what is left open instead of working around it.
 Tracked work and its evidence go where each repo already tracks them — load
 `work-items` before creating or updating any.
 
+Shared skill files and workspace instructions refresh before the next service
+turn. Newly added skills need no conversation reset; selected exclusions remain.
+
 After-the-fact trails (what you said, receipts, play journals) live under the
 user's Clankie homes — load `trace-clankie`. Those paths exist on every install.
 

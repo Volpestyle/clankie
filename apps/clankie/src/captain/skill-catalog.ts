@@ -1,9 +1,50 @@
 import { join, sep } from "node:path";
-import type { InlineExtension, Skill } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
+import { clankieSkillRoots } from "@clankie/settings";
+import {
+  DefaultResourceLoader,
+  loadProjectContextFiles,
+  loadSkills,
+  type InlineExtension,
+  type Skill,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { toolJson } from "./tools.ts";
 
 const SKILL_SEARCH = "skill_search";
+
+type CaptainResourceOptions = NonNullable<ConstructorParameters<typeof DefaultResourceLoader>[0]> &
+  Parameters<typeof clankieSkillRoots>[0] & { quieted: Set<string> };
+
+export class CaptainResourceLoader extends DefaultResourceLoader {
+  private readonly discovery: CaptainResourceOptions;
+
+  constructor(discovery: CaptainResourceOptions) {
+    super(discovery);
+    this.discovery = discovery;
+  }
+
+  override getSkills() {
+    const base = loadSkills({
+      cwd: this.discovery.cwd,
+      agentDir: this.discovery.agentDir,
+      skillPaths: clankieSkillRoots(this.discovery).filter(existsSync),
+      includeDefaults: false,
+    });
+    return {
+      ...base,
+      skills: quietMachineSkills(
+        base.skills,
+        listedSkillRoots(this.discovery.repoRoot, this.discovery.cwd),
+        this.discovery.quieted,
+      ),
+    };
+  }
+
+  override getAgentsFiles() {
+    return { agentsFiles: loadProjectContextFiles(this.discovery) };
+  }
+}
 
 /**
  * The roots whose skills the prompt lists: the ones shipped with this body and
