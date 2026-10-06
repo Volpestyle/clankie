@@ -18,8 +18,8 @@ export interface RemoteHireClaim {
   nonce: string;
 }
 export interface RemoteHireRecovery {
-  disposition: "delivered" | "abandoned";
-  paneId: string;
+  disposition: "delivered" | "abandoned" | "abandoned-unknown";
+  paneId?: string;
   cwd: string;
   harness: string;
   beforeIds?: string[];
@@ -114,7 +114,11 @@ export function createRemoteHireReceipts(options: {
         proof.fingerprint !== claim.fingerprint ||
         !isDeepStrictEqual(proof.target, claim.target) ||
         proof.disposition !== recovery.disposition ||
-        proof.allocation.paneId !== recovery.paneId ||
+        (recovery.disposition === "abandoned-unknown"
+          ? !("outcome" in proof.allocation) ||
+            recovery.paneId !== undefined ||
+            recovery.message !== undefined
+          : !("paneId" in proof.allocation) || proof.allocation.paneId !== recovery.paneId) ||
         (recovery.message &&
           (proof.delivery?.receiptId !== recovery.message.receiptId ||
             proof.delivery.seatId !== recovery.message.seatId))

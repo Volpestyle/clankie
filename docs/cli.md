@@ -516,6 +516,21 @@ needs separately authorized fresh intent, not a replay or an automatic key chang
 All original receipts, bridge acknowledgements and host recovery history remain
 retained. Neither recovery command sends, relaunches or adopts an original.
 An abandoned host-operation lock is a refusal, never an invitation to delete it.
+`clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID abandoned-unknown` is a
+separate operator decision for a fresh remote Codex hire whose launch crossed
+the host barrier but whose worker allocation was never recorded. It requires the
+existing exact host journal, original admission and launch commitment, no active
+local original, and a fresh complete authenticated census. Missing history,
+mapped allocations, resumes and other harnesses refuse. The retained disposition
+is `abandoned-unknown`: allocation fate stays explicitly unknown, with no pane
+identity, absence assertion or delivery claim. It records the operator's approval
+of separately new work as `freshIntentAllowed: true`; an unobserved original
+could still finish. The original remains permanently fenced. A new hire needs a
+different brief and explicit fresh UUID under the usual owner, project, target
+and unresolved-sibling checks. This operation grants no pane-close or adoption
+authority. If a host write succeeds but local settlement loses authority, retry
+only recovery of that exact original; the host appends a fresh census.
+
 The host OS and configured SSH principal are trusted; a compromised host cannot
 attest its own history. The journal covers service-authorized effects, not arbitrary
 programs launched outside Clankie's controlled hire path. It adds no fleet tool,

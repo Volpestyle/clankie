@@ -1,0 +1,35 @@
+{
+  "paneId": "wH:p1",
+  "terminalId": "term_65d2ce41e95bb1c",
+  "observedAt": "2026-10-06T15:05:18.3027068Z",
+  "originalReceiptId": "3989da1d-2af3-4a58-bae9-0b35aee0d828",
+  "ownerApproval": "Close only if a Clankie/Tess test-hire allocation, idle, and no unsent draft; otherwise leave and report.",
+  "ownership": {
+    "result": "unverified",
+    "receiptAllocationRecorded": false,
+    "paneReceiptMetadataObserved": false,
+    "matchingCreationResponseInServiceLog": false,
+    "timingCwdAndCensusOnly": true
+  },
+  "idle": {
+    "result": "passed",
+    "processes": [
+      {
+        "pid": 450920,
+        "parentPid": 402600,
+        "name": "powershell.exe",
+        "created": "2026-10-06T14:34:07.3903120Z"
+      }
+    ],
+    "descendants": 0
+  },
+  "draft": {
+    "result": "passed",
+    "visible": "PS C:\\Users\\volpe\\repos\\kh2-multiplayer>"
+  },
+  "closed": false,
+  "leadReport": {
+    "deliveryId": "e3bcb8f5-408f-42c0-a7c0-f164af38353b",
+    "deliveryStage": "stored"
+  }
+}

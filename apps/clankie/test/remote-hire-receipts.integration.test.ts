@@ -18,6 +18,7 @@ import {
 } from "../src/remote-hire-receipts.ts";
 import {
   HireNoLaunchEvidenceSchema,
+  HireRecoveryEvidenceSchema,
   OperatorConversationServiceRequestSchema,
   OperatorConversationServiceResultSchema,
 } from "@clankie/protocol";
@@ -110,6 +111,22 @@ it("operator request accepts only the original UUID, never supplied evidence or 
   expect(OperatorConversationServiceRequestSchema.safeParse({ ...request, evidence: {} }).success).toBe(
     false,
   );
+  expect(
+    OperatorConversationServiceRequestSchema.safeParse({ ...request, disposition: "abandoned-unknown" })
+      .success,
+  ).toBe(true);
+  for (const untrusted of [
+    { paneId: "pc/wH:p1" },
+    { freshIntentAllowed: true },
+    { launchHistory: "launching" },
+  ])
+    expect(
+      OperatorConversationServiceRequestSchema.safeParse({
+        ...request,
+        disposition: "abandoned-unknown",
+        ...untrusted,
+      }).success,
+    ).toBe(false);
   expect(
     OperatorConversationServiceRequestSchema.safeParse({
       ...request,
@@ -467,6 +484,59 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
         expect(hostRows.find((row) => row.claim.receiptId === freshOriginal.receiptId)).toMatchObject({
           state: "sealed",
         });
+        const unknownId = pending[1].messageId;
+        const unknownClaim = hostRows.find((row) => row.claim.receiptId === unknownId)
+          .claim as RemoteHireClaim;
+        const unknownRecovery = { disposition: "abandoned-unknown" as const, cwd: home, harness: "codex" };
+        await expect(
+          native.recover({ ...unknownClaim, nonce: "b".repeat(64) }, unknownRecovery),
+        ).rejects.toThrow(/identity/u);
+        await expect(
+          native.recover({ ...unknownClaim, receiptId: randomUUID() }, unknownRecovery),
+        ).rejects.toThrow(/existing original launch journal/u);
+        await expect(native.recover(freshOriginal, unknownRecovery)).rejects.toThrow(/launching history/u);
+        await expect(
+          native.recover(unknownClaim, { ...unknownRecovery, paneId: "pc/guessed-root" }),
+        ).rejects.toThrow(/unmapped/u);
+        let recoveryAuthorityChecks = 0;
+        expect(
+          await freshRestart.settleHireReceipt(
+            unknownId,
+            async () => {
+              if (++recoveryAuthorityChecks === 4) throw new Error("Operator revoked after host evidence");
+            },
+            "abandoned-unknown",
+          ),
+        ).toMatchObject({ state: "refused" });
+        expect(recoveryAuthorityChecks).toBe(4);
+        const interrupted = new DeliveryFence(`${freshPath}.hire-receipts.json`);
+        expect(interrupted.pending(pending[0])).toMatchObject({
+          recoveryRequested: true,
+          remoteLaunchCommitted: true,
+        });
+        expect(interrupted.settlement(unknownId)).toBeUndefined();
+        const interruptedHostRows = await Promise.all(
+          (await readdir(join(home, ".clankie/hire-receipts")))
+            .filter((name) => name.endsWith(".json"))
+            .map(async (name) =>
+              JSON.parse(await readFile(join(home, ".clankie/hire-receipts", name), "utf8")),
+            ),
+        );
+        const interruptedHost = interruptedHostRows.find((row) => row.claim.receiptId === unknownId);
+        expect(interruptedHost.state).toBe("recovered");
+        expect(interruptedHost.recoveries).toHaveLength(1);
+        expect(interruptedHost.recoveries[0].evidence).toMatchObject({
+          disposition: "abandoned-unknown",
+          allocation: { outcome: "unknown", launchHistory: "launching", freshIntentAllowed: true },
+        });
+        await expect(host(home, unknownClaim, "launch", env)).rejects.toThrow(/cannot launch again/u);
+        await expect(
+          native.recover(unknownClaim, {
+            ...unknownRecovery,
+            disposition: "abandoned",
+            paneId: "pc/guessed-root",
+          }),
+        ).rejects.toThrow(/different retained disposition/u);
         // Real CLI -> authenticated HTTP route -> shared request schema -> hire
         // mechanism and journal. Unrelated captain surfaces stay inert.
         const { app } = await createClankieApp({
@@ -555,6 +625,79 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
             receiptId: freshOriginal.receiptId,
           });
           expect(freshPreparations).toBe(1);
+          output = "";
+          expect(
+            await runHireReceiptCommand(["settle", unknownId, "abandoned-unknown"], {
+              ...commandOptions,
+              stdout: {
+                write: (chunk: string) => {
+                  output += chunk;
+                },
+              },
+            }),
+          ).toBe(0);
+          const unknownSettled = JSON.parse(output);
+          expect(unknownSettled).toMatchObject({
+            state: "abandoned",
+            receiptId: unknownId,
+            evidence: {
+              disposition: "abandoned-unknown",
+              allocation: { outcome: "unknown", freshIntentAllowed: true },
+            },
+          });
+          expect(unknownSettled.evidence.census.observedAt).toBeGreaterThan(
+            interruptedHost.recoveries[0].evidence.census.observedAt,
+          );
+          expect(unknownSettled.evidence.allocation).not.toHaveProperty("paneId");
+          expect(unknownSettled.evidence.allocation).not.toHaveProperty("present");
+          expect(unknownSettled.evidence).not.toHaveProperty("delivery");
+          expect(
+            HireRecoveryEvidenceSchema.safeParse({ ...unknownSettled.evidence, disposition: "abandoned" })
+              .success,
+          ).toBe(false);
+          expect(
+            HireRecoveryEvidenceSchema.safeParse({
+              ...unknownSettled.evidence,
+              allocation: { ...unknownSettled.evidence.allocation, freshIntentAllowed: false },
+            }).success,
+          ).toBe(false);
+          expect(
+            await freshRestart.settleHireReceipt(unknownId, async () => {}, "abandoned-unknown"),
+          ).toEqual(unknownSettled);
+          const retainedUnknown = new DeliveryFence(`${freshPath}.hire-receipts.json`);
+          expect(retainedUnknown.settled(pending[0])).toMatchObject({
+            recoveryRequested: true,
+            remoteLaunchCommitted: true,
+          });
+          expect(retainedUnknown.reconcile(pending[0], unknownId)).toBe(false);
+          expect(() => retainedUnknown.begin(pending[0], { fingerprint: "original replacement" })).toThrow();
+          output = "";
+          const separatelyNew = {
+            ...freshRequest,
+            freshIntent: { id: randomUUID(), afterReceiptId: unknownId },
+          };
+          expect(
+            await runHireReceiptCommand(["fresh", "--json-stdin"], {
+              ...commandOptions,
+              stdin: Readable.from([
+                JSON.stringify({
+                  conversationId: freshAuthority.owner.conversationId,
+                  seat: separatelyNew,
+                  brief: "Separately authorized new work after unknown abandonment",
+                }),
+              ]),
+              stdout: {
+                write: (chunk: string) => {
+                  output += chunk;
+                },
+              },
+            }),
+          ).toBe(1);
+          expect(JSON.parse(output)).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+          expect(freshPreparations).toBe(2);
+          expect(new DeliveryFence(`${freshPath}.hire-receipts.json`).settlement(unknownId)).toEqual(
+            unknownSettled.evidence,
+          );
         } finally {
           await new Promise<void>((resolve) => server.close(() => resolve()));
         }

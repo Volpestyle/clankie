@@ -38,17 +38,28 @@ export const HireReceiptIdSchema = z
 /** Historical delivery and explicit abandonment do not assert a no-launch window. */
 export const HireRecoveryEvidenceSchema = HireNoLaunchEvidenceSchema.omit({ window: true, journal: true })
   .extend({
-    disposition: z.enum(["delivered", "abandoned"]),
+    disposition: z.enum(["delivered", "abandoned", "abandoned-unknown"]),
     journal: z.literal("authenticated-recovery"),
-    allocation: z
-      .object({
-        paneId: z.string(),
-        present: z.boolean(),
-        terminalId: z.string().optional(),
-        sessionId: z.string().optional(),
-        status: z.string().optional(),
-      })
-      .strict(),
+    allocation: z.union([
+      z
+        .object({
+          paneId: z.string(),
+          present: z.boolean(),
+          terminalId: z.string().optional(),
+          sessionId: z.string().optional(),
+          status: z.string().optional(),
+        })
+        .strict(),
+      z
+        .object({
+          outcome: z.literal("unknown"),
+          launchHistory: z.literal("launching"),
+          openedAt: z.number().int().nonnegative(),
+          abandonedAt: z.number().int().nonnegative(),
+          freshIntentAllowed: z.literal(true),
+        })
+        .strict(),
+    ]),
     delivery: z
       .object({
         receiptId: HireReceiptIdSchema,
@@ -66,6 +77,16 @@ export const HireRecoveryEvidenceSchema = HireNoLaunchEvidenceSchema.omit({ wind
   .superRefine((proof, ctx) => {
     if (proof.disposition === "delivered" && !proof.delivery)
       ctx.addIssue({ code: "custom", message: "Delivered recovery needs the original native channel event" });
+    const unknown = "outcome" in proof.allocation;
+    if (unknown !== (proof.disposition === "abandoned-unknown") || (unknown && proof.delivery))
+      ctx.addIssue({ code: "custom", message: "Unknown abandonment cannot claim an allocation or delivery" });
+    if (
+      "outcome" in proof.allocation &&
+      (proof.allocation.abandonedAt < proof.allocation.openedAt ||
+        proof.census.observedAt < proof.allocation.openedAt ||
+        proof.census.observedAt > proof.allocation.abandonedAt)
+    )
+      ctx.addIssue({ code: "custom", message: "Unknown abandonment observation interval is invalid" });
   });
 export type HireRecoveryEvidence = z.infer<typeof HireRecoveryEvidenceSchema>;
 export const RetainedHireEvidenceSchema = z.union([HireNoLaunchEvidenceSchema, HireRecoveryEvidenceSchema]);

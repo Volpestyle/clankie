@@ -5,7 +5,12 @@ with an uncertain SSH outcome before recording a worker allocation. Original
 `3989da1d` remains fenced; its exact authenticated host journal is `launching`,
 and deployed recovery refuses the missing allocation. Report, peer exchange,
 catalog and the complete fresh acceptance remain unproven. VUH-1527 stays open;
-see the [current evidence and required decision](live/c72c3d02/README.md).
+see the [current evidence and approved recovery](live/c72c3d02/README.md).
+
+The [explicit unknown-abandonment repair](unknown-abandonment/CHECKS.md) now
+records the approved separate disposition without assigning a pane or claiming
+no launch. Native security review and focused real-host/CLI tests passed;
+deployment and the original PC settlement remain pending.
 
 The earlier `7ee4da04` run proved hire, brief, follow-up, exact completion wake,
 tracker isolation and explicit SSH-loss refusal, with sender/peer/catalog gaps.

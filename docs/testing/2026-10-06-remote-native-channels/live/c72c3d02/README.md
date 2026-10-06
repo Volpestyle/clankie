@@ -55,7 +55,7 @@ LAN reads and Tailscale ping succeeded. The bounded `14:48` OS census observed
 source or of the SSH refusal's cause. No sshd process was killed or setting
 changed.
 
-## Required decision and next source work
+## Approved recovery and next source work
 
 The [native security assessment](SECURITY-ASSESSMENT.md) permits permanent
 abandonment that explicitly retains an **unknown allocation outcome**, provided
@@ -63,11 +63,17 @@ the original authenticated journal, claim, target and complete current census
 are checked. Such a record must preserve the original no-retry fence. It must
 not claim no launch, guess a worker pane or adopt it.
 
-The decision for Clankie is whether that unknown abandonment may admit a
+Clankie explicitly approved authenticated unknown abandonment followed by a
 separately authorized new read-only test at the same location. An unobserved
-original could still finish after census. The default is to keep fresh admission
-blocked until mapped resolution; the existing fresh-admission rule cannot simply
-treat this proposed unknown disposition as an ordinary settled sibling.
+original could still finish after census. The implementation therefore uses a
+distinct operator disposition, `abandoned-unknown`, that records this approval;
+ordinary recovery does not acquire that permission accidentally. Deployment and
+settlement of the exact original remain required before fresh acceptance.
+
+Clankie also approved closing `wH:p1` conditionally on verified hire ownership,
+idle state and an empty draft. The [fresh three-check observation](root-checks.json)
+passed idle/draft checks, but ownership remains unverified. The pane was left
+open and that failed condition was reported to Clankie.
 
 Future allocations also need an immediate durable layout-only checkpoint of
 Herdr's acknowledged workspace/root response before rename or metadata RPCs,
