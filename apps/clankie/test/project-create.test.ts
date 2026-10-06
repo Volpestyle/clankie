@@ -267,7 +267,13 @@ it("concurrent reviewed CREATE cannot replace the first saved tracker after both
     }
   });
   const first = await f.command({
-    trackerSetup: { backend: "github", githubRepo: "fixture/first-owner", note: "Retain this choice" },
+    trackerSetup: {
+      backend: "github",
+      githubRepo: "fixture/first-owner",
+      note: "Retain this choice",
+      releaseSource: "both",
+      releaseLane: "mobile",
+    },
     trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
   });
   const second = { ...first, projectId: "other", trackerSetup: { backend: "default" } };
@@ -297,6 +303,7 @@ it("concurrent reviewed CREATE cannot replace the first saved tracker after both
       backend: "github",
       github: { repo: "fixture/first-owner" },
       note: "Retain this choice",
+      releases: { source: "both", lane: "mobile" },
     });
     release.other.resolve();
     expect((await secondResponse).status).toBe(409);

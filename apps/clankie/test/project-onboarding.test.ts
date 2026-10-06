@@ -157,7 +157,12 @@ it("proposal tool persists one immutable artifact; explicit create preserves cap
 it.each([
   { backend: "default" as const },
   { backend: "markdown" as const, directory: "tasks", decisions: "docs/adr" },
-  { backend: "github" as const, githubRepo: "fixture/project" },
+  {
+    backend: "github" as const,
+    githubRepo: "fixture/project",
+    releaseSource: "both" as const,
+    releaseLane: "mobile",
+  },
   { backend: "linear" as const, linearTeam: "FIX", linearProject: "Fixture", linearLabel: "app" },
 ])(
   "explicit CREATE records the reviewed $backend work-init choice and roles exactly once",
@@ -178,7 +183,10 @@ it.each([
     expect(convention).toMatchObject({ schemaVersion: 1, backend: trackerSetup.backend, decidedBy: "owner" });
     if (trackerSetup.backend === "linear")
       expect(convention.linear).toEqual({ team: "FIX", project: "Fixture", label: "app" });
-    if (trackerSetup.backend === "github") expect(convention.github).toEqual({ repo: "fixture/project" });
+    if (trackerSetup.backend === "github") {
+      expect(convention.github).toEqual({ repo: "fixture/project" });
+      expect(convention.releases).toEqual({ source: "both", lane: "mobile" });
+    }
     const project = (await f.settings.load()).projects.projects[0]!;
     expect(project).toMatchObject({
       trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },

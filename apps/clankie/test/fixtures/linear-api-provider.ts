@@ -74,6 +74,7 @@ export async function createLinearApiProvider() {
     state,
     assignee: user,
     parent: null,
+    projectMilestone: { id: "milestone", name: "Ship" },
     labels: connection([label]),
     children: connection([]),
     relations: connection([]),
@@ -123,10 +124,20 @@ export async function createLinearApiProvider() {
     ],
     projectLabels: [],
     issueRelations: [],
+    initiatives: [
+      {
+        id: "goal-1",
+        name: "Useful work",
+        status: "Active",
+        targetDate: "2026-12-01",
+        projects: connection([{ id: PROJECT_ID, name: "Clankie", progress: 0.4, status }]),
+      },
+    ],
   };
   const entityLists: Record<string, string> = {
     issue: "issues",
     project: "projects",
+    initiative: "initiatives",
     team: "teams",
     user: "users",
     comment: "comments",
@@ -144,6 +155,7 @@ export async function createLinearApiProvider() {
   let refresh = API_REFRESH;
   let rotations = 0;
   let reject = false;
+  let emptyInitiativeProjectPages = 0;
   let blockedMutationResponse: { started: () => void; wait: Promise<void> } | undefined;
   let blockedRead: { started: () => void; wait: Promise<void> } | undefined;
   let blocked: { started: () => void; wait: Promise<void> } | undefined;
@@ -220,13 +232,43 @@ export async function createLinearApiProvider() {
         if (field === "viewer") data[key] = user;
         else if (field === "organization") data[key] = { id: "personal-workspace", name: "Personal" };
         else if (field === "searchIssues") data[key] = connection(rows.issues!);
-        else if (rows[field]) data[key] = connection(rows[field]!);
-        else if (operation.operation !== "mutation" && entityLists[field])
-          data[key] =
-            rows[entityLists[field]!]!.find((row) =>
-              [row.id, row.identifier, row.slugId].includes(variables.id),
-            ) ?? null;
-        else if (field.endsWith("Create") || field.endsWith("Update")) {
+        else if (rows[field]) {
+          const start = variables.after == null ? 0 : Number(variables.after);
+          const end = start + Number(variables.first ?? 50);
+          data[key] = {
+            nodes: rows[field]!.slice(start, end),
+            pageInfo: {
+              hasNextPage: end < rows[field]!.length,
+              endCursor: end < rows[field]!.length ? String(end) : null,
+            },
+          };
+        } else if (operation.operation !== "mutation" && entityLists[field]) {
+          const found = rows[entityLists[field]!]!.find((row) =>
+            [row.id, row.identifier, row.slugId].includes(variables.id),
+          );
+          data[key] = found ?? null;
+          if (field === "initiative" && found && found.projects) {
+            const projects = (found.projects as { nodes: Row[] }).nodes;
+            const start = variables.after == null ? 0 : Number(variables.after);
+            const offset = Math.max(0, start - emptyInitiativeProjectPages);
+            const end = offset + 250;
+            data[key] = {
+              ...found,
+              projects: {
+                nodes: start < emptyInitiativeProjectPages ? [] : projects.slice(offset, end),
+                pageInfo: {
+                  hasNextPage: start < emptyInitiativeProjectPages || end < projects.length,
+                  endCursor:
+                    start < emptyInitiativeProjectPages
+                      ? String(start + 1)
+                      : end < projects.length
+                        ? String(end + emptyInitiativeProjectPages)
+                        : null,
+                },
+              },
+            };
+          }
+        } else if (field.endsWith("Create") || field.endsWith("Update")) {
           const entity = field.replace(/(?:Create|Update)$/u, "");
           const list = entityLists[entity];
           const input = (variables.input as Row) ?? {};
@@ -244,7 +286,8 @@ export async function createLinearApiProvider() {
           if (input.assigneeId !== undefined) base.assignee = input.assigneeId === null ? null : user;
           if (input.parentId !== undefined)
             base.parent = input.parentId === null ? null : { id: input.parentId, identifier: "VUH-1" };
-          if (input.stateId !== undefined) base.state = state;
+          if (input.stateId !== undefined)
+            base.state = rows.workflowStates!.find((row) => row.id === input.stateId);
           if (input.projectId !== undefined)
             base.project = input.projectId === null ? null : { id: input.projectId, name: "Clankie" };
           if (input.labelIds || input.addedLabelIds) base.labels = connection([label]);
@@ -297,6 +340,9 @@ export async function createLinearApiProvider() {
     },
     reject: (value: boolean) => {
       reject = value;
+    },
+    setEmptyInitiativeProjectPages: (count: number) => {
+      emptyInitiativeProjectPages = count;
     },
     blockNextMutationResponse: () => {
       let started!: () => void;

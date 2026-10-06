@@ -1397,13 +1397,18 @@ paths:
       summary: Read and write work items in the repo's own tracking convention
       description: >-
         One contract over Linear, GitHub issues, the repo's own Markdown directory, or
-        .clankie/work/ (ADR 0191). `action` is repos, discover, init, list, show, create,
+        .clankie/work/ (ADR 0191). `action` is repos, discover, init, list, show, project, create,
         update, attach, write or write_receipt. The two narrow owner operations take
         request {repoId,itemId,requestId,command}; receipt reads omit command. The
         command assigns work-metadata owner, adds/removes a role label or appends a
         blocker. Their applied/refused/uncertain receipt always carries the UUID;
         repeated IDs and receipt reads never replay a write. A path names and registers a local repo; registered repos are
-        readable from paired devices through the work_repos and work_items operator ops.
+        readable from paired devices through the work_repos, work_items and work_project operator ops.
+        work_items statusVersion=2 opts into backlog and native milestone metadata;
+        older requests receive backlog as todo. project reads planned milestones,
+        shipped v* tags/published versions and Linear initiative goals. init accepts
+        releaseSource (tags, milestones, both; default both) and releaseLane
+        (default repository). Unavailable facts are explicit; store builds are not inferred.
         list takes optional status, owner and label (case-insensitive) filters; items carry
         the backend's labels (ADR 0208).
       security: [{ operatorBearer: [] }]

@@ -20,6 +20,7 @@ import {
 } from "./tracker-tools.ts";
 
 const STATES: Record<WorkItemStatus, { name: string; type: string }> = {
+  backlog: { name: "Backlog", type: "backlog" },
   todo: { name: "Todo", type: "unstarted" },
   in_progress: { name: "In Progress", type: "started" },
   in_review: { name: "In Review", type: "started" },
@@ -31,7 +32,7 @@ function statuses(value: unknown): WorkItemStatus[] {
   const key = String(value).toLowerCase().replace(/[ -]+/gu, "_");
   if (key in STATES) return [key as WorkItemStatus];
   if (key === "started") return ["in_progress", "in_review"];
-  if (key === "unstarted" || key === "backlog") return ["todo"];
+  if (key === "unstarted") return ["todo"];
   if (key === "completed") return ["done"];
   if (key === "duplicate" || key === "cancelled") return ["canceled"];
   throw new Error(`Unknown issue state ${String(value)}`);
@@ -137,6 +138,7 @@ export function createRepoTracker(
       }),
       labels: item.labels ?? [],
       priority: item.priority ?? 0,
+      ...(item.milestone === undefined ? {} : { milestone: item.milestone }),
       ...raw,
       status: STATES[item.status].name,
       state: STATES[item.status].name,

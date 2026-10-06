@@ -300,3 +300,36 @@ function pageOf(snapshot: IssueSnapshot, listing: Listing, snapshotId?: string):
     isError: false,
   };
 }
+
+/** Metadata collections share the issue reader's coalescing, cursors and invalidation. */
+export async function callCachedLinearCollection(
+  reader: ReturnType<typeof createPrioritySortedLinearIssueReader>,
+  args: Record<string, unknown>,
+  call: UpstreamCall,
+  binding: string,
+  collection: string,
+): Promise<ToolResult> {
+  if (collection === "issues") return reader.call(args, call, binding);
+  const result = await reader.call(
+    args,
+    async (parameters) => {
+      const response = await call({ ...parameters, ...(collection === "projects" ? { limit: 50 } : {}) });
+      if (response.isError) return response;
+      const page = JSON.parse(response.content) as Record<string, unknown>;
+      // Some native collection tools return a bare array.
+      const rows = Array.isArray(page) ? page : page[collection];
+      if (!Array.isArray(rows)) throw new Error("Linear returned an incomplete metadata collection");
+      return {
+        ...response,
+        content: JSON.stringify({
+          ...(Array.isArray(page) ? {} : page),
+          issues: rows,
+        }),
+      };
+    },
+    `${binding}:${collection}`,
+  );
+  if (result.isError) return result;
+  const { issues, ...page } = JSON.parse(result.content) as Record<string, unknown>;
+  return { ...result, content: JSON.stringify({ ...page, [collection]: issues }) };
+}

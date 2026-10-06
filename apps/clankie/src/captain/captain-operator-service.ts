@@ -646,6 +646,7 @@ export function createOperatorService(
       throw new Error("Connections are served by the authenticated app boundary");
     if (
       request.op === "work_repos" ||
+      request.op === "work_project" ||
       request.op === "work_items" ||
       request.op === "work_item_write" ||
       request.op === "work_item_write_receipt"

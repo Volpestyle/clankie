@@ -77,7 +77,10 @@ export async function initializeConvention(
 ): Promise<WorkConvention> {
   const request = WorkInitSettingsSchema.parse(input);
   let convention: WorkConvention;
-  if (request.backend === undefined) {
+  const recorded = request.backend === undefined ? await readConvention(root) : undefined;
+  if (recorded !== undefined) {
+    convention = recorded;
+  } else if (request.backend === undefined) {
     const discovery = await discoverConvention(root, options.run);
     if (!discovery.suggestion)
       throw new WorkInitDecisionRequired(discovery.question ?? "Choose a backend", discovery.signals);
@@ -108,6 +111,15 @@ export async function initializeConvention(
     convention = WorkConventionSchema.parse({
       ...convention,
       linear: { ...convention.linear, label: request.linearLabel },
+    });
+  }
+  if (request.releaseSource !== undefined || request.releaseLane !== undefined) {
+    convention = WorkConventionSchema.parse({
+      ...convention,
+      releases: {
+        source: request.releaseSource ?? convention.releases?.source ?? "both",
+        lane: request.releaseLane ?? convention.releases?.lane ?? "repository",
+      },
     });
   }
   await options.guard?.();

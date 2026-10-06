@@ -3,7 +3,12 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseProtocolResponse } from "../../protocol/test/fixtures/response-8d982a93.ts";
-import { WorkItemSchema, WorkItemsResultSchema, type WorkItem } from "@clankie/protocol/work-items";
+import {
+  legacyWorkItem,
+  WorkItemSchema,
+  WorkItemsResultSchema,
+  type WorkItem,
+} from "@clankie/protocol/work-items";
 import { afterEach, expect, it } from "vitest";
 import { WorkItemsResultSchema as oldResultSchema } from "../../protocol/test/fixtures/work-items-8d982a93.ts";
 import { createFilesBackend } from "../src/backends/files.ts";
@@ -53,8 +58,10 @@ it("projects the captured Linear parent into list/get responses and old-client r
   expect(await backend.get("VUH-1593")).toEqual(items[0]);
   expect(WorkItemsResultSchema.parse(wire).items[0]?.parent).toBe("VUH-1588");
   expect(oldResultSchema.safeParse(wire).success).toBe(false);
-  const oldRead = parseProtocolResponse(oldResultSchema, wire);
-  expect(oldRead.items).toEqual(items.map(({ parent: _parent, priority: _priority, ...item }) => item));
+  const oldRead = parseProtocolResponse(oldResultSchema, result(items.map(legacyWorkItem), "linear"));
+  expect(oldRead.items).toEqual(
+    items.map(legacyWorkItem).map(({ parent: _parent, priority: _priority, ...item }) => item),
+  );
   expect(oldResultSchema.safeParse(wire).success).toBe(false);
   expect(() =>
     parseProtocolResponse(oldResultSchema, {

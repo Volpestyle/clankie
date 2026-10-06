@@ -1022,7 +1022,8 @@ GitHub or Markdown adapter.
   than one tracker or only a single `TODO.md`. Answer it once with `work init`.
 - `clankie work init` records what discovery found; `work init --backend
 default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
-[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--note TEXT]` records the owner's
+[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL]
+[--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]` records the owner's
   choice. The answer is written to `.clankie/tracking.json` in the repo; nothing
   else is added to a repo that tracks work elsewhere.
   `--linear-label` saves an existing Linear label as `linear.label`, scoping
@@ -1030,6 +1031,25 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   It requires a Linear convention with a team; blank, multiline or over-64-character
   labels are refused. Omit it to keep the team/project-wide board. The HTTP init
   parameter and the device write's init parameter are `linearLabel`.
+- `clankie work project` (also `/work project` in the TUI) returns planned
+  milestones, shipped `v*` versions and Linear initiative goals for the saved
+  tracker. `work init --release-source tags|milestones|both --release-lane NAME`
+  changes the release selection without changing an existing tracker. Source
+  defaults to `both`; lane defaults to `repository` until explicitly named.
+  Separate mobile/macOS repos can name their own lanes. Dates say whether they
+  came from a publication, annotated tag or lightweight tag's commit. Missing
+  store builds and release membership are not inferred. Markdown has no planned
+  milestone collection; GitHub and Markdown return no initiative goals.
+  Failed/unsupported sections carry explicit `unavailable` entries.
+- Work statuses are `backlog`, `todo`, `in_progress`, `in_review`, `done`, and
+  `canceled`. Linear backlog/triage, GitHub `status: backlog`, and Markdown
+  `status: backlog` stay distinct from todo. Items may carry a native milestone
+  id/name; Markdown uses both `milestone_id` and `milestone_name` front matter.
+  Device `work_items` requests opt into these facts with `statusVersion: 2`;
+  older requests receive backlog as todo and omit the new milestone field.
+  `work_project` uses the same registered repo ids and device authority as
+  `work_items`. Metadata reads share connected-account snapshots and pagination,
+  preserving the poller's provider budget.
 - `clankie work repos` lists the repos registered on this machine. A repo is
   registered the first time a local command names it; only registered repos are
   readable from a paired device.

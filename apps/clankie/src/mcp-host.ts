@@ -69,7 +69,7 @@ import { compactLinearWrite } from "./linear-write-receipt.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
-import { createPrioritySortedLinearIssueReader } from "./tracker-tool-router.ts";
+import { createPrioritySortedLinearIssueReader, callCachedLinearCollection } from "./tracker-tool-router.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -1154,10 +1154,18 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               ? (aliases[input.tool] ?? input.tool)
               : input.tool;
           const selected = state;
+          const collection = (
+            {
+              list_issues: "issues",
+              list_milestones: "milestones",
+              list_initiatives: "initiatives",
+              list_projects: "projects",
+            } as Record<string, string>
+          )[upstreamTool];
           const priorityRead =
             !repositoryCall &&
             server.id === "linear" &&
-            upstreamTool === "list_issues" &&
+            collection !== undefined &&
             (isApiTracker(server) || (!isLocalTracker(server) && options.localTracker !== undefined));
           let providerPages = 0;
           selected.activeCalls += 1;
@@ -1180,8 +1188,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                   isError: false,
                 }
               : isApiTracker(server) && !workerPost
-                ? upstreamTool === "list_issues"
-                  ? await trackerReads.call(
+                ? collection !== undefined
+                  ? await callCachedLinearCollection(
+                      trackerReads,
                       input.arguments,
                       async (args) => {
                         await assertCurrent(server, state!);
@@ -1189,12 +1198,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                         providerPages += 1;
                         return {
                           content: JSON.stringify(
-                            await options.linearApiTracker!.call("list_issues", args, publication),
+                            await options.linearApiTracker!.call(upstreamTool, args, publication),
                           ),
                           isError: false,
                         };
                       },
                       JSON.stringify([connectedAccount?.binding, state!.configuration, state!.credential]),
+                      collection,
                     )
                   : {
                       content: JSON.stringify(
@@ -1235,10 +1245,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                           // provider cap, even after the caller's shorter deadline.
                           return client!.callTool(upstreamTool, args, REQUEST_TIMEOUT_MS);
                         };
-                        return options.localTracker &&
-                          server.id === "linear" &&
-                          upstreamTool === "list_issues"
-                          ? trackerReads.call(
+                        return options.localTracker && server.id === "linear" && collection !== undefined
+                          ? callCachedLinearCollection(
+                              trackerReads,
                               input.arguments,
                               callUpstream,
                               JSON.stringify([
@@ -1246,6 +1255,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                                 state!.configuration,
                                 state!.credential,
                               ]),
+                              collection,
                             )
                           : callUpstream(input.arguments);
                       });
