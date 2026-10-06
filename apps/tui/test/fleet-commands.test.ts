@@ -1,6 +1,14 @@
-import { FleetAutonomySchema } from "@clankie/protocol";
+import {
+  FleetAutonomySchema,
+  FleetResourcePolicySchema,
+  ProjectSchema,
+  effectiveHireProfile,
+} from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
-import { emptySettings, type ClankieSettings, type SettingsStore } from "@clankie/settings";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { emptySettings, type ClankieSettings, SettingsStore } from "@clankie/settings";
 import { fleetStatus, formatFleetLines, runFleetCommand } from "../src/command/fleet.ts";
 import { buildFleetCommands } from "../src/fleet-commands.ts";
 import type { SetupFlow } from "../src/shell/setup-flow.ts";
@@ -75,6 +83,8 @@ describe("clankie fleet", () => {
     const picks = [
       "small",
       "efficient",
+      "codex",
+      "xhigh",
       "off",
       "off",
       "owner",
@@ -93,6 +103,7 @@ describe("clankie fleet", () => {
       },
       readText: async (options: Parameters<SetupFlow["readText"]>[0]) => {
         prompts.push(options);
+        if (options.message.includes("worker model")) return " gpt-6.1-sol ";
         return options.message.includes("reporting style")
           ? "Plain evidence."
           : "  claude when it needs skills.  ";
@@ -105,6 +116,8 @@ describe("clankie fleet", () => {
     expect(selects).toMatchObject([
       { currentValue: "large" },
       { currentValue: "optimal" },
+      { currentValue: "auto" },
+      { currentValue: "auto" },
       { currentValue: "connected" },
       { currentValue: "on" },
       { currentValue: "lead" },
@@ -115,11 +128,13 @@ describe("clankie fleet", () => {
       { currentValue: "change_run_read" },
     ]);
     expect(prompts).toMatchObject([
+      { defaultValue: "" },
       { defaultValue: "Short and plain.", multiline: true },
       { defaultValue: "codex is the workhorse.", multiline: true },
     ]);
     expect(read().fleet).toEqual({
       notes: "claude when it needs skills.",
+      hire: { harness: "codex", model: "gpt-6.1-sol", effort: "xhigh" },
       size: "small",
       models: "efficient",
       tools: "off",
@@ -266,5 +281,188 @@ describe("clankie fleet peer messages", () => {
     ).rejects.toThrow("Usage");
     await expect(runFleetCommand(["set", "--peer-messages"], { settings })).rejects.toThrow("Usage");
     expect(read().fleet.peerMessages).toBe("on");
+  });
+});
+
+/** Real settings files exercise the CLI/profile/schema persistence boundary. */
+describe("fleet worker defaults persistence", () => {
+  async function fixture() {
+    const root = await mkdtemp(join(tmpdir(), "clankie-worker-defaults-"));
+    const settings = new SettingsStore(join(root, "settings.json"));
+    // Refuse service lookup locally; the test only owns this settings file.
+    const options = {
+      settings,
+      cwd: root,
+      env: { CLANKIE_OPERATOR_TOKEN: "", CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json") },
+    };
+    return { root, settings, options };
+  }
+
+  it("patches one field at a time, preserves advanced defaults and reports effective role precedence", async () => {
+    const f = await fixture();
+    try {
+      const resources = FleetResourcePolicySchema.parse({ heavySlots: 3, simulatorSlots: 0 });
+      const advanced = {
+        subagents: { model: "gpt-6.1-sol", effort: "medium" as const },
+        delegation: "native-first" as const,
+        account: "second",
+        placement: "new-tab" as const,
+      };
+      await f.settings.update((current) => ({
+        ...current,
+        fleet: { ...current.fleet, hire: advanced, resources },
+        autonomy: { fleet: { ...current.autonomy.fleet, commit: "owner" } },
+        projects: {
+          ...current.projects,
+          projects: [
+            ProjectSchema.parse({
+              id: "example",
+              name: "Example",
+              workerCap: 2,
+              roles: [{ role: "builder", model: "role-model", effort: "high" }],
+            }),
+          ],
+        },
+      }));
+      await runFleetCommand(["set", "--harness", "codex"], f.options);
+      await runFleetCommand(["set", "--model", " gpt-6.1-sol ", "--effort", "xhigh"], f.options);
+      const fresh = await new SettingsStore(f.settings.path).load();
+      expect(fresh.fleet.hire).toEqual({
+        ...advanced,
+        harness: "codex",
+        model: "gpt-6.1-sol",
+        effort: "xhigh",
+      });
+      expect(fresh.fleet.resources).toEqual(resources);
+      expect(fresh.autonomy.fleet.commit).toBe("owner");
+      const status = await runFleetCommand(["show"], f.options);
+      expect(status.roleProfiles[0]?.profile).toMatchObject({
+        ...advanced,
+        model: "role-model",
+        effort: "high",
+      });
+      expect(
+        effectiveHireProfile({ model: "explicit-model" }, status.roleProfiles[0]?.profile, fresh.fleet.hire)
+          .model,
+      ).toBe("explicit-model");
+      expect(formatFleetLines(status.fleet).join("\n")).toContain(
+        "worker defaults: harness codex, model gpt-6.1-sol, effort xhigh",
+      );
+      const output: string[] = [];
+      await buildFleetCommands({ settings: f.settings })[0]!.run("show", {
+        insertCommandResult: (_command: string, text: string) => output.push(text),
+      } as unknown as ClankieFaceShell);
+      expect(output.join("\n")).toContain("worker defaults: harness codex, model gpt-6.1-sol, effort xhigh");
+      await runFleetCommand(["set", "--model", "auto"], f.options);
+      expect((await f.settings.load()).fleet.hire).toEqual({
+        ...advanced,
+        harness: "codex",
+        effort: "xhigh",
+      });
+      await runFleetCommand(["set", "--harness", "auto", "--effort", "auto"], f.options);
+      expect((await f.settings.load()).fleet.hire).toEqual(advanced);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps independent defaults when field updates share the settings queue and clears the last field", async () => {
+    const f = await fixture();
+    try {
+      await Promise.all([
+        runFleetCommand(["set", "--model", "gpt-6.1-sol"], f.options),
+        runFleetCommand(["set", "--effort", "xhigh"], f.options),
+      ]);
+      expect((await f.settings.load()).fleet.hire).toEqual({ model: "gpt-6.1-sol", effort: "xhigh" });
+      const cleared = await runFleetCommand(["set", "--model", "auto", "--effort", "auto"], f.options);
+      expect(cleared.fleet.hire).toEqual({});
+      expect(formatFleetLines(cleared.fleet).join("\n")).toContain(
+        "worker defaults: none (he picks harness, model and effort per job)",
+      );
+      await runFleetCommand(["set", "--harness", "claude"], f.options);
+      const reset = await runFleetCommand(["clear"], f.options);
+      expect(reset.fleet.hire).toBeUndefined();
+      expect((await new SettingsStore(f.settings.path).load()).fleet.hire).toBeUndefined();
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces JSON profiles and rejects mixed, repeated and malformed field flags before saving", async () => {
+    const f = await fixture();
+    try {
+      await runFleetCommand(["set", "--model", "original"], f.options);
+      const profile = join(f.root, "profile.json");
+      await writeFile(profile, JSON.stringify({ account: "second", subagents: null }));
+      for (const args of [
+        ["--harness", "unknown"],
+        ["--model", ""],
+        ["--model", " "],
+        ["--model", "x".repeat(201)],
+        ["--effort", " "],
+        ["--effort", "x".repeat(65)],
+        ["--model", "one", "--model", "two"],
+        ["--harness", "auto", "--harness", "codex"],
+        ["--effort", "high", "--effort", "low"],
+        ["--model"],
+        ["--hire-profile", profile, "--model", "new"],
+        ["--effort", "high", "--hire-profile", profile],
+      ]) {
+        const before = await readFile(f.settings.path, "utf8");
+        await expect(runFleetCommand(["set", ...args], f.options)).rejects.toThrow();
+        expect(await readFile(f.settings.path, "utf8")).toBe(before);
+      }
+      await runFleetCommand(["set", "--hire-profile", profile], f.options);
+      expect((await f.settings.load()).fleet.hire).toEqual({ account: "second", subagents: null });
+      // Top-level effort remains harness-defined, matching the current profile schema.
+      await runFleetCommand(["set", "--effort", "custom-effort"], f.options);
+      expect((await f.settings.load()).fleet.hire?.effort).toBe("custom-effort");
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  it("the TUI can return fields to auto while preserving advanced defaults and custom effort options", async () => {
+    const f = await fixture();
+    try {
+      await f.settings.update((current) => ({
+        ...current,
+        fleet: {
+          ...current.fleet,
+          hire: {
+            harness: "claude",
+            model: "old-model",
+            effort: "custom-effort",
+            account: "second",
+            subagents: null,
+          },
+        },
+      }));
+      const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
+      const flow = {
+        begin: () => undefined,
+        end: () => undefined,
+        renderLine: () => undefined,
+        readSelect: async (options: Parameters<SetupFlow["readSelect"]>[0]) => {
+          selects.push(options);
+          return options.message.includes("default worker") ? "auto" : options.currentValue;
+        },
+        readText: async (options: Parameters<SetupFlow["readText"]>[0]) =>
+          options.message.includes("worker model") ? " " : options.defaultValue,
+      } as unknown as SetupFlow;
+      await buildFleetCommands({ settings: f.settings })[0]!.run("", {
+        setupFlow: flow,
+      } as unknown as ClankieFaceShell);
+      expect(selects.find((s) => s.message.includes("worker effort"))).toMatchObject({
+        currentValue: "custom-effort",
+        options: expect.arrayContaining([{ value: "custom-effort", label: "custom-effort" }]),
+      });
+      expect((await new SettingsStore(f.settings.path).load()).fleet.hire).toEqual({
+        account: "second",
+        subagents: null,
+      });
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
   });
 });

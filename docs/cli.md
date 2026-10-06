@@ -1950,7 +1950,7 @@ The command is excluded from `pnpm check` and push, PR and scheduled CI.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -2024,9 +2024,14 @@ preferences mark the migration complete; clearing that project override then
 stays cleared after restart. An unregistered project inherits global ask-first
 releases. See [ADR 0230](adr/0230-fleet-responsibility-is-owner-settings.md).
 
-`--hire-profile FILE.json` retains the global launch defaults for harness, model,
-effort, native subagents, delegation, account and placement. Project role defaults
-and explicit per-hire choices keep their existing precedence.
+`--harness`, `--model` and `--effort` update default workers one field at a time
+(`fleet.hire`), preserving native subagents, delegation, account and placement.
+`auto` removes a field so Clankie chooses it per job. `--hire-profile FILE.json`
+replaces the whole profile; use it separately from the field flags. Explicit
+per-hire choices override project roles, which override fleet defaults. These
+settings affect new hires. `fleet clear` also removes worker defaults.
+The TUI status prints `worker defaults: …`, or explains that Clankie chooses
+when no fields are set.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
 leadership skill (`lead`) and his prompt use them to aim.
@@ -2062,13 +2067,15 @@ on machine-authorized lanes, including the default `lead` responsibilities.
 JSON includes the global `fleet` projection and a separate workspace
 `workingPreferences` report, with either available resolved values or an
 unavailable detail. The TUI `/fleet` command opens the same editor (size, models,
-connected tools, peer messages, closure, machine setup, working preferences, then notes)
-and `/fleet status` prints the same values.
+worker harness, model and effort, connected tools, peer messages, closure, machine setup, working preferences, then notes)
+and `/fleet status` (also `/fleet show`) prints the same values. CLI `fleet show` aliases `fleet status`.
 
 ```bash
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
 clankie fleet set --size small --models efficient
 clankie fleet set --peer-messages off
+clankie fleet set --harness codex --model gpt-6.1-sol --effort xhigh
+clankie fleet set --effort auto
 clankie fleet set --closure owner --machine-setup owner
 clankie fleet set --commit lead --push lead --release owner
 clankie fleet set --verification review_and_seal --report-style "Short and plain."
@@ -2327,7 +2334,7 @@ accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
 `/accounts claude` in the console); no login or profile path is guessed. Remote
 account overrides remain unsupported. Profile selection confers no grants.
 
-`clankie fleet set --hire-profile FILE.json` sets fleet hire defaults with the
+`clankie fleet set --hire-profile FILE.json` replaces all fleet hire defaults with the
 same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the
 defaults and effective project role profiles. The hire result's `profile` shows
 the effective launch preferences. These settings affect new hires, not running

@@ -11,7 +11,7 @@ import {
 import { createResourceGovernor, type FleetResourceGovernor } from "@clankie/fleet-resources";
 import { projectRolePolicy } from "@clankie/protocol/projects";
 import { readFile } from "node:fs/promises";
-import { HireProfileSchema } from "@clankie/protocol";
+import { HireProfileSchema, OPERATOR_SEAT_HARNESSES, type HireProfile } from "@clankie/protocol";
 import {
   FLEET_MODEL_GUIDANCE,
   FLEET_MODEL_MODES,
@@ -28,8 +28,8 @@ import { readWorkingPreferences, type WorkingPreferencesReport } from "./working
 import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
-  "Usage: clankie fleet [status [--working-directory PATH]]",
-  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]`,
+  "Usage: clankie fleet [status|show [--working-directory PATH]]",
+  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--hire-profile FILE.json]`,
   "       clankie fleet set [--heavy-slots auto|N] [--simulator-slots N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
   "       clankie fleet resources",
   "       clankie fleet clear",
@@ -61,6 +61,24 @@ function store(options: FleetCommandOptions): SettingsStore {
   return options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
 }
 
+/** Worker defaults set one field at a time; `auto` leaves the choice to Clankie. */
+type HirePatch = { [K in "harness" | "model" | "effort"]?: string };
+
+function patchHireDefaults(current: HireProfile | undefined, patch: HirePatch): HireProfile {
+  const next: Record<string, unknown> = { ...current };
+  for (const [field, value] of Object.entries(patch))
+    if (value === "auto") delete next[field];
+    else next[field] = value;
+  return HireProfileSchema.parse(next);
+}
+
+function formatHireDefaults(hire: HireProfile | undefined): string {
+  const fields = Object.entries(hire ?? {}).map(
+    ([key, value]) => `${key} ${typeof value === "string" ? value : JSON.stringify(value)}`,
+  );
+  return fields.length ? fields.join(", ") : "none (he picks harness, model and effort per job)";
+}
+
 export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>): string[] {
   const notes = fleet.notes.trim();
   const resources = FleetResourcePolicySchema.parse(fleet.resources ?? {});
@@ -72,7 +90,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
     ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
-    `hire defaults: ${JSON.stringify(fleet.hire ?? {})}`,
+    `worker defaults: ${formatHireDefaults(fleet.hire)}`,
     "routing preferences:",
     ...(notes.length === 0
       ? ["  (none — the default: he picks a harness per job on his own)"]
@@ -123,6 +141,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
 export async function fleetUpdate(
   update: string | FleetUpdate,
   options: FleetCommandOptions = {},
+  hirePatch?: HirePatch,
 ): Promise<FleetCommandResult> {
   const change: FleetUpdate = typeof update === "string" ? { notes: update } : update;
   const settings = store(options);
@@ -130,7 +149,11 @@ export async function fleetUpdate(
     change;
   const updated = await settings.update((current) => ({
     ...current,
-    fleet: FleetSettingsSchema.parse({ ...current.fleet, ...fleetChange }),
+    fleet: FleetSettingsSchema.parse({
+      ...current.fleet,
+      ...fleetChange,
+      ...(hirePatch === undefined ? {} : { hire: patchHireDefaults(current.fleet.hire, hirePatch) }),
+    }),
     autonomy: {
       ...current.autonomy,
       fleet: FleetAutonomySchema.parse({
@@ -168,9 +191,10 @@ function isModelMode(value: string): value is FleetModelMode {
 async function parseSet(
   flags: readonly string[],
   resourceDefaults: FleetSettings["resources"],
-): Promise<FleetUpdate> {
+): Promise<{ change: FleetUpdate; hire: HirePatch }> {
   if (flags.length === 0 || flags.length % 2 !== 0) throw new Error(FLEET_USAGE);
   const change: FleetUpdate = {};
+  const hire: HirePatch = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
   const resources = FleetResourcePolicySchema.parse(resourceDefaults ?? {});
@@ -235,16 +259,24 @@ async function parseSet(
     } else if (flag === "--peer-messages" && change.peerMessages === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--peer-messages must be on or off.");
       change.peerMessages = value;
+    } else if (flag === "--harness" && !("harness" in hire) && value) {
+      if (value !== "auto" && !(OPERATOR_SEAT_HARNESSES as readonly string[]).includes(value))
+        throw new Error(`--harness must be auto or one of ${OPERATOR_SEAT_HARNESSES.join(", ")}.`);
+      hire.harness = value;
+    } else if ((flag === "--model" || flag === "--effort") && !(flag.slice(2) in hire) && value) {
+      hire[flag.slice(2) as keyof HirePatch] = value;
     } else {
       throw new Error(FLEET_USAGE);
     }
   }
+  if (change.hire !== undefined && Object.keys(hire).length)
+    throw new Error("Use --hire-profile or --harness/--model/--effort, not both.");
   if (releaseMode !== undefined || releaseRule !== undefined)
     change.release = FleetReleasePolicySchema.parse({
       mode: releaseMode,
       ...(releaseRule === undefined ? {} : { rule: releaseRule }),
     });
-  return change;
+  return { change, hire };
 }
 
 export async function runFleetCommand(
@@ -252,7 +284,7 @@ export async function runFleetCommand(
   options: FleetCommandOptions = {},
 ): Promise<FleetCommandResult> {
   const verb = args[0];
-  if (verb === undefined || verb === "status") {
+  if (verb === undefined || verb === "status" || verb === "show") {
     if (args.length <= 1) return await fleetStatus(options);
     if (args.length === 3 && args[1] === "--working-directory" && args[2])
       return await fleetStatus({ ...options, cwd: args[2] });
@@ -264,16 +296,16 @@ export async function runFleetCommand(
     return await fleetUpdate(
       {
         ...FleetSettingsSchema.parse({}),
+        hire: undefined,
         ...FleetAutonomySchema.parse({}),
         ...(current.resources === undefined ? {} : { resources: FleetResourcePolicySchema.parse({}) }),
       },
       options,
     );
   }
-  if (verb === "set")
-    return await fleetUpdate(
-      await parseSet(args.slice(1), (await store(options).load()).fleet.resources),
-      options,
-    );
+  if (verb === "set") {
+    const { change, hire } = await parseSet(args.slice(1), (await store(options).load()).fleet.resources);
+    return await fleetUpdate(change, options, Object.keys(hire).length ? hire : undefined);
+  }
   throw new Error(FLEET_USAGE);
 }
