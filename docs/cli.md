@@ -1843,6 +1843,19 @@ failed response does not imply termination. Uncertain operations remain held
 until exact delivery or termination evidence resolves them. Recovery never
 silently retries a Discord send.
 
+For `recovery_required` browser, voice, play and Discord mouth leases, the
+service tries the same verified stop-check automatically at boot, then retries
+with backoff from 5 seconds up to 60 seconds. It waits until the holder's turn
+and body operations have ended, and checks both again across awaited work.
+Only confirmed termination releases the exact lease incarnation. Refused or
+unavailable stop proof keeps the lease held; computer recovery stays in its
+separate contract. If recovery persists, the owner can inspect `clankie body
+status` and explicitly recover from an existing writable conversation:
+
+```sh
+clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'
+```
+
 ### `browser [status]` / `browser record on|off`
 
 Read or set `browser.recordSessions`. When on, each burst of Clankie's browsing

@@ -3804,6 +3804,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     seatContext,
+    conversationTurnIdle: (conversationId) => conversations.turnIdle(conversationId),
     syncSeatTranscript: (id, transcript) => {
       if (!conversations.syncNativeSeatTranscript(id, transcript.sessionId, transcript.entries)) return false;
       autonomy.pauseGoal(id);

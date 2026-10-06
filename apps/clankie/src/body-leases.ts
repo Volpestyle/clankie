@@ -351,6 +351,17 @@ export class BodyLeaseStore {
     return claim === undefined ? undefined : this.ref(claim);
   }
 
+  /** Automatic recovery cannot stop another live effect; its own recovery pin is the sole exception. */
+  public recoveryReady(ref: LeaseRef, recoveryOperation?: string): boolean {
+    const found = this.match(ref);
+    return (
+      !("outcome" in found) &&
+      this.expired(found) &&
+      found.operations.every((id) => id === recoveryOperation) &&
+      (found.recoveryOperation === undefined || found.recoveryOperation === recoveryOperation)
+    );
+  }
+
   /** Host calls only after independently proving termination; a token alone grants no such authority. */
   public reconcileStopped(ref: LeaseRef): { outcome: "released" } | Refusal {
     const found = this.match(ref);
