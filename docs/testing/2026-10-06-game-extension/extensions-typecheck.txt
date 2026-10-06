@@ -1,0 +1,5 @@
+Command (wrapped in fleet bin/heavy): pnpm --workspace-concurrency=1 --filter @clankie/game-extension --filter @clankie/pokemon typecheck
+Scope: 2 of 31 workspace projects
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+Observed exit code: 0

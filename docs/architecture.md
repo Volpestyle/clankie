@@ -536,6 +536,13 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   objectives, fresh observations, and read-only sharing; the existing Go Live
   PNG publisher carries its video. The Pokémon seam remains unchanged in scope.
   See [ADR 0175](adr/0175-rivals-agent-is-a-gameplay-skill.md) and [setup](rivals.md).
+- **Game extensions.** [ADR 0234](adr/0234-games-share-one-extension-contract.md)
+  defines typed connector, skill, settings, Activity and lifecycle composition.
+  `integrations/pokemon` implements it; core retains play leases, authority and
+  recovery, persona/model selection, Discord/Activity destinations and evidence
+  projections. Pokémon's existing API/CLI/TUI enter that extension through a
+  compatibility composition point. Minecraft and Rivals adoption, and
+  installed-extension discovery without core edits, remain follow-ups.
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
   the MCP projection derived from that catalog. MCP carries calls; the world

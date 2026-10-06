@@ -1,0 +1,10 @@
+Command (wrapped in fleet bin/heavy): pnpm exec oxfmt --write packages/game-extension integrations/pokemon docs/adr/0234-games-share-one-extension-contract.md
+Finished in 84ms on 17 files using 18 threads.
+Observed exit code: 0
+
+Final targeted oxfmt --check (same changed sources/docs):
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 131ms on 33 files using 18 threads.
+Observed exit code: 0

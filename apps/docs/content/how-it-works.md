@@ -198,6 +198,11 @@ service's separate enforcement and cannot mint a paired device. The owner-facing
 [`support` command](/cli/) documents the controls; hosted availability depends on
 the coordinated service rollout.
 
+Pokémon play uses a game extension for its PokeAgents connector and session
+execution. Clankie keeps ownership, permissions, publishing destinations and
+evidence in his service. Minecraft and Rivals adoption of that shared extension
+contract remains follow-up work; their current play paths remain available.
+
 ## Go deeper
 
 The [architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md)
