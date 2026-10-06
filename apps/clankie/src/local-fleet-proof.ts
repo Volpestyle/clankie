@@ -55,19 +55,29 @@ export interface LocalFleetProofOptions extends Pick<
 > {
   binding(): Promise<HerdrBinding | undefined>;
   /** Server-owned private app-server registry; never supplied by a caller. */
-  privateSeat?(ancestors: readonly number[], pane: string, binding: HerdrBinding): Promise<boolean>;
+  privateSeat?(
+    ancestors: readonly number[],
+    pane: string,
+    binding: HerdrBinding,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
   privateProjectSeat?(
     ancestors: readonly number[],
     pane: string,
     binding: HerdrBinding,
     proof: ProjectProcessProof,
+    signal?: AbortSignal,
   ): Promise<boolean>;
   herdrBinary: string;
   run?: Run;
   platform?: string;
   processHelper?: string;
   /** Host observation seam; production always uses the fresh native census. */
-  observeSocket?(socket: Socket, expected?: NativeSocketOwner): Promise<NativeSocketProcess | undefined>;
+  observeSocket?(
+    socket: Socket,
+    expected?: NativeSocketOwner,
+    signal?: AbortSignal,
+  ): Promise<NativeSocketProcess | undefined>;
   /** Server-owned additional lifetime pin. It can refuse, never grant admission. */
   expectedOwner?(socket: Socket): NativeSocketOwner | undefined;
   /** Server-owned opt-in diagnostics; fixed stages only, never caller authority. */
@@ -108,14 +118,15 @@ export function localFleetProof(options: LocalFleetProofOptions) {
   const execute = options.run ?? run;
   const observe = options.observeSocket;
   const owners = new WeakMap<Socket, NativeSocketOwner>();
-  return async (socket: Socket, pane: string): Promise<boolean> => {
+  return async (socket: Socket, pane: string, signal?: AbortSignal): Promise<boolean> => {
+    signal?.throwIfAborted();
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
       diagnostic(options, { source: "proof", reason });
       return false;
     };
     const snapshot = (checkpoint: "initial" | "final", expected?: NativeSocketOwner) =>
       observe !== undefined
-        ? observe(socket, expected)
+        ? observe(socket, expected, signal)
         : observeSocketProcess(
             socket,
             options.processHelper ?? fleetProcessHelper(),
@@ -124,6 +135,7 @@ export function localFleetProof(options: LocalFleetProofOptions) {
               ? undefined
               : (event) => diagnostic(options, { source: "native", checkpoint, event }),
             (reason) => diagnostic(options, { source: "transport", reason }),
+            signal,
           );
     if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
     if (!/^w[\w]+:p[\w]+$/u.test(pane)) return refuse("invalid_pane");
@@ -140,12 +152,15 @@ export function localFleetProof(options: LocalFleetProofOptions) {
     if (!alive() || !clientPort || !serverPort) return refuse("closed_socket");
     try {
       const binding = await options.binding();
+      signal?.throwIfAborted();
       if (!binding) return refuse("missing_binding");
       const initial = await snapshot("initial", options.expectedOwner?.(socket) ?? owners.get(socket));
+      signal?.throwIfAborted();
       if (!initial) return refuse("native_initial_unavailable");
       if (!alive()) return refuse("closed_socket");
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
       const paneInfo = async () => {
+        signal?.throwIfAborted();
         const result = options.run
           ? JSON.parse(
               await execute(
@@ -154,7 +169,13 @@ export function localFleetProof(options: LocalFleetProofOptions) {
                 pinHerdrEnvironment({ ...process.env }, binding.socketPath),
               ),
             )
-          : await nativeRequest(binding, "pane.process_info", { pane_id: pane }, { timeoutMs: 5_000 });
+          : await nativeRequest(
+              binding,
+              "pane.process_info",
+              { pane_id: pane },
+              { timeoutMs: 5_000, ...(signal ? { signal } : {}) },
+            );
+        signal?.throwIfAborted();
         return (result as { result?: { process_info?: { pane_id: string; shell_pid: number } } })?.result
           ?.process_info;
       };
@@ -162,16 +183,28 @@ export function localFleetProof(options: LocalFleetProofOptions) {
       if (info?.pane_id !== pane) return refuse("pane_unavailable");
       const shell = info.shell_pid;
       if (!Number.isSafeInteger(shell) || shell <= 1) return refuse("pane_unavailable");
-      const admitted = chain.includes(shell) || (await options.privateSeat?.(chain, pane, binding)) === true;
+      const admitted =
+        chain.includes(shell) || (await options.privateSeat?.(chain, pane, binding, signal)) === true;
+      signal?.throwIfAborted();
       if (!admitted) return refuse("not_member");
-      const [final, latest] = await Promise.all([snapshot("final", initial.owner), paneInfo()]);
+      // Drain both owned observations before returning, even if cancellation closes control first.
+      const [finalRead, latestRead] = await Promise.allSettled([
+        snapshot("final", initial.owner),
+        paneInfo(),
+      ]);
+      signal?.throwIfAborted();
+      if (finalRead.status !== "fulfilled" || latestRead.status !== "fulfilled")
+        return refuse("observation_failed");
+      const final = finalRead.value,
+        latest = latestRead.value;
       if (!final) return refuse("native_final_unavailable");
       if (JSON.stringify(final) !== JSON.stringify(initial)) return refuse("snapshot_changed");
       if (latest?.pane_id !== pane || latest?.shell_pid !== shell) return refuse("pane_changed");
       if (!alive()) return refuse("closed_socket");
-      if (!chain.includes(shell) && (await options.privateSeat?.(chain, pane, binding)) !== true)
+      if (!chain.includes(shell) && (await options.privateSeat?.(chain, pane, binding, signal)) !== true)
         return refuse("private_seat_expired");
       const current = await options.binding();
+      signal?.throwIfAborted();
       if (!alive()) return refuse("closed_socket");
       if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
         return refuse("binding_changed");
@@ -180,6 +213,7 @@ export function localFleetProof(options: LocalFleetProofOptions) {
       owners.set(socket, initial.owner);
       return true;
     } catch {
+      signal?.throwIfAborted();
       return refuse("observation_failed");
     }
   };
@@ -187,10 +221,14 @@ export function localFleetProof(options: LocalFleetProofOptions) {
 
 /** Project access additionally needs the live native foreground agent, not just its pane shell. */
 export function localProjectProof(options: LocalFleetProofOptions) {
-  const observe = createProjectProcessObserver(options);
-  const observeSocket = (socket: Socket, checkpoint: "initial" | "final", expected?: NativeSocketOwner) =>
+  const observeSocket = (
+    socket: Socket,
+    checkpoint: "initial" | "final",
+    expected?: NativeSocketOwner,
+    signal?: AbortSignal,
+  ) =>
     options.observeSocket !== undefined
-      ? options.observeSocket(socket, expected)
+      ? options.observeSocket(socket, expected, signal)
       : observeSocketProcess(
           socket,
           options.processHelper ?? fleetProcessHelper(),
@@ -199,9 +237,16 @@ export function localProjectProof(options: LocalFleetProofOptions) {
             ? undefined
             : (event) => diagnostic(options, { source: "native", checkpoint, event }),
           (reason) => diagnostic(options, { source: "transport", reason }),
+          signal,
         );
   const owners = new WeakMap<Socket, NativeSocketOwner>();
-  return async (socket: Socket, pane: string): Promise<ProjectProcessProof | undefined> => {
+  return async (
+    socket: Socket,
+    pane: string,
+    signal?: AbortSignal,
+  ): Promise<ProjectProcessProof | undefined> => {
+    signal?.throwIfAborted();
+    const observe = createProjectProcessObserver({ ...options, ...(signal ? { signal } : {}) });
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
       diagnostic(options, { source: "proof", reason });
       return undefined;
@@ -221,17 +266,21 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     if (!alive() || !clientPort || !serverPort) return refuse("closed_socket");
     try {
       const binding = await options.binding();
+      signal?.throwIfAborted();
       if (!binding) return refuse("missing_binding");
       // Keep the full-census phases clear of our own short-lived Herdr/helper
       // children. Project observations bracket both socket checkpoints, while
       // those socket checkpoints bracket the private-registry checks below.
       const proof = await observe("default", pane);
+      signal?.throwIfAborted();
       if (!proof) return refuse("pane_unavailable");
       const initial = await observeSocket(
         socket,
         "initial",
         options.expectedOwner?.(socket) ?? owners.get(socket),
+        signal,
       );
+      signal?.throwIfAborted();
       if (!initial) return refuse("native_initial_unavailable");
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
       if (
@@ -251,8 +300,9 @@ export function localProjectProof(options: LocalFleetProofOptions) {
             ancestor.pid === process.pid && nativeProcessStart(ancestor.birth) === process.startTime,
         );
       const directShell = hasLifetime(initial, proof.shell);
-      if (!directShell && (await options.privateSeat?.(chain, pane, binding)) !== true)
+      if (!directShell && (await options.privateSeat?.(chain, pane, binding, signal)) !== true)
         return refuse("not_member");
+      signal?.throwIfAborted();
       // A private registry may supply an alternate server ancestry; it never
       // excuses conflicting kernel lifetimes for a PID already in this chain.
       if (
@@ -264,11 +314,14 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       const privateSeat =
         !direct &&
         !proof.nativeSessionPending &&
-        (await options.privateProjectSeat?.(chain, pane, binding, proof)) === true;
+        (await options.privateProjectSeat?.(chain, pane, binding, proof, signal)) === true;
+      signal?.throwIfAborted();
       if (!direct && !privateSeat) return refuse("not_member");
-      const final = await observeSocket(socket, "final", initial.owner);
+      const final = await observeSocket(socket, "final", initial.owner, signal);
+      signal?.throwIfAborted();
       if (!final) return refuse("native_final_unavailable");
       const finalProof = await observe("default", pane);
+      signal?.throwIfAborted();
       const finalChain = final?.ancestors.map((ancestor) => ancestor.pid) ?? [];
       if (
         !final ||
@@ -279,17 +332,24 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         return refuse("snapshot_changed");
       if (
         !hasLifetime(final, proof.shell) &&
-        (await options.privateSeat?.(finalChain, pane, binding)) !== true
+        (await options.privateSeat?.(finalChain, pane, binding, signal)) !== true
       )
         return refuse("private_seat_expired");
-      if (privateSeat && (await options.privateProjectSeat?.(finalChain, pane, binding, proof)) !== true)
+      signal?.throwIfAborted();
+      if (
+        privateSeat &&
+        (await options.privateProjectSeat?.(finalChain, pane, binding, proof, signal)) !== true
+      )
         return refuse("private_seat_expired");
+      signal?.throwIfAborted();
       const current = await options.binding();
+      signal?.throwIfAborted();
       if (!alive() || current?.socketPath !== binding.socketPath || current?.session !== binding.session)
         return refuse("binding_changed");
       owners.set(socket, initial.owner);
       return privateSeat ? { ...proof, privateSeat: true } : proof;
     } catch {
+      signal?.throwIfAborted();
       return refuse("observation_failed");
     }
   };

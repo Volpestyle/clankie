@@ -11,7 +11,12 @@ import { pinHerdrEnvironment } from "./herdr-session.ts";
 import { observeNativeBirth, nativeProcessReceipt } from "./local-fleet-process.ts";
 
 const exec = promisify(execFile);
-const processStart = async (pid: number, previous?: string): Promise<string | undefined> => {
+const processStart = async (
+  pid: number,
+  previous?: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> => {
+  signal?.throwIfAborted();
   if (process.platform !== "darwin") {
     // Preserve existing private-launch support elsewhere. This never supplies
     // macOS socket admission or substitutes after a failed native observation.
@@ -19,6 +24,7 @@ const processStart = async (pid: number, previous?: string): Promise<string | un
       const { stdout } = await exec("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
         timeout: 5_000,
         encoding: "utf8",
+        ...(signal ? { signal } : {}),
       });
       const start = stdout.trim();
       return /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}$/u.test(start)
@@ -28,7 +34,8 @@ const processStart = async (pid: number, previous?: string): Promise<string | un
       return undefined;
     }
   }
-  const birth = await observeNativeBirth(pid);
+  const birth = await observeNativeBirth(pid, signal);
+  signal?.throwIfAborted();
   return birth ? nativeProcessReceipt(birth, previous) : undefined;
 };
 
@@ -50,7 +57,7 @@ interface DurableSeats {
   /** Controller-owned launch records; incoming requests never create them. */
   path: string;
   /** Fresh native foreground observation, required before admitting a restored server. */
-  observeOccupant(pane: string): Promise<string | undefined>;
+  observeOccupant(pane: string, signal?: AbortSignal): Promise<string | undefined>;
   warn?(message: string): void;
 }
 
@@ -58,7 +65,11 @@ interface DurableSeats {
 export class LocalCodexSeats {
   private readonly seats = new Map<number, Entry>();
   private readonly binding: () => HerdrBinding | undefined;
-  private readonly observeStart: (pid: number, previous?: string) => Promise<string | undefined>;
+  private readonly observeStart: (
+    pid: number,
+    previous?: string,
+    signal?: AbortSignal,
+  ) => Promise<string | undefined>;
   private readonly durable: DurableSeats | undefined;
   constructor(binding: () => HerdrBinding | undefined, observeStart = processStart, durable?: DurableSeats) {
     this.binding = binding;
@@ -210,8 +221,10 @@ export class LocalCodexSeats {
     pane: string,
     binding: HerdrBinding,
     nativeOccupantId?: string,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     for (const pid of ancestors) {
+      signal?.throwIfAborted();
       const seat = this.seats.get(pid);
       if (
         !seat ||
@@ -222,13 +235,22 @@ export class LocalCodexSeats {
         continue;
       if (nativeOccupantId !== undefined && seat.nativeOccupantId !== nativeOccupantId) continue;
       const start = await seat.start;
-      if (!start || (await this.observeStart(pid, start).catch(() => undefined)) !== start) continue;
+      signal?.throwIfAborted();
+      if (!start || (await this.observeStart(pid, start, signal).catch(() => undefined)) !== start) {
+        signal?.throwIfAborted();
+        continue;
+      }
+      signal?.throwIfAborted();
       if (
         seat.restored &&
         (!seat.nativeOccupantId ||
-          (await this.durable?.observeOccupant(pane).catch(() => undefined)) !== seat.nativeOccupantId)
-      )
+          (await this.durable?.observeOccupant(pane, signal).catch(() => undefined)) !==
+            seat.nativeOccupantId)
+      ) {
+        signal?.throwIfAborted();
         continue;
+      }
+      signal?.throwIfAborted();
       const current = this.binding();
       if (
         this.seats.get(pid) === seat &&

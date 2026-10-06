@@ -854,8 +854,12 @@ const projectProcessObserver = (fleet: string, pane: string) =>
   fleet === "default" ? localProjectProcessObserver(fleet, pane) : remoteProjectObserver(fleet, pane);
 const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
   path: join(stateRoot, "local-codex-seats.json"),
-  observeOccupant: async (pane) => {
-    const proof = await localProjectProcessObserver("default", pane);
+  observeOccupant: async (pane, signal) => {
+    const observe = signal
+      ? createProjectProcessObserver({ binding: localFleetBinding, herdrBinary: "herdr", signal })
+      : localProjectProcessObserver;
+    const proof = await observe("default", pane);
+    signal?.throwIfAborted();
     return proof?.nativeSessionPending ? undefined : proof?.nativeOccupantId;
   },
   warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
@@ -1158,18 +1162,26 @@ const localFleet = new LocalFleetLink({
     diagnostics: localProofDiagnostics(logger, "project"),
     binding: localFleetBinding,
     herdrBinary: "herdr",
-    privateSeat: async (chain, pane, binding) =>
-      (await localCodexSeats.allows(chain, pane, binding)) || grokNative.allows(chain, pane, binding),
-    privateProjectSeat: async (chain, pane, binding, proof) =>
-      (await localCodexSeats.allows(chain, pane, binding, proof.nativeOccupantId)) ||
-      grokNative.allows(chain, pane, binding, proof.nativeOccupantId),
+    privateSeat: async (chain, pane, binding, signal) => {
+      if (await localCodexSeats.allows(chain, pane, binding, undefined, signal)) return true;
+      signal?.throwIfAborted();
+      return grokNative.allows(chain, pane, binding);
+    },
+    privateProjectSeat: async (chain, pane, binding, proof, signal) => {
+      if (await localCodexSeats.allows(chain, pane, binding, proof.nativeOccupantId, signal)) return true;
+      signal?.throwIfAborted();
+      return grokNative.allows(chain, pane, binding, proof.nativeOccupantId);
+    },
   }),
   prove: localFleetProof({
     diagnostics: localProofDiagnostics(logger, "fleet"),
     binding: localFleetBinding,
     herdrBinary: "herdr",
-    privateSeat: async (chain, pane, binding) =>
-      (await localCodexSeats.allows(chain, pane, binding)) || grokNative.allows(chain, pane, binding),
+    privateSeat: async (chain, pane, binding, signal) => {
+      if (await localCodexSeats.allows(chain, pane, binding, undefined, signal)) return true;
+      signal?.throwIfAborted();
+      return grokNative.allows(chain, pane, binding);
+    },
   }),
 });
 const workerPluginNotices = new WorkerPluginNotices({

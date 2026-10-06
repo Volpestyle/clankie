@@ -24,7 +24,7 @@ import { PeerSeatMessages } from "../src/captain/peer-seat-messages.ts";
 import { createStubCaptain, type LaneTool } from "../src/captain/port.ts";
 import type { ProjectHireProcessProof } from "../src/captain/project-hires.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
-import { createMcpHost } from "../src/mcp-host.ts";
+import { createMcpHost, type McpHostOptions } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 const bridgeModule = fileURLToPath(
@@ -76,7 +76,14 @@ type NativeBridge = {
 };
 
 /** Native TUI/Herdr observations are fixtures; hire admission and every MCP hop are production. */
-async function fixture(requestTimeoutMs = 5_000) {
+async function fixture(
+  requestTimeoutMs = 5_000,
+  options: {
+    host?: Pick<McpHostOptions, "writeAuthorityForWorker" | "observeCall">;
+    stallProjectProof?: boolean;
+    unrelatedAccount?: boolean;
+  } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-concurrency-"));
   const stateDirectory = join(root, ".clankie");
   const socketPath = join(root, "herdr.sock");
@@ -84,6 +91,8 @@ async function fixture(requestTimeoutMs = 5_000) {
   const allReadsAdmitted = gate();
   const stalledReadAdmitted = gate();
   const calls: { provider: string; id: string }[] = [];
+  const bindings: string[] = [];
+  const projectProofSignals: (AbortSignal | undefined)[] = [];
   const agents = new Map<string, HerdrAgentSnapshot>();
   const bridges = new Map<string, NativeBridge>();
   const receivedPeerMessages: { seatId: string; text: string }[] = [];
@@ -107,6 +116,20 @@ async function fixture(requestTimeoutMs = 5_000) {
             allReadsAdmitted.release();
           if (id === "VUH-stall") stalledReadAdmitted.release();
           if (id.startsWith("VUH-read-") || id === "VUH-stall") await response.promise;
+          return { content: [{ type: "text", text: JSON.stringify({ id, provider: name }) }] };
+        },
+      },
+      {
+        name: "save_project_update",
+        description: "Publish an update in this isolated tracker fixture.",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+        async call(args) {
+          const id = String(args.id);
+          calls.push({ provider: name, id });
           return { content: [{ type: "text", text: JSON.stringify({ id, provider: name }) }] };
         },
       },
@@ -142,6 +165,7 @@ async function fixture(requestTimeoutMs = 5_000) {
       verifiedAt: new Date().toISOString(),
     },
   });
+  if (options.unrelatedAccount) await credentials.set("unverified", { type: "api", key: providerToken });
   const settings = new SettingsStore(join(root, "settings.json"));
   const setProvider = async (url: string) => {
     await settings.update((current) => ({
@@ -159,6 +183,20 @@ async function fixture(requestTimeoutMs = 5_000) {
             initialTools: ["get_issue"],
             enabled: true,
           },
+          ...(options.unrelatedAccount
+            ? [
+                {
+                  id: "unverified",
+                  transport: "http" as const,
+                  url: `${url}/v1/mcp`,
+                  args: [],
+                  lane: "operator" as const,
+                  credential: "unverified",
+                  initialTools: ["get_issue"],
+                  enabled: true,
+                },
+              ]
+            : []),
         ],
       },
     }));
@@ -169,7 +207,15 @@ async function fixture(requestTimeoutMs = 5_000) {
     settings,
     curated: [],
     logger: { info() {}, warn() {} },
+    ...options.host,
   });
+  // Observe calls through the real binding implementation; no account result
+  // is replaced. Exact invocation must not inspect unrelated account authority.
+  const binding = host.binding!.bind(host);
+  host.binding = async (server, lane) => {
+    bindings.push(server);
+    return binding(server, lane);
+  };
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
@@ -196,7 +242,18 @@ async function fixture(requestTimeoutMs = 5_000) {
     directory: join(stateDirectory, "links"),
     binding: async () => ({ runtime: "external", socketPath, session: "fixture" }),
     prove: async (_socket, pane) => proof(pane) !== undefined,
-    projectProof: async (_socket, pane) => proof(pane),
+    projectProof: async (_socket, pane, signal) => {
+      projectProofSignals.push(signal);
+      if (options.stallProjectProof) {
+        await new Promise<void>((_resolve, reject) => {
+          if (!signal) throw new Error("Optional author proof must have a cancellation deadline");
+          const abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+          if (signal.aborted) abort();
+        });
+      }
+      return proof(pane);
+    },
   });
   const peer = new PeerSeatMessages({
     path: join(root, "peer-receipts.json"),
@@ -359,6 +416,8 @@ async function fixture(requestTimeoutMs = 5_000) {
   return {
     bridges,
     calls,
+    bindings,
+    projectProofSignals,
     response,
     allReadsAdmitted,
     stalledReadAdmitted,
@@ -403,6 +462,119 @@ const text = (result: Awaited<ReturnType<Client["callTool"]>>) =>
     .content.filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("\n");
+
+it("reads through the native worker bridge without optional native publishing proof", async () => {
+  let authorRequests = 0;
+  const f = await fixture(2_000, {
+    stallProjectProof: true,
+    host: {
+      writeAuthorityForWorker: async (_principal, observe) => {
+        authorRequests++;
+        await observe?.();
+        return undefined;
+      },
+    },
+  });
+  try {
+    expect((await f.hire(1))[0]?.outcome).toBe("spawned");
+    const worker = [...f.bridges.values()][0]!;
+    const read = await worker.client.callTool({
+      name: "clankie_call",
+      arguments: { name: "linear_get_issue", arguments: { id: "VUH-independent-read" } },
+    });
+    expect(JSON.parse(text(read))).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
+    expect(f.calls).toEqual([{ provider: "original", id: "VUH-independent-read" }]);
+    expect(authorRequests).toBe(0);
+    expect(f.projectProofSignals).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+it.each(["capture", "revalidation"] as const)(
+  "bounds optional author %s without blocking or attributing the independent connected write",
+  async (stage) => {
+    let authorRequests = 0;
+    const attribution: unknown[] = [];
+    const f = await fixture(2_000, {
+      stallProjectProof: true,
+      host: {
+        writeAuthorityForWorker: async (_principal, observe) => {
+          authorRequests++;
+          if (stage === "capture") {
+            await observe?.();
+            return undefined;
+          }
+          return {
+            nativeRecipientAuthority: {
+              recipient: {
+                kind: "native",
+                paneId: "default/w1:p1",
+                seatId: "fixture-seat-1",
+                occupantId: "fixture-original",
+                binding: "a".repeat(64),
+              },
+              current: () => true,
+              authorize: async () => {
+                await observe?.();
+                return true;
+              },
+            },
+          };
+        },
+        observeCall: (call) => void attribution.push({ owner: call.owner, recipient: call.recipient }),
+      },
+    });
+    try {
+      expect((await f.hire(1))[0]?.outcome).toBe("spawned");
+      const worker = [...f.bridges.values()][0]!;
+      const started = performance.now();
+      const write = await worker.client.callTool({
+        name: "clankie_call",
+        arguments: { name: "linear_save_project_update", arguments: { id: `VUH-write-${stage}` } },
+      });
+      expect(JSON.parse(text(write))).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
+      expect(performance.now() - started).toBeLessThan(1_500);
+      expect(authorRequests).toBe(1);
+      expect(f.projectProofSignals).toHaveLength(1);
+      expect(f.projectProofSignals[0]?.aborted).toBe(true);
+      expect(attribution).toEqual([{ owner: undefined, recipient: undefined }]);
+      expect(f.calls).toEqual([{ provider: "original", id: `VUH-write-${stage}` }]);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+it("verifies only the exact tool account on invocation and receipt lookup while discovery spans all accounts", async () => {
+  const f = await fixture(5_000, { unrelatedAccount: true });
+  try {
+    expect((await f.hire(1))[0]?.outcome).toBe("spawned");
+    const worker = [...f.bridges.values()][0]!;
+    const search = await worker.client.callTool({ name: "clankie_tools", arguments: { query: "issue" } });
+    expect(text(search)).toContain("linear_get_issue");
+    expect(f.bindings).toContain("unverified");
+    f.bindings.length = 0;
+    const read = await worker.client.callTool({
+      name: "clankie_call",
+      arguments: { name: "linear_get_issue", arguments: { id: "VUH-exact-account" } },
+    });
+    const receipt = JSON.parse(text(read));
+    expect(receipt).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
+    expect(f.bindings.length).toBeGreaterThan(0);
+    expect(new Set(f.bindings)).toEqual(new Set(["linear"]));
+    f.bindings.length = 0;
+    const reconciled = await worker.client.callTool({
+      name: "clankie_call",
+      arguments: { receiptId: receipt.receiptId },
+    });
+    expect(JSON.parse(text(reconciled))).toMatchObject({ outcome: "ok", receiptId: receipt.receiptId });
+    expect(new Set(f.bindings)).toEqual(new Set(["linear"]));
+    expect(f.calls).toEqual([{ provider: "original", id: "VUH-exact-account" }]);
+  } finally {
+    await f.close();
+  }
+});
 
 it("keeps six native-first hires' tools and admitted tracker reads through shared client replacement", async () => {
   const f = await fixture();

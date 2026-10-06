@@ -65,6 +65,9 @@ const MAX_DATA_RESULT_BYTES = 8 * 1024 * 1024;
 const MAX_DESCRIPTION_CHARACTERS = 4_000;
 const CONNECT_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 60_000;
+/** Publication attribution is optional; it cannot exhaust a connected-account call's budget. */
+const ATTRIBUTION_TIMEOUT_MS = 2_000;
+const isReadTool = (name: string) => /^(?:get|list|search|check|fetch|read)_/u.test(name);
 /** Per invocation, including the SDK's later credential/header awaits; never connection-global. */
 const dispatchFence = new AsyncLocalStorage<(() => void) | undefined>();
 /** Refusal before a wire effect does not mean the shared provider connection failed. */
@@ -162,7 +165,7 @@ export interface McpHost {
     /** Host-stamped turn attribution; it grants no provider tools. */
     readonly conversationAuthority?: ConversationAuthority;
     /** Host-only socket/controller proof for native author attribution; never a grant. */
-    readonly nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>;
+    readonly nativeWriteProof?: (signal?: AbortSignal) => Promise<ProjectProcessProof | undefined>;
     /** Internal receipt hooks; never caller/model arguments. */
     readonly onDispatch?: () => void;
     /** Confirmed response in the caller's result mode; may follow a caller timeout. */
@@ -251,7 +254,7 @@ export interface McpHostOptions {
   /** Fresh author/owner proof captured at call entry, before connected-provider awaits. */
   readonly writeAuthorityForWorker?: (
     principalId: string,
-    nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>,
+    nativeWriteProof?: (signal?: AbortSignal) => Promise<ProjectProcessProof | undefined>,
   ) => Promise<WorkerWriteAuthority | undefined>;
   readonly observeCall?: (call: {
     readonly server: string;
@@ -773,21 +776,69 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           : z.number().int().positive().max(1_200_000).parse(input.timeoutMs);
       const signal = AbortSignal.timeout(timeoutMs);
       const deadline = Date.now() + timeoutMs;
+      const attributionAbort = new AbortController();
+      let attributionRemainingMs = Math.min(ATTRIBUTION_TIMEOUT_MS, timeoutMs / 4);
+      const optionalAttribution = async <T>(task: () => Promise<T>): Promise<T | undefined> => {
+        const remaining = Math.min(attributionRemainingMs, deadline - Date.now());
+        if (remaining <= 0 || signal.aborted || attributionAbort.signal.aborted) return undefined;
+        const started = Date.now();
+        const admission = AbortSignal.any([signal, attributionAbort.signal]);
+        let aborted!: () => void;
+        const timer = setTimeout(
+          () => attributionAbort.abort(new Error("Optional MCP publication attribution timed out")),
+          remaining,
+        );
+        try {
+          return await Promise.race([
+            Promise.resolve()
+              .then(task)
+              .catch(() => undefined),
+            new Promise<undefined>((resolve) => {
+              aborted = () => resolve(undefined);
+              admission.addEventListener("abort", aborted, { once: true });
+              if (admission.aborted) aborted();
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+          admission.removeEventListener("abort", aborted);
+          attributionRemainingMs -= Date.now() - started;
+        }
+      };
+      // Every later author reproof uses this same bounded capability, including
+      // callbacks retained by the captain. Expiry cancels queued native work.
+      const nativeWriteProof = input.nativeWriteProof
+        ? async (requested?: AbortSignal) => {
+            const proofSignal = AbortSignal.any([
+              signal,
+              attributionAbort.signal,
+              ...(requested ? [requested] : []),
+            ]);
+            proofSignal.throwIfAborted();
+            return input.nativeWriteProof!(proofSignal);
+          }
+        : undefined;
       let dispatched = false;
       const perform = async (): Promise<McpCallResult> => {
-        const providedSource = input.conversationAuthority
-          ? captureConversationAuthority(input.conversationAuthority)
-          : undefined;
+        // Read discovery never needs a publishing author. This classification
+        // only controls optional attribution; fleet/account admission is unchanged.
+        const publicationCall = !isReadTool(input.tool);
+        const providedSource =
+          publicationCall && input.conversationAuthority
+            ? captureConversationAuthority(input.conversationAuthority)
+            : undefined;
         const workerProof =
-          input.delegation && options.writeAuthorityForWorker
-            ? await options
-                .writeAuthorityForWorker(input.delegation.principalId, input.nativeWriteProof)
-                .catch(() => undefined)
+          publicationCall && input.delegation && options.writeAuthorityForWorker
+            ? await optionalAttribution(() =>
+                options.writeAuthorityForWorker!(input.delegation!.principalId, nativeWriteProof),
+              )
             : undefined;
         const workerSource =
           workerProof?.conversationAuthority ??
-          (!providedSource && input.delegation && !options.writeAuthorityForWorker
-            ? await options.conversationForWorker?.(input.delegation.principalId).catch(() => undefined)
+          (publicationCall && !providedSource && input.delegation && !options.writeAuthorityForWorker
+            ? await optionalAttribution(async () =>
+                options.conversationForWorker?.(input.delegation!.principalId),
+              )
             : undefined);
         const admittedSource =
           providedSource ?? (workerSource ? captureConversationAuthority(workerSource) : undefined);
@@ -872,26 +923,33 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           const refreshAttribution = async () => {
             authority = undefined;
             recipient = undefined;
-            try {
-              if (source && source.current() && (await source.authorize()) && source.current())
-                authority = captureConversationAuthority(source);
-            } catch {
-              /* Unavailable attribution does not revoke an independent provider grant. */
-            }
-            try {
-              if (
-                admittedNativeSource &&
-                admittedNativeSource.current() &&
-                (await admittedNativeSource.authorize()) &&
-                admittedNativeSource.current()
-              )
-                recipient = captureNativeSeatAuthority(admittedNativeSource).recipient;
-            } catch {
-              /* Never manufacture a native recipient when proof is unavailable. */
-            }
+            if (!publicationCall || (!source && !admittedNativeSource)) return;
+            // Assign only the bounded result. A late proof cannot mutate the
+            // recipient of a call that already proceeded without attribution.
+            const observed = await optionalAttribution(async () => {
+              const [owner, native] = await Promise.all([
+                (async () =>
+                  source && source.current() && (await source.authorize()) && source.current()
+                    ? captureConversationAuthority(source)
+                    : undefined)().catch(() => undefined),
+                (async () =>
+                  admittedNativeSource &&
+                  admittedNativeSource.current() &&
+                  (await admittedNativeSource.authorize()) &&
+                  admittedNativeSource.current()
+                    ? captureNativeSeatAuthority(admittedNativeSource).recipient
+                    : undefined)().catch(() => undefined),
+              ]);
+              return { owner, native };
+            });
+            authority = observed?.owner;
+            recipient = observed?.native;
             recipient ??= authority ? { kind: "conversation", owner: authority.owner } : undefined;
           };
-          await refreshAttribution();
+          // Owned publication backends reprove at their actual beforeWrite
+          // boundary. Generic MCP writes need one reproof before dispatch.
+          if (!repositoryCall && !isLocalTracker(server) && !isApiTracker(server) && !workerPost)
+            await refreshAttribution();
           // Admission may await; retain the account/config fence after it, then
           // check revocation without yielding again before provider dispatch.
           const current = input.fence ? await input.fence() : undefined;
@@ -917,8 +975,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               // Synchronous receipt persistence may consume the remaining budget.
               assertDispatch();
               dispatched = true;
-              if (server.id === "linear" && !/^(?:get|list|search|check|fetch|read)_/u.test(input.tool))
-                trackerReads.invalidate();
+              if (server.id === "linear" && !isReadTool(input.tool)) trackerReads.invalidate();
             }
           };
           const publication = {
@@ -1064,12 +1121,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               assertDispatch();
             }
           } finally {
-            if (
-              dispatched &&
-              server.id === "linear" &&
-              !/^(?:get|list|search|check|fetch|read)_/u.test(input.tool)
-            )
-              trackerReads.invalidate();
+            if (dispatched && server.id === "linear" && !isReadTool(input.tool)) trackerReads.invalidate();
             selected.activeCalls -= 1;
             // Provider settlement releases the connection; receipt observers
             // can still await without retaining an obsolete transport.

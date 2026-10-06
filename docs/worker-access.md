@@ -97,6 +97,10 @@ timeout when the job becomes active. Cancelling one caller removes its queued
 job or drains and discards its active reply; other callers keep their proofs.
 Queue depth stays at 128; waiting under a burst can exceed 1 s, and queued
 callers can abort.
+The worker request's deadline follows local admission through Herdr reads,
+socket census and project observations. Expired requests remove their queued
+helper work; an active helper reply still drains before another job uses the pipe.
+Cancellation is a request failure, not evidence that the pane lost membership.
 An active timeout, malformed reply or helper exit refuses pending observations,
 and the body closes its own helper
 at shutdown. Refusals emit `fleet.local_proof.refused` with a fixed reason;
@@ -156,6 +160,14 @@ atomic. This is the chosen contract (VUH-1585,
 calls rather than promising atomic revocation. The original strict guarantee was
 not met and was replaced by this decision, not shown to pass. An operation already
 dispatched to a provider cannot be recalled.
+
+Connected-account reads do not acquire native publication attribution. A write
+may obtain that optional author/recipient proof within one shared budget of at
+most two seconds, further limited by the request's remaining time. Missing or
+expired attribution cannot remove an independently admitted account grant or
+invent an author. Publication tools that require a proven author still refuse
+without it. Exact tool invocation and receipt lookup verify only their selected
+connected account; broad catalog discovery still checks each offered account.
 
 ## Messages between workers
 

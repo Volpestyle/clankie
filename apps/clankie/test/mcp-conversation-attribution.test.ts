@@ -98,7 +98,8 @@ describe("MCP conversation attribution", () => {
       },
       writeAuthorityForWorker: async (principal, nativeProof) => {
         expect(principal).toBe("fleet:kh2:pane:w3:pK");
-        expect(nativeProof).toBe(proof);
+        // The host wraps this capability with its attribution cancellation budget.
+        expect(await nativeProof?.()).toBeUndefined();
         return { conversationAuthority: owner, nativeRecipientAuthority: native };
       },
       observeCall: (call) => void observed.push({ owner: call.owner, recipient: call.recipient }),

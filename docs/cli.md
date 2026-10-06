@@ -3043,6 +3043,33 @@ cached schemas do not authorize a refused call. A `No durable native binding`
 message receipt means the bridge could not prove its delivery binding and sent
 no new message; inspect the pane's native binding before retrying delivery.
 
+Connected reads do not run optional native write-attribution proof. Ordinary
+connected writes bound that attribution separately while preserving fleet,
+account, configuration and publication checks. Request cancellation follows the
+local native proof queue, so an expired worker call does not keep consuming it.
+
+An older running worker bridge can keep an exact terminal inbound receipt
+unresolved even after the service and plugin files are updated. Version 0.6.2
+accepted only positive stored receipts; current code also accepts the service's
+matching `definitive: not_sent` fence. Refresh the MCP process that owns the call,
+preserving the original thread and receipt file. The deployed operator outbox
+pump fix does not reload a worker's already-imported parser.
+
+For a Clankie-managed Codex seat with its original dedicated controller and
+isolated copied config, the controller replaces only Clankie's connection by
+updating `mcp_servers.clankie.env.CLANKIE_CATALOG_REVISION` with
+`config/value/write`, then calling `config/mcpServer/reload`. The next model step
+uses the refreshed connection on the same loaded thread. Do not edit the owner's
+config, restart a shared daemon, fork the thread or delete a claim. An embedded
+or remote session without that controller needs its owner's exact-session
+reconnect after the old runtime unloads.
+
+After refresh, invoke `message_clankie` once to read the original receipt. A
+matching positive stored result or terminal `definitive: not_sent` result settles
+the retained claim; that invocation still sends no replacement. Invoke again
+deliberately to send the later report. A timeout, unauthenticated or mismatched
+lookup stays uncertain. See [the worker fleet regression evidence](testing/2026-10-05-worker-fleet-tools/README.md).
+
 ### `project create PROJECT --settings FILE.json --revision REVISION`
 
 Requires a service build containing the local project-creation route; a source

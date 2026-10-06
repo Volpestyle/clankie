@@ -49,13 +49,19 @@ async function fixture(legacy = false) {
   };
   let loadedThread = session.value;
   let extraThread: "child" | "independent" | undefined;
-  server.on("connection", (socket) =>
+  const state = { holdLoaded: false, requests: [] as string[], closed: 0 };
+  server.on("connection", (socket) => {
+    socket.once("close", () => {
+      state.closed++;
+    });
     socket.on("message", (bytes) => {
       const request = JSON.parse(String(bytes)) as {
         id?: number;
         method: string;
         params?: { threadId?: string };
       };
+      state.requests.push(request.method);
+      if (request.method === "thread/loaded/list" && state.holdLoaded) return;
       if (request.id !== undefined)
         socket.send(
           JSON.stringify({
@@ -73,8 +79,8 @@ async function fixture(legacy = false) {
                   : {},
           }),
         );
-    }),
-  );
+    });
+  });
   const start = "Sun Oct  4 21:43:29 2026";
   const launch = {
     pid: 20145,
@@ -129,6 +135,7 @@ async function fixture(legacy = false) {
     return { stdout, stderr: "" };
   };
   return {
+    state,
     path,
     run,
     binding,
@@ -200,6 +207,44 @@ it.each([
     await recoverLocalCodexSession({ paneId: f.launch.pane, agent: "codex" }, f.options),
   ).toBeUndefined();
   expect((await readFleet({ ...f.options, summaries: {} })).seats).toEqual([]);
+});
+
+it("closes the owned recovery socket on cancellation and skips later authority observations", async () => {
+  const f = await fixture();
+  const controller = new AbortController();
+  f.state.holdLoaded = true;
+  const commands: string[] = [];
+  const run: HerdrCensusRunner = (command, args) => {
+    commands.push(`${command} ${args.join(" ")}`);
+    return f.run(command, args);
+  };
+  const pending = recoverLocalCodexSession(
+    { paneId: f.launch.pane, agent: "codex" },
+    {
+      ...f.options,
+      runCommand: run,
+      signal: controller.signal,
+    },
+  );
+  // Attach rejection handling before abort so the test never abandons an owned request.
+  const outcome = pending.then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  );
+  const deadline = Date.now() + 2_000;
+  while (!f.state.requests.includes("thread/loaded/list")) {
+    if (Date.now() >= deadline) throw new Error("Recovery fixture did not reach loaded-thread read");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const observed = commands.length;
+  controller.abort(new Error("fixture cancellation"));
+  expect(await outcome).toEqual({ error: controller.signal.reason });
+  while (f.state.closed === 0) {
+    if (Date.now() >= deadline) throw new Error("Cancelled owned recovery socket did not close");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  expect(f.state.requests).toEqual(["initialize", "initialized", "thread/loaded/list"]);
+  expect(commands).toHaveLength(observed);
 });
 
 it("keeps a resumed root steerable when its native parallel child remains loaded", async () => {

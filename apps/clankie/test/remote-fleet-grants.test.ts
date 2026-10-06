@@ -50,7 +50,10 @@ it("runs the remote admitted-pane handshake without native project proof and fen
     ],
     logger: { info: () => {}, warn: () => {} },
     connect: async () => ({
-      listTools: async () => [{ name: "get_issue", inputSchema: { type: "object" } }],
+      listTools: async () => [
+        { name: "get_issue", inputSchema: { type: "object" } },
+        { name: "save_project_update", inputSchema: { type: "object" } },
+      ],
       callTool,
       close: async () => {},
     }),
@@ -119,18 +122,18 @@ it("runs the remote admitted-pane handshake without native project proof and fen
     ]);
     expect(projectProof).not.toHaveBeenCalled();
     expect((await rpc("tools/list", {}, session, false)).status).toBe(401);
-    const call = async () =>
+    const call = async (tool = "get_issue") =>
       await (
         await rpc(
           "tools/call",
-          { name: "clankie_call", arguments: { name: "linear_get_issue", arguments: { id: "TEST-1" } } },
+          { name: "clankie_call", arguments: { name: `linear_${tool}`, arguments: { id: "TEST-1" } } },
           session,
         )
       ).json();
     expect((await call()).result.isError).toBe(false);
     expect(callTool).toHaveBeenCalledOnce();
     expect(authorProofs).toEqual([]);
-    expect(projectProof).toHaveBeenCalled();
+    expect(projectProof).not.toHaveBeenCalled();
     const otherFleet: LocalFleetIdentity = { ...identity, fleet: "kh2" };
     const originalFetch = app.app.fetch;
     // A session cannot move to a different admitted fleet with the same pane string.
@@ -163,12 +166,12 @@ it("runs the remote admitted-pane handshake without native project proof and fen
       processes: [{ pid: 123, startTime: "original" }],
       shell: { pid: 122, startTime: "shell" },
     };
-    expect((await call()).result.isError).toBe(false);
+    expect((await call("save_project_update")).result.isError).toBe(false);
     expect(callTool).toHaveBeenCalledTimes(2);
     expect(authorProofs).toEqual([{ principal: "fleet:pc:pane:w3:p8", proof: currentProof }]);
     // A claimed header cannot borrow another pane's observed native author.
     currentProof = { ...currentProof, pane: "w3:p9" };
-    expect((await call()).result.isError).toBe(false);
+    expect((await call("save_project_update")).result.isError).toBe(false);
     expect(callTool).toHaveBeenCalledTimes(3);
     expect(authorProofs).toHaveLength(1);
     live = false;
