@@ -176,9 +176,13 @@ async function fixture(
     },
   );
   fixtures.push({ root, captain });
-  // Bind real native outboxes before a scheduled wake, so no model is called.
-  await captain.pollSeatEvents(0, undefined, "global-default");
-  await captain.pollSeatEvents(0, undefined, second.conversation.conversationId);
+  // Park both native outboxes before a scheduled wake; zero-wait reads do not bind them.
+  expect(
+    await Promise.all([
+      captain.pollSeatEvents(1, undefined, "global-default"),
+      captain.pollSeatEvents(1, undefined, second.conversation.conversationId),
+    ]),
+  ).toEqual([[], []]);
   const leadSessions = new Map([
     ["global-default", randomUUID()],
     [second.conversation.conversationId, randomUUID()],
