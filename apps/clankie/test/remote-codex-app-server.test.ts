@@ -470,6 +470,7 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
       HERDR_PANE_ID: "w1:p1",
       HERDR_SOCKET_PATH: "C:\\herdr.sock",
       CLANKIE_EXPECTED_TOOL_NAMES: JSON.stringify(["linear_get_issue"]),
+      CLANKIE_CODEX_CATALOG_OBSERVED: "1",
     },
     onExit: () => {},
   });
@@ -481,6 +482,7 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
   expect(script).toContain('mcp_servers.clankie.env.OWNER_KEEP="yes"');
   expect(script).toContain("mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES");
   expect(script).not.toContain("$environment['CLANKIE_EXPECTED_TOOL_NAMES']");
+  expect(script).toContain("$environment['CLANKIE_CODEX_CATALOG_OBSERVED']='1'");
   expect(script).toContain("GetProcessTimes(created.process");
   expect(script).toContain("ResumeThread(created.thread)");
   expect(script.indexOf("GetProcessTimes(created.process")).toBeLessThan(

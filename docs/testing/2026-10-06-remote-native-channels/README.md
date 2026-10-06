@@ -9,6 +9,8 @@ native binding. A hand-started `--no-daemon` Codex report stored successfully, b
 its native Queue reply returned `seat_offline` while the TUI remained live.
 VUH-1527 stays open; see the [current acceptance and exact gaps](live/7ee4da04/README.md).
 
+A [fresh-root naming and catalog repair](sender-naming/CHECKS.md) now prevents native automatic title helpers from revoking managed remote sender authority without granting those helpers an exception. Both fixes passed native security review; deployed PC acceptance remains pending.
+
 The deployed [sender and completion repair](sender-completion/CHECKS.md) adds
 original-registration retention after unavailable native inventory reads,
 original-backend proof, shared fleet-qualified persona identity, and exact

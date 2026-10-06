@@ -41,10 +41,19 @@ it("recovers report/peer native proof after an unavailable inventory read, using
   );
   const controller = await startCodexAppServerSeat({
     cwd: directory,
+    threadName: "Ada · PC acceptance",
     server: async (input) => ({ ...(await native.launch(input)), remoteRegistration: registration }),
     startView: async () => native.startView(),
   });
   try {
+    await controller.send("Fresh owned native brief");
+    const methods = native.requests.map(({ method }) => method);
+    expect(methods.indexOf("thread/name/set")).toBeLessThan(methods.indexOf("turn/start"));
+    expect(native.requests.find(({ method }) => method === "thread/name/set")?.params).toEqual({
+      threadId: native.threadId,
+      name: "Ada · PC acceptance",
+    });
+    native.finish("completed", "Native brief completed");
     const observe = createRemoteProjectObserver({
       fleet: async () => fleet,
       privateSeats: seats,
@@ -75,6 +84,48 @@ it("recovers report/peer native proof after an unavailable inventory read, using
     expect(await peerSeatAuthority(identity, identity.pane)).toBeUndefined();
   } finally {
     await controller.close();
+    registration.release();
+    await native.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each(["rejected", "existing"])("keeps native naming %s within the fresh managed root", async (kind) => {
+  const directory = await mkdtemp(join(tmpdir(), "remote-sender-name-"));
+  const native = await codex0160Protocol(
+    directory,
+    kind === "existing" ? { threadName: "Owner's existing name" } : { rejectName: true },
+  );
+  const seats = new RemoteCodexSeats(async () => undefined);
+  const registration = seats.register(
+    {
+      fleet: { id: "pc", session: "default", ssh: { host: "pc", shell: "powershell" } },
+      pane: "w1:p1",
+      binding: { session: "default", socketPath: "C:\\herdr.sock" },
+      shell: { pid: 10, startTime: "shell" },
+      server: { pid: 20, startTime: "server", executable: "C:\\codex.exe", port: 45000 },
+    },
+    () => true,
+  );
+  let controller: Awaited<ReturnType<typeof startCodexAppServerSeat>> | undefined;
+  try {
+    const started = startCodexAppServerSeat({
+      cwd: directory,
+      threadName: "New hire name",
+      server: async (input) => ({ ...(await native.launch(input)), remoteRegistration: registration }),
+      startView: async () => native.startView(),
+    });
+    if (kind === "rejected") {
+      await expect(started).rejects.toThrow("Native thread name was rejected");
+      expect(native.requests.some(({ method }) => method === "turn/start" || method === "turn/steer")).toBe(
+        false,
+      );
+    } else {
+      controller = await started;
+      expect(native.requests.some(({ method }) => method === "thread/name/set")).toBe(false);
+    }
+  } finally {
+    await controller?.close();
     registration.release();
     await native.close();
     await rm(directory, { recursive: true, force: true });

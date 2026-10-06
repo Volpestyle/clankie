@@ -312,6 +312,7 @@ export function createCodexSeatAdapter(
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({
             cwd: launch.cwd,
+            ...(view.name ? { threadName: view.name } : {}),
             ...(options.localProcess &&
             launch.env?.CLANKIE_CODEX_ISOLATED_HOME === launch.env?.CODEX_HOME &&
             launch.env?.CODEX_HOME
@@ -339,7 +340,7 @@ export function createCodexSeatAdapter(
                   env: {
                     ...launch.env,
                     ...(await options.viewEnv?.(view)),
-                    ...(options.catalogObserved && !options.server && !options.serverForView
+                    ...(options.catalogObserved && (!options.server || options.serverForView)
                       ? { CLANKIE_CODEX_CATALOG_OBSERVED: "1" }
                       : {}),
                   },
