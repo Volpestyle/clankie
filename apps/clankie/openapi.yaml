@@ -315,8 +315,13 @@ paths:
       operationId: runtimeUpdateStatus
       summary: Read runtime-update status and current deploy holds
       security: [{ operatorBearer: [] }]
+      parameters:
+        - in: query
+          name: ref
+          schema: { type: string, minLength: 1, maxLength: 256 }
+          description: Fetch and preview this target, including new commit count and latest summaries
       responses:
-        "200": { description: Runtime boot identity, durable operation status and holds with holder presence }
+        "200": { description: Runtime boot identity, durable operation status, holds with canary causes and measurements, and optional target preview }
         "403": { description: Operator required }
         "503": { description: Runtime updater unavailable }
     post:
@@ -334,6 +339,10 @@ paths:
                 ref: { type: string, minLength: 1, maxLength: 256, default: main }
                 overrides:
                   { type: array, maxItems: 32, items: { $ref: "#/components/schemas/DeployHoldOverride" } }
+                overrideHolds:
+                  { type: boolean, description: Owner-explicit override of all current holds; requires reason and excludes overrides }
+                reason:
+                  { type: string, minLength: 1, maxLength: 512, description: Required nonblank reason for overrideHolds; audit actor is derived from authenticated owner }
       responses:
         "202": { description: Accepted durable update, not completed deployment }
         "409": { description: Named deploy hold or other refusal; detail describes the blocker }

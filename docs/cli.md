@@ -316,6 +316,20 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 ### `update [--ref REF]` / `update status` / `update canary`
 
+In a terminal, update shows the live commit, the fetched target, its new commit
+count and latest commit summaries, then groups holds by cause with CPU and
+health measurements. `status` and `canary` also use plain words. Add `--json`
+for structured output; piped output stays JSON. `update --help` lists the flags.
+
+After reviewing holds, the authenticated owner can use
+`clankie update --override-holds --reason "why proceeding is safe"`.
+An interactive terminal also offers confirmation and asks for the reason;
+declining or giving no reason leaves the update held. Each hold gets its own
+durable override audit, attributed to the authenticated owner. A new hold
+acquired after the prompt still blocks. Legacy per-hold flags remain available:
+`--override-hold UUID [--actor NAME] --reason TEXT`; the server derives the
+audit actor from authentication regardless of the supplied name.
+
 `clankie update` fetches `origin/main` and stages its exact commit. Named branches
 (including `origin/BRANCH` and `refs/heads/BRANCH`) fetch that branch from origin;
 failed fetches refuse the update without using a cached or local tip. Use a full
@@ -347,7 +361,10 @@ post-update canary observes it for five minutes. The default budgets are 10%
 captain-process CPU (100% means one core) and 250 ms `/health` p95, sampled every
 10 seconds. Health latency includes TCP setup and the complete response on a
 fresh loopback HTTP connection. Its deploy hold blocks further updates and integration landings
-during observation. A pass releases only that canary's hold. A regression or
+during observation. A full pass releases that canary's hold and older canary
+holds with matching durable provenance; their original results and release
+audits remain. Pending or failed newer observations do not clear old holds,
+and independent or unverified holds continue to block. A regression or
 missing health signal records a failed canary, retains the hold, names the
 previous healthy commit, and attempts the runtime-health alert path. The new
 pin keeps running; rollback requires an explicit owner decision. Alert status

@@ -5,7 +5,7 @@ import { realpath } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import type { RuntimeUpdater, UpdateAuthority } from "../../tui/bin/runtime-updater.ts";
 import { HoldOverrideSchema } from "@clankie/protocol/integrate";
-import type { DeployHolds } from "./deploy-holds.ts";
+import { DeployHeldError, type DeployHolds } from "./deploy-holds.ts";
 import { FleetHarnessRefreshRequestSchema } from "@clankie/protocol/fleet-settings";
 import {
   FLEET_WORKER_CATALOG_REFRESH_PATH,
@@ -250,11 +250,15 @@ export function createRuntimeUpdateRoutes(options: {
     try {
       const result = options.updater.status();
       const holds = options.holds ? await options.holds.list() : undefined;
+      const ref = context.req.query("ref");
+      const target =
+        ref !== undefined && options.updater.preview ? await options.updater.preview(ref) : undefined;
       await authority.guard();
       if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
       return context.json({
         ...result,
-        ...(holds === undefined ? {} : { holds }),
+        ...(holds === undefined ? {} : { holds: options.canary?.describeHolds(holds) ?? holds }),
+        ...(target === undefined ? {} : { target }),
         ...(options.canary ? { canaryPolicy: options.canary.policy() } : {}),
       });
     } catch {
@@ -275,27 +279,59 @@ export function createRuntimeUpdateRoutes(options: {
       .object({
         ref: z.string().min(1).max(256).optional(),
         overrides: z.array(HoldOverrideSchema).max(32).default([]),
+        overrideHolds: z.boolean().optional(),
+        reason: HoldOverrideSchema.shape.reason.optional(),
       })
       .strict()
+      .refine((input) =>
+        input.overrideHolds
+          ? Boolean(input.reason) && input.overrides.length === 0
+          : input.reason === undefined,
+      )
       .safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ error: "invalid_update_request" }, 400);
     try {
-      const deploy = async () => {
+      await authority.guard();
+      if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+      const actor = authority.initiator?.operatorId;
+      if ((parsed.data.overrideHolds || parsed.data.overrides.length) && !actor)
+        return context.json({ error: "override_owner_identity_required" }, 403);
+      const guard = async () => {
         await authority.guard();
+        if (!authority.current()) throw Error("operator_revoked");
+      };
+      const deploy = async () => {
+        await guard();
         return options.updater!.request(parsed.data.ref ?? "main", authority);
       };
-      if (!options.holds && parsed.data.overrides.length) throw Error("Deploy holds unavailable");
+      if (!options.holds && (parsed.data.overrideHolds || parsed.data.overrides.length))
+        throw Error("Deploy holds unavailable");
       const result = options.holds
         ? await options.holds.landing(
             `runtime-update:${parsed.data.ref ?? "main"}`,
-            parsed.data.overrides,
+            parsed.data.overrides.map((override) => ({ ...override, actor: actor! })),
             deploy,
+            {
+              guard,
+              ...(parsed.data.overrideHolds
+                ? { overrideAll: { actor: actor!, reason: parsed.data.reason! } }
+                : {}),
+            },
           )
         : await deploy();
       return context.json(result, result.accepted ? 202 : 409);
     } catch (error) {
       return context.json(
-        { error: authority.current() ? "update_refused" : "operator_revoked", detail: String(error) },
+        {
+          error: authority.current() ? "update_refused" : "operator_revoked",
+          detail: String(error),
+          ...(error instanceof DeployHeldError
+            ? {
+                ...options.updater.status(),
+                holds: options.canary?.describeHolds(error.holds) ?? error.holds,
+              }
+            : {}),
+        },
         authority.current() ? 409 : 403,
       );
     }
