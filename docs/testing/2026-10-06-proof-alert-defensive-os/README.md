@@ -30,15 +30,26 @@ cooldown. Exceptions or conflicting original evidence remain held. Native
 mailbox IDs and bindings remain private. Stored next-turn mail is held rather
 than accepted; its exact ID, binding and content acknowledgment is read without
 rewriting or taking its journal. A prior identical receipt without a current
-dispatch guard cannot acquire acceptance.
+dispatch guard cannot acquire acceptance. Inactive unresolved originals retain
+their slots while rate buckets expire. The 512-seat cap refuses new admission
+instead of evicting an unresolved alert; this can suppress new seat alerts until
+held receipts settle, while aggregate counters continue to record observations.
 
 The real mailbox/filesystem regression takes an event without acknowledging it,
-observes uncertainty, then continues proof observations for six configured
-minutes with one dispatch. Invented IDs and wrong bindings refuse. The exact
-original acknowledgment starts cooldown; another attempt becomes eligible only
+observes uncertainty, then leaves a six-minute gap with no observations. A
+snapshot and new refusal still leave one dispatch. Filling all 512 seat slots
+and observing an overflow pane cannot evict or replay the original. Invented
+IDs and wrong bindings refuse. The exact original acknowledgment starts
+cooldown; another attempt becomes eligible only
 after five further minutes. This is protocol-client evidence, not an original
 owner TUI receipt. Existing eight real worker-receipt producer checks were
 already integrated separately; no original POST is replayed here.
+
+The same owned idle-gap case against the frozen `356b0603` collector reproduced
+two dispatches where one was required (`expected 2 to be 1`). The corrected
+collector passes all four cases, including exact acknowledgment and bounded
+admission. Service typecheck, scoped lint and 456 documentation link checks
+pass. Before/after logs are `.local/1704/idle-gap-{before,checks}.log`.
 
 ## Remaining acceptance
 
