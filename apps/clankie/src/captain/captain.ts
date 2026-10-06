@@ -1,3 +1,4 @@
+import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
 import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
 import {
   inspectCheckout,
@@ -1591,7 +1592,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return pruneTidyWorktree(
       repository,
       path,
-      join(homedir(), ".herdr-handoffs", "worktree-evidence"),
+      join(options.stateDir, "worktree-evidence"),
       herdrRunner,
       async () => {
         await guard();
@@ -1599,6 +1600,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
           throw Error("Project enrollment changed");
       },
+      { runtimeRoot: options.repoRoot },
     );
   };
 
@@ -1766,6 +1768,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const paneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
+    runtimeRoot: options.repoRoot,
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
@@ -2268,10 +2271,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  const checkoutStatusCache = new Map<
-    string,
-    { expires: number; pending: Promise<import("@clankie/protocol").CheckoutStatus> }
-  >();
+  const checkoutObservations = new CheckoutObservationCache();
+  async function enrichCheckoutSeats(
+    seats: readonly OperatorFleetSeat[],
+  ): Promise<readonly OperatorFleetSeat[]> {
+    return Promise.all(
+      seats.map(async (seat) => {
+        if (seat.fleet !== undefined || !seat.workingDirectory) return seat;
+        const checkout = await checkoutObservations.observe(seat.workingDirectory);
+        return checkout ? { ...seat, checkout } : seat;
+      }),
+    );
+  }
   async function observeFleetProjection(): Promise<readonly OperatorFleetSeat[]> {
     await personas.ready(settingsStore);
     const fleet = await observeFleet();
@@ -2386,7 +2397,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrWatches.trackSeat(seat.seatId);
     }
     liveSeats = seats;
-    const rosterOwnerPaths = new Map<string, Promise<string>>();
     const projected = await Promise.all(
       seats.map(async (seat) => {
         // A lapsed stance simply is not here, so no surface has to reason about
@@ -2445,27 +2455,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             /* Conflicting historical claims confer no inspection attribution. */
           }
         }
-        let checkout: import("@clankie/protocol").CheckoutStatus | undefined;
-        if (seat.fleet === undefined && seat.workingDirectory) {
-          let owner = rosterOwnerPaths.get(seat.workingDirectory);
-          if (!owner) {
-            owner = ownerCheckout(seat.workingDirectory);
-            rosterOwnerPaths.set(seat.workingDirectory, owner);
-          }
-          checkout = await owner
-            .then((path) => {
-              let cached = checkoutStatusCache.get(path);
-              if (!cached || cached.expires < Date.now()) {
-                cached = { expires: Date.now() + 30_000, pending: inspectCheckout(path) };
-                checkoutStatusCache.set(path, cached);
-              }
-              return cached.pending;
-            })
-            .catch(() => undefined);
-        }
         const result: OperatorFleetSeat = {
           ...seat,
-          ...(checkout ? { checkout } : {}),
           conversationId: conversations.conversationIdForPersona(seat.personaId),
           ...(stance === undefined ? {} : { stance }),
           ...(activity === undefined ? {} : { activity }),
@@ -2773,10 +2764,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   /** Read every fleet-owned record against one stable Herdr change cursor. */
-  async function fleetSnapshot(): Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>> {
+  async function fleetSnapshot({ includeCheckouts = false }: { includeCheckouts?: boolean } = {}): Promise<
+    Extract<OperatorConversationServiceResult, { op: "fleet" }>
+  > {
     for (;;) {
       const cursor = fleetChanges.current();
-      const seats = await refreshFleet();
+      const observed = await refreshFleet();
+      const seats = includeCheckouts ? await enrichCheckoutSeats(observed) : observed;
       const channelsResult = await conversations.serve({ op: "channels", schemaVersion: 1 });
       const goalConversations = await conversations.serve({ op: "list", schemaVersion: 1 });
       const goals =
@@ -3807,6 +3801,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
       get shutdown() {
         return shutdown;
+      },
+      get enrichCheckoutSeats() {
+        return enrichCheckoutSeats;
       },
       get fleetSnapshot() {
         return fleetSnapshot;

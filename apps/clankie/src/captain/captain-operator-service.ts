@@ -58,7 +58,12 @@ export interface CreateOperatorServiceContext {
   readonly sessions: Map<string, Promise<LaneSession>>;
   readonly desktop: DesktopExpressions;
   readonly shutdown: AbortController;
-  readonly fleetSnapshot: () => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
+  readonly enrichCheckoutSeats: (
+    seats: readonly OperatorFleetSeat[],
+  ) => Promise<readonly OperatorFleetSeat[]>;
+  readonly fleetSnapshot: (options?: {
+    includeCheckouts?: boolean;
+  }) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
   readonly headSeat: ObservedHeadSeat | undefined;
   readonly observeFleet: (localOnly?: boolean) => Promise<ObservedFleet>;
   readonly agentWork: ReturnType<typeof createAgentWorkStore>;
@@ -283,9 +288,7 @@ export function createOperatorService(
     }
     if (request.op === "roster") {
       const observed = await ctx.refreshFleet();
-      const seats = request.includeCheckouts
-        ? observed
-        : observed.map(({ checkout: _checkout, ...seat }) => seat);
+      const seats = request.includeCheckouts ? await ctx.enrichCheckoutSeats(observed) : observed;
       return {
         op: "roster",
         schemaVersion: 1,
@@ -382,16 +385,7 @@ export function createOperatorService(
     }
     if (request.op === "fleet") {
       await ctx.fleetChanges.wait(request.cursor, request.waitMs ?? 0);
-      const observed = await ctx.fleetSnapshot();
-      const snapshot = request.includeCheckouts
-        ? observed
-        : {
-            ...observed,
-            snapshot: {
-              ...observed.snapshot,
-              seats: observed.snapshot.seats.map(({ checkout: _checkout, ...seat }) => seat),
-            },
-          };
+      const snapshot = await ctx.fleetSnapshot({ includeCheckouts: request.includeCheckouts === true });
       const { closedPanes: _closed, ...withoutHistory } = snapshot.snapshot;
       const full = request.includeClosedPanes ? snapshot : { ...snapshot, snapshot: withoutHistory };
       const { goals: _goals, assignments: _assignments, ...legacy } = full.snapshot;

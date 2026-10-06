@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { canonicalProjectPath, projectPathContains } from "@clankie/settings";
 import type { HerdrWatchRunner } from "./herdr-watch.ts";
@@ -22,6 +23,27 @@ interface GitWorktree {
 const exec = promisify(execFile);
 const platform = process.platform === "win32" ? "windows" : "posix";
 const SHA = /^[a-f0-9]{40,64}$/u;
+
+export interface ManagedWorktreeProtection {
+  readonly runtimeRoot?: string;
+  readonly home?: string;
+  readonly runtimePath?: string;
+}
+
+async function managedWorktreePaths(options: ManagedWorktreeProtection): Promise<string[]> {
+  const home = options.home ?? homedir();
+  const paths = [
+    join(home, ".clankie", "pinned"),
+    join(home, ".clankie", "runtimes"),
+    join(home, ".clankie", "updates"),
+    options.runtimePath ?? process.env.CLANKIE_RUNTIME_DIR ?? join(home, ".clankie", "pinned"),
+    options.runtimeRoot ?? process.cwd(),
+  ].map((path) => resolve(path));
+  // Protect both configured names and their actual targets, including a pin alias.
+  return [
+    ...new Set([...paths, ...(await Promise.all(paths.map((path) => realpath(path).catch(() => path))))]),
+  ];
+}
 
 async function canonical(path: string, directory = true): Promise<string> {
   if (
@@ -120,6 +142,7 @@ export async function listTidyWorktrees(
   repositoryPath: string,
   mergedInto: string,
   runner: Pick<HerdrWatchRunner, "list">,
+  protection: ManagedWorktreeProtection = {},
 ): Promise<TidyWorktreesResult> {
   const unavailable = (reason: string): TidyWorktreesResult => ({
     outcome: "unavailable",
@@ -153,10 +176,19 @@ export async function listTidyWorktrees(
   try {
     const raw = await git(repo.top, ["worktree", "list", "--porcelain", "-z"]);
     const inventory = worktrees(raw);
+    const managedPaths = await managedWorktreePaths(protection);
     const result: TidyWorktreesResult = { outcome: "listed", mergedInto, candidates: [], excluded: [] };
     for (const entry of inventory) {
       let reason: string | undefined;
       if (entry.bare || entry.path === inventory[0]!.path) reason = "main_worktree";
+      else if (
+        managedPaths.some(
+          (path) =>
+            projectPathContains(path, entry.path, platform) ||
+            projectPathContains(entry.path, path, platform),
+        )
+      )
+        reason = "managed_runtime";
       else if (entry.locked) reason = "locked";
       else if (entry.prunable) reason = "prunable";
       else {

@@ -4769,8 +4769,9 @@ branch, HEAD, cached `origin/main`, ahead/behind, dirty state, and linked/stale
 worktree counts. Doctor and local roster cards include these observations.
 Cached refs are explicitly identified; status never fetches or edits a checkout.
 Roster/fleet requests opt into checkout cards with `includeCheckouts: true`;
-older callers keep their original response shape. Roster observations may be
-cached for 30 seconds.
+older callers keep their original response shape and perform no checkout Git
+observation. Opted-in reads cache owner discovery and inspection together for
+30 seconds, retaining at most 128 cwd observations.
 
 `clankie checkouts sync [--repository OWNER_CHECKOUT]` fetches `origin/main`
 and fast-forwards an owner checkout on `main` only when it has no local commits
@@ -4787,9 +4788,11 @@ one landed, clean, inactive linked worktree in an enrolled worktree root. The
 Tidy up skill uses the equivalent `prune_tidy_worktree` tool after preserving
 its result. The service fetches main, copies ignored `.local` evidence, then
 rechecks Git and every live local pane's cwd and foreground cwd. Main checkouts,
-managed runtime worktrees, locked, dirty, unmerged, and live trees stay. Git
+managed pinned/runtime/update namespaces, the running service checkout, locked,
+dirty, unmerged, and live trees stay regardless of developer-root enrollment. Git
 removal is never forced; local branches are deleted only if merged. Evidence
-is retained under `~/.herdr-handoffs/worktree-evidence/`.
+is retained under `worktree-evidence/` in Clankie’s configured state directory
+(default `~/.clankie/captain/worktree-evidence/`).
 
 New local and SSH hires fetch and verify their start checkout on that machine.
 Dirty checkouts, missing remote main, failed fetches and a HEAD that does not

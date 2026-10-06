@@ -743,5 +743,9 @@ Git observations, safe fast-forward, and new-hire freshness admission.
 pushes and main runtime updates persist checkout-sync results. Fresh hires
 verify fetched main on their actual machine before any launch; saved resumes
 retain their directory. Tidy's exact-worktree removal preserves `.local`
-evidence and rechecks complete local pane and Git inventories. Roster and
-doctor report cached-ref observations without fetching during their reads.
+evidence in the configured state directory and rechecks complete local pane
+and Git inventories. Managed pin/runtime/update namespaces and the running
+service checkout are protected independently of developer-root enrollment.
+Roster/fleet checkout reads require explicit opt-in and cache owner discovery
+and inspection together for 30 seconds with a 128-cwd limit; default reads do
+no checkout Git work. Doctor reports cached refs without fetching.

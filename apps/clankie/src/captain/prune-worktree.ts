@@ -1,7 +1,7 @@
 import { cp, mkdir, realpath, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
-import { checkoutGit, fetchCheckoutMain } from "@clankie/settings";
-import { listTidyWorktrees } from "./tidy-worktrees.ts";
+import { basename, join, resolve } from "node:path";
+import { checkoutGit, fetchCheckoutMain, projectPathContains } from "@clankie/settings";
+import { listTidyWorktrees, type ManagedWorktreeProtection } from "./tidy-worktrees.ts";
 import type { HerdrWatchRunner } from "./herdr-watch.ts";
 
 export interface PruneWorktreeResult {
@@ -18,11 +18,12 @@ export async function pruneTidyWorktree(
   evidenceRoot: string,
   runner: Pick<HerdrWatchRunner, "list">,
   guard: () => Promise<void>,
+  protection: ManagedWorktreeProtection = {},
 ): Promise<PruneWorktreeResult> {
   try {
     await guard();
     await fetchCheckoutMain(repository);
-    const first = await listTidyWorktrees(repository, "origin/main", runner);
+    const first = await listTidyWorktrees(repository, "origin/main", runner, protection);
     if (first.outcome !== "listed")
       return { outcome: "unavailable", path, reason: first.excluded[0]?.reason ?? "inventory_unavailable" };
     const candidate = first.candidates.find((entry) => entry.path === path);
@@ -40,7 +41,13 @@ export async function pruneTidyWorktree(
     let evidencePath: string | undefined;
     if (await stat(evidence).catch(() => undefined)) {
       if ((await realpath(evidence)) !== evidence) return { outcome: "kept", path, reason: "evidence_alias" };
+      if (
+        projectPathContains(path, resolve(evidenceRoot), process.platform === "win32" ? "windows" : "posix")
+      )
+        return { outcome: "kept", path, reason: "evidence_archive_in_worktree" };
       await mkdir(evidenceRoot, { recursive: true, mode: 0o700 });
+      if ((await realpath(evidenceRoot)) !== resolve(evidenceRoot))
+        return { outcome: "kept", path, reason: "evidence_archive_alias" };
       evidencePath = join(evidenceRoot, `${basename(path)}-${Date.now()}`);
       await cp(evidence, evidencePath, {
         recursive: true,
@@ -49,7 +56,7 @@ export async function pruneTidyWorktree(
         verbatimSymlinks: true,
       });
     }
-    const fresh = await listTidyWorktrees(repository, "origin/main", runner);
+    const fresh = await listTidyWorktrees(repository, "origin/main", runner, protection);
     const current = fresh.candidates.find(
       (entry) => entry.path === path && entry.sha === candidate.sha && entry.branch === candidate.branch,
     );

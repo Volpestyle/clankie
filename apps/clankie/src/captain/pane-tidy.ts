@@ -110,6 +110,7 @@ export class PaneTidy {
     preflightResume?(session: SavedAgentSession): Promise<void>;
     nativeExitAvailable?(agent: HerdrAgentSnapshot): Promise<boolean>;
     changed(): void;
+    runtimeRoot?: string;
     now?: () => number;
   };
   constructor(path: string, ports: PaneTidy["ports"]) {
@@ -125,7 +126,9 @@ export class PaneTidy {
   }
   /** List merged, clean, unused linked worktrees; never remove one. */
   worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {
-    return listTidyWorktrees(repositoryPath, mergedInto, this.ports.runner);
+    return listTidyWorktrees(repositoryPath, mergedInto, this.ports.runner, {
+      ...(this.ports.runtimeRoot ? { runtimeRoot: this.ports.runtimeRoot } : {}),
+    });
   }
   async worktreeReport(repository: string, mergedInto = "origin/main") {
     const result = await this.worktrees(repository, mergedInto);

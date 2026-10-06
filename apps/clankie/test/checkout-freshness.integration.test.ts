@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,139 @@ import { expect, it } from "vitest";
 import { checkoutGit, syncOwnerCheckout } from "@clankie/settings";
 import { remoteCheckoutProgram } from "../src/captain/checkout-freshness.ts";
 const exec = promisify(execFile);
+
+it("default fleet reads skip Git checkout work and opted-in reads reuse the complete bounded observation", async () => {
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const { CheckoutObservationCache } = await import("../src/captain/checkout-observation-cache.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-checkout-roster-")));
+  const owner = join(root, "owner"),
+    trace = join(root, "git-calls.jsonl"),
+    bin = join(root, "bin");
+  const originalPath = process.env.PATH;
+  let captain: ReturnType<typeof createCaptain> | undefined;
+  try {
+    await exec("git", ["init", "--initial-branch=main", owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    const linked = join(root, "linked"),
+      second = join(root, "second");
+    await checkoutGit(owner, ["worktree", "add", "--detach", linked, "HEAD"]);
+    await checkoutGit(owner, ["worktree", "add", "--detach", second, "HEAD"]);
+    const realGit = (await exec("/usr/bin/which", ["git"])).stdout.trim();
+    await mkdir(bin);
+    // Observe actual subprocesses; every invocation delegates unchanged to real Git.
+    await writeFile(
+      join(bin, "git"),
+      `#!${process.execPath}\nconst {appendFileSync}=require('node:fs');\nconst {spawnSync}=require('node:child_process');\nappendFileSync(${JSON.stringify(trace)},JSON.stringify(process.argv.slice(2))+'\\n');\nconst child=spawnSync(${JSON.stringify(realGit)},process.argv.slice(2),{stdio:'inherit'});\nprocess.exit(child.status??1);\n`,
+    );
+    await chmod(join(bin, "git"), 0o755);
+    await writeFile(trace, "");
+    process.env.PATH = `${bin}:${originalPath}`;
+    const row = {
+      pane_id: "w1:p1",
+      terminal_id: "checkout-fixture",
+      agent: "codex",
+      agent_status: "idle",
+      title: "Fixture",
+      cwd: linked,
+      agent_session: { source: "herdr:codex", kind: "id", value: "checkout-fixture" },
+    };
+    let censusReads = 0;
+    captain = createCaptain({ herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps, {
+      repoRoot: owner,
+      stateDir: join(root, "state"),
+      settings: new SettingsStore(join(root, "settings.json")),
+      nativeHerdrRunner: createHerdrWatchRunner(undefined, async () =>
+        JSON.stringify({ result: { panes: [row], agent: row } }),
+      ),
+      nativeCensusRunner: async () => {
+        censusReads++;
+        return {
+          stdout: JSON.stringify({
+            result: {
+              snapshot: { agents: [row], panes: [row], workspaces: [], tabs: [] },
+              agents: [row],
+              panes: [row],
+              workspaces: [],
+            },
+          }),
+          stderr: "",
+        };
+      },
+    });
+    for (const op of ["roster", "fleet"] as const) {
+      const result = await captain.serveOperatorConversation({ schemaVersion: 1, op });
+      const seats =
+        result.op === "roster" ? result.seats : result.op === "fleet" ? result.snapshot.seats : [];
+      expect(seats.some((seat) => seat.workingDirectory === linked)).toBe(true);
+      expect(seats.every((seat) => !("checkout" in seat))).toBe(true);
+    }
+    expect(await readFile(trace, "utf8")).toBe("");
+    const enriched = await captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "roster",
+      includeCheckouts: true,
+    });
+    expect(enriched).toMatchObject({
+      op: "roster",
+      seats: expect.arrayContaining([
+        expect.objectContaining({
+          workingDirectory: linked,
+          checkout: expect.objectContaining({ path: owner, outcome: "observed", dirty: false }),
+        }),
+      ]),
+    });
+    const firstTrace = await readFile(trace, "utf8");
+    expect(firstTrace).toContain('"worktree","list"');
+    const precedingCensus = censusReads;
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await writeFile(join(owner, "draft.txt"), "draft\n");
+    const repeated = await captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "fleet",
+      includeCheckouts: true,
+    });
+    expect(repeated).toMatchObject({
+      op: "fleet",
+      snapshot: {
+        seats: expect.arrayContaining([
+          expect.objectContaining({ checkout: expect.objectContaining({ dirty: false }) }),
+        ]),
+      },
+    });
+    expect(censusReads).toBeGreaterThan(precedingCensus);
+    expect(await readFile(trace, "utf8")).toBe(firstTrace);
+    await captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+    await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+    expect(await readFile(trace, "utf8")).toBe(firstTrace);
+    const bounded = new CheckoutObservationCache(2);
+    await bounded.observe(owner);
+    await bounded.observe(linked);
+    await bounded.observe(second);
+    await writeFile(trace, "");
+    expect(await bounded.observe(owner)).toMatchObject({ path: owner, dirty: true });
+    expect(await readFile(trace, "utf8")).toContain('"worktree","list"');
+  } finally {
+    await captain?.close();
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
 it("remote observer enforces fetched main and cleanliness in a real child process", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-remote-freshness-")));
   try {
