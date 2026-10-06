@@ -65,6 +65,16 @@ Responses pass the strict public schema and value redaction before emission.
 Captain session IDs, continuation tokens, provider credentials, and arbitrary
 provider payloads do not cross the boundary.
 
+The same dispatch route accepts `presence` for a device with the current `chat`
+grant. Its typed snapshot reports the captain's present-tense mood, activity
+detail, source timestamp and live seat counts. A cursor and `waitMs` up to
+30 seconds park the read until the projection changes. The relay rechecks
+device authorization before releasing it, validates the strict presence schema
+and recursively redacts credential-shaped values in every string, including
+activity detail and pending-owner titles. Presence content and credentials never
+enter its metadata-only logs. See [present tense](../../docs/cli.md#present-tense)
+for activity priority and additive desktop fields.
+
 Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
 Transient `seat_offline` refusals collapse concurrently but are not retained, so a retry observes a pane that has returned.
 

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "ticket": "VUH-1049",
+  "testedCommit": "26a4c8a19afae9f47d9aa584e529f00a8a715fd5",
+  "receiptSha256": "10cf9baa953f292713b704905af958503481714abe0a7483d5bc67173c6c5e0a",
+  "passed": 91,
+  "failed": 0,
+  "suites": [
+    {
+      "path": "apps/relay/test/operator-conversations.test.ts",
+      "passed": 79
+    },
+    {
+      "path": "apps/clankie/test/presence-events.integration.test.ts",
+      "passed": 4
+    },
+    {
+      "path": "apps/clankie/test/presence-service.test.ts",
+      "passed": 1
+    },
+    {
+      "path": "apps/clankie/test/presence.test.ts",
+      "passed": 7
+    }
+  ]
+}
