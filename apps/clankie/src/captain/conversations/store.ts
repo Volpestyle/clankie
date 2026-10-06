@@ -281,6 +281,8 @@ export class ConversationStore {
   private readonly tailWaitMs: number;
   /** Per-conversation parked tails, woken by `append` and by a live draft. */
   private readonly tailListeners = new Map<string, Set<() => void>>();
+  /** Releases waiting readers while close drains the already accepted work. */
+  private readonly tailShutdown = new AbortController();
   /** The message the captain is typing right now, per conversation. Never durable. */
   private readonly drafts = new Map<string, OperatorConversationLiveDraft>();
   /** Serializes host file reads so transcript order survives async publication. */
@@ -548,6 +550,7 @@ export class ConversationStore {
   public async serve(
     request: ConversationServiceRequest,
     authority?: QuestionAuthority,
+    readSignal?: AbortSignal,
   ): Promise<ConversationServiceResult> {
     switch (request.op) {
       case "project_proposal_get":
@@ -650,6 +653,8 @@ export class ConversationStore {
       case "replay":
         return { op: "replay", schemaVersion: 1, result: this.replay(request.replay) };
       case "tail": {
+        readSignal?.throwIfAborted();
+        this.tailShutdown.signal.throwIfAborted();
         // Hanging long-poll: a page with no news parks until this conversation
         // changes (or the wait elapses), so an idle tail costs one request per
         // wait window instead of one per client poll interval, and a live draft
@@ -659,7 +664,9 @@ export class ConversationStore {
         const waitMs = Math.min(request.tail.waitMs ?? 0, this.tailWaitMs);
         if (waitMs > 0 && result.status === "page" && result.events.length === 0 && !result.hasMore) {
           if ((result.live?.sequence ?? 0) === (request.tail.liveSequence ?? 0)) {
-            await this.waitForChange(request.tail.conversationId, waitMs);
+            await this.waitForChange(request.tail.conversationId, waitMs, readSignal);
+            readSignal?.throwIfAborted();
+            this.tailShutdown.signal.throwIfAborted();
             result = this.replay(request.tail);
           }
         }
@@ -1448,6 +1455,8 @@ export class ConversationStore {
   }
 
   public async close(): Promise<void> {
+    this.tailShutdown.abort(new DOMException("Conversation tails are closed", "AbortError"));
+    for (const conversationId of this.tailListeners.keys()) this.wakeTails(conversationId);
     for (const id of this.linearHookTimers.keys()) this.flushLinearActivity(id);
     await Promise.allSettled([
       ...this.runs.values(),
@@ -2469,23 +2478,34 @@ export class ConversationStore {
     }
   }
 
-  private waitForChange(conversationId: string, waitMs: number): Promise<void> {
-    return new Promise((resolve) => {
+  private waitForChange(conversationId: string, waitMs: number, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    return new Promise((resolve, reject) => {
       let listeners = this.tailListeners.get(conversationId);
       if (listeners === undefined) {
         listeners = new Set();
         this.tailListeners.set(conversationId, listeners);
       }
       const registered = listeners;
-      const done = (): void => {
+      const cleanup = (): void => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", aborted);
         registered.delete(done);
         if (registered.size === 0) this.tailListeners.delete(conversationId);
+      };
+      const done = (): void => {
+        cleanup();
         resolve();
+      };
+      const aborted = (): void => {
+        cleanup();
+        reject(signal?.reason);
       };
       const timer = setTimeout(done, waitMs);
       timer.unref?.();
       registered.add(done);
+      signal?.addEventListener("abort", aborted, { once: true });
+      if (signal?.aborted) aborted();
     });
   }
 

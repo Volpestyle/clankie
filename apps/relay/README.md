@@ -68,6 +68,34 @@ provider payloads do not cross the boundary.
 Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
 Transient `seat_offline` refusals collapse concurrently but are not retained, so a retry observes a pane that has returned.
 
+Conversation tails share one upstream read per active conversation across both
+JSON long polls and NDJSON streams. Each device keeps its own opaque cursor,
+page limit, live-draft sequence, wait deadline and authorization checks. The
+relay bootstraps immediately, then parks the shared read for up to 20 seconds;
+joining devices do not inherit that wait. Disconnecting one device leaves its
+peers running. Disconnecting the last cancels the HTTP read and the captain's
+parked waiter, without interrupting an accepted turn.
+
+The cache holds validated, redacted public events only: at most 1,000 events or
+1 MiB per conversation, with up to 256 conversations and a 60-second idle
+lifetime. Cursor comparisons use identity, including native session hashes.
+Backward history, unknown or evicted cursors use an immediate authoritative
+`replay` rather than opening another parked tail. A native reset clears the
+shared cache; recovery remains specific to each reader. No new device protocol,
+setting or client streaming support is required.
+
+```mermaid
+flowchart LR
+  A[Device JSON long poll] --> H[Conversation tail hub]
+  B[Device NDJSON stream] --> H
+  H -->|One parked tail| C[Captain conversation]
+  C -->|Public events and draft| H
+  H -->|Own cursor and deadline| A
+  H -->|Own cursor| B
+  A --> G[Device grant checks]
+  B --> G
+```
+
 ![Relay device-request architecture](../../docs/diagrams/relay-architecture.jpg)
 
 [Editable Turbopuffer tldraw source](../../docs/diagrams/clankie-docs-diagrams-2.tldraw)

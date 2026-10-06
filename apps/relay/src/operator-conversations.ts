@@ -39,6 +39,7 @@ import {
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { once } from "node:events";
+import { ConversationTailHub } from "./conversation-tail-hub.ts";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_BYTES_MAX,
@@ -120,6 +121,9 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
 export function createOperatorConversationRelayHandler(options: OperatorConversationRelayOptions) {
   const logger = options.logger ?? silentLogger;
   const idempotency = new TurnIdempotencyStore(options.clock ?? Date.now);
+  const tails = new ConversationTailHub(async (request, signal) =>
+    publicServiceResult(await options.dispatch(request, signal)),
+  );
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
     if (path === FLEET_SETTINGS_PATH || path === PROJECTS_PATH || path === PROJECT_UPDATE_SETTINGS_PATH) {
@@ -466,6 +470,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         initialAuthorization: currentAuthorization,
         options,
         logger,
+        tails,
       });
       return true;
     }
@@ -532,9 +537,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               },
               abort.signal,
             )
-          : serviceRequest.op === "send" || serviceRequest.op === "presence"
-            ? options.dispatch(serviceRequest, abort.signal)
-            : options.dispatch(serviceRequest);
+          : serviceRequest.op === "tail"
+            ? readTail(tails, serviceRequest, abort.signal)
+            : serviceRequest.op === "send" || serviceRequest.op === "presence"
+              ? options.dispatch(serviceRequest, abort.signal)
+              : options.dispatch(serviceRequest);
       const result =
         serviceRequest.op === "send"
           ? await idempotency.run(currentAuthorization.device.deviceId, serviceRequest, dispatch)
@@ -609,6 +616,20 @@ interface StreamTailInput {
   readonly initialAuthorization: Extract<RelayDeviceAuthorization, { authorized: true }>;
   readonly options: OperatorConversationRelayOptions;
   readonly logger: RelayConversationLogger;
+  readonly tails: ConversationTailHub;
+}
+
+async function readTail(
+  tails: ConversationTailHub,
+  request: Extract<OperatorConversationServiceRequest, { op: "tail" }>,
+  signal: AbortSignal,
+): Promise<OperatorConversationServiceResult> {
+  const subscription = tails.subscribe(request, signal);
+  try {
+    return await subscription.read(request);
+  } finally {
+    subscription.close();
+  }
 }
 
 async function streamTail(input: StreamTailInput): Promise<void> {
@@ -618,98 +639,114 @@ async function streamTail(input: StreamTailInput): Promise<void> {
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-content-type-options", "nosniff");
   let cursor = request.tail.cursor;
+  let liveSequence = request.tail.liveSequence;
   let pages = 0;
   let authorization: RelayDeviceAuthorization = input.initialAuthorization;
-  while (!response.destroyed) {
-    if (pages > 0) authorization = await options.authorizeDevice.authorize(input.token);
-    if (!authorization.authorized) {
-      logger.warn(
-        {
-          route: "tail",
-          conversationId: redactSensitiveString(request.tail.conversationId),
-          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
-          denial: authorization.denial,
-        },
-        "conversation tail authorization revoked",
-      );
-      await writeTailAuthFailure(response, authorization.denial);
-      return;
-    }
-    if (!authorization.device.grants.chat && authorization.device.supportGrantId === undefined) {
-      logger.warn(
-        {
-          route: "tail",
-          conversationId: redactSensitiveString(request.tail.conversationId),
-          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
-          denial: "chat_grant_required",
-        },
-        "conversation tail authorization revoked",
-      );
-      await writeTailAuthFailure(response, "chat_grant_required");
-      return;
-    }
-    let result: OperatorConversationServiceResult;
-    try {
-      result = publicServiceResult(
-        await options.dispatch({
-          ...request,
-          tail: { ...request.tail, ...(cursor === undefined ? {} : { cursor }) },
-        }),
-      );
-    } catch {
-      logger.warn(
-        {
-          route: "tail",
-          deviceId: redactSensitiveString(authorization.device.deviceId),
-          conversationId: redactSensitiveString(request.tail.conversationId),
-          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
-        },
-        "conversation tail upstream failure",
-      );
-      response.destroy();
-      return;
-    }
-    if (result.op !== "tail") {
-      response.destroy();
-      return;
-    }
-    authorization = await options.authorizeDevice.authorize(input.token);
-    const emissionDenial = tailAuthorizationDenial(authorization, "chat");
-    if (emissionDenial !== undefined) {
-      logger.warn(
-        {
-          route: "tail",
-          conversationId: redactSensitiveString(request.tail.conversationId),
-          surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
-          denial: emissionDenial,
-        },
-        "conversation tail authorization revoked",
-      );
-      await writeTailAuthFailure(response, emissionDenial);
-      return;
-    }
-    const page = result.result;
-    if (page.status === "recover") {
-      await writeNdjson(response, { kind: "recovery", recovery: page });
-      response.end();
-      return;
-    }
-    for (const event of page.events) {
-      const fresh = await options.authorizeDevice.authorize(input.token);
-      const denial = tailAuthorizationDenial(fresh, "chat");
-      if (denial !== undefined) {
-        await writeTailAuthFailure(response, denial);
+  const abort = new AbortController();
+  const disconnected = () => abort.abort();
+  response.once("close", disconnected);
+  if (response.destroyed) abort.abort();
+  const subscription = input.tails.subscribe(request, abort.signal);
+  try {
+    while (!response.destroyed && !abort.signal.aborted) {
+      if (pages > 0) authorization = await options.authorizeDevice.authorize(input.token);
+      if (!authorization.authorized) {
+        logger.warn(
+          {
+            route: "tail",
+            conversationId: redactSensitiveString(request.tail.conversationId),
+            surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
+            denial: authorization.denial,
+          },
+          "conversation tail authorization revoked",
+        );
+        await writeTailAuthFailure(response, authorization.denial);
         return;
       }
-      await writeNdjson(response, { kind: "event", event });
+      if (!authorization.device.grants.chat && authorization.device.supportGrantId === undefined) {
+        logger.warn(
+          {
+            route: "tail",
+            conversationId: redactSensitiveString(request.tail.conversationId),
+            surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
+            denial: "chat_grant_required",
+          },
+          "conversation tail authorization revoked",
+        );
+        await writeTailAuthFailure(response, "chat_grant_required");
+        return;
+      }
+      let result: OperatorConversationServiceResult;
+      try {
+        result = await subscription.read({
+          ...request,
+          tail: {
+            ...request.tail,
+            ...(cursor === undefined ? {} : { cursor }),
+            ...(liveSequence === undefined ? {} : { liveSequence }),
+            waitMs: request.tail.waitMs ?? options.tailPollMs ?? 250,
+          },
+        });
+      } catch {
+        if (abort.signal.aborted) return;
+        logger.warn(
+          {
+            route: "tail",
+            deviceId: redactSensitiveString(authorization.device.deviceId),
+            conversationId: redactSensitiveString(request.tail.conversationId),
+            surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
+          },
+          "conversation tail upstream failure",
+        );
+        response.destroy();
+        return;
+      }
+      if (result.op !== "tail") {
+        response.destroy();
+        return;
+      }
+      authorization = await options.authorizeDevice.authorize(input.token);
+      const emissionDenial = tailAuthorizationDenial(authorization, "chat");
+      if (emissionDenial !== undefined) {
+        logger.warn(
+          {
+            route: "tail",
+            conversationId: redactSensitiveString(request.tail.conversationId),
+            surfaceClientId: redactSensitiveString(request.tail.surfaceClientId),
+            denial: emissionDenial,
+          },
+          "conversation tail authorization revoked",
+        );
+        await writeTailAuthFailure(response, emissionDenial);
+        return;
+      }
+      const page = result.result;
+      if (page.status === "recover") {
+        await writeNdjson(response, { kind: "recovery", recovery: page });
+        response.end();
+        return;
+      }
+      for (const event of page.events) {
+        const fresh = await options.authorizeDevice.authorize(input.token);
+        const denial = tailAuthorizationDenial(fresh, "chat");
+        if (denial !== undefined) {
+          await writeTailAuthFailure(response, denial);
+          return;
+        }
+        await writeNdjson(response, { kind: "event", event });
+      }
+      cursor = page.nextCursor;
+      liveSequence = page.live?.sequence ?? 0;
+      pages += 1;
+      if (options.tailMaxPages !== undefined && pages >= options.tailMaxPages) {
+        response.end();
+        return;
+      }
+      if (page.events.length === 0) await sleep(options.tailPollMs ?? 250);
     }
-    cursor = page.nextCursor;
-    pages += 1;
-    if (options.tailMaxPages !== undefined && pages >= options.tailMaxPages) {
-      response.end();
-      return;
-    }
-    if (page.events.length === 0) await sleep(options.tailPollMs ?? 250);
+  } finally {
+    subscription.close();
+    response.off("close", disconnected);
   }
 }
 
