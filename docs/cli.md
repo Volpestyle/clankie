@@ -1168,6 +1168,8 @@ environment variables, settings, output or device responses. Google public
 settings also support `CLANKIE_GOOGLE_OAUTH_CLIENT_ID` and
 `CLANKIE_GOOGLE_OAUTH_REDIRECT_URI` overrides; neither variable accepts a secret.
 
+<a id="voice-status-voice-model-set-model-id-voice-model-clear"></a>
+
 ### `voice [status]` / `voice brain set PROVIDER [MODEL_ID]` / `voice model set MODEL_ID`
 
 The headless launcher inspects voice settings, selects the voice brain, and
