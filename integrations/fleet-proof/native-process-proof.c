@@ -118,8 +118,9 @@ static int within_overall_budget(void) {
 }
 
 /* Churn retries spend the existing job budget rather than exhausting three
- * back-to-back reads in a few milliseconds. No partial census survives this
- * pause. Clip every wait, including EINTR continuations, to the outer cap. */
+ * back-to-back reads in a few milliseconds. Callers discard the unstable
+ * PID's partial candidate before waiting. Completed reads survive only within
+ * the same bounded scan. Clip waits, including EINTR continuations, to the cap. */
 static int retry_pause(void) {
   int64_t delay = ((int64_t)arc4random_uniform(8) + 1) * 1000000;
   for (;;) {
@@ -656,8 +657,88 @@ static int prove_codex_server(int argc, char **argv) {
   return 0;
 }
 
-/* Return 2 only for census churn or an expired attempt. Retrying starts the entire census again;
- * uncertain records are never omitted from an otherwise successful proof. */
+/* Reconcile the kernel lists by inspecting their bounded union. A process born
+ * between list calls is another candidate to inspect, not a reason to discard
+ * every completed observation. No live same-user candidate is omitted. */
+static int merge_pids(pid_t *all, int *count, const pid_t *extra, int extra_count) {
+  pid_t merged[MAX_PIDS];
+  int i = 0, j = 0, size = 0;
+  while (i < *count || j < extra_count) {
+    pid_t next;
+    if (j >= extra_count || (i < *count && all[i] < extra[j])) next = all[i++];
+    else if (i >= *count || extra[j] < all[i]) next = extra[j++];
+    else { next = all[i++]; ++j; }
+    if (next <= 1 || (size > 0 && merged[size - 1] == next)) continue;
+    if (size >= MAX_PIDS - 1) { errno = EOVERFLOW; return 0; }
+    merged[size++] = next;
+  }
+  memcpy(all, merged, (size_t)size * sizeof(*all));
+  *count = size;
+  return 1;
+}
+
+/* One PID-local transaction. Only a stable before/after lifetime contributes
+ * an owner. A stale descriptor or changing process retries this PID, with its
+ * partial candidate discarded; other processes' completed reads survive. */
+static int scan_process(pid_t pid, int same_uid, struct proc_fdinfo *fds,
+                        uint16_t client, uint16_t server, struct owner *candidate) {
+  *candidate = (struct owner){0};
+  struct identity before, after;
+  int observed = observe(pid, &before);
+  if (observed == 0) return 0;
+  if (observed < 0) {
+    int error = errno;
+    if ((error == EPERM || error == EACCES) && protected_other_user(pid)) return 0;
+    int retry = error == ESRCH;
+    diagnostic("process", "process_unavailable", error, retry);
+    return retry ? 2 : refuse();
+  }
+  same_uid = same_uid || before.uid == getuid() || before.ruid == getuid();
+  errno = 0;
+  int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, MAX_FDS * (int)sizeof(*fds));
+  int error = errno;
+  if (bytes < 0 || (bytes == 0 && error != 0)) {
+    if (exited(pid)) return 0;
+    if (!same_uid && (error == EPERM || error == EACCES)) return 0;
+    int retry = error == ESRCH;
+    diagnostic("fd_list", "fd_list_unavailable", error, retry);
+    return retry ? 2 : refuse();
+  }
+  if (bytes >= MAX_FDS * (int)sizeof(*fds) || bytes % sizeof(*fds))
+    return refuse_at("fd_list", "fd_list_bounds", 0);
+  for (int j = 0; j < bytes / (int)sizeof(*fds); ++j) {
+    if (fds[j].proc_fd < 0) return refuse_at("fd_list", "fd_record_invalid", 0);
+    if (fds[j].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
+    struct socket_fdinfo socket;
+    if (!socket_info(pid, fds[j].proc_fd, &socket)) {
+      error = errno;
+      if (exited(pid)) { *candidate = (struct owner){0}; return 0; }
+      if (!same_uid && (error == EPERM || error == EACCES)) continue;
+      int retry = error == ESRCH || error == EBADF || error == ENOENT || error == ENOTSOCK;
+      diagnostic("fd_socket", "socket_unavailable", error, retry);
+      return retry ? 2 : refuse();
+    }
+    if (!matches(&socket, client, server)) continue;
+    if (before.uid != getuid()) return refuse_at("socket_owner", "owner_mismatch", 0);
+    if (socket.psi.soi_so == 0 || socket.psi.soi_pcb == 0 ||
+        socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt == 0)
+      return refuse_at("socket_owner", "socket_identity_invalid", 0);
+    if (candidate->process.pid != 0 && !same_socket(candidate, &socket))
+      return refuse_at("socket_owner", "multiple_owners", 0);
+    *candidate = (struct owner){before, fds[j].proc_fd, socket.psi.soi_so, socket.psi.soi_pcb,
+                               socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt};
+  }
+  observed = observe(pid, &after);
+  if (observed == 0) { *candidate = (struct owner){0}; return 0; }
+  if (observed != 1 || !same_process(&before, &after)) {
+    diagnostic("process", "process_changed", observed == 1 ? 0 : errno, 1);
+    return 2;
+  }
+  return 0;
+}
+
+/* An expired scan may restart within the existing overall cap. PID-local churn
+ * never restarts the global census or lends a partial owner to admission. */
 static int prove(int argc, char **argv) {
   if (argc != 3 && argc != 6 && argc != 7)
     return refuse_at("arguments", "invalid_arguments", 0);
@@ -676,104 +757,48 @@ static int prove(int argc, char **argv) {
       !list_pids(PROC_UID_ONLY, uid_pids, &uid_count) ||
       !list_pids(PROC_RUID_ONLY, ruid_pids, &ruid_count))
     return refuse_at("census", "process_census_unavailable", errno);
-  /* A same-user process born between these snapshots must not hide an owner. */
+  int changed = 0;
   for (int i = 0; i < uid_count; ++i)
-    if (uid_pids[i] > 1 && !contains(all, count, uid_pids[i]) && !exited(uid_pids[i])) {
-      diagnostic("census", "process_census_changed", 0, 1);
-      return 2;
-    }
+    if (uid_pids[i] > 1 && !contains(all, count, uid_pids[i])) changed = 1;
   for (int i = 0; i < ruid_count; ++i)
-    if (ruid_pids[i] > 1 && !contains(all, count, ruid_pids[i]) && !exited(ruid_pids[i])) {
-      diagnostic("census", "process_census_changed", 0, 1);
-      return 2;
-    }
+    if (ruid_pids[i] > 1 && !contains(all, count, ruid_pids[i])) changed = 1;
+  if (changed) diagnostic("census", "process_census_changed", 0, 0);
+  if (!merge_pids(all, &count, uid_pids, uid_count) ||
+      !merge_pids(all, &count, ruid_pids, ruid_count))
+    return refuse_at("census", "process_census_unavailable", errno);
 
   struct proc_fdinfo *fds = calloc(MAX_FDS, sizeof(*fds));
   if (fds == NULL) return refuse_at("fd_list", "allocation_failed", errno);
   struct owner owner = {0};
-  int valid = 1;
-  for (int i = 0; valid == 1 && i < count; ++i) {
+  int result = 0;
+  for (int i = 0; result == 0 && i < count; ++i) {
     pid_t pid = all[i];
-    if (pid <= 1) continue;
     int same_uid = contains(uid_pids, uid_count, pid) || contains(ruid_pids, ruid_count, pid);
-    struct identity before, after;
-    int observed = observe(pid, &before);
-    if (observed == 0) continue;
-    if (observed < 0) {
-      int observation_error = errno;
-      /* libproc cannot inspect another user's protected processes. A same-user
-       * denial is never treated as proof that the process owns no socket. */
-      if ((errno == EPERM || errno == EACCES) && protected_other_user(pid)) continue;
-      valid = errno == ESRCH ? -1 : 0;
-      diagnostic("process", "process_unavailable", observation_error, valid == -1);
+    struct owner candidate = {0};
+    for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
+      result = scan_process(pid, same_uid, fds, (uint16_t)client, (uint16_t)server, &candidate);
+      if (result != 2 || !within_budget()) break;
+      if (attempt + 1 == MAX_ATTEMPTS) {
+        diagnostic("completion", "attempts_exhausted", 0, 0);
+        result = 1;
+        break;
+      }
+      if (!retry_pause()) { result = 1; break; }
+    }
+    if (result != 0) break;
+    if (candidate.process.pid == 0) continue;
+    if (owner.process.pid != 0 &&
+        (owner.process.pid != candidate.process.pid ||
+         owner.socket != candidate.socket || owner.pcb != candidate.pcb ||
+         owner.generation != candidate.generation)) {
+      diagnostic("socket_owner", "multiple_owners", 0, 0);
+      result = 1;
       break;
     }
-    same_uid = same_uid || before.uid == getuid() || before.ruid == getuid();
-    errno = 0;
-    int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, MAX_FDS * (int)sizeof(*fds));
-    int error = errno;
-    if (bytes < 0 || (bytes == 0 && error != 0)) {
-      if (exited(pid)) continue;
-      if (!same_uid && (error == EPERM || error == EACCES)) continue;
-      valid = error == ESRCH ? -1 : 0;
-      diagnostic("fd_list", "fd_list_unavailable", error, valid == -1);
-      break;
-    }
-    if (bytes >= MAX_FDS * (int)sizeof(*fds) || bytes % sizeof(*fds)) {
-      diagnostic("fd_list", "fd_list_bounds", 0, 0);
-      valid = 0;
-      break;
-    }
-    int found = 0;
-    for (int j = 0; valid == 1 && j < bytes / (int)sizeof(*fds); ++j) {
-      if (fds[j].proc_fd < 0) {
-        diagnostic("fd_list", "fd_record_invalid", 0, 0);
-        valid = 0;
-        break;
-      }
-      if (fds[j].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
-      struct socket_fdinfo socket;
-      if (!socket_info(pid, fds[j].proc_fd, &socket)) {
-        error = errno;
-        if (exited(pid)) { found = 0; break; }
-        if (!same_uid && (error == EPERM || error == EACCES)) continue;
-        /* The kernel may have closed/replaced this descriptor since LISTFDS.
-         * Start over on a stale-descriptor error; other failures stay closed. */
-        valid = error == ESRCH || error == EBADF || error == ENOENT || error == ENOTSOCK ? -1 : 0;
-        diagnostic("fd_socket", "socket_unavailable", error, valid == -1);
-        break;
-      }
-      if (!matches(&socket, (uint16_t)client, (uint16_t)server)) continue;
-      if (before.uid != getuid()) {
-        diagnostic("socket_owner", "owner_mismatch", 0, 0);
-        valid = 0;
-        break;
-      }
-      if (socket.psi.soi_so == 0 || socket.psi.soi_pcb == 0 ||
-          socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt == 0) {
-        diagnostic("socket_owner", "socket_identity_invalid", 0, 0);
-        valid = 0;
-        break;
-      }
-      if (owner.process.pid != 0 && (owner.process.pid != pid || !same_socket(&owner, &socket))) {
-        diagnostic("socket_owner", "multiple_owners", 0, 0);
-        valid = 0;
-        break;
-      }
-      owner = (struct owner){before, fds[j].proc_fd, socket.psi.soi_so, socket.psi.soi_pcb,
-                            socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt};
-      found = 1;
-    }
-    observed = observe(pid, &after);
-    if (observed == 0 && !found) continue;
-    if (observed != 1 || !same_process(&before, &after)) {
-      diagnostic("process", "process_changed", observed == 1 ? 0 : errno, 1);
-      valid = -1;
-    }
+    owner = candidate;
   }
   free(fds);
-  if (valid == -1 && within_budget()) return 2;
-  if (!valid) return refuse();
+  if (result != 0) return budget_expired ? 2 : 1;
   if (owner.process.pid <= 1) return refuse_at("socket_owner", "owner_not_found", 0);
   if (!within_budget()) return refuse_at("completion", "budget_exhausted", 0);
 

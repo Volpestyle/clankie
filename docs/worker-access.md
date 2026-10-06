@@ -105,11 +105,14 @@ An active timeout, malformed reply or helper exit refuses pending observations,
 and the body closes its own helper
 at shutdown. Refusals emit `fleet.local_proof.refused` with a fixed reason;
 `fleet.local_proof.diagnostic` records fixed kernel or transport details.
-Neither event contains PIDs, paths, argv or caller headers. Transient census
-churn restarts the complete proof up to 32 times with 1–8 ms jitter, within
-the unchanged 200 ms per-attempt and 600 ms total limits. Unknown ownership,
-owner/ancestor changes and shared descriptors remain refused; sustained churn
-can still exhaust those limits.
+Neither event contains PIDs, paths, argv or caller headers. The helper reconciles
+changing PID lists by inspecting their bounded union.
+Transient PID/descriptor races repeat only the affected process observation,
+with its partial owner discarded. These local retries use 1–8 ms jitter and at
+most 32 attempts per PID within the unchanged 200 ms scan and 600 ms job caps.
+Only an expired scan restarts the entire census. Unknown live ownership,
+owner/ancestor changes and shared descriptors remain refused; persistent
+uncertainty or exceeded bounds can still refuse admission.
 
 When project identity is required, the same helper reads the foreground agent's
 executable, exact first launcher arguments, and the shell and agent's microsecond
@@ -120,8 +123,8 @@ admission cache. Generic hire receipts recorded with older display timestamps
 fail closed until a fresh hire records the complete kernel lifetime.
 
 Local admission can refuse when process or descriptor ownership changes during
-the census. The native helper retries a complete census for confirmed descriptor
-churn; it never skips an uncertain record. An exact HTTP 403 with
+the census. The native helper repeats the affected process observation for
+descriptor churn; it never skips an uncertain live same-user record. An exact HTTP 403 with
 `local_process_membership_required` is returned before forwarding that request,
 so a later fresh request can retry safely. Read-only discovery and mailbox polls
 can also retry. The worker bridge currently surfaces that 403 rather than

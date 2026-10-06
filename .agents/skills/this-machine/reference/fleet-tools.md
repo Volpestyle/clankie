@@ -125,6 +125,15 @@ within ten minutes produce one native alert to their owning lead. Inspect
 failure rates. Preserve and reconcile uncertain originals; health observations
 never authorize deleting receipts or replaying reports.
 
+Native `process_census_changed` with `retry: false` can accompany a successful
+admission: changing PID lists are reconciled and every candidate is inspected.
+Descriptor/process races retry that PID within the existing job budget. Read the
+terminal proof reason and refusal rate before treating a churn counter as lost
+membership. A pre-dispatch `local_process_membership_required` 403 permits a
+fresh request; an earlier uncertain call still requires its original receipt.
+Details: `{repoRoot}/docs/worker-access.md` and
+`{repoRoot}/integrations/fleet-proof/README.md`.
+
 Remote reports also include `linkState`: an `unreachable` link's `error` is the
 decoded remote reason, independently of harness installation health. Fleet
 control connections and resident relays refresh at ten minutes; renewal keeps
