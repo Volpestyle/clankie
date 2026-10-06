@@ -144,6 +144,7 @@ import { retireLinearNotifications } from "./linear-notifications.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
+import { LinearRequestBudget } from "./linear-request-budget.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -604,8 +605,22 @@ const boundApp = (): ClankieApp => {
 // Durable revision receipts distinguish captain echoes from delegated worker
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
+let notifyLinearBudgetWarning: ((text: string) => Promise<boolean>) | undefined;
+const pendingLinearBudgetWarnings: string[] = [];
+const linearRequestBudget = new LinearRequestBudget({
+  onAlert: (account) => {
+    const text = `Linear request budget reached ${Math.round(account.utilization * 100)}% (${account.used}/${account.limit} requests in an hour) at ${new Date().toISOString()}. Background reads slow at 80%; writes retain priority. Inspect clankie linear budget.`;
+    logger.warn({ event: "linear.request_budget.warning", ...account }, text);
+    if (notifyLinearBudgetWarning) return notifyLinearBudgetWarning(text);
+    pendingLinearBudgetWarnings.push(text);
+  },
+});
 const mcpHost = createMcpHost({
-  linearApiTracker: createLinearApiTracker({ credentials: operatorCredentialStore }),
+  linearApiTracker: createLinearApiTracker({
+    credentials: operatorCredentialStore,
+    requestBudget: linearRequestBudget,
+  }),
+  linearRequestBudget,
   localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
@@ -1213,8 +1228,12 @@ const workerMcp = new WorkerMcp({
   },
 });
 
+notifyLinearBudgetWarning = (text) => captain.notifyRuntimeHealthAlert(text);
+for (const text of pendingLinearBudgetWarnings.splice(0))
+  void notifyLinearBudgetWarning(text).catch(() => undefined);
 const clankie = await createClankieApp({
   fleetHealthMetrics,
+  linearRequestBudget,
   discordPermissions: (query, body) =>
     managedDiscord
       ? managedDiscord.permissions(query, body)

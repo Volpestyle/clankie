@@ -169,6 +169,7 @@ export interface ClankieAppDependencies {
   workItems?: WorkItemsService;
   workerMcp?: WorkerMcp;
   fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
+  linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
   runtimes?: ExecutionConnections;
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;

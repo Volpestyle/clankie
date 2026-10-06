@@ -113,6 +113,7 @@ const FleetCallSchema = z.union([
   z.strictObject({
     name: z.string().min(1).max(256),
     arguments: z.record(z.string(), z.json()),
+    background: z.boolean().optional(),
   }),
   z.strictObject({ receiptId: z.string().uuid() }),
 ]);
@@ -158,7 +159,7 @@ const FLEET_TOOLS = [
   {
     name: "clankie_call",
     description:
-      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account. Calls return a receiptId. An uncertain call may have applied: reconcile with only {receiptId}, never retry its name and arguments. Receipt lookup is read-only and rechecks current access.",
+      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account. Set background:true for automated polling so reads yield under Linear budget pressure; ordinary owner/lead reads and writes retain priority. Calls return a receiptId. An uncertain call may have applied: reconcile with only {receiptId}, never retry its name and arguments. Receipt lookup is read-only and rechecks current access.",
     inputSchema: { ...z.toJSONSchema(FleetCallSchema), type: "object" as const },
   },
 ];
@@ -1044,7 +1045,10 @@ export class WorkerMcp {
       let admitted = false;
       let repeatedReceipt: WorkerCallReceipt | undefined;
       let unadmittedSettlement = false;
+      let background = call.params._meta?.clankieRequestPriority === "background";
       try {
+        if (call.params._meta?.clankieRequestPriority !== undefined && !background)
+          throw new Error("Invalid request priority");
         return await this.operation(
           authority,
           extra.authInfo?.token ?? "",
@@ -1118,6 +1122,7 @@ export class WorkerMcp {
                 );
               name = invocation.name;
               args = invocation.arguments;
+              background ||= invocation.background === true;
             }
             if (Object.hasOwn(minecraftWorkerSchemas, name)) {
               if (authorityNow.fleet === undefined || this.options.minecraft === undefined)
@@ -1189,6 +1194,7 @@ export class WorkerMcp {
               return workerCallResponse(await this.reconcileCallReceipt(id, authorityNow, signal));
             }
             const result = await this.options.host.call({
+              ...(background ? { requestPriority: "background" as const } : {}),
               timeoutMs: remaining(),
               onDispatch: () => {
                 signal.throwIfAborted();

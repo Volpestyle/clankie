@@ -612,6 +612,42 @@ the name and colored Clankie portrait from the fleet. Output includes the MCP
 result and `ok`; provider/tool rejection sets `ok: false` and exits nonzero.
 See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
 
+### `linear budget`
+
+`clankie linear budget` reads `/v1/linear/request-budget` without calling Linear.
+It reports each connected actor's actual HTTP attempts in the last hour across
+MCP, the API tracker, pagination, and worker publishing. The same workspace and
+actor share one budget across OAuth audiences. Counters reset on service restart;
+provider remaining/reset headers account for usage by other clients after the
+next provider response. No credentials or request bodies appear in the report.
+
+At 50% of the 5,000-request hourly budget, Clankie emits one warning through
+native runtime alerts and shows `warning` in `/doctor`. At 80%, device Work refreshes
+and explicitly marked background reads
+share a one-minute minimum interval per actor; excess calls are refused before
+dispatch with a retry time. Existing issue-list caching continues to apply.
+Ordinary owner/lead reads, writes and webhook context reads retain priority. Every request remains subject
+to the hard budget, which leaves one request below the cap. Provider headers can
+lower the effective limit. The warning rearms after usage falls below 50%.
+`doctor --json` and `/doctor json` include `linearRequestBudget`; unavailable
+observations remain explicit. These fixed limits need no owner setup.
+
+### `linear read TOOL --json-stdin [--background]`
+
+Read through the connected Linear tool bank using JSON arguments on stdin.
+Use `--background` for automated polling; owner reads default to interactive
+priority. The fleet equivalent is `clankie_call({name, arguments, background: true})`.
+Background markers do not grant authority or downgrade writes. Each logical
+read gets its own admission and may finish its provider pages. For example:
+
+```sh
+printf '%s' '{"team":"VUH"}' | clankie linear read list_issues --json-stdin --background
+```
+
+Initial account setup and OAuth token endpoint calls are outside the connected
+Linear request counter; GraphQL identity verification during a connected app's
+credential refresh is counted.
+
 ### `linear status` / `linear follow on|off`
 
 A verified Linear webhook stores a compact **External activity** message in one

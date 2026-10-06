@@ -17,6 +17,10 @@ import {
   type InspectInstallOptions,
   type InstallDoctorReport,
 } from "../install-doctor.ts";
+import {
+  LINEAR_REQUEST_BUDGET_PATH,
+  LinearRequestBudgetReportSchema,
+} from "@clankie/protocol/linear-request-budget";
 
 export type { ExecFileImpl, InstallDoctorReport };
 
@@ -53,6 +57,13 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
       ? line
       : `${line} Run \`clankie\`, then \`/setup\`.`;
   }
+  const budget = report.linearRequestBudget;
+  const pressured =
+    budget && "accounts" in budget
+      ? budget.accounts.find((account) => account.status !== "normal")
+      : undefined;
+  if (pressured)
+    return `Linear request budget is ${pressured.status} at ${Math.round(pressured.utilization * 100)}% — run \`clankie linear budget\`.`;
   return "ready";
 }
 
@@ -123,6 +134,28 @@ export async function doctorCommand(
     };
   }
   let remoteHarnesses: readonly unknown[];
+  let linearRequestBudget: NonNullable<InstallDoctorReport["linearRequestBudget"]>;
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("Linear request budget needs the operator credential");
+    const response = await (options.fetchImpl ?? fetch)(
+      `${commandHost(options)}${LINEAR_REQUEST_BUDGET_PATH}`,
+      {
+        headers: { authorization: `Bearer ${credential.token}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) throw new Error(`Linear request budget unavailable (HTTP ${response.status})`);
+    linearRequestBudget = LinearRequestBudgetReportSchema.parse(await response.json());
+  } catch (error) {
+    linearRequestBudget = {
+      status: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
   try {
     const inventory = await runRuntimeCommand(["list"], options);
     const fleets = Array.isArray(inventory.connections)
@@ -158,6 +191,7 @@ export async function doctorCommand(
     workerReports,
     workingPreferences,
     ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
+    linearRequestBudget,
   };
 }
 

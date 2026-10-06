@@ -9,6 +9,10 @@ import { text } from "node:stream/consumers";
 import { connectLaneUpstream, type LaneToolUpstream } from "./mcp.ts";
 import { z } from "zod";
 import {
+  LINEAR_REQUEST_BUDGET_PATH,
+  LinearRequestBudgetReportSchema,
+} from "@clankie/protocol/linear-request-budget";
+import {
   SettingsStore,
   defaultSettingsPath,
   linearFollowStatus,
@@ -17,7 +21,7 @@ import {
 } from "@clankie/settings";
 
 const LINEAR_USAGE =
-  "Usage: clankie linear [status] | post comment|issue --json-stdin | follow on|off | target [show|set CONVERSATION_ID] | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear";
+  "Usage: clankie linear [status] | budget | read TOOL --json-stdin [--background] | post comment|issue --json-stdin | follow on|off | target [show|set CONVERSATION_ID] | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear";
 
 function publishingResult(result: Awaited<ReturnType<LaneToolUpstream["callTool"]>>) {
   // Lane tools wrap the host result as JSON text. A refused host call is not
@@ -44,6 +48,30 @@ export async function runLinearCommand(
     readonly callTool?: LaneToolUpstream["callTool"];
   } = {},
 ) {
+  if (args[0] === "read") {
+    if (
+      (args.length !== 3 && args.length !== 4) ||
+      args[2] !== "--json-stdin" ||
+      (args.length === 4 && args[3] !== "--background") ||
+      !/^(?:get|list|search|check|fetch|read)_[a-z_]+$/u.test(args[1] ?? "")
+    )
+      throw new Error(LINEAR_USAGE);
+    const body: unknown = JSON.parse(await text(options.stdin ?? process.stdin));
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Expected a JSON object");
+    const name = `linear_${args[1]}`;
+    const purpose = args[3] === "--background" ? { background: true } : undefined;
+    if (options.callTool)
+      return publishingResult(await options.callTool(name, body as Record<string, unknown>, purpose));
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({ env });
+    if (!credential) throw new Error("Linear reads need the operator credential. Run clankie doctor.");
+    const upstream = await connectLaneUpstream({ host: commandHost({ env }), bearer: credential.token });
+    try {
+      return publishingResult(await upstream.callTool(name, body as Record<string, unknown>, purpose));
+    } finally {
+      await upstream.close();
+    }
+  }
   if (args[0] === "post") {
     if (args.length !== 3 || !["comment", "issue"].includes(args[1]!) || args[2] !== "--json-stdin")
       throw new Error(LINEAR_USAGE);
@@ -80,6 +108,10 @@ export async function runLinearCommand(
     return response.json();
   };
   const settings = options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+  if (args[0] === "budget") {
+    if (args.length !== 1) throw new Error(LINEAR_USAGE);
+    return LinearRequestBudgetReportSchema.parse(await request(LINEAR_REQUEST_BUDGET_PATH));
+  }
   if (args[0] === "target") {
     if (args.length === 1 || (args.length === 2 && args[1] === "show"))
       return { ok: true, wakeConversationId: (await settings.load()).linearWebhook.wakeConversationId };

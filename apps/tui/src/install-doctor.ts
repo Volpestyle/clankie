@@ -103,6 +103,9 @@ export interface InstallDoctorReport {
   };
   readonly emailConfigured: boolean;
   readonly linear?: ReturnType<typeof linearFollowStatus>;
+  readonly linearRequestBudget?:
+    | import("@clankie/protocol/linear-request-budget").LinearRequestBudgetReport
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly tracker?: {
     readonly backend: "linear" | "local";
     readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";

@@ -70,6 +70,14 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
       (window) =>
         `  Fleet failures ${window.minutes}m · proof ${(window.proofRefusalRate * 100).toFixed(2)}% (${window.proof.refusals}/${window.proof.attempts}, ${window.proofRefusalsPerMinute.toFixed(2)}/min) · reports ${(window.reportFailureRate * 100).toFixed(2)}% (${window.reports.failures}/${window.reports.attempts}, ${window.reportFailuresPerMinute.toFixed(2)}/min)`,
     ) ?? []),
+    ...(report.linearRequestBudget === undefined
+      ? []
+      : "accounts" in report.linearRequestBudget
+        ? report.linearRequestBudget.accounts.map(
+            (account) =>
+              `  ${account.status === "normal" ? "✓" : "!"} Linear requests · ${account.accountId} · ${account.requests} observed/hour · ${Math.round(account.utilization * 100)}% of ${account.limit} · ${account.status}${account.backgroundMinIntervalMs ? " · background reads at most once/minute" : ""}`,
+          )
+        : [`  ○ Linear requests · unknown · ${clean(report.linearRequestBudget.detail)}`]),
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
     ...(report.tracker
       ? [

@@ -241,6 +241,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["linear"],
     lines: [
       "  linear [status] | follow on|off | target [show|set ID]  Linear webhook wakes",
+      "  linear budget            Read account request usage and background throttling",
+      "  linear read TOOL --json-stdin [--background]   Read Linear; automated polls yield to interactive work",
       "  linear wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES]",
       "  linear post comment|issue --json-stdin   Publish as an existing worker persona through the connected app",
     ],

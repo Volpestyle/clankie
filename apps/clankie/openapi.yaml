@@ -1311,6 +1311,46 @@ paths:
         "401": { description: Operator authentication required }
         "409": { description: Target is not an available ordinary global chat }
         "503": { description: Settings or operator authentication unavailable }
+  /v1/linear/request-budget:
+    get:
+      tags: [Operator]
+      operationId: inspectLinearRequestBudget
+      summary: Read rolling provider request usage and background read throttling
+      description: Counts actual HTTP attempts across MCP and the API tracker per workspace and actor. The default 5000/hour cap reserves one request; provider remaining/reset headers can lower available headroom. At 50% a native runtime warning is emitted once until usage recovers; at 80% background reads share a one-minute minimum interval. Writes and webhook context retain priority within the hard cap. This diagnostic makes no provider calls.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Service-local rolling counts and available provider rate-limit observations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, windowMs, observedAt, accounts]
+                properties:
+                  schemaVersion: { const: 1 }
+                  windowMs: { const: 3600000 }
+                  observedAt: { type: integer, minimum: 0 }
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        [accountId, requests, limit, used, utilization, status, backgroundMinIntervalMs]
+                      properties:
+                        accountId: { type: string }
+                        workspaceId: { type: string }
+                        userId: { type: string }
+                        requests: { type: integer, minimum: 0 }
+                        limit: { type: integer, minimum: 1 }
+                        used: { type: integer, minimum: 0 }
+                        utilization: { type: number, minimum: 0 }
+                        status: { type: string, enum: [normal, warning, throttled, limited] }
+                        backgroundMinIntervalMs: { type: integer, minimum: 0 }
+                        backgroundRetryAt: { type: integer, minimum: 0 }
+                        requestsRemaining: { type: integer, minimum: 0 }
+                        resetAt: { type: integer, minimum: 0, description: UTC epoch milliseconds }
+        "401": { description: Operator authentication required }
+        "503": { description: Budget or operator authentication unavailable }
   /v1/linear/wake:
     get:
       tags: [Operator]

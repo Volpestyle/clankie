@@ -18,7 +18,13 @@ type Row = Record<string, unknown>;
 const connection = (nodes: Row[]) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
 
 /** Local HTTP OAuth/GraphQL provider validates real documents/input against the pinned SDK schema. */
-export async function createLinearApiProvider() {
+export async function createLinearApiProvider(
+  options: {
+    requestBudget?: { clock: () => number; limit: number; previousRequests?: readonly number[] };
+    issuePageSize?: number;
+    issueCount?: number;
+  } = {},
+) {
   const schema = buildSchema(await readFile(new URL("./linear-api/schema.graphql", import.meta.url), "utf8"));
   const team = { id: TEAM_ID, name: "Clankie", key: "VUH" };
   const user = { id: USER_ID, name: "Clankie", email: null, displayName: "Clankie", app: true };
@@ -109,7 +115,16 @@ export async function createLinearApiProvider() {
   comment.issue = { id: ISSUE_ID, identifier: "VUH-1383" };
   update.project = { id: PROJECT_ID, name: "Clankie" };
   const rows: Record<string, Row[]> = {
-    issues: [issue],
+    issues: Array.from({ length: options.issueCount ?? 1 }, (_, index) =>
+      index === 0
+        ? issue
+        : {
+            ...issue,
+            id: `${String(index + 20).padStart(8, "0")}-0000-4000-8000-000000000000`,
+            identifier: `VUH-${index + 1383}`,
+            title: `Work item ${index + 1}`,
+          },
+    ),
     projects: [project],
     teams: [team],
     users: [user],
@@ -144,6 +159,8 @@ export async function createLinearApiProvider() {
   let refresh = API_REFRESH;
   let rotations = 0;
   let reject = false;
+  const requestTimes = [...(options.requestBudget?.previousRequests ?? [])];
+  let rateLimited = 0;
   let blockedMutationResponse: { started: () => void; wait: Promise<void> } | undefined;
   let blockedRead: { started: () => void; wait: Promise<void> } | undefined;
   let blocked: { started: () => void; wait: Promise<void> } | undefined;
@@ -159,8 +176,12 @@ export async function createLinearApiProvider() {
       query: undefined as string | undefined,
     };
     seen.push(entry);
+    let requestHeaders: Record<string, string> = {};
     const json = (statusCode: number, value: unknown) => {
-      response.writeHead(statusCode, { "content-type": "application/json" });
+      response.writeHead(statusCode, {
+        "content-type": "application/json",
+        ...requestHeaders,
+      });
       response.end(JSON.stringify(value));
     };
     if (path === "/oauth/token") {
@@ -176,6 +197,12 @@ export async function createLinearApiProvider() {
           return json(400, { error: "invalid_grant", error_description: refresh });
         access = `${API_ACCESS}_${++rotations}`;
         refresh = `${API_REFRESH}_${rotations}`;
+      } else if (parameters.get("grant_type") === "client_credentials") {
+        if (
+          parameters.get("client_id") !== "fixture-app" ||
+          parameters.get("client_secret") !== "fixture-app-secret"
+        )
+          return json(400, { error: "invalid_client" });
       } else if (parameters.get("code") !== "good-code" || !parameters.get("code_verifier"))
         return json(400, { error: "invalid_grant", error_description: `${API_ACCESS} ${API_REFRESH}` });
       return json(200, {
@@ -188,6 +215,21 @@ export async function createLinearApiProvider() {
     }
     if (path === "/oauth/revoke") return json(200, {});
     if (path !== "/graphql") return json(404, {});
+    if (options.requestBudget) {
+      const now = options.requestBudget.clock();
+      requestTimes.push(now);
+      const active = requestTimes.filter((at) => at > now - 3_600_000);
+      // Capture at admission so a deliberately delayed response retains its old observation.
+      requestHeaders = {
+        "x-ratelimit-requests-limit": String(options.requestBudget.limit),
+        "x-ratelimit-requests-remaining": String(Math.max(0, options.requestBudget.limit - active.length)),
+        "x-ratelimit-requests-reset": String(now + 3_600_000),
+      };
+      if (active.length > options.requestBudget.limit) {
+        rateLimited++;
+        return json(429, { errors: [{ extensions: { code: "RATELIMITED" } }] });
+      }
+    }
     if (blockedRead) {
       const gate = blockedRead;
       blockedRead = undefined;
@@ -220,7 +262,17 @@ export async function createLinearApiProvider() {
         if (field === "viewer") data[key] = user;
         else if (field === "organization") data[key] = { id: "personal-workspace", name: "Personal" };
         else if (field === "searchIssues") data[key] = connection(rows.issues!);
-        else if (rows[field]) data[key] = connection(rows[field]!);
+        else if (field === "issues" && options.issuePageSize) {
+          const offset = Number(variables.after ?? 0);
+          const next = Math.min(rows.issues!.length, offset + options.issuePageSize);
+          data[key] = {
+            nodes: rows.issues!.slice(offset, next),
+            pageInfo: {
+              hasNextPage: next < rows.issues!.length,
+              endCursor: String(next),
+            },
+          };
+        } else if (rows[field]) data[key] = connection(rows[field]!);
         else if (operation.operation !== "mutation" && entityLists[field])
           data[key] =
             rows[entityLists[field]!]!.find((row) =>
@@ -279,6 +331,11 @@ export async function createLinearApiProvider() {
     fetch: routedFetch,
     seen,
     validationErrors,
+    rateLimited: () => rateLimited,
+    spendRequests: (count: number) => {
+      if (!options.requestBudget) throw new Error("Fixture request budget is disabled");
+      requestTimes.push(...Array.from({ length: count }, () => options.requestBudget!.clock()));
+    },
     rows,
     issue,
     project,

@@ -198,6 +198,13 @@ index). Configure through the headless CLI:
 | Play session                          | `clankie play status` / `clankie play stop`                                                                                                                          |
 | Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                                 |
 
+`clankie linear budget` and `clankie doctor --json` show account request usage.
+At 80%, the app's Work refresh and reads explicitly marked as background share
+a one-minute interval; honor refusal retry times. Automated operator scripts use
+`clankie linear read TOOL --json-stdin --background`; fleet polls use
+`clankie_call({name, arguments, background: true})`. Ordinary owner and lead reads,
+writes and webhook context retain priority within the hard cap.
+
 Everything else about the launcher (Linear activity, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
 [launcher details](reference/launcher.md).
