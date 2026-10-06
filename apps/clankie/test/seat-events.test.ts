@@ -108,7 +108,11 @@ it("resolves project context and keeps event polls/replies on that binding", asy
   });
   try {
     const context = await clankie.app.request("/v1/captain/seat-context?conversationId=project-a");
-    expect(await context.json()).toEqual({ conversationId: "project-a", cwd: "/projects/a" });
+    expect(await context.json()).toEqual({
+      conversationId: "project-a",
+      cwd: "/projects/a",
+      occupied: false,
+    });
     expect((await clankie.app.request("/v1/captain/seat-context?conversationId=missing")).status).toBe(404);
     expect((await clankie.app.request("/v1/mcp?conversationId=missing", { method: "POST" })).status).toBe(
       404,

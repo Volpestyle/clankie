@@ -178,8 +178,17 @@ it.each(["claude", "codex"] as const)(
         body: JSON.stringify({ sessionId: parentId, entries: [], activity: "waiting" }),
       });
       expect(synced.status).toBe(200);
+      const occupancy = async () =>
+        (
+          await service.app.request(`/v1/captain/seat-context?conversationId=${parentConversationId}`, {
+            headers,
+          })
+        ).json();
+      expect(await occupancy()).toMatchObject({ conversationId: parentConversationId, occupied: false });
       const poll = captain.pollSeatEvents(5_000, pollAbort.signal, parentConversationId);
       await vi.waitFor(() => expect(captain.operatorSeatReady?.()).toBe(true), { timeout: 2_000 });
+      // A fresh launcher sees the live seat and takes its own chat instead.
+      expect(await occupancy()).toMatchObject({ conversationId: parentConversationId, occupied: true });
       run = captain.submitDiscordTurn(request);
       let firstSettled = false;
       void run.then(

@@ -17,7 +17,13 @@ import { fleetSeatToolCatalogPath } from "@clankie/protocol/tool-catalog";
 
 const PLUGIN = "clankie@clankie-seat";
 const exec = promisify(execFileCallback);
-type Flags = { resume: boolean; dryRun: boolean; conversationId?: string; pluginDir?: string };
+type Flags = {
+  resume: boolean;
+  dryRun: boolean;
+  conversationId?: string;
+  newConversation?: boolean;
+  pluginDir?: string;
+};
 type Binding = {
   sessionId?: string;
   conversationId?: string;
@@ -102,6 +108,7 @@ async function planSelectedCodexSeat(
     {
       conversationId:
         previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
+      fresh: flags.newConversation === true,
       cwd: previous?.cwd ?? process.cwd(),
       command,
       dryRun: true,
@@ -172,7 +179,7 @@ export async function runCodexSeat(
   if (plan.newConversation !== undefined) {
     plan = {
       ...plan,
-      ...(await resolveSeatContext({ cwd: plan.cwd, command, dryRun: false }, options)),
+      ...(await resolveSeatContext({ cwd: plan.cwd, command, fresh: true, dryRun: false }, options)),
     };
   }
   stderr.write(`clankie ${command}: ${ownerStep.kind}: ${ownerStep.detail}\n`);

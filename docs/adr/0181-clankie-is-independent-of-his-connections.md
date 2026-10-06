@@ -180,7 +180,9 @@ Clankie's operator MCP bank. A separate native enrollment would split task creat
 identity from the conversation that verifies grants. Sharing the existing tools
 preserves one task owner across Pi and Claude; the existing channel delivers its
 leased envelopes. Launch-directory context cannot select a different coordinator.
-Each fresh native seat creates a separate workspace chat at its launch directory.
+A fresh native seat takes the global chat while no live seat holds it, and
+otherwise (or with `--new`) creates a separate workspace chat at its launch
+directory (amended 2026-10-06; previously every fresh seat got its own chat).
 `clankie seat --conversation ID` selects an existing global/workspace conversation,
 resolves its service-owned cwd, and retains the binding on resume. Prompt assembly
 loads the same workspace agent instructions as Pi. MCP sessions pin the

@@ -25,7 +25,7 @@ import { operatorHarness } from "./harness-command.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SEAT_USAGE =
-  "Usage: clankie claude|codex|opencode|grok [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
+  "Usage: clankie claude|codex|opencode|grok [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -115,6 +115,8 @@ export interface SeatCommandOptions {
 interface SeatFlags {
   readonly harness?: "claude" | "codex" | "opencode" | "grok";
   readonly conversationId?: string;
+  /** A fresh workspace chat even when the global chat is free. */
+  readonly newConversation?: boolean;
   readonly resume: boolean;
   readonly dryRun: boolean;
   readonly pluginDir?: string;
@@ -127,6 +129,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
   if (command !== undefined && selected === undefined) throw new Error(usage);
   let harness: SeatFlags["harness"] = selected;
   let conversationId: string | undefined;
+  let newConversation = false;
   let resume = false;
   let dryRun = false;
   let pluginDir: string | undefined;
@@ -144,15 +147,18 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
       const value = args[++index]?.trim();
       if (!value || value.startsWith("--")) throw new Error(usage);
       conversationId = value;
-    } else if (arg === "--plugin-dir") {
+    } else if (arg === "--new") newConversation = true;
+    else if (arg === "--plugin-dir") {
       const value = args[index + 1];
       if (value === undefined || value.length === 0 || value.startsWith("--")) throw new Error(usage);
       pluginDir = value;
       index += 1;
     } else throw new Error(usage);
   }
+  if (newConversation && (conversationId !== undefined || resume)) throw new Error(usage);
   return {
     ...(harness === undefined ? {} : { harness }),
+    ...(newConversation ? { newConversation } : {}),
     resume,
     dryRun,
     ...(conversationId === undefined ? {} : { conversationId }),
@@ -317,6 +323,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     {
       conversationId:
         previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
+      fresh: flags.newConversation === true,
       cwd: previous?.cwd ?? process.cwd(),
       command,
       dryRun: true,
@@ -431,7 +438,10 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   if (plan.newConversation !== undefined) {
     plan = {
       ...plan,
-      ...(await resolveSeatContext({ cwd: plan.cwd, command: plan.command, dryRun: false }, options)),
+      ...(await resolveSeatContext(
+        { cwd: plan.cwd, command: plan.command, fresh: true, dryRun: false },
+        options,
+      )),
     };
   }
   if (!plan.resumed) {

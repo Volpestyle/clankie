@@ -30,6 +30,7 @@ interface Flags {
   resume: boolean;
   dryRun: boolean;
   conversationId?: string;
+  newConversation?: boolean;
   pluginDir?: string;
 }
 interface Record {
@@ -66,6 +67,7 @@ export async function planGrokSeat(
   const context = await resolveSeatContext(
     {
       conversationId: previous?.conversationId ?? flags.conversationId,
+      fresh: previous !== undefined || flags.newConversation === true,
       cwd: previous?.cwd ?? process.cwd(),
       command: "grok",
       dryRun: true,
@@ -114,7 +116,10 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
   });
   if (!credential) throw new Error("Grok operator needs Clankie's operator credential in the broker");
   if (plan.newConversation) {
-    const context = await resolveSeatContext({ cwd: plan.cwd, command: "grok", dryRun: false }, options);
+    const context = await resolveSeatContext(
+      { cwd: plan.cwd, command: "grok", fresh: true, dryRun: false },
+      options,
+    );
     plan = { ...plan, ...context, args: ["--leader", "--cwd", context.cwd, "--session-id", plan.sessionId] };
   }
   const query = { lane: "operator", ...(plan.conversationId ? { conversationId: plan.conversationId } : {}) };

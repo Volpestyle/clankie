@@ -165,8 +165,8 @@ export interface CaptainPort {
     repository: string,
     mergedInto?: string,
   ): ReturnType<import("./pane-tidy.ts").PaneTidy["worktrees"]>;
-  /** A live native operator bridge can answer independently of the fallback model. */
-  operatorSeatReady?(): boolean;
+  /** A live native operator bridge can answer independently of the fallback model (default: the global chat). */
+  operatorSeatReady?(conversationId?: string): boolean;
   /** Current host-bound persona for the exact native seat and occupant. */
   personaForFleetOccupant(seatId: string, occupantId: string): string | undefined;
   projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;

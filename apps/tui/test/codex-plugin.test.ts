@@ -90,7 +90,7 @@ test("closing native hook review aborts startup and preserves the previous resum
   try {
     let canceled = false;
     const exit = await runCodexSeat(
-      { resume: false, dryRun: false },
+      { resume: false, dryRun: false, newConversation: true },
       {
         repoRoot,
         env: {

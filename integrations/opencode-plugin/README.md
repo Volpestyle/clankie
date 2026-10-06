@@ -2,8 +2,9 @@
 
 `clankie opencode --conversation ID --dry-run` reviews a launch.
 Remove `--dry-run` to open the native interactive TUI. `--resume` reopens only
-the recorded native session and conversation. A fresh launch creates its own
-workspace chat; `--conversation ID` selects an existing chat, and `--dry-run`
+the recorded native session and conversation. A fresh launch takes the global
+chat while no live seat holds it, else (or with `--new`) creates its own workspace
+chat; `--conversation ID` selects an existing chat, and `--dry-run`
 creates nothing. Older resume records without a conversation retain the global
 chat. The service resolves the workspace before launch; a changed resume
 workspace fails closed. `/opencode` in Clankie's

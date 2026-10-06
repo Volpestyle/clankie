@@ -95,10 +95,10 @@ it.each(["claude", "claude2", "codex", "opencode"])(
 );
 
 it.each(["claude", "codex", "opencode"])(
-  "%s dry-run without a conversation plans a fresh chat without a service write",
+  "%s --new dry-run plans a fresh chat without a service request",
   async (command) => {
     const f = await fixture();
-    expect(await runHeadlessCaptainCommand([command, "--dry-run"], f.options), f.error()).toBe(0);
+    expect(await runHeadlessCaptainCommand([command, "--new", "--dry-run"], f.options), f.error()).toBe(0);
     expect(JSON.parse(f.output())).toMatchObject({
       newConversation: { op: "create", scope: { kind: "workspace" } },
       resumed: false,
@@ -311,7 +311,7 @@ it("codex2 uses one captured account for discovery, native server and view even 
     };
   });
   const exit = await runCodexSeat(
-    { resume: false, dryRun: false },
+    { resume: false, dryRun: false, newConversation: true },
     {
       ...f.options,
       harnessCommand: "codex2",
@@ -404,7 +404,7 @@ it.each(["codex", "codex2"])(
     let message = "";
     try {
       await runCodexSeat(
-        { resume: false, dryRun: false },
+        { resume: false, dryRun: false, newConversation: true },
         { ...f.options, harnessCommand: command, execFileImpl, spawnImpl },
       );
     } catch (error) {
