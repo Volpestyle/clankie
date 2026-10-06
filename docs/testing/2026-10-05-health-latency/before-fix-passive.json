@@ -1,0 +1,654 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-06T04:24:51.817Z",
+  "head": "c70fc10f66cc88444f424218f519b83083b3f2d0",
+  "node": "v26.7.0",
+  "mode": "healthy",
+  "profile": false,
+  "eventLoopDelay": false,
+  "compare": true,
+  "policy": {
+    "windowMs": 30000,
+    "sampleIntervalMs": 1000,
+    "cpuPercent": 10,
+    "healthLatencyMs": 250
+  },
+  "sourceDigests": {
+    "apps/clankie/src/index.ts": "b3fd3b2b3706b3dac6c5486e4ccc7cc8bcbdd032964dc85c008cd1d525e5e9f4",
+    "apps/clankie/src/runtime-canary.ts": "ddf72d3cc809fc9ca94d049fe8c19f77cde355c8fd7aa204ea9fc176caa5e287",
+    "apps/clankie/src/runtime-health-sample.ts": "a2b07ac97461c2cc590746c77c6f40460bc18ece98d708e4262662fa0151122d",
+    "apps/clankie/src/app/runtime.ts": "13f0b61f7bbf2beb179d81a8209750dcc2b089afd704246dc2061704388d3595",
+    "apps/tui/bin/runtime-updater.ts": "7af44edf3453aaa444cc2e54ad3f1f65cfeaa000d2ff552466e5f568d822a290",
+    "apps/clankie/scripts/runtime-canary-live-proof.ts": "787a859055eb708b5a7f6d0d255baf81242ec99c4df804db3f829b74bf7ece9e",
+    "apps/clankie/test/fixtures/runtime-canary-cpu-preload.mjs": "a2e795564170cf33d1de36f72d451a7b7edf1d03822a2b3578529e020f34c08d"
+  },
+  "uncommittedInput": true,
+  "limitations": [
+    "The preceding healthy cutover and previous healthy checkpoint are seeded; no updater helper is executed.",
+    "The observation uses 30-second window/1-second sampling, not the default 300/10-second policy.",
+    "Independent public health comparisons run outside the measured canary window; the bare Node control is not product-flow evidence.",
+    "No model turn, provider call, Discord body, browser, Herdr fleet or AWS deployment is exercised."
+  ],
+  "firstHealthyAt": "2026-10-06T04:24:55.937Z",
+  "healthyConfirmedAt": "2026-10-06T04:25:02.231Z",
+  "completedAt": "2026-10-06T04:25:34.015Z",
+  "purpose": "Before-fix passive diagnostic; healthy passage intentionally remains unproven because actual canary fails latency.",
+  "measuredCanary": {
+    "state": "failed",
+    "policy": {
+      "windowMs": 30000,
+      "sampleIntervalMs": 1000,
+      "cpuPercent": 10,
+      "healthLatencyMs": 250
+    },
+    "previousHealthyCommit": "8fcf47a54b578629386bdbc306db3ae2205d57f4",
+    "holdId": "360e9227-883b-4cb8-bd1d-e35ecbdeb883",
+    "holdEstablished": true,
+    "instanceId": "63db0904-6a2d-435e-9dcb-78ed7fa9c100",
+    "pid": 26679,
+    "startedAt": "2026-10-06T04:25:02.902Z",
+    "samples": 27,
+    "cpuMeanPercent": 0.7281282205007611,
+    "healthP95Ms": 295.55558299999757,
+    "completedAt": "2026-10-06T04:25:32.920Z",
+    "error": "runtime-canary-latency-budget-exceeded",
+    "alertState": "claimed"
+  },
+  "holds": [
+    {
+      "id": "68db9faf-4114-445e-afda-5376f508181f",
+      "holder": "Independent proof reviewer",
+      "reason": "Retain a separate owner hold through a healthy canary",
+      "createdAt": "2026-10-06T04:24:51.834Z",
+      "presence": "person"
+    },
+    {
+      "id": "360e9227-883b-4cb8-bd1d-e35ecbdeb883",
+      "holder": "Clankie runtime canary",
+      "reason": "Runtime canary for c70fc10f66cc88444f424218f519b83083b3f2d0; previous healthy 8fcf47a54b578629386bdbc306db3ae2205d57f4",
+      "createdAt": "2026-10-06T04:24:55.869Z",
+      "presence": "person"
+    }
+  ],
+  "samplerHttpTimings": [
+    {
+      "observedAt": "2026-10-06T04:25:02.917Z",
+      "kind": "sampler-http",
+      "ordinal": 1,
+      "completedAt": "2026-10-06T04:25:02.917Z",
+      "requestLatencyMs": 4.728957999999693,
+      "socketId": 1,
+      "socketAgeMs": 0.2854170000009617,
+      "eventLoopUtilization": {
+        "idle": 0.018082999999933236,
+        "active": 4.682334041778631,
+        "utilization": 0.9961528945539924
+      },
+      "dispatchToHeadersMs": 2.545750000001135,
+      "headersToServerMs": 0.30970799999886367,
+      "dispatchToBodySentMs": 2.6121249999996508,
+      "beforeServerMs": 2.8554579999999987,
+      "serverHandlingMs": 0.32954200000131095,
+      "afterServerMs": 1.5439579999983835,
+      "headersMs": 4.4207079999996495
+    },
+    {
+      "observedAt": "2026-10-06T04:25:04.002Z",
+      "kind": "sampler-http",
+      "ordinal": 2,
+      "completedAt": "2026-10-06T04:25:04.002Z",
+      "requestLatencyMs": 71.9739580000005,
+      "socketId": 1,
+      "socketAgeMs": 1086.5087920000005,
+      "eventLoopUtilization": {
+        "idle": 71.01058299999931,
+        "active": 0.9681669904639421,
+        "utilization": 0.013450733592792571
+      },
+      "dispatchToHeadersMs": 71.25824999999895,
+      "headersToServerMs": 0.11404100000072503,
+      "dispatchToBodySentMs": 71.2999579999996,
+      "beforeServerMs": 71.37229099999968,
+      "serverHandlingMs": 0.39400000000023283,
+      "afterServerMs": 0.20766700000058336,
+      "headersMs": 71.9194580000003
+    },
+    {
+      "observedAt": "2026-10-06T04:25:05.128Z",
+      "kind": "sampler-http",
+      "ordinal": 3,
+      "completedAt": "2026-10-06T04:25:05.128Z",
+      "requestLatencyMs": 113.84537500000079,
+      "socketId": 1,
+      "socketAgeMs": 2212.1601250000003,
+      "eventLoopUtilization": {
+        "idle": 113.00900000000001,
+        "active": 0.8400419387817237,
+        "utilization": 0.007378559577457194
+      },
+      "dispatchToHeadersMs": 113.20983400000114,
+      "headersToServerMs": 0.10679100000015751,
+      "dispatchToBodySentMs": 113.24587500000052,
+      "beforeServerMs": 113.3166250000013,
+      "serverHandlingMs": 0.38045899999997346,
+      "afterServerMs": 0.14829099999951723,
+      "headersMs": 113.80770900000061
+    },
+    {
+      "observedAt": "2026-10-06T04:25:06.214Z",
+      "kind": "sampler-http",
+      "ordinal": 4,
+      "completedAt": "2026-10-06T04:25:06.214Z",
+      "requestLatencyMs": 72.26970799999981,
+      "socketId": 1,
+      "socketAgeMs": 3298.1197920000013,
+      "eventLoopUtilization": {
+        "idle": 70.93841600000087,
+        "active": 1.3357508224326011,
+        "utilization": 0.018481718726890837
+      },
+      "dispatchToHeadersMs": 71.67804199999955,
+      "headersToServerMs": 0.08779099999992468,
+      "dispatchToBodySentMs": 71.70487499999945,
+      "beforeServerMs": 71.76583299999947,
+      "serverHandlingMs": 0.35304200000064156,
+      "afterServerMs": 0.15083299999969313,
+      "headersMs": 72.23079200000029
+    },
+    {
+      "observedAt": "2026-10-06T04:25:07.240Z",
+      "kind": "sampler-http",
+      "ordinal": 5,
+      "completedAt": "2026-10-06T04:25:07.240Z",
+      "requestLatencyMs": 9.66400000000067,
+      "socketId": 1,
+      "socketAgeMs": 4324.720917000001,
+      "eventLoopUtilization": {
+        "idle": 8.587041999999201,
+        "active": 1.0821250417793635,
+        "utilization": 0.1119150219562569
+      },
+      "dispatchToHeadersMs": 9.106959000000643,
+      "headersToServerMs": 0.06779099999948812,
+      "dispatchToBodySentMs": 9.129375000000437,
+      "beforeServerMs": 9.174750000000131,
+      "serverHandlingMs": 0.32641700000021956,
+      "afterServerMs": 0.16283300000031886,
+      "headersMs": 9.620959000001676
+    },
+    {
+      "observedAt": "2026-10-06T04:25:08.437Z",
+      "kind": "sampler-http",
+      "ordinal": 6,
+      "completedAt": "2026-10-06T04:25:08.437Z",
+      "requestLatencyMs": 181.8010830000003,
+      "socketId": 1,
+      "socketAgeMs": 5520.909292,
+      "eventLoopUtilization": {
+        "idle": 181.01229200000125,
+        "active": 0.7932077920977463,
+        "utilization": 0.004362947177092042
+      },
+      "dispatchToHeadersMs": 181.1570410000004,
+      "headersToServerMs": 0.1682089999994787,
+      "dispatchToBodySentMs": 181.18854100000135,
+      "beforeServerMs": 181.32524999999987,
+      "serverHandlingMs": 0.3436660000006668,
+      "afterServerMs": 0.1321669999997539,
+      "headersMs": 181.7684160000008
+    },
+    {
+      "observedAt": "2026-10-06T04:25:09.743Z",
+      "kind": "sampler-http",
+      "ordinal": 7,
+      "completedAt": "2026-10-06T04:25:09.743Z",
+      "requestLatencyMs": 295.1487500000003,
+      "socketId": 1,
+      "socketAgeMs": 6827.481250000001,
+      "eventLoopUtilization": {
+        "idle": 294.07291599999917,
+        "active": 1.0822511028145527,
+        "utilization": 0.0036667191478899764
+      },
+      "dispatchToHeadersMs": 294.6474999999991,
+      "headersToServerMs": 0.06979199999841512,
+      "dispatchToBodySentMs": 294.67320800000016,
+      "beforeServerMs": 294.71729199999754,
+      "serverHandlingMs": 0.30600000000049477,
+      "afterServerMs": 0.12545800000225427,
+      "headersMs": 295.11916700000074
+    },
+    {
+      "observedAt": "2026-10-06T04:25:10.901Z",
+      "kind": "sampler-http",
+      "ordinal": 8,
+      "completedAt": "2026-10-06T04:25:10.901Z",
+      "requestLatencyMs": 145.93545799999993,
+      "socketId": 1,
+      "socketAgeMs": 7985.3009999999995,
+      "eventLoopUtilization": {
+        "idle": 145.0112910000007,
+        "active": 0.9325008663017798,
+        "utilization": 0.0063894520923235545
+      },
+      "dispatchToHeadersMs": 145.1895829999994,
+      "headersToServerMs": 0.20662499999889405,
+      "dispatchToBodySentMs": 145.22770799999853,
+      "beforeServerMs": 145.3962079999983,
+      "serverHandlingMs": 0.3835419999995793,
+      "afterServerMs": 0.15570800000205054,
+      "headersMs": 145.8966659999969
+    },
+    {
+      "observedAt": "2026-10-06T04:25:11.947Z",
+      "kind": "sampler-http",
+      "ordinal": 9,
+      "completedAt": "2026-10-06T04:25:11.947Z",
+      "requestLatencyMs": 29.488499999999476,
+      "socketId": 1,
+      "socketAgeMs": 9031.566542,
+      "eventLoopUtilization": {
+        "idle": 28.639124999997875,
+        "active": 0.8600419654867437,
+        "utilization": 0.029154788218020946
+      },
+      "dispatchToHeadersMs": 28.7935839999991,
+      "headersToServerMs": 0.17445799999768496,
+      "dispatchToBodySentMs": 28.833583999999973,
+      "beforeServerMs": 28.968041999996785,
+      "serverHandlingMs": 0.3663330000017595,
+      "afterServerMs": 0.15412500000093132,
+      "headersMs": 29.446708999999828
+    },
+    {
+      "observedAt": "2026-10-06T04:25:12.980Z",
+      "kind": "sampler-http",
+      "ordinal": 10,
+      "completedAt": "2026-10-06T04:25:12.980Z",
+      "requestLatencyMs": 20.70654099999956,
+      "socketId": 1,
+      "socketAgeMs": 10064.289458,
+      "eventLoopUtilization": {
+        "idle": 19.61016699999891,
+        "active": 1.1063750055400305,
+        "utilization": 0.053405390013652916
+      },
+      "dispatchToHeadersMs": 20.154582999999548,
+      "headersToServerMs": 0.07300000000032014,
+      "dispatchToBodySentMs": 20.181124999999156,
+      "beforeServerMs": 20.227582999999868,
+      "serverHandlingMs": 0.3215830000008282,
+      "afterServerMs": 0.15737499999886495,
+      "headersMs": 20.65299999999843
+    },
+    {
+      "observedAt": "2026-10-06T04:25:14.001Z",
+      "kind": "sampler-http",
+      "ordinal": 11,
+      "completedAt": "2026-10-06T04:25:14.001Z",
+      "requestLatencyMs": 6.923125000001164,
+      "socketId": 1,
+      "socketAgeMs": 11085.078083,
+      "eventLoopUtilization": {
+        "idle": 6.230542000001151,
+        "active": 0.6949581544940884,
+        "utilization": 0.1003477205964686
+      },
+      "dispatchToHeadersMs": 6.336416999998619,
+      "headersToServerMs": 0.09762500000215368,
+      "dispatchToBodySentMs": 6.370875000000524,
+      "beforeServerMs": 6.4340420000007725,
+      "serverHandlingMs": 0.377874999998312,
+      "afterServerMs": 0.11120800000207964,
+      "headersMs": 6.889459000001807
+    },
+    {
+      "observedAt": "2026-10-06T04:25:15.458Z",
+      "kind": "sampler-http",
+      "ordinal": 12,
+      "completedAt": "2026-10-06T04:25:15.458Z",
+      "requestLatencyMs": 445.7903330000008,
+      "socketId": 1,
+      "socketAgeMs": 12542.123167000002,
+      "eventLoopUtilization": {
+        "idle": 444.93125000000146,
+        "active": 0.8614169120774022,
+        "utilization": 0.0019323263391573342
+      },
+      "dispatchToHeadersMs": 445.0951249999998,
+      "headersToServerMs": 0.21350000000165892,
+      "dispatchToBodySentMs": 445.15770800000246,
+      "beforeServerMs": 445.3086250000015,
+      "serverHandlingMs": 0.36583299999983865,
+      "afterServerMs": 0.11587499999950523,
+      "headersMs": 445.7662500000006
+    },
+    {
+      "observedAt": "2026-10-06T04:25:16.741Z",
+      "kind": "sampler-http",
+      "ordinal": 13,
+      "completedAt": "2026-10-06T04:25:16.741Z",
+      "requestLatencyMs": 270.65258299999914,
+      "socketId": 1,
+      "socketAgeMs": 13825.917375,
+      "eventLoopUtilization": {
+        "idle": 269.57795799999803,
+        "active": 1.080916988557874,
+        "utilization": 0.003993650637185194
+      },
+      "dispatchToHeadersMs": 270.16191699999763,
+      "headersToServerMs": 0.0610000000015134,
+      "dispatchToBodySentMs": 270.17954199999804,
+      "beforeServerMs": 270.22291699999914,
+      "serverHandlingMs": 0.32208299999911105,
+      "afterServerMs": 0.10758300000088639,
+      "headersMs": 270.6294999999991
+    },
+    {
+      "observedAt": "2026-10-06T04:25:17.907Z",
+      "kind": "sampler-http",
+      "ordinal": 14,
+      "completedAt": "2026-10-06T04:25:17.907Z",
+      "requestLatencyMs": 152.00975000000108,
+      "socketId": 1,
+      "socketAgeMs": 14991.671125,
+      "eventLoopUtilization": {
+        "idle": 151.25283299999865,
+        "active": 0.7619589654859737,
+        "utilization": 0.005012400146289571
+      },
+      "dispatchToHeadersMs": 151.38466699999844,
+      "headersToServerMs": 0.13516600000002654,
+      "dispatchToBodySentMs": 151.40899999999965,
+      "beforeServerMs": 151.51983299999847,
+      "serverHandlingMs": 0.3772500000013679,
+      "afterServerMs": 0.1126670000012382,
+      "headersMs": 151.98875000000044
+    },
+    {
+      "observedAt": "2026-10-06T04:25:18.968Z",
+      "kind": "sampler-http",
+      "ordinal": 15,
+      "completedAt": "2026-10-06T04:25:18.968Z",
+      "requestLatencyMs": 48.73408299999937,
+      "socketId": 1,
+      "socketAgeMs": 16052.046750000001,
+      "eventLoopUtilization": {
+        "idle": 48.00945800000045,
+        "active": 0.7306249792018207,
+        "utilization": 0.014990228463779665
+      },
+      "dispatchToHeadersMs": 48.11874999999782,
+      "headersToServerMs": 0.15783300000111922,
+      "dispatchToBodySentMs": 48.15399999999863,
+      "beforeServerMs": 48.276582999998936,
+      "serverHandlingMs": 0.34724999999889405,
+      "afterServerMs": 0.1102500000015425,
+      "headersMs": 48.7107909999977
+    },
+    {
+      "observedAt": "2026-10-06T04:25:20.001Z",
+      "kind": "sampler-http",
+      "ordinal": 16,
+      "completedAt": "2026-10-06T04:25:20.001Z",
+      "requestLatencyMs": 20.704750000000786,
+      "socketId": 1,
+      "socketAgeMs": 17085.012583,
+      "eventLoopUtilization": {
+        "idle": 20.00891700000284,
+        "active": 0.6986659505892021,
+        "utilization": 0.03373961858591647
+      },
+      "dispatchToHeadersMs": 20.12891700000182,
+      "headersToServerMs": 0.09495799999785959,
+      "dispatchToBodySentMs": 20.158957999999984,
+      "beforeServerMs": 20.22387499999968,
+      "serverHandlingMs": 0.3840830000008282,
+      "afterServerMs": 0.09679200000027777,
+      "headersMs": 20.680374999999913
+    },
+    {
+      "observedAt": "2026-10-06T04:25:21.228Z",
+      "kind": "sampler-http",
+      "ordinal": 17,
+      "completedAt": "2026-10-06T04:25:21.228Z",
+      "requestLatencyMs": 209.9129580000008,
+      "socketId": 1,
+      "socketAgeMs": 18312.316417000002,
+      "eventLoopUtilization": {
+        "idle": 208.75174999999945,
+        "active": 1.1640419883733557,
+        "utilization": 0.005545280692544712
+      },
+      "dispatchToHeadersMs": 209.33450000000084,
+      "headersToServerMs": 0.06970800000271993,
+      "dispatchToBodySentMs": 209.359083000003,
+      "beforeServerMs": 209.40420800000356,
+      "serverHandlingMs": 0.38299999999799184,
+      "afterServerMs": 0.1257499999992433,
+      "headersMs": 209.88629200000287
+    },
+    {
+      "observedAt": "2026-10-06T04:25:22.254Z",
+      "kind": "sampler-http",
+      "ordinal": 18,
+      "completedAt": "2026-10-06T04:25:22.254Z",
+      "requestLatencyMs": 0.7548339999993914,
+      "socketId": 1,
+      "socketAgeMs": 19337.947208,
+      "eventLoopUtilization": {
+        "idle": 0,
+        "active": 0.7563750743865967,
+        "utilization": 1
+      },
+      "dispatchToHeadersMs": 0.07637500000055297,
+      "headersToServerMs": 0.08825000000069849,
+      "dispatchToBodySentMs": 0.10795900000084657,
+      "beforeServerMs": 0.16462500000125146,
+      "serverHandlingMs": 0.43895899999915855,
+      "afterServerMs": 0.15124999999898137,
+      "headersMs": 0.7284590000017488
+    },
+    {
+      "observedAt": "2026-10-06T04:25:23.480Z",
+      "kind": "sampler-http",
+      "ordinal": 19,
+      "completedAt": "2026-10-06T04:25:23.480Z",
+      "requestLatencyMs": 208.73545899999954,
+      "socketId": 1,
+      "socketAgeMs": 20564.070167,
+      "eventLoopUtilization": {
+        "idle": 208.0054170000003,
+        "active": 0.7313331258847029,
+        "utilization": 0.0035036146028126353
+      },
+      "dispatchToHeadersMs": 208.11562499999854,
+      "headersToServerMs": 0.16900000000168802,
+      "dispatchToBodySentMs": 208.15233399999852,
+      "beforeServerMs": 208.28462500000023,
+      "serverHandlingMs": 0.3476249999985157,
+      "afterServerMs": 0.10320900000078836,
+      "headersMs": 208.71316699999807
+    },
+    {
+      "observedAt": "2026-10-06T04:25:24.728Z",
+      "kind": "sampler-http",
+      "ordinal": 20,
+      "completedAt": "2026-10-06T04:25:24.728Z",
+      "requestLatencyMs": 233.71383300000525,
+      "socketId": 1,
+      "socketAgeMs": 21812.132792,
+      "eventLoopUtilization": {
+        "idle": 233.00675000000047,
+        "active": 0.7139159317011945,
+        "utilization": 0.0030545691321528946
+      },
+      "dispatchToHeadersMs": 233.1234579999982,
+      "headersToServerMs": 0.1050840000025346,
+      "dispatchToBodySentMs": 233.15833300000304,
+      "beforeServerMs": 233.22854200000074,
+      "serverHandlingMs": 0.37995799999771407,
+      "afterServerMs": 0.10533300000679446,
+      "headersMs": 233.68941700000505
+    },
+    {
+      "observedAt": "2026-10-06T04:25:25.844Z",
+      "kind": "sampler-http",
+      "ordinal": 21,
+      "completedAt": "2026-10-06T04:25:25.844Z",
+      "requestLatencyMs": 104.70974999999453,
+      "socketId": 1,
+      "socketAgeMs": 22928.407792,
+      "eventLoopUtilization": {
+        "idle": 104.00604200000089,
+        "active": 0.7095408475943259,
+        "utilization": 0.0067758859598480515
+      },
+      "dispatchToHeadersMs": 104.11170799999672,
+      "headersToServerMs": 0.12737500000366708,
+      "dispatchToBodySentMs": 104.14916699999594,
+      "beforeServerMs": 104.23908300000039,
+      "serverHandlingMs": 0.37316699999792036,
+      "afterServerMs": 0.0974999999962165,
+      "headersMs": 104.68779199999699
+    },
+    {
+      "observedAt": "2026-10-06T04:25:26.916Z",
+      "kind": "sampler-http",
+      "ordinal": 22,
+      "completedAt": "2026-10-06T04:25:26.916Z",
+      "requestLatencyMs": 57.6921250000014,
+      "socketId": 1,
+      "socketAgeMs": 24000.478124999998,
+      "eventLoopUtilization": {
+        "idle": 57.005708000000595,
+        "active": 0.6913339883722074,
+        "utilization": 0.011982139197214409
+      },
+      "dispatchToHeadersMs": 57.112207999998645,
+      "headersToServerMs": 0.14320900000166148,
+      "dispatchToBodySentMs": 57.138749999998254,
+      "beforeServerMs": 57.25541700000031,
+      "serverHandlingMs": 0.3365410000042175,
+      "afterServerMs": 0.10016699999687262,
+      "headersMs": 57.670500000000175
+    },
+    {
+      "observedAt": "2026-10-06T04:25:27.989Z",
+      "kind": "sampler-http",
+      "ordinal": 23,
+      "completedAt": "2026-10-06T04:25:27.989Z",
+      "requestLatencyMs": 56.534333000003244,
+      "socketId": 1,
+      "socketAgeMs": 25073.287375000004,
+      "eventLoopUtilization": {
+        "idle": 55.754667000001064,
+        "active": 0.7855420549458358,
+        "utilization": 0.01389351168090713
+      },
+      "dispatchToHeadersMs": 55.871500000001106,
+      "headersToServerMs": 0.19241699999838602,
+      "dispatchToBodySentMs": 55.91195799999696,
+      "beforeServerMs": 56.06391699999949,
+      "serverHandlingMs": 0.3617500000036671,
+      "afterServerMs": 0.10866600000008475,
+      "headersMs": 56.51233299999876
+    },
+    {
+      "observedAt": "2026-10-06T04:25:29.252Z",
+      "kind": "sampler-http",
+      "ordinal": 24,
+      "completedAt": "2026-10-06T04:25:29.252Z",
+      "requestLatencyMs": 245.44350000000122,
+      "socketId": 1,
+      "socketAgeMs": 26336.821667,
+      "eventLoopUtilization": {
+        "idle": 244.47145799999998,
+        "active": 0.9737917959137121,
+        "utilization": 0.0039674501613839105
+      },
+      "dispatchToHeadersMs": 244.96916699999565,
+      "headersToServerMs": 0.0632499999992433,
+      "dispatchToBodySentMs": 244.9877090000009,
+      "beforeServerMs": 245.0324169999949,
+      "serverHandlingMs": 0.3225830000010319,
+      "afterServerMs": 0.0885000000052969,
+      "headersMs": 245.42395899999974
+    },
+    {
+      "observedAt": "2026-10-06T04:25:30.495Z",
+      "kind": "sampler-http",
+      "ordinal": 25,
+      "completedAt": "2026-10-06T04:25:30.495Z",
+      "requestLatencyMs": 227.9305830000012,
+      "socketId": 1,
+      "socketAgeMs": 27579.271542,
+      "eventLoopUtilization": {
+        "idle": 226.80075000000215,
+        "active": 1.1316249542214791,
+        "utilization": 0.004964739890279944
+      },
+      "dispatchToHeadersMs": 227.37645799999882,
+      "headersToServerMs": 0.07458300000143936,
+      "dispatchToBodySentMs": 227.39716600000247,
+      "beforeServerMs": 227.45104100000026,
+      "serverHandlingMs": 0.3516250000029686,
+      "afterServerMs": 0.12791699999797856,
+      "headersMs": 227.90904099999898
+    },
+    {
+      "observedAt": "2026-10-06T04:25:31.756Z",
+      "kind": "sampler-http",
+      "ordinal": 26,
+      "completedAt": "2026-10-06T04:25:31.756Z",
+      "requestLatencyMs": 247.33941599999525,
+      "socketId": 1,
+      "socketAgeMs": 28839.804417000003,
+      "eventLoopUtilization": {
+        "idle": 246.221000000005,
+        "active": 1.1248330631206045,
+        "utilization": 0.004547612746051532
+      },
+      "dispatchToHeadersMs": 246.80320799999754,
+      "headersToServerMs": 0.09008300000277814,
+      "dispatchToBodySentMs": 246.82320799999434,
+      "beforeServerMs": 246.89329100000032,
+      "serverHandlingMs": 0.3521669999972801,
+      "afterServerMs": 0.09395799999765586,
+      "headersMs": 247.3186659999992
+    },
+    {
+      "observedAt": "2026-10-06T04:25:32.919Z",
+      "kind": "sampler-http",
+      "ordinal": 27,
+      "completedAt": "2026-10-06T04:25:32.919Z",
+      "requestLatencyMs": 147.8589590000047,
+      "socketId": 1,
+      "socketAgeMs": 30003.535291999997,
+      "eventLoopUtilization": {
+        "idle": 147.0089999999982,
+        "active": 0.8561249408739968,
+        "utilization": 0.005789904422806535
+      },
+      "dispatchToHeadersMs": 147.13200000000506,
+      "headersToServerMs": 0.1556669999990845,
+      "dispatchToBodySentMs": 147.16562500000146,
+      "beforeServerMs": 147.28766700000415,
+      "serverHandlingMs": 0.44083300000056624,
+      "afterServerMs": 0.13045899999997346,
+      "headersMs": 147.83395900000323
+    }
+  ],
+  "eventLoopTimings": [],
+  "processExit": {
+    "code": 143,
+    "signal": null
+  },
+  "controlProcessExit": {
+    "code": null,
+    "signal": "SIGTERM"
+  },
+  "gap": "Expected values to be strictly equal:\n\n'failed' !== 'passed'\n",
+  "alertReceipt": "Not tested; transientclaimed is not submission or delivery.",
+  "transportConclusion": "Idle reused Undici socket stalls before sendHeaders while server handler is below1ms. No timed observer or synchronous trace writes."
+}

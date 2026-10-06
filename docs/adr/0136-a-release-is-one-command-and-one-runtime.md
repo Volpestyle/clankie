@@ -103,3 +103,10 @@ liveness remains separate; confirmed pre-canary rollback cleans up only its own
 temporary hold. Settings use the operator API, launcher CLI and TUI, and apply
 to the next observation. The process-only metadata schema exposes cumulative
 CPU and a boot identity without conversation content or credentials.
+
+Health probes use fresh native HTTP connections, including connection setup
+and the complete bounded response. The installed Node client's idle fetch pool
+could delay dispatch by roughly 500 ms while the handler remained below 1 ms;
+the [passive investigation](../testing/2026-10-05-health-latency/README.md)
+records that measurement fault. The 250 ms budget remains unchanged, and no
+global dispatcher or background wakeup is added.

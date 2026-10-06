@@ -305,7 +305,8 @@ per-profile receipt in `harness-refresh.json` beside the transaction record.
 After the new service responds with its exact boot identity, a persistent
 post-update canary observes it for five minutes. The default budgets are 10%
 captain-process CPU (100% means one core) and 250 ms `/health` p95, sampled every
-10 seconds. Its deploy hold blocks further updates and integration landings
+10 seconds. Health latency includes TCP setup and the complete response on a
+fresh loopback HTTP connection. Its deploy hold blocks further updates and integration landings
 during observation. A pass releases only that canary's hold. A regression or
 missing health signal records a failed canary, retains the hold, names the
 previous healthy commit, and attempts the runtime-health alert path. The new

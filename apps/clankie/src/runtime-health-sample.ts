@@ -1,3 +1,4 @@
+import { get } from "node:http";
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
 import type { RuntimeBootIdentity } from "../../tui/bin/runtime-update.ts";
@@ -50,27 +51,39 @@ export function createRuntimeHealthSampler(input: {
     previousCpu ??= process.cpuUsage();
     previousAt ??= performance.now();
     const probeAt = performance.now();
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: "error",
-      headers: { accept: "application/json" },
+    // An idle shared fetch socket can wait ~500ms before writing on affected
+    // Node/Undici versions (#5600). A fresh native connection measures the
+    // service, including TCP setup and the complete body, without pool delay.
+    const chunks = await new Promise<Buffer[]>((resolve, reject) => {
+      const request = get(
+        url,
+        {
+          agent: false,
+          signal: AbortSignal.timeout(timeoutMs),
+          headers: { accept: "application/json" },
+        },
+        (response) => {
+          if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300) {
+            response.destroy();
+            reject(Error("runtime-health-http-unhealthy"));
+            return;
+          }
+          const body: Buffer[] = [];
+          let bytes = 0;
+          response.on("data", (chunk: Buffer) => {
+            bytes += chunk.byteLength;
+            if (bytes > 32_768) {
+              response.destroy(Error("runtime-health-response-too-large"));
+              return;
+            }
+            body.push(chunk);
+          });
+          response.once("error", reject);
+          response.once("end", () => resolve(body));
+        },
+      );
+      request.once("error", reject);
     });
-    if (!response.ok) throw Error("runtime-health-http-unhealthy");
-    const reader = response.body?.getReader();
-    if (!reader) throw Error("runtime-health-response-empty");
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        bytes += value.byteLength;
-        if (bytes > 32_768) throw Error("runtime-health-response-too-large");
-        chunks.push(value);
-      }
-    } finally {
-      await reader.cancel().catch(() => {});
-    }
     const value = z
       .object({
         ok: z.literal(true),

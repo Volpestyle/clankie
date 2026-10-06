@@ -2,8 +2,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { channel } from "node:diagnostics_channel";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { Agent, request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +15,7 @@ import { ProcessHealthSnapshotSchema, type ProcessHealthSnapshot } from "@clanki
 import { ClankieSettingsSchema } from "@clankie/settings";
 import type { DeployHold } from "@clankie/protocol/integrate";
 import { DeployHolds } from "../src/deploy-holds.ts";
+import { RuntimeCanaryPolicySchema } from "../src/runtime-canary.ts";
 import { writePrivateJson } from "../../tui/bin/update-files.ts";
 import type { RuntimeBootIdentity, RuntimeUpdateResult } from "../../tui/bin/runtime-update.ts";
 
@@ -25,6 +28,25 @@ if (!process.argv.includes("--run")) {
 
 const repoRoot = await realpath(fileURLToPath(new URL("../../..", import.meta.url)));
 const healthy = process.argv.includes("--healthy");
+const profile = process.argv.includes("--profile");
+const eventLoopDelay = process.argv.includes("--event-loop-delay");
+const compare = process.argv.includes("--compare");
+const warmup = process.argv.includes("--warmup");
+const policyConfigured =
+  process.argv.includes("--window-seconds") || process.argv.includes("--sample-seconds");
+function seconds(flag: string, fallback: number): number {
+  const at = process.argv.indexOf(flag);
+  if (at < 0) return fallback;
+  const value = Number(process.argv[at + 1]);
+  assert(
+    Number.isFinite(value) && value > 0 && Number.isSafeInteger(value * 1000),
+    `${flag} requires positive seconds`,
+  );
+  return value;
+}
+const windowSeconds = seconds("--window-seconds", 300);
+const sampleSeconds = seconds("--sample-seconds", 10);
+assert(windowSeconds >= sampleSeconds * 2, "Observation must contain at least two sample intervals");
 const outputFlag = process.argv.indexOf("--output");
 const output = resolve(
   outputFlag < 0
@@ -34,15 +56,26 @@ const output = resolve(
       )
     : process.argv[outputFlag + 1]!,
 );
+assert(!existsSync(output), `Preserve the existing receipt; choose a new --output: ${output}`);
 const home = await realpath(await mkdtemp(join(tmpdir(), "clankie-index-canary-proof-")));
 const state = join(home, ".clankie");
 const updates = join(state, "updates");
 const trace = join(home, "canary-request-timings.jsonl");
+const profiles = join(home, "cpu-profiles");
 const id = randomUUID();
 const independentHoldId = randomUUID();
 const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
 const previous = execFileSync("git", ["rev-parse", "HEAD^"], { cwd: repoRoot, encoding: "utf8" }).trim();
-const policy = { windowMs: 30_000, sampleIntervalMs: 1000, cpuPercent: 10, healthLatencyMs: 250 };
+const policy = RuntimeCanaryPolicySchema.parse(
+  policyConfigured
+    ? {
+        windowMs: windowSeconds * 1000,
+        sampleIntervalMs: sampleSeconds * 1000,
+        cpuPercent: 10,
+        healthLatencyMs: 250,
+      }
+    : {},
+);
 const receipt: Record<string, unknown> = {
   schemaVersion: 1,
   startedAt: new Date().toISOString(),
@@ -51,16 +84,192 @@ const receipt: Record<string, unknown> = {
   node: process.version,
   outcome: "running",
   mode: healthy ? "healthy" : "cpu",
+  profile,
+  eventLoopDelay,
+  compare,
+  warmup,
+  policyConfigured,
   path: "apps/clankie/src/index.ts -> /health -> runtime canary -> /v1/runtime-update",
   policy,
   limitations: [
     "The preceding healthy cutover and previous healthy checkpoint are seeded; no updater helper is executed.",
-    "The observation uses an accelerated 30-second window, not the default 300-second window.",
+    ...(windowSeconds === 300 && sampleSeconds === 10
+      ? []
+      : [
+          `The observation uses ${windowSeconds}-second window/${sampleSeconds}-second sampling, not the default 300/10-second policy.`,
+        ]),
+    ...(profile
+      ? [
+          "The owned Node process runs its native CPU profiler; profiling overhead is included in measurements.",
+        ]
+      : []),
+    ...(eventLoopDelay
+      ? [
+          "The optional 10ms event-loop delay histogram adds regular wakeups and may mask an idle transport delay.",
+        ]
+      : []),
+    ...(compare
+      ? [
+          "Independent public health comparisons run outside the measured canary window; the bare Node control is not product-flow evidence.",
+        ]
+      : []),
     "No model turn, provider call, Discord body, browser, Herdr fleet or AWS deployment is exercised.",
   ],
 };
 let child: ChildProcess | undefined;
+let control: ChildProcess | undefined;
 let logs = "";
+const keepalive = new Agent({ keepAlive: true, maxSockets: 1 });
+const socketIds = new WeakMap<object, number>();
+const externalRequests = new WeakMap<object, { began: number; id: string }>();
+const fetchTimings = new Map<string, unknown>();
+let externalSocketOrdinal = 0;
+let currentFetch: { began: number; id: string } | undefined;
+channel("undici:request:create").subscribe((message) => {
+  const { request } = message as { request: { path: string } };
+  if (request.path === "/health" && currentFetch) externalRequests.set(request, currentFetch);
+});
+channel("undici:client:sendHeaders").subscribe((message) => {
+  const { request, socket } = message as { request: object; socket: object };
+  const probe = externalRequests.get(request);
+  if (!probe) return;
+  const reused = socketIds.has(socket);
+  const socketId = socketIds.get(socket) ?? ++externalSocketOrdinal;
+  socketIds.set(socket, socketId);
+  fetchTimings.set(probe.id, {
+    socketId,
+    reusedObservedSocket: reused,
+    dispatchToHeadersMs: performance.now() - probe.began,
+  });
+});
+
+async function curlHealth(url: string, id: string): Promise<unknown> {
+  const began = performance.now();
+  const result = await new Promise<string>((done, reject) => {
+    const probe = spawn(
+      "/usr/bin/curl",
+      [
+        "--noproxy",
+        "*",
+        "--http1.1",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "2",
+        "--output",
+        "/dev/null",
+        "--header",
+        `x-clankie-canary-proof: ${id}`,
+        "--write-out",
+        "%{http_code} %{time_total} %{time_connect} %{num_connects}",
+        url,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let data = "";
+    let error = "";
+    probe.stdout.on("data", (chunk: Buffer) => {
+      data += chunk.toString();
+    });
+    probe.stderr.on("data", (chunk: Buffer) => {
+      error += chunk.toString();
+    });
+    probe.once("error", reject);
+    probe.once("exit", (code) =>
+      code === 0 ? done(data) : reject(Error(`Owned curl probe failed: ${error}`)),
+    );
+  });
+  const [status, total, connect, connections] = result.trim().split(" ").map(Number);
+  assert.equal(status, 200);
+  return {
+    requestLatencyMs: total! * 1000,
+    connectMs: connect! * 1000,
+    connections,
+    includingLaunchMs: performance.now() - began,
+  };
+}
+
+async function nodeHealth(url: string, id: string, persistent: boolean): Promise<unknown> {
+  const began = performance.now();
+  return new Promise((done, reject) => {
+    let connectMs: number | undefined;
+    const request = httpRequest(
+      url,
+      {
+        agent: persistent ? keepalive : false,
+        headers: { "x-clankie-canary-proof": id },
+        signal: AbortSignal.timeout(2000),
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () => {
+          if (response.statusCode !== 200) reject(Error(`Owned HTTP probe returned ${response.statusCode}`));
+          else
+            done({
+              requestLatencyMs: performance.now() - began,
+              connectMs,
+              reusedSocket: request.reusedSocket,
+            });
+        });
+      },
+    );
+    request.on("socket", (socket) =>
+      socket.once("connect", () => {
+        connectMs = performance.now() - began;
+      }),
+    );
+    request.once("error", reject);
+    request.end();
+  });
+}
+
+async function independentHealth(url: string, cycle: number): Promise<unknown[]> {
+  const rows: unknown[] = [];
+  for (const client of [
+    "curl",
+    "node-http-fresh",
+    "node-http-keepalive",
+    "undici-close",
+    "undici-keepalive",
+  ] as const) {
+    const count = client.endsWith("keepalive") ? 2 : 1;
+    for (let iteration = 1; iteration <= count; iteration++) {
+      const id = `${cycle}-${client}-${iteration}`;
+      const began = performance.now();
+      let timing: unknown;
+      try {
+        if (client === "curl") timing = await curlHealth(url, id);
+        else if (client.startsWith("node-http"))
+          timing = await nodeHealth(url, id, client.endsWith("keepalive"));
+        else {
+          currentFetch = { id, began };
+          const response = await fetch(url, {
+            headers: {
+              "x-clankie-canary-proof": id,
+              ...(client === "undici-close" ? { connection: "close" } : {}),
+            },
+            signal: AbortSignal.timeout(2000),
+          });
+          await response.arrayBuffer();
+          assert.equal(response.status, 200);
+          timing = { requestLatencyMs: performance.now() - began, dispatch: fetchTimings.get(id) };
+        }
+        rows.push({ id, client, measuredAt: new Date().toISOString(), timing });
+      } catch (error) {
+        rows.push({
+          id,
+          client,
+          measuredAt: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        currentFetch = undefined;
+      }
+      if (iteration < count) await sleep(250);
+    }
+  }
+  return rows;
+}
 
 interface Status {
   runtime: RuntimeBootIdentity;
@@ -120,7 +329,7 @@ try {
     }),
   );
   await privateJson(join(updates, "latest.json"), { id });
-  await privateJson(join(updates, "canary-policy.json"), policy);
+  if (policyConfigured) await privateJson(join(updates, "canary-policy.json"), policy);
   await privateJson(join(updates, "healthy-canary.json"), { commit: previous });
   const cutover = {
     id,
@@ -145,6 +354,8 @@ try {
     "apps/clankie/src/runtime-health-sample.ts",
     "apps/clankie/src/app/runtime.ts",
     "apps/tui/bin/runtime-updater.ts",
+    "apps/clankie/scripts/runtime-canary-live-proof.ts",
+    "apps/clankie/test/fixtures/runtime-canary-cpu-preload.mjs",
   ])
     digests[path] = createHash("sha256")
       .update(await readFile(join(repoRoot, path)))
@@ -153,11 +364,33 @@ try {
   receipt.uncommittedInput =
     execFileSync("git", ["status", "--porcelain"], { cwd: repoRoot, encoding: "utf8" }).trim().length > 0;
   const port = await privatePort();
+  const controlPort = compare ? await privatePort() : undefined;
+  if (compare)
+    control = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import {createServer} from 'node:http'; createServer((_,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({ok:true,service:'bare-node-control',pid:process.pid}));}).listen(${controlPort},'127.0.0.1');`,
+      ],
+      {
+        cwd: home,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, HOME: home, TMPDIR: home },
+      },
+    );
+  if (control)
+    receipt.control = {
+      pid: control.pid,
+      purpose: "Independent bare node:http process, not product-flow evidence",
+    };
   const token = `clankie_op_${randomBytes(32).toString("base64url")}`;
   const trigger = join(home, "cpu-burn.trigger");
+  if (profile) await mkdir(profiles, { mode: 0o700 });
   child = spawn(
     process.execPath,
     [
+      ...(profile ? ["--cpu-prof", `--cpu-prof-dir=${profiles}`, "--cpu-prof-interval=1000"] : []),
       "--import",
       fileURLToPath(new URL("../test/fixtures/runtime-canary-cpu-preload.mjs", import.meta.url)),
       "--import",
@@ -184,6 +417,7 @@ try {
         CLANKIE_PI_NATIVE_ENABLED: "false",
         ...(healthy ? {} : { CLANKIE_CANARY_CPU_TRIGGER: trigger }),
         CLANKIE_CANARY_REQUEST_TRACE: trace,
+        ...(eventLoopDelay ? { CLANKIE_CANARY_EVENT_LOOP_DELAY: "true" } : {}),
         PORT: String(port),
         GIT_CONFIG_GLOBAL: "/dev/null",
         GIT_CONFIG_SYSTEM: "/dev/null",
@@ -200,6 +434,23 @@ try {
     logs += `${error.message}\n`;
   });
   const base = `http://127.0.0.1:${port}`;
+  const controlBase = `http://127.0.0.1:${controlPort}`;
+  const comparisons: unknown[] = [];
+  async function compareHealth(stage: "before" | "after") {
+    if (!compare) return;
+    const cycle = stage === "before" ? 1 : 2;
+    comparisons.push({
+      stage,
+      target: "bare-node-control",
+      probes: await independentHealth(`${controlBase}/health`, cycle),
+    });
+    comparisons.push({
+      stage,
+      target: "actual-index",
+      probes: await independentHealth(`${base}/health`, cycle),
+    });
+    receipt.independentHealth = comparisons;
+  }
   async function get<T>(path: string): Promise<T> {
     const response = await fetch(`${base}${path}`, {
       headers: { authorization: `Bearer ${token}` },
@@ -233,17 +484,20 @@ try {
     const warming = await get<Status>("/v1/runtime-update");
     assert.equal(warming.latest?.phase, "restarting");
     assert(warming.holds?.some((hold) => hold.id === id));
-    const warmup: { measuredAt: string; healthRttMs: number }[] = [];
-    const warmUntil = Date.now() + 5000;
-    while (Date.now() < warmUntil) {
-      const began = performance.now();
-      await get<Health>("/health");
-      warmup.push({ measuredAt: new Date().toISOString(), healthRttMs: performance.now() - began });
-      await sleep(250);
+    if (warmup) {
+      const probes: { measuredAt: string; healthRttMs: number }[] = [];
+      const warmUntil = Date.now() + 5000;
+      while (Date.now() < warmUntil) {
+        const began = performance.now();
+        await get<Health>("/health");
+        probes.push({ measuredAt: new Date().toISOString(), healthRttMs: performance.now() - began });
+        await sleep(250);
+      }
+      receipt.warmupHealth = probes;
+      receipt.warmupLimitation =
+        "A five-second real health warmup precedes seeded helper confirmation; this diagnoses startup timing and is not production policy.";
     }
-    receipt.warmup = warmup;
-    receipt.warmupLimitation =
-      "A five-second real health warmup precedes seeded helper confirmation; this diagnoses startup timing and is not production policy.";
+    await compareHealth("before");
     writePrivateJson(join(updates, id, "result.json"), {
       ...cutover,
       phase: "healthy",
@@ -254,6 +508,9 @@ try {
     receipt.healthyConfirmedAt = new Date().toISOString();
   }
   const initial = await get<Status>("/v1/runtime-update");
+  assert.deepEqual(initial.canaryPolicy, policy);
+  if (!policyConfigured) assert.equal(existsSync(join(updates, "canary-policy.json")), false);
+  receipt.policySource = policyConfigured ? "private-policy-fixture" : "unconfigured-runtime-default";
   assert.equal(initial.latest?.canary?.state, "pending");
   assert(initial.holds?.some((hold) => hold.id === id));
   receipt.bootHealth = health;
@@ -282,6 +539,7 @@ try {
   }
   assert(final, "Real index did not settle its canary");
   receipt.finalStatus = final;
+  await compareHealth("after");
   assert.equal(final.latest?.phase, "healthy");
   assert.equal(final.latest?.healthy, true);
   assert.equal(final.latest?.canary?.previousHealthyCommit, previous);
@@ -344,15 +602,38 @@ try {
   receipt.gap = error instanceof Error ? error.message : String(error);
   process.exitCode = 1;
 } finally {
+  keepalive.destroy();
   if (child) {
     await stopOwnedProcess(child);
     receipt.processExit = { code: child.exitCode, signal: child.signalCode };
   }
-  if (existsSync(trace))
-    receipt.samplerHttpTimings = (await readFile(trace, "utf8"))
+  if (control) {
+    await stopOwnedProcess(control);
+    receipt.controlProcessExit = { code: control.exitCode, signal: control.signalCode };
+  }
+  if (existsSync(trace)) {
+    const rows = (await readFile(trace, "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line));
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { kind: string });
+    receipt.diagnostics = rows;
+    receipt.samplerHttpTimings = rows.filter((row) => row.kind === "sampler-http");
+    receipt.eventLoopTimings = rows.filter((row) => row.kind === "event-loop");
+  }
+  if (profile && existsSync(profiles)) {
+    const copied: unknown[] = [];
+    const destination = `${output}.cpu-profiles`;
+    await mkdir(destination, { recursive: true, mode: 0o700 });
+    for (const file of await readdir(profiles)) {
+      if (!file.endsWith(".cpuprofile")) continue;
+      const bytes = await readFile(join(profiles, file));
+      const path = join(destination, file);
+      await writeFile(path, bytes, { mode: 0o600 });
+      copied.push({ path, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
+    }
+    receipt.cpuProfiles = copied;
+  }
   receipt.completedAt = new Date().toISOString();
   await mkdir(dirname(output), { recursive: true, mode: 0o700 });
   await writeFile(output, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
