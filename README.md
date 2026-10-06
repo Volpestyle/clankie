@@ -28,7 +28,7 @@ The [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-ma
 installs a self-contained bundle on **Apple silicon, macOS 14 or newer**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+curl -fsSL https://clankie.bot/install | sh
 clankie
 ```
 

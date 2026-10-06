@@ -78,7 +78,7 @@ tart delete onboard-test
    normal installer, then open a new Terminal so `~/.local/bin` is on PATH:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh -s -- --version vX.Y.Z
+   curl -fsSL https://clankie.bot/install | sh -s -- --version vX.Y.Z
    clankie --version
    clankie doctor
    clankie
