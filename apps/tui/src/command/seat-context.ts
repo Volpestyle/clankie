@@ -15,7 +15,7 @@ export interface NewSeatConversation {
   readonly title: string;
 }
 
-export const GLOBAL_CONVERSATION_ID = "global-default";
+const GLOBAL_CONVERSATION_ID = "global-default";
 
 /**
  * A new native seat without a selection takes the global chat while no live
