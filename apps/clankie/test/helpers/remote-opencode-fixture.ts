@@ -1,13 +1,17 @@
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { createServer, createConnection, type Server, type Socket } from "node:net";
-import type { ChildProcess, spawn } from "node:child_process";
+import { execFile, type ChildProcess, type spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { inflateRawSync } from "node:zlib";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import type { HerdrFleet } from "../../src/herdr-fleet.ts";
 import { RemoteOpenCodeWorkers } from "../../src/captain/remote-opencode-workers.ts";
 import { createRemoteOpenCodeHelper } from "../../src/captain/remote-opencode-helper.ts";
+import { remoteHireReceiptCommand, type RemoteHireClaim } from "../../src/remote-hire-receipts.ts";
+import { REMOTE_HIRE_RECEIPT_PROGRAM } from "../../src/remote-hire-receipt-program.ts";
 
 /** SSH/remote OS inputs only; RPC framing, socket API, reader and controller remain real. */
 export async function remoteOpenCodeFixture(options: {
@@ -38,6 +42,9 @@ export async function remoteOpenCodeFixture(options: {
   const root = await realpath(options.root);
   const remoteState = join(root, "remote-state");
   await mkdir(remoteState, { mode: 0o700 });
+  const receiptHome = join(remoteState, "receipt-home");
+  await mkdir(receiptHome, { mode: 0o700 });
+  const execute = promisify(execFile);
   // Darwin UNIX socket addresses are bounded to 104 bytes; TMPDIR can be longer.
   const socketRoot = await mkdtemp("/private/tmp/vuh1555-ssh-");
   const socketPath = join(socketRoot, "herdr.sock");
@@ -210,8 +217,37 @@ export async function remoteOpenCodeFixture(options: {
   };
   const shell = async (command: string) => {
     commands.push(command);
-    if (!command.includes("remote-opencode-workers")) throw new Error("Unexpected SSH fixture command");
-    return JSON.stringify({ root: assetsRoot, node: process.execPath, stateDir: remoteState });
+    if (command.includes("remote-opencode-workers"))
+      return JSON.stringify({ root: assetsRoot, node: process.execPath, stateDir: remoteState });
+    // Admit only the canonical service-authored reservation/launch program.
+    // Its real filesystem locks, original claim and launch fence run in this
+    // fixture's private host HOME, never the owner's ~/.clankie receipts.
+    const compressed = command.match(/[A-Za-z0-9+/]{128,}={0,2}/u)?.[0];
+    if (!compressed) throw new Error("Unexpected SSH fixture command");
+    const script = inflateRawSync(Buffer.from(compressed, "base64")).toString();
+    const prefix = `Promise.resolve().then(()=>(${REMOTE_HIRE_RECEIPT_PROGRAM})(`;
+    if (!script.startsWith(prefix)) throw new Error("Unexpected SSH fixture command");
+    const request = JSON.parse(
+      script.slice(prefix.length, script.indexOf(")).then(value=>", prefix.length)),
+    ) as {
+      op: "reserve" | "launch";
+      claim: RemoteHireClaim;
+    };
+    if (
+      !["reserve", "launch"].includes(request.op) ||
+      command.replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture") !==
+        remoteHireReceiptCommand(request.claim, request.op).replaceAll(
+          /clankie-launch-[a-f0-9]{16}/gu,
+          "clankie-launch-fixture",
+        )
+    )
+      throw new Error("Unexpected SSH fixture command");
+    const { stdout } = await execute("/bin/sh", ["-c", command], {
+      cwd: root,
+      env: { ...process.env, HOME: receiptHome },
+      timeout: 30_000,
+    });
+    return stdout;
   };
   const workers = new RemoteOpenCodeWorkers({
     repoRoot: fileURLToPath(new URL("../../../../", import.meta.url)),
