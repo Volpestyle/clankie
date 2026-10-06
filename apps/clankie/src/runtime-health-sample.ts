@@ -25,12 +25,8 @@ export const RuntimeHealthSampleSchema = z.strictObject({
   healthLatencyMs: z.number().finite().nonnegative(),
 });
 
-/** A canonical metadata-only signal for the canary and runtime CPU alert consumers. */
-export function createRuntimeHealthSampler(input: {
-  readonly healthUrl: string;
-  readonly timeoutMs?: number;
-}): (runtime: RuntimeBootIdentity) => Promise<RuntimeHealthSample> {
-  const url = new URL(input.healthUrl);
+function healthEndpoint(healthUrl: string): URL {
+  const url = new URL(healthUrl);
   if (
     url.protocol !== "http:" ||
     !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
@@ -41,6 +37,60 @@ export function createRuntimeHealthSampler(input: {
     url.hash
   )
     throw Error("Runtime health sampler requires the local /health endpoint");
+  return url;
+}
+
+/** Fresh, bounded local HTTP for both the deploy canary and sustained detector. */
+export function requestRuntimeHealth(input: {
+  readonly healthUrl: string;
+  readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
+}): Promise<Buffer> {
+  const url = healthEndpoint(input.healthUrl);
+  // The detector waits up to twice its configurable 60-second health budget.
+  if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > 120_000)
+    throw Error("Invalid runtime health probe timeout");
+  return new Promise((resolve, reject) => {
+    const request = get(
+      url,
+      {
+        agent: false,
+        signal: AbortSignal.any([
+          ...(input.signal === undefined ? [] : [input.signal]),
+          AbortSignal.timeout(input.timeoutMs),
+        ]),
+        headers: { accept: "application/json" },
+      },
+      (response) => {
+        if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300) {
+          response.destroy();
+          reject(Error("runtime-health-http-unhealthy"));
+          return;
+        }
+        const body: Buffer[] = [];
+        let bytes = 0;
+        response.on("data", (chunk: Buffer) => {
+          bytes += chunk.byteLength;
+          if (bytes > 32_768) {
+            response.destroy(Error("runtime-health-response-too-large"));
+            return;
+          }
+          body.push(chunk);
+        });
+        response.once("error", reject);
+        response.once("end", () => resolve(Buffer.concat(body)));
+      },
+    );
+    request.once("error", reject);
+  });
+}
+
+/** A canonical metadata-only signal for the canary and runtime CPU alert consumers. */
+export function createRuntimeHealthSampler(input: {
+  readonly healthUrl: string;
+  readonly timeoutMs?: number;
+}): (runtime: RuntimeBootIdentity) => Promise<RuntimeHealthSample> {
+  const url = healthEndpoint(input.healthUrl);
   const timeoutMs = input.timeoutMs ?? 5000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000)
     throw Error("Invalid runtime health probe timeout");
@@ -54,43 +104,14 @@ export function createRuntimeHealthSampler(input: {
     // An idle shared fetch socket can wait ~500ms before writing on affected
     // Node/Undici versions (#5600). A fresh native connection measures the
     // service, including TCP setup and the complete body, without pool delay.
-    const chunks = await new Promise<Buffer[]>((resolve, reject) => {
-      const request = get(
-        url,
-        {
-          agent: false,
-          signal: AbortSignal.timeout(timeoutMs),
-          headers: { accept: "application/json" },
-        },
-        (response) => {
-          if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300) {
-            response.destroy();
-            reject(Error("runtime-health-http-unhealthy"));
-            return;
-          }
-          const body: Buffer[] = [];
-          let bytes = 0;
-          response.on("data", (chunk: Buffer) => {
-            bytes += chunk.byteLength;
-            if (bytes > 32_768) {
-              response.destroy(Error("runtime-health-response-too-large"));
-              return;
-            }
-            body.push(chunk);
-          });
-          response.once("error", reject);
-          response.once("end", () => resolve(body));
-        },
-      );
-      request.once("error", reject);
-    });
+    const body = await requestRuntimeHealth({ healthUrl: url.href, timeoutMs });
     const value = z
       .object({
         ok: z.literal(true),
         service: z.literal("clankie"),
         runtime: RuntimeHealthSampleSchema.shape.runtime,
       })
-      .parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      .parse(JSON.parse(body.toString("utf8")));
     if (
       value.runtime.root !== runtime.root ||
       value.runtime.commit !== runtime.commit ||

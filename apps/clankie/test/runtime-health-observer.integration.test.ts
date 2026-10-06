@@ -18,6 +18,7 @@ import { parseBodyTelemetryLine } from "@clankie/observability/body-telemetry";
 import { SettingsStore } from "@clankie/settings";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { createClankieApp, createBearerAuthenticator } from "../src/app.ts";
+import { RuntimeHealthObserver } from "../src/runtime-health.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { runRuntimeHealthCommand, formatRuntimeHealth } from "../../tui/src/command/runtime-health.ts";
 import { probeHealth } from "../../tui/src/command/gateway.ts";
@@ -30,6 +31,67 @@ import type { ClankieFaceShell } from "../../tui/src/shell/shell.ts";
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
+});
+
+it("the sustained detector probes after idle through fresh metadata-only connections", async () => {
+  const requests: { port: number | undefined; authorization: string | undefined; url: string | undefined }[] =
+    [];
+  const server = createServer((request, response) => {
+    requests.push({
+      port: request.socket.remotePort,
+      authorization: request.headers.authorization,
+      url: request.url,
+    });
+    response.end('{"ok":true}');
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  cleanup.push(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing TCP address");
+  const observations: RuntimeHealthObservation[] = [];
+  await new Promise<void>((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      monitor.stop();
+      reject(new Error("Missing native health observations"));
+    }, 6_000);
+    const monitor = new RuntimeHealthObserver({
+      settings: async () => ({
+        enabled: true,
+        cpuPercent: 1000,
+        healthLatencyMs: 1000,
+        sustainedMs: 10000,
+        sampleIntervalMs: 250,
+        cooldownMs: 60000,
+      }),
+      healthUrl: `http://127.0.0.1:${address.port}/health`,
+      notify: async () => false,
+      observed: (observation) => {
+        observations.push(observation);
+        if (observations.length === 3) {
+          monitor.stop();
+          clearTimeout(deadline);
+          resolve();
+        }
+      },
+    });
+    cleanup.push(async () => {
+      monitor.stop();
+      clearTimeout(deadline);
+    });
+    monitor.start();
+  });
+  expect(requests).toHaveLength(3);
+  expect(new Set(requests.map((request) => request.port)).size).toBe(3);
+  expect(requests.every((request) => request.url === "/health" && request.authorization === undefined)).toBe(
+    true,
+  );
+  expect(
+    observations.every((observation) => observation.state === "healthy" && observation.healthAvailable),
+  ).toBe(true);
 });
 
 it("real busy process and slow HTTP sustain one alarm, recover once with duration, and spool content-free metadata", async () => {
