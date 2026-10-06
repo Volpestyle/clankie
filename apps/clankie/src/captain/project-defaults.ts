@@ -1,9 +1,33 @@
-import { readdir, readFile } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { discoverConvention, readConvention, type CommandRunner } from "@clankie/work-items";
 import { ProjectProposalDraftSchema, type ProjectProposalDraft } from "@clankie/protocol/projects";
 import type { ResourceSnapshot } from "@clankie/fleet-resources";
 import { defaultRun } from "../work-items.ts";
+
+const inferenceTextLimit = 100_000;
+// A UTF-8 prefix of this size covers the original UTF-16 character limit.
+const inferenceByteLimit = inferenceTextLimit * 4;
+
+async function inferenceText(path: string, prefix: boolean): Promise<string | undefined> {
+  const file = await open(path, "r");
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile() || (!prefix && stat.size > inferenceByteLimit)) return undefined;
+    const buffer = Buffer.alloc(inferenceByteLimit + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (!prefix && length > inferenceByteLimit) return undefined;
+    const text = buffer.subarray(0, Math.min(length, inferenceByteLimit)).toString("utf8");
+    return prefix ? text.slice(0, inferenceTextLimit) : text.length <= inferenceTextLimit ? text : undefined;
+  } finally {
+    await file.close();
+  }
+}
 
 /** Bounded local reads. No install, tracker write, hire, or model call. */
 async function filesUnder(root: string): Promise<string[]> {
@@ -39,8 +63,8 @@ export async function inferProjectDefaults(
       .slice(0, 64)
       .map(async (file) => {
         try {
-          const text = await readFile(join(workspace, file), "utf8");
-          if (text.length > 100_000) return {};
+          const text = await inferenceText(join(workspace, file), false);
+          if (text === undefined) return {};
           const parsed: unknown = JSON.parse(text);
           if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
           return parsed as {
@@ -60,7 +84,7 @@ export async function inferProjectDefaults(
       .map(async (file) => {
         try {
           return /\bimport\s+(?:SwiftUI|UIKit|AppKit)\b/u.test(
-            (await readFile(join(workspace, file), "utf8")).slice(0, 100_000),
+            (await inferenceText(join(workspace, file), true)) ?? "",
           );
         } catch {
           return false;

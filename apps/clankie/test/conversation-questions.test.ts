@@ -61,7 +61,9 @@ async function fixture(hold = false) {
     if (context.inputAnswer) return;
     if (message === "ask") {
       // Actual registered tool -> host callback -> store, no provider or model.
-      const tool = questionTools({ requestQuestion: (d) => store.requestQuestion(id, d, context) })[0]!;
+      const tool = questionTools({ requestQuestion: (d) => store.requestQuestion(id, d, context) }).find(
+        (t) => t.name === "request_user_input",
+      )!;
       await tool.execute("tool-call", draft, undefined, undefined, {} as never);
       const result = await store.serve({ op: "input_get", schemaVersion: 1, conversationId: id }, owner);
       if (result.op !== "input_get") throw new Error("wrong result");
@@ -316,7 +318,8 @@ it("corrupt actionable state never becomes an empty registry that can accept aga
   await restarted.close();
 });
 it("refuses unbound tool and approval-kind input", async () => {
-  await expect(questionTools({})[0]!.execute("id", draft, undefined, undefined, {} as never)).rejects.toThrow(
+  const tool = questionTools({}).find((t) => t.name === "request_user_input")!;
+  await expect(tool.execute("id", draft, undefined, undefined, {} as never)).rejects.toThrow(
     "current owner workspace",
   );
   expect(QuestionDraftSchema.safeParse({ ...draft, kind: "approval" }).success).toBe(false);
@@ -543,7 +546,7 @@ it.each(["before question", "while pending"])(
           }
           const tool = questionTools({
             requestQuestion: (d) => store.requestQuestion(conversationId, d, context),
-          })[0]!;
+          }).find((t) => t.name === "request_user_input")!;
           await tool.execute("question", draft, undefined, undefined, {} as never);
           asked.resolve();
           await finish.promise;

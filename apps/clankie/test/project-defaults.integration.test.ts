@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, rm, readFile, rename } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readFile, rename, truncate } from "node:fs/promises";
 import { realpathSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -118,6 +118,32 @@ it("native SwiftUI and manifest-declared suites produce roles; malformed manifes
   });
   const { draft } = await inferProjectDefaults(root, resources);
   expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer", "tester"]);
+});
+
+it("bounded inference preserves UTF-16 character limits for multibyte manifests and Swift prefixes", async () => {
+  const root = await repo({
+    "package.json": JSON.stringify({ note: "€".repeat(40_000), scripts: { test: "swift test" } }),
+    "Sources/App.swift": `// ${"€".repeat(70_000)}\nimport SwiftUI\n`,
+  });
+  // Large sparse generated tails must not be allocated just to inspect the prefix.
+  await truncate(join(root, "Sources/App.swift"), 128 * 1024 * 1024);
+  const { draft } = await inferProjectDefaults(root, resources);
+  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer", "designer", "tester"]);
+});
+
+it("oversized manifests and Swift imports beyond the character prefix do not infer roles", async () => {
+  const root = await repo({
+    "package.json": `${JSON.stringify({ dependencies: { react: "1" }, scripts: { test: "test" } })}${" ".repeat(100_000)}`,
+    "Sources/App.swift": `// ${"€".repeat(100_000)}\nimport SwiftUI\n`,
+  });
+  await truncate(join(root, "Sources/App.swift"), 128 * 1024 * 1024);
+  const { draft } = await inferProjectDefaults(root, resources);
+  expect(draft!.roles!.map((role) => role.role)).toEqual(["builder", "reviewer"]);
+  await truncate(join(root, "package.json"), 128 * 1024 * 1024);
+  expect((await inferProjectDefaults(root, resources)).draft!.roles!.map((role) => role.role)).toEqual([
+    "builder",
+    "reviewer",
+  ]);
 });
 
 it("reads a linked Linear project plus actual commit history", async () => {
