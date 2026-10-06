@@ -62,6 +62,28 @@ it("keeps a private Codex worker's authenticated binding and reports across serv
       repoRoot,
       stateDir: root,
       settings: new SettingsStore(join(root, "settings.json")),
+      nativeCensusRunner: async (_command, args) => {
+        // Re-observe the same live private worker on both sides of the service
+        // replacement; caller binding and process proof alone are not census.
+        const agent = await get();
+        const row = {
+          pane_id: agent.paneId,
+          terminal_id: agent.terminalId,
+          agent: agent.agent,
+          agent_status: agent.status,
+          title: agent.title,
+          agent_session: agent.session,
+        };
+        let result: unknown;
+        if (args[0] === "agent" && args[1] === "list") result = { agents: [row] };
+        else if (args[0] === "agent" && args[1] === "get") result = { agent: row };
+        else if (args[0] === "pane" && args[1] === "list") result = { panes: [row] };
+        else if (args[0] === "workspace" && args[1] === "list") result = { workspaces: [] };
+        else if (args[0] === "api" && args[1] === "snapshot")
+          result = { snapshot: { agents: [row], panes: [row], workspaces: [], tabs: [] } };
+        else throw new Error(`Unexpected external Herdr command: ${args.join(" ")}`);
+        return { stdout: JSON.stringify({ result }), stderr: "" };
+      },
     });
     const prove = localFleetProof({
       platform: "darwin",
