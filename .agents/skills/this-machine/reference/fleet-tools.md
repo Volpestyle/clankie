@@ -56,6 +56,16 @@ catalog remains `not-observed`; those observations grant no tool authority.
 
 ## Bridge health in doctor and the roster
 
+Claude's pane tool-check warning names timeout, connection refusal or the exact
+HTTP/native-binding refusal. The idle observer retries through fresh link
+discovery; each cause is logged once per Claude session, even across healthy checks.
+For persistent native binding failures, use `/mcp` → reconnect `clankie-worker`,
+then save and restart/resume Claude if needed. Transport failures need the PC
+fleet link/SSH diagnosis from Clankie's machine (`clankie doctor --machine pc`),
+not another pane's restart. A remote observer timeout appears as
+`remote_observation_timeout` and in the fleet-link log; its original late reply
+is never accepted as fresh proof. Keep uncertain message receipts untouched.
+
 `doctor.harnessBridges` reports the worker bridge separately from the operator
 seat: Claude plugin installation/enabling, Codex registration and generated config
 source, and live local process membership. A shared Codex app-server daemon cannot prove its pane. Inspect

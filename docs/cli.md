@@ -221,6 +221,18 @@ never recommends the shared daemon, whose pane identity inheritance can break
 worker bridges. Native introspection for embedded Codex remains a follow-up.
 Plugin hook/mod trust is required; an absent probe remains unverified.
 
+Claude's pane check reports HTTP refusal codes separately from a link connection
+refusal or a timeout, including `remote_observation_timeout` when Windows pane
+verification misses its deadline. It retries at idle with backoff and rereads
+the current link; a matched check clears the status without forgetting causes
+already logged in that process. Persistent native binding failures name
+`/mcp` → reconnect `clankie-worker`, then save and restart/resume Claude if needed.
+For transport failures, inspect `clankie doctor --machine pc` on Clankie's machine
+and its fleet-link logs. A queued observation timeout fails that caller and
+retains its exact pending ID for at most 30 further seconds; late replies are
+discarded, and a truly stalled observer closes with an explicit log reason.
+No expired proof or uncertain tool call is replayed.
+
 Doctor observes operator bridges separately from worker bridges; an operator
 bridge does not prove worker readiness. Process age is separate from transport
 status. `freshness: older-than-runtime` means the observed bridge started before

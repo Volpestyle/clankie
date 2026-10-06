@@ -4,7 +4,7 @@ import type { HttpBindings, Http2Bindings } from "@hono/node-server";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import type { RemoteStream } from "./remote-project-proof.ts";
-import { RemoteFleetRelay } from "./remote-fleet-relay.ts";
+import { RemoteFleetRelay, RemoteObservationError } from "./remote-fleet-relay.ts";
 import { windowsFleetRelayCommand } from "./windows-fleet-relay.ts";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FleetLinkFile } from "@clankie/protocol";
@@ -224,6 +224,7 @@ class FleetLink {
           localPort: this.options.localPort,
           ready: publish,
           responseServer: responseServer!,
+          log: (message) => this.options.log?.(`fleet ${this.fleet.id}: ${message}`),
         });
         relayChild.once("close", () => {
           if (this.child === child) {
@@ -288,7 +289,7 @@ class FleetLink {
   observe(command: string, timeoutMs?: number): Promise<string> {
     return this.current.state === "ready" && this.relay
       ? this.relay.execute(command, timeoutMs)
-      : Promise.reject(new Error("Remote proof relay unavailable"));
+      : Promise.reject(new RemoteObservationError("remote_observer_unavailable"));
   }
 
   /** Replacement discovery is already live; accepted work keeps this relay alive. */

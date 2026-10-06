@@ -1,0 +1,44 @@
+Base: a00d7d8e5f1138680a26d099a81f228acf407115
+All heavy commands used legacy bin/heavy outside clankie heavy --.
+Real install: pnpm install --frozen-lockfile -- PASS (590 packages).
+
+Completed focused gate:
+pnpm --filter @clankie/clankie typecheck
+PASS
+pnpm exec oxlint --deny-warnings [10 changed source/test files]
+PASS
+pnpm exec vitest run --config vitest.config.ts \
+  apps/clankie/test/claude-tool-catalog-mod.integration.test.ts \
+  apps/clankie/test/remote-fleet-relay.test.ts \
+  apps/clankie/test/remote-project-proof.test.ts \
+  apps/clankie/test/tool-catalog-health.test.ts \
+  apps/clankie/test/fleet-link.test.ts
+Test Files 5 passed (5)
+Tests 131 passed (131)
+Duration 57.91s
+
+Final helper body-reset amendment:
+pnpm exec oxfmt --write integrations/claude-plugin/worker/mods/report.mjs \
+  apps/clankie/test/claude-tool-catalog-mod.integration.test.ts
+PASS
+pnpm --filter @clankie/clankie typecheck
+PASS
+pnpm exec oxlint --deny-warnings integrations/claude-plugin/worker/mods/report.mjs \
+  apps/clankie/test/claude-tool-catalog-mod.integration.test.ts
+PASS
+pnpm exec vitest run --config vitest.config.ts \
+  apps/clankie/test/claude-tool-catalog-mod.integration.test.ts
+Test Files 1 passed (1)
+Tests 12 passed (12)
+Duration 21.73s
+Final source union: 120 unchanged tests + 12 final helper tests = 132 passing tests.
+
+Real isolated Windows transport reproduction:
+pnpm --filter @clankie/clankie exec tsx [owned isolated relay driver] --before
+Expected failure: baseline timeout makes aliveAfterTimeout false; next observation unavailable.
+pnpm --filter @clankie/clankie exec tsx [owned isolated relay driver]
+PASS: timeout leaves relay alive; late reply discarded; fresh-proof succeeds;
+new exact-tuple TCP stream succeeds; cleanup closes only owned resources.
+
+git diff --check -- PASS
+No full suite, native Claude UI acceptance, production refresh, eval or release.

@@ -9,7 +9,11 @@ let probing = false;
 let watcher;
 let activeTools = 0;
 let nextWatchAfter = 0;
-let lastMessage;
+// A successful check clears the status, not the warning history. Intermittent
+// link failures must not print the same cause again after every healthy probe.
+const warnedCauses = new Set();
+let failures = 0;
+let retryAfter = 0;
 const activeTurns = new Set();
 
 export function register(on) {
@@ -34,6 +38,9 @@ export function register(on) {
     watcher = undefined;
     activeTurns.clear();
     nextWatchAfter = 0;
+    retryAfter = 0;
+    failures = 0;
+    warnedCauses.clear();
     return next(event);
   });
   on("turn.start", ($, event, next) => {
@@ -73,6 +80,7 @@ export function register(on) {
 
 async function scheduleProbe($, startup = true) {
   if (!interactive || probing || activeTools || activeTurns.size) return;
+  if (!startup && (await $.clock.now()) < retryAfter) return;
   const pane = await $.env.get("HERDR_PANE_ID");
   const socket = await $.env.get("HERDR_SOCKET_PATH");
   if (!pane || !socket) return;
@@ -158,21 +166,24 @@ async function observeCatalog($, deadline, sessionId, probe) {
   try {
     const response = await $.process.run(["node", helper], {
       stdin: JSON.stringify(report),
-      timeoutMs: 10_000,
+      timeoutMs: 25_000,
     });
     if (response.exitCode !== 0) throw new Error(response.stderr || "catalog report failed");
     result = JSON.parse(response.stdout);
   } catch {
     result = {
       status: "unverified",
-      detail: "Clankie tool check could not be reported through this pane's authenticated link.",
-      remediation: "Run clankie doctor in this pane to inspect its fleet link.",
+      reason: "report_helper_failed",
+      detail: "Clankie tool check report helper failed or exceeded its 25s deadline.",
+      remediation:
+        "Run clankie doctor in this pane. Ask Clankie to refresh the worker plugin; then save this session and restart/resume Claude.",
     };
   }
   if (!(await current())) return;
   if (result.status === "unlinked" || result.status === "matched") {
     nextWatchAfter = (await $.clock.now()) + WATCH_MS;
-    lastMessage = undefined;
+    failures = 0;
+    retryAfter = 0;
     $.ui.status(undefined);
     return;
   }
@@ -183,6 +194,13 @@ async function observeCatalog($, deadline, sessionId, probe) {
   const message = [result.detail, result.remediation].filter(Boolean).join(" ");
   const warning = message || "Clankie tools are unverified; run clankie doctor in this pane.";
   $.ui.status(warning);
-  if (warning !== lastMessage) $.ui.log(warning);
-  lastMessage = warning;
+  const cause = result.reason || warning;
+  if (!warnedCauses.has(cause)) {
+    $.ui.log(warning);
+    warnedCauses.add(cause);
+  }
+  // Repeated turns do not amplify a congested link's background traffic.
+  failures = Math.min(failures + 1, 4);
+  retryAfter = (await $.clock.now()) + Math.min(60_000, WATCH_MS * 2 ** failures);
+  nextWatchAfter = retryAfter;
 }

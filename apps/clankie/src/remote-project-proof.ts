@@ -3,6 +3,7 @@ import type { ProjectGitWorktreeObservation, ProjectWorktreeRootObservation } fr
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { win32 } from "node:path";
+import { RemoteObservationError } from "./remote-fleet-relay.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { splitFleetQualified, type FleetShellRun, type HerdrFleet } from "./herdr-fleet.ts";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
@@ -515,7 +516,10 @@ export function createRemoteProjectObserver(options: Options) {
       // Herdr/native probes and private-seat keys are host-local. The caller's
       // address namespace remains intact for the original hire allocation.
       return { ...first.proof, pane: paneAddress };
-    } catch {
+    } catch (error) {
+      // Only a request already tied to the trusted relay may receive a typed
+      // transport diagnostic. Ordinary discovery keeps unavailable proof.
+      if (stream && error instanceof RemoteObservationError) throw error;
       return undefined;
     }
   };
