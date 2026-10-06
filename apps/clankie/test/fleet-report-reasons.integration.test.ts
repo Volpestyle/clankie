@@ -103,7 +103,10 @@ it("counts every worker receipt failure from real TCP/filesystem failures withou
           metrics.observeReport("default", pane, report); // Polling the same observation adds no attempt.
         },
         request: async (suffix, init) => {
-          const response = await fetch(`${host}/${suffix}`, { ...init, signal: AbortSignal.timeout(100) });
+          const response = await fetch(`${host}${suffix || "/"}`, {
+            ...init,
+            signal: AbortSignal.timeout(100),
+          });
           if (reason === "connection_refused" && !init) {
             await response.clone().text();
             server.closeAllConnections();
@@ -144,6 +147,10 @@ it("counts every worker receipt failure from real TCP/filesystem failures withou
           await sender.reconcilePending();
           expect(posts).toBe(before);
           if (reason === "receipt_unresolved") expect(reports[reason]).toEqual([reason, reason]);
+          if (reason === "receipt_invalid") {
+            expect(reports[reason]).toEqual([reason, "stored"]);
+            expect(hasPendingInboundClaim(directory, reason)).toBe(false);
+          }
         }
         if (reason === "stored") {
           expect(await readdir(directory)).toEqual([]);
@@ -176,7 +183,7 @@ it("counts every worker receipt failure from real TCP/filesystem failures withou
       if (!("fleet" in result)) throw new Error("No fleet metrics");
       for (const reason of WorkerReportBridgeReasonSchema.options.filter((value) => value !== "stored"))
         expect(result.fleet.totals.reports.byReason[reason]).toBeGreaterThanOrEqual(1);
-      expect(result.fleet.totals.reports.failures).toBe(result.fleet.totals.reports.attempts - 1);
+      expect(result.fleet.totals.reports.failures).toBe(result.fleet.totals.reports.attempts - 2);
       expect(result.fleet.windows[0].reports).toEqual(result.fleet.totals.reports);
       expect(result.fleet.windows[1].reports).toEqual(result.fleet.totals.reports);
       expect(JSON.stringify(result.fleet)).not.toMatch(
