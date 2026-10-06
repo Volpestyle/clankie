@@ -26,11 +26,18 @@ export function currentLinearRequestPriority(fallback: LinearRequestPriority): L
 const WINDOW_MS = 3_600_000;
 const LIMIT = 5_000;
 const BACKGROUND_INTERVAL_MS = 60_000;
+const WARNING_RETRY_MS = 60_000;
+interface WarningIncident {
+  accepted: boolean;
+  retryAt: number;
+  retryTimer?: ReturnType<typeof setTimeout>;
+}
 interface AccountState {
   readonly accountId: string;
   readonly account?: Pick<ProviderAccount, "workspaceId" | "userId">;
   requests: number[];
-  warned: boolean;
+  warning?: WarningIncident;
+  warningInFlight?: boolean;
   sequence: number;
   headerSequence: number;
   lastBackground?: number;
@@ -51,15 +58,17 @@ export class LinearRequestBudgetRefused extends Error {
 /** One service-owned budget across API/MCP audiences; counts wire attempts, including failures. */
 export class LinearRequestBudget {
   private readonly accounts = new Map<string, AccountState>();
+  private closed = false;
   private readonly clock: () => number;
   private readonly options: {
     readonly clock?: () => number;
-    readonly onAlert?: (account: LinearRequestBudgetAccount) => unknown;
+    /** True means native admission, including an unresolved accepted receipt, not confirmed delivery. */
+    readonly onAlert?: (account: LinearRequestBudgetAccount) => boolean | Promise<boolean>;
   };
   constructor(
     options: {
       readonly clock?: () => number;
-      readonly onAlert?: (account: LinearRequestBudgetAccount) => unknown;
+      readonly onAlert?: (account: LinearRequestBudgetAccount) => boolean | Promise<boolean>;
     } = {},
   ) {
     this.options = options;
@@ -77,6 +86,8 @@ export class LinearRequestBudget {
     const state = this.state(credential);
     const now = this.clock();
     const observation = this.observe(state, now);
+    // Pending warnings must remain retryable even when no more provider calls can be admitted.
+    this.warn(state, now, observation);
     const context = priority.getStore();
     const selectedPriority = context?.value ?? "interactive";
     if (observation.used >= observation.limit - 1) {
@@ -137,8 +148,17 @@ export class LinearRequestBudget {
       schemaVersion: 1,
       windowMs: WINDOW_MS,
       observedAt: now,
-      accounts: [...this.accounts.values()].map((state) => this.observe(state, now)),
+      accounts: [...this.accounts.values()].map((state) => {
+        const observation = this.observe(state, now);
+        this.warn(state, now, observation);
+        return observation;
+      }),
     };
+  }
+
+  close(): void {
+    this.closed = true;
+    for (const state of this.accounts.values()) this.clearWarningTimer(state.warning);
   }
 
   private state(credential: ProviderCredential): AccountState {
@@ -167,7 +187,6 @@ export class LinearRequestBudget {
         accountId,
         ...(account ? { account: { workspaceId: account.workspaceId, userId: account.userId } } : {}),
         requests: [],
-        warned: false,
         sequence: 0,
         headerSequence: 0,
       };
@@ -187,7 +206,10 @@ export class LinearRequestBudget {
       state.provider ? state.provider.limit - state.provider.remaining : 0,
     );
     const utilization = used / limit;
-    if (utilization < 0.5) state.warned = false;
+    if (utilization < 0.5) {
+      this.clearWarningTimer(state.warning);
+      delete state.warning;
+    }
     return {
       accountId: state.accountId,
       ...state.account,
@@ -215,17 +237,67 @@ export class LinearRequestBudget {
     };
   }
 
-  private warn(state: AccountState, now: number) {
-    const observation = this.observe(state, now);
-    if (observation.utilization >= 0.5 && !state.warned) {
-      state.warned = true;
-      // Diagnostic delivery never changes whether an admitted provider request is sent.
-      try {
-        void Promise.resolve(this.options.onAlert?.(observation)).catch(() => undefined);
-      } catch {
-        /* observed in doctor */
-      }
+  private warn(state: AccountState, now: number, observation = this.observe(state, now)): void {
+    const onAlert = this.options.onAlert;
+    if (this.closed || !onAlert || observation.utilization < 0.5) return;
+    const warning = (state.warning ??= { accepted: false, retryAt: now });
+    if (warning.accepted || state.warningInFlight) return;
+    if (now < warning.retryAt) {
+      this.scheduleWarning(state, warning, now);
+      return;
     }
+    this.clearWarningTimer(warning);
+    state.warningInFlight = true;
+    // Diagnostic admission never delays or changes an admitted provider request.
+    void (async () => {
+      let accepted = false;
+      try {
+        accepted = (await onAlert(observation)) === true;
+      } catch {
+        /* Retain the incident when the native notification could not be admitted. */
+      }
+      state.warningInFlight = false;
+      if (this.closed) return;
+      const settledAt = this.clock();
+      this.observe(state, settledAt);
+      if (state.warning === warning) {
+        warning.accepted = accepted;
+        if (!accepted) {
+          warning.retryAt = settledAt + WARNING_RETRY_MS;
+          this.scheduleWarning(state, warning, settledAt);
+        }
+      } else {
+        // A late result belongs only to its original threshold crossing. Serialize a
+        // newer incident behind it, without letting that result latch the new warning.
+        this.warn(state, settledAt);
+      }
+    })();
+  }
+
+  private scheduleWarning(state: AccountState, warning: WarningIncident, now: number): void {
+    if (
+      this.closed ||
+      warning.accepted ||
+      warning.retryTimer ||
+      state.warningInFlight ||
+      state.warning !== warning
+    )
+      return;
+    // Retry without a provider request or doctor poll, and never keep a stopping service alive.
+    warning.retryTimer = setTimeout(
+      () => {
+        delete warning.retryTimer;
+        if (state.warning === warning) this.warn(state, this.clock());
+      },
+      Math.max(0, warning.retryAt - now),
+    );
+    warning.retryTimer.unref();
+  }
+
+  private clearWarningTimer(warning?: WarningIncident): void {
+    if (!warning?.retryTimer) return;
+    clearTimeout(warning.retryTimer);
+    delete warning.retryTimer;
   }
 
   private retryAt(state: AccountState, now: number) {
