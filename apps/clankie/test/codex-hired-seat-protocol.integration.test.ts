@@ -97,20 +97,19 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
                 id: "pc",
                 session: "default",
                 host: "protocol-host",
-                run: async (args: readonly string[]) =>
-                  args[0] === "agent"
-                    ? JSON.stringify({
-                        result: {
-                          agents: [
-                            {
-                              ...pane,
-                              pane_id: pane.pane_id.slice(3),
-                              terminal_id: pane.terminal_id.slice(3),
-                            },
-                          ],
-                        },
-                      })
-                    : JSON.stringify({ result: { snapshot: {} } }),
+                run: async (args: readonly string[]) => {
+                  const agents = [
+                    {
+                      ...structuredClone(pane),
+                      pane_id: pane.pane_id.slice(3),
+                      terminal_id: pane.terminal_id.slice(3),
+                    },
+                  ];
+                  if (args.join(" ") === "agent list") return JSON.stringify({ result: { agents } });
+                  if (args.join(" ") === "api snapshot")
+                    return JSON.stringify({ result: { snapshot: { agents } } });
+                  throw new Error(`Unexpected remote census command: ${args.join(" ")}`);
+                },
               },
             ],
           }

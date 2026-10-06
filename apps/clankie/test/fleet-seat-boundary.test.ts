@@ -44,21 +44,22 @@ test("disabled default does not hide connected fleet census or probe the default
   const local = vi.fn(async () => {
     throw new Error("must not query default");
   });
-  const remote = vi.fn(async () =>
-    JSON.stringify({
-      result: {
-        agents: [
-          {
-            pane_id: "w2:p1",
-            terminal_id: "term",
-            agent: "codex",
-            agent_status: "idle",
-            agent_session: { source: "herdr:codex", kind: "id", value: "native-session" },
-          },
-        ],
-      },
-    }),
-  );
+  const agents = [
+    {
+      pane_id: "w2:p1",
+      terminal_id: "term",
+      agent: "codex",
+      agent_status: "idle",
+      agent_session: { source: "herdr:codex", kind: "id", value: "native-session" },
+    },
+  ];
+  const remote = vi.fn(async (args: readonly string[]) => {
+    if (args.join(" ") === "agent list")
+      return JSON.stringify({ result: { agents: structuredClone(agents) } });
+    if (args.join(" ") === "api snapshot")
+      return JSON.stringify({ result: { snapshot: { agents: structuredClone(agents) } } });
+    throw new Error(`Unexpected remote census command: ${args.join(" ")}`);
+  });
   const fleets = [{ id: "pc", host: "pc", session: "work", run: remote }];
   const fleet = await readFleet({ localAvailable: false, runCommand: local, fleets });
   expect(fleet.seats.map((seat) => seat.seatId)).toContain("pc/term");

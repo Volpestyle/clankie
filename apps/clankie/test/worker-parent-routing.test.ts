@@ -124,9 +124,13 @@ async function fixture(
       const agent = current.find((item) => item.pane_id === args[2] || item.terminal_id === args[2]);
       if (!agent) throw new Error("agent_not_found");
       result = { agent: structuredClone(agent) };
-    } else if (args[0] === "agent" && args[1] === "list") {
-      result = { agents: structuredClone(current) };
-      if (gate && --gate.remaining === 0) {
+    } else if ((args[0] === "agent" && args[1] === "list") || (args[0] === "api" && args[1] === "snapshot")) {
+      const agents = structuredClone(current);
+      result = args[0] === "api" ? { snapshot: { agents, panes: structuredClone(current) } } : { agents };
+      const authorityCensus = options.remote
+        ? fleet === "away" && args[0] === "api"
+        : fleet === "default" && args[0] === "agent";
+      if (authorityCensus && gate && --gate.remaining === 0) {
         const held = gate;
         gate = undefined;
         held.entered();
@@ -540,7 +544,9 @@ it.each([false, true])(
     expect(
       f.calls.some(
         (call) =>
-          call.fleet === (remote ? "away" : "default") && call.args[0] === "agent" && call.args[1] === "list",
+          call.fleet === (remote ? "away" : "default") &&
+          call.args[0] === (remote ? "api" : "agent") &&
+          call.args[1] === (remote ? "snapshot" : "list"),
       ),
     ).toBe(true);
   },

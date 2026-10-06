@@ -250,24 +250,22 @@ it("projects the remote Herdr-observed session through fleet and roster without 
   const shell = localShell(root);
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
-  const herdr = vi.fn(async (args: readonly string[]) =>
-    JSON.stringify({
-      result:
-        args[0] === "agent"
-          ? {
-              agents: [
-                {
-                  pane_id: "w1:p1",
-                  terminal_id: "seat",
-                  agent: "codex",
-                  agent_status: "idle",
-                  agent_session: session,
-                },
-              ],
-            }
-          : {},
-    }),
-  );
+  const agents = [
+    {
+      pane_id: "w1:p1",
+      terminal_id: "seat",
+      agent: "codex",
+      agent_status: "idle",
+      agent_session: session,
+    },
+  ];
+  const herdr = vi.fn(async (args: readonly string[]) => {
+    if (args.join(" ") === "agent list")
+      return JSON.stringify({ result: { agents: structuredClone(agents) } });
+    if (args.join(" ") === "api snapshot")
+      return JSON.stringify({ result: { snapshot: { agents: structuredClone(agents) } } });
+    throw new Error(`Unexpected remote census command: ${args.join(" ")}`);
+  });
   const captain = createCaptain(
     {
       herdrAvailable: () => false,
