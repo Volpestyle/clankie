@@ -49,8 +49,9 @@ reply ORIGINAL_TURN_DONE."` Keep the returned qualified pane, native session
    `--remote`.
 2. **Steer the active original turn through Clankie.** While its sleep tool is
    active, have Clankie call `message_seat` for that exact qualified terminal with
-   `delivery: "steer"` and `message: "After the sleep, include TESS_STEER_ACCEPTED
+   `message: "After the sleep, include TESS_STEER_ACCEPTED
 in this turn's final reply."` Retain the original delivery ID and full receipt.
+   The current tool chooses native delivery automatically; it has no `delivery` parameter.
    Require native `state: "steered"` for the original active turn; a queued receipt
    or successful transport alone does not pass. If uncertain, reconcile that ID
    only, with no typing, alternate bridge, queue fallback or replacement send.
