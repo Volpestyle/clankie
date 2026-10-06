@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import type { Duplex } from "node:stream";
+import { trustInstalledCodexWorkerHooks } from "./codex-hook-trust.ts";
 import { isolatedCodexConfig, watchCodexCatalog } from "./codex-catalog-refresh.ts";
 import type { SeatQuestion, SeatQuestionAnswer, SeatQuestionResult } from "@clankie/agent-hosts";
 import { isDeepStrictEqual } from "node:util";
@@ -821,6 +822,13 @@ export async function startCodexAppServerSeat(options: {
         throw policyFailure;
       }
     }
+    if (options.catalogRefreshHome) {
+      await trustInstalledCodexWorkerHooks({
+        home: options.catalogRefreshHome,
+        cwd: options.cwd,
+        request: (method, params) => client!.request(method, params),
+      });
+    }
     const viewArgs = [
       ...configArgs,
       ...(server.viewConfigArgs ?? []),
@@ -845,7 +853,8 @@ export async function startCodexAppServerSeat(options: {
       // here strands the TUI in an automatic reconnect loop.
       if (
         !options.onThreadPending ||
-        (!/agent_not_ready/u.test(String(error)) && !(options.resumeThreadId && herdrStartupTimedOut(error)))
+        (!/agent_not_ready|trust_required/u.test(String(error)) &&
+          !(options.resumeThreadId && herdrStartupTimedOut(error)))
       )
         throw error;
     }

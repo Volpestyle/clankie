@@ -49,7 +49,11 @@ the shared skills; release bundles already contain them. Install with
 and `codex plugin add clankie@clankie-seat`; keep it disabled globally in `/plugins`.
 The launcher enables it for this seat. The owner must review and trust its hooks
 in `/hooks`, then exit and repeat the original launch command. Use `--resume` after its first turn.
-Never bypass hook trust or write trust hashes. New or changed hooks need review.
+For this operator seat, never bypass hook trust or write trust hashes. New or
+changed hooks need review. A fleet hire separately authorizes the installed
+Clankie worker plugin: its dedicated app-server trusts only those hooks' current
+native hashes in the isolated worker home before launch. Other hooks retain
+native review, and a review prompt keeps the hire's app-server connected.
 Wakes, watches and escalations use the same conversation outbox and the native
 thread's turn delivery; the launcher waits for trusted startup hooks before
 binding it. Codex's `/model` selects the seat brain. Its resume record is separate
