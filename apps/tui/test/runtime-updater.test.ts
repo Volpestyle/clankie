@@ -38,7 +38,7 @@ function fixture(extra: Partial<RuntimeUpdaterOptions> = {}) {
   const run: InstallCommand = (_command, args) => {
     if (args.includes("--git-common-dir")) return common;
     if (args.includes("--verify")) return args.at(-1) === "HEAD^{commit}" ? "a".repeat(40) : "b".repeat(40);
-    if (["status", "branch"].includes(args[0]!)) return "";
+    if (["status", "branch", "fetch", "check-ref-format", "merge-base"].includes(args[0]!)) return "";
     throw Error("No fixture process permitted");
   };
   const updater = createRuntimeUpdater({
@@ -185,12 +185,12 @@ it("bounded result reads reject symlinks and malformed health, never trusting a 
   const result = await f.updater.request("main", f.authority);
   const path = join(f.home, ".clankie/updates", result.pending!, "result.json");
   writeFileSync(path, JSON.stringify({ ...result.latest, healthy: "yes" }), { mode: 0o600 });
-  expect(() => f.updater.status()).toThrow("health");
+  expect(f.updater.status()).toMatchObject({ error: "update_record_unreadable", needsReconciliation: true });
   rmSync(path);
   const elsewhere = join(f.home, "elsewhere");
   writeFileSync(elsewhere, "{}");
   symlinkSync(elsewhere, path);
-  expect(() => f.updater.status()).toThrow();
+  expect(f.updater.status()).toMatchObject({ error: "update_record_unreadable", needsReconciliation: true });
 });
 it("helper copies remain self-contained when their source location disappears", async () => {
   const f = fixture();

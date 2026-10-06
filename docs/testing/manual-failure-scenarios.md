@@ -135,7 +135,7 @@ This checklist records no executed passes. Automated links describe coverage at 
 - [ ] **Setup:** Consenting test call, marked handoff, clean running pin and existing approved local update ref. Record `clankie discord call`;
       set `clankie integrate hold --holder James --reason "VUH-1522 live voice"`.
 - **Action:** Attempt an update while held. When James permits interruption, run `clankie integrate release HOLD_ID --actor James --reason "voice test finished"`,
-  run `clankie update --ref APPROVED_LOCAL_REF` and make a fresh attributed ask (update does not implicitly fetch).
+  run `clankie update --ref APPROVED_BRANCH_OR_SHA` and make a fresh attributed ask. Named branches fetch origin; explicit SHAs remain exact. Inspect the accepted SHA and any older/diverged warning.
 - **Expected:** Hold blocks admission with unchanged runtime/call. After release, terminal receipts identify the new boot SHA; one active mouth/body and an audible fresh ask/result.
   Record original handoffs as completed/interrupted/unconfirmed; stale-session results may be dropped. Never replay them automatically.
   Record disconnect/rejoin and audio gaps; active voice creates no automatic hold here. Accepted/pending is not recovery or proof of uninterrupted audio.

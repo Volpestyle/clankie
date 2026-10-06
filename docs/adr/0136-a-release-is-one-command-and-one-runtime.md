@@ -79,3 +79,20 @@ installation through symlinks.
   runtime and a reversible version switch.
 - Developer ID signing, notarization, Intel macOS, Linux, and package-manager
   formulas are separate targets added when those distribution channels exist.
+
+## Source update repair (VUH-1737, 2026-10-06)
+
+The source updater previously resolved bare `main` from the owner's checkout.
+Operation `70adecaa-cd71-4dc1-bfb9-a31bbbdc5cee` selected local `e1f45750`
+over a newer live pin, then reported healthy. Named branch updates now fetch
+that branch from origin before accepting its exact SHA; failed fetches cannot
+fall back to a local or cached branch. Explicit SHA/tag targets remain available
+with older/diverged warnings. Each accepted operation retains its authenticated
+operator or host-admitted conversation; CLI seat/session claims remain attribution.
+
+Cutover supervises only code dependent on the pin. The external activity tunnel
+stays with its existing owner instead of failing cleanup or acquiring authority
+to kill an unowned process. Result readers tolerate unknown optional evidence;
+malformed known records report reconciliation as JSON without retiring locks.
+Tests use actual Git remotes, HTTP CLI calls and isolated native supervisor
+processes. Integration into the live pin belongs to the fleet integrator.

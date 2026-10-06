@@ -1,0 +1,136 @@
+{
+  "runtime": "f6260751f51652a239e11ad2b11db9228636b0e1",
+  "normalUpdate": {
+    "command": "clankie herdr prepare pc --codex-source-setup C:\\Users\\volpe\\dotfiles\\scripts\\codex-worker-setup.py --approve",
+    "workingDirectory": "/Users/james/dev/clankie",
+    "ownerAuthorization": "Clankie approved normal-path PC update after deployment",
+    "result": "ok",
+    "claudeWorkerVersions": ["0.6.6", "0.6.6"],
+    "codexSourceSetup": "source-setup-completed"
+  },
+  "harnesses": {
+    "machine": {
+      "platform": "win32",
+      "home": "C:\\Users\\volpe"
+    },
+    "claude": [
+      {
+        "profile": "C:\\Users\\volpe\\.claude",
+        "executable": true,
+        "installed": true,
+        "enabled": true,
+        "version": "0.6.6",
+        "expectedVersion": "0.6.6",
+        "versionMatches": true,
+        "bridge": true,
+        "legacyServerName": false,
+        "hooks": true,
+        "skill": true,
+        "liveReceiver": "not-observed"
+      },
+      {
+        "profile": "C:\\Users\\volpe\\.claude-james",
+        "executable": true,
+        "installed": true,
+        "enabled": true,
+        "version": "0.6.6",
+        "expectedVersion": "0.6.6",
+        "versionMatches": true,
+        "bridge": true,
+        "legacyServerName": false,
+        "hooks": true,
+        "skill": true,
+        "liveReceiver": "not-observed"
+      }
+    ],
+    "codex": {
+      "executable": true,
+      "executablePath": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+      "executableDetail": "Native executable responded; static registration only.",
+      "registered": true,
+      "registration": "legacy-node",
+      "registrationIdentityForwarding": true,
+      "bridge": true,
+      "identityForwarding": true,
+      "pluginInstalled": true,
+      "enabled": true,
+      "version": "0.6.6",
+      "expectedVersion": "0.6.6",
+      "versionMatches": true,
+      "configPath": "C:\\Users\\volpe\\.codex\\config.toml",
+      "configSource": "C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml",
+      "skill": true,
+      "replies": "native-control",
+      "liveReceiver": "not-observed"
+    },
+    "otherHarnesses": [
+      {
+        "harness": "opencode",
+        "executable": true,
+        "registration": "not-inspected",
+        "detail": "No supported automatic worker-plugin installer for this harness; inspect its native MCP/skill configuration separately."
+      },
+      {
+        "harness": "pi",
+        "executable": false,
+        "registration": "not-inspected",
+        "detail": "No supported automatic worker-plugin installer for this harness; inspect its native MCP/skill configuration separately."
+      }
+    ]
+  },
+  "ownedPane": {
+    "root_pane": {
+      "agent_status": "unknown",
+      "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer\\",
+      "focused": false,
+      "pane_id": "w9:p8",
+      "revision": 0,
+      "scroll": {
+        "max_offset_from_bottom": 0,
+        "offset_from_bottom": 0,
+        "viewport_rows": 71
+      },
+      "tab_id": "w9:t7",
+      "terminal_id": "term_65d256106c3b9b",
+      "workspace_id": "w9"
+    },
+    "tab": {
+      "agent_status": "unknown",
+      "focused": false,
+      "label": "tess-vuh1709-hooks-f626",
+      "number": 7,
+      "pane_count": 1,
+      "tab_id": "w9:t7",
+      "workspace_id": "w9"
+    },
+    "type": "tab_created"
+  },
+  "start": {
+    "agent": {
+      "agent": "codex",
+      "agent_status": "idle",
+      "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+      "focused": false,
+      "interactive_ready": true,
+      "name": "tess-vuh1709-hooks-f626",
+      "pane_id": "w9:p8",
+      "revision": 1,
+      "state_change_seq": 777,
+      "tab_id": "w9:t7",
+      "terminal_id": "term_65d256106c3b9b",
+      "terminal_title": "Administrator: C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "terminal_title_stripped": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "workspace_id": "w9"
+    },
+    "argv": [
+      "codex",
+      "--no-daemon",
+      "--model",
+      "gpt-6.1-sol",
+      "Owned VUH-1709 Windows hook test. Do not use tools, change files, change settings, or start other processes. Reply only TESS_VUH1709_WINDOWS_HOOKS_OK and finish this turn. Stay in this session."
+    ],
+    "type": "agent_started"
+  },
+  "acceptance": "blocked-native-hook-trust",
+  "detail": "3 new or changed hooks need native review. SessionStart worker 1/2 active; UserPromptSubmit worker 0/1 active. Completed marker does not prove worker hooks ran."
+}
