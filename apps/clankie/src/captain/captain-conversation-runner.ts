@@ -1,4 +1,5 @@
 import {
+  OPERATOR_CONVERSATION_TEXT_MAX,
   type CaptainSessionLaneV2,
   type OperatorConversationActivityPhase,
   type OperatorSeatEventKind,
@@ -70,6 +71,7 @@ export interface CreateConversationRunnerContext {
     cwd: string,
     sideConversation?: boolean,
     run?: ConversationServiceRun,
+    fresh?: boolean,
   ) => Promise<LaneSession>;
   readonly captureEvaluationStart: (
     runId: string,
@@ -215,14 +217,21 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           )
             return;
         }
-        // Native ownership survives gaps in polling. Internal deliveries must
-        // wait for that receiver, rather than starting another lead in Pi.
-        if (context.internal && ctx.conversations.hasNativeSeat(conversationId)) {
+        // Signed Linear activity alone still waits for an attached native
+        // receiver and is re-offered on its next poll (VUH-1743).
+        if (context.origin === "hook" && ctx.conversations.hasNativeSeat(conversationId)) {
           context.deliveryReceipt?.("unavailable");
-          throw new Error(
-            "Native conversation receiver is unavailable; internal service fallback is refused",
-          );
+          throw new Error("Native conversation receiver is unavailable; Linear activity waits for it");
         }
+        // ADR 0218: no live seat means the service runs the conversation. The
+        // log is the source of truth: a harness that drove since this lane last
+        // ran is caught up by a fresh session seeded from the log, and the turn
+        // opens the handoff span the returning harness receives.
+        const handoff = ctx.conversations.noteServiceTurn(conversationId);
+        const seed =
+          context.side === true || ctx.conversations.activeInvocationCount(conversationId) > 1
+            ? undefined
+            : ctx.conversations.serviceContextSeed(conversationId);
         const cwd = context.workspace ?? ctx.workingDirectory;
         const lane = await ctx.durableSession(
           `operator:${conversationId}`,
@@ -232,7 +241,17 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           cwd,
           context.side === true,
           run,
+          seed !== undefined,
         );
+        // Internal inputs never enter the log on their own; record what the
+        // service answered so the log, not this lane, carries it forward.
+        if (handoff && context.internal)
+          publish({
+            type: "message",
+            role: "external",
+            text: message.slice(0, OPERATOR_CONVERSATION_TEXT_MAX),
+            streaming: false,
+          });
         if (ctx.shutdown.signal.aborted) {
           ctx.shutdown.signal.throwIfAborted();
         }
@@ -431,6 +450,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               }
             });
         let settled: TurnSettledOutcome | undefined;
+        let admitted = false;
         try {
           ctx.shutdown.signal.throwIfAborted();
           if (
@@ -520,11 +540,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             "Pi execution",
             runDurableTurn(
               lane,
-              [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
+              [seed?.text, workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
               attached?.images ?? [],
               {
                 expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
-                onAdmitted: (state) => context.deliveryOutcome?.({ state }),
+                onAdmitted: (state) => {
+                  admitted = true;
+                  context.deliveryOutcome?.({ state });
+                },
                 ...(context.inputAnswer
                   ? {
                       // Existing admission reservation rechecks immediately before prompt().
@@ -539,7 +562,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                             !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
                           )
                             throw new Error("question_context_lost");
-                          return [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
+                          return [seed?.text, workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
                         };
                       },
                       onAbsorbed: () => {
@@ -553,7 +576,12 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               },
             ),
           );
-          if (role === "absorbed") return;
+          if (seed !== undefined) ctx.conversations.markServiceContext(conversationId, seed.revision);
+          if (role === "absorbed") {
+            context.deliveryReceipt?.("consumed");
+            return;
+          }
+          context.deliveryReceipt?.("responded");
           const text = lane.lastAssistantText.trim();
           await run.wait(
             "said log",
@@ -567,6 +595,8 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           settled = context.signal.aborted ? "interrupted" : "completed";
         } catch (error) {
           if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
+          // Failure before Pi took the input is a definite non-dispatch.
+          if (!admitted && !context.signal.aborted) context.deliveryReceipt?.("unavailable");
           throw error;
         } finally {
           releaseGoalBudget();

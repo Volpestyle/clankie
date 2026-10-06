@@ -191,6 +191,7 @@ import { captainRoutingExtension } from "./routing.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
+import { createServiceHandoffDelivery } from "./service-handoff-delivery.ts";
 import { withSeatSubagents } from "./seat-subagents.ts";
 import { CaptainResourceLoader, skillSearchExtension } from "./skill-catalog.ts";
 import { createStanceStore } from "./stances.ts";
@@ -910,6 +911,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     return outbox;
   }
+  const deliverServiceHandoff = createServiceHandoffDelivery({
+    get conversations() {
+      return conversations;
+    },
+    seatOutbox: (conversationId) => seatOutbox(conversationId),
+    get shutdown() {
+      return shutdown.signal;
+    },
+  });
+
   function seatContext(conversationId = conversations.defaultGlobalConversationId()) {
     const conversation = conversations.conversation(conversationId);
     if (
@@ -1253,17 +1264,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     cwd: string,
     sideConversation = false,
     run?: ConversationServiceRun,
+    /** Start a new session file instead of resuming; older files stay on disk. */
+    fresh = false,
   ): Promise<LaneSession> {
     run?.signal.throwIfAborted();
+    if (fresh) {
+      const previous = sessions.get(key);
+      sessions.delete(key);
+      void previous?.then(
+        (lane) => lane.session.dispose(),
+        () => undefined,
+      );
+    }
     let pending = sessions.get(key);
     if (pending === undefined) {
       const created = (async () => {
         let manager: SessionManager;
-        try {
-          manager = SessionManager.continueRecent(cwd, dir);
-        } catch {
-          manager = SessionManager.create(cwd, dir);
-        }
+        if (fresh) manager = SessionManager.create(cwd, dir);
+        else
+          try {
+            manager = SessionManager.continueRecent(cwd, dir);
+          } catch {
+            manager = SessionManager.create(cwd, dir);
+          }
         return buildSession(
           lane,
           manager,
@@ -2907,39 +2930,46 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   );
   for (const seatId of conversations.seatIds()) herdrWatches.trackSeat(seatId);
   void refreshFleet().catch(() => undefined);
-  const { workerReportActions, reportSummaries, conversationReportRunner, recoverWorkerReports } =
-    createWorkerReports({
-      get conversations() {
-        return conversations;
-      },
-      get seatOutboxes() {
-        return seatOutboxes;
-      },
-      get shutdown() {
-        return shutdown;
-      },
-      get validateConversationOwner() {
-        return validateConversationOwner;
-      },
-      get herdrRunner() {
-        return herdrRunner;
-      },
-      get herdrWatches() {
-        return herdrWatches;
-      },
-      get inboundBinding() {
-        return inboundBinding;
-      },
-      get nativeRecipientCurrent() {
-        return nativeRecipientCurrent;
-      },
-      get deliverToSeat() {
-        return deliverToSeat;
-      },
-      get onChange() {
-        return () => fleetChanges.touch();
-      },
-    });
+  const {
+    workerReportActions,
+    reportSummaries,
+    conversationReportRunner,
+    recoverWorkerReports,
+    recoverAllWorkerReports,
+  } = createWorkerReports({
+    get conversations() {
+      return conversations;
+    },
+    get seatOutboxes() {
+      return seatOutboxes;
+    },
+    get shutdown() {
+      return shutdown;
+    },
+    get validateConversationOwner() {
+      return validateConversationOwner;
+    },
+    get herdrRunner() {
+      return herdrRunner;
+    },
+    get herdrWatches() {
+      return herdrWatches;
+    },
+    get inboundBinding() {
+      return inboundBinding;
+    },
+    get nativeRecipientCurrent() {
+      return nativeRecipientCurrent;
+    },
+    get deliverToSeat() {
+      return deliverToSeat;
+    },
+    get onChange() {
+      return () => fleetChanges.touch();
+    },
+  });
+  // Reports left pending by an earlier process run without waiting for a seat.
+  setTimeout(() => recoverAllWorkerReports(), 0).unref?.();
 
   const inboundReceipts = new InboundSeatReceipts(
     join(options.stateDir, "delivery-receipts", "inbound.json"),
@@ -3832,12 +3862,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const selection = sections.includes("model")
         ? await (await runtime()).resolveSelection().catch(() => undefined)
         : undefined;
+      // A fresh seat starts from the shared log, and that projection is what it
+      // now holds; a later reconnect handoff begins after it (ADR 0218).
+      const projected =
+        lane === "operator" && sections.includes("conversation")
+          ? conversations.seatStartProjection(
+              binding?.conversationId ?? conversations.defaultGlobalConversationId(),
+            )
+          : undefined;
       let prompt = assembleLanePrompt(
         lane,
         laneHoldsSystemTools(lane),
         currentSettings,
         sections,
-        selection === undefined ? {} : { model: modelCard(selection) },
+        {
+          ...(selection === undefined ? {} : { model: modelCard(selection) }),
+          ...(projected === undefined ? {} : { conversation: projected }),
+        },
         laneHoldsSystemTools(lane) && sections.includes("reach") ? await harnessesForPrompt() : [],
       );
       if (sections.includes("persona")) prompt += "\n\n" + personaImageBriefing(await personaImages());
@@ -3938,6 +3979,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             binding.conversationId,
             () => {
               const pending = seatOutbox(binding.conversationId).poll(waitMs, pollSignal, recipientBinding);
+              deliverServiceHandoff(binding.conversationId);
               void recoverWorkerReports(binding.conversationId).catch(() => undefined);
               return pending;
             },

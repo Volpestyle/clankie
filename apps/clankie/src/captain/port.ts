@@ -52,7 +52,16 @@ import type { LinearActivityEvent } from "../linear-webhook.ts";
  * the card a hidden extension refreshes per run. A seat that carries the
  * identity some other way (a Claude Code output style) asks for the rest by name.
  */
-export const CAPTAIN_PROMPT_SECTIONS = ["identity", "persona", "reach", "fleet", "address", "model"] as const;
+/** `conversation` is the operator seat's bounded log projection at session start (ADR 0218). */
+export const CAPTAIN_PROMPT_SECTIONS = [
+  "identity",
+  "persona",
+  "reach",
+  "fleet",
+  "address",
+  "model",
+  "conversation",
+] as const;
 export type CaptainPromptSection = (typeof CAPTAIN_PROMPT_SECTIONS)[number];
 
 /** A seat harness that loads some project instruction files itself. */
