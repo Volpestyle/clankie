@@ -8,7 +8,13 @@ import { OPERATOR_SEAT_HARNESSES, type HerdrBinding } from "@clankie/protocol";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession, recoverLocalCodexSession } from "./captain/herdr-census.ts";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
-import { fleetProcessHelper, nativeProcessStart, observeNativeProcesses } from "./local-fleet-process.ts";
+import {
+  fleetProcessHelper,
+  nativeProcessStart,
+  observeNativeProcesses,
+  type NativeProcessDiagnostic,
+} from "./local-fleet-process.ts";
+import type { NativeTransportReason } from "./native-process-transport.ts";
 import { nativeRequest } from "./herdr-native-request.ts";
 
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
@@ -79,6 +85,8 @@ export function createProjectProcessObserver(options: {
   canonical?(path: string): Promise<string>;
   processHelper?: string;
   signal?: AbortSignal;
+  nativeDiagnostics?(event: NativeProcessDiagnostic, checkpoint: "initial" | "final", pane: string): void;
+  nativeTransportDiagnostics?(reason: NativeTransportReason, pane: string): void;
 }) {
   const execute = options.run ?? run;
   const canonical = options.canonical ?? realpath;
@@ -159,15 +167,18 @@ export function createProjectProcessObserver(options: {
       if (shellPid === undefined || agentPid === undefined) return undefined;
       if (![shellPid, agentPid].every((pid) => Number.isSafeInteger(pid) && pid > 1) || shellPid === agentPid)
         return undefined;
-      const snapshot = () =>
+      const snapshot = (checkpoint: "initial" | "final") =>
         observeNativeProcesses(
           shellPid,
           agentPid,
           options.processHelper ?? fleetProcessHelper(),
           options.run,
           options.signal,
+          options.nativeDiagnostics && ((event) => options.nativeDiagnostics!(event, checkpoint, pane)),
+          options.nativeTransportDiagnostics &&
+            ((reason) => options.nativeTransportDiagnostics!(reason, pane)),
         );
-      const initialProcesses = await snapshot();
+      const initialProcesses = await snapshot("initial");
       if (!initialProcesses) return undefined;
       const [shell, agent] = initialProcesses.processes;
       const matchesLauncher = async (observed: NonNullable<typeof agent>) => {
@@ -188,7 +199,11 @@ export function createProjectProcessObserver(options: {
       if (!shell || !agent || !(await matchesLauncher(agent))) return undefined;
       // Keep a roster read's permit until every owned native child has closed,
       // even when another observation fails or cancellation arrives first.
-      const [paneRead, nativeRead, processRead] = await Promise.allSettled([info(), native(), snapshot()]);
+      const [paneRead, nativeRead, processRead] = await Promise.allSettled([
+        info(),
+        native(),
+        snapshot("final"),
+      ]);
       if (
         paneRead.status !== "fulfilled" ||
         nativeRead.status !== "fulfilled" ||

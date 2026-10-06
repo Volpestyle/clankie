@@ -1,9 +1,14 @@
 import { once } from "node:events";
 import { Server as HttpServer } from "node:http";
+import { readFile } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { serve } from "@hono/node-server";
 import { createLogger } from "@clankie/observability";
-import { FLEET_HEALTH_METRICS_PATH, FleetHealthMetricsSnapshotSchema } from "@clankie/protocol";
+import {
+  FLEET_HEALTH_METRICS_PATH,
+  FleetHealthMetricsSnapshotSchema,
+  FleetNativeDiagnosticReasonSchema,
+} from "@clankie/protocol";
 import { Hono } from "hono";
 import { expect, it } from "vitest";
 import { registerFleetHealthMetricsRoutes } from "../src/app/fleet-health-metrics-routes.ts";
@@ -14,6 +19,7 @@ import { localFleetProof } from "../src/local-fleet-proof.ts";
 import { localProofDiagnostics } from "../src/local-fleet-proof-log.ts";
 import { closeNativeProcessObservers, nativeProcessRequest } from "../src/native-process-transport.ts";
 import { runMetricsCommand } from "../../tui/src/command/metrics.ts";
+import { NativeProcessDiagnosticSchema } from "../src/local-fleet-process.ts";
 
 it("counts terminal real socket refusals, keeps diagnostics separate, and serves authenticated 5/60-minute CLI rates", async () => {
   let now = Date.parse("2026-10-05T12:00:00Z");
@@ -121,6 +127,95 @@ it("counts terminal real socket refusals, keeps diagnostics separate, and serves
     expect(metrics.snapshot().totals.proof.attempts).toBe(4);
   } finally {
     await closeNativeProcessObservers();
+    if (server instanceof HttpServer) server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it("carries the helper's complete fixed diagnostic vocabulary through the collector and authenticated HTTP schema", async () => {
+  const source = await readFile(
+    new URL("../../../integrations/fleet-proof/native-process-proof.c", import.meta.url),
+    "utf8",
+  );
+  const declarations = new Map<string, string>();
+  for (const [, stage, reason] of source.matchAll(/(?:diagnostic|refuse_at)\("([\w]+)",\s*"([\w]+)"/gu))
+    declarations.set(reason!, stage!);
+  const exhausted = /diagnostic\("completion", within_overall_budget\(\) \? "([\w]+)" : "([\w]+)"/u.exec(
+    source,
+  );
+  expect(exhausted).not.toBeNull();
+  for (const reason of exhausted!.slice(1)) declarations.set(reason, "completion");
+  expect([...declarations.keys()].sort()).toEqual([...FleetNativeDiagnosticReasonSchema.options].sort());
+  const metrics = new FleetHealthMetrics();
+  const captured = JSON.parse(
+    await readFile(
+      new URL("./fixtures/local-fleet-proof/exhausted-diagnostics.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { samples: Array<{ checkpoint: "initial" | "final"; event: unknown }> };
+  expect(captured.samples.map((sample) => NativeProcessDiagnosticSchema.parse(sample.event).reason)).toEqual([
+    "budget_exhausted",
+    "attempts_exhausted",
+  ]);
+  for (const sample of captured.samples)
+    metrics.observeProof("fleet", {
+      source: "native",
+      checkpoint: sample.checkpoint,
+      event: NativeProcessDiagnosticSchema.parse(sample.event),
+    });
+  // Source-grounded vocabulary contract samples; these do not claim the OS
+  // produced clock/allocation failures or malformed kernel records.
+  for (const [reason, stage] of declarations)
+    metrics.observeProof("fleet", {
+      source: "native",
+      checkpoint: "initial",
+      event: NativeProcessDiagnosticSchema.parse({
+        schemaVersion: 1,
+        reason,
+        stage,
+        errno: 0,
+        attempt: 1,
+        retry: false,
+      }),
+    });
+  expect(
+    NativeProcessDiagnosticSchema.safeParse({
+      schemaVersion: 1,
+      reason: "private-reason-/private/sensitive",
+      stage: "process",
+      errno: 0,
+      attempt: 1,
+      retry: false,
+    }).success,
+  ).toBe(false);
+  const app = new Hono();
+  registerFleetHealthMetricsRoutes(app, {
+    captain: createStubCaptain(),
+    authenticateOperator: createBearerAuthenticator("vocabulary-test", { operatorId: "owner" }),
+    fleetHealthMetrics: metrics,
+  });
+  const server = serve({ hostname: "127.0.0.1", port: 0, fetch: app.fetch });
+  if (!server.listening) await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing real TCP listener");
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}${FLEET_HEALTH_METRICS_PATH}`, {
+      headers: { authorization: "Bearer vocabulary-test" },
+    });
+    expect(response.status).toBe(200);
+    const snapshot = FleetHealthMetricsSnapshotSchema.parse(await response.json());
+    const expected = Object.fromEntries([...declarations.keys()].map((reason) => [reason, 1]));
+    expected.budget_exhausted = 2;
+    expected.attempts_exhausted = 2;
+    expect(snapshot.totals.nativeDiagnostics).toEqual(expected);
+    for (const window of snapshot.windows) {
+      expect(window.nativeDiagnostics).toEqual(expected);
+      expect(window.proof).toEqual({ attempts: 0, refusals: 0, byReason: {} });
+      expect(window.proofRefusalRate).toBe(0);
+    }
+    expect(snapshot.totals.proof).toEqual({ attempts: 0, refusals: 0, byReason: {} });
+    expect(JSON.stringify(snapshot)).not.toMatch(/private-reason|\/private\/sensitive|\bpid\b|argv":/u);
+  } finally {
     if (server instanceof HttpServer) server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

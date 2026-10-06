@@ -243,6 +243,12 @@ to stderr; its successful stdout schema and generic failure stderr remain the
 default contract. No PID, endpoint, command, path, environment or credentials
 enter diagnostic events. Diagnostic callbacks cannot change admission.
 
+The body also forwards opt-in shell/foreground process diagnostics into its
+fleet counters. Missing panes retain Herdr's fixed `pane_not_found` classification
+at the initial or final proof phase. See [reason coverage](REASON-COVERAGE.md) for
+the real-boundary evidence, complete vocabulary contract and explicit OS coverage
+limits.
+
 A process can replace a listed socket FD with a non-socket before the kernel
 socket query. macOS returns `ENOTSOCK`; like `EBADF`, this requires a complete
 fresh census, rather than skipping the descriptor or treating it as permanent

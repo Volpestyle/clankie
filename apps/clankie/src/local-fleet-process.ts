@@ -115,6 +115,8 @@ export async function observeNativeProcesses(
   processHelper = fleetProcessHelper(),
   execute?: (command: string, args: string[]) => Promise<string>,
   signal?: AbortSignal,
+  report?: (event: NativeProcessDiagnostic) => void,
+  transport?: (reason: NativeTransportReason) => void,
 ): Promise<NativeProcessSnapshot | undefined> {
   if (
     (execute === undefined && process.platform !== "darwin") ||
@@ -126,9 +128,20 @@ export async function observeNativeProcesses(
     return undefined;
   try {
     const args = ["--processes", String(shellPid), String(agentPid)];
-    const stdout = execute
-      ? await execute(processHelper, args)
-      : (await nativeProcessRequest(processHelper, args, signal))?.stdout;
+    let stdout: string | undefined;
+    if (execute) stdout = await execute(processHelper, args);
+    else {
+      const reply = await nativeProcessRequest(
+        processHelper,
+        report ? [...args, "--diagnostics"] : args,
+        signal,
+        transport,
+      );
+      if (reply) {
+        nativeDiagnostics(reply.stderr, report);
+        stdout = reply.stdout;
+      }
+    }
     if (stdout === undefined) return undefined;
     const parsed = ProcessSnapshotSchema.safeParse(JSON.parse(stdout));
     if (!parsed.success) return undefined;

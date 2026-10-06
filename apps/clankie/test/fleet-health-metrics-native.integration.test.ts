@@ -32,6 +32,38 @@ nativeIt(
     const helper = fleetProcessHelper();
     const unavailableHelper = resolve(logDirectory, "missing-helper");
     const binding = { runtime: "external" as const, session: "default", socketPath: herdr.socketPath };
+    let fault: "method" | "framing" = "method";
+    const relaySockets = new Set<Socket>();
+    const relay = createServer((peer) => {
+      const upstream = createConnection(herdr.socketPath);
+      relaySockets.add(peer);
+      relaySockets.add(upstream);
+      for (const stream of [peer, upstream]) {
+        stream.on("error", () => {});
+        stream.on("close", () => {
+          relaySockets.delete(stream);
+          peer.destroy();
+          upstream.destroy();
+        });
+      }
+      createInterface({ input: peer }).on("line", (line) => {
+        const request = JSON.parse(line);
+        if (fault === "method") request.method = "fixture.unknown_method";
+        upstream.write(JSON.stringify(request) + "\n");
+      });
+      let first = true;
+      upstream.on("data", (chunk: Buffer) => {
+        // Corrupt the opening byte of an actual provider reply, rather than
+        // inventing a provider or kernel response.
+        peer.write(fault === "framing" && first ? chunk.subarray(1) : chunk);
+        first = false;
+      });
+    });
+    const relayPath = resolve(herdr.root, "fault-control.sock");
+    await new Promise<void>((resolve, reject) => {
+      relay.once("error", reject);
+      relay.listen(relayPath, resolve);
+    });
     // A real same-user private transport registry, pinned to this actual socket's OS owner.
     const registry = new Set([process.pid]);
     const options: LocalFleetProofOptions = {
@@ -43,10 +75,19 @@ nativeIt(
     };
     const proof = (overrides: Partial<LocalFleetProofOptions> = {}) =>
       localFleetProof({ ...options, ...overrides });
+    let effects = 0;
+    const request = async (candidate: ReturnType<typeof proof>, pane = herdr.pane) => {
+      const accepted = await candidate(socket, pane);
+      if (accepted) effects++;
+      return accepted;
+    };
     try {
       const admitted = proof();
-      expect(await admitted(socket, herdr.pane)).toBe(true);
-      expect(await admitted(socket, herdr.pane)).toBe(true);
+      expect(await request(admitted)).toBe(true);
+      expect(await request(admitted)).toBe(true);
+      expect(await request(admitted, "invalid/pane")).toBe(false);
+      expect(await request(proof({ platform: "unsupported" }))).toBe(false);
+      expect(await request(admitted, "w999999:p999999")).toBe(false);
       expect(await proof({ privateSeat: async () => false })(socket, herdr.pane)).toBe(false);
       expect(await proof({ binding: async () => undefined })(socket, herdr.pane)).toBe(false);
       expect(await proof({ processHelper: unavailableHelper })(socket, herdr.pane)).toBe(false);
@@ -134,14 +175,31 @@ nativeIt(
           binding: async () => ({ ...binding, socketPath: resolve(logDirectory, "missing-control.sock") }),
         })(socket, herdr.pane),
       ).toBe(false);
+      for (const mode of ["method", "framing"] as const) {
+        fault = mode;
+        expect(await request(proof({ binding: async () => ({ ...binding, socketPath: relayPath }) }))).toBe(
+          false,
+        );
+      }
+      expect(
+        await request(
+          proof({
+            privateSeat: async (chain) => {
+              await herdr.cli("pane", "close", herdr.pane);
+              return registry.has(chain[0]!);
+            },
+          }),
+        ),
+      ).toBe(false);
       const closed = once(socket, "close");
       socket.destroy();
       await closed;
-      expect(await admitted(socket, herdr.pane)).toBe(false);
+      expect(await request(admitted)).toBe(false);
+      expect(effects).toBe(2);
       const snapshot = metrics.snapshot();
       expect(snapshot.totals.proof).toEqual({
-        attempts: 11,
-        refusals: 9,
+        attempts: 17,
+        refusals: 15,
         byReason: {
           not_member: 1,
           missing_binding: 1,
@@ -149,16 +207,22 @@ nativeIt(
           native_final_unavailable: 1,
           private_seat_expired: 1,
           binding_changed: 1,
-          observation_failed: 1,
+          observation_failed: 3,
           closed_socket: 1,
           snapshot_changed: 1,
+          invalid_pane: 1,
+          unsupported_platform: 1,
+          pane_unavailable: 1,
+          pane_changed: 1,
         },
       });
       expect(snapshot.totals.transportDiagnostics.helper_unavailable).toBe(1);
-      expect(snapshot.windows[0].proofRefusalRate).toBe(9 / 11);
+      expect(snapshot.windows[0].proofRefusalRate).toBe(15 / 17);
       expect(JSON.stringify(snapshot)).not.toContain(herdr.socketPath);
       expect(JSON.stringify(snapshot)).not.toMatch(/\bpid\b/u);
     } finally {
+      for (const peer of relaySockets) peer.destroy();
+      await new Promise<void>((resolve) => relay.close(() => resolve()));
       client.destroy();
       socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));

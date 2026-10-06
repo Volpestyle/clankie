@@ -229,10 +229,26 @@ describe.skipIf(!enabled)("native socket proof under unrelated churn", () => {
         (reply) => !reply.ok && reply.stderr.includes('"reason":"socket_mismatch"'),
       );
       expect(socketMismatch.result).toBeNull();
+      const invalidPin = await native.request([...s.ports, 1, ...owner.birth, owner.socket]);
+      expect(invalidPin.ok).toBe(false);
+      expect(invalidPin.stderr).toContain('"reason":"invalid_arguments"');
+      const peerClosed = once(s.peer, "close");
+      const clientClosed = once(s.client, "close");
+      s.client.destroy();
+      s.peer.destroy();
+      await Promise.all([peerClosed, clientClosed]);
+      const absent = await observed(
+        native,
+        s.ports,
+        (reply) => !reply.ok && reply.stderr.includes('"reason":"owner_not_found"'),
+      );
+      expect(absent.result).toBeNull();
       const counters = native.metrics.snapshot().totals;
       expect(counters.nativeDiagnostics.multiple_owners).toBeGreaterThan(0);
       expect(counters.nativeDiagnostics.owner_mismatch).toBeGreaterThan(0);
       expect(counters.nativeDiagnostics.socket_mismatch).toBeGreaterThan(0);
+      expect(counters.nativeDiagnostics.invalid_arguments).toBeGreaterThan(0);
+      expect(counters.nativeDiagnostics.owner_not_found).toBeGreaterThan(0);
       // Retry diagnostics remain separate from the terminal fleet proof denominator.
       expect(counters.proof).toEqual({ attempts: 0, refusals: 0, byReason: {} });
     } finally {
