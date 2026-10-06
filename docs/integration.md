@@ -6,12 +6,20 @@ a source checkout with Git and pnpm available; installed release and hosted
 clients do not expose this local repository operation.
 
 ```bash
-clankie integrate CORE_SHA CORE_SHA --app APP_SHA --push
+clankie integrate CORE_SHA CORE_SHA --app APP_SHA --push --no-wait
 clankie integrate CORE_SHA --id UUID --no-wait
+clankie integrate status
 clankie integrate status UUID
 clankie integrate push UUID
 clankie integrate revert PASSED_BATCH_UUID --push
 ```
+
+Everyone, including the owner's interactive panes, commits, pushes a branch, runs
+`clankie integrate <sha> --push --no-wait`, then follows with
+`clankie integrate status`. No direct main pushes. `status` without a UUID shows
+running batches, waiting requests, the last result and interrupted work;
+`status UUID` follows one request through shared batches and failure isolation.
+The TUI `/integrate` shows the same queue.
 
 Core inputs are positional; repeat `--app SHA` in order for the optional app.
 Core may be empty when only app commits are supplied. The service uses its own
@@ -20,11 +28,23 @@ objects independently, fetches current `origin/main`, and creates detached
 `clankie`/`clankie-app` worktrees beside each other so the app resolves core's
 protocol. It never switches or installs in either live source checkout.
 Every input records its full SHA and applied/already-present/conflict/failed
-result. After a conflict, later inputs for that repo are blocked; files and
-conflict details remain in the batch for inspection. Repair by approving new
-commits and composing a fresh batch.
+result. A conflicting request rolls back across both repositories before the next
+request is applied. Its later inputs are blocked and its error and conflicting
+paths remain in the batch record. Healthy requests continue. Repair by approving
+new commits and composing a fresh batch.
 
-The service serializes batches. Each runs real `pnpm install --frozen-lockfile`
+The service serializes batches, coalescing requests waiting during a gate into
+the next batch in admission order. Requests must have the same push intent and
+identical hold overrides; restores run alone. The existing per-request input
+limits do not cap the combined batch. Requests retain their original UUID and input; a
+`batchId` points to the shared attestation and `attempts` retains previous batch
+IDs. A failed shared gate splits into smaller fresh batches until each failing
+request is reported; good subsets gate and land independently on fresh origin.
+A failed single request is terminal and cannot block later arrivals. Shared gate
+failures caused by the base or infrastructure may affect every member; diagnosis
+is bounded by smaller subsets, and every failure retains its logs.
+
+Each batch runs real `pnpm install --frozen-lockfile`
 with a private store and copied packages, then `pnpm check` in every included
 repository. Evals remain outside the full check. Gate processes start with private
 HOME, XDG directories, Clankie state and fleet descriptors, and a file credential
@@ -58,6 +78,39 @@ commit on current origin/main**, installs, gates and lands that commit through
 the same checks. Select the last known good batch; the tool does not decide
 whether a production failure invalidates a previously passed tree. History
 remains intact; no force push is used.
+
+## Direct main push guard
+
+Doctor inspects the caller's clankie or clankie-app checkout and offers the
+tracked guard shipped in the launcher. Installing on this Mac requires the owner's
+approval; ordinary doctor never installs hooks:
+
+```bash
+clankie doctor --json
+clankie doctor --install-main-guard /path/to/clankie
+clankie doctor --install-main-guard /path/to/clankie-app
+```
+
+Installation uses Git's effective hook path, so linked worktrees share the
+pre-push guard. It preserves existing hooks and refuses a conflicting
+`core.hooksPath`. The guard refuses any remote `refs/heads/main` update,
+including `HEAD:main`, deletion and pushes from another local branch, and names
+the queue commands. Branch pushes continue normally. Integration clones retain
+`core.hooksPath=/dev/null`; their own pushes are unaffected, and server hooks
+still run.
+
+For an explicit owner recovery decision only:
+
+```bash
+CLANKIE_MAIN_PUSH_BYPASS=owner CLANKIE_MAIN_PUSH_REASON='Owner approved recovery' git push origin HEAD:main
+```
+
+The bypass requires a reason and appends time, OS user, ref, SHA and reason to
+`clankie-main-push-bypass.log` in the Git common directory. This is a local
+workflow guard, not server branch protection or proof of owner identity. Git's
+`--no-verify` and configuration can disable client hooks; they are not authorized
+landing routes. Doctor reports disabled, missing or conflicting hooks. The
+mechanism is ready to install; live installation waits for the owner's approval.
 
 ## Deploy holds
 

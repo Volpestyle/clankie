@@ -1,0 +1,59 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 6 queued)
+Finished in 358ms on 20 files using 18 threads.
+Scope: 3 of 32 workspace projects
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/rowan-vuh-1761
+
+Integration batch 41726bd9-ff20-4572-a3c0-66e304856c64; reconcile with clankie integrate status 41726bd9-ff20-4572-a3c0-66e304856c64
+Integration batch 3b9169b9-1c69-4447-acbd-fde1aee26142; reconcile with clankie integrate status 3b9169b9-1c69-4447-acbd-fde1aee26142
+Integration batch 3b4d0b3a-62d6-40a2-bc53-2bcdabefc04b; reconcile with clankie integrate status 3b4d0b3a-62d6-40a2-bc53-2bcdabefc04b
+Integration batch 9f00a3a9-fce3-47eb-9df8-f4eb76677103; reconcile with clankie integrate status 9f00a3a9-fce3-47eb-9df8-f4eb76677103
+Integration batch 80b57756-ad15-4ea7-8cfb-f4e30552e5e0; reconcile with clankie integrate status 80b57756-ad15-4ea7-8cfb-f4e30552e5e0
+Integration batch 3b4d0b3a-62d6-40a2-bc53-2bcdabefc04b; reconcile with clankie integrate status 3b4d0b3a-62d6-40a2-bc53-2bcdabefc04b
+Integration batch 3b4d0b3a-62d6-40a2-bc53-2bcdabefc04b; reconcile with clankie integrate status 3b4d0b3a-62d6-40a2-bc53-2bcdabefc04b
+ ❯ apps/clankie/test/integrate.integration.test.ts (13 tests | 1 failed) 39799ms
+   × CLI/API coalesces arrivals during a real gate, isolating a cross-repo conflict and landing healthy members once 5555ms
+ ❯ apps/tui/test/main-push-guard.integration.test.ts (3 tests | 1 failed) 3346ms
+   × preserves existing hooks and detects disabled or non-executable guards 511ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/tui/test/main-push-guard.integration.test.ts > preserves existing hooks and detects disabled or non-executable guards
+AssertionError: expected 'unavailable' to be 'conflict' // Object.is equality
+
+Expected: "conflict"
+Received: "unavailable"
+
+ ❯ apps/tui/test/main-push-guard.integration.test.ts:96:57
+     94|   expect((await inspectMainPushGuard(f.source)).status).toBe("installe…
+     95|   await f.git("config", "core.hooksPath", "/dev/null");
+     96|   expect((await inspectMainPushGuard(f.source)).status).toBe("conflict…
+       |                                                         ^
+     97|   await expect(installMainPushGuard(f.source)).rejects.toThrow("nothin…
+     98| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  apps/clankie/test/integrate.integration.test.ts > CLI/API coalesces arrivals during a real gate, isolating a cross-repo conflict and landing healthy members once
+Error: Clankie API 409: {"ok":false,"error":"Error: Batch ID belongs to a different request"}
+ ❯ ClankieApiClient.request packages/api-client/src/index.ts:260:21
+    258|       }
+    259|       const lease = safeParseProtocolResponse(BodyLeaseResultSchema, p…
+    260|       const error = new Error(`Clankie API ${response.status}: ${text}…
+       |                     ^
+    261|       if (lease.success) Object.assign(error, { bodyLease: lease.data …
+    262|       throw error;
+ ❯ ClankieApiClient.integrate packages/api-client/src/index.ts:428:7
+ ❯ runIntegrationCommand apps/tui/src/command/integrate.ts:117:16
+ ❯ apps/clankie/test/integrate.integration.test.ts:458:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  2 failed | 47 passed (49)
+   Start at  18:19:19
+   Duration  49.93s (transform 1.95s, setup 32ms, import 4.52s, tests 45.08s, environment 0ms)

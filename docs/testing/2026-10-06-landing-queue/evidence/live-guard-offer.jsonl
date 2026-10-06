@@ -1,0 +1,2 @@
+{"repository":"/Users/james/dev/clankie","status":"offered","detail":"Ready to install with owner approval; linked worktrees share this hook","installCommand":"clankie doctor --install-main-guard '/Users/james/dev/clankie'","hook":"/Users/james/dev/clankie/.git/hooks/pre-push"}
+{"repository":"/Users/james/dev/clankie-app","status":"offered","detail":"Ready to install with owner approval; linked worktrees share this hook","installCommand":"clankie doctor --install-main-guard '/Users/james/dev/clankie-app'","hook":"/Users/james/dev/clankie-app/.git/hooks/pre-push"}

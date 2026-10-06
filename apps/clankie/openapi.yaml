@@ -201,7 +201,10 @@ paths:
       operationId: integrate
       summary: Compose, gate and land an ordered approved commit batch
       description: |
-        Source-checkout service only. Run returns a durable batch immediately; poll status.
+        Source-checkout service only. Run returns a durable request receipt immediately; poll status.
+        Compatible requests waiting during a gate share the next batch. Conflicting members
+        roll back; failed shared gates split until failing members are reported. Status without
+        an id returns running batches, waiting requests, the last result and interrupted work.
         Independent clones and detached core/app sibling worktrees install real packages
         and run pnpm check with private home, state, credentials and caches. Only the
         recorded zero-exit exact HEAD may land. Core pushes first; app failure retains
@@ -246,7 +249,7 @@ paths:
                       }
                 - type: object
                   additionalProperties: false
-                  required: [action, id]
+                  required: [action]
                   properties:
                     action: { const: status }
                     id: { type: string, format: uuid }
@@ -291,7 +294,7 @@ paths:
                     reason: { type: string, minLength: 1, maxLength: 512 }
       responses:
         "200":
-          description: Durable batch or holds; inspect ok and batch.state for failures/partial landing
+          description: Durable request receipt, queue or holds; inspect ok and batch.state for failures/partial landing
           content:
             application/json:
               schema:
@@ -301,6 +304,30 @@ paths:
                   ok: { type: boolean }
                   error: { type: string }
                   holds: { type: array, items: { $ref: "#/components/schemas/DeployHold" } }
+                  queue:
+                    type: object
+                    required: [running, waiting, interrupted]
+                    properties:
+                      running:
+                        {
+                          type: array,
+                          items: { type: object },
+                          description: Active integration batches with state and member requests,
+                        }
+                      waiting:
+                        {
+                          type: array,
+                          items: { type: object },
+                          description: Queued request receipts in admission order,
+                        }
+                      lastResult:
+                        { type: object, description: Most recently completed batch and its evidence }
+                      interrupted:
+                        {
+                          type: array,
+                          items: { type: object },
+                          description: Active records without a current process owner,
+                        }
                   batch:
                     type: object
                     required: [schemaVersion, id, state, evidence, repos, createdAt, updatedAt, request]
@@ -317,6 +344,7 @@ paths:
                               conflict,
                               installing,
                               gating,
+                              isolating,
                               failed,
                               passed,
                               held,
@@ -331,6 +359,25 @@ paths:
                       createdAt: { type: string, format: date-time }
                       updatedAt: { type: string, format: date-time }
                       request: { type: object }
+                      batchId:
+                        {
+                          type: string,
+                          format: uuid,
+                          description: Shared attestation for this request receipt,
+                        }
+                      attempts: { type: array, items: { type: string, format: uuid } }
+                      members:
+                        {
+                          type: array,
+                          items: { type: object },
+                          description: Original requests included in this shared attempt,
+                        }
+                      excluded:
+                        {
+                          type: array,
+                          items: { type: object },
+                          description: Conflicting or failed members rolled back before gating,
+                        }
                       repos:
                         type: array
                         items:

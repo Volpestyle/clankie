@@ -69,6 +69,11 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     `  ${mark(missing.length === 0)} Tools · ${
       missing.length ? `missing ${missing.join(", ")}` : `${commands.length} present`
     }`,
+    ...(report.mainPushGuard && report.mainPushGuard.status !== "not_applicable"
+      ? [
+          `  ${mark(report.mainPushGuard.status === "installed")} Main push guard · ${clean(report.mainPushGuard.detail)}`,
+        ]
+      : []),
     ...fleetLinks,
     ...workerTools,
     ...workerReports,

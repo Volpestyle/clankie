@@ -75,8 +75,12 @@ production enforcement.
 ## Approved commit integration
 
 The source-checkout service owns an approved-commit integration queue through
-`POST /v1/integrate` and `clankie integrate`. Each batch has independent Git clones
-and detached sibling worktrees, private gate environments and durable tested-HEAD
+`POST /v1/integrate` and `clankie integrate`. All core/app main landings use this
+queue. Requests waiting during a gate share the next compatible batch;
+conflicting requests roll back and failed shared gates split to isolate failures.
+Doctor offers a tracked direct-main pre-push guard for source checkouts.
+`integrate status` and `/integrate` expose running/waiting work and the last result.
+Each batch has independent Git clones and detached sibling worktrees, private gate environments and durable tested-HEAD
 records. Exact passed trees land core before app; partial landings preserve each
 confirmed SHA. Named deploy holds guard landing and runtime-update admission,
 with explicit audited operator overrides. [Integration](integration.md) owns the
@@ -87,7 +91,9 @@ flowchart LR
   Approvals["Ordered approved SHAs"] --> Queue["Service integration queue"]
   Queue --> Compose["Fresh origin + detached sibling worktrees"]
   Compose --> Gate["Private installs + full checks"]
-  Gate --> Record["Durable exit code + tested HEAD"]
+  Gate -->|pass| Record["Durable exit code + tested HEAD"]
+  Gate -->|shared failure| Split["Smaller batches / report failing request"]
+  Split --> Compose
   Record --> Verify["Exact HEAD + clean tree + current origin"]
   Verify --> Hold["Deploy holds / audited owner override"]
   Hold --> Core["Fast-forward core"]

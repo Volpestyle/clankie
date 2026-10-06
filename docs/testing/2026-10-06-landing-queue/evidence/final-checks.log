@@ -1,0 +1,77 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 3 queued)
+Finished in 405ms on 20 files using 18 threads.
+Scope: 3 of 32 workspace projects
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/rowan-vuh-1761
+
+ ✓ apps/clankie/test/integrate.integration.test.ts > composes in order on fresh origin, installs real siblings, gates privately and durably reloads exact HEAD 4291ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > attributes a conflict to its input commit and blocks subsequent commits without touching source 1027ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > retains exit and tested HEAD when a gate fails or changes HEAD (process.exit(7);) 1583ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > retains exit and tested HEAD when a gate fails or changes HEAD (execFileSync('git', ['commit', '--allow-empty', '-m', 'gate moved HEAD']);) 1611ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > refuses a saved pass after head changes 1627ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > refuses a saved pass after dirty changes 1599ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > refuses a saved pass after origin changes 1650ms
+Integration batch 12bed39a-8ba9-4e45-9e5e-fe9765a70e45; reconcile with clankie integrate status 12bed39a-8ba9-4e45-9e5e-fe9765a70e45
+ ✓ apps/clankie/test/integrate.integration.test.ts > CLI/API batch passes, a named gone hold blocks push and runtime update, and owner override is audited 1904ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > restores a passed tree with a new gated forward commit, retaining bad history 3299ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > records core landed/app pending on app rejection and retries only app 4283ms
+Integration batch 21e8321e-d98b-438c-9439-20e99444c947; reconcile with clankie integrate status 21e8321e-d98b-438c-9439-20e99444c947
+Integration batch bdd00bd9-fc79-4983-9c69-3b16510e734b; reconcile with clankie integrate status bdd00bd9-fc79-4983-9c69-3b16510e734b
+Integration batch fd52a7de-058f-4138-a7e8-7d16e809783a; reconcile with clankie integrate status fd52a7de-058f-4138-a7e8-7d16e809783a
+Integration batch 68b90135-ae78-4744-9f39-dfeb8ca77fc3; reconcile with clankie integrate status 68b90135-ae78-4744-9f39-dfeb8ca77fc3
+Integration batch bdd00bd9-fc79-4983-9c69-3b16510e734b; reconcile with clankie integrate status bdd00bd9-fc79-4983-9c69-3b16510e734b
+Integration batch bdd00bd9-fc79-4983-9c69-3b16510e734b; reconcile with clankie integrate status bdd00bd9-fc79-4983-9c69-3b16510e734b
+coalescing-evidence {"gating":["gating"],"waiting":3,"members":3,"sharedBatch":"1d3dea7b-28d5-4559-97a3-c9d774e308d9","healthy":["pushed","pushed"],"excluded":["conflict"],"coreGates":2,"sourceGuards":"installed","cloneHooks":"/dev/null"}
+ ✓ apps/clankie/test/integrate.integration.test.ts > CLI/API coalesces arrivals during a real gate, isolating a cross-repo conflict and landing healthy members once 5910ms
+isolation-evidence {"healthy":["pushed","pushed"],"failing":"failed","exitCode":9,"attempts":3,"coreGates":6}
+ ✓ apps/clankie/test/integrate.integration.test.ts > bisects a failed shared real gate, reports the bad request, and lands both healthy requests 8260ms
+ ✓ apps/clankie/test/integrate.integration.test.ts > keeps gate-only requests separate from auto-push intent and reports interrupted receipts after process loss 4271ms
+ ✓ apps/tui/test/main-push-guard.integration.test.ts > doctor offers and installs the tracked clankie guard; real Git blocks main and permits branches / explicit owner bypass 1484ms
+ ✓ apps/tui/test/main-push-guard.integration.test.ts > doctor offers and installs the tracked clankie-app guard; real Git blocks main and permits branches / explicit owner bypass 1476ms
+ ✓ apps/tui/test/main-push-guard.integration.test.ts > preserves existing hooks and detects disabled or non-executable guards 555ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > sends only an original hire UUID or channel ID through the operator CLI and exposes a refusal without redispatch (11111111-1111-4111-8111-111111111111 undefined) 23ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > sends only an original hire UUID or channel ID through the operator CLI and exposes a refusal without redispatch (seat-11111111-1111-4111-8111-111111111111 delivered) 4ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > sends only an original hire UUID or channel ID through the operator CLI and exposes a refusal without redispatch (11111111-1111-4111-8111-111111111111 abandoned) 3ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > does not project stored Discord settings back as environment overrides for config commands 683ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > prints a self-contained command index on help 2ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > probes the single service health route without starting anything 8ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > diagnoses an env/store mismatch without printing either credential 5ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > rotates the stored operator credential without rendering the old or new secret 4ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > routes a captain-scoped restart through the single service without a TTY face 6ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > defers a restart requested by the active operator turn 3ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > prints a secret-free install card without probing the live PATH 119ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > rejects an unknown restart target without signalling anything 1ms
+ ✓ apps/tui/test/headless-captain.test.ts > headless clankie commands > routes the real executable health command without a TTY 935ms
+ ✓ apps/tui/test/headless-captain.test.ts > returns typed JSON and exits nonzero when Linear following lacks its webhook 11ms
+ ✓ apps/tui/test/install-doctor.test.ts > doctor resolves current workspace preferences before any agent is started and explains project versus global 107ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports the tracker backend and selection reason without probing or writing Linear 15ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > keeps missing webhook credentials separate from an empty owner rule 12ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports ineffective owner wake rules without changing configuration: {"following":true,"actors":["owner"],"ownerUserIds":[],"warning":true,"otherActors":false} 15ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports ineffective owner wake rules without changing configuration: {"following":false,"actors":["owner"],"ownerUserIds":[],"warning":false,"otherActors":false} 16ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports ineffective owner wake rules without changing configuration: {"following":true,"actors":["owner"],"ownerUserIds":["james"],"warning":false,"otherActors":false} 14ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports ineffective owner wake rules without changing configuration: {"following":true,"actors":["human"],"ownerUserIds":[],"warning":false,"otherActors":true} 13ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports ineffective owner wake rules without changing configuration: {"following":true,"actors":["owner","human"],"ownerUserIds":[],"warning":true,"otherActors":true} 12ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > treats a tree with libexec/node and release.json as a release 1ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > reports ids not secrets, and names the setup steps this install still needs 15ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > says the runtime is down rather than reporting a healthy install 33ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > names the credential an endpoint asks for, on the evidence of its own 401 3ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > catches a ref naming a model the provider does not declare 3ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > the selected model > stays quiet for a healthy local endpoint, and never probes a builtin provider 7ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > names where a harness reaches his tools, on the evidence of the route's own 401 3ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > asks for a sign-in when the Mac is shut out of its own doorway 3ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > asks to link a bundled herdr plugin when herdr is present and the plugin is not linked 7ms
+ ✓ apps/tui/test/install-doctor.test.ts > install doctor > treats herdr-lead as present from PATH without executing it 2ms
+ ✓ apps/tui/test/install-doctor.test.ts > discovers only running owner Herdr sessions using a read-only installed CLI probe 2ms
+
+ Test Files  4 passed (4)
+      Tests  49 passed (49)
+   Start at  18:23:52
+   Duration  51.47s (transform 1.91s, setup 31ms, import 4.19s, tests 46.93s, environment 0ms)
+
+Checked 470 markdown files; local links resolve.
+$ node scripts/check.mjs
+Built public docs: 10 pages, 70 network routes, 181 API operations, 72 slash commands.
+Checked 10 public docs pages; links and anchors resolve.
