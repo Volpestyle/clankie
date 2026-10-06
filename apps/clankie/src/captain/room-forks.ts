@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 
 /** What an owner-directed room turn reports back to the seat that started it (ADR 0218). */
-export const RoomForkResultSchema = z
+const RoomForkResultSchema = z
   .object({
     state: z.enum(["posted", "silent", "failed", "uncertain"]),
     room: z.string().min(1),
