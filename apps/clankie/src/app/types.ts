@@ -139,6 +139,7 @@ export interface ClankieAppDependencies {
   runtimeCanary?: import("../runtime-canary.ts").RuntimeCanary;
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
+  refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;

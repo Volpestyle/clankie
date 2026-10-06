@@ -29,6 +29,17 @@ const Session = z.object({
   version: z.literal(OPENCODE_WORKER_VERSION),
 });
 const Status = z.enum(["idle", "working", "blocked"]);
+const CatalogRefresh = z.object({
+  outcome: z.enum(["refreshed", "skipped-busy", "failed"]),
+  reason: z.enum([
+    "native-action-pending",
+    "native-session-busy",
+    "native-mcp-refresh-unsupported",
+    "native-mcp-refresh-unconfirmed",
+    "original-native-clankie-connection-observed",
+    "original-native-control-unavailable",
+  ]),
+});
 const Delivery = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("accepted"), messageId: z.string(), state: z.literal("queued") }),
   z.object({ outcome: z.literal("unconfirmed"), messageId: z.string(), detail: z.string() }),
@@ -361,6 +372,22 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                   } catch {
                     await dispose().catch(() => {});
                     return "offline";
+                  }
+                },
+                async refreshToolCatalog(input) {
+                  try {
+                    await verify(selectedRef);
+                    const result = CatalogRefresh.parse(
+                      await native.request("refreshToolCatalog", undefined, 45_000, async () => {
+                        await input?.beforeDispatch?.();
+                        await verify(selectedRef);
+                        return true;
+                      }),
+                    );
+                    await verify(selectedRef);
+                    return result;
+                  } catch {
+                    return { outcome: "failed", reason: "original-native-control-unavailable" };
                   }
                 },
                 async send(text, options) {

@@ -9,9 +9,7 @@ const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
 });
-async function fixture(
-  request = vi.fn(async (_method: string, _params: Record<string, unknown>): Promise<unknown> => ({})),
-) {
+async function fixture(refresh = vi.fn(async (_revision: string): Promise<void> => {})) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "catalog-controller-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const signalPath = join(root, "signal");
@@ -19,7 +17,10 @@ async function fixture(
   const stop = watchCodexCatalog({
     signalPath,
     configPath: join(root, "config.toml"),
-    request,
+    request: async () => {
+      throw new Error("Legacy direct mutation must never run");
+    },
+    refresh,
     onError,
     intervalMs: 5,
   });
@@ -28,71 +29,53 @@ async function fixture(
     await writeFile(`${signalPath}.tmp`, randomUUID());
     await rename(`${signalPath}.tmp`, signalPath);
   };
-  return { root, request, onError, stop, signal };
+  return { root, refresh, onError, stop, signal };
 }
 
-it("refreshes only the connection revision, coalesces unchanged notifications, and follows later removal", async () => {
+it("delegates bridge signals to the durable coordinator, coalesces unchanged notifications and observes later revisions", async () => {
   const f = await fixture();
   await f.signal();
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledTimes(2));
-  expect(f.request.mock.calls).toEqual([
-    [
-      "config/value/write",
-      {
-        keyPath: "mcp_servers.clankie.env.CLANKIE_CATALOG_REVISION",
-        value: expect.any(String),
-        mergeStrategy: "upsert",
-        filePath: join(f.root, "config.toml"),
-      },
-    ],
-    ["config/mcpServer/reload", {}],
-  ]);
+  await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledTimes(1));
+  expect(f.refresh).toHaveBeenCalledWith(expect.stringMatching(/^[a-f0-9-]{36}$/u));
   await new Promise((resolve) => setTimeout(resolve, 25));
-  expect(f.request).toHaveBeenCalledTimes(2);
+  expect(f.refresh).toHaveBeenCalledTimes(1);
   await f.signal();
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledTimes(4));
+  await vi.waitFor(() => expect(f.refresh).toHaveBeenCalledTimes(2));
   expect(f.onError).not.toHaveBeenCalled();
 });
 
-it("bounds failed refreshes, permits a later revision, and never issues a tool call or turn", async () => {
-  const request = vi.fn(async (_method: string, _params: Record<string, unknown>): Promise<unknown> => {
+it("bounds failed coordinator observations without retrying a native mutation itself", async () => {
+  const refresh = vi.fn(async (_revision: string): Promise<void> => {
     throw new Error("disconnected");
   });
-  const f = await fixture(request);
+  const f = await fixture(refresh);
   await f.signal();
   await vi.waitFor(() => expect(f.onError).toHaveBeenCalledTimes(3));
   await new Promise((resolve) => setTimeout(resolve, 25));
-  expect(request).toHaveBeenCalledTimes(3);
-  request.mockImplementation(async () => ({}));
+  expect(refresh).toHaveBeenCalledTimes(3);
+  refresh.mockImplementation(async () => {});
   await f.signal();
-  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(5));
-  expect(request.mock.calls.map(([method]) => method)).toEqual([
-    "config/value/write",
-    "config/value/write",
-    "config/value/write",
-    "config/value/write",
-    "config/mcpServer/reload",
-  ]);
+  await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(4));
 });
 
-it("stops between RPCs when the seat closes and never overlaps refreshes", async () => {
+it("never overlaps delegated observations and stops watching when the seat closes", async () => {
   let release!: () => void;
-  const request = vi.fn(
-    (_method: string, _params: Record<string, unknown>) =>
-      new Promise<unknown>((resolve) => {
-        release = () => resolve({});
+  const refresh = vi.fn(
+    (_revision: string) =>
+      new Promise<void>((resolve) => {
+        release = resolve;
       }),
   );
-  const f = await fixture(request);
+  const f = await fixture(refresh);
   await f.signal();
-  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   await f.signal();
   await new Promise((resolve) => setTimeout(resolve, 25));
-  expect(request).toHaveBeenCalledTimes(1);
+  expect(refresh).toHaveBeenCalledTimes(1);
   f.stop();
   release();
   await new Promise((resolve) => setTimeout(resolve, 25));
-  expect(request).toHaveBeenCalledTimes(1);
+  expect(refresh).toHaveBeenCalledTimes(1);
 });
 
 it("accepts a private copied config and rejects an owner home or symlinked config", async () => {

@@ -1158,6 +1158,31 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /** Native waiting detail is display metadata; census identity and authority stay unchanged. */
+  public async refreshWorkerCatalog(
+    paneId: string,
+    input: { revision: string; beforeDispatch?: () => Promise<void> },
+  ): Promise<{ outcome: "refreshed" | "skipped-busy" | "failed"; reason: string }> {
+    const original = await this.runner.get(paneId);
+    if (this.closed || !original?.session)
+      return { outcome: "failed", reason: "original_native_session_unavailable" };
+    const identity = JSON.stringify([original.terminalId, original.agent, original.session]);
+    const current = async () => {
+      await input.beforeDispatch?.();
+      const fresh = await this.runner.get(paneId);
+      if (
+        this.closed ||
+        !fresh ||
+        JSON.stringify([fresh.terminalId, fresh.agent, fresh.session]) !== identity
+      )
+        throw new Error("Original native session changed");
+    };
+    const control = await this.seatControl.attach(original);
+    if (!control?.refreshToolCatalog)
+      return { outcome: "failed", reason: "original_native_catalog_refresh_unavailable" };
+    await current();
+    return control.refreshToolCatalog({ revision: input.revision, beforeDispatch: current });
+  }
+
   public async withNativeStatus(
     seats: readonly OperatorFleetSeat[],
     observed: readonly ObservedFleetSeat[],

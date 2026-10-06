@@ -33,4 +33,6 @@ export function createPeerSender(options: {
   scope: string;
   discover: () => Promise<Response>;
   request: (suffix: string, init?: { method: string; body: string }) => Promise<Response>;
-}): (seat: string, text: string) => Promise<PeerReceipt>;
+}): ((seat: string, text: string) => Promise<PeerReceipt>) & {
+  reconcilePending(): Promise<PeerReceipt | undefined>;
+};

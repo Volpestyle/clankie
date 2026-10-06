@@ -140,7 +140,14 @@ link, and shows a mismatch with one fixing action. The same verdict appears in
 the roster and `clankie doctor`; a live bridge process alone remains separate
 evidence. Operator and worker bridges report independently. Plugin reload,
 clear, resume and compaction trigger a fresh check. No native evidence stays
-explicitly unverified. See [doctor](../../docs/cli.md#doctor).
+explicitly unverified. The original interactive mod also observes the accepted
+catalog every five seconds while idle, after Claude's native MCP
+`tools/list_changed` handling. Running turns, tools and background agents hold
+these probes. Reports keep the exact current session and server namespace;
+they never submit a prompt, create an SDK query, reconnect personal servers or
+restart the seat. A missing native mod/API remains an explicit failure in
+`clankie harness refresh-tools` and the roster. See
+[doctor](../../docs/cli.md#doctor).
 
 `clankie-worker@clankie` serves native hired seats and linked fleet agents.
 Its MCP server key is `clankie`; older `swarm` registrations require updating.

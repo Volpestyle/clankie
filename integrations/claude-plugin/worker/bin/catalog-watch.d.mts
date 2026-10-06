@@ -5,6 +5,8 @@ interface CatalogTool {
 export function createCatalogWatcher(input: {
   list(): Promise<readonly CatalogTool[]>;
   notify(): Promise<void>;
+  /** Authenticated runtime identity also changes when schemas remain equal. */
+  revision?(): string | undefined;
 }): {
   observe(tools: readonly CatalogTool[]): void;
   check(): Promise<void>;

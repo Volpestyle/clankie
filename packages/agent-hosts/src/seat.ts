@@ -206,6 +206,11 @@ export type SeatEvent =
 /** Control of one live seat. */
 export interface SeatControl {
   readonly ref: SeatRef;
+  /** Refresh only this original controller's Clankie MCP server at an idle boundary. */
+  refreshToolCatalog?(input?: {
+    readonly revision?: string;
+    readonly beforeDispatch?: () => Promise<void>;
+  }): Promise<{ readonly outcome: "refreshed" | "skipped-busy" | "failed"; readonly reason: string }>;
   /** Explicit modes this native controller can honor, rather than silently substituting. */
   readonly deliveryModes?: readonly ("steer" | "queue")[];
   /** Original prepared controller/root observation; never a wire or saved-metadata proof. */

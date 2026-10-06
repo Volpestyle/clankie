@@ -13,4 +13,7 @@ export function createInboundSender(options: {
   directory: string;
   scope: string;
   request: (suffix: string, init?: { method: string; body: string; redirect?: "error" }) => Promise<Response>;
-}): (text: string) => Promise<InboundReceipt>;
+}): ((text: string) => Promise<InboundReceipt>) & {
+  /** Inspect only the retained original; an empty journal sends nothing. */
+  reconcilePending(): Promise<InboundReceipt | undefined>;
+};

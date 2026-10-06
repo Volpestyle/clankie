@@ -3797,6 +3797,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return recordNativeToolCatalog(paneId, report, workerTools, proof, operatorTools);
     },
 
+    async workerCatalogSeats() {
+      const fleet = await observeFleet();
+      return fleet.seats.map((seat) => {
+        const sessionId = nativeSessionId({
+          terminalId: seat.seatId,
+          paneId: seat.paneId,
+          agent: seat.harness,
+          status: seat.status,
+          title: seat.title,
+          ...(seat.session === undefined ? {} : { session: seat.session }),
+        });
+        return {
+          paneId: seat.paneId,
+          seatId: seat.seatId,
+          harness: seat.harness,
+          status: seat.status,
+          ...(sessionId === undefined ? {} : { sessionId }),
+        };
+      });
+    },
+
+    async refreshNativeWorkerCatalog(paneId, input) {
+      return herdrWatches.refreshWorkerCatalog(paneId, input);
+    },
+
     async toolCatalogHealth() {
       const fleet = await observeFleet();
       const seats = await Promise.all(

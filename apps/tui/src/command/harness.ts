@@ -7,6 +7,12 @@ import { refreshLinkedHarnesses } from "../harness-refresh.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { automaticCodexConsent, codexSourceSetupCommand, installHarnessBridges } from "../harness-install.ts";
 import { confirmMachineSetupApproval, machineSetupContext } from "./machine-setup.ts";
+import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { commandHost } from "./io.ts";
+import {
+  FLEET_WORKER_CATALOG_REFRESH_PATH,
+  FleetWorkerCatalogRefreshResultSchema,
+} from "@clankie/protocol/tool-catalog";
 
 export async function runHarnessCommand(
   args: readonly string[],
@@ -18,7 +24,7 @@ export async function runHarnessCommand(
   },
 ) {
   const usage =
-    "Usage: clankie harness install [--refresh-linked | --codex-source-setup /absolute/source-owned/script] [--project PROJECT] [--approve]";
+    "Usage: clankie harness install [--refresh-linked | --codex-source-setup /absolute/source-owned/script] [--project PROJECT] [--approve]; clankie harness refresh-tools [--pane PANE]";
   if (args[0] !== "install") throw new Error(usage);
   const flags = new Map<string, string>();
   let approvalRequested = false;
@@ -172,4 +178,31 @@ export async function runHarnessCommand(
   } finally {
     terminal?.close();
   }
+}
+
+export async function runWorkerToolRefreshCommand(
+  args: readonly string[],
+  options: BrowserCommandOptions = {},
+) {
+  if (
+    args[0] !== "refresh-tools" ||
+    !(args.length === 1 || (args.length === 3 && args[1] === "--pane" && args[2]))
+  )
+    throw new Error("Usage: clankie harness refresh-tools [--pane PANE]");
+  const credential = await resolveOperatorCredential({
+    env: options.env ?? process.env,
+    ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+  });
+  if (!credential?.token) throw new Error("Worker tool refresh needs the operator credential");
+  const response = await (options.fetchImpl ?? fetch)(
+    new URL(FLEET_WORKER_CATALOG_REFRESH_PATH, commandHost(options)),
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      body: JSON.stringify(args.length === 1 ? {} : { paneId: args[2] }),
+      signal: AbortSignal.timeout(60_000),
+    },
+  );
+  if (!response.ok) throw new Error(`Worker tool refresh returned ${response.status}`);
+  return FleetWorkerCatalogRefreshResultSchema.parse(await response.json());
 }

@@ -342,7 +342,7 @@ describe("trusted native seat policy", () => {
     };
   }
 
-  it("wires a private bridge signal to the owned app-server and stops it when the seat closes", async () => {
+  it("retains the private bridge signal while leaving native refresh mutations to the durable coordinator", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "owned-catalog-")));
     cleanups.push(() => rmSync(root, { recursive: true, force: true }));
     const home = join(root, "worker-codex", "seat-fixture");
@@ -363,13 +363,14 @@ describe("trusted native seat policy", () => {
     const seat = await f.pending;
     expect(f.launches).toMatchObject([{ catalogRefresh: true }]);
     writeFileSync(signal, randomUUID());
-    await vi.waitFor(() => expect(f.methods).toContain("config/mcpServer/reload"), { timeout: 3000 });
-    expect(f.methods.filter((method) => method === "config/value/write")).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(f.methods).not.toContain("config/mcpServer/reload");
+    expect(f.methods).not.toContain("config/value/write");
     expect(f.methods).not.toContain("turn/start");
     await seat.close();
     const count = f.methods.length;
     writeFileSync(signal, randomUUID());
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await new Promise((resolve) => setTimeout(resolve, 25));
     expect(f.methods).toHaveLength(count);
   });
 

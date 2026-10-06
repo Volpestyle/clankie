@@ -1,4 +1,7 @@
 import { ComputerBody } from "./computer-body.ts";
+import { randomUUID } from "node:crypto";
+import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
+import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
 import { startHostedActivityRuntime } from "./activity-runtime.ts";
 import { ActivityPlaySource } from "./activity-play-source.ts";
 import { createActivityArtifactSources } from "./activity-artifact-source.ts";
@@ -889,6 +892,7 @@ const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
   },
   warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
 });
+const workerRuntimeRevision = randomUUID();
 const grokNative = createGrokNativeHost({
   binding: localFleetBinding,
   processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
@@ -982,6 +986,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
 });
 const captain = createCaptain(
   {
+    refreshWorkerCatalogs: (input, authority) => workerToolRefresh.refresh(input, authority),
     activitySharing,
     discordTracking,
     ...(runtimeUpdater === undefined
@@ -1289,6 +1294,17 @@ await runtimeCanary
     ),
   );
 const workerMcp = new WorkerMcp({
+  runtimeRevision: workerRuntimeRevision,
+  catalogRefreshPending: async (fleet, pane) => {
+    const paneId = fleet === "default" ? pane : `${fleet}/${pane}`;
+    const seat = (await captain.workerCatalogSeats!()).find((row) => row.paneId === paneId);
+    if (!seat || !["idle", "ready"].includes(seat.status ?? "")) return true;
+    if (seat.harness === "opencode") {
+      const observed = await captain.refreshNativeWorkerCatalog!(paneId, { revision: workerRuntimeRevision });
+      return observed.outcome !== "refreshed";
+    }
+    return false;
+  },
   directory: join(stateRoot, "worker-grants"),
   credentials: operatorCredentialStore,
   host: mcpHost,
@@ -1303,6 +1319,18 @@ const workerMcp = new WorkerMcp({
     const snapshot = await settingsStore.loadFenced();
     return { tools: snapshot.settings.fleet.tools, assertCurrent: snapshot.assertCurrent };
   },
+});
+const workerCatalogCoordinator = createLocalCodexCatalogCoordinator({
+  seats: localCodexSeats,
+  revision: workerRuntimeRevision,
+  expectedTools: async () => ["message_clankie", ...(await workerMcp.expectedFleetToolNames())],
+});
+const workerToolRefresh = createWorkerToolRefresh({
+  captain,
+  local: workerCatalogCoordinator,
+  remote: remoteCodexSeats,
+  workerMcp,
+  revision: workerRuntimeRevision,
 });
 
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
@@ -1368,7 +1396,11 @@ const clankie = await createClankieApp({
       fleets: await runtimes.fleets(),
       shell: (fleet) => runtimes.fleetShell(fleet),
     }),
-  pluginVersionInstalled: (version) => workerPluginNotices.expect(version),
+  pluginVersionInstalled: (version) => {
+    workerPluginNotices.expect(version);
+    workerToolRefresh.expectRevision(randomUUID());
+  },
+  refreshWorkerCatalogs: workerToolRefresh.refresh,
   roomObservations,
   roomVoice: new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore),
   discordTurnReceipts,
@@ -1724,6 +1756,8 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
   linearRequestBudget.close();
+
+  workerToolRefresh.close();
   const exitCode = signal === "SIGINT" ? 130 : 143;
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");

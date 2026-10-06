@@ -7,6 +7,12 @@ import type { RuntimeUpdater, UpdateAuthority } from "../../tui/bin/runtime-upda
 import { HoldOverrideSchema } from "@clankie/protocol/integrate";
 import type { DeployHolds } from "./deploy-holds.ts";
 import { FleetHarnessRefreshRequestSchema } from "@clankie/protocol/fleet-settings";
+import {
+  FLEET_WORKER_CATALOG_REFRESH_PATH,
+  FleetWorkerCatalogRefreshRequestSchema,
+  FleetWorkerCatalogRefreshResultSchema,
+} from "@clankie/protocol/tool-catalog";
+import type { RefreshWorkerCatalogs } from "./worker-tool-refresh.ts";
 import type { SettingsStore } from "@clankie/settings";
 import { RuntimeCanaryPolicySchema, type RuntimeCanary } from "./runtime-canary.ts";
 import type { HerdrFleet } from "./herdr-fleet.ts";
@@ -36,6 +42,7 @@ export function createRuntimeUpdateRoutes(options: {
   readonly settings?: Pick<SettingsStore, "load"> | undefined;
   readonly setup?: FleetSettingsContextDependencies | undefined;
   readonly pluginVersionInstalled?: ((version: string) => void) | undefined;
+  readonly refreshWorkerCatalogs?: RefreshWorkerCatalogs | undefined;
   readonly authorize: (request: Request) => Promise<UpdateAuthority | undefined>;
 }): Hono {
   const app = new Hono();
@@ -90,6 +97,33 @@ export function createRuntimeUpdateRoutes(options: {
       throw error;
     }
     return context.json({ policy, appliesTo: "next_canary" }, 200, { "Cache-Control": "no-store" });
+  });
+  app.post(FLEET_WORKER_CATALOG_REFRESH_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
+    const authority = await options.authorize(context.req.raw);
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    const input = FleetWorkerCatalogRefreshRequestSchema.safeParse(
+      await context.req.json().catch(() => undefined),
+    );
+    if (!input.success) return context.json({ error: "invalid_worker_catalog_refresh" }, 400);
+    if (!options.refreshWorkerCatalogs)
+      return context.json({ error: "worker_catalog_refresh_unavailable" }, 503);
+    context.header("Cache-Control", "no-store");
+    try {
+      await authority.guard();
+      if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+      const result = await options.refreshWorkerCatalogs(
+        input.data.paneId === undefined ? {} : { paneId: input.data.paneId },
+        authority,
+      );
+      await authority.guard();
+      if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+      return context.json(FleetWorkerCatalogRefreshResultSchema.parse(result));
+    } catch {
+      return context.json(
+        { error: authority.current() ? "worker_catalog_refresh_failed" : "operator_revoked" },
+        authority.current() ? 409 : 403,
+      );
+    }
   });
   app.post("/v1/harness-plugin-version", bodyLimit({ maxSize: 1024 }), async (context) => {
     const authority = await options.authorize(context.req.raw);

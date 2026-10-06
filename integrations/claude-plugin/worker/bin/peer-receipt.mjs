@@ -124,7 +124,7 @@ export function createPeerSender({ directory, scope, discover, request }) {
           "The original peer message is settled. This different follow-up was not sent.",
         );
   };
-  return async (target, text) => {
+  const send = async (target, text) => {
     let record;
     try {
       if (existsSync(`${path}.lock`)) return uncertain();
@@ -181,4 +181,16 @@ export function createPeerSender({ directory, scope, discover, request }) {
       return uncertain(record);
     }
   };
+  return Object.assign(send, {
+    async reconcilePending() {
+      let record;
+      try {
+        if (existsSync(`${path}.lock`)) return uncertain();
+        record = inspect();
+        return record === undefined ? undefined : await reconcile(record, record.seatId, record.text);
+      } catch {
+        return uncertain(record);
+      }
+    },
+  });
 }

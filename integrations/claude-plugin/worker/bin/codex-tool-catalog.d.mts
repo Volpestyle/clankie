@@ -12,5 +12,7 @@ export interface CodexToolCatalogReport {
 export function codexToolCatalogReport(input: {
   sessionId: string;
   bridge?: "worker" | "operator";
+  /** Require a connected exact-thread server even when its expected projection is empty. */
+  requireConnected?: boolean;
   request?: (method: string, params: Record<string, unknown>) => Promise<unknown>;
 }): Promise<CodexToolCatalogReport>;

@@ -177,6 +177,28 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
+    ...(lane === "operator" && deps.refreshWorkerCatalogs
+      ? [
+          defineTool({
+            name: "refresh_worker_tools",
+            label: "Refresh running worker tools",
+            description:
+              "Refresh Clankie's MCP tools through original running native controllers, keeping the same threads and context. Omit paneId for all observed fleet workers. Returns per-seat refreshed, skipped-busy (deferred to idle), or failed with a reason. Preserves original receipts and never replays a report, starts a turn, or restarts a harness. Unsupported original controllers fail explicitly.",
+            parameters: Type.Object({ paneId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }),
+            executionMode: "sequential",
+            execute: async (_id, input) => {
+              const authority = captureConversationAuthority(turn.conversationAuthority);
+              await assertConversationAuthority(authority);
+              return json(
+                await deps.refreshWorkerCatalogs!(input, {
+                  guard: () => assertConversationAuthority(authority),
+                  current: authority.current,
+                }),
+              );
+            },
+          }),
+        ]
+      : []),
     ...(deps.activitySharing && (lane === "operator" || lane.startsWith("discord_"))
       ? activityTools(deps.activitySharing, turn)
       : []),

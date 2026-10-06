@@ -14,7 +14,7 @@ import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 type Admission = "local" | "stream" | "bearer";
-async function fixture(admission: Admission = "bearer") {
+async function fixture(admission: Admission = "bearer", workerVersion?: string) {
   const root = await mkdtemp(join(tmpdir(), "clankie-fleet-bridge-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const account = {
@@ -30,7 +30,12 @@ async function fixture(admission: Admission = "bearer") {
   };
   await credentials.set("linear", { type: "api", key: "SECRET-fixture", account });
   await credentials.set("docs", { type: "api", key: "SECRET-other" });
-  const state = { live: true, tools: "connected" as "connected" | "off", serversEnabled: true };
+  const state = {
+    live: true,
+    tools: "connected" as "connected" | "off",
+    serversEnabled: true,
+    nativeBusy: false,
+  };
   const calls = vi.fn(async () => ({ content: "result", isError: false }));
   const observed: unknown[] = [];
   const host = createMcpHost({
@@ -77,6 +82,9 @@ async function fixture(admission: Admission = "bearer") {
     directory: join(root, "grants"),
     credentials,
     host,
+    runtimeRevision: "service-before",
+    pluginExpectedVersion: () => "0.6.7",
+    catalogRefreshPending: async () => state.nativeBusy,
     fleetTools: async () => state.tools,
     fleetToolsSnapshot: async () => ({
       tools: state.tools,
@@ -119,7 +127,12 @@ async function fixture(admission: Admission = "bearer") {
         accept: "application/json, text/event-stream",
         ...(session ? { "mcp-session-id": session } : {}),
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        ...(method.startsWith("notifications/") ? {} : { id: 1 }),
+        method,
+        params,
+      }),
     });
     if (admission === "local") return localFetch(request, { incoming: { socket } } as HttpBindings);
     if (admission === "stream") identities.set(request, identity);
@@ -132,7 +145,7 @@ async function fixture(admission: Admission = "bearer") {
   const init = await rpc("initialize", {
     protocolVersion: "2025-06-18",
     capabilities: {},
-    clientInfo: { name: "fixture", version: "1" },
+    clientInfo: { name: workerVersion ? "clankie-worker" : "fixture", version: workerVersion ?? "1" },
   });
   expect(init.status).toBe(200);
   const session = init.headers.get("mcp-session-id")!;
@@ -158,6 +171,59 @@ async function fixture(admission: Admission = "bearer") {
     },
   };
 }
+
+it("separates observed worker versions and published runtime from the expected deploy generation", async () => {
+  const f = await fixture("stream", "0.6.6");
+  try {
+    expect(f.worker.bridgeStatus("pc", "w1:p1")).toMatchObject({
+      pluginVersion: "0.6.6",
+      expectedPluginVersion: "0.6.7",
+      expectedRuntimeRevision: "service-before",
+      behind: true,
+    });
+    const report = async (runtimeRevision: string) => {
+      const response = await f.rpc("notifications/clankie/bridge_status", {
+        status: "ready",
+        reason: "Native published catalog",
+        tools: ["clankie_tools", "clankie_call"],
+        pluginVersion: "0.6.7",
+        runtimeRevision,
+      });
+      expect(response.status).toBe(202);
+    };
+    await report("service-before");
+    expect(f.worker.bridgeStatus("pc", "w1:p1")).toMatchObject({
+      pluginVersion: "0.6.7",
+      runtimeRevision: "service-before",
+      behind: false,
+    });
+    f.worker.expectRuntimeRevision("service-after");
+    f.state.nativeBusy = true;
+    const held = (await (await f.rpc("tools/list")).json()).result;
+    expect(held._meta.clankie).toMatchObject({ runtimeRevision: "service-after", refreshPending: true });
+    expect(f.worker.bridgeStatus("pc", "w1:p1")).toMatchObject({
+      runtimeRevision: "service-before",
+      expectedRuntimeRevision: "service-after",
+      behind: true,
+    });
+    f.state.nativeBusy = false;
+    f.worker.requestCatalogRefresh("pc", "w1:p1", "manual-after");
+    const ready = (await (await f.rpc("tools/list")).json()).result;
+    expect(ready._meta.clankie).toMatchObject({ runtimeRevision: "manual-after", refreshPending: false });
+    await report("manual-after");
+    expect(f.worker.bridgeStatus("pc", "w1:p1")).toMatchObject({
+      runtimeRevision: "manual-after",
+      expectedRuntimeRevision: "manual-after",
+      behind: false,
+    });
+    f.state.tools = "off";
+    expect((await (await f.rpc("tools/list")).json()).result.tools).toEqual([]);
+    expect((await f.call("clankie_call", { name: "linear_read_0", arguments: {} })).isError).toBe(true);
+    expect(f.calls).not.toHaveBeenCalled();
+  } finally {
+    await f.close();
+  }
+});
 
 it("searches bounded names and schemas across verified servers, excluding worker publishing and unverified accounts", async () => {
   const f = await fixture();

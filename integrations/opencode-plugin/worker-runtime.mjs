@@ -35,6 +35,42 @@ export function createOpenCodeWorkerRuntime(api, controller) {
   let generation = 0;
   let routeKey;
   let sending = false;
+  let refreshing = false;
+  let activityGeneration = 0;
+  let activityObserved = false;
+  let activityObserverInvalid = false;
+  const activeNativeSessions = new Set();
+  const stopActivity = [];
+  try {
+    if (typeof api.event?.on === "function") {
+      // Pinned TuiEventBus uses SDKv2 Event, whose session.status payload is
+      // properties.{sessionID,status}. Observe all sessions sharing this MCP
+      // client, including children. Keep only a monotonic activity fence, not
+      // tool arguments, owner questions, or another session's content.
+      for (const type of ["session.status", "permission.asked", "question.asked"]) {
+        const stop = api.event.on(type, (event) => {
+          activityGeneration += 1;
+          if (type !== "session.status") return;
+          try {
+            const id = event.properties?.sessionID;
+            if (!sessionPattern.test(id ?? "")) throw new Error("Invalid native activity event");
+            const status = nativeStatus(event.properties.status);
+            if (status === "idle") activeNativeSessions.delete(id);
+            else activeNativeSessions.add(id);
+          } catch {
+            activityObserverInvalid = true;
+            activityObserved = false;
+          }
+        });
+        if (typeof stop !== "function") throw new Error("Native activity observer unavailable");
+        stopActivity.push(stop);
+      }
+      activityObserved = !activityObserverInvalid;
+    }
+  } catch {
+    // An unavailable observer only disables refresh, preserving existing native
+    // delivery/control. Its failure must never be treated as proof of idle.
+  }
   let selectedModel;
   let selectedVariant;
   const route = () => {
@@ -73,11 +109,7 @@ export function createOpenCodeWorkerRuntime(api, controller) {
     throwOnError: true,
     signal: AbortSignal.any([api.lifecycle.signal, AbortSignal.timeout(10_000)]),
   });
-  const snapshot = async () => {
-    alive();
-    const before = generation;
-    bound(before);
-    if (!api.state.ready) throw new Error("Native TUI state is not ready");
+  const assertWorkerProjection = () => {
     const worker = api.state.config?.mcp?.clankie;
     if (
       worker?.type !== "local" ||
@@ -102,6 +134,13 @@ export function createOpenCodeWorkerRuntime(api, controller) {
       )
         throw new Error("Inherited personal tracker is not isolated");
     }
+  };
+  const snapshot = async () => {
+    alive();
+    const before = generation;
+    bound(before);
+    if (!api.state.ready) throw new Error("Native TUI state is not ready");
+    assertWorkerProjection();
     const selected = await api.client.session.get({ sessionID: sessionId }, options());
     bound(before);
     if (selected.data?.id !== sessionId) throw new Error("Native session lookup disagrees with the TUI");
@@ -125,6 +164,10 @@ export function createOpenCodeWorkerRuntime(api, controller) {
     return {
       generation: before,
       state: held ? "blocked" : status === "idle" ? "idle" : "working",
+      catalogBusy:
+        permissions.data.length > 0 ||
+        questions.data.length > 0 ||
+        Object.values(statuses.data).some((entry) => nativeStatus(entry) !== "idle"),
     };
   };
 
@@ -193,6 +236,70 @@ export function createOpenCodeWorkerRuntime(api, controller) {
     async status() {
       return (await snapshot()).state;
     },
+    async refreshToolCatalog() {
+      if (sending || refreshing) return { outcome: "skipped-busy", reason: "native-action-pending" };
+      if (!activityObserved) return { outcome: "failed", reason: "native-mcp-refresh-unsupported" };
+      if (activeNativeSessions.size) return { outcome: "skipped-busy", reason: "native-session-busy" };
+      refreshing = true;
+      try {
+        const activity = activityGeneration;
+        const initial = await snapshot();
+        if (initial.state !== "idle" || initial.catalogBusy || activityGeneration !== activity)
+          return { outcome: "skipped-busy", reason: "native-session-busy" };
+        if (typeof api.client.mcp?.status !== "function")
+          return { outcome: "failed", reason: "native-mcp-refresh-unsupported" };
+        const fresh = await snapshot();
+        bound(initial.generation);
+        if (fresh.state !== "idle" || fresh.catalogBusy || activityGeneration !== activity)
+          return { outcome: "skipped-busy", reason: "native-session-busy" };
+        // Admission runs after async preparation, immediately before observing
+        // the existing native connection. Its guard belongs to the original
+        // controller, not this plugin's cached launch parameters.
+        await controller.authorize("refreshToolCatalog");
+        bound(initial.generation);
+        assertWorkerProjection();
+        if (!activityObserved) return { outcome: "failed", reason: "native-mcp-refresh-unsupported" };
+        if (activeNativeSessions.size || activityGeneration !== activity)
+          return { outcome: "skipped-busy", reason: "native-session-busy" };
+        // Check the native TUI's synchronous owner-decision/turn snapshot again
+        // immediately before observing this worker's configured MCP client.
+        const localStatus = api.state.session.status(sessionId);
+        if (
+          nativeStatus(localStatus, localStatus === undefined) !== "idle" ||
+          api.state.session.permission(sessionId).length > 0 ||
+          api.state.session.question(sessionId).length > 0
+        )
+          return { outcome: "skipped-busy", reason: "native-session-busy" };
+        // The pinned native tools/list_changed handler reads new definitions
+        // through the existing client. mcp.connect replaces and closes that
+        // client without an atomic activity guard, so refresh must never call
+        // it. Observation preserves a call that starts during this await.
+        const statuses = await api.client.mcp.status({}, options());
+        bound(initial.generation);
+        if (!activityObserved) return { outcome: "failed", reason: "native-mcp-refresh-unsupported" };
+        if (activeNativeSessions.size || activityGeneration !== activity)
+          return { outcome: "skipped-busy", reason: "native-session-busy" };
+        const currentStatus = api.state.session.status(sessionId);
+        if (
+          nativeStatus(currentStatus, currentStatus === undefined) !== "idle" ||
+          api.state.session.permission(sessionId).length > 0 ||
+          api.state.session.question(sessionId).length > 0
+        )
+          return { outcome: "skipped-busy", reason: "native-session-busy" };
+        if (statuses.data?.clankie?.status !== "connected")
+          return { outcome: "failed", reason: "native-mcp-refresh-unconfirmed" };
+        // This proves only the original connection. The service separately
+        // requires the bridge's actual tools/list observation at its revision;
+        // the native SDK does not expose exact model-visible MCP tool names.
+        return { outcome: "refreshed", reason: "original-native-clankie-connection-observed" };
+      } catch {
+        // Native errors may include provider/configuration details. The fleet
+        // result names the bounded failure without copying any raw error.
+        return { outcome: "failed", reason: "original-native-control-unavailable" };
+      } finally {
+        refreshing = false;
+      }
+    },
     async history() {
       const before = await snapshot();
       await controller.authorize("history");
@@ -233,7 +340,8 @@ export function createOpenCodeWorkerRuntime(api, controller) {
       };
     },
     async send(input) {
-      if (sending) return { outcome: "unavailable", detail: "Another native dispatch is pending" };
+      if (sending || refreshing)
+        return { outcome: "unavailable", detail: "Another native action is pending" };
       if (
         !messagePattern.test(input.messageId ?? "") ||
         typeof input.text !== "string" ||
@@ -318,6 +426,14 @@ export function createOpenCodeWorkerRuntime(api, controller) {
     close() {
       retired = true;
       stopRoute();
+      for (const stop of stopActivity) {
+        try {
+          stop();
+        } catch {
+          // The original control is already retired. Keep removing its other
+          // observers; one host unsubscribe failure cannot retain admission.
+        }
+      }
       // Only control ends. No session deletion, permission answer, prompt
       // mutation, or native process/pane shutdown is performed here.
     },
