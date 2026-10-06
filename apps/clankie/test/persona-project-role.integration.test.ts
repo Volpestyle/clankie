@@ -82,12 +82,14 @@ async function fixture(mode: "hire" | "workspace" | "remote" = "hire") {
       role: "builder",
     });
     hires.launch(allocation.id, projects);
-    hires.pane(allocation.id, panes[index]!.pane_id);
+    // Remote allocations retain fleet-qualified addresses; the native census stays host-local.
+    const pane = mode === "remote" && index === 0 ? `pc/${panes[index]!.pane_id}` : panes[index]!.pane_id;
+    hires.pane(allocation.id, pane);
     hires.observe(
       allocation.id,
       mode === "remote" && index === 0 ? "term_1" : panes[index]!.terminal_id,
       proofs[index]!.nativeOccupantId,
-      proofs[index],
+      { ...proofs[index]!, pane },
     );
     hires.confirmed(allocation.id);
   }
