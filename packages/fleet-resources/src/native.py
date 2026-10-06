@@ -76,6 +76,26 @@ def identity(pid, census=False):
         raise RuntimeError("Process identity unavailable")
 
 
+def darwin_memory():
+    """The compressor-aware free percentage reported by memory_pressure -Q."""
+    if sys.platform != "darwin":
+        raise RuntimeError("Darwin memory observation unavailable")
+    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+    library.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p,
+                                    ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+    library.sysctlbyname.restype = ctypes.c_int
+    percent = ctypes.c_uint32()
+    total = ctypes.c_uint64()
+    for name, value in ((b"kern.memorystatus_level", percent), (b"hw.memsize", total)):
+        size = ctypes.c_size_t(ctypes.sizeof(value))
+        if library.sysctlbyname(name, ctypes.byref(value), ctypes.byref(size), None, 0) != 0 or \
+                size.value != ctypes.sizeof(value):
+            raise RuntimeError("Darwin memory observation unavailable")
+    if percent.value > 100 or total.value == 0:
+        raise RuntimeError("Darwin memory observation invalid")
+    return {"schemaVersion": 1, "availablePercent": percent.value, "totalMemoryBytes": total.value}
+
+
 def snapshot():
     if sys.platform == "darwin":
         rows = subprocess.run(["/bin/ps", "-axo", "pid=,uid="], capture_output=True, timeout=2, check=True)
@@ -262,6 +282,10 @@ if __name__ == "__main__":
             if len(sys.argv) != 2 or identity(os.getpid()) is None:
                 raise RuntimeError("Native observer unavailable")
             print("true")
+        elif mode == "memory":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Memory observation request unavailable")
+            print(json.dumps(darwin_memory(), separators=(",", ":")))
         elif mode == "snapshot":
             print(json.dumps(snapshot()))
         elif mode == "observe":

@@ -19,6 +19,16 @@ process itself, so a hosted captain running as PID 1 can perform pressure
 admission without granting PID 1 lease or signal authority. The hosted Linux
 image installs Python 3; self-hosted hosts must provide it.
 
+On macOS, available memory is physical RAM multiplied by the kernel's
+`kern.memorystatus_level` percentage, matching `memory_pressure -Q` rather than
+summing selected VM page queues. The existing Python native boundary reads it
+with `sysctlbyname`, without launching `vm_stat` or `memory_pressure`. One shared
+one-second cache and an in-flight read coalesce repeated sampler calls in each
+process. An expired value never supplies a fallback when the native read fails;
+invalid or unavailable observations refuse new work. This pressure cache grants
+no process, lease or signaling authority. Linux retains `/proc/meminfo`'s
+`MemAvailable`; other platforms retain their existing free-memory source.
+
 The heavy runner registers its process birth under the journal's kernel file lock
 before receiving execution permission. A dead claim owner cannot authorize a late
 runner. A registered runner owns its process group independently of its wrapper;

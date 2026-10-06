@@ -24,10 +24,11 @@ permit until the kernel proves they have exited.
 `clankie fleet resources` and `clankie doctor --json` show capacity, actual holders,
 queue and pressure. Status includes executable names and labels, never arguments
 or credentials. A wait can mean a full pool, high load, low available memory or
-unavailable native observations. Available memory counts reclaimable pages
-(free, speculative and inactive on macOS; `MemAvailable` on Linux), not only
-strictly free ones. A failed observation refuses new local hires;
-it does not terminate existing agents. Python 3 and the shipped native helper
+unavailable native observations. macOS available memory matches
+`memory_pressure -Q` through the kernel's compressor-aware percentage; Linux
+uses `MemAvailable`. macOS pressure reads share a one-second cache, then refresh;
+failed observations refuse new local hires without terminating existing agents.
+Python 3 and the shipped native helper
 must be available. Repair an unavailable installation through the existing setup
 route; do not select another registry to evade a wait.
 
