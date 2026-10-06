@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveHerdrSeatTranscriptPath } from "@clankie/agent-transcript";
+import { resolveHerdrSeatTranscriptPathAsync, sessionIdFromPath } from "@clankie/agent-transcript";
 import {
   CaptainTurnSettledMetricsSchema,
   IssueMetricsReportSchema,
@@ -11,9 +11,12 @@ import {
 import { z } from "zod";
 import { SeatLedgerRowSchema } from "./seat-ledger.ts";
 import { ReceiptSchema } from "./delivery-fence.ts";
+import { HireOwnersStateSchema } from "./hire-owners.ts";
+import { PaneTidyStateSchema } from "./pane-tidy.ts";
 
 const MAX_SOURCE_BYTES = 64 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 256 * 1024 * 1024;
+const SESSION_UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu;
 const obj = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 const identifiers = (text: string) => [...new Set(text.match(/\b[A-Z][A-Z0-9]*-\d+\b/gu) ?? [])];
@@ -22,6 +25,7 @@ type Episode = Worker & { issueId: string; lastAt: string; source: string };
 type NativeRecord = { at: string; id: string; prompt?: string; tokens?: number; commands?: string[] };
 const MetaSchema = z.object({
   title: z.string(),
+  scope: z.object({ kind: z.string(), seatId: z.string().optional() }).optional(),
   nativeSource: z
     .object({
       terminalId: z.string(),
@@ -34,6 +38,19 @@ const MetaSchema = z.object({
     .record(z.string(), z.object({ text: z.string(), runId: z.string(), paneId: z.string() }))
     .optional(),
 });
+type NativeSource = NonNullable<z.infer<typeof MetaSchema>["nativeSource"]>;
+type MetricsBinding = {
+  native: NativeSource;
+  label: string;
+  aliases: Set<string>;
+  owner?: string;
+  priority: number;
+};
+const HistoricalSessionKeySchema = z.tuple([
+  z.string().min(1),
+  z.enum(["codex", "claude"]),
+  z.string().regex(/^[a-z0-9_-]{1,128}$/iu),
+]);
 
 function commands(value: unknown, name: unknown): string[] {
   const tool = typeof name === "string" ? name.split(".").at(-1) : undefined;
@@ -334,37 +351,189 @@ export async function readIssueMetrics(
     }
   }
   const all: Episode[] = [];
-  const seen = new Set<string>();
+  const bindings: MetricsBinding[] = [];
+  const seatLabels = new Map<string, string>();
+  for (const meta of metas)
+    if (meta.scope?.kind === "seat" && meta.scope.seatId) seatLabels.set(meta.scope.seatId, meta.title);
+  const bind = (native: NativeSource, label: string, priority: number, owner?: string) => {
+    bindings.push({
+      native,
+      label,
+      priority,
+      ...(owner === undefined ? {} : { owner }),
+      aliases: new Set([native.terminalId, label, native.session.value]),
+    });
+  };
   for (const meta of metas) {
     const native = meta.nativeSource;
     if (!native) continue;
-    if (
-      query.worker !== undefined &&
-      ![native.terminalId, meta.title, native.session.value].includes(query.worker)
-    )
-      continue;
-    const key = `${native.agent}:${native.session.value}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    bind(native, meta.title, 3);
+  }
+  // These are historical provenance, not current delivery/driver authority.
+  // Fold exact saved bindings; never search unrelated transcript directories
+  // for issue mentions, or modify the owner's live conversation attachment.
+  const ownersRaw = await read(join(stateDir, "herdr-watches.json.owners.json"));
+  if (ownersRaw !== undefined) {
+    try {
+      const owners = HireOwnersStateSchema.parse(JSON.parse(ownersRaw));
+      for (const hire of owners.hires) {
+        if (!hire.seatId) continue; // A bare startup intent has no native history yet.
+        let session;
+        try {
+          session = HistoricalSessionKeySchema.parse(JSON.parse(hire.sessionKey ?? "null"));
+        } catch {
+          warnings.push(`Native history binding unavailable: ${hire.seatId}`);
+          continue;
+        }
+        const [fleet, agent, value] = session;
+        if (fleet !== "local") {
+          warnings.push(`Remote native history unavailable: ${hire.seatId}`);
+          continue;
+        }
+        if (!hire.paneId) {
+          warnings.push(`Native history binding unavailable: ${hire.seatId}`);
+          continue;
+        }
+        bind(
+          {
+            terminalId: hire.seatId,
+            paneId: hire.paneId,
+            agent,
+            session: { source: `herdr:${agent}`, kind: "id", value },
+          },
+          seatLabels.get(hire.seatId) ?? hire.seatId,
+          1,
+          hire.owner.conversationId,
+        );
+      }
+    } catch {
+      warnings.push("Invalid historical hire bindings");
+    }
+  }
+  const tidyRaw = await read(join(stateDir, "pane-tidy.json"));
+  if (tidyRaw !== undefined) {
+    try {
+      const tidy = PaneTidyStateSchema.parse(JSON.parse(tidyRaw));
+      // Prefer the latest retained name when a worker resumes the same thread.
+      for (const entry of [...tidy.entries].reverse()) {
+        bind(
+          {
+            terminalId: entry.seatId,
+            paneId: entry.paneId,
+            agent: entry.harness,
+            session: {
+              source: `herdr:${entry.harness}`,
+              kind: entry.sessionId.startsWith("/") ? "path" : "id",
+              value: entry.sessionId,
+            },
+          },
+          entry.title || seatLabels.get(entry.seatId) || entry.seatId,
+          2,
+          entry.owner.conversationId,
+        );
+      }
+    } catch {
+      warnings.push("Invalid closed worker history");
+    }
+  }
+  const groups = new Map<
+    string,
+    { path: string; size: number; mtimeMs: number; bindings: MetricsBinding[] }
+  >();
+  for (const binding of bindings) {
+    const native = binding.native;
     if (native.paneId.includes("/")) {
       warnings.push(`Remote native history unavailable: ${native.terminalId}`);
       continue;
     }
-    const path = resolveHerdrSeatTranscriptPath(native.agent, native.session);
+    const path = await resolveHerdrSeatTranscriptPathAsync(native.agent, native.session);
     if (!path) {
       warnings.push(`Native history unavailable: ${native.terminalId}`);
       continue;
     }
+    const info = await stat(path).catch(() => undefined);
+    if (!info?.isFile()) {
+      warnings.push(`Native history unreadable: ${native.terminalId}`);
+      continue;
+    }
+    // ID/path aliases and hard links must not count a native response twice.
+    const key = `${native.agent}:${info.dev}:${info.ino}`;
+    const group = groups.get(key) ?? { path, size: info.size, mtimeMs: info.mtimeMs, bindings: [] };
+    group.bindings.push(binding);
+    groups.set(key, group);
+  }
+  // Separate files claiming the same native UUID are ambiguous histories,
+  // even if the caller selects only one of their worker aliases. Do not double
+  // totals or guess which archived copy is complete/current.
+  const logicalSources = new Map<string, Set<string>>();
+  for (const [key, group] of groups) {
+    const native = group.bindings[0]!.native;
+    const namedSession = sessionIdFromPath({
+      harness: native.agent,
+      path: group.path,
+      size: group.size,
+      mtimeMs: group.mtimeMs,
+    });
+    const ids = new Set([
+      namedSession,
+      ...group.bindings
+        .filter((binding) => binding.native.session.kind === "id")
+        .map((binding) => binding.native.session.value),
+    ]);
+    for (const id of ids) {
+      if (!SESSION_UUID.test(id)) continue;
+      const ref = `${native.agent}:${id.toLowerCase()}`;
+      const held = logicalSources.get(ref) ?? new Set<string>();
+      held.add(key);
+      logicalSources.set(ref, held);
+    }
+  }
+  const ambiguousFiles = new Set<string>();
+  for (const [ref, files] of logicalSources) {
+    if (files.size < 2) continue;
+    warnings.push(`Ambiguous native history files: ${ref}`);
+    for (const key of files) ambiguousFiles.add(key);
+  }
+  const sourceSessions = new Map<string, Set<string>>();
+  for (const [key, group] of groups) {
+    if (ambiguousFiles.has(key)) continue;
+    const found = group.bindings.sort((a, b) => b.priority - a.priority);
+    const primary = found[0]!;
+    const aliases = new Set(found.flatMap((binding) => [...binding.aliases]));
+    if (query.worker !== undefined && !aliases.has(query.worker)) continue;
+    const owners = new Set(found.flatMap((binding) => (binding.owner === undefined ? [] : [binding.owner])));
+    if (owners.size > 1) {
+      warnings.push(`Conflicting native history owners: ${primary.native.terminalId}`);
+      continue;
+    }
+    const native = primary.native;
+    const path = group.path;
     const raw = await read(path);
     if (raw === undefined) {
       warnings.push(`Native history unreadable: ${native.terminalId}`);
       continue;
     }
+    const namedSession = sessionIdFromPath({
+      harness: native.agent,
+      path,
+      size: group.size,
+      mtimeMs: group.mtimeMs,
+    });
+    const sessionId =
+      found.find((binding) => binding.native.session.kind === "id")?.native.session.value ??
+      (SESSION_UUID.test(namedSession) ? namedSession : undefined);
+    sourceSessions.set(
+      key,
+      new Set([
+        ...found.map((binding) => binding.native.session.value),
+        ...(sessionId === undefined ? [] : [sessionId]),
+      ]),
+    );
     all.push(
       ...episodes(
-        nativeRecords(raw, native.agent, native.session.kind === "id" ? native.session.value : undefined),
+        nativeRecords(raw, native.agent, sessionId),
         native.terminalId,
-        meta.title,
+        primary.label,
         native.session.value,
         key,
       ),
@@ -374,8 +543,7 @@ export async function readIssueMetrics(
     (row) =>
       (row.acceptedAt ?? row.lastAt) >= since &&
       (row.acceptedAt ?? row.lastAt) < until &&
-      (query.issue === undefined || row.issueId === query.issue) &&
-      (query.worker === undefined || [row.workerId, row.label, row.nativeSessionId].includes(query.worker)),
+      (query.issue === undefined || row.issueId === query.issue),
   );
   const ledger = ((await read(join(stateDir, "seat-ledger.jsonl"))) ?? "").split("\n");
   for (const line of ledger) {
@@ -405,9 +573,10 @@ export async function readIssueMetrics(
     warnings.push("Unreadable hire receipt snapshot");
   }
   for (const row of rows)
-    row.unresolvedHireReceipt = Object.values(receipts).some(
-      (value) => obj(value).sessionId === row.nativeSessionId,
-    );
+    row.unresolvedHireReceipt = Object.values(receipts).some((value) => {
+      const sessionId = obj(value).sessionId;
+      return typeof sessionId === "string" && sourceSessions.get(row.source)?.has(sessionId);
+    });
   const lead = new Map<string, { tokens: number; reports: number }>();
   const assignments = new Map<string, Set<string>>();
   for (const meta of metas)
@@ -505,7 +674,7 @@ export async function readIssueMetrics(
         "Observed worker command launches of full pnpm check (shell/literal Python subprocess forms). Partial counts exclude unrecognized wrappers, native children and lead batch checks; no log/prose mentions counted.",
       reviews:
         "Explicit native review requests and approvals; rework counts explicit requests for fixes. Seat ledger passed/ship events are observations, never issue acceptance. Hire receipts retain unresolved attempts only; absence is not historical proof of delivery.",
-      warnings,
+      warnings: [...new Set(warnings)],
     },
   });
 }

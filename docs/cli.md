@@ -2428,10 +2428,23 @@ The JSON `report` contains `issues`, `workers`, `window`, and explicit `coverage
   work on that issue.
 - Worker `seatSettlements` and `unresolvedHireReceipt` expose ledger edges and
   pending receipts. A passed/ship edge is never issue acceptance; missing
-  receipts do not establish historical delivery.
+  receipts do not establish historical delivery. Ledger edges match the preferred
+  retained seat ID. Older seat aliases have no saved association intervals, so
+  their ledger rows are excluded from that worker's settlement totals.
 
-Only retained exact local native bindings can be read. Missing, remote,
-unreadable, or over-64-MiB sources appear in `coverage.warnings`. Reads also have
+Retained exact local bindings come from conversation metadata, the persisted
+hire-owner journal, and archived pane-tidy entries. This includes workers whose
+conversation metadata predates `nativeSource` and panes that have been closed.
+Matching session IDs and transcript paths are combined before counting, so the
+same native history is counted once across these records. Retained labels, seat
+IDs, session IDs, and transcript paths can select that worker with `--worker`.
+These historical bindings provide attribution; they grant no current pane
+control or delivery authority and cannot establish issue approval.
+
+Missing, remote, malformed, conflicting, unreadable, or over-64-MiB sources
+appear in `coverage.warnings`. Unbound session directories are not searched for
+issue mentions. Separate files claiming the same native session are ambiguous
+and excluded, including when `--worker` selects only one of their aliases. Reads also have
 a 256-MiB total request budget, with skipped sources reported. There is no
 fuzzy pane attribution or new metrics ledger. Known totals are partial when
 other sources are unavailable. No transcript, command, tool output, or

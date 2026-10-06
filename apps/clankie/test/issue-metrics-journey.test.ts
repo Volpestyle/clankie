@@ -12,6 +12,8 @@ import { expect, it } from "vitest";
 import { createSeatLedger } from "../src/captain/seat-ledger.ts";
 import { TurnMetrics, TurnSettledLog } from "../src/captain/turn-metrics.ts";
 import { DeliveryFence } from "../src/captain/delivery-fence.ts";
+import { HireOwners } from "../src/captain/hire-owners.ts";
+import { PaneTidyStateSchema } from "../src/captain/pane-tidy.ts";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -36,6 +38,24 @@ async function stop(child: ChildProcess): Promise<void> {
   clearTimeout(timer);
 }
 
+async function unchanged<T>(paths: string[], read: () => Promise<T>): Promise<T> {
+  const snapshot = () =>
+    Promise.all(
+      paths.map(async (path) => {
+        try {
+          return await readFile(path);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          return undefined;
+        }
+      }),
+    );
+  const before = await snapshot();
+  const value = await read();
+  expect(await snapshot()).toEqual(before);
+  return value;
+}
+
 it("serves the real VUH-1608 golden through the production service, client and CLI without changing the owner's fleet link", async () => {
   const dir = await mkdtemp(join(tmpdir(), "clankie-issue-metrics-"));
   // Explicitly opt in to this one owner-file read during local evidence capture.
@@ -54,6 +74,9 @@ it("serves the real VUH-1608 golden through the production service, client and C
     const captain = join(state, "captain");
     const conversationId = "conv-19296793-5a5f-4da4-af48-a8be7c2a19ca";
     const conversation = join(captain, "conversations", conversationId);
+    const metaPath = join(conversation, "meta.json");
+    const ownersPath = join(captain, "herdr-watches.json.owners.json");
+    const tidyPath = join(captain, "pane-tidy.json");
     await mkdir(conversation, { recursive: true });
     await mkdir(home, { recursive: true });
     const manifest = JSON.parse(await readFile(new URL("vuh-1608.json", fixtures), "utf8"));
@@ -71,7 +94,7 @@ it("serves the real VUH-1608 golden through the production service, client and C
     // Production metadata shape, reconstructed from the retained exact binding;
     // no live captain reads. The native source itself is the copied real history.
     await writeFile(
-      join(conversation, "meta.json"),
+      metaPath,
       JSON.stringify({
         conversationId,
         scope: { kind: "seat", seatId: manifest.terminalId },
@@ -160,23 +183,27 @@ it("serves the real VUH-1608 golden through the production service, client and C
       fullCheckRuns: 3,
     });
     expect(report.coverage.tokens).toContain("Native subagents");
-    const cli = await exec(
-      process.execPath,
-      [
-        "--import",
-        tsx,
-        join(root, "apps/tui/bin/clankie.ts"),
-        "metrics",
-        "--issues",
-        "--issue",
-        query.issue,
-        "--since",
-        query.since,
-        "--until",
-        query.until,
-      ],
-      { cwd: root, env, timeout: 20_000 },
-    );
+    const runCli = (worker?: string) =>
+      exec(
+        process.execPath,
+        [
+          "--import",
+          tsx,
+          join(root, "apps/tui/bin/clankie.ts"),
+          "metrics",
+          "--issues",
+          "--issue",
+          query.issue,
+          "--since",
+          query.since,
+          "--until",
+          query.until,
+          ...(worker === undefined ? [] : ["--worker", worker]),
+        ],
+        { cwd: root, env, timeout: 20_000 },
+      );
+    const retainedPaths = [metaPath, ownersPath, tidyPath, native];
+    const cli = await unchanged(retainedPaths, () => runCli());
     expect(JSON.parse(cli.stdout)).toEqual({ ok: true, report });
     expect(IssueMetricsReportSchema.parse(JSON.parse(cli.stdout).report)).toEqual(report);
     expect((await client.readIssueMetrics({ ...query, worker: "Noor" })).issues).toEqual(report.issues);
@@ -198,10 +225,241 @@ it("serves the real VUH-1608 golden through the production service, client and C
         })
       ).status,
     ).toBe(400);
+    // Historical attribution uses the same production journals as hiring and
+    // tidying. A native file with an issue approval is insufficient on its own.
+    const activeMeta = await readFile(metaPath);
+    const historicalMeta = JSON.parse(activeMeta.toString("utf8"));
+    delete historicalMeta.nativeSource;
+    await writeFile(metaPath, JSON.stringify(historicalMeta));
+    expect((await unchanged(retainedPaths, () => client.readIssueMetrics(query))).issues).toEqual([]);
+    const owner = { conversationId };
+    const hires = new HireOwners(ownersPath);
+    hires.bind(
+      "w3Z:p1P",
+      owner,
+      manifest.terminalId,
+      undefined,
+      "historical-noor-occupant",
+      JSON.stringify(["local", "codex", manifest.sessionId]),
+    );
+    const ownerOnly = await unchanged(retainedPaths, () => client.readIssueMetrics(query));
+    expect(ownerOnly.issues).toEqual(report.issues);
+    const ownerCli = await unchanged(retainedPaths, () => runCli(manifest.sessionId));
+    expect(IssueMetricsReportSchema.parse(JSON.parse(ownerCli.stdout).report).issues).toEqual(report.issues);
+    await rm(ownersPath);
+    const archivedSeat = "term_archived_noor";
+    const archivedTitle = "Archived Noor";
+    const tidyEntry = {
+      id: "f8c99e40-2188-4c61-817b-266d7865e500",
+      paneId: "w3Z:p1P",
+      seatId: archivedSeat,
+      title: archivedTitle,
+      harness: "codex",
+      reason: "Issue approved and native results kept",
+      lastOutput: "VUH-1608 retained report; this output does not establish approval",
+      reportPath: join(captain, "tidy-reports", "noor.md"),
+      closedAt: "2026-10-04T19:20:00.000Z",
+      undoUntil: "2026-10-04T19:25:00.000Z",
+      state: "closed",
+      sessionId: native,
+      workingDirectory: dir,
+      owner,
+      closedBy: owner,
+    };
+    const saveTidy = async (entries: unknown[]) =>
+      writeFile(tidyPath, JSON.stringify(PaneTidyStateSchema.parse({ version: 1, entries, reports: [] })));
+    await saveTidy([tidyEntry]);
+    const retainedNative = await readFile(native, "utf8");
+    const foreignUsage = {
+      timestamp: "2026-10-04T18:30:00.000Z",
+      type: "token_usage_record",
+      payload: {
+        thread_id: "foreign-child",
+        response_id: "lab-foreign-response",
+        usage: { total_tokens: 999999 },
+      },
+    };
+    // A retained absolute path still identifies the parent native thread;
+    // foreign child usage cannot inflate this worker's provider totals.
+    await writeFile(native, retainedNative + JSON.stringify(foreignUsage) + "\n");
+    const tidyOnly = await unchanged(retainedPaths, () => client.readIssueMetrics(query));
+    expect(tidyOnly.issues).toHaveLength(1);
+    expect(tidyOnly.issues[0]).toMatchObject({ status: "accepted", ...manifest.expected });
+    expect(tidyOnly.workers).toHaveLength(1);
+    expect(tidyOnly.workers[0]).toMatchObject({ workerId: archivedSeat, label: archivedTitle });
+    const tidyCli = await unchanged(retainedPaths, () => runCli(native));
+    expect(IssueMetricsReportSchema.parse(JSON.parse(tidyCli.stdout).report).issues).toEqual(tidyOnly.issues);
+    await writeFile(
+      native,
+      retainedNative
+        .split("\n")
+        .filter((line) => !line.includes(manifest.expected.acceptedAt))
+        .join("\n"),
+    );
+    expect((await unchanged(retainedPaths, () => client.readIssueMetrics(query))).issues[0]).toMatchObject({
+      status: "in_progress",
+      acceptedAt: null,
+      wallTimeMs: null,
+      reviewRounds: 1,
+      reworkRounds: 1,
+    });
+    await writeFile(native, retainedNative);
+    // ID and absolute-path aliases across all three sources are one history.
+    await writeFile(metaPath, activeMeta);
+    const historicalSeat = "term_historical_noor";
+    new HireOwners(ownersPath).bind(
+      "w3Z:p9P",
+      owner,
+      historicalSeat,
+      undefined,
+      "historical-noor-occupant",
+      JSON.stringify(["local", "codex", manifest.sessionId]),
+    );
+    const merged = await unchanged(retainedPaths, () => client.readIssueMetrics(query));
+    expect(merged.issues).toEqual(report.issues);
+    for (const worker of [
+      "Noor",
+      manifest.terminalId,
+      manifest.sessionId,
+      historicalSeat,
+      archivedSeat,
+      archivedTitle,
+      native,
+    ])
+      expect(
+        (await unchanged(retainedPaths, () => client.readIssueMetrics({ ...query, worker }))).issues,
+      ).toEqual(merged.issues);
+    const ledgerPath = join(captain, "seat-ledger.jsonl");
+    const receiptPath = join(captain, "herdr-watches.json.hire-receipts.json");
+    createSeatLedger(ledgerPath, () => Date.parse("2026-10-04T19:10:00.000Z")).runSettled(
+      archivedSeat,
+      "passed",
+    );
+    const archivedFence = new DeliveryFence(receiptPath);
+    archivedFence.begin("lab-archived", { fingerprint: "lab-archived", sessionId: native });
+    const aliasEdges = await unchanged([...retainedPaths, ledgerPath, receiptPath], () =>
+      client.readIssueMetrics(query),
+    );
+    expect(aliasEdges.issues[0]).toMatchObject({ status: "accepted", ...manifest.expected });
+    // Old seat aliases lack association intervals; their ledger rows cannot
+    // be borrowed by the preferred active seat. Exact session receipts survive.
+    expect(aliasEdges.issues[0]!.workers[0]).toMatchObject({
+      workerId: manifest.terminalId,
+      seatSettlements: { passed: 0 },
+      unresolvedHireReceipt: true,
+    });
+    archivedFence.reconcile("lab-archived", archivedFence.pending("lab-archived")!.messageId);
+    await rm(ledgerPath);
+    await rm(receiptPath);
+    const unboundSessionId = "04f4c8ce-407f-49a4-990b-b81d8508d3f7";
+    const unboundNative = join(nativeDir, `rollout-2026-10-04T12-51-52-${unboundSessionId}.jsonl`);
+    await writeFile(
+      unboundNative,
+      nativeBytes
+        .toString("utf8")
+        .replaceAll(manifest.sessionId, unboundSessionId)
+        .replaceAll(query.issue, "VUH-9999"),
+    );
+    expect(
+      (
+        await unchanged([...retainedPaths, unboundNative], () =>
+          client.readIssueMetrics({ ...query, issue: "VUH-9999" }),
+        )
+      ).issues,
+    ).toEqual([]);
+    const copiedDir = join(dir, "archived-native-copy");
+    await mkdir(copiedDir);
+    const copiedNative = join(copiedDir, manifest.source.replace("Codex ", ""));
+    await writeFile(copiedNative, retainedNative);
+    const copiedEntry = {
+      ...tidyEntry,
+      id: "9cd3b64b-f22e-40f0-a2d0-4fbd22d7ee75",
+      seatId: "term_copied_noor",
+      title: "Copied Noor",
+      sessionId: copiedNative,
+    };
+    await saveTidy([tidyEntry, copiedEntry]);
+    const copiedPaths = [...retainedPaths, copiedNative];
+    const ambiguous = await unchanged(copiedPaths, () => client.readIssueMetrics(query));
+    expect(ambiguous.issues).toEqual([]);
+    expect(ambiguous.coverage.warnings).toContain(
+      `Ambiguous native history files: codex:${manifest.sessionId}`,
+    );
+    const ambiguousAlias = await unchanged(copiedPaths, () =>
+      client.readIssueMetrics({ ...query, worker: copiedEntry.seatId }),
+    );
+    expect(ambiguousAlias.issues).toEqual([]);
+    expect(ambiguousAlias.coverage.warnings).toContain(
+      `Ambiguous native history files: codex:${manifest.sessionId}`,
+    );
+    // A worker filter cannot hide the other physical file or its distinct owner.
+    await saveTidy([tidyEntry, { ...copiedEntry, owner: { conversationId: "conv-other-owner" } }]);
+    const ambiguousOwners = await unchanged(copiedPaths, () =>
+      client.readIssueMetrics({ ...query, worker: archivedSeat }),
+    );
+    expect(ambiguousOwners.issues).toEqual([]);
+    expect(ambiguousOwners.coverage.warnings).toContain(
+      `Ambiguous native history files: codex:${manifest.sessionId}`,
+    );
+    await rm(copiedNative);
+    await saveTidy([tidyEntry]);
+    // A different persisted owner poisons the whole exact-source group; a
+    // retained title, closed-pane report or approval text cannot resolve it.
+    await saveTidy([{ ...tidyEntry, owner: { conversationId: "conv-other-owner" } }]);
+    const conflicting = await unchanged(retainedPaths, () => client.readIssueMetrics(query));
+    expect(conflicting.issues).toEqual([]);
+    expect(conflicting.coverage.warnings).toContain(
+      `Conflicting native history owners: ${manifest.terminalId}`,
+    );
+    await rm(ownersPath);
+    await writeFile(metaPath, JSON.stringify(historicalMeta));
+    // Missing/remote session bindings and malformed journals are coverage gaps,
+    // never a fallback to unbound native files or a zero-cost accepted episode.
+    new HireOwners(ownersPath).bind("w3Z:p0P", owner, "term_missing_binding");
+    new HireOwners(ownersPath).bind(
+      "w3Z:p2P",
+      owner,
+      "term_malformed_binding",
+      undefined,
+      "malformed-occupant",
+      "not-a-session-tuple",
+    );
+    new HireOwners(ownersPath).bind(
+      "remote/w3Z:p3P",
+      owner,
+      "term_remote_binding",
+      undefined,
+      "remote-occupant",
+      JSON.stringify(["remote", "codex", manifest.sessionId]),
+    );
+    new HireOwners(ownersPath).intent(owner);
+    const missingSession = "01111111-2222-3333-4444-555555555555";
+    await saveTidy([{ ...tidyEntry, seatId: "term_missing_history", sessionId: missingSession }]);
+    const unavailableHistorical = await unchanged(retainedPaths, () => client.readIssueMetrics(query));
+    expect(unavailableHistorical.issues).toEqual([]);
+    expect(unavailableHistorical.coverage.warnings).toEqual(
+      expect.arrayContaining([
+        "Native history binding unavailable: term_missing_binding",
+        "Native history binding unavailable: term_malformed_binding",
+        "Remote native history unavailable: term_remote_binding",
+        "Native history unavailable: term_missing_history",
+      ]),
+    );
+    expect(unavailableHistorical.coverage.warnings).toHaveLength(4);
+    await writeFile(ownersPath, '{"schemaVersion":1,"hires":[{"invalid":true}]}');
+    await writeFile(tidyPath, '{"version":1,"entries":[{"invalid":true}],"reports":[]}');
+    const malformed = await unchanged(retainedPaths, () => client.readIssueMetrics(query));
+    expect(malformed.issues).toEqual([]);
+    expect(malformed.coverage.warnings).toEqual(
+      expect.arrayContaining(["Invalid historical hire bindings", "Invalid closed worker history"]),
+    );
+    await rm(ownersPath);
+    await rm(tidyPath);
+    await rm(unboundNative);
+    await writeFile(metaPath, activeMeta);
     // Integration boundary: actual settled-log producer rows are attributed
     // only through unambiguous retained inbound references, in the episode.
     // These are lab rows, separate from the real-history golden above.
-    const metaPath = join(conversation, "meta.json");
     const metadata = JSON.parse(await readFile(metaPath, "utf8"));
     metadata.inboundAcceptances = {
       unique: { text: "VUH-1608 ready", runId: "lab-unique", paneId: "w3Z:p1P" },
@@ -252,15 +510,6 @@ it("serves the real VUH-1608 golden through the production service, client and C
           "text(await tools.exec_command({cmd: " +
           JSON.stringify("printf 'ok; pnpm check'\n# subprocess.run(['pnpm','check'])") +
           "}));",
-      },
-    };
-    const foreignUsage = {
-      timestamp: "2026-10-04T18:30:00.000Z",
-      type: "token_usage_record",
-      payload: {
-        thread_id: "foreign-child",
-        response_id: "lab-foreign-response",
-        usage: { total_tokens: 999999 },
       },
     };
     await writeFile(
@@ -325,6 +574,25 @@ it("serves the real VUH-1608 golden through the production service, client and C
     if (process.env.CLANKIE_METRICS_EVIDENCE !== undefined) {
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "metrics-cli.json"), cli.stdout);
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "loopback-service.log"), output);
+      await writeFile(
+        join(process.env.CLANKIE_METRICS_EVIDENCE, "historical-metrics.json"),
+        JSON.stringify(
+          {
+            ownerOnly,
+            tidyOnly,
+            merged,
+            aliasEdges,
+            ambiguous,
+            ambiguousAlias,
+            ambiguousOwners,
+            conflicting,
+            unavailableHistorical,
+            malformed,
+          },
+          null,
+          2,
+        ) + "\n",
+      );
     }
   } finally {
     if (child) await stop(child);

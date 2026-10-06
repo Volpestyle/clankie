@@ -57,7 +57,14 @@ blindly.
 
 For accepted-issue cost evidence, use `clankie metrics --issue ISSUE --since ISO
 --until ISO` or `clankie metrics --issues --worker LABEL`. The operator route
-projects retained native history and existing ledgers. Report its `coverage`
+projects retained native history and existing ledgers. Exact local bindings in
+conversation metadata, hire-owner records, and archived pane-tidy entries also
+cover older workers and closed panes. A session retained in several records or
+as both an ID and transcript path is counted once; `--worker` accepts its
+retained label, seat ID, session ID, or transcript path. Missing, remote,
+malformed, conflicting, or ambiguous bindings remain explicit coverage gaps. This read
+does not search unbound histories, alter ownership, or grant delivery authority.
+Report its `coverage`
 alongside token, wall-time, check and rework totals: parent native usage is
 partial, elapsed time includes waits, and a passed seat edge is not approval.
 Unknowns remain null; never turn missing history into a zero-cost claim. See
