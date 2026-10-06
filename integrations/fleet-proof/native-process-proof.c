@@ -3,6 +3,7 @@
 #error "Native local fleet proof requires macOS"
 #endif
 
+#define __STDC_WANT_LIB_EXT1__ 1
 #include <arpa/inet.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -303,7 +304,9 @@ static void print_string(FILE *stream, const char *text) {
 }
 
 static void erase_buffer(void *buffer, size_t size) {
-  for (size_t i = 0; i < size; ++i) ((volatile unsigned char *)buffer)[i] = 0;
+  /* Darwin's C11 erase cannot be optimized away and clears the same complete
+   * buffer as the old volatile byte loop, without one store per C iteration. */
+  if (memset_s(buffer, size, 0, size) != 0) abort();
 }
 
 /* These are both observed owners, not ancestry candidates. Never substitute

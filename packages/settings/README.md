@@ -37,6 +37,11 @@ A missing settings file uses defaults. Invalid content, permission errors and
 other read failures propagate; they never silently replace configured access
 restrictions with defaults.
 
+Every load reads the current file bytes. Identical bytes reuse their validated
+parse, returning an independent copy to each caller. There is no time-based or
+file-metadata cache of authority. Fenced loads still check the actual descriptor
+generation and recheck the path immediately before a mutation.
+
 ## Discord server role
 
 `discord.serverId` connects one server. `discord.role` is `participant` by
