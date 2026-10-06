@@ -7,7 +7,8 @@ import { inflateRawSync } from "node:zlib";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import type { HerdrFleet } from "../../src/herdr-fleet.ts";
+import { remoteProgramCommand, type HerdrFleet } from "../../src/herdr-fleet.ts";
+import { remoteCheckoutProgram } from "../../src/captain/checkout-freshness.ts";
 import { RemoteOpenCodeWorkers } from "../../src/captain/remote-opencode-workers.ts";
 import { createRemoteOpenCodeHelper } from "../../src/captain/remote-opencode-helper.ts";
 import { remoteHireReceiptCommand, type RemoteHireClaim } from "../../src/remote-hire-receipts.ts";
@@ -219,6 +220,23 @@ export async function remoteOpenCodeFixture(options: {
     commands.push(command);
     if (command.includes("remote-opencode-workers"))
       return JSON.stringify({ root: assetsRoot, node: process.execPath, stateDir: remoteState });
+    // Checkout admission runs the exact remote program against the real fixture
+    // directory. This workspace is intentionally non-Git; preserve that actual
+    // observation rather than manufacturing a fresh checkout receipt.
+    if (
+      command.replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture") ===
+      remoteProgramCommand(fleet.ssh.shell, "node", ["-e", remoteCheckoutProgram(root)]).replaceAll(
+        /clankie-launch-[a-f0-9]{16}/gu,
+        "clankie-launch-fixture",
+      )
+    ) {
+      const { stdout } = await execute("/bin/sh", ["-c", command], {
+        cwd: root,
+        env: { ...process.env, HOME: receiptHome },
+        timeout: 30_000,
+      });
+      return stdout;
+    }
     // Admit only the canonical service-authored reservation/launch program.
     // Its real filesystem locks, original claim and launch fence run in this
     // fixture's private host HOME, never the owner's ~/.clankie receipts.
