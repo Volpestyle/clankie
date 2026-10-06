@@ -35,8 +35,8 @@ for (const path of markdown) {
     }
   }
 }
-// Agent skill roots link into .agents; a moved skill leaves a dangling link that hides it.
-for (const skillRoot of [".claude/skills", ".codex/skills"]) {
+// Agent and shipped Claude skill roots link into .agents; dangling links also prevent runtime updates.
+for (const skillRoot of [".claude/skills", ".codex/skills", "integrations/claude-plugin/skills"]) {
   for (const name of await readdir(resolve(root, skillRoot))) {
     try {
       await access(resolve(root, skillRoot, name, "SKILL.md"));
