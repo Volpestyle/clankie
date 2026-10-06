@@ -29,6 +29,7 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
         offeredGrants,
         mintedBy,
         review,
+        localCompanion,
         supportGrantId,
         pendingExpiresAt,
       } = parsed.data;
@@ -44,6 +45,7 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
           offerId,
           mintedBy,
           ...(review === undefined ? {} : { review }),
+          ...(localCompanion === undefined ? {} : { localCompanion }),
           ...(supportGrantId === undefined ? {} : { supportGrantId }),
           createdAt: event.occurredAt,
           pendingExpiresAt,

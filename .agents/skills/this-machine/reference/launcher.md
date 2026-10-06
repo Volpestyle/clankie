@@ -131,6 +131,19 @@ pair again. `clankie doctor`/`clankie gateway status` show `doorway: signed out 
 a `nextStep` line; `doctor` carries the same `nextStep`. Console: `/login` signs in,
 `/devices` lists/revokes phones. A pair code that lacks the gateway route while remote
 access is signed out carries a sign-in note (`nextStep` in `--json`).
+For the installed Mac companion, `clankie pair --local-companion --json` writes
+a five-minute, single-use offer privately under `CLANKIE_STATE/companion`
+(default `~/.clankie/companion`). Output names only the file. Run as the owner,
+never root; never print, message or copy its secret into a shared location.
+The companion redeems only through the native primary loopback listener;
+repeating the handoff preserves its active device ID. This is the service
+contract; signed app distribution and installer wiring remain separate work.
+For device setup, read `/v1/captain/readiness`; never create an app-owned setup
+flag. Subscription start/status/cancel routes are documented in
+`docs/model-keys.md` under the service root. Device API-key entry on a
+self-hosted Mac is refused when readiness passes; the terminal keeps owner key
+management. Claude subscription sign-in remains unsupported.
+
 `clankie pair` and `/pair` start or reuse the local relay before minting a code;
 run pairing on the host that owns the relay. Public pairing requires the secure
 QR or full link; its fragment is secret-bearing. Never paste it into logs or

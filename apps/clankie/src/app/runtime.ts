@@ -918,7 +918,59 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),
   );
-  app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
+  const readCaptainReadiness = async () => {
+    if (dependencies.captain.operatorSeatReady?.()) return { ready: true } as const;
+    if (!dependencies.modelKeys?.readiness) throw Error("readiness_unavailable");
+    const { CaptainReadinessResponseSchema } = await import("@clankie/protocol/captain-readiness");
+    return CaptainReadinessResponseSchema.parse(await dependencies.modelKeys.readiness());
+  };
+  app.route(
+    "/",
+    createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets, {
+      keyEntryAllowed: async (request) => {
+        const setup = dependencies.modelDeviceSetup ?? {
+          platform: process.platform,
+          hosted: Boolean(dependencies.hostedBody),
+        };
+        if (setup.platform !== "darwin" || setup.hosted) return true;
+        const operator = await authenticateOperator(request, dependencies);
+        if (operator && operator !== "unavailable" && !hostedOriginalRequests.has(request)) return true;
+        return !(await readCaptainReadiness()).ready;
+      },
+      signInAuthority: async (request) => {
+        const operator = await authenticateOperator(request, dependencies);
+        if (operator && operator !== "unavailable")
+          return {
+            principal: `operator:${operator.operatorId}`,
+            commit: async (operation) => {
+              const fresh = await authenticateOperator(request, dependencies);
+              if (!fresh || fresh === "unavailable" || fresh.operatorId !== operator.operatorId) return false;
+              await operation();
+              return true;
+            },
+          };
+        const device = await authenticateDevice(request);
+        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
+          return undefined;
+        return {
+          principal: `device:${device.deviceId}`,
+          commit: (operation) =>
+            withSerializedLock(deviceLocks, device.deviceId, async () => {
+              const fresh = await authenticateDevice(request);
+              if (
+                fresh === "unavailable" ||
+                "denied" in fresh ||
+                fresh.deviceId !== device.deviceId ||
+                !fresh.grants.terminalControl
+              )
+                return false;
+              await operation();
+              return true;
+            }),
+        };
+      },
+    }),
+  );
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",
@@ -977,16 +1029,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const authorized = await authorizeOwnerDevice(context.req.raw);
     if (authorized !== true)
       return context.json({ error: authorized }, authorized === "forbidden" ? 403 : 401);
-    if (dependencies.captain.operatorSeatReady?.())
-      return context.json({ ready: true }, 200, { "cache-control": "no-store" });
-    if (!dependencies.modelKeys?.readiness) return context.json({ error: "unavailable" }, 503);
     try {
-      const { CaptainReadinessResponseSchema } = await import("@clankie/protocol/captain-readiness");
-      return context.json(
-        CaptainReadinessResponseSchema.parse(await dependencies.modelKeys.readiness()),
-        200,
-        { "cache-control": "no-store" },
-      );
+      return context.json(await readCaptainReadiness(), 200, { "cache-control": "no-store" });
     } catch {
       return context.json({ error: "unavailable" }, 503);
     }
@@ -2513,6 +2557,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: () => {
+      dependencies.modelKeys?.close?.();
       managedDiscordClosed = true;
       if (managedDiscordTimer !== undefined) clearInterval(managedDiscordTimer);
       stopBodyRequests();

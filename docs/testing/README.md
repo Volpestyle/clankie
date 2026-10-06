@@ -29,6 +29,7 @@ An archive only needs its normal `README.md`, `evidence/`, and `flows/`
 contents. The viewer derives its title from the README heading and discovers
 all other capabilities from the files present.
 
+- [2026-10-06 Mac companion service setup](2026-10-06-mac-service-setup/README.md)
 - [2026-10-05 Project membership and conversational onboarding source handoff](2026-10-05-project-onboarding/README.md)
 - [2026-09-30 Clankie trim/account integration and existing eval harvest](2026-09-30-clankie-integration/README.md)
 - [2026-09-30 Codex account headroom and launch selection](2026-09-30-codex-accounts/README.md)

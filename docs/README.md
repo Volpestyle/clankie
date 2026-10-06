@@ -18,6 +18,7 @@ This directory and the module READMEs hold the technical references.
 | [Always on](always-on.md)                           | Host sleep, the awake-Mac option, and the hosted-body alternative          |
 | [Memory](memory.md)                                 | Episodes, person facts, visibility, retention, and operator control        |
 | [Bundled skills](bundled-skills.md)                 | Skill sources, discovery, and worker distribution                          |
+| [Local companion](local-companion.md)               | Same-UID Mac pairing handoff and native loopback device session            |
 | [Model keys](model-keys.md)                         | Paired-device API for model credentials and selection                      |
 | [Composer transcription](composer-transcription.md) | Paired-device recording, draft receipts and local/cloud boundaries         |
 | [Worker access](worker-access.md)                   | Connected tools, native peer messages and manual grants                    |

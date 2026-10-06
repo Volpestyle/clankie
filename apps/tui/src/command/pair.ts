@@ -1,4 +1,5 @@
 import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { writeLocalCompanionHandoff } from "../../bin/local-companion.ts";
 import { directOriginTransport } from "@clankie/protocol";
 import QRCode from "qrcode";
 import {
@@ -18,7 +19,8 @@ const DEFAULT_PAIR_TIMEOUT_MS = 30_000;
 const DEFAULT_REVIEW_COUNT = 3;
 const REVIEW_COUNT_MAX = 10;
 const REVIEW_DAYS_MAX = 31;
-const PAIR_USAGE = "Usage: clankie pair [--json] [--timeout SEC] [--review --days N [--count N]]";
+const PAIR_USAGE =
+  "Usage: clankie pair [--json] [--timeout SEC] [--local-companion | --review --days N [--count N]]";
 
 /** The loopback stack is the only one this launcher can start or speak for. */
 function isLocalControlPlane(controlPlaneUrl: string): boolean {
@@ -166,6 +168,7 @@ export interface PairCommandOptions extends CreateServiceOptionsInput {
 }
 
 interface PairCliOptions {
+  readonly localCompanion?: true;
   readonly json: boolean;
   readonly timeoutMs: number;
   /** Review mode: `count` independent single-use offers that each live `days`. */
@@ -176,6 +179,7 @@ function parsePairArgs(args: readonly string[]): PairCliOptions {
   let json = false;
   let timeoutMs = DEFAULT_PAIR_TIMEOUT_MS;
   let review = false;
+  let localCompanion = false;
   let days: number | undefined;
   let count: number | undefined;
   const integerArg = (index: number, name: string, max: number): number => {
@@ -189,6 +193,10 @@ function parsePairArgs(args: readonly string[]): PairCliOptions {
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === "--local-companion") {
+      localCompanion = true;
+      continue;
+    }
     if (arg === "--json") {
       json = true;
       continue;
@@ -220,14 +228,15 @@ function parsePairArgs(args: readonly string[]): PairCliOptions {
   }
   if (!review) {
     if (days !== undefined || count !== undefined) throw new Error("--days and --count require --review.");
-    return { json, timeoutMs };
+    return { json, timeoutMs, ...(localCompanion ? { localCompanion: true } : {}) };
   }
   if (days === undefined) throw new Error("--review requires --days N.");
+  if (localCompanion) throw new Error("--local-companion cannot be combined with --review.");
   return { json, timeoutMs, review: { days, count: count ?? DEFAULT_REVIEW_COUNT } };
 }
 
 export async function runPairCommand(args: readonly string[], options: PairCommandOptions): Promise<number> {
-  const { json, timeoutMs, review } = parsePairArgs(args);
+  const { json, timeoutMs, review, localCompanion } = parsePairArgs(args);
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
@@ -249,10 +258,23 @@ export async function runPairCommand(args: readonly string[], options: PairComma
     if (operatorToken === undefined || operatorToken.length === 0) {
       throw new PairingOfferError("unauthorized");
     }
+    if (localCompanion && process.platform !== "darwin") throw new PairingOfferError("unavailable");
     await ensureRelayForPairing(
       { ...options, env },
       { controlPlaneUrl, timeoutMs: Math.max(1, deadline - Date.now()) },
     );
+    if (localCompanion) {
+      const path = await writeLocalCompanionHandoff({
+        env,
+        controlPlaneUrl,
+        operatorToken,
+        signal: controller.signal,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+      if (json) outputJson(stdout, { ok: true, localCompanion: true, handoffPath: path });
+      else stdout.write(`Local companion offer ready in ${path}.\n`);
+      return 0;
+    }
     // Before the mint, so the offer stays the last request. It only decides
     // whether the finished code gets a sign-in note; a failed probe says nothing.
     if (review === undefined && !controller.signal.aborted)

@@ -146,6 +146,9 @@ export interface ClankieAppDependencies {
   seatCallReceiptPath?: string;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
+  /** Proven by the primary listener socket, never a caller-supplied header. */
+  isLocalCompanionRequest?: (request: Request) => boolean;
+  modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
   hostedPairing?: HostedPairing;

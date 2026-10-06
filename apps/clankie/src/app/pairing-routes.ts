@@ -25,6 +25,13 @@ import {
 import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
 import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
 import { Hono, type Context } from "hono";
+import {
+  LOCAL_COMPANION_OFFER_PATH,
+  LOCAL_COMPANION_REDEEM_PATH,
+  LocalCompanionOfferSchema,
+  LocalCompanionRedeemRequestSchema,
+  type LocalCompanionSession,
+} from "@clankie/protocol/local-companion";
 import { bodyLimit } from "hono/body-limit";
 import { randomBytes } from "node:crypto";
 import { COMPLETION_TOKEN_TTL_MS, DeviceSessionSigner, mintDeviceSessionClaims } from "../device-session.ts";
@@ -78,6 +85,113 @@ export interface RegisterPairingRoutesContext {
 }
 
 export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
+  // Deliberately separate: these offers cannot redeem through the gateway or
+  // ordinary pairing routes, even if a proxy forwards them from loopback.
+  let localOffers = new PairingOfferStore();
+  for (const path of [LOCAL_COMPANION_OFFER_PATH, LOCAL_COMPANION_REDEEM_PATH]) {
+    ctx.app.use(path, async (context, next) => {
+      context.header("cache-control", "no-store");
+      if (
+        ctx.dependencies.modelDeviceSetup?.platform !== "darwin" ||
+        ctx.dependencies.modelDeviceSetup.hosted
+      )
+        return context.json({ error: "not_found" }, 404);
+      if (!ctx.dependencies.isLocalCompanionRequest?.(context.req.raw))
+        return context.json({ error: "native_loopback_required" }, 403);
+      if (!ctx.deviceSessionSigner) return context.json({ error: "device_authentication_unavailable" }, 503);
+      await next();
+    });
+    ctx.app.use(path, bodyLimit({ maxSize: 1024 }));
+  }
+  ctx.app.post(LOCAL_COMPANION_OFFER_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!operator || operator === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const offer = mintPairingOffer({
+      now: ctx.clock(),
+      mintedBy: operator.operatorId,
+      idFactory: ctx.idFactory,
+    });
+    // A reinstall replaces an unredeemed handoff rather than accumulating capabilities.
+    localOffers = new PairingOfferStore();
+    localOffers.add(pairingOfferRecord(offer));
+    ctx.recordEvent("pairing.offer.minted", `pairing:${offer.offerId}`, offer.createdAt, {
+      offerId: offer.offerId,
+      operatorId: operator.operatorId,
+      expiresAt: offer.expiresAt,
+      localCompanion: true,
+    });
+    return context.json(
+      LocalCompanionOfferSchema.parse({
+        version: 1,
+        offerSecret: offer.offerSecret,
+        expiresAt: offer.expiresAt,
+      }),
+    );
+  });
+  ctx.app.post(LOCAL_COMPANION_REDEEM_PATH, async (context) => {
+    const parsed = LocalCompanionRedeemRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    return withSerializedLock(ctx.deviceLocks, "local-companion", async () => {
+      const now = ctx.clock();
+      localOffers.prune(now);
+      const taken = localOffers.take(parsed.data, now);
+      if (!taken.ok) return context.json({ error: taken.error }, taken.error === "consumed" ? 409 : 410);
+      const existing = [...ctx.devices.values()].find(
+        (device) => device.localCompanion && device.status === "active",
+      );
+      const deviceId = existing?.deviceId ?? `device-${ctx.idFactory().slice(0, 12)}`;
+      // Revokes share this device lock. A reissue never widens the existing grants.
+      return withSerializedLock(ctx.deviceLocks, deviceId, async () => {
+        if (existing && ctx.devices.get(deviceId)?.status !== "active")
+          return context.json({ error: "revoked" }, 403);
+        const claims = mintDeviceSessionClaims({
+          deviceId,
+          nowEpochSeconds: Math.floor(now.getTime() / 1000),
+        });
+        const deviceToken = ctx.deviceSessionSigner!.issue(claims);
+        const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
+        const grants = existing?.grants ?? TAKE_CONTROL_GRANTS;
+        if (!existing) {
+          applyDeviceEvent(
+            ctx.devices,
+            ctx.recordEvent("device.pairing.redeemed", `device:${deviceId}`, now.toISOString(), {
+              schemaVersion: 1,
+              deviceId,
+              offerId: taken.offer.offerId,
+              name: "Clankie on this Mac",
+              platform: "macos",
+              offeredGrants: grants,
+              mintedBy: taken.offer.mintedBy,
+              localCompanion: true,
+              pendingExpiresAt: new Date(now.getTime() + COMPLETION_TOKEN_TTL_MS).toISOString(),
+            }),
+          );
+        }
+        applyDeviceEvent(
+          ctx.devices,
+          ctx.recordEvent(
+            existing ? "device.session.refreshed" : "device.activated",
+            `device:${deviceId}`,
+            now.toISOString(),
+            { schemaVersion: 1, deviceId, grants, sessionExpiresAt },
+          ),
+        );
+        const controlPlaneUrl = new URL(context.req.url).origin;
+        const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? "4321");
+        const relayUrl = `http://127.0.0.1:${Number.isInteger(relayPort) && relayPort > 0 && relayPort <= 65535 ? relayPort : 4321}`;
+        return context.json({
+          deviceId,
+          deviceToken,
+          grants,
+          sessionExpiresAt,
+          host: { name: ctx.hostDisplayName },
+          relayUrl,
+          directRoute: { controlPlaneUrl, relayUrl },
+        } satisfies LocalCompanionSession);
+      });
+    });
+  });
   // Mint a one-time pairing offer. The offer secret appears once in the
   // response and is never logged; events carry only the non-secret offer id.
   // Public gateway wins when configured. Otherwise the existing owner-authored

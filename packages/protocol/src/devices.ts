@@ -61,6 +61,7 @@ export const DeviceRecordSchema = z
     supportGrantId: z.string().uuid().optional(),
     /** Paired through a long-lived review offer (ADR 0154); revoke after the review. */
     review: z.literal(true).optional(),
+    localCompanion: z.literal(true).optional(),
     createdAt: z.string().datetime(),
     pendingExpiresAt: z.string().datetime(),
     activatedAt: z.string().datetime().optional(),
@@ -340,6 +341,7 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
       mintedBy: z.string().min(1),
       supportGrantId: z.string().uuid().optional(),
       review: z.literal(true).optional(),
+      localCompanion: z.literal(true).optional(),
       pendingExpiresAt: z.string().datetime(),
     }),
   }),

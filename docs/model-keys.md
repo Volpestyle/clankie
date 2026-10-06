@@ -120,3 +120,56 @@ error text are omitted. Catalog identifiers allow letters, digits, `.`, `_`,
 `:`, `/` and `-`, up to 128 characters; credential-shaped values are refused.
 The existing emitter adds `v` and `atMs`, and the host shipper adds tenant and
 instance identity. Telemetry failure never changes a write's result.
+
+## First-run setup and subscription sign-in
+
+On a self-hosted Mac, device key entry (`POST /v1/model-keys/set`) is allowed
+while `/v1/captain/readiness` is false. When readiness is true, including an
+active operator seat, it returns `forbidden` (403). Readiness is checked at the
+serialized credential write, alongside authorization. Operator CLI key
+management and hosted device behavior keep their existing authority. Setup
+writes and model selection share one service lock. Completing `/setup` in the
+console updates the same broker/config that a paired device reads, without a
+restart or an app-owned setup flag.
+
+`GET /v1/model-keys/subscriptions` still lists existing sign-ins only. Starting
+one uses separate APIs from `@clankie/protocol/model-keys`:
+
+| Method | Path                                   | Request                                                                                          |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| GET    | `/v1/model-keys/subscriptions/methods` | none                                                                                             |
+| POST   | `/v1/model-keys/subscriptions/start`   | `{ "providerId": "openai-codex", "method": "browser", "model": "openai-codex/<catalog model>" }` |
+| POST   | `/v1/model-keys/subscriptions/status`  | `{ "sessionId": "<returned UUID>" }`                                                             |
+| POST   | `/v1/model-keys/subscriptions/cancel`  | `{ "sessionId": "<returned UUID>" }`                                                             |
+
+Populate providers/methods from `methods` and models from the catalog. Current
+policy permits local ChatGPT browser/device sign-in and SuperGrok device-code
+sign-in. Claude subscription sign-in is removed; hosted ChatGPT remains
+unavailable pending provider approval. These APIs reuse `/auth`'s sign-in
+helpers and preserve those policies; API-key setup remains available.
+
+Start returns `{ "ok": true, "sessionId": "…", "providerId": "…",
+"expiresAt": "…", "state": "pending" }`. Poll status for `url` and optionally
+`userCode`; the initiating client opens that HTTPS URL in its browser. ChatGPT
+`browser` uses a callback on this Mac, so use `device` from a phone. SuperGrok
+may return a complete verification URL and still exposes the code for manual
+entry. The local console continues to offer both flows through `/auth` and
+`/setup`; the service does not launch a browser without the client's action.
+
+After fresh principal and cancellation checks, `committing` marks admission to
+the broker write. Cancellation and expiry then wait for that write and model
+selection to finish; they never claim that an admitted write was cancelled.
+A successful sign-in stores the credential in the broker and selects the
+requested model, then reports `complete`. Other terminal states are
+`cancelled`, `expired`, and `failed`; terminal responses discard the URL/code.
+Only the initiating authenticated principal can read or cancel its interaction.
+Another paired device gets `session_not_found` (404). One pending sign-in is
+allowed per service (`busy`, 409); sessions expire after five minutes. Restart
+or service shutdown cancels interactions. Revocation, cancellation and timeout
+prevent a later provider result from reaching commit admission. The token exchange
+and polling helpers support cancellation and bounded network waits.
+
+Sign-in errors use fixed codes (`unsupported_provider`, `unsupported_model`,
+`malformed`, `unavailable`), never provider text. Login URLs and device codes
+are sensitive interaction data: do not log, persist, put them in conversation
+messages or include them in diagnostics. Provider tokens never cross this API.
