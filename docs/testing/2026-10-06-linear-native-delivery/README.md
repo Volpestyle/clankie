@@ -182,8 +182,8 @@ external cursor, native `<channel>` message in the original transcript, and
 delivery acknowledgment. A healthy MCP tool connection or protocol ACK alone is
 insufficient. No live restart or repoint was authorized for this investigation.
 
-Ticket acceptance also requests per-project routing and marking Linear inbox
-notifications read. Current main explicitly uses one configured global chat and
-retired account read/ack routing. Those requirements need a lead decision before
-closure; this branch preserves the current architecture and does not mark inbox
-notifications read.
+James settled these acceptance lines on 2026-10-06: project lead chat routing
+with a named `global-default` fallback, and read only after target-chat consumption.
+The additive [routing/read follow-up](../2026-10-06-linear-routing-read/README.md)
+implements them. This original source snapshot did not mark live notifications
+read or change destinations.

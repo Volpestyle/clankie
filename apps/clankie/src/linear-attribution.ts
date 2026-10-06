@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import {
   linearActivityIssueId,
+  linearActivityProject,
   linearActivityUpdateParent,
   LinearReplyRecipientSchema,
   type LinearActivityEvent,
@@ -17,6 +18,7 @@ const EntrySchema = z.object({
   issueId: z.string().uuid().optional(),
   issueIdentifier: z.string().max(256).optional(),
   issueTitle: z.string().max(2048).optional(),
+  project: z.object({ id: z.string().uuid(), name: z.string().max(256).optional() }).optional(),
   parent: LinearReplyRecipientSchema.pick({ parentType: true, parentId: true }).optional(),
   replyRecipient: LinearReplyRecipientSchema.optional(),
   comment: z.string().optional(),
@@ -137,10 +139,18 @@ export class LinearAttributionJournal {
       ...(issueId === undefined ? {} : { issueId }),
       ...(typeof issue.identifier === "string" ? { issueIdentifier: issue.identifier.slice(0, 256) } : {}),
       ...(typeof issue.title === "string" ? { issueTitle: issue.title.slice(0, 2048) } : {}),
+      ...(linearActivityProject(activity) ? { project: linearActivityProject(activity) } : {}),
       ...(parent ? { parent } : {}),
       ...(provenRecipient ? { replyRecipient: provenRecipient } : {}),
       ...(activity.type === "Comment" && typeof activity.data.id === "string"
         ? { comment: activity.data.id }
+        : {}),
+      ...(activity.type === "Reaction" &&
+      activity.data.comment &&
+      typeof activity.data.comment === "object" &&
+      "id" in activity.data.comment &&
+      z.string().uuid().safeParse(activity.data.comment.id).success
+        ? { comment: activity.data.comment.id }
         : {}),
       type: activity.type,
       action: activity.action,
@@ -184,6 +194,7 @@ export class LinearAttributionJournal {
           id: found.issueId,
           title: found.issueTitle,
           ...(found.issueIdentifier ? { identifier: found.issueIdentifier } : {}),
+          ...(found.project?.name ? { project: { id: found.project.id, name: found.project.name } } : {}),
         }
       : undefined;
   }
@@ -194,7 +205,7 @@ export class LinearAttributionJournal {
     host: Pick<McpHost, "call">,
   ): Promise<LinearActivityEvent["issueContext"]> {
     const retained = this.context(activity);
-    if (retained) return retained;
+    if (retained?.project) return retained;
     if (!activity.issueId) return;
     const read = await host.call({
       lane: "operator",
@@ -205,10 +216,16 @@ export class LinearAttributionJournal {
       resultMode: "data",
       timeoutMs: 1_000,
     });
-    if (read.outcome !== "ok" || read.isError) return;
+    if (read.outcome !== "ok" || read.isError) return retained;
     const parsed: unknown = JSON.parse(read.content);
     if (!parsed || typeof parsed !== "object") return;
-    const issue = parsed as { id?: unknown; uuid?: unknown; identifier?: unknown; title?: unknown };
+    const issue = parsed as {
+      id?: unknown;
+      uuid?: unknown;
+      identifier?: unknown;
+      title?: unknown;
+      project?: { id?: unknown; name?: unknown };
+    };
     const ids = [issue.id, issue.uuid].filter((id): id is string => z.string().uuid().safeParse(id).success);
     if (
       !ids.length ||
@@ -226,7 +243,98 @@ export class LinearAttributionJournal {
       id: activity.issueId,
       title: issue.title.slice(0, 2048),
       ...(identifier ? { identifier: identifier.slice(0, 256) } : {}),
+      ...(z.string().uuid().safeParse(issue.project?.id).success && typeof issue.project?.name === "string"
+        ? { project: { id: String(issue.project.id).toLowerCase(), name: issue.project.name.slice(0, 256) } }
+        : {}),
     };
+  }
+
+  /** Sparse update comments resolve only their signed parent UUID through the verified connection. */
+  async projectContext(
+    activity: LinearActivityEvent,
+    host: Pick<McpHost, "call">,
+  ): Promise<LinearActivityEvent["projectContext"]> {
+    let project = linearActivityProject(activity);
+    const parent = linearActivityUpdateParent(activity);
+    if (!project && parent?.parentType === "ProjectUpdate") {
+      const result = await host.call({
+        lane: "operator",
+        server: "linear",
+        tool: "get_status_updates",
+        requestPriority: "interactive",
+        arguments: { type: "project", id: parent.parentId },
+        resultMode: "data",
+        timeoutMs: 1_000,
+      });
+      if (result.outcome !== "ok" || result.isError) return;
+      const update = z
+        .object({ id: z.string().uuid(), project: z.object({ id: z.string().uuid(), name: z.string() }) })
+        .safeParse(JSON.parse(result.content));
+      if (!update.success || update.data.id.toLowerCase() !== parent.parentId) return;
+      project = { id: update.data.project.id.toLowerCase(), name: update.data.project.name };
+    }
+    if (!project) return;
+    if (project.name) return { id: project.id, name: project.name.slice(0, 256) };
+    const result = await host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "get_project",
+      requestPriority: "interactive",
+      arguments: { query: project.id },
+      resultMode: "data",
+      timeoutMs: 1_000,
+    });
+    if (result.outcome !== "ok" || result.isError) return;
+    const found = z.object({ id: z.string().uuid(), name: z.string() }).safeParse(JSON.parse(result.content));
+    if (found.success && found.data.id.toLowerCase() === project.id)
+      return { id: project.id, name: found.data.name.slice(0, 256) };
+  }
+
+  /** Exact signed event correlation for a target-chat consumption receipt. Delayed inbox creation is allowed
+   * only when a comment anchor uniquely identifies its signed create event. */
+  notificationEvent(
+    notification: { type: string; createdAt: string; url?: string | undefined },
+    organizationId: string,
+  ): string | undefined {
+    const target = subject(notification.url);
+    if (!target) return;
+    const commentType = ["issueNewComment", "issueCommentMention", ...STATUS_REPLY_NOTIFICATIONS].includes(
+      notification.type,
+    );
+    const at = Date.parse(notification.createdAt);
+    if (!Number.isFinite(at)) return;
+    const candidates = this.entries.filter((entry) => {
+      if (entry.organizationId !== organizationId || entry.resource !== target.resource) return false;
+      if (
+        target.update &&
+        (entry.parent?.parentType !== target.update.type ||
+          !aliasMatches(entry.parent.parentId, target.update.id, true))
+      )
+        return false;
+      if (commentType)
+        return (
+          entry.type === "Comment" &&
+          entry.action === "create" &&
+          !!target.comment &&
+          aliasMatches(entry.comment, target.comment, true)
+        );
+      // Resource-only notifications are not unique: retain the conservative action-time window.
+      if (entry.at > at + 1_000 || entry.at < at - 5_000) return false;
+      if (notification.type === "issueCommentReaction")
+        return (
+          entry.type === "Reaction" &&
+          entry.action === "create" &&
+          (!target.comment || aliasMatches(entry.comment, target.comment, true))
+        );
+      if (notification.type === "issueAssignedToYou")
+        return (
+          entry.type === "Issue" &&
+          (entry.action === "create" ||
+            entry.changed.some((field) => ["assigneeId", "delegateId"].includes(field)))
+        );
+      return false;
+    });
+    return candidates.length === 1 ? candidates[0]!.eventId : undefined;
   }
 
   /** Resolve an issue independently of actor timing, using only retained signed resource evidence. */

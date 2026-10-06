@@ -112,6 +112,9 @@ import {
   flushLinearActivity,
   freshLinearEvents,
   linearWakePrompt,
+  linearWakeReceipt,
+  receiveLinearWake,
+  linearWakeDeliveries,
   linearWakeTargetAllowed,
   loadLinearEventReceipts,
   queueLinearActivity,
@@ -298,6 +301,11 @@ export class ConversationStore {
   public questionEligible: (id: string) => boolean = () => true;
   public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
   public linearFollowing: (() => Promise<boolean>) | undefined;
+  public onLinearWakeReceived:
+    | ((
+        references: readonly import("../../linear-wake-read.ts").LinearWakeNotificationReference[],
+      ) => Promise<unknown>)
+    | undefined;
 
   public constructor(
     root: string,
@@ -995,6 +1003,20 @@ export class ConversationStore {
   /** Compact verified context is prepared when the queued chat turn starts. */
   public linearWakePrompt(id = "global-default", runId?: string): string | undefined {
     return linearWakePrompt(this, id, runId);
+  }
+
+  public linearWakeReceipt(id: string, runId?: string) {
+    return linearWakeReceipt(this, id, runId);
+  }
+
+  public receiveLinearWake(
+    ...args: Parameters<typeof receiveLinearWake> extends [unknown, ...infer Rest] ? Rest : never
+  ) {
+    return receiveLinearWake(this, ...args);
+  }
+
+  public linearWakeDeliveries(id?: string) {
+    return linearWakeDeliveries(this, id);
   }
 
   public conversationIdForSeat(seatId: string): string | undefined {

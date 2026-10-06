@@ -150,7 +150,18 @@ export interface ConversationMeta {
   retainedFromCursor?: string;
   /** Newest external event already carried by a Linear hook turn. */
   linearWakeCursor?: string;
-  linearWakeCheckpoint?: { previous: string; cursor: string; runId?: string };
+  linearWakeCheckpoint?: { previous: string; cursor: string; runId?: string; wakeId?: string };
+  /** Exact offered batches; a native transport ACK alone does not mark provider notifications read. */
+  linearWakeReceipts?: Record<
+    string,
+    {
+      runId?: string;
+      eventIds: string[];
+      offeredAt: string;
+      receivedAt?: string;
+      native?: { messageId: string; fingerprint: string; recipientBinding?: string };
+    }
+  >;
   /** Harness-native messages already folded into this durable persona thread. */
   seatTranscript?: SeatTranscriptCheckpoint;
   roomTranscripts?: Record<string, SeatTranscriptCheckpoint>;

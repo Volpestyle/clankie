@@ -76,6 +76,9 @@ export interface CaptainOptions {
   readonly settings?: SettingsStore;
   /** Live webhook readiness, rechecked before a queued Linear wake starts. */
   readonly linearFollowing?: () => Promise<boolean>;
+  readonly linearWakeReceived?: (
+    references: readonly import("../linear-wake-read.ts").LinearWakeNotificationReference[],
+  ) => Promise<unknown>;
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;
   /** Conversation-scoped file publication; bytes share the conversation retention lifecycle. */

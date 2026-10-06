@@ -297,6 +297,7 @@ export interface ClankieAppDependencies {
     ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
     /** Bounded read of missing issue context through the verified connected account. */
     issueContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["issueContext"]>;
+    projectContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["projectContext"]>;
   };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;

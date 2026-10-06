@@ -36,6 +36,7 @@ async function fixture(boundGraceMs = 20) {
       ...value.linearWebhook,
       following: true,
       url: "https://fixture.example/v1/hooks/linear",
+      wake: { ...value.linearWebhook.wake, ownerUserEmails: ["volpestyle@gmail.com"] },
     },
   }));
   const own = { userId: randomUUID(), workspaceId: randomUUID() };

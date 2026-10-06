@@ -818,6 +818,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     linearWake: {
       settings: settingsStore,
       targetAllowed: (id: string) => conversations.linearWakeTargetAllowed(id),
+      received: (id: string, wakeId: string) =>
+        conversations.receiveLinearWake(id, wakeId, async (original) => {
+          const source = await operatorNativeSource(id);
+          const binding = inboundBinding(source);
+          if (!binding || binding !== original.recipientBinding) return false;
+          shutdown.signal.throwIfAborted();
+          return seatOutbox(id).confirmReceived(original);
+        }),
     },
     discordSettings: () => readDiscordServerSettings(options.discordEnvironment, settingsStore),
   };
@@ -1544,6 +1552,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   conversations.linearFollowing = async () =>
     (await settings()).linearWebhook.following &&
     (options.linearFollowing === undefined || (await options.linearFollowing()));
+  conversations.onLinearWakeReceived = options.linearWakeReceived;
   const hireSeat: HireSeat = async (request, brief, source) => {
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
@@ -4317,6 +4326,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     fleetWriteAuthority,
     linearWakeTargetAllowed: (id) => conversations.linearWakeTargetAllowed(id),
+    linearWakeDeliveries: () => conversations.linearWakeDeliveries(),
     receiveLinearActivity: (activity, following, conversationId) =>
       conversations.receiveLinearActivity(activity, following, conversationId),
 

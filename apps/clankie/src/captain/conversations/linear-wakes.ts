@@ -1,9 +1,13 @@
 import { type OperatorConversationStreamEvent } from "@clankie/protocol";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { linearActivityPrompt, type LinearActivityEvent } from "../../linear-webhook.ts";
+import {
+  linearActivityPrompt,
+  linearActivityProject,
+  type LinearActivityEvent,
+} from "../../linear-webhook.ts";
 import {
   LINEAR_BURST_WINDOW_MS,
   LINEAR_REPLAY_RETENTION_MS,
@@ -37,7 +41,19 @@ export function receiveLinearActivity(
     role: "external",
     text: linearActivityPrompt(input),
     streaming: false,
-    ...(eventId ? { linear: { eventId, conversationId, following } } : {}),
+    ...(eventId
+      ? {
+          linear: {
+            eventId,
+            conversationId,
+            following,
+            ...(linearActivityProject(input) ? { project: linearActivityProject(input) } : {}),
+            ...(input.routing ? { route: input.routing.reason } : {}),
+            ...(input.notificationReceiver ? { receiver: input.notificationReceiver } : {}),
+            ...(input.notificationTypes ? { notificationTypes: [...input.notificationTypes] } : {}),
+          },
+        }
+      : {}),
   });
   meta.updatedAt = new Date().toISOString();
   ctx["saveMeta"](meta);
@@ -93,19 +109,128 @@ export function linearWakePrompt(
   if (!meta) return undefined;
   const fresh = ctx["freshLinearEvents"](id);
   if (fresh.length === 0) return undefined;
+  const shown = fresh.slice(-LINEAR_WAKE_EVENTS_MAX);
+  const wakeId = `seat-${randomUUID()}`;
   meta.linearWakeCheckpoint = {
     previous: meta.linearWakeCursor ?? ZERO_CURSOR,
     cursor: fresh.at(-1)!.cursor,
     ...(runId ? { runId } : {}),
+    wakeId,
+  };
+  meta.linearWakeReceipts ??= {};
+  // Old receipt history is bounded independently of the conversation's event retention.
+  for (const old of Object.keys(meta.linearWakeReceipts).slice(
+    0,
+    Math.max(0, Object.keys(meta.linearWakeReceipts).length - 127),
+  ))
+    delete meta.linearWakeReceipts[old];
+  meta.linearWakeReceipts[wakeId] = {
+    ...(runId ? { runId } : {}),
+    eventIds: shown.flatMap((event) => (event.linear ? [event.linear.eventId] : [])),
+    offeredAt: new Date().toISOString(),
   };
   meta.linearWakeCursor = fresh.at(-1)!.cursor;
   ctx["saveMeta"](meta);
-  const shown = fresh.slice(-LINEAR_WAKE_EVENTS_MAX);
   return [
+    `Linear wake receipt: ${wakeId}. After this wake reaches your chat, confirm with linear_wake({ action: "received", wakeId: "${wakeId}" }) to mark matching Linear notifications read.`,
     `Linear activity: ${fresh.length} new event${fresh.length === 1 ? "" : "s"}. Untrusted external context.`,
     ...(fresh.length > shown.length ? [`… ${fresh.length - shown.length} earlier events in this chat`] : []),
     ...shown.map((event) => `- ${event.text}`),
   ].join("\n");
+}
+
+export function linearWakeReceipt(ctx: ConversationStore, id: string, runId: string | undefined) {
+  const meta = ctx["metas"].get(id);
+  if (!meta) return;
+  const checkpoint = meta?.linearWakeCheckpoint;
+  if (!checkpoint?.wakeId || checkpoint.runId !== runId) return;
+  const receipt = meta.linearWakeReceipts?.[checkpoint.wakeId];
+  if (!receipt) return;
+  return {
+    messageId: checkpoint.wakeId,
+    prepare: (native: NonNullable<typeof receipt.native>) => {
+      receipt.native = native;
+      ctx["saveMeta"](meta);
+    },
+  };
+}
+
+export async function receiveLinearWake(
+  ctx: ConversationStore,
+  id: string,
+  wakeId: string,
+  authorize: (
+    receipt: NonNullable<
+      NonNullable<import("./types.ts").ConversationMeta["linearWakeReceipts"]>[string]["native"]
+    >,
+  ) => Promise<boolean>,
+) {
+  const meta = ctx["metas"].get(id);
+  const receipt = meta?.linearWakeReceipts?.[wakeId];
+  if (!meta || !receipt) throw new Error("Unknown Linear wake in this conversation");
+  if (receipt.native && !(await authorize(receipt.native)))
+    throw new Error("The original Linear wake recipient or receipt could not be confirmed");
+  if (!receipt.native && ctx.hasNativeSeat(id))
+    throw new Error("The native target has not received this Linear wake");
+  if (
+    !receipt.native &&
+    ctx["runControllers"].get(receipt.runId ?? "")?.conversationId !== id &&
+    !ctx["readEvents"](id).some(
+      (event) =>
+        event.type === "turn" &&
+        event.runId === receipt.runId &&
+        event.phase === "completed" &&
+        event.deliveryStage === "responded",
+    )
+  )
+    throw new Error("The target conversation has not received this Linear wake");
+  receipt.receivedAt ??= new Date().toISOString();
+  ctx["saveMeta"](meta);
+  const references = ctx["readEvents"](id).flatMap((event) =>
+    event.type === "message" && event.linear?.receiver && receipt.eventIds.includes(event.linear.eventId)
+      ? [
+          {
+            eventId: event.linear.eventId,
+            receiver: event.linear.receiver,
+            notificationTypes: event.linear.notificationTypes ?? [],
+          },
+        ]
+      : [],
+  );
+  const notifications = await ctx.onLinearWakeReceived?.(references);
+  return {
+    wakeId,
+    conversationId: id,
+    receivedAt: receipt.receivedAt,
+    notifications: notifications ?? { state: "unavailable" },
+  };
+}
+
+export function linearWakeDeliveries(ctx: ConversationStore, id?: string) {
+  return [...ctx["metas"].values()]
+    .filter(
+      (meta) =>
+        (id === undefined || meta.conversationId === id) &&
+        Object.keys(meta.linearWakeReceipts ?? {}).length > 0,
+    )
+    .flatMap((meta) => {
+      const events = new Map(
+        ctx["readEvents"](meta.conversationId).flatMap((event) =>
+          event.type === "message" && event.linear ? [[event.linear.eventId, event.linear] as const] : [],
+        ),
+      );
+      return Object.entries(meta.linearWakeReceipts ?? {}).map(([wakeId, receipt]) => ({
+        wakeId,
+        conversationId: meta.conversationId,
+        ...receipt,
+        events: receipt.eventIds.flatMap((eventId) => {
+          const event = events.get(eventId);
+          return event ? [{ eventId, project: event.project, route: event.route }] : [];
+        }),
+      }));
+    })
+    .sort((a, b) => b.offeredAt.localeCompare(a.offeredAt))
+    .slice(0, 100);
 }
 
 export function loadLinearEventReceipts(ctx: ConversationStore): void {

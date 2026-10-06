@@ -408,6 +408,35 @@ export class SeatOutbox {
     return true;
   }
 
+  /** A target conversation confirms consumption of this exact original, never a replacement. */
+  public confirmReceived(original: {
+    messageId: string;
+    fingerprint: string;
+    recipientBinding?: string;
+  }): boolean {
+    const pending = this.inFlight.find((entry) => entry.event.id === original.messageId);
+    if (pending) {
+      if (
+        !pending.taken ||
+        !this.matchesRecipient(pending, original.recipientBinding) ||
+        deliveryFingerprint(pending.event.content) !== original.fingerprint
+      )
+        return false;
+    } else {
+      if (this.active.has(original.messageId)) return false;
+      const receipt = [...this.fence.all(), ...this.delivered.all()].find(
+        ([, entry]) => entry.messageId === original.messageId,
+      )?.[1];
+      if (
+        !receipt ||
+        receipt.fingerprint !== original.fingerprint ||
+        receipt.sessionId !== (original.recipientBinding ?? "")
+      )
+        return false;
+    }
+    return this.acknowledge(original.messageId, original.recipientBinding);
+  }
+
   public close(): void {
     this.closed = true;
     for (const pending of [...this.queued, ...this.inFlight, ...this.awaitingReply.values()]) {

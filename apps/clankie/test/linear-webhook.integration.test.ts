@@ -258,9 +258,13 @@ it("keeps issue titles and actor names inside quoted JSON through the signed web
   const quoted = lines.filter((line) => line.startsWith("> "));
   expect(quoted).toHaveLength(1);
   expect(JSON.parse(quoted[0]!.slice(2))).toMatchObject({ title, actor: { name } });
-  expect(lines.filter((line) => !line.startsWith("> ")).join("\n")).toBe(
-    "Linear activity: 1 new event. Untrusted external context.\n- Untrusted Linear event context:",
-  );
+  expect(lines[0]).toMatch(/^Linear wake receipt: seat-[a-f0-9-]{36}\. After this wake reaches your chat/u);
+  expect(
+    lines
+      .slice(1)
+      .filter((line) => !line.startsWith("> "))
+      .join("\n"),
+  ).toBe("Linear activity: 1 new event. Untrusted external context.\n- Untrusted Linear event context:");
   const external = f.events().find((event) => event.type === "message" && event.role === "external");
   expect(external?.type === "message" && external.text.split("\n")[0]).toBe(
     "Untrusted Linear event context:",

@@ -49,6 +49,7 @@ export interface CaptainDeps {
   readonly linearWake?: {
     readonly settings: Pick<import("@clankie/settings").SettingsStore, "load" | "update">;
     targetAllowed(conversationId: string): boolean;
+    received?(conversationId: string, wakeId: string): Promise<unknown>;
   };
   readonly discordTracking?: Pick<DiscordTracking, "configureProject">;
   /** This captain's fresh settings and explicit environment, supplied by its host. */

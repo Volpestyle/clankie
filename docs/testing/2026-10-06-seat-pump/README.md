@@ -82,11 +82,10 @@ After the receiver is live, the lead requests a fresh James comment; join its
 accepted signed hook, external activity, native delivery receipt and exact
 `w3Z:p2N` transcript event within about a minute.
 
-The ticket's automatic project routing and read-marking lines conflict with
-James's 2026-10-04 VUH-1678 decision in
-[ADR 0214](../../adr/0214-linear-wakes-require-attribution-and-rules.md): one
-configured ordinary chat receives signed activity and the lead delegates;
-the inbox/read protocol is retired. The lead has been asked to settle whether
-those acceptance lines amend that decision. Neither protocol ACK nor retained
-external activity proves model review. No live provider notification has been
-marked read, and no project destination has been changed.
+James settled the routing/read acceptance on 2026-10-06 in VUH-1743:
+verified project activity goes to its configured lead chat, otherwise
+`global-default` with the project named. A target-chat consumption receipt,
+not a transport ACK, permits matched notifications to be marked read.
+The separate [routing/read follow-up](../2026-10-06-linear-routing-read/README.md)
+implements those decisions and retains exact uncertain mutation claims.
+No live provider notification or project destination has been changed by Ash.

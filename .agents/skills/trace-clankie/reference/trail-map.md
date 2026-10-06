@@ -57,6 +57,15 @@ reconciliation and is never replayed automatically. CLI `trace` is not a command
 the TUI's `/trace` is a different room-trail view.
 The attribution journal and write receipts retain signature-based provenance
 and exact-echo suppression; a shared Linear account name is not human proof.
+For project activity, inspect `clankie linear routes show` and the external
+entry's `linear.project`, `linear.route` and `linear.conversationId` to prove the
+chosen lead chat or named `global-default` fallback. `clankie linear deliveries`
+joins offered wake IDs to their native fingerprint/binding and target-chat
+`receivedAt`. An offered batch may have failed before delivery, and a native
+transport ACK does not establish consumption. The target's `linear_wake`
+`received` call confirms only the exact original; provider `readAt` is separate.
+Read mutation claims in `~/.clankie/linear-wake-read-receipts.json` remain uncertain
+until read-only inbox evidence settles them; never delete them to repeat a write.
 The special inbox conversation, read/ack cursors and
 `~/.clankie/linear-notifications.json` checkpoint are retired. Upgrade drops
 existing unread inbox items once with a service log entry; it never replays them

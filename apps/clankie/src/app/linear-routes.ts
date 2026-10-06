@@ -1,8 +1,18 @@
 import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
-import { linearFollowStatus, linearWakeMatches, LinearWakeSettingsSchema } from "@clankie/settings";
+import {
+  linearFollowStatus,
+  linearWakeMatches,
+  LinearWakeSettingsSchema,
+  LinearWebhookSettingsSchema,
+} from "@clankie/settings";
 import { Hono } from "hono";
 import { z } from "zod";
-import { classifyLinearDelivery, linearReplyTo, linearActivityWakeTypes } from "../linear-webhook.ts";
+import {
+  classifyLinearDelivery,
+  linearReplyTo,
+  linearActivityWakeTypes,
+  linearActivityProject,
+} from "../linear-webhook.ts";
 import { authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import type { ClankieAppDependencies } from "./types.ts";
@@ -20,13 +30,50 @@ export interface RegisterLinearRoutesContext {
     readonly captain: Pick<
       ClankieAppDependencies["captain"],
       "receiveLinearActivity" | "linearWakeTargetAllowed"
-    >;
+    > &
+      Partial<Pick<ClankieAppDependencies["captain"], "linearWakeDeliveries">>;
   };
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
 }
 
 export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
+  ctx.app.on(["GET", "PUT"], "/v1/linear/routes", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    let current;
+    if (context.req.method === "PUT") {
+      const input = z
+        .object({ projectChats: LinearWebhookSettingsSchema.shape.projectChats })
+        .strict()
+        .safeParse(await readJson(context.req.raw));
+      if (!input.success) return context.json({ error: "malformed" }, 400);
+      if (
+        input.data.projectChats.some(
+          (route) => !ctx.dependencies.captain.linearWakeTargetAllowed(route.conversationId),
+        )
+      )
+        return context.json({ error: "linear_wake_target_unavailable" }, 409);
+      if (!ctx.settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
+      current = await ctx.settingsSource.update((value) => ({
+        ...value,
+        linearWebhook: { ...value.linearWebhook, projectChats: input.data.projectChats },
+      }));
+    } else current = await ctx.settingsSource.load();
+    return context.json({ schemaVersion: 1, projectChats: current.linearWebhook.projectChats });
+  });
+  ctx.app.get("/v1/linear/deliveries", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    return context.json({
+      schemaVersion: 1,
+      deliveries: ctx.dependencies.captain.linearWakeDeliveries?.() ?? [],
+    });
+  });
   ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {
     const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
     if (operator === "unavailable")
@@ -195,6 +242,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       !identityUnavailable &&
       !workspaceMismatch &&
       !(
+        linearActivityProject(activity) &&
         signedIssue &&
         typeof signedIssue === "object" &&
         "title" in signedIssue &&
@@ -212,6 +260,18 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       });
       if (context?.id.toLowerCase() === activity.issueId.toLowerCase())
         activity = { ...activity, issueContext: context };
+    }
+    if (!identityUnavailable && !workspaceMismatch && !linearActivityProject(activity)?.name) {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const projectContext = await Promise.race([
+        hook.projectContext?.(activity).catch(() => undefined),
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => resolve(undefined), 1_000);
+        }),
+      ]).finally(() => {
+        if (timeout) clearTimeout(timeout);
+      });
+      if (projectContext) activity = { ...activity, projectContext };
     }
     const ownActor =
       own !== undefined && own.workspaceId === activity.organizationId && own.userId === activity.actorId;
@@ -234,9 +294,40 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
           own !== undefined && own.workspaceId === activity.organizationId ? own.userId : "",
         ),
       );
-    const targetAllowed = ctx.dependencies.captain.linearWakeTargetAllowed(
-      current.linearWebhook.wakeConversationId,
-    );
+    const project = linearActivityProject(activity);
+    const route =
+      project &&
+      current.linearWebhook.projectChats.find((route) => route.projectId.toLowerCase() === project.id);
+    const leadAvailable = route && ctx.dependencies.captain.linearWakeTargetAllowed(route.conversationId);
+    const target = leadAvailable
+      ? route.conversationId
+      : project
+        ? "global-default"
+        : current.linearWebhook.wakeConversationId;
+    const reason = leadAvailable
+      ? ("project_lead" as const)
+      : project
+        ? ("project_fallback" as const)
+        : ("default" as const);
+    activity = {
+      ...activity,
+      ...(project
+        ? {
+            projectContext: {
+              id: project.id,
+              name: project.name ?? (route ? route.name : `Project ${project.id}`),
+            },
+          }
+        : {}),
+      routing: { conversationId: target, reason },
+      ...(own && !workspaceMismatch
+        ? {
+            notificationReceiver: { userId: own.userId, workspaceId: own.workspaceId },
+            notificationTypes: types,
+          }
+        : {}),
+    };
+    const targetAllowed = ctx.dependencies.captain.linearWakeTargetAllowed(target);
     const following =
       current.linearWebhook.following &&
       !identityUnavailable &&
@@ -245,12 +336,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       !ownWorker &&
       matches;
     const ingested =
-      targetAllowed &&
-      ctx.dependencies.captain.receiveLinearActivity(
-        activity,
-        following,
-        current.linearWebhook.wakeConversationId,
-      );
+      targetAllowed && ctx.dependencies.captain.receiveLinearActivity(activity, following, target);
     logger.info(
       {
         event: "linear.webhook",
@@ -259,7 +345,10 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
         type: activity.type,
         action: activity.action,
         issueId: activity.issueId,
-        target: current.linearWebhook.wakeConversationId,
+        target,
+        route: reason,
+        projectId: project?.id,
+        projectName: activity.projectContext?.name,
         ingested: ingested !== false,
         decision: !targetAllowed
           ? "target_unavailable"
