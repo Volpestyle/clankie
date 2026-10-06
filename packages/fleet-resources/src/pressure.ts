@@ -1,6 +1,40 @@
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
+import { promisify } from "node:util";
 import type { FleetResourcePolicy, ResourcePressure, ResourcePressureInput } from "./model.ts";
 import { nativeBoundaryAvailable } from "./process.ts";
+
+const execute = promisify(execFile);
+
+/**
+ * Memory the OS can hand a new job without swapping, in MiB. `os.freemem()` is
+ * only right where the kernel reports it that way: on macOS it counts strictly
+ * free pages, which a warm page cache keeps near zero on a mostly idle machine.
+ */
+async function availableMemoryMb(): Promise<number> {
+  if (process.platform === "darwin") {
+    // free + speculative + inactive pages: memory the kernel reclaims without
+    // touching the working set (speculative and file-backed inactive pages are
+    // dropped, anonymous inactive pages compressed). vm_stat prints "free"
+    // already net of speculative. Purgeable pages sit on the active/inactive
+    // queues, so adding them would double count. Active pages are excluded,
+    // which keeps this below memory_pressure's free percentage
+    // (kern.memorystatus_level also counts active pages as compressible).
+    const { stdout } = await execute("/usr/bin/vm_stat", [], { timeout: 2_000 });
+    const pageSize = Number(/page size of (\d+) bytes/.exec(stdout)?.[1]);
+    const pages = (label: string) =>
+      Number(new RegExp(`^Pages ${label}:\\s+(\\d+)\\.`, "m").exec(stdout)?.[1]);
+    return ((pages("free") + pages("speculative") + pages("inactive")) * pageSize) / 1024 ** 2;
+  }
+  if (process.platform === "linux") {
+    // The kernel's own estimate of memory available without swapping.
+    const meminfo = await readFile("/proc/meminfo", "utf8");
+    const kb = /^MemAvailable:\s+(\d+) kB$/m.exec(meminfo)?.[1];
+    if (kb !== undefined) return Number(kb) / 1024;
+  }
+  return freemem() / 1024 ** 2;
+}
 
 let nativeAvailable = false;
 let nativePending: Promise<void> | undefined;
@@ -25,7 +59,7 @@ async function defaultProbe(): Promise<ResourcePressureInput> {
   }
   return {
     loadRatio: loadavg()[0]! / Math.max(1, availableParallelism()),
-    availableMemoryMb: freemem() / 1024 ** 2,
+    availableMemoryMb: await availableMemoryMb(),
   };
 }
 
