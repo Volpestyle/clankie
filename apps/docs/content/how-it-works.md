@@ -1,12 +1,12 @@
 # How Clankie works
 
-Clankie lives in a persistent service. The app, terminal console, and configured
-Discord and voice connections are ways to reach him. His machine can be one you
-maintain or a private hosted machine; the service owns his conversations,
-memory, tools, and access in either case.
+Clankie lives in a persistent service on one machine: yours, or a private hosted
+one. The app, the terminal console, and Discord are ways to reach him. The
+service owns his conversations, memory, tools, and access, so closing a client
+loses nothing.
 
-You can use him without knowing the pieces below. They become useful when you
-want to customize him, connect a team, or understand where your work goes.
+You can use him without knowing any of this. It helps when you want to
+customize him, connect a team, or know where your work goes.
 
 <div class="diagram" role="img" aria-label="The app and console, plus optional Discord text and voice, reach Clankie's persistent service. The service stores conversations and memory and uses configured models, tools, and agent connections. Capabilities depend on the host.">
   <div class="diagram-col">
@@ -23,203 +23,99 @@ want to customize him, connect a team, or understand where your work goes.
   <div class="diagram-col">
     <h4>His connections</h4>
     <div class="dnode"><strong>Models and tools</strong><span>chosen for the task</span></div>
-    <div class="dnode"><strong>Helper agents</strong><span>native harnesses · optional peer coordination</span></div>
+    <div class="dnode"><strong>Helper agents</strong><span>native harnesses in Herdr</span></div>
     <div class="dnode"><strong>Optional services</strong><span>accounts · browser · media · play</span></div>
   </div>
 </div>
 
-## One identity, separate conversations
+## One identity, many conversations
 
-Clankie's character belongs to the service. A chat in the app, a project in the
-console, and a Discord room do not each create a new personality. They do have
-separate conversation histories and permissions. Sharing an identity does not
-mean every room receives everything said elsewhere.
+There is one Clankie. A chat in the app, a project in the console, and a Discord
+room each have their own history and permissions, but the same character. What
+is said in one room does not leak into another.
 
-Self-hosted Discord voice can use OpenAI/xAI realtime or an optional Claude text
-brain with OpenAI transcription and ElevenLabs speech. These choices share the
-same room permissions and turn-taking. The owner selects the stack through
-`/voice` or `clankie voice brain`, then restarts the active body. The Sonnet path
-is an experiment whose call latency and quality still need the owner's manual
-trial; it does not change the hosted service's provider selection.
+His built-in agent runs on [pi](https://pi.dev), which handles models, sessions,
+tools, skills, and compaction. Clankie adds the lasting identity, memory, his
+connections, and the authority each caller brings.
 
-His built-in agent uses [pi](https://pi.dev) for models, sessions, tools, skills,
-and compaction. Clankie adds durable identity, memory, the connections around
-him, and the authority each caller carries. Optional
-[Claude](https://github.com/Volpestyle/clankie/blob/main/integrations/claude-plugin/README.md)
-and [Codex operator seats](https://github.com/Volpestyle/clankie/blob/main/integrations/codex-plugin/README.md)
-`clankie claude` and `clankie codex`, along with `clankie opencode`,
-use the same service through their native harnesses. All three support
-`--resume`, `--conversation ID`, `--dry-run`, and `--plugin-dir PATH`.
-Numbered Claude commands use the owner’s shell account command; `clankie codex2`
-selects the registered Codex account labelled `codex2`. Their setup, hook trust,
-delivery, and continuation limits are documented separately.
-Each fresh native launch gets its own workspace chat, including simultaneous
-launches in the same directory. Resume keeps that chat; an explicit conversation
-ID selects an existing one. Transcripts and wake channels follow the selected chat.
+Other harnesses can take his seat: `clankie claude`, `clankie codex`,
+`clankie opencode`, and `clankie grok` open that tool as Clankie, with his
+persona, memory, and tools, on a chat of their own or an existing one
+([seat commands](/cli/#seat-commands)). While a seat is open, worker reports and
+wakes for its chat go to it; when it closes, pi takes over again.
 
-`clankie grok` provides another operator seat on macOS with Grok Build 1.0.46
-and an existing sign-in. Its visible native session carries the service persona,
-memory, operator tools and selected skill paths through leader IPC/ACP.
-`--dry-run` reviews the launch; `--conversation ID` selects a chat and `--resume`
-retains the original profile/session/chat after a confirmed exit. It does not
-accept `--plugin-dir`. Native permission prompts remain owner decisions.
-The selected chat can also be a Discord room. While the seat's channel is live,
-worker reports, room turns, wakes and watches reach that seat; new inputs return
-to the built-in agent after it leaves. Each channel or DM remains a separate
-conversation with its existing permissions. Workers report to the conversation
-that hired or subsequently adopted them, as resolved by the service. Without
-adoption, the actual Herdr parent receives the report through its attached
-conversation or native channel. If no eligible parent exists, the default
-conversation gets an explicitly tagged report and doctor/roster name the lead
-pane needing a bridge. This grants no tools or room permissions.
-
-Voice and text handoffs appear as individual threads under Clankie in the dock
-and app: who asked, what he is doing, and the result. Separate handoffs can run
-in parallel, with four active globally, two per room and a bounded waiting
-queue, and answers return to the asking room. Claude uses restricted native
-children. Codex uses native children only for the verified owner; everyone
-else uses the service's Pi threads with their original room grant until Codex
-can enforce a narrower child tool set. Approval
-requests still continue on the authenticated operator surface.
+Requests from Discord text or voice run as their own visible threads under
+Clankie, several at once, and the answer returns to the room that asked.
 
 ## History, memory, and goals
 
-These serve different purposes:
+| Store                | What it gives you                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| Conversation history | The thread you return to: messages, visible tool work, and delivered files.                    |
+| Memory               | Selected experiences and facts for later conversations, kept until forgotten.                  |
+| Goal                 | An objective you approve that he keeps working on, within a token budget, when autonomy is on. |
 
-| Store                | What it gives you                                                                                                          |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Conversation history | The thread you return to, with messages, visible tool work, and delivered files.                                           |
-| Memory               | Selected experiences and facts that can inform later conversations. Notes stay until forgotten.                            |
-| Goal                 | An owner-approved objective that continues in a Pi-owned conversation with a finite token budget when autonomy is enabled. |
-
-Closing a client does not erase those records. Memory recall is bounded and filtered
-by the receiving conversation's authority; operator-private notes do not enter
-social Discord recall. Goals and scheduled wakes use the existing conversation
-and tool permissions. They do not create extra access. The [memory reference](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)
-and [CLI](/cli/) own memory and continuation controls.
+Memory recall is filtered by who is asking: private operator notes never reach
+a social Discord room. Goals and self-wakes use the conversation's existing
+permissions. See [memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md).
 
 ## Models, skills, and tools
 
-A model supplies reasoning. A tool performs an operation. A skill supplies
-instructions for using tools or approaching a task. Choosing a model does not
-install a browser, log in to an account, or authorize a Discord room to run a
-shell.
-
-The DIY setup lets you choose models and connect capabilities independently.
-Conversation, images, video, and voice have separate configuration. Hosted
-availability follows the managed service's current offering. See [Customize Clankie](/diy/)
-for the practical setup and [clankie.bot](https://clankie.bot) for hosted availability.
+A model reasons, a tool acts, and a skill explains how to approach a task.
+Choosing a model installs no browser, signs in to no account, and gives no
+Discord room a shell. Chat, images, video, and voice are configured separately;
+hosted availability is listed on [clankie.bot](https://clankie.bot).
 
 ## A team around him
 
-**Work stays where you track it:** Linear, GitHub, or task files in the repo.
-Clankie and his workers use one Linear-shaped tool surface; without a Linear
-connection it uses durable local storage. `clankie doctor` reports the active
-backend, and the existing `clankie work` commands keep working.
-**Herdr contains the agents:** their native interactive terminals remain yours
-to watch and use. Clankie sends assignments through each supported harness's
-message connection, without typing into your draft. If delivery is unavailable
-or uncertain, he reports that outcome.
+**Work stays where you track it.** Clankie and his workers share one
+Linear-shaped tracker. It uses your connected Linear account, or durable local
+storage without one; `clankie doctor` shows which.
 
-Native local message adapters cover Claude Code, Codex, Pi, OpenCode and
-Grok Build. Grok uses its interactive TUI's private leader IPC/ACP on macOS,
-pinned to 1.0.46; native sign-in/permission gaps refuse without terminal input.
-Prime Agent remains researched without a local hire adapter. Remote Claude and
-Codex hires use the fleet link and native channels. See the [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
-for the message flow and current limits.
+**Herdr holds the agents.** Workers run in their real terminals, which you can
+watch and type into. Clankie hires and messages Claude Code, Codex, Pi, OpenCode,
+and Grok Build through each harness's own channel, never by typing into the
+pane, and reports when delivery is uncertain. Agents on other machines join
+through a fleet link. The [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
+lists support and limits.
 
-The app presents those agents in Messages and, where execution seats exist,
-Commons and Terminal. A worker's contact can outlive its terminal session.
-Live activity and a completion claim are evidence to inspect, not substitutes
-for the finished result and its checks. Independent linked agents can initiate
-messages to Clankie through `message_clankie`. They discover and message seats in
-their own fleet through `list_fleet_seats` and `message_peer`, using the same native
-delivery and receipts. Peer messages are agent output and grant no owner authority;
-the owner can switch them off in `/fleet`.
+Agents can also message Clankie and each other (`message_clankie`,
+`message_peer`). Those messages are agent output and carry no owner authority;
+`/fleet` can switch peer messages off. A busy-looking agent or a claim of "done"
+is something to check, not proof the work is finished.
 
-For a local source-checkout service, `clankie integrate` composes approved core
-and app commits, runs full checks in private worktrees and retains the tested
-commit evidence before landing. Named deploy holds block landing and runtime
-updates, with explicit audited owner overrides. See the [CLI reference](/cli/).
-
-## Finding your way in the console
-
-A local console opens the existing main conversation unless you select another
-with `--chat`. `/cd` selects a project workspace; tools use the selected
-conversation's directory. The TUI separates the things you can open:
-
-- `/chats`: personal and workspace chats with Clankie.
-- `/agents`: agents that are live now, and past ones that kept a thread.
-- `/rooms`: shared channels and read-only Discord inspection.
-- `/history`: all retained threads, including ongoing and offline ones.
-- `/sessions`: saved harness execution records.
-
-`/new` starts a fresh chat. `/btw` opens an ephemeral side question; `Ctrl+X`
-switches between it and the main thread, while `Ctrl+C` discards it. The
-[console reference](/console/) owns commands and keys, and
-[product vocabulary](https://github.com/Volpestyle/clankie/blob/main/docs/product-vocabulary.md)
-defines the TUI terms. Other clients may organize navigation differently.
+In the app, agents appear in Messages, as figures in Commons, and as live panes
+in Terminal. In the console, `/chats`, `/agents`, `/rooms`, `/history`, and
+`/sessions` open each kind of thread
+([vocabulary](https://github.com/Volpestyle/clankie/blob/main/docs/product-vocabulary.md),
+[console](/console/)).
 
 ## Where the service and data live
 
-In local mode, the launcher keeps Clankie's service running after the console
-closes. Your Mac must remain awake and online; [`clankie awake on`](/cli/#awake)
-can keep it awake while plugged in. In hosted mode, the console and
-app connect to a remote service; closing those clients leaves the remote work
-running, subject to the host's lifecycle and limits.
+Locally, the service keeps running after the console closes, as long as the Mac
+stays awake and online ([`clankie awake on`](/cli/#awake) helps). Hosted, closing
+a client leaves his work running within the plan's limits.
 
-The host stores service state and brokered credentials. macOS uses Keychain by
-default; Linux deployments use the documented private file backend. Model
-requests reach the configured provider or runtime, so running Clankie locally
-does not automatically make every model request local. See [credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)
-for the exact stores and exceptions.
+The host keeps service state and credentials: Keychain on macOS, a private file
+store on Linux. Connected GitHub, Linear, and Google accounts are stored there
+too, and can be reviewed or disconnected from the app or console. Model requests
+go to whichever provider you chose, so running locally does not make every model
+call local. See [credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md).
 
-GitHub, Linear and Google account Connections use the body's credential broker too.
-The app and account page show identity and granted permissions and can disconnect.
-The result reports confirmed provider revocation or a permission-review link.
-Hosted GitHub disconnect removes local access; Clankie's shared developer
-secret never enters a customer body. GitHub authorization starts with a user code; Linear uses a
-browser return and PKCE. Google consent independently enables Gmail, Calendar
-or Drive reads. Gmail and Calendar use read-only scopes; Drive's file picker
-grants access to selected files. That grant permits edits, while Clankie's
-implemented tools only read. Its refresh and
-grouped revoke lifecycle stay on the body. The shared catalog shows each
-service's purpose, account, scopes and recovery status across app, dashboard
-and console. Provider tokens remain on the body, while device
-requests travel through the encrypted gateway. These flows require configured
-developer OAuth applications; hosted provisioning supplies their public client
-configuration. See [account connections](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0232-hosted-connections-use-the-body-broker.md).
+The app reaches the host through the public gateway, which relays encrypted
+exchanges it cannot read (it sees only routing metadata, sizes, and timing). A
+self-hosted Mac can also offer a direct route with no account. Either way the
+host issues pairings and enforces every device's grants
+([network](/network/), [privacy](https://clankie.bot/privacy/)).
 
-The public gateway routes encrypted device exchanges to the host. The host
-issues pairing offers and device grants and enforces them on requests. The
-gateway cannot decrypt those device payloads; it can see routing metadata,
-sizes, and timing. Accounts, model providers, and optional push delivery have
-separate data flows. The [network reference](/network/) explains the transport
-boundary; the [privacy notice](https://clankie.bot/privacy/) covers the product's
-data handling.
-
-A self-hosted Mac can also advertise a direct device route on a reachable
-network. Direct pairing does not require a Clankie account and retains the
-host's pairing and device-grant checks. See [pairing](/cli/#pair-json-timeout-sec-review-days-n-count-n)
-for supported routes and recovery.
-
-Customer support access has a separate owner-issued window of at most 72 hours.
-Read state can expose history and Clankie state while the grant remains live;
-it cannot send messages, change settings or read terminal output. Revocation or
-expiry closes the read device, including streams. Shell windows use the hosted
-service's separate enforcement and cannot mint a paired device. The owner-facing
-[`support` command](/cli/) documents the controls; hosted availability depends on
-the coordinated service rollout.
-
-Pokémon play uses a game extension for its PokeAgents connector and session
-execution. Clankie keeps ownership, permissions, publishing destinations and
-evidence in his service. Minecraft and Rivals adoption of that shared extension
-contract remains follow-up work; their current play paths remain available.
+An owner can open a support window of up to 72 hours. Read access shows history
+and state but cannot send, change settings, or see terminals; revoking it ends
+access immediately ([`clankie support`](/cli/)).
 
 ## Go deeper
 
 The [architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md)
-is the canonical current system diagram and request-flow reference.
-The [reference shelf](/reference/) leads to the CLI, API, and subsystem guides.
+is the canonical system diagram and request-flow reference, and the
+[reference shelf](/reference/) leads to the CLI, API, and subsystem guides.
 [Decision records](https://github.com/Volpestyle/clankie/tree/main/docs/adr)
-explain how the design changed; older records describe older systems.
+explain how the design got here.

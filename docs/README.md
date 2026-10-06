@@ -70,7 +70,7 @@ source setup and checks.
   Read the current references above for operational instructions.
 - [Testing archive](testing/README.md) contains dated proofs and their limitations;
   [quality gates](testing/quality-gates.md) define the recurring checks.
-- [Desktop runtime design](desktop-runtime-design.md) is a dated proposal, not an
+- [Desktop runtime design](proposals/2026-09-05-desktop-runtime-design.md) is a dated proposal, not an
   implemented replacement for the desktop-control path.
 - [Clankie's own computer-use loop](proposals/2026-10-04-sota-computer-use.md)
   proposes direct native/provider loops, a shared hosted body and a manual comparison.

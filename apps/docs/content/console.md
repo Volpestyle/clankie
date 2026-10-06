@@ -5,62 +5,38 @@ work on a project, configure his connections, or inspect an agent's progress.
 For the first installation, follow [Get started](/get-started/); for models,
 skills, and worker setup, use [Customize Clankie](/diy/).
 
-In local mode, `clankie` starts the service if needed and opens the console.
-In hosted mode it connects to your existing remote Clankie. First launch asks
-which mode you want. The transcript shows messages and tool work above the
-editor; `/` opens command suggestions and `Ctrl+/` opens the workbench.
-An ordinary terminal works; Herdr is optional for viewing the built-in workers.
-
-Opening or switching conversations starts at the latest messages. Scroll up to
-load older retained history in pages. The text you are reading stays in place,
-and live messages continue to arrive while older pages load.
-
-The local console uses the service's [HTTP API](/api/). Hosted mode uses the
-paired-device transport and supports a smaller command set; see
-[connection modes](/cli/#local-and-hosted-connection-modes). The tables below
-describe the local console. The [CLI](/cli/) is the headless configuration and
-control reference, including its output formats and exceptions.
+In local mode, `clankie` starts the service if needed and opens the console; in
+hosted mode it connects to your remote Clankie through the paired-device
+transport, with a [smaller command set](/cli/#local-and-hosted-connection-modes).
+First launch asks which. `/` opens command suggestions, `Ctrl+/` the workbench.
+Any terminal works; Herdr is optional. This page describes the local console;
+the [CLI](/cli/) is the headless equivalent.
 
 ## Live agents
 
-While agents are seated, a dock below the editor shows status counts and up to
-three agents that want attention: blocked or with a broken bridge first, then
-working, then done. Idle agents are only counted. Another machine is named; this
-Mac is not. Press Down on an empty prompt to expand the dock in place into the
-whole fleet in the same order: Up/Down selects, Enter opens its conversation,
-and Escape or Up past the first row returns to the prompt. Typing anything else
-collapses the list and goes to the prompt.
+While agents are working, a dock under the editor counts them and shows up to
+three that want attention: blocked or disconnected first, then working, then
+done. Agents on another machine are labeled with it. Expand the dock or open
+`Ctrl+G` (see [Keys](#keys)) to pick one and open its conversation.
 
-`Ctrl+G` opens the same list as a centered modal; its full name, harness, state,
-machine and distinct current step wrap below the list. Enter opens its existing
-conversation; Escape closes the modal and preserves your draft.
-An opened conversation shows its newest 20 turns, then follows live; older turns
-stay readable with `clankie conversations show ID`.
-A fixed bar above the transcript names the conversation on screen. In an
-agent's conversation it shows `◀ esc Clankie › name` with the agent's harness,
-state and machine, and the bar and the input border take the harness color
-(yellow for Claude, blue for others), so you can see who you are typing to.
-Messages use the same native delivery as `/agents`. Escape returns to the
-conversation you left without cancelling the worker, however the agent was
-opened: the dock, `Ctrl+G` or `/agents`. Composer drafts stay with
-their conversations. The strip disappears when no agents are live.
+An agent's conversation shows its newest 20 turns and then follows live
+(`clankie conversations show ID` reads older ones). A bar above the transcript
+names who you are talking to, and the bar and input border take the harness
+color: yellow for Claude, blue for others. Messages go through the same native
+delivery as `/agents`, and drafts stay with their conversations. Escape returns
+to where you were without stopping the worker.
 
-When a harness sits in the selected conversation's seat (for example
-`clankie claude`), the footer names it, such as `claude seat`, in place of the
-configured model, because that harness takes the turns.
-
-From an expanded agent, `Ctrl+Y` focuses its exact pane in the full Herdr
-workspace. In an ordinary terminal it attaches a viewer to the existing
-workspace; inside that same workspace it only focuses the pane. A remote agent
-opens its selected machine and session over SSH. An unavailable connection
-reports an error. This action never starts a Herdr server.
-
-`/agents` still includes saved conversations under Past agents. The strip uses
-the service's fleet feed and works with his own workspace or your Herdr session.
+When a harness holds the conversation's seat (for example `clankie claude`), the
+footer names it, such as `claude seat`, in place of the model.
 
 ## Slash commands
 
-Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token boundary for the skill picker. `/skill-name task` invokes a loaded skill directly. A command typed bare opens its menu: `/project` edits names, caps, trackers, roles and workspaces in place; `/access`, `/accounts`, `/devices`, `/machines`, `/minecraft`, `/rivals` and `/update` work the same way, and `/update` shows what is running before it stages anything. Settings commands (`/autonomy`, `/awake`, `/browser`, `/compaction`, `/desktop`, `/routing`) list each setting with its current value; pick one to change it. Arguments run the same command the CLI does, and `/doctor json` keeps the full report. This table is generated from the console's own command registry.
+`$` opens the skill picker, and `/skill-name task` runs a skill directly. A
+command typed bare opens its menu (`/project`, `/access`, `/accounts`,
+`/devices`, `/machines`, `/minecraft`, `/rivals`, `/update`), and settings
+commands such as `/autonomy`, `/awake`, `/browser`, and `/routing` list each
+setting with its value. With arguments, a command runs the same code as the
+CLI. This table is generated from the console's command registry.
 
 {{SLASH_COMMANDS}}
 
@@ -71,7 +47,7 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 | `Ctrl+/`                      | Open the command workbench                                                                                                                                                                 |
 | `Down` on an empty prompt     | Expand the agent dock into the whole fleet; Up/Down selects, Enter opens its conversation, Escape returns                                                                                  |
 | `Ctrl+G`                      | Open the full live-agent modal; Up/Down selects, Enter opens its conversation, Escape closes                                                                                               |
-| `Ctrl+Y` in an expanded agent | Open that exact pane in its full Herdr workspace                                                                                                                                           |
+| `Ctrl+Y` in an expanded agent | Focus that agent's pane in its Herdr workspace (over SSH for another machine); never starts a Herdr server                                                                                 |
 | `Esc` in an expanded agent    | Return to the previous conversation; leave the worker running                                                                                                                              |
 | `Ctrl+O`                      | Toggle every tool and bash block between preview and full output                                                                                                                           |
 | `Ctrl+Shift+F`                | Search the transcript                                                                                                                                                                      |
@@ -89,38 +65,34 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 
 {{TUI_README_OPERATOR_BEHAVIOR}}
 
-`/discord` connects a server with a Participant or Admin role, a fleet toggle
-and a tracking level. The invitation requests that role's permissions. Gateway
-checks flag proven missing grants as **needs** and unknown evidence as **not
-checked**. Participant room access follows Discord permissions; Admin controls
-its dedicated server except deleting it or transferring ownership. Raw IDs and
-machine grants live under Advanced. Opening or saving setup never posts.
+`/discord` connects a server with a Participant or Admin role, a fleet toggle,
+and a tracking level, and requests exactly that role's permissions. Setup marks
+proven missing permissions **needs** and unknown ones **not checked**. Admin
+controls its dedicated server except deleting it or transferring ownership. Raw
+IDs and machine grants live under Advanced. Opening or saving setup never posts.
 
 ## Account connections
 
-Open `/connect accounts` or `/connections` → Accounts to review the body's
-service catalog, identity and granted permissions. Gmail and Calendar use
-read-only browser consent. Drive opens Google's file picker to authorize
-selected files; that grant permits editing them, while Clankie's implemented
-tools only read. The body keeps credentials and refreshes access.
-The console masks the callback link. A status check verifies access, while
-disconnecting any Google service disables all three on this Clankie and
-reports whether provider revocation completed. An unconfigured service needs
-operator OAuth client setup. See [account setup](/cli/#account-setup).
+`/connect accounts` (or `/connections` → Accounts) shows each connected
+service's identity and permissions. Gmail and Calendar are read-only; Drive
+uses Google's file picker, and Clankie's tools only read the files you pick.
+Disconnecting any Google service disconnects all three and reports whether the
+provider revoked access. See [account setup](/cli/#account-setup).
 
 ## Follow Linear
 
-Connecting an account and following its activity are separate choices.
-Use `/connect linear` for the account and the follow setup. Bare `/linear` opens
-**Follow Linear**, including **Wake rules** and the ordinary chat destination.
-The default chat is `global-default`; default rules wake only for James's signed
-comments and mentions (`volpestyle@gmail.com`), assignments/delegations to Clankie,
-and reactions on his comments. Other activity remains visible
-without starting a turn. Clankie can change the non-secret rules himself with
-`linear_wake` or `clankie linear wake set`. The
-[Linear reference](/cli/#linear-status-linear-follow-on-off) owns webhook
-configuration, enabling following, status, and recovery.
+Connecting Linear and following its activity are separate. `/connect linear`
+does both; bare `/linear` opens **Follow Linear** with its **Wake rules** and
+destination chat (default `global-default`). Default rules wake for signed
+comments and mentions from the owner emails in those rules, assignments or
+delegations to Clankie, and reactions on his comments. Other activity is visible
+without waking him. He can adjust the rules himself (`linear_wake`,
+`clankie linear wake set`). The [Linear reference](/cli/#linear-status-linear-follow-on-off)
+covers webhooks, status, and recovery.
 
 ## Headless
 
-Use headless commands for scripts: `clankie status`, `clankie doctor --json`, `clankie model set`, and `clankie persona set` print JSON and exit 0 or 1. Pairing, device listing and operator credential rotation default to human-readable output; pass `--json`, for example `clankie pair --json`. Other output exceptions are listed in the CLI reference. The full contract, with every flag and payload, is the [CLI reference](/cli/). Secret entry stays interactive — `/auth`, `/discord`, `/connect`, `/voice` — because tokens never become flags.
+Scripts use the [CLI](/cli/): most commands print JSON and exit 0 or 1, while
+pairing, device listing, and credential rotation print for people unless you
+pass `--json`. Secrets are only entered interactively (`/auth`, `/discord`,
+`/connect`, `/voice`) so tokens never become flags.

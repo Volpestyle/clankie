@@ -25,94 +25,79 @@ Clankie wherever you are.
 ## Run your own
 
 The [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-mac)
-installs a self-contained bundle on **Apple silicon, macOS 14 or newer**. Choose
-local mode, connect a supported model subscription, API key, or local runtime,
-and start talking. `/setup` continues through phone pairing, optional connections,
-and a first-agent request to Clankie. `/setup rooms` lists the other settings. No app account or Discord setup is required to use him locally.
+installs a self-contained bundle on **Apple silicon, macOS 14 or newer**:
 
-- [Install and pair the app](https://docs.clankie.bot/get-started/) — the complete onboarding path
-- [Run from source](CONTRIBUTING.md) — development setup and checks
-- [Run on Linux](infra/hosted/README.md) — advanced self-hosting, with its own capability limits
-- [Release details](docs/distribution.md) — checksums, layout, pinning, and upgrades
+```sh
+curl -fsSL https://raw.githubusercontent.com/Volpestyle/clankie/main/install.sh | sh
+clankie
+```
 
-Clankie's software is free to run; model providers and connected services may
-charge for use. Prefer to have the machine managed for you? [Hosted Clankie](https://clankie.bot)
-uses the same open-source foundation. Its plans and available features are described there.
+`/setup` connects a model (subscription, API key, or local runtime), then
+offers phone pairing, account connections, and a first agent. Only the model is
+required.
 
-## What you can make him
+- [Install and pair the app](https://docs.clankie.bot/get-started/): the full onboarding path
+- [Run from source](CONTRIBUTING.md): development setup and checks
+- [Run on Linux](infra/hosted/README.md): advanced self-hosting, with its own capability limits
+- [Release details](docs/distribution.md): checksums, layout, pinning, and upgrades
 
-**An assistant with continuity.** Talk through ideas, make drafts, generate
-pictures, and keep useful memories across conversations. His persona is yours
-to configure. Conversation history, memory, and ongoing goals belong to the
-service, so closing a console does not discard them.
+The software is free; model providers and connected services may charge.
+[Hosted Clankie](https://clankie.bot) runs the same foundation on a managed
+machine.
 
-**His own browser.** Clankie browses headlessly with a private profile that keeps
-his logins. An explicit headed request opens a window for sign-in takeover;
-windows and tabs close after 60 seconds without a browser call, and the next
-burst starts headless. `clankie browser record on` saves browsing bursts as WebM
-videos. See the [browser contract](docs/adr/0082-clankie-holds-the-browser.md).
+## What he does
 
-**A coding partner and team lead.** He can work directly or bring in agents
-using supported harnesses such as Claude Code and Codex. Herdr supplies their
-native interactive terminals; harness channels and session APIs carry automated
-messages without typing into your draft. Work stays in your repo's tracker or
-files. Remote hires use the fleet link and native channels. See
-[agent control](packages/agent-hosts/README.md#seat-adapters).
-Tell him how you want agents to work: commit, push and release approval,
-verification and reporting style. Owner defaults apply everywhere; each project
-can override them. The app's project settings and `clankie fleet status` expose
-the same [working preferences](docs/cli.md#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
-which reach every hire's brief.
+**Keeps you company and remembers.** Talk through ideas, make drafts and
+pictures, and keep memories across conversations. His persona is yours to
+shape, and his history, memory, and goals live in the service, not the window.
 
-**A familiar face on your phone.** Messages is home. Commons shows the team as
-a small world of agent figures, each leading back to a real conversation.
-Terminal exposes the worker panes when you want direct observation or control.
+**Browses on his own.** He has a private browser profile with his own logins,
+headless by default, with a visible window when you need to take over a
+sign-in ([browser contract](docs/adr/0082-clankie-holds-the-browser.md)).
+
+**Codes and leads a team.** He works directly or hires Claude Code, Codex, Pi,
+OpenCode, or Grok Build agents into real terminals in Herdr, and messages them
+through each harness's own channel. Work stays in your repo's tracker or files,
+and you set how agents commit, push, release, and report
+([agent control](packages/agent-hosts/README.md#seat-adapters),
+[working preferences](docs/cli.md#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear)).
+
+**Lives on your phone.** In the iPhone and iPad app, Messages is home, Commons
+shows the team as little figures, and Terminal opens the real worker panes.
 [Pair the app](https://docs.clankie.bot/get-started/#bring-your-mac-s-clankie-into-the-app)
-to your Mac and keep that Mac awake and online to reach it away from your desk.
+with your Mac and keep the Mac awake to reach him away from your desk.
 
-**Company in Discord.** The official bot can chat, join voice, play requested
-YouTube music, and show his Pokémon play through an Activity. Play needs his
-own credentialed seat in a separate PokeAgents world. Screen-share watching and
-Go Live belong to the separately enabled personal-lab body. The
-[Discord media guide](docs/discord-media.md) explains the differences and setup.
+**Hangs out in Discord.** The official bot chats, joins voice, plays requested
+music, and streams his Pokémon play (from his own PokeAgents seat) through an
+Activity. Screen-share watching and Go Live need the separate personal-lab body
+([Discord media](docs/discord-media.md)).
 
-**A foundation to build on.** Choose models independently for conversation and
-media, add skills and connected services, use the headless CLI, or build a client
-against the HTTP API. An MCP projection lets other agent seats use authorized
-service tools. Start with [customization](https://docs.clankie.bot/diy/) and the
-[architecture](docs/architecture.md).
-
-Start small and add the capabilities you want. The
-[setup guide](https://docs.clankie.bot/get-started/) covers the hosted experience
-and what you can enable on your own machine.
+**Is built to extend.** Models, skills, and connected services are independent
+choices. A headless CLI, an HTTP API, and an MCP bridge expose the same
+authorized tools to scripts and other agents
+([customize](https://docs.clankie.bot/diy/)).
 
 ## The system underneath
 
 Clankie is one persistent service plus the clients and connections around it.
-His built-in agent runs on pi; choosing a worker harness does not replace that
-runtime. The host owns conversations, memory, credentials, tool authority, and
-device access. Portals, execution runtimes, coordinators, and work trackers are
-independent connections.
+His built-in agent runs on [pi](https://pi.dev); worker harnesses are
+connections and never replace it. The host owns conversations, memory,
+credentials, tool authority, and device access.
 
-The [architecture](docs/architecture.md) owns the current system diagram.
-The [library index](docs/README.md) maps every subsystem to its canonical guide;
-the [CLI](docs/cli.md) and [HTTP catalog](apps/clankie/openapi.yaml) own their
-command and route contracts.
+- [Architecture](docs/architecture.md): the system diagram and request flows
+- [Library index](docs/README.md): every subsystem's canonical guide
+- [CLI](docs/cli.md) and [HTTP catalog](apps/clankie/openapi.yaml): command and route contracts
 
-The service, console, relay, and public contracts live here. The companion app
-and managed service live in separate private repositories. The
-[repository boundary](docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)
-explains what belongs where.
+This repository holds the service, console, relay, and public contracts. The
+companion app and the hosted service are private
+([repository boundary](docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
 
 ## Contribute
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the toolchain, source setup, and
-verification commands. Read [AGENTS.md](AGENTS.md) before pointing a coding agent
-at the checkout. Keep the relevant user guide and technical reference current
-when changing behavior.
-
-For questions about using Clankie, start with the [docs](https://docs.clankie.bot)
-or [support](https://clankie.bot/support/). Report security issues through
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the toolchain, source setup, and
+checks; read [AGENTS.md](AGENTS.md) before pointing a coding agent at the
+checkout. Questions go to the [docs](https://docs.clankie.bot) or
+[support](https://clankie.bot/support/), and security issues to
 [SECURITY.md](SECURITY.md).
 
 ## License

@@ -139,15 +139,7 @@ blanket retry override or automatic reconciliation from another session's transc
 `stored`, an explicit native acknowledgment means `consumed` (not model-read), and a completed
 channel result reports `responded`; unknown failures stay `uncertain`.
 
-The self-hosted voice brain is selected through `/voice` or `clankie voice brain`.
-OpenAI/xAI realtime and the optional Claude text brain share that same floor and
-voice tools. Claude uses the existing per-speaker OpenAI transcription and
-ElevenLabs speech wrapper; it receives attributed text, and interruptions abort
-its request and retire the mouth's output. Native owner voice-setting changes
-persist public settings and require a body restart. Hosted provider selection is
-separate; [the manual Sonnet trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
-owns live latency and quality proof.
-The service normalizes it — untrusted body
+The service normalizes each admitted message — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
 attached — and prompts a pi session. Every room gets a continuing session (a pi
 JSONL tree that survives restarts): operator conversations, voice channels under
@@ -179,6 +171,15 @@ stays visible through thinking and tool work. Room chatter he is merely shown
 lights only when his reply stream can no longer be the silence sentinel, so a
 turn he ends in silence never shows the room a reply being written. Buffered,
 dropped, duplicate, and backlog catch-up messages do not start typing.
+
+The self-hosted voice brain is selected through `/voice` or `clankie voice brain`.
+OpenAI/xAI realtime and the optional Claude text brain share that same floor and
+voice tools. Claude uses the existing per-speaker OpenAI transcription and
+ElevenLabs speech wrapper; it receives attributed text, and interruptions abort
+its request and retire the mouth's output. Native owner voice-setting changes
+persist public settings and require a body restart. Hosted provider selection is
+separate; [the manual Sonnet trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
+owns live latency and quality proof.
 
 ### Operator conversations and fleet views
 
