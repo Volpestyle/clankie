@@ -111,6 +111,14 @@ Fleet workers use the separate `clankie-worker@clankie-fleet` package under
 owner installation and checked by content hash and package version. Neither
 skill presence nor plugin installation proves live project access.
 
+Hiring authorizes the installed Clankie worker hooks in the worker's isolated
+Codex home. Before opening its TUI, the dedicated app-server discovers the hooks
+with `hooks/list`, trusts their current native hashes with `config/batchWrite`,
+and verifies them again. This covers a changed plugin manifest path or hash after
+a deploy without modifying the owner's home. Copied owner hook approvals remain
+intact; other new or changed hooks still require native review. If startup pauses
+for that review, the app-server stays alive so accepting it can continue the hire.
+
 At startup, a Clankie-managed Codex seat reads the MCP status of its original
 loaded native thread and reports the accepted bridge tools. `clankie doctor`
 and the roster show missing tools with one fixing action. The worker plugin's

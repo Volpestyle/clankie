@@ -277,19 +277,21 @@ describe("trusted native seat policy", () => {
         if (request.id === undefined) return;
         if (request.method === "mcpServerStatus/list") catalog?.read();
         const result =
-          request.method === "mcpServerStatus/list"
-            ? catalog?.result
-            : request.method === "thread/loaded/list"
-              ? { data: ["root"] }
-              : request.method === "thread/read"
-                ? { thread: { id: "root" } }
-                : request.method === "thread/resume"
-                  ? { thread: { id: "root", turns: [] } }
-                  : request.method === "turn/start"
-                    ? { turn: { id: "turn" } }
-                    : request.method === "turn/steer"
-                      ? { turnId: "turn" }
-                      : {};
+          request.method === "hooks/list"
+            ? { data: [{ cwd: "/fixture", hooks: [], errors: [] }] }
+            : request.method === "mcpServerStatus/list"
+              ? catalog?.result
+              : request.method === "thread/loaded/list"
+                ? { data: ["root"] }
+                : request.method === "thread/read"
+                  ? { thread: { id: "root" } }
+                  : request.method === "thread/resume"
+                    ? { thread: { id: "root", turns: [] } }
+                    : request.method === "turn/start"
+                      ? { turn: { id: "turn" } }
+                      : request.method === "turn/steer"
+                        ? { turnId: "turn" }
+                        : {};
         socket.send(JSON.stringify({ id: request.id, result }));
       });
     });
