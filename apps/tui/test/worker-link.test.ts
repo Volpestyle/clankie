@@ -1648,18 +1648,13 @@ it("shares the whole initialized handshake and bounds a hanging response body, i
   bridge.initialized();
   const started = performance.now();
   const hung = bridge.tool("hang");
-  const listed = bridge.list();
+  const read = bridge.tool("read");
   await expect.poll(service.initializes).toBe(1);
   await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(service.initializes()).toBe(1);
   expect(service.calls).toEqual([]);
   service.releaseHandshake();
-  expect((await listed).result.tools.map((tool) => tool.name)).toEqual([
-    "message_clankie",
-    "clankie_tools",
-    "clankie_call",
-    "list_fleet_seats",
-    "message_peer",
-  ]);
+  expect((await read).result.content[0]?.text).toBe("read completed");
   const result = await hung;
   expect(result.result.isError).toBe(true);
   expect(result.result.content[0]?.text).toContain("timed out within its 500 ms request budget");
@@ -1667,10 +1662,17 @@ it("shares the whole initialized handshake and bounds a hanging response body, i
   expect(performance.now() - started).toBeLessThan(1_200);
   expect(service.initializes()).toBe(1);
   expect(service.prematureCall()).toBe(false);
-  expect(service.calls).toEqual(["hang"]);
+  expect(service.calls).toEqual(["hang", "read"]);
   await expect.poll(() => service.health.some((entry) => entry.status === "stalled")).toBe(true);
   expect((await bridge.tool("read")).result.content[0]?.text).toBe("read completed");
   await expect.poll(() => service.health.at(-1)?.status).toBe("ready");
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
+    "message_clankie",
+    "clankie_tools",
+    "clankie_call",
+    "list_fleet_seats",
+    "message_peer",
+  ]);
 });
 
 it("retains proven catalogs while discovery fails, and never replays an admitted mutation after its result is lost", async () => {
@@ -1679,8 +1681,6 @@ it("retains proven catalogs while discovery fails, and never replays an admitted
   await bridge.init();
   const names = ["message_clankie", "clankie_tools", "clankie_call", "list_fleet_seats", "message_peer"];
   expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names);
-  const mutated = bridge.tool("mutate");
-  await expect.poll(() => service.calls).toEqual(["mutate"]);
   service.failDiscovery(true);
   service.failPeers(true);
   expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names);
@@ -1691,10 +1691,23 @@ it("retains proven catalogs while discovery fails, and never replays an admitted
   service.failPeers(false);
   expect((await bridge.tool("read")).result.isError).toBe(false);
   expect(service.initializes()).toBe(2);
+  const mutated = bridge.tool("mutate");
+  await expect.poll(() => service.calls).toEqual(["read", "mutate"]);
+  const discoveries = service.bridgeRequests.filter((entry) => entry.method === "tools/list").length;
+  const peers = service.peerRequests();
+  service.failDiscovery(true);
+  service.failPeers(true);
+  // A busy native session keeps its published catalog without rediscovery.
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names);
+  expect(service.bridgeRequests.filter((entry) => entry.method === "tools/list")).toHaveLength(discoveries);
+  expect(service.peerRequests()).toBe(peers);
+  expect(service.initializes()).toBe(2);
   service.loseMutationReply();
   expect((await mutated).result.isError).toBe(true);
+  service.failDiscovery(false);
+  service.failPeers(false);
   expect((await bridge.tool("read")).result.isError).toBe(false);
-  expect(service.initializes()).toBe(2);
+  expect(service.initializes()).toBe(3);
   expect(service.calls.filter((name) => name === "mutate")).toHaveLength(1);
   service.disablePeers();
   expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names.slice(0, 3));
