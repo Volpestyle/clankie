@@ -639,6 +639,16 @@ export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
  */
 export const OauthAppsSettingsSchema = z
   .object({
+    google: z
+      .object({
+        clientId: z
+          .string()
+          .regex(/^[A-Za-z0-9._-]{1,256}$/u)
+          .optional(),
+        redirectUri: z.url().max(512).optional(),
+      })
+      .strict()
+      .default(() => ({})),
     github: z
       .object({
         clientId: z

@@ -9,6 +9,11 @@ import {
   AccountLinearCompleteRequestSchema,
   AccountLinearCompleteResultSchema,
   AccountLinearStartResultSchema,
+  AccountGoogleStartRequestSchema,
+  AccountGoogleStartResultSchema,
+  AccountGoogleCompleteRequestSchema,
+  AccountGoogleCompleteResultSchema,
+  GoogleAccountProviderSchema,
 } from "@clankie/protocol/accounts";
 import {
   createDefaultCredentialStore,
@@ -20,16 +25,18 @@ import { commandHost } from "./io.ts";
 import { isHostedModelEnvironment } from "@clankie/model-provider";
 
 const ACCOUNTS_USAGE =
-  "Usage: clankie accounts [list] | connect github|linear | start github | poll github --flow-id ID | complete linear --json-stdin | connect linear-app --client-id ID --secret-stdin | disconnect github|linear | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] | apps github-secret --client-id ID --secret-stdin";
+  "Usage: clankie accounts [list] | connect github|linear|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
 
 const APP_FLAGS = {
   "--github-client-id": ["github", "clientId"],
   "--linear-client-id": ["linear", "clientId"],
   "--linear-redirect-uri": ["linear", "redirectUri"],
+  "--google-client-id": ["google", "clientId"],
+  "--google-redirect-uri": ["google", "redirectUri"],
 } as const;
 
 /**
- * The owner's GitHub and Linear account connections (ADR 0232). Tokens never
+ * The owner's account connections (ADR 0232). Tokens never
  * come back out: the service keeps them in the credential broker. Linear app
  * secrets enter through stdin, never argv; output carries only the outcome.
  */
@@ -69,6 +76,45 @@ export async function runAccountsCommand(
     });
 
   if (args.length === 0 || (args.length === 1 && args[0] === "list")) return request("/v1/accounts");
+  const google = GoogleAccountProviderSchema.safeParse(args[1]);
+  if (google.success && args.length === 2 && (args[0] === "connect" || args[0] === "start")) {
+    const result = AccountGoogleStartResultSchema.safeParse(
+      await request("/v1/accounts/google/start", { provider: google.data }),
+    );
+    if (!result.success) throw new Error("Account connection unavailable");
+    return result.data;
+  }
+  if (google.success && args.length === 2 && args[0] === "check") {
+    const result = AccountGoogleCompleteResultSchema.safeParse(
+      await request(
+        "/v1/accounts/google/check",
+        AccountGoogleStartRequestSchema.parse({ provider: google.data }),
+      ),
+    );
+    if (!result.success) throw new Error("Account connection unavailable");
+    return result.data;
+  }
+  if (google.success && args.length === 3 && args[0] === "complete" && args[2] === "--json-stdin") {
+    let input: unknown;
+    try {
+      input = JSON.parse(await text(options.stdin ?? process.stdin));
+    } catch {
+      throw new Error("Invalid Google authorization response");
+    }
+    const callback = AccountGoogleCompleteRequestSchema.safeParse(
+      input !== null && typeof input === "object" && !Array.isArray(input)
+        ? { ...input, provider: google.data }
+        : undefined,
+    );
+    if (!callback.success) throw new Error("Invalid Google authorization response");
+    if (input !== null && typeof input === "object" && "provider" in input)
+      throw new Error("Invalid Google authorization response");
+    const result = AccountGoogleCompleteResultSchema.safeParse(
+      await request("/v1/accounts/google/complete", callback.data),
+    );
+    if (!result.success) throw new Error("Account connection unavailable");
+    return result.data;
+  }
   if (args.length === 2 && args[0] === "start" && args[1] === "github") {
     const parsed = AccountGithubStartResultSchema.safeParse(await request("/v1/accounts/github/start", {}));
     if (!parsed.success) throw new Error("Account connection unavailable");
@@ -117,7 +163,11 @@ export async function runAccountsCommand(
     if (!parsed.success) throw new Error("Invalid Linear app credentials");
     return request("/v1/accounts/linear/app", parsed.data);
   }
-  if (args.length === 2 && args[0] === "disconnect" && (args[1] === "github" || args[1] === "linear"))
+  if (
+    args.length === 2 &&
+    args[0] === "disconnect" &&
+    (args[1] === "github" || args[1] === "linear" || google.success)
+  )
     return request("/v1/accounts/disconnect", { provider: args[1] });
   if (args.length === 2 && args[0] === "connect" && args[1] === "github") {
     const prompt = options.prompt ?? ((line: string) => process.stderr.write(`${line}\n`));
@@ -137,22 +187,40 @@ export async function runAccountsCommand(
     if (options.request) throw new Error("OAuth application configuration is managed by the hosted service");
     if (
       args.length === 5 &&
-      args[1] === "github-secret" &&
+      (args[1] === "github-secret" || args[1] === "google-secret") &&
       args[2] === "--client-id" &&
       args[4] === "--secret-stdin"
     ) {
+      const provider = args[1] === "google-secret" ? "google" : "github";
+      const name = provider === "google" ? "Google" : "GitHub";
       if (isHostedModelEnvironment(env))
         throw new Error(
-          "GitHub application secrets are only supported for an owner-run self-hosted OAuth app",
+          `${name} application secrets are only supported for an owner-run self-hosted OAuth app`,
         );
-      if (!/^[A-Za-z0-9._-]{1,128}$/u.test(args[3] ?? "")) throw new Error("Invalid GitHub application ID");
+      if (
+        !(provider === "google" ? /^[A-Za-z0-9._-]{1,256}$/u : /^[A-Za-z0-9._-]{1,128}$/u).test(args[3] ?? "")
+      )
+        throw new Error(`Invalid ${name} application ID`);
       if (!(await resolveOperatorCredential({ env })))
         throw new Error("OAuth application configuration requires operator access");
       const secret = (await text(options.stdin ?? process.stdin)).trim();
-      if (!secret || secret.length > 4096) throw new Error("Invalid GitHub application secret");
+      if (!secret || secret.length > 4096) throw new Error(`Invalid ${name} application secret`);
       const store = options.credentials ?? createDefaultCredentialStore({ env });
-      await store.set("github-oauth-app", { type: "api", key: secret, metadata: { clientId: args[3]! } });
-      return { ok: true, provider: "github", revocation: "configured" };
+      if (provider === "google") {
+        if (!store.updateMany)
+          throw new Error("Google application configuration requires a locked credential store");
+        await store.updateMany(["google-oauth-app"], async (group) => {
+          const previous = group["google-oauth-app"];
+          const metadata = previous !== undefined && "metadata" in previous ? previous.metadata : undefined;
+          return {
+            ...group,
+            "google-oauth-app": { type: "api", key: secret, metadata: { ...metadata, clientId: args[3]! } },
+          };
+        });
+      } else {
+        await store.set("github-oauth-app", { type: "api", key: secret, metadata: { clientId: args[3]! } });
+      }
+      return { ok: true, provider, revocation: "configured" };
     }
     const settings = options.settings ?? new SettingsStore(defaultSettingsPath(env));
     const action = args[1];

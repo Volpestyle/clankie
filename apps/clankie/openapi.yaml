@@ -885,11 +885,14 @@ paths:
     get:
       tags: [Operator]
       operationId: listAccounts
-      summary: List GitHub and Linear account connections
+      summary: Read the body-owned GitHub, Linear and Google account catalog
       description: |
         Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
+        Includes service purpose, permission disclosure, account identity, granted scopes,
+        recovery status and selected Drive file IDs. An unconfigured Google row needs
+        operator OAuth client setup; it does not request a customer credential.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
@@ -1069,6 +1072,158 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
+  /v1/accounts/google/start:
+    post:
+      tags: [Operator]
+      operationId: startGoogleAccount
+      summary: Start body-owned Google consent with state and S256 PKCE
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public gateway
+        calls require the encrypted envelope. The body retains the verifier and keeps
+        all client secrets and tokens in its broker. Cache-Control no-store.
+        Gmail requests gmail.readonly plus openid email. Calendar requests
+        calendar.calendarlist.readonly and calendar.events.readonly plus openid email.
+        Drive requests only drive.file and opens Google Picker with prompt consent,
+        trigger_onepick true and include_granted_scopes false. Google's selected-file
+        grant permits editing; Clankie's implemented tools only read selected files.
+        All flows request offline access. Client setup and browser consent are required.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountGoogleStartRequest" }
+      responses:
+        "200":
+          description: One-time state, registered redirect, consent URL and expiry; no token or verifier
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountGoogleStartSuccess" }
+        "400":
+          description: Closed failure code, including malformed, unconfigured or unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "401":
+          description: authentication_required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "403":
+          description: forbidden — terminalControl required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "413":
+          description: malformed — body exceeds 16 KiB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "503":
+          description: unavailable — body, broker or current owner authority could not be verified
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+  /v1/accounts/google/complete:
+    post:
+      tags: [Operator]
+      operationId: completeGoogleAccount
+      summary: Exchange the one-time Google code on the tenant body
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public gateway
+        calls require the encrypted envelope. State is single use, bound to this body's
+        pending provider, OAuth application and expiry. The body verifies provider identity
+        and granted scopes before storing credentials; no tokens or provider errors escape.
+        Gmail and Calendar accept provider, state and code only. Drive also requires a
+        nonempty unique pickedFileIds array, validated from Google Picker's picked_file_ids
+        callback. These IDs bound the files the implemented Drive read tools can access.
+        Cache-Control no-store. Authorization codes belong in the JSON body, never API request URLs or logs.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountGoogleCompleteRequest" }
+      responses:
+        "200":
+          description: Verified account connection and granted permissions; no credential
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountGoogleCompleteSuccess" }
+        "400":
+          description: Closed failure code, including malformed, unknown_flow, expired, unconfigured, provider_rejected or unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "401":
+          description: authentication_required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "403":
+          description: forbidden — terminalControl required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "413":
+          description: malformed — body exceeds 32 KiB (including selected file IDs)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "503":
+          description: unavailable — body, broker or current owner authority could not be verified
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+  /v1/accounts/google/check:
+    post:
+      tags: [Operator]
+      operationId: checkGoogleAccount
+      summary: Refresh and verify the selected Google account's authorized access
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public gateway
+        calls require the encrypted envelope. The body refreshes the selected grant under
+        the credential-store lock and verifies its identity, scopes and disconnect epoch.
+        Returns catalog metadata and last-check status without exposing credentials.
+        Invalid grants require renewed consent; provider outages do not imply revocation.
+        Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountGoogleStartRequest" }
+      responses:
+        "200":
+          description: Current verified account connection and check metadata; no credential
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountGoogleCompleteSuccess" }
+        "400":
+          description: Closed failure code, including malformed, unconfigured, denied, provider_rejected or unavailable; list accounts for recovery status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "401":
+          description: authentication_required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "403":
+          description: forbidden — terminalControl required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "413":
+          description: malformed — body exceeds 16 KiB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "503":
+          description: unavailable — body, broker or current owner authority could not be verified
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
   /v1/accounts/disconnect:
     post:
       tags: [Operator]
@@ -1078,8 +1233,11 @@ paths:
         Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
-        revoked is false when the provider could not revoke; the token is deleted either way
-        and manageUrl names where to revoke it by hand.
+        revoked is false when the provider could not confirm revocation; local access is
+        disabled either way and manageUrl names where to review the grant.
+        Disconnecting any Google provider disables all three Google connections on this
+        body. Its broker may retain a refresh credential solely for bounded revocation
+        retries; catalog revocationPending remains true until Google confirms revocation.
         Hosted GitHub disconnect never uses a developer app secret and reports revoked false.
         Owner-run self-hosted GitHub revocation deletes only the stored token, never an app grant.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
@@ -1092,7 +1250,7 @@ paths:
                 type: object,
                 required: [provider],
                 additionalProperties: false,
-                properties: { provider: { type: string, enum: [github, linear] } },
+                properties: { provider: { $ref: "#/components/schemas/AccountProvider" } },
               }
       responses:
         "200":
@@ -5072,17 +5230,140 @@ components:
       required: [providerId]
       properties:
         providerId: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }
+    AccountProvider:
+      type: string
+      enum: [github, linear, google-gmail, google-calendar, google-drive]
+    GoogleAccountProvider:
+      type: string
+      enum: [google-gmail, google-calendar, google-drive]
+    AccountFlowId:
+      type: string
+      pattern: "^[A-Za-z0-9_-]{16,128}$"
+    AccountAuthorizationCode:
+      type: string
+      minLength: 1
+      maxLength: 2048
+      pattern: '^[\x21-\x7e]+$'
+      writeOnly: true
+      description: One-time provider code; send in the authenticated JSON body, never argv, API request URLs or logs.
+    AccountGoogleFileId:
+      type: string
+      pattern: "^[A-Za-z0-9_-]{1,256}$"
+    AccountGoogleStartRequest:
+      type: object
+      additionalProperties: false
+      required: [provider]
+      properties:
+        provider: { $ref: "#/components/schemas/GoogleAccountProvider" }
+    AccountGoogleCompleteRequest:
+      description: Drive requires unique Google Picker file IDs; Gmail and Calendar forbid that field.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [provider, state, code]
+          properties:
+            provider: { type: string, enum: [google-gmail, google-calendar] }
+            state: { $ref: "#/components/schemas/AccountFlowId" }
+            code: { $ref: "#/components/schemas/AccountAuthorizationCode" }
+        - type: object
+          additionalProperties: false
+          required: [provider, state, code, pickedFileIds]
+          properties:
+            provider: { type: string, enum: [google-drive] }
+            state: { $ref: "#/components/schemas/AccountFlowId" }
+            code: { $ref: "#/components/schemas/AccountAuthorizationCode" }
+            pickedFileIds:
+              type: array
+              minItems: 1
+              maxItems: 100
+              uniqueItems: true
+              items: { $ref: "#/components/schemas/AccountGoogleFileId" }
+              description: Selected IDs from Google Picker's comma-separated picked_file_ids callback.
+    AccountFailure:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error:
+          type: string
+          enum:
+            [
+              authentication_required,
+              forbidden,
+              malformed,
+              unconfigured,
+              unknown_flow,
+              expired,
+              denied,
+              provider_rejected,
+              unavailable,
+            ]
+    AccountGoogleStartSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, flowId, authorizeUrl, redirectUri, expiresAt]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        flowId:
+          allOf: [{ $ref: "#/components/schemas/AccountFlowId" }]
+          description: Single-use OAuth state; the PKCE verifier remains on the body.
+        authorizeUrl: { type: string, format: uri }
+        redirectUri: { type: string, minLength: 1, maxLength: 512 }
+        expiresAt: { type: string, format: date-time }
+    AccountGoogleCompleteSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, connection]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        connection: { $ref: "#/components/schemas/AccountConnection" }
     AccountConnection:
       type: object
       additionalProperties: false
       required: [provider, status, scopes]
       properties:
-        provider: { type: string, enum: [github, linear] }
-        status: { type: string, enum: [connected, not_connected, unconfigured] }
-        account: { type: string }
+        provider: { $ref: "#/components/schemas/AccountProvider" }
+        status:
+          type: string
+          enum:
+            [
+              connected,
+              not_connected,
+              unconfigured,
+              awaiting_consent,
+              expired,
+              reconnect_required,
+              unavailable,
+              disconnected,
+            ]
+          description: unconfigured needs operator OAuth client setup; reconnect_required needs new owner consent; unavailable is a provider failure.
+        name: { type: string, maxLength: 128, description: Body-owned catalog name. }
+        group: { type: string, maxLength: 64, description: Body-owned catalog group. }
+        description: { type: string, maxLength: 512, description: Service purpose supplied by the body. }
+        access:
+          { type: string, maxLength: 512, description: Provider permission disclosure supplied by the body. }
+        readOnly:
+          type: boolean
+          description: Whether the provider grant is read-only. Drive's selected-file grant permits editing, while the implemented tools only read.
+        lastCheckedAt: { type: string, format: date-time }
+        revocationPending:
+          {
+            type: boolean,
+            description: Local Google access is disabled while provider revocation remains unconfirmed.,
+          }
+        selectedFileIds:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AccountGoogleFileId" }
+          description: Selected file IDs recorded for this body's Drive connection; connection status governs whether access is usable.
+        reason:
+          type: string
+          enum: [invalid_grant, scope_required, provider_unavailable, revocation_pending]
+        account: { type: string, maxLength: 320 }
         actor: { type: string, enum: [user, app] }
-        workspace: { type: string }
-        scopes: { type: array, items: { type: string } }
+        workspace: { type: string, maxLength: 320 }
+        scopes: { type: array, maxItems: 64, items: { type: string, maxLength: 128 } }
         connectedAt: { type: string, format: date-time }
         manageUrl: { type: string, format: uri }
     AccountsResponse:
@@ -5090,7 +5371,7 @@ components:
       additionalProperties: false
       required: [connections]
       properties:
-        connections: { type: array, items: { $ref: "#/components/schemas/AccountConnection" } }
+        connections: { type: array, maxItems: 16, items: { $ref: "#/components/schemas/AccountConnection" } }
     AccountResult:
       type: object
       description: |

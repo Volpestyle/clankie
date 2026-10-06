@@ -251,10 +251,13 @@ async function setup(
 describe("GitHub device flow", () => {
   it("connects: user code out, device code and token stay on the body, scopes listed", async () => {
     const { json, store, providers, advance } = await setup();
-    expect((await json("/v1/accounts")).body).toEqual({
+    expect((await json("/v1/accounts")).body).toMatchObject({
       connections: [
         { provider: "github", status: "not_connected", scopes: [] },
         { provider: "linear", status: "not_connected", scopes: [] },
+        { provider: "google-gmail", status: "unconfigured", scopes: [] },
+        { provider: "google-calendar", status: "unconfigured", scopes: [] },
+        { provider: "google-drive", status: "unconfigured", scopes: [] },
       ],
     });
     const start = await json("/v1/accounts/github/start", {});
@@ -352,11 +355,13 @@ describe("GitHub device flow", () => {
     );
     expect(JSON.parse(revoke.body)).toEqual({ access_token: TOKEN });
     expect(await store.get("github")).toBeUndefined();
-    expect((await json("/v1/accounts")).body.connections).toContainEqual({
-      provider: "github",
-      status: "not_connected",
-      scopes: [],
-    });
+    expect((await json("/v1/accounts")).body.connections).toContainEqual(
+      expect.objectContaining({
+        provider: "github",
+        status: "not_connected",
+        scopes: [],
+      }),
+    );
   });
 
   it("revokes only this self-hosted body's token and preserves another body's token for the same app/account", async () => {
@@ -425,11 +430,13 @@ describe("GitHub device flow", () => {
 
   it("is unconfigured until the owner sets a client ID; the environment wins over settings", async () => {
     const { json } = await setup({ apps: { github: {} } });
-    expect((await json("/v1/accounts")).body.connections).toContainEqual({
-      provider: "github",
-      status: "unconfigured",
-      scopes: [],
-    });
+    expect((await json("/v1/accounts")).body.connections).toContainEqual(
+      expect.objectContaining({
+        provider: "github",
+        status: "unconfigured",
+        scopes: [],
+      }),
+    );
     expect(await json("/v1/accounts/github/start", {})).toEqual({
       status: 400,
       body: { ok: false, error: "unconfigured" },

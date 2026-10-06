@@ -59,6 +59,10 @@ export const genericBootstrapSchema = z
     /** Public developer-app IDs only; customer/provider secrets are broker-only. */
     accounts: z
       .object({
+        google: z
+          .object({ clientId: z.string().regex(/^[A-Za-z0-9._-]{1,256}$/u), redirectUri: z.url() })
+          .strict()
+          .optional(),
         github: z
           .object({ clientId: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/u) })
           .strict()
@@ -76,6 +80,16 @@ export const genericBootstrapSchema = z
   })
   .strict()
   .superRefine((bootstrap, context) => {
+    if (
+      bootstrap.accounts?.google &&
+      bootstrap.accounts.google.redirectUri !==
+        `${bootstrap.gatewayOrigin}/account/connections/google/callback`
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["accounts", "google", "redirectUri"],
+        message: "must be the gateway Google account callback",
+      });
     if (
       bootstrap.accounts?.linear &&
       bootstrap.accounts.linear.redirectUri !== `${bootstrap.gatewayOrigin}/account/connections/callback`
@@ -116,6 +130,7 @@ export async function applyHostedAccountApps(
   await settings.update((current) => ({
     ...current,
     oauthApps: {
+      google: bootstrap.accounts?.google ?? {},
       github: bootstrap.accounts?.github ?? {},
       linear: bootstrap.accounts?.linear ?? {},
     },

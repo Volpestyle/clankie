@@ -10,6 +10,13 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   ACCOUNTS_PATH,
+  ACCOUNT_GOOGLE_START_PATH,
+  ACCOUNT_GOOGLE_COMPLETE_PATH,
+  ACCOUNT_GOOGLE_CHECK_PATH,
+  AccountGoogleStartRequestSchema,
+  AccountGoogleCompleteRequestSchema,
+  AccountGoogleStartResultSchema,
+  AccountGoogleCompleteResultSchema,
   ACCOUNT_DISCONNECT_PATH,
   ACCOUNT_GITHUB_POLL_PATH,
   ACCOUNT_GITHUB_START_PATH,
@@ -39,6 +46,9 @@ export function createAccountRoutes(
   const paths = [
     "/v1/accounts/codex",
     ACCOUNTS_PATH,
+    ACCOUNT_GOOGLE_START_PATH,
+    ACCOUNT_GOOGLE_COMPLETE_PATH,
+    ACCOUNT_GOOGLE_CHECK_PATH,
     ACCOUNT_GITHUB_START_PATH,
     ACCOUNT_GITHUB_POLL_PATH,
     ACCOUNT_LINEAR_START_PATH,
@@ -63,7 +73,8 @@ export function createAccountRoutes(
     app.use(
       path,
       bodyLimit({
-        maxSize: 16 * 1024,
+        // Picker can return 100 file IDs of 256 characters, plus the code/state.
+        maxSize: path === ACCOUNT_GOOGLE_COMPLETE_PATH ? 32 * 1024 : 16 * 1024,
         onError: (context) => context.json({ ok: false, error: "malformed" }, 413),
       }),
     );
@@ -123,6 +134,32 @@ export function createAccountRoutes(
       }
     });
   const malformed = { ok: false, error: "malformed" } as const;
+  post(ACCOUNT_GOOGLE_START_PATH, async (body) => {
+    const parsed = AccountGoogleStartRequestSchema.safeParse(body);
+    return parsed.success
+      ? AccountGoogleStartResultSchema.parse(await accounts!.startGoogle(parsed.data.provider))
+      : malformed;
+  });
+  post(ACCOUNT_GOOGLE_COMPLETE_PATH, async (body, guard) => {
+    const parsed = AccountGoogleCompleteRequestSchema.safeParse(body);
+    return parsed.success
+      ? AccountGoogleCompleteResultSchema.parse(
+          await accounts!.completeGoogle(
+            parsed.data.provider,
+            parsed.data.state,
+            parsed.data.code,
+            guard,
+            parsed.data.pickedFileIds,
+          ),
+        )
+      : malformed;
+  });
+  post(ACCOUNT_GOOGLE_CHECK_PATH, async (body, guard) => {
+    const parsed = AccountGoogleStartRequestSchema.safeParse(body);
+    return parsed.success
+      ? AccountGoogleCompleteResultSchema.parse(await accounts!.checkGoogle(parsed.data.provider, guard))
+      : malformed;
+  });
   post(ACCOUNT_GITHUB_START_PATH, async () =>
     AccountGithubStartResultSchema.parse(await accounts!.startGithub()),
   );

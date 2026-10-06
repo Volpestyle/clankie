@@ -604,6 +604,7 @@ const boundApp = (): ClankieApp => {
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 const mcpHost = createMcpHost({
+  googleApps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env).google ?? {},
   linearApiTracker: createLinearApiTracker({ credentials: operatorCredentialStore }),
   localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
   trackerIdentity: join(stateRoot, "tracker"),

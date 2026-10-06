@@ -5,6 +5,9 @@ import {
   ACCOUNT_GITHUB_START_PATH,
   ACCOUNT_LINEAR_COMPLETE_PATH,
   ACCOUNT_LINEAR_START_PATH,
+  ACCOUNT_GOOGLE_START_PATH,
+  ACCOUNT_GOOGLE_COMPLETE_PATH,
+  ACCOUNT_GOOGLE_CHECK_PATH,
   AccountDisconnectRequestSchema,
   AccountDisconnectResultSchema,
   AccountGithubPollRequestSchema,
@@ -13,9 +16,15 @@ import {
   AccountLinearCompleteRequestSchema,
   AccountLinearCompleteResultSchema,
   AccountLinearStartResultSchema,
+  AccountGoogleStartRequestSchema,
+  AccountGoogleCompleteRequestSchema,
+  AccountGoogleStartResultSchema,
+  AccountGoogleCompleteResultSchema,
   AccountsResponseSchema,
   type AccountFailure,
   type AccountLinearStartResult,
+  type AccountGoogleStartResult,
+  type GoogleAccountProvider,
   type AccountProvider,
 } from "@clankie/protocol/accounts";
 
@@ -138,6 +147,34 @@ export function createAccountsClient(options: {
         AccountLinearCompleteResultSchema,
         input(AccountLinearCompleteRequestSchema, { state, code }),
       ),
+    startGoogle: (provider: GoogleAccountProvider) =>
+      request(
+        ACCOUNT_GOOGLE_START_PATH,
+        AccountGoogleStartResultSchema,
+        input(AccountGoogleStartRequestSchema, { provider }),
+      ),
+    completeGoogle: (
+      provider: GoogleAccountProvider,
+      state: string,
+      code: string,
+      pickedFileIds?: string[],
+    ) =>
+      request(
+        ACCOUNT_GOOGLE_COMPLETE_PATH,
+        AccountGoogleCompleteResultSchema,
+        input(AccountGoogleCompleteRequestSchema, {
+          provider,
+          state,
+          code,
+          ...(pickedFileIds === undefined ? {} : { pickedFileIds }),
+        }),
+      ),
+    checkGoogle: (provider: GoogleAccountProvider) =>
+      request(
+        ACCOUNT_GOOGLE_CHECK_PATH,
+        AccountGoogleCompleteResultSchema,
+        input(AccountGoogleStartRequestSchema, { provider }),
+      ),
     disconnect: (provider: AccountProvider) =>
       request(
         ACCOUNT_DISCONNECT_PATH,
@@ -149,6 +186,147 @@ export function createAccountsClient(options: {
 
 export type AccountsClient = ReturnType<typeof createAccountsClient>;
 export type PendingLinearAccountFlow = Extract<AccountLinearStartResult, { ok: true }>;
+export type PendingGoogleAccountFlow = Extract<AccountGoogleStartResult, { ok: true }> & {
+  provider: GoogleAccountProvider;
+};
+
+const GOOGLE_SCOPES: Record<GoogleAccountProvider, readonly string[]> = {
+  "google-gmail": ["https://www.googleapis.com/auth/gmail.readonly"],
+  "google-calendar": [
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/calendar.events.readonly",
+  ],
+  "google-drive": ["https://www.googleapis.com/auth/drive.file"],
+};
+
+/** Consent is bound to the body-retained state and PKCE verifier, with selected-file Drive access. */
+export function validateGoogleAccountStart(flow: PendingGoogleAccountFlow): void {
+  try {
+    const authorize = new URL(flow.authorizeUrl);
+    const redirect = new URL(flow.redirectUri);
+    const parameters = authorize.searchParams;
+    const scopes = (parameters.get("scope") ?? "").split(/\s+/u).filter(Boolean);
+    const drive = flow.provider === "google-drive";
+    const allowedScopes = [...(drive ? [] : ["openid", "email"]), ...(GOOGLE_SCOPES[flow.provider] ?? [])];
+    const allowed = [
+      "client_id",
+      "redirect_uri",
+      "response_type",
+      "scope",
+      "state",
+      "nonce",
+      "code_challenge",
+      "code_challenge_method",
+      "access_type",
+      "prompt",
+      "include_granted_scopes",
+      ...(drive ? ["trigger_onepick", "allow_multiple"] : []),
+    ];
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(redirect.hostname);
+    if (
+      authorize.origin !== "https://accounts.google.com" ||
+      authorize.pathname !== "/o/oauth2/v2/auth" ||
+      authorize.username ||
+      authorize.password ||
+      authorize.hash ||
+      (redirect.protocol !== "https:" && !(redirect.protocol === "http:" && loopback)) ||
+      redirect.username ||
+      redirect.password ||
+      redirect.search ||
+      redirect.hash ||
+      redirect.pathname !== "/account/connections/google/callback" ||
+      parameters.get("state") !== flow.flowId ||
+      parameters.get("redirect_uri") !== flow.redirectUri ||
+      parameters.get("response_type") !== "code" ||
+      parameters.get("code_challenge_method") !== "S256" ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(parameters.get("code_challenge") ?? "") ||
+      !/^[A-Za-z0-9_-]{16,128}$/u.test(parameters.get("nonce") ?? "") ||
+      parameters.get("access_type") !== "offline" ||
+      parameters.get("prompt") !== (drive ? "consent" : "consent select_account") ||
+      (drive && parameters.get("trigger_onepick") !== "true") ||
+      (parameters.has("allow_multiple") &&
+        !["true", "false"].includes(parameters.get("allow_multiple") ?? "")) ||
+      parameters.get("include_granted_scopes") !== "false" ||
+      !parameters.get("client_id") ||
+      !/^[A-Za-z0-9_-]{16,128}$/u.test(flow.flowId) ||
+      !Number.isFinite(Date.parse(flow.expiresAt)) ||
+      !GOOGLE_SCOPES[flow.provider] ||
+      scopes.length !== allowedScopes.length ||
+      new Set(scopes).size !== scopes.length ||
+      scopes.some((scope) => !allowedScopes.includes(scope)) ||
+      [...parameters.keys()].some((key) => !allowed.includes(key) || parameters.getAll(key).length !== 1)
+    )
+      throw new Error();
+  } catch {
+    throw new AccountClientError("malformed");
+  }
+}
+
+export type GoogleAccountCallback =
+  | { state: string; code: string; pickedFileIds?: string[] }
+  | { state: string; error: "denied" | "provider_rejected" };
+
+/** Callback extras identify Google's consent UI; they never alter the pending provider or grant. */
+export function parseGoogleAccountCallback(
+  value: string,
+  pending: Pick<PendingGoogleAccountFlow, "provider" | "flowId" | "expiresAt">,
+  now = Date.now(),
+): GoogleAccountCallback {
+  try {
+    const url = new URL(value);
+    const query = url.searchParams;
+    if (
+      url.protocol !== "clankie:" ||
+      url.hostname !== "accounts" ||
+      url.pathname !== "/google/callback" ||
+      url.port ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      query.getAll("state").length !== 1 ||
+      query.get("state") !== pending.flowId ||
+      !Number.isFinite(Date.parse(pending.expiresAt)) ||
+      Date.parse(pending.expiresAt) <= now ||
+      [...query.keys()].some(
+        (key) =>
+          ![
+            "state",
+            "code",
+            "error",
+            "error_description",
+            "scope",
+            "authuser",
+            "prompt",
+            "iss",
+            "picked_file_ids",
+          ].includes(key) || query.getAll(key).length !== 1,
+      ) ||
+      query.has("code") === query.has("error") ||
+      (query.has("picked_file_ids") && (pending.provider !== "google-drive" || query.has("error")))
+    )
+      throw new Error();
+    if (query.has("error"))
+      return {
+        state: pending.flowId,
+        error: query.get("error") === "access_denied" ? "denied" : "provider_rejected",
+      };
+    const callback = AccountLinearCompleteRequestSchema.parse({
+      state: pending.flowId,
+      code: query.get("code"),
+    });
+    if (!query.has("picked_file_ids")) return callback;
+    const pickedFileIds = query.get("picked_file_ids")!.split(",");
+    if (
+      pickedFileIds.length > 100 ||
+      new Set(pickedFileIds).size !== pickedFileIds.length ||
+      pickedFileIds.some((id) => !/^[A-Za-z0-9_-]{1,256}$/u.test(id))
+    )
+      throw new Error();
+    return { ...callback, pickedFileIds };
+  } catch {
+    throw new AccountClientError("malformed");
+  }
+}
 
 /** Validate before opening a provider URL supplied by a body. */
 export function validateLinearAccountStart(flow: PendingLinearAccountFlow): void {

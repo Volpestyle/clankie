@@ -19,6 +19,10 @@ describe("managed hosted credential", () => {
       const { bootstrap } = hostedFixture();
       const path = join(dir, "bootstrap.json");
       const accounts = {
+        google: {
+          clientId: "fixture-google.apps.googleusercontent.com",
+          redirectUri: `${bootstrap.gatewayOrigin}/account/connections/google/callback`,
+        },
         github: { clientId: "fixture-github" },
         linear: {
           clientId: "fixture-linear",
@@ -33,6 +37,21 @@ describe("managed hosted credential", () => {
       await applyHostedAccountApps({}, settings);
       expect((await settings.load()).oauthApps).toEqual(accounts);
       for (const invalid of [
+        { ...accounts, google: { ...accounts.google, clientSecret: "secret-marker" } },
+        {
+          ...accounts,
+          google: {
+            ...accounts.google,
+            redirectUri: "https://other.example/account/connections/google/callback",
+          },
+        },
+        {
+          ...accounts,
+          google: {
+            ...accounts.google,
+            redirectUri: `${bootstrap.gatewayOrigin}/account/connections/google/callback?code=secret-marker`,
+          },
+        },
         { ...accounts, github: { ...accounts.github, clientSecret: "secret-marker" } },
         { ...accounts, linear: { ...accounts.linear, accessToken: "secret-marker" } },
         {

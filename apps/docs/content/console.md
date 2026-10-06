@@ -96,6 +96,18 @@ checked**. Participant room access follows Discord permissions; Admin controls
 its dedicated server except deleting it or transferring ownership. Raw IDs and
 machine grants live under Advanced. Opening or saving setup never posts.
 
+## Account connections
+
+Open `/connect accounts` or `/connections` → Accounts to review the body's
+service catalog, identity and granted permissions. Gmail and Calendar use
+read-only browser consent. Drive opens Google's file picker to authorize
+selected files; that grant permits editing them, while Clankie's implemented
+tools only read. The body keeps credentials and refreshes access.
+The console masks the callback link. A status check verifies access, while
+disconnecting any Google service disables all three on this Clankie and
+reports whether provider revocation completed. An unconfigured service needs
+operator OAuth client setup. See [account setup](/cli/#account-setup).
+
 ## Follow Linear
 
 Connecting an account and following its activity are separate choices.

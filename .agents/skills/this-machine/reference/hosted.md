@@ -28,11 +28,14 @@ These endpoints do not establish that the shipped app has an add-provider
 screen: check the current client before sending the owner there. They are
 never a prerequisite for a managed first reply.
 
-The same devices link the owner's GitHub and Linear accounts through
+The same devices link the owner's GitHub, Linear and Google accounts through
 `/v1/accounts` (ADR 0196; `clankie accounts` on the CLI): a GitHub device flow
-and Linear OAuth with PKCE, run by the body, tokens only in its broker. Never
-ask for a GitHub or Linear token in chat; send the owner to the app or
-`clankie accounts connect github`.
+and browser OAuth with PKCE, run by the body, tokens only in its broker. Google
+offers separate Gmail, Calendar and selected-file Drive consent using the body
+catalog. Gmail and Calendar grants are read-only; Drive's selected-file grant
+permits edits, while Clankie's implemented tools only read. Refresh and grouped revocation
+remain on the body. Never ask for a provider token in chat; send the owner to
+the app or `/connect accounts`. See [account consent](accounts-and-connections.md).
 
 ## Managed hosted bodies
 

@@ -45,11 +45,24 @@ import {
   linearOauthNeedsRefresh,
   providerCredentialBearer,
   resolveProviderBearer,
+  GOOGLE_ACCOUNT_DEFINITIONS,
+  GOOGLE_PROVIDER_IDS,
+  googleCredentialMetadata,
+  googleCredentialUsable,
+  googlePickedFileIds,
+  googleIdentityEpoch,
+  googleAppSecret,
+  normalizeProviderId,
+  GOOGLE_OAUTH_APP_PROVIDER_ID,
+  resolveGoogleBearer,
+  type GoogleOAuthApp,
+  type GoogleOAuthEndpoints,
   type CredentialStore,
   type ProviderCredential,
   type ProviderAccount,
 } from "@clankie/credential-broker";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
+import { GoogleAccountProviderSchema, type GoogleAccountProvider } from "@clankie/protocol/accounts";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
 import { compactLinearWrite } from "./linear-write-receipt.ts";
@@ -82,6 +95,35 @@ class DispatchRefused extends Error {}
 const FAILURE_COOLDOWN_MS = 60_000;
 const LOCAL_TRACKER_COMMAND = "clankie:local-tracker";
 const API_TRACKER_COMMAND = "clankie:linear-api-tracker";
+/** A server alias cannot widen the policy attached to its managed broker grant. */
+const googleProvider = (
+  server: Pick<McpServerSettings, "id" | "credential">,
+): GoogleAccountProvider | undefined => {
+  let providerId: string | undefined;
+  try {
+    providerId = server.credential === undefined ? undefined : normalizeProviderId(server.credential);
+  } catch {
+    // An invalid authored reference fails in its own credential admission;
+    // classification must not hide unrelated connected servers.
+  }
+  const binding = GoogleAccountProviderSchema.safeParse(providerId);
+  if (binding.success) return binding.data;
+  const named = GoogleAccountProviderSchema.safeParse(server.id);
+  return named.success ? named.data : undefined;
+};
+function assertGoogleCredentialBinding(
+  server: Pick<McpServerSettings, "id" | "credential">,
+  credential: ProviderCredential | undefined,
+): GoogleAccountProvider | undefined {
+  const google = googleProvider(server);
+  if (
+    (credential?.type === "oauth" && credential.googleAuth === "user" && google === undefined) ||
+    (google !== undefined &&
+      (server.credential === undefined || normalizeProviderId(server.credential) !== google))
+  )
+    throw new Error("Google access requires an unambiguous managed provider credential binding");
+  return google;
+}
 
 interface TrackerBackendStatus {
   readonly backend: "linear" | "local";
@@ -209,9 +251,25 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
     ],
     enabled: true,
   },
+  ...GOOGLE_PROVIDER_IDS.map(
+    (provider): McpServerSettings => ({
+      id: provider,
+      transport: "http",
+      url: GOOGLE_ACCOUNT_DEFINITIONS[provider].url,
+      args: [],
+      lane: "operator",
+      credential: provider,
+      initialTools: [...GOOGLE_ACCOUNT_DEFINITIONS[provider].tools],
+      enabled: true,
+    }),
+  ),
 ];
 
 export interface McpHostOptions {
+  /** The same body-owned developer app as /v1/accounts; no secret leaves the broker. */
+  readonly googleApps?: () => Promise<GoogleOAuthApp>;
+  readonly googleFetch?: typeof fetch;
+  readonly googleEndpoints?: GoogleOAuthEndpoints;
   /** The durable fallback. Connected transport failures never select this backend. */
   readonly localTracker?: TrackerToolBackend;
   /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
@@ -305,6 +363,8 @@ function credentialDigest(credential: ProviderCredential): string {
 }
 
 export function createMcpHost(options: McpHostOptions): McpHost {
+  const googleApps =
+    options.googleApps ?? (async () => (await options.settings.load()).oauthApps?.google ?? {});
   const connectImpl = options.connect ?? connectServer;
   const curated = options.curated ?? CURATED_MCP_SERVERS;
   const states = new Map<string, ServerState>();
@@ -375,7 +435,11 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               enabled: true,
             },
           ]),
-    ].filter((server) => server.enabled);
+    ]
+      .filter((server) => server.enabled)
+      .map((server) =>
+        googleProvider(server) === undefined ? server : { ...server, lane: "operator" as const },
+      );
     const linear = servers.find((server) => server.id === "linear");
     if (linear && options.linearApiTracker && (await options.credentials.get(LINEAR_API_PROVIDER_ID))) {
       servers = servers.map((server) =>
@@ -443,6 +507,22 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   async function credentialFingerprint(server: McpServerSettings, refresh = false): Promise<string> {
     if (server.credential === undefined) return "none";
     let stored = await options.credentials.get(server.credential);
+    const google = assertGoogleCredentialBinding(server, stored);
+    if (google !== undefined) {
+      const apps = await googleApps();
+      if (refresh) {
+        await resolveGoogleBearer({
+          store: options.credentials,
+          provider: google,
+          apps: () => Promise.resolve(apps),
+          ...(options.googleFetch === undefined ? {} : { fetchImpl: options.googleFetch }),
+          ...(options.googleEndpoints === undefined ? {} : { endpoints: options.googleEndpoints }),
+        });
+        stored = await options.credentials.get(server.credential);
+      }
+      if (!apps.clientId || !googleCredentialUsable(stored, google, apps.clientId))
+        throw new Error("Google access requires reconnecting");
+    }
     if (stored?.type === "oauth" && stored.linearAuth === "api" && !isApiTracker(server))
       throw new Error("Registered Linear API credentials cannot authenticate MCP");
     if (refresh && stored?.type === "oauth" && linearOauthNeedsRefresh(stored)) {
@@ -586,6 +666,10 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       return state.tools;
     }
     const client = await connection(server, state, now);
+    const pickedFiles =
+      googleProvider(server) === "google-drive"
+        ? googlePickedFileIds(await options.credentials.get(server.credential!))
+        : undefined;
     const initial = new Set(server.initialTools);
     const listed = await client.listTools();
     await assertCurrent(server, state);
@@ -598,6 +682,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         ? [...listed.filter((tool) => !trackerNames.has(tool.name)), ...trackerCatalog]
         : listed;
     const projected = exposed
+      .filter((tool) => {
+        const google = googleProvider(server);
+        return (
+          google === undefined ||
+          (GOOGLE_ACCOUNT_DEFINITIONS[google].tools as readonly string[]).includes(tool.name)
+        );
+      })
       .filter((tool) => {
         const reason = mcpToolSchemaError(tool);
         if (reason === undefined) return true;
@@ -617,19 +708,35 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             : tool.name,
         inputSchema:
           tool.inputSchema !== null && typeof tool.inputSchema === "object"
-            ? server.id === "linear" && trackerNames.has(tool.name)
+            ? pickedFiles !== undefined
               ? {
                   ...(tool.inputSchema as Record<string, unknown>),
                   properties: {
                     ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
-                    repo: {
-                      type: "string",
-                      description:
-                        "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
-                    },
+                    fileId: { type: "string", enum: pickedFiles },
                   },
+                  required: [
+                    ...new Set([
+                      ...(Array.isArray((tool.inputSchema as { required?: unknown }).required)
+                        ? (tool.inputSchema as { required: string[] }).required
+                        : []),
+                      "fileId",
+                    ]),
+                  ],
                 }
-              : (tool.inputSchema as Record<string, unknown>)
+              : server.id === "linear" && trackerNames.has(tool.name)
+                ? {
+                    ...(tool.inputSchema as Record<string, unknown>),
+                    properties: {
+                      ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
+                      repo: {
+                        type: "string",
+                        description:
+                          "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
+                      },
+                    },
+                  }
+                : (tool.inputSchema as Record<string, unknown>)
             : { type: "object" },
         // No `initialTools` means all of them: right for a small server, and
         // the reason a large one should name the handful worth carrying.
@@ -863,6 +970,19 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             detail: `${server.id} stays at the console. Ask from the operator TUI, not from this room.`,
           };
         }
+        const google = googleProvider(server);
+        if (
+          google !== undefined &&
+          (input.delegation !== undefined ||
+            !(GOOGLE_ACCOUNT_DEFINITIONS[google].tools as readonly string[]).includes(input.tool))
+        ) {
+          return {
+            outcome: "refused",
+            reason: "lane_denied",
+            possiblyDispatched: false,
+            detail: "This Google connection permits only its owner's read-only tools.",
+          };
+        }
         let trackerRepo = input.arguments.repo;
         let inferredRepo = false;
         if (
@@ -901,6 +1021,22 @@ export function createMcpHost(options: McpHostOptions): McpHost {
 
         try {
           state = await stateFor(server);
+          if (google === "google-drive") {
+            const credential = await options.credentials.get(server.credential!);
+            if (
+              credential === undefined ||
+              credentialDigest(credential) !== state.credential ||
+              typeof input.arguments.fileId !== "string" ||
+              !googlePickedFileIds(credential).includes(input.arguments.fileId)
+            ) {
+              return {
+                outcome: "refused",
+                reason: "lane_denied",
+                possiblyDispatched: false,
+                detail: "Choose this file in the Google Drive connection before reading it.",
+              };
+            }
+          }
           const client = repositoryCall ? undefined : await connection(server, state, now);
           const connectedAccount =
             input.delegation !== undefined || options.observeCall !== undefined
@@ -1380,10 +1516,38 @@ async function connectServer(
 
 async function createTransport(
   server: McpServerSettings,
-  credentials: Pick<CredentialStore, "get">,
+  credentials: Pick<CredentialStore, "get"> & Partial<Pick<CredentialStore, "updateMany">>,
   expectedCredential: string,
 ): Promise<StdioClientTransport | StreamableHTTPClientTransport> {
   const selectedBearer = async (): Promise<string> => {
+    const google = googleProvider(server);
+    if (google !== undefined) {
+      if (!credentials.updateMany || !server.credential || normalizeProviderId(server.credential) !== google)
+        throw new Error("Google access requires a locked managed provider credential binding");
+      let bearer: string | undefined;
+      // Read the grant and durable disable epoch in one existing broker lock.
+      // A partial Keychain publication or replacement account cannot combine
+      // an old grant with a separately awaited marker. This projection writes nothing.
+      await credentials.updateMany([GOOGLE_OAUTH_APP_PROVIDER_ID, google], async (group) => {
+        const stored = group[google];
+        assertGoogleCredentialBinding(server, stored);
+        if (stored === undefined || credentialDigest(stored) !== expectedCredential)
+          throw new Error(server.id + " credential changed; reconnect before calling tools");
+        const metadata = googleCredentialMetadata(stored);
+        const app = group[GOOGLE_OAUTH_APP_PROVIDER_ID];
+        if (
+          metadata?.status !== "connected" ||
+          !googleCredentialUsable(stored, google) ||
+          googleAppSecret(app, metadata.clientId) === undefined ||
+          (metadata.identityEpoch ?? "0") !== googleIdentityEpoch(app, metadata)
+        )
+          throw new Error("Google connection is disabled or requires reconnecting");
+        bearer = providerCredentialBearer(stored);
+        return group;
+      });
+      if (!bearer) throw new Error(server.id + " has no usable stored credential");
+      return bearer;
+    }
     const stored = server.credential === undefined ? undefined : await credentials.get(server.credential);
     if (stored === undefined || credentialDigest(stored) !== expectedCredential) {
       throw new Error(`${server.id} credential changed; reconnect before calling tools`);
@@ -1393,6 +1557,7 @@ async function createTransport(
     }
     if (stored?.type === "oauth" && stored.linearAuth === "api")
       throw new Error("Registered Linear API credentials cannot authenticate MCP");
+    assertGoogleCredentialBinding(server, stored);
     const bearer = providerCredentialBearer(stored);
     if (bearer === undefined) throw new Error(`${server.id} has no usable stored credential`);
     return bearer;
@@ -1444,7 +1609,17 @@ async function createTransport(
     stderr: "ignore",
   });
   const send = transport.send.bind(transport);
-  transport.send = (message) => {
+  transport.send = async (message) => {
+    if (googleProvider(server) !== undefined) {
+      try {
+        // Validate the captured process credential; never replace its environment token.
+        await selectedBearer();
+      } catch (error) {
+        if (dispatchFence.getStore())
+          throw new DispatchRefused(error instanceof Error ? error.message : "Connected credential changed");
+        throw error;
+      }
+    }
     dispatchFence.getStore()?.();
     return send(message);
   };

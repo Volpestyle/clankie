@@ -276,7 +276,8 @@ function buildNetworkRows() {
       "GET /v1/accounts",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose: "List GitHub and Linear account connections with account, scopes and status, never tokens.",
+        purpose:
+          "Read the body-owned GitHub, Linear and Google catalog with account, grants and recovery status, never tokens.",
       },
     ],
     [
@@ -315,10 +316,35 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/accounts/google/start",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Start body-owned Google consent for Gmail, Calendar or selected-file Drive access, with state and PKCE.",
+      },
+    ],
+    [
+      "POST /v1/accounts/google/complete",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Exchange the one-time Google code and selected Drive file IDs on the body; return identity and grants without tokens.",
+      },
+    ],
+    [
+      "POST /v1/accounts/google/check",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Refresh and verify the selected Google account's authorized access and return its recovery status.",
+      },
+    ],
+    [
       "POST /v1/accounts/disconnect",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose: "Revoke an account connection at the provider and delete its token from the body.",
+        purpose:
+          "Disable local account access and attempt provider revocation; Google disconnect disables all three Google connections and reports pending revocation if needed.",
       },
     ],
     [
