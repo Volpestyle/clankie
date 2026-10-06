@@ -32,12 +32,19 @@ function writeRelease(
   restart: "ok" | "fail" = "ok",
   replaceCurrentOnDown = false,
   target?: string,
+  runtimeProviderApi?: number,
 ) {
   mkdirSync(join(root, "bin"), { recursive: true });
   writeFileSync(join(root, "VERSION"), `${version}\n`);
   writeFileSync(
     join(root, "release.json"),
-    JSON.stringify({ schemaVersion: 1, version, revision, ...(target === undefined ? {} : { target }) }),
+    JSON.stringify({
+      schemaVersion: 1,
+      version,
+      revision,
+      ...(target === undefined ? {} : { target }),
+      ...(runtimeProviderApi === undefined ? {} : { runtimeProviderApi }),
+    }),
   );
   const launcher = join(root, "bin", "clankie");
   writeFileSync(
@@ -73,6 +80,9 @@ async function fixture(
     readonly target?: string;
     /** The target the published archive's manifest claims, when it differs. */
     readonly publishedTarget?: string;
+    /** The provider API the published release expects, and what the installed provider serves. */
+    readonly publishedProviderApi?: number;
+    readonly providerApis?: readonly number[];
   } = {},
 ) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
@@ -92,6 +102,7 @@ async function fixture(
     input.restart,
     input.replaceCurrentOnDown === "new",
     input.publishedTarget ?? input.target,
+    input.publishedProviderApi,
   );
   const archiveName = `clankie-${input.target ?? "darwin-arm64"}.tar.gz`;
   const archive = join(home, archiveName);
@@ -120,6 +131,7 @@ async function fixture(
       releaseRoot,
       env,
       helperPath,
+      ...(input.providerApis === undefined ? {} : { providerApis: input.providerApis }),
       source: { api: `http://127.0.0.1:${port}/api`, download: `http://127.0.0.1:${port}/download` },
     });
   const settled = async (id: string): Promise<RuntimeUpdateResult> => {
@@ -192,6 +204,23 @@ it("refuses an archive built for another target before stopping anything", async
   expect(result.error).toContain("another target");
   expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
   expect(f.calls().filter((call) => call.action === "down")).toEqual([]);
+});
+
+it("refuses a release the installed runtime provider cannot serve before stopping anything", async () => {
+  const f = await fixture({ publishedProviderApi: 2, providerApis: [1] });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "refused",
+    reason: "provider-api-unsupported",
+  });
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+  expect(f.calls().filter((call) => call.action === "down")).toEqual([]);
+});
+
+it("installs a release whose provider API the installed provider serves", async () => {
+  const f = await fixture({ publishedProviderApi: 2, providerApis: [1, 2] });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
 });
 
 it("restores the previous release when the new one fails to come up", async () => {

@@ -958,8 +958,20 @@ const runtimeUpdater =
     : existsSync(join(repoRoot, ".git"))
       ? createRuntimeUpdater({ repoRoot })
       : existsSync(join(repoRoot, "release.json")) && basename(dirname(realpathSync(repoRoot))) === "releases"
-        ? createReleaseUpdater({ releaseRoot: repoRoot })
+        ? releaseUpdaterOrNone()
         : undefined;
+/** A release that cannot update (say, a local image built without a revision) still runs. */
+function releaseUpdaterOrNone() {
+  try {
+    return createReleaseUpdater({
+      releaseRoot: repoRoot,
+      ...(runtimeProvider.apis === undefined ? {} : { providerApis: runtimeProvider.apis }),
+    });
+  } catch (error) {
+    logger.warn({ event: "runtime.update.unavailable", error }, "Release updates are unavailable");
+    return undefined;
+  }
+}
 try {
   const reconciled = runtimeUpdater?.reconcile?.();
   if (reconciled)

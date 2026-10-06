@@ -28,6 +28,8 @@ const OFFICIAL_RELEASES: ReleaseSource = {
 
 export interface ReleaseUpdaterOptions {
   readonly releaseRoot: string;
+  /** The installed runtime provider's API versions; a release outside them is refused. */
+  readonly providerApis?: readonly number[];
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
   readonly source?: ReleaseSource;
@@ -119,6 +121,7 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
         oldCommit: manifest.revision,
         newCommit: target.commit,
         target: manifest.target,
+        ...(options.providerApis === undefined ? {} : { providerApis: options.providerApis }),
         archiveUrl: releaseUrl(`${source.download}/${target.version}/${releaseArchive(manifest.target)}`),
         checksumUrl: releaseUrl(
           `${source.download}/${target.version}/${releaseArchive(manifest.target)}.sha256`,

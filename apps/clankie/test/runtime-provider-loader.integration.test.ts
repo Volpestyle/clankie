@@ -52,7 +52,8 @@ async function fixture() {
           provider.heartbeat?.close();
           await provider.model?.close();
           process.stdout.write(JSON.stringify({
-            hooks: Object.keys(provider), denied: denied?.status, admitted: admitted?.status,
+            hooks: Object.keys(provider).filter(key => key !== 'apis'), apis: provider.apis,
+            denied: denied?.status, admitted: admitted?.status,
             data: admitted && await admitted.json(), capacity
           }));
         } catch (error) {
@@ -131,6 +132,8 @@ it("fresh service processes load the installed provider each time and retain its
   for (const boot of [1, 2])
     expect(await f.boot()).toEqual({
       hooks: ["quota", "heartbeat", "model"],
+      // A provider that predates versioning serves the first contract.
+      apis: [1],
       denied: 401,
       admitted: 200,
       data: { boot },
@@ -211,6 +214,31 @@ it("managed startup requires all policy capabilities and validates exact supplem
       stderr: "runtime_provider_gateway_routes_invalid",
     });
   }
+  // A provider that does not serve this runtime's contract never starts (ADR 0237).
+  for (const [apis, error] of [
+    ["[2, 3]", "runtime_provider_api_unsupported"],
+    ["[]", "runtime_provider_apis_invalid"],
+    ['["1"]', "runtime_provider_apis_invalid"],
+  ] as const) {
+    await writeFile(
+      invalid,
+      `export const runtimeProviderApis = ${apis};
+      export async function createRuntimeProvider() { throw new Error("must not initialize"); }`,
+    );
+    await expect(f.boot(invalid, true)).rejects.toMatchObject({ code: 2, stderr: error });
+  }
+  await writeFile(
+    invalid,
+    `export const runtimeProviderApis = [1, 2];
+    export async function createRuntimeProvider() {
+      return {
+        quota: { routes() {}, hireCapacity: async () => undefined },
+        heartbeat: { begin() {}, interactive() {}, authenticatedWork() {}, activitySharing() {}, start() {}, close() {} },
+        model: { async piSeatModel() {}, async onChanged() {}, async close() {} }
+      };
+    }`,
+  );
+  expect((await f.boot(invalid, true)).apis).toEqual([1, 2]);
   // Negative startup never touched the broker or initialized the hosted policy.
   await expect(readFile(join(f.state, "credentials.json"))).rejects.toMatchObject({ code: "ENOENT" });
   expect((await f.boot(f.provider, true)).hooks).toEqual(["quota", "heartbeat", "model"]);
