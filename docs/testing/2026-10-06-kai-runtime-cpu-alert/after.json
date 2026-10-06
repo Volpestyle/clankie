@@ -1,0 +1,19 @@
+{
+  "mode": "candidate",
+  "pid": 88871,
+  "boot": "16e77aa4-de16-483a-b5b9-e2db0fc68cf8",
+  "elapsedMs": 119899.119375,
+  "cpuMicros": 3394092,
+  "cpuPercent": 2.8307897653397593,
+  "healthP95Ms": 297.81333299999824,
+  "clients": 10,
+  "fleets": ["pc", "kh2"],
+  "requests": 352,
+  "errors": 0,
+  "turns": 0,
+  "spawns": {
+    "ps": 88,
+    "ssh": 110
+  },
+  "scope": "Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled."
+}

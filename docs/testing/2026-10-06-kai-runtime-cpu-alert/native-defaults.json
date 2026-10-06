@@ -1,0 +1,64 @@
+{
+  "delivered": [
+    {
+      "event": {
+        "schemaVersion": 1,
+        "id": "seat-36ade09c-68ed-4501-84e5-c4ac35e35273",
+        "kind": "message",
+        "conversationId": "global-default",
+        "source": "service",
+        "content": "Runtime health alarm: cpu and health held for 306413ms at 2026-10-06T13:16:07.393Z. Clankie process CPU 61.1% (threshold 50%); /health 1120ms (available, threshold 1000ms). Inspect clankie status or clankie doctor; include the incident in the next Linear project check-in.",
+        "createdAt": "2026-10-06T13:16:07.393Z"
+      },
+      "ack": {
+        "schemaVersion": 1,
+        "acknowledged": true,
+        "deliveryStage": "delivered"
+      }
+    },
+    {
+      "event": {
+        "schemaVersion": 1,
+        "id": "seat-61e5424b-3491-4033-ba7b-4ba585128880",
+        "kind": "message",
+        "conversationId": "global-default",
+        "source": "service",
+        "content": "Runtime health recovered after 321559ms at 2026-10-06T13:16:22.539Z: Clankie process CPU 7.6%; /health 1ms. Include this recovery and incident duration in the next Linear project check-in.",
+        "createdAt": "2026-10-06T13:16:22.539Z"
+      },
+      "ack": {
+        "schemaVersion": 1,
+        "acknowledged": true,
+        "deliveryStage": "delivered"
+      }
+    }
+  ],
+  "results": [
+    {
+      "fingerprint": "7a9f50e4f71c7037e8b6e39386c42cbcdb18613f88eb7d6de3ed22ef035c1a6a",
+      "conversationId": "global-default",
+      "outcome": "submitted",
+      "reason": "owner_mailbox_delivered"
+    },
+    {
+      "fingerprint": "ed5f962bf1fb7c0bc7529364c643106a34b96904c8a3921097601719824ea6a9",
+      "conversationId": "global-default",
+      "outcome": "submitted",
+      "reason": "owner_mailbox_delivered"
+    }
+  ],
+  "final": {
+    "state": "healthy",
+    "durationMs": 0,
+    "reasons": [],
+    "delivery": "accepted",
+    "observedAt": "2026-10-06T13:16:22.539Z",
+    "cpuPercent": 7.6,
+    "healthLatencyMs": 1,
+    "healthAvailable": true,
+    "lastAlarmAt": "2026-10-06T13:16:07.393Z",
+    "lastIncidentDurationMs": 321559,
+    "lastRecoveryAt": "2026-10-06T13:16:22.539Z"
+  },
+  "modelTurns": 0
+}
