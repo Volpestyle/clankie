@@ -209,7 +209,8 @@ export function createOperatorService(
     if (
       request.op === "readopt_seat" ||
       request.op === "worker_reports" ||
-      request.op === "acknowledge_worker_reports"
+      request.op === "acknowledge_worker_reports" ||
+      request.op === "acknowledge_worker_report_history"
     ) {
       if (authority) await authorizeQuestion(authority);
       const owner: ConversationOwner = { conversationId: request.conversationId };
@@ -237,6 +238,19 @@ export function createOperatorService(
             request.conversationId,
             request.limit === undefined ? {} : { limit: request.limit },
           ),
+        };
+      }
+      if (request.op === "acknowledge_worker_report_history") {
+        if (!authority || authority.principal.kind !== "operator")
+          throw new ConversationRefusedError("Worker report history requires the operator owner");
+        await authorizeQuestion(authority);
+        if (!ctx.conversations.acknowledgeInboundReportHistory(request.conversationId, request.deliveryIds))
+          throw new ConversationRefusedError("Worker report history IDs must belong to this conversation");
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          conversationId: request.conversationId,
+          acknowledged: new Set(request.deliveryIds).size,
         };
       }
       if (!ctx.conversations.acknowledgeInboundReports(request.conversationId, request.deliveryIds))

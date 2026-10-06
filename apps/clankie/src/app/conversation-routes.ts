@@ -277,10 +277,13 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         captain === "unavailable" ? 503 : 401,
       );
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (parsed.data.op === "acknowledge_worker_report_history" && owner?.principal.kind !== "operator")
+      return context.json({ error: "operator_authority_required" }, 403);
     const workerOwnerOp =
       parsed.data.op === "readopt_seat" ||
       parsed.data.op === "worker_reports" ||
-      parsed.data.op === "acknowledge_worker_reports";
+      parsed.data.op === "acknowledge_worker_reports" ||
+      parsed.data.op === "acknowledge_worker_report_history";
     if (
       workerOwnerOp &&
       !owner &&
