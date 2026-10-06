@@ -282,6 +282,17 @@ export function createOperatorService(
           const inVoice = voice.some(
             (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
           );
+          const beatsEnabled = request.includeBeats === true && !(await ctx.desktop.beatsAreQuiet());
+          const hire = beatsEnabled ? ctx.desktop.recentHire() : undefined;
+          const report = beatsEnabled
+            ? ctx
+                .reportSummaries()
+                .filter((item) => {
+                  const age = Date.now() - Date.parse(item.acceptedAt);
+                  return (item.state === "delivered" || item.state === "read") && age >= 0 && age < 10_000;
+                })
+                .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt))[0]
+            : undefined;
           return projectPresence(
             {
               expression: await ctx.desktop.current(),
@@ -296,8 +307,21 @@ export function createOperatorService(
               ...(nativeSubagents === undefined ? {} : { nativeSubagents }),
               pendingOwnerItem: ctx.conversations.pendingPresenceOwnerItem(),
               ...ctx.conversations.recentPresenceActivity(),
+              beats: [
+                ...(hire ? [hire] : []),
+                ...(report
+                  ? [
+                      {
+                        id: report.deliveryId,
+                        kind: "worker_report" as const,
+                        at: new Date(report.acceptedAt).toISOString(),
+                      },
+                    ]
+                  : []),
+              ],
             },
             request.includeFace === true,
+            request.includeBeats === true,
           );
         },
         request.cursor,

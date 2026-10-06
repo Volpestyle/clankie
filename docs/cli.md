@@ -3976,6 +3976,16 @@ holds a distinct static face, and an unreachable pet uses his offline art.
 Legacy reads omit the field. The desktop client retries without the opt-in
 when an older service rejects it, checking again after one minute.
 
+Desktop consumers may separately request `includeBeats: true`. Its optional
+`beats` array contains only an ID, `hire` or `worker_report` kind, and source
+timestamp; at most the latest completed hire and confirmed report accepted
+within ten seconds. Quiet hours suppress them. Expiry changes the opted-in
+cursor. Legacy requests omit the field and keep their existing cursor. A
+resumed seat, failed hire or uncertain report never creates a beat. The desktop
+client consumes IDs once and skips history and bursts; this metadata does not
+contain worker output or identify a private conversation. See
+[ADR 0220](adr/0220-clankie-has-one-present-tense.md).
+
 ## Computer body
 
 ```sh

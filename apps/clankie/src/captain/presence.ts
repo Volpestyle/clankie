@@ -17,10 +17,15 @@ export interface PresenceSources {
   pendingOwnerItem?: OperatorPresenceSnapshot["pendingOwnerItem"];
   newMessage?: boolean;
   error?: boolean;
+  beats?: OperatorPresenceSnapshot["beats"];
 }
 
 /** Pure projection: no persisted presence state or invented transition time. */
-export function projectPresence(sources: PresenceSources, includeFace = true): OperatorPresenceSnapshot {
+export function projectPresence(
+  sources: PresenceSources,
+  includeFace = true,
+  includeBeats = false,
+): OperatorPresenceSnapshot {
   const { activeSeats, pendingOwnerItem } = sources;
   const [mood, detail, since] = pendingOwnerItem
     ? (["needs_you", pendingOwnerItem.title, pendingOwnerItem.since] as const)
@@ -60,6 +65,7 @@ export function projectPresence(sources: PresenceSources, includeFace = true): O
     ...(sources.nativeSubagents === undefined ? {} : { nativeSubagents: sources.nativeSubagents }),
     ...(pendingOwnerItem === undefined ? {} : { pendingOwnerItem }),
     ...(sources.expression === undefined ? {} : { expression: sources.expression }),
+    ...(includeBeats && sources.beats?.length ? { beats: sources.beats } : {}),
   };
   return { ...projection, cursor: createHash("sha256").update(JSON.stringify(projection)).digest("hex") };
 }

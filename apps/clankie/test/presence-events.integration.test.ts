@@ -15,6 +15,11 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { readHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import type { HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
+import { DesktopExpressions } from "../src/captain/desktop.ts";
+import {
+  WorkerReportSummarySchema,
+  type WorkerReportSummary,
+} from "../../../packages/protocol/src/worker-reports.ts";
 
 const roots: string[] = [];
 const stores: ConversationStore[] = [];
@@ -36,6 +41,9 @@ async function fixture() {
   roots.push(root);
   let mode: "reply" | "failed" | "quiet" | "ask" = "reply";
   const live = { thinking: false, voice: false };
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const desktop = new DesktopExpressions(async () => (await settings.load()).desktop);
+  const reports: WorkerReportSummary[] = [];
   const store = new ConversationStore(join(root, "conversations"), async (id, _message, publish, context) => {
     if (mode === "ask") {
       await store.requestQuestion(
@@ -78,7 +86,8 @@ async function fixture() {
         }),
       ],
     ]),
-    desktop: { current: async () => undefined },
+    desktop,
+    reportSummaries: () => reports,
     shutdown: new AbortController(),
   } as unknown as CreateOperatorServiceContext;
   const serve = createOperatorService(context);
@@ -86,14 +95,22 @@ async function fixture() {
     store,
     root,
     live,
+    desktop,
+    settings,
+    reports,
     mode: (value: typeof mode) => {
       mode = value;
     },
-    presence: async (includeFace = true) =>
+    presence: async (includeFace = true, includeBeats = false) =>
       OperatorPresenceResultSchema.parse(
         JSON.parse(
           JSON.stringify(
-            await serve({ op: "presence", schemaVersion: 1, ...(includeFace ? { includeFace: true } : {}) }),
+            await serve({
+              op: "presence",
+              schemaVersion: 1,
+              ...(includeFace ? { includeFace: true } : {}),
+              ...(includeBeats ? { includeBeats: true } : {}),
+            }),
           ),
         ),
       ).snapshot,
@@ -120,6 +137,49 @@ async function fixture() {
     },
   };
 }
+
+it("offers brief hire and confirmed report IDs only to opted-in clients, expires them, and honors quiet hours", async () => {
+  const f = await fixture();
+  const legacy = await f.presence(false);
+  f.desktop.recordHire();
+  const hired = await f.presence(true, true);
+  expect(hired.beats).toEqual([f.desktop.recentHire()]);
+  expect(hired.cursor).not.toBe(legacy.cursor);
+  const oldClient = await f.presence(false);
+  expect(oldClient.cursor).toBe(legacy.cursor);
+  expect(OperatorPresenceSnapshotSchema.omit({ face: true, beats: true }).parse(oldClient)).toEqual(legacy);
+  const report = (id: string, state: WorkerReportSummary["state"], acceptedAt = new Date().toISOString()) =>
+    WorkerReportSummarySchema.parse({
+      deliveryId: id,
+      conversationId: "private-thread",
+      paneId: "private-worker-pane",
+      acceptedAt,
+      state,
+    });
+  f.reports.push(report("10000000-0000-4000-8000-000000000001", "pending"));
+  f.reports.push(report("10000000-0000-4000-8000-000000000002", "uncertain"));
+  expect((await f.presence(true, true)).beats).toEqual(hired.beats);
+  const delivered = report("10000000-0000-4000-8000-000000000003", "delivered");
+  f.reports.push(delivered);
+  const snapshot = await f.presence(true, true);
+  expect(snapshot.beats).toEqual([
+    ...hired.beats!,
+    { id: delivered.deliveryId, kind: "worker_report", at: delivered.acceptedAt },
+  ]);
+  expect(JSON.stringify(snapshot)).not.toMatch(/private-thread|private-worker-pane/);
+  delivered.state = "read";
+  expect((await f.presence(true, true)).cursor).toBe(snapshot.cursor);
+  vi.setSystemTime(Date.now() + 10000);
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+  f.desktop.recordHire();
+  f.reports.push(report("10000000-0000-4000-8000-000000000004", "delivered"));
+  await f.settings.update((current) => ({
+    ...current,
+    desktop: { quietHours: { start: "10:00", end: "11:00", timeZone: "UTC" } },
+  }));
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+  expect((await f.presence(true, true)).mood).toBe("idle");
+});
 
 it("projects durable owner replies and source priority, then changes the cursor on expiry", async () => {
   const f = await fixture();
