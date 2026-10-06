@@ -472,9 +472,15 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         };
       }
       return context.json(
-        await ctx.dependencies.captain.serveOperatorConversation(parsed.data, roleAuthority),
+        await ctx.dependencies.captain.serveOperatorConversation(
+          parsed.data,
+          roleAuthority,
+          parsed.data.op === "tail" ? context.req.raw.signal : undefined,
+        ),
       );
     } catch (error) {
+      if (parsed.data.op === "tail" && context.req.raw.signal.aborted)
+        return new Response(null, { status: 499 });
       if (error instanceof Error && error.message === "goal_owner_required")
         return context.json({ error: "goal_owner_required" }, 403);
       if (error instanceof Error && error.message === "question_owner_unavailable")

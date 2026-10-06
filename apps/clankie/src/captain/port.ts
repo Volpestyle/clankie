@@ -204,10 +204,11 @@ export interface CaptainPort {
   submitChannelProjectionMessage(
     request: DiscordChannelProjectionMessage,
   ): Promise<DiscordChannelProjectionMessageResult>;
-  /** Callable operator service for conversations and read-only terminal tails. */
+  /** Callable operator service; read cancellation stops conversation tails without interrupting turns. */
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
+    readSignal?: AbortSignal,
   ): Promise<OperatorConversationServiceResult>;
   invalidateQuestionPrincipal?(deviceId: string): void;
   /** Lane transcript snapshots for the TUI lanes view. */

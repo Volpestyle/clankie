@@ -1,0 +1,64 @@
+{
+  "ticket": "VUH-1051",
+  "sourceBase": "26a4c8a19afae9f47d9aa584e529f00a8a715fd5",
+  "node": "v26.7.0",
+  "tests": {
+    "passed": 116,
+    "failed": 0,
+    "skipped": 0,
+    "files": [
+      {
+        "file": "apps/relay/test/conversation-tail-sharing.integration.test.ts",
+        "passed": 13,
+        "status": "passed"
+      },
+      {
+        "file": "apps/relay/test/operator-conversations.test.ts",
+        "passed": 79,
+        "status": "passed"
+      },
+      {
+        "file": "apps/clankie/test/captain-native-chat.test.ts",
+        "passed": 2,
+        "status": "passed"
+      },
+      {
+        "file": "apps/clankie/test/delivered-files.test.ts",
+        "passed": 4,
+        "status": "passed"
+      },
+      {
+        "file": "apps/clankie/test/native-conversation.test.ts",
+        "passed": 6,
+        "status": "passed"
+      },
+      {
+        "file": "apps/clankie/test/operator-conversation-tail.test.ts",
+        "passed": 12,
+        "status": "passed"
+      }
+    ],
+    "rawReportSha256": "d62adb6472c3f5ca7d97f96ffcf34e835d501d5d52595a29815acf0ffd9db5a7"
+  },
+  "typecheck": {
+    "packages": ["@clankie/protocol", "@clankie/relay", "@clankie/clankie"],
+    "workspaceConcurrency": 1,
+    "exitCode": 0
+  },
+  "scopedLint": {
+    "files": 9,
+    "exitCode": 0
+  },
+  "heavyLimiterUsed": true,
+  "scannerProbe": {
+    "callsPerLength": 4,
+    "characters": [4000, 8000, 16000],
+    "beforeMs": [34.775292, 119.808084, 459.232],
+    "afterMs": [0.274916, 0.096709, 0.188542]
+  },
+  "limits": [
+    "No fresh physical app or live native harness proof",
+    "No full pnpm check; integrator owns composed gate",
+    "No owner-runtime mutation, model calls, hiring, simulator or AWS actions"
+  ]
+}

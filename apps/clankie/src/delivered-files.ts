@@ -357,7 +357,10 @@ export class DeliveredFileStore {
  * candidate is a real file inside the working directory is `publish`'s call.
  */
 export function namedImagePaths(text: string): string[] {
-  const pattern = /`([^`\n]+\.(?:png|jpe?g|gif|webp))`|([^\s`'"()<>[\]]+\.(?:png|jpe?g|gif|webp))\b/giu;
+  // Try a bare path only at a token boundary. Retrying at every character of
+  // a long plain word makes a native history read quadratic and blocks HTTP.
+  const pattern =
+    /`([^`\n]+\.(?:png|jpe?g|gif|webp))`|(?<![^\s`'"()<>[\]])([^\s`'"()<>[\]]+\.(?:png|jpe?g|gif|webp))\b/giu;
   const paths = [...text.matchAll(pattern)]
     .map((match) => (match[1] ?? match[2] ?? "").trim())
     .filter((path) => path.length > 0 && !path.includes("://"))

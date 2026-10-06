@@ -35,6 +35,8 @@ import { PersonaStore } from "./personas.ts";
 import type { CaptainPort, HireSeat } from "./port.ts";
 import { captainIsThinking, captainNativeSubagents, pollPresence, projectPresence } from "./presence.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
+import { waitForConversationRun } from "./conversation-run.ts";
+import { setTimeout as delay } from "node:timers/promises";
 import { type SeatLedger } from "./seat-ledger.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import type { createStanceStore } from "./stances.ts";
@@ -109,8 +111,19 @@ export function createOperatorService(
   return async function serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
+    readSignal?: AbortSignal,
   ): Promise<OperatorConversationServiceResult> {
-    await ctx.personas.ready(ctx.settingsStore);
+    const tailSignal =
+      request.op === "tail"
+        ? readSignal === undefined
+          ? ctx.shutdown.signal
+          : AbortSignal.any([readSignal, ctx.shutdown.signal])
+        : undefined;
+    tailSignal?.throwIfAborted();
+    const ready = ctx.personas.ready(ctx.settingsStore);
+    if (tailSignal === undefined) await ready;
+    else await waitForConversationRun(ready, tailSignal);
+    tailSignal?.throwIfAborted();
     if (
       ctx.deps.herdrAvailable?.() === false &&
       ["spawn_seat", "move_seat", "close_seat", "state_stance", "state_work"].includes(request.op)
@@ -821,14 +834,18 @@ export function createOperatorService(
         if (seatId !== undefined) {
           const deadline = Date.now() + (request.op === "tail" ? Math.min(input.waitMs ?? 0, 25_000) : 0);
           for (;;) {
-            const snapshot = await ctx.herdrWatches.readNativeChat(seatId, previous);
+            tailSignal?.throwIfAborted();
+            const reading = ctx.herdrWatches.readNativeChat(seatId, previous);
+            const snapshot =
+              tailSignal === undefined ? await reading : await waitForConversationRun(reading, tailSignal);
+            tailSignal?.throwIfAborted();
             if (snapshot === undefined) break;
             const cwd =
               ctx.liveSeats.find((seat) => seat.seatId === seatId)?.workingDirectory ??
               previous?.workingDirectory;
             const source = { ...snapshot.agent, ...(cwd === undefined ? {} : { workingDirectory: cwd }) };
             ctx.conversations.rememberNativeSource(input.conversationId, source);
-            const page = await nativeConversationPage(
+            const paging = nativeConversationPage(
               conversation,
               snapshot.transcript,
               snapshot.agent.status,
@@ -843,6 +860,9 @@ export function createOperatorService(
                     }),
               ctx.conversations.nativeAnnotations(input.conversationId),
             );
+            const page =
+              tailSignal === undefined ? await paging : await waitForConversationRun(paging, tailSignal);
+            tailSignal?.throwIfAborted();
             if (request.op === "react")
               return {
                 op: "react",
@@ -866,12 +886,12 @@ export function createOperatorService(
               Date.now() >= deadline
             )
               return { op: request.op, schemaVersion: 1, result: page };
-            await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, deadline - Date.now())));
+            await delay(Math.min(1_000, deadline - Date.now()), undefined, { signal: tailSignal });
           }
         }
       }
     }
-    const result = await ctx.conversations.serve(request, authority);
+    const result = await ctx.conversations.serve(request, authority, tailSignal);
     if (request.op === "create" && request.scope.kind === "seat") {
       ctx.herdrWatches.trackSeat(request.scope.seatId);
     } else if (request.op === "create" && request.scope.kind === "persona") {
