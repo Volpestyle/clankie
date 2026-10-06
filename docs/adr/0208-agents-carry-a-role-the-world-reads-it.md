@@ -116,9 +116,11 @@ display observations, never child-history authority.
 The same native readers resolve the selected child. Claude maps the parent call
 ID through its matching `toolUseResult.agentId`, then checks the derived nested
 child journal's parent and agent IDs. A call without that recorded locator is
-unavailable; ordinary parent reads still exclude sidechains. Codex reuses the
-roster's direct-child header discovery and checks both headers before each byte
-read. OpenCode resolves the task call inside the same registered profile and
+unavailable; ordinary parent reads still exclude sidechains. Selected Codex
+history synchronously resolves the direct child and checks both headers before
+each byte read. It does not use the asynchronous roster discovery cache as
+history authority or inherit its measured discovery cost. OpenCode resolves the
+task call inside the same registered profile and
 checks its direct-child database relation again after reading. Labels and list
 positions never select files. Parent changes, foreign cursors and escaped paths
 refuse instead of reading another child. A remembered native source allows

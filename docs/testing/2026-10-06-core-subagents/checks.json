@@ -1,0 +1,71 @@
+{
+  "ticket": "VUH-1530",
+  "date": "2026-10-06",
+  "base": "26a4c8a19afae9f47d9aa584e529f00a8a715fd5",
+  "branch": "bex/vuh-1530-core-subagents",
+  "initialStatus": "clean",
+  "productionChanges": false,
+  "checks": [
+    {
+      "name": "install",
+      "command": "/Users/james/.herdr-handoffs/clankie-backlog-20261003/bin/heavy pnpm install --frozen-lockfile",
+      "exitCode": 0,
+      "log": ".local/subagents-proof/install.log"
+    },
+    {
+      "name": "focused-tests",
+      "command": "/Users/james/.herdr-handoffs/clankie-backlog-20261003/bin/heavy pnpm exec vitest run --config vitest.config.ts apps/clankie/test/codex-subagents.test.ts apps/clankie/test/subagent-native-history.integration.test.ts apps/clankie/test/seat-subagents.test.ts apps/clankie/test/captain-native-subagents.test.ts apps/clankie/test/fleet-refresh.integration.test.ts --reporter=default --reporter=json --outputFile=.local/subagents-proof/tests.json",
+      "exitCode": 0,
+      "passed": 30,
+      "failed": 0,
+      "pending": 0,
+      "files": {
+        "captain-native-subagents.test.ts": 2,
+        "codex-subagents.test.ts": 17,
+        "fleet-refresh.integration.test.ts": 2,
+        "seat-subagents.test.ts": 5,
+        "subagent-native-history.integration.test.ts": 4
+      },
+      "report": ".local/subagents-proof/tests.json",
+      "log": ".local/subagents-proof/tests.log"
+    },
+    {
+      "name": "protocol-and-clankie-typecheck",
+      "command": "/Users/james/.herdr-handoffs/clankie-backlog-20261003/bin/heavy pnpm --workspace-concurrency=1 --filter @clankie/protocol --filter @clankie/clankie typecheck",
+      "exitCode": 0,
+      "log": ".local/subagents-proof/typecheck.log"
+    },
+    {
+      "name": "scoped-lint",
+      "command": "pnpm exec oxlint --deny-warnings packages/agent-transcript/src/subagents.ts packages/protocol/src/operator-conversations.ts packages/protocol/src/operator-service.ts apps/clankie/src/agent-sessions.ts apps/clankie/src/captain/seat-subagents.ts apps/clankie/src/captain/presence.ts apps/clankie/src/captain/captain-operator-service.ts apps/clankie/test/codex-subagents.test.ts apps/clankie/test/subagent-native-history.integration.test.ts apps/clankie/test/seat-subagents.test.ts apps/clankie/test/captain-native-subagents.test.ts apps/clankie/test/fleet-refresh.integration.test.ts",
+      "exitCode": 0,
+      "log": ".local/subagents-proof/lint.log"
+    }
+  ],
+  "fleetFixtureFilesystemCalls": {
+    "seats": 10,
+    "callers": 16,
+    "unrelatedDirectories": 1024,
+    "cold": {
+      "stats": 5390,
+      "directories": 1069,
+      "opens": 1064,
+      "parentOpens": 20,
+      "syncWalks": 0
+    },
+    "warm": {
+      "stats": 110,
+      "directories": 0,
+      "opens": 0,
+      "parentOpens": 0,
+      "syncWalks": 0
+    }
+  },
+  "limits": [
+    "No fresh app/device visual proof; app repository untouched",
+    "No explicit CLI child selector",
+    "Selected Codex history uses synchronous resolution; performance unmeasured",
+    "Public replay dispatch source-inspected; selected tests cover reader and fleet/roster paths",
+    "No model/hiring/owner-runtime/AWS/simulator/full-check/external-write"
+  ]
+}
