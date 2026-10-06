@@ -39,7 +39,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     const version = worker.pluginVersion === undefined ? "plugin unknown" : `plugin ${worker.pluginVersion}`;
     const expected =
       worker.expectedPluginVersion === undefined ? "" : ` / deployed ${worker.expectedPluginVersion}`;
-    return `  ${marker} Worker ${clean(worker.seatId)} tools · ${status} · ${version}${expected}${worker.behind ? " · behind" : ""} · ${clean(worker.reason)}`;
+    return `  ${marker} Worker ${clean(worker.seatId)} tools · ${status} · ${clean(worker.reason)} · ${version}${expected}${worker.behind ? " · behind" : ""}`;
   });
   if (report.workerTools?.error)
     workerTools.push(`  ○ Worker tools · unknown · ${clean(report.workerTools.error)}`);
