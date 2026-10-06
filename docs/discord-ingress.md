@@ -1,7 +1,7 @@
-# Authenticated remote Discord text
+# Authenticated remote Discord ingress
 
 `POST /v1/discord/ingress` accepts a connection's sealed, fleet-permitted text
-turn. It is not an operator bearer API. The public gateway forwards this route's
+turn or connection-owned voice callback. It is not an operator bearer API. The public gateway forwards this route's
 own encrypted envelope; neither message text nor the answer is plaintext there.
 The managed body's broker owns a P-256 ingress key, registered through the signed
 `/fleet/v1/body/discord-key` call at boot. Failed registration retries without
@@ -45,3 +45,18 @@ in the private operations repository. The official shared bot token never goes
 into this service or a tenant's credential broker. There is no ambient ingress
 kind. Default remote text requires explicit addressing; being awake does not
 make Discord supply otherwise restricted Message Content.
+
+Voice callbacks use `kind: "voice"` and one strict `voice.action`: `briefing`,
+`handoff`, or `self_tool`. Briefing and the three existing voice self-tools use
+the service's existing voice routes; they grant no general captain or operator
+bearer. Handoffs require `voice_event` with the same guild, channel and actor as
+the sealed event and the bot transport. The body supplies the hosted identity,
+verified owner proof and live source fence before entering the existing captain
+flow. Approval prompts remain on the authenticated operator surface.
+
+Callbacks and replies use the same recipient-bound encryption, durable admission,
+retry and restart behavior as text. Call audio and provider credentials belong
+to the trusted connection; this callback contract never transports a shared bot
+token. `state: "voice"` carries the bounded operation result inside the sealed
+reply. Hosting, charging and rollout records remain in the private operations
+repository.

@@ -129,12 +129,51 @@ export function createDiscordIngressRoutes(ingress: DiscordIngress | undefined):
   });
   return app;
 }
+/** Compose the existing local voice routes; the connection never receives their bearer. */
+export function createHostedDiscordVoiceCallback(
+  fetchVoice: (request: Request) => Response | Promise<Response>,
+  bridgeBearer: string,
+): (event: DiscordIngressEvent) => Promise<DiscordIngressResult> {
+  return async (event) => {
+    const operation = event.voice;
+    if (!operation || operation.action === "handoff") return { state: "failed", code: "unavailable" };
+    const briefing = operation.action === "briefing";
+    const response = await fetchVoice(
+      new Request(`http://localhost/v1/discord/${briefing ? "voice-briefing" : "voice-self-tool"}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${bridgeBearer}` },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          guildId: event.guildId,
+          channelId: event.channelId,
+          ...(briefing
+            ? { consentedUserIds: operation.consentedUserIds }
+            : {
+                speakerId: event.actorId,
+                tool: operation.tool,
+                arguments: operation.arguments,
+              }),
+        }),
+      }),
+    );
+    if (!response.ok) return { state: "failed", code: "unavailable" };
+    const result = await response.json();
+    return {
+      state: "voice",
+      result: briefing
+        ? { instructions: result.instructions, briefing: result.briefing }
+        : { text: result.text, isError: result.isError },
+    };
+  };
+}
 export async function createHostedDiscordIngress(options: {
   client: HostedBodyClient;
   store: CredentialStore;
   statePath: string;
   captain: CaptainPort;
   onWork?: () => void;
+  /** Existing service voice routes, composed locally; no extra HTTP authority. */
+  voice?: (event: DiscordIngressEvent) => Promise<DiscordIngressResult>;
 }): Promise<{ ingress: DiscordIngress; operator: HostedDiscordOperator; close(): void }> {
   const provider = `clankie-discord-ingress-${options.client.hostId}`;
   const existing = await options.store.get(provider),
@@ -180,6 +219,37 @@ export async function createHostedDiscordIngress(options: {
       statePath: options.statePath,
       ...(options.onWork === undefined ? {} : { onWork: options.onWork }),
       execute: async (event) => {
+        if (event.kind === "voice") {
+          if (event.voice?.action !== "handoff")
+            return options.voice?.(event) ?? { state: "failed", code: "unavailable" };
+          const request = event.voice.request;
+          const result = await options.captain.submitDiscordTurn(
+            {
+              ...request,
+              deliveryId: event.deliveryId,
+              identity: {
+                ...request.identity,
+                presenceSessionId: `discord:${event.channelId}`,
+                correlationId: event.deliveryId,
+                profileHash: "hosted-discord-v1",
+                characterId: "clankie",
+                credentialRef: "hosted_discord",
+                transportKind: "bot",
+              },
+            },
+            { verifiedOwner: event.owner, sourceCurrent: () => !stopped },
+          );
+          return {
+            state: "voice",
+            result:
+              result.state === "waiting_user" && result.approvalRequired
+                ? {
+                    ...result,
+                    prompt: "I need you to continue that request on the authenticated operator surface.",
+                  }
+                : result,
+          };
+        }
         const result = await options.captain.submitDiscordTurn(
           {
             schemaVersion: 1,

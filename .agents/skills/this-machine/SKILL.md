@@ -215,6 +215,12 @@ bound server/current installation. Inspect `managedPolicy` before claiming a
 saved policy reached the edge; pending or unavailable is not an acknowledgement.
 The account dashboard uses a Discord-only owner permit. Disconnect/reinstall
 revokes that connection grant; it does not create a terminal or paired-device grant.
+For a managed Discord call, inspect the current connection and voice status;
+the managed connection owns media and credentials. The tenant body receives only
+sealed briefing, attributed captain handoff and voice self-tool callbacks.
+Use the existing server/role and voice settings; a hosted customer supplies no
+bot token or provider key. Report a pending wake or unavailable call as observed,
+and keep live voice verification separate from a successful policy save.
 
 ## Authority
 

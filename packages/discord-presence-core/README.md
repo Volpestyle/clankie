@@ -20,6 +20,8 @@ what lets both bodies be one character
 | `elevenlabs-tts`             | ElevenLabs legacy TTS and explicit v4 Turbo dialogue WebSocket boundary (ADR 0070)                    |
 | `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)   |
 | `voice-session`              | Vox-backed attributed speech/text input, shared group floor, deliberate barge-in and playback         |
+| `vox-gateway`                | Structural gateway adapter, validated OP4 voice effects and confirmed account leave                   |
+| `vox-process`                | Tokenless Vox startup, versioned IPC readiness and process probes                                     |
 | `voice-composition`          | Shared voice dependency assembly for bot and user-session bodies                                      |
 | `voice-control`              | Local join/leave control request handling                                                             |
 | `voice-music`                | Shared bounded queue and transport controls                                                           |
@@ -66,6 +68,9 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
   session closes after two minutes and reopens on demand. At 25 retained
   listeners, the least recently active idle listener is evicted before another
   opens; active captures and pending transcript correlation are never evicted.
+  Each consented recording also ends after three minutes of elapsed time or
+  forwarded PCM, whichever comes first. A host can set `recordingLimitMs`; a
+  recording limit never grants capture consent.
 - **Vox is the sole voice media owner.** Both media-enabled Discord bodies use
   native Vox capture, TTS playback, DAVE readiness, and audible music; a
   text-only bot does not spawn it. This package owns policy and correlation
@@ -77,6 +82,30 @@ durations, and typed outcomes, never transcript, prompt, audio, or PCM.
   separately proves positive role-scoped DAVE. A leave qualifies only after the
   account gateway confirms detachment. See
   [ADR 0128](../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md).
+
+## Host call limits
+
+Local and hosted callers reuse `DiscordVoiceSession.announce(text, { timeoutMs })`
+for call warnings and `endGracefully({ reason, message, timeoutMs })` for a cap or
+sleep transition. The status is operational context for Clankie's existing voice
+provider: he composes the warning or farewell using the current persona and
+conversation. An announcement waits for current capture and speech; it counts as
+`spoken` only after the matching Vox playback drains.
+
+Graceful ending immediately stops new capture and normal response admission,
+preserves already admitted speech, and offers a brief farewell before leaving.
+The default deadline is 60 seconds across waiting, provider generation and
+playback. Silence, interrupted output or timeout returns `incomplete`; an
+incomplete ending also emits `voice_graceful_end_incomplete`. The account gateway
+must still confirm detachment before the caller releases its stay or returns Vox
+to a pool. Neither model completion nor the core's local `left` receipt proves a
+Discord account leave. Billing, tenant limits and wake policy remain the host's.
+
+`DiscordVoxGatewayBridge` accepts a structural gateway adapter and has no Discord
+client dependency. `startOfficialBotVox({ enabled: true, env })` starts the same
+tokenless media process and checks its versioned IPC handshake. The official bot
+app retains its old import paths as reexports; hosted runtimes import these
+helpers from this package.
 
 ## Consumers
 

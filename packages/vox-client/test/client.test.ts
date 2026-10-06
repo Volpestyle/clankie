@@ -1,7 +1,11 @@
 import { Buffer } from "node:buffer";
+import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { build } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
   VoxFrameDecoder,
@@ -477,6 +481,55 @@ describe("Vox client framing", () => {
 
   it("resolves an owned candidate without requiring environment configuration", () => {
     expect(resolveVoxBin({}, [process.execPath])).toBe(process.execPath);
+  });
+
+  it("starts the configured Vox executable from a CJS bundle without evaluating source-tree fallbacks", async () => {
+    const fixture = await createVoxFixture();
+    const directory = await mkdtemp(join(tmpdir(), "vox-cjs-bundle-"));
+    const bundled = join(directory, "vox-client.cjs");
+    try {
+      // Hosted edge ships CJS. import.meta is deliberately absent; an explicit
+      // binary must be authoritative before any source-checkout fallback runs.
+      await build({
+        entryPoints: [fileURLToPath(new URL("../src/index.ts", import.meta.url))],
+        bundle: true,
+        platform: "node",
+        target: "node24",
+        format: "cjs",
+        outfile: bundled,
+        logLevel: "silent",
+      });
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [
+          "-e",
+          `
+const { createVoxClient, resolveVoxBin } = require(process.argv[1]);
+const resolved = resolveVoxBin();
+const missing = resolveVoxBin({ CLANKIE_VOX_BIN: process.env.CLANKIE_VOX_BIN + "-absent" });
+const client = createVoxClient();
+const timer = setTimeout(() => { client.close(); process.exit(1); }, 5000);
+client.onStatus((status, detail) => {
+  if (status === "ready") {
+    clearTimeout(timer);
+    process.stdout.write(JSON.stringify({ resolved, missing: missing ?? null, status }));
+    client.close();
+  } else if (status === "missing" || status === "error") {
+    clearTimeout(timer);
+    client.close();
+    throw new Error(detail);
+  }
+});
+`,
+          bundled,
+        ],
+        { env: { ...process.env, CLANKIE_VOX_BIN: fixture.bin }, timeout: 8000 },
+      );
+      expect(JSON.parse(stdout)).toEqual({ resolved: fixture.bin, missing: null, status: "ready" });
+    } finally {
+      await fixture.cleanup();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("reports a Vox binary older than its source, including sources in a subdirectory", async () => {
