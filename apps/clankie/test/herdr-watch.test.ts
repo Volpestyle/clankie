@@ -1397,7 +1397,7 @@ describe("hiring a seat", () => {
     expect(result.outcome).toBe("spawned");
     expect(result).not.toHaveProperty("skills");
     const args = startAgent.mock.calls[0]?.[0].args ?? [];
-    for (const name of ["lead", "reflect", "this-machine"])
+    for (const name of ["lead", "shared-checkout", "this-machine"])
       expect(args).toContain(join(repoRoot, ".agents/skills", name));
     store.close();
   });

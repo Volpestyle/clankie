@@ -17,13 +17,12 @@ it("ships every repo-owned skill, leadership included, without retired names", (
   expect(names).not.toContain("herdr-lead");
   for (const name of [
     "lead",
-    "reflect",
+    "shared-checkout",
     "tidy",
     "this-machine",
     "trace-clankie",
     "work-items",
     "research-team",
-    "computer-use-delegation",
     "desktop-control",
     "herdr",
     "trip-planning",
@@ -38,7 +37,7 @@ it("projects a plugin with exactly the given skills and its components", async (
   const plugin = await projectSkillPlugin(join(repo, "integrations/claude-plugin"), state, catalog);
   const names = await readdir(join(plugin, "skills"));
   expect(names).not.toContain("lead");
-  expect(names).toContain("reflect");
+  expect(names).toContain("shared-checkout");
   expect(names).toContain("this-machine");
   expect(await readFile(join(plugin, "hooks/hooks.json"), "utf8")).toContain("seat-sync");
   expect(await readFile(join(plugin, "output-styles/clankie.md"), "utf8")).toContain("# Identity");
