@@ -1,5 +1,7 @@
 import { homedir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createInboundSender } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 /**
  * `clankie mcp --lane operator` and `clankie mcp --seat` — stdio MCP for a
@@ -60,6 +62,19 @@ import {
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 import { runWorkerMcp } from "./worker-mcp.ts";
+import { clankieStateHome } from "../state-home.ts";
+
+// Capture when this module loads; a runtime update on disk cannot replace an
+// already running bridge. The journal identifies the code that actually ran.
+const bridgeSourceHash = (() => {
+  try {
+    return createHash("sha256")
+      .update(readFileSync(fileURLToPath(import.meta.url)))
+      .digest("hex");
+  } catch {
+    return undefined;
+  }
+})();
 
 const execFileAsync = promisify(execFileCallback);
 const MCP_USAGE =
@@ -349,10 +364,33 @@ export async function pumpSeatEvents(
     readonly waitMs?: number;
     readonly retryMs?: number;
     readonly onError?: (error: unknown) => void;
+    readonly onDiagnostic?: (event: SeatPumpDiagnostic) => void;
   } = {},
 ): Promise<void> {
   const waitMs = options.waitMs ?? OUTBOX_POLL_WAIT_MS;
   const retryMs = options.retryMs ?? OUTBOX_RETRY_MS;
+  const receipts = new Set<string>();
+  const diagnostic = (event: SeatPumpDiagnostic) => {
+    try {
+      options.onDiagnostic?.(event);
+    } catch {
+      // Diagnostics cannot interrupt delivery or receipt reconciliation.
+    }
+  };
+  const report = (error: unknown, stage: "poll" | "ack", eventId?: string) => {
+    diagnostic({
+      event: "pump_error",
+      stage,
+      ...(eventId === undefined ? {} : { eventId }),
+      ...errorIdentity(error),
+    });
+    try {
+      options.onError?.(error);
+    } catch {
+      // A broken stderr or observer must not unbind an otherwise live seat.
+    }
+  };
+  diagnostic({ event: "pump_started" });
   while (!signal.aborted) {
     // A poll that answers at once (an empty page from a service that ignored
     // `wait`) must not spin the loop faster than the transport can deliver.
@@ -363,58 +401,143 @@ export async function pumpSeatEvents(
       events = await upstream.pollEvents(waitMs, signal);
     } catch (error) {
       if (signal.aborted) return;
-      options.onError?.(error);
+      report(error, "poll");
       await delay(retryMs, signal);
       continue;
     }
     for (const event of events) {
       if (signal.aborted) return;
-      await server.notification({
-        method: CHANNEL_NOTIFICATION_METHOD,
-        params: {
-          content: event.content,
-          // Attribute keys must be identifiers; anything else Claude Code drops.
-          meta: {
-            kind: event.kind,
-            conversation: event.conversationId,
-            source: event.source,
-            event_id: event.id,
-            created_at: event.createdAt,
+      try {
+        await server.notification({
+          method: CHANNEL_NOTIFICATION_METHOD,
+          params: {
+            content: event.content,
+            // Attribute keys must be identifiers; anything else Claude Code drops.
+            meta: {
+              kind: event.kind,
+              conversation: event.conversationId,
+              source: event.source,
+              event_id: event.id,
+              created_at: event.createdAt,
+            },
           },
-        },
-      });
-      if (upstream.acknowledge !== undefined)
-        await acknowledgeSeatEvent(upstream.acknowledge.bind(upstream), event.id, signal, retryMs, options);
+        });
+      } catch (error) {
+        // Polling again implicitly acknowledges all previous takes. If the
+        // channel write failed, that could falsely confirm an unseen event.
+        // Retain the original uncertainty fence; never re-notify it.
+        diagnostic({
+          event: "pump_stopped",
+          stage: "notification",
+          eventId: event.id,
+          ...errorIdentity(error),
+        });
+        throw error;
+      }
+      diagnostic({ event: "notification_sent", eventId: event.id });
+      if (upstream.acknowledge !== undefined) receipts.add(event.id);
     }
+    // Settle the page together so a batch's ACK outages cannot multiply the
+    // no-poll window. Retain exact IDs for a late ACK after a service restart.
+    if (upstream.acknowledge !== undefined)
+      await Promise.all(
+        [...receipts].map(async (id) => {
+          if (
+            await acknowledgeSeatEvent(
+              upstream.acknowledge!.bind(upstream),
+              id,
+              signal,
+              retryMs,
+              report,
+              diagnostic,
+            )
+          )
+            receipts.delete(id);
+        }),
+      );
   }
 }
 
 /**
- * Settle one notified event's receipt without ever ending the pump. A failed
- * acknowledgment retries the same receipt (the service reconciles it even
- * after the take window lapses); a refusal is reported once and polling
- * continues, because a bridge that stops polling unbinds the whole seat.
+ * Retry one notified event's exact receipt once, then resume polling. The
+ * service's next poll acknowledges previous takes as well. An unlimited ACK
+ * retry would stop polling and unbind the seat even when polling still works.
+ * Every notification in the previous page must have succeeded before we poll
+ * again; channel failures remain fenced instead of being retried or ACKed.
  */
 async function acknowledgeSeatEvent(
   acknowledge: (eventId: string) => Promise<boolean>,
   eventId: string,
   signal: AbortSignal,
   retryMs: number,
-  options: { readonly onError?: (error: unknown) => void },
-): Promise<void> {
-  while (!signal.aborted) {
+  report: (error: unknown, stage: "ack", eventId: string) => void,
+  diagnostic: (event: SeatPumpDiagnostic) => void,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 2 && !signal.aborted; attempt += 1) {
     try {
-      if (!(await acknowledge(eventId)))
-        options.onError?.(
+      if (await acknowledge(eventId)) diagnostic({ event: "acknowledged", eventId });
+      else {
+        diagnostic({ event: "ack_refused", eventId });
+        report(
           new Error(`The notification ${eventId} was sent but the service no longer holds its receipt.`),
+          "ack",
+          eventId,
         );
-      return;
+      }
+      return true;
     } catch (error) {
-      if (signal.aborted) return;
-      options.onError?.(error);
-      await delay(retryMs, signal);
+      if (signal.aborted) return false;
+      report(error, "ack", eventId);
+      if (attempt === 0) await delay(retryMs, signal);
     }
   }
+  if (!signal.aborted) diagnostic({ event: "ack_deferred_to_poll", eventId });
+  return false;
+}
+
+/** No content, arguments, credentials, URLs or raw error messages. */
+export interface SeatPumpDiagnostic {
+  readonly event:
+    | "pump_started"
+    | "pump_error"
+    | "notification_sent"
+    | "acknowledged"
+    | "ack_refused"
+    | "ack_deferred_to_poll"
+    | "pump_stopped"
+    | "stdio_closed";
+  readonly stage?: "poll" | "ack" | "notification";
+  readonly eventId?: string;
+  readonly errorName?: string;
+  readonly errorCode?: string | number;
+}
+
+function errorIdentity(error: unknown): Pick<SeatPumpDiagnostic, "errorName" | "errorCode"> {
+  if (!(error instanceof Error)) return { errorName: typeof error };
+  const code = "code" in error ? error.code : undefined;
+  return {
+    errorName: /^[a-zA-Z_$][a-zA-Z0-9_.$-]{0,63}$/u.test(error.name) ? error.name : "Error",
+    ...(typeof code === "number" || (typeof code === "string" && /^[A-Z_0-9-]{1,64}$/u.test(code))
+      ? { errorCode: code }
+      : {}),
+  };
+}
+
+function seatPumpJournal(env: NodeJS.ProcessEnv, conversationId: string) {
+  const directory = join(clankieStateHome(env), "clankie", "seat-bridges");
+  const path = join(directory, `${process.pid}.jsonl`);
+  return (event: SeatPumpDiagnostic) => {
+    try {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      appendFileSync(
+        path,
+        `${JSON.stringify({ schemaVersion: 1, at: new Date().toISOString(), pid: process.pid, conversationId, sourceHash: bridgeSourceHash, ...event })}\n`,
+        { mode: 0o600 },
+      );
+    } catch {
+      // An unavailable diagnostic store cannot cost the seat its receiver.
+    }
+  };
 }
 
 /** Transport diagnostics contain no arguments, credentials, response bodies or error messages. */
@@ -1014,7 +1137,7 @@ export async function runMcpCommand(
   if (conversationId !== undefined && (lane !== "operator" || !conversationId.trim()))
     throw new Error(MCP_USAGE);
   const stderr = options.stderr ?? process.stderr;
-  const lifecycle = (event: LaneUpstreamTransportEvent | { readonly event: "stdio_closed" }) => {
+  const lifecycle = (event: LaneUpstreamTransportEvent | SeatPumpDiagnostic) => {
     try {
       stderr.write(`clankie mcp: ${JSON.stringify(event)}\n`);
     } catch {
@@ -1025,6 +1148,8 @@ export async function runMcpCommand(
   // `clankie seat` loads the projected plugin as the session-only
   // `clankie@inline`; an installed marketplace copy is `clankie@clankie`.
   const channel = OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry));
+  const journal =
+    lane === "operator" && channel ? seatPumpJournal(env, conversationId ?? "global-default") : undefined;
   const upstream = await (options.connectUpstream ?? defaultUpstream)({
     lane,
     ...(conversationId === undefined ? {} : { conversationId }),
@@ -1035,6 +1160,7 @@ export async function runMcpCommand(
   const closed = new Promise<void>((resolve) => {
     server.onclose = () => {
       lifecycle({ event: "stdio_closed" });
+      journal?.({ event: "stdio_closed" });
       closing.abort();
       resolve();
     };
@@ -1045,6 +1171,7 @@ export async function runMcpCommand(
     lane === "operator" && channel
       ? pumpSeatEvents(server, upstream, closing.signal, {
           ...pollCadence(options),
+          ...(journal === undefined ? {} : { onDiagnostic: journal }),
           onError: (error) => {
             stderr.write(
               `clankie mcp: outbox poll failed (${error instanceof Error ? error.message : String(error)}); retrying\n`,
@@ -1052,10 +1179,10 @@ export async function runMcpCommand(
           },
         }).catch((error: unknown) => {
           // The seat is unbound from here on; never let that pass silently.
-          if (!closing.signal.aborted)
-            stderr.write(
-              `clankie mcp: outbox pump stopped (${error instanceof Error ? error.message : String(error)})\n`,
-            );
+          if (!closing.signal.aborted) {
+            journal?.({ event: "pump_stopped", ...errorIdentity(error) });
+            lifecycle({ event: "pump_stopped", ...errorIdentity(error) });
+          }
         })
       : Promise.resolve();
   // The harness owns this process: when it closes stdin the bridge is done.
