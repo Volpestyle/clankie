@@ -1,0 +1,142 @@
+[
+  {
+    "id": "cli:pane:close",
+    "result": {
+      "type": "ok"
+    }
+  },
+  {
+    "id": "cli:pane:list",
+    "result": {
+      "panes": [
+        {
+          "agent": "codex",
+          "agent_session": {
+            "agent": "codex",
+            "kind": "id",
+            "source": "herdr:codex",
+            "value": "01a10ef9-8a61-74a1-9df4-2441ef9abcf5"
+          },
+          "agent_status": "working",
+          "cwd": "C:\\Users\\volpe\\repos",
+          "focused": false,
+          "pane_id": "w9:p1",
+          "revision": 973,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 69
+          },
+          "tab_id": "w9:t1",
+          "terminal_id": "term_65d0ca2fa70f81",
+          "terminal_title": "\u2839 Review KH2 co-op handoff | repos",
+          "terminal_title_stripped": "Review KH2 co-op handoff | repos",
+          "tokens": {
+            "clankie-plugin": "Clankie plugin 0.6.5 is older than 0.6.6. Save this session, then restart/resume"
+          },
+          "workspace_id": "w9"
+        },
+        {
+          "agent": "claude",
+          "agent_session": {
+            "agent": "claude",
+            "kind": "id",
+            "source": "herdr:claude",
+            "value": "35fe0f48-1532-45dd-aff0-53d19ffd5536"
+          },
+          "agent_status": "idle",
+          "cwd": "C:\\Users\\volpe\\repos",
+          "focused": true,
+          "pane_id": "w9:p2",
+          "revision": 15,
+          "scroll": {
+            "max_offset_from_bottom": 8168,
+            "offset_from_bottom": 6,
+            "viewport_rows": 69
+          },
+          "tab_id": "w9:t1",
+          "terminal_id": "term_65d0ca3cb067b2",
+          "terminal_title": "\u2733 KH2-multiplayer project orientation",
+          "terminal_title_stripped": "KH2-multiplayer project orientation",
+          "workspace_id": "w9"
+        },
+        {
+          "agent": "codex",
+          "agent_session": {
+            "agent": "codex",
+            "kind": "id",
+            "source": "herdr:codex",
+            "value": "01a109c3-ddaa-7ed2-8bef-b953b11f4c27"
+          },
+          "agent_status": "done",
+          "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+          "focused": false,
+          "pane_id": "w9:p3",
+          "revision": 364,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 71
+          },
+          "tab_id": "w9:t2",
+          "terminal_id": "term_65d0e2463eaeb3",
+          "terminal_title": "Validate VUH-1493 Tailscale path | kh2-multiplayer",
+          "terminal_title_stripped": "Validate VUH-1493 Tailscale path | kh2-multiplayer",
+          "tokens": {
+            "clankie-plugin": "Clankie plugin 0.6.5 is older than 0.6.6. Save this session, then restart/resume"
+          },
+          "workspace_id": "w9"
+        },
+        {
+          "agent": "codex",
+          "agent_session": {
+            "agent": "codex",
+            "kind": "id",
+            "source": "herdr:codex",
+            "value": "01a109dd-4e7f-70a1-beb3-195344663c1a"
+          },
+          "agent_status": "idle",
+          "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+          "focused": false,
+          "pane_id": "w9:p4",
+          "revision": 44,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 71
+          },
+          "tab_id": "w9:t3",
+          "terminal_id": "term_65d0e8822cbf54",
+          "terminal_title": "Review auto-resync false trigger fix | kh2-multiplayer",
+          "terminal_title_stripped": "Review auto-resync false trigger fix | kh2-multiplayer",
+          "tokens": {
+            "clankie-plugin": "Clankie plugin 0.6.5 is older than 0.6.6. Save this session, then restart/resume"
+          },
+          "workspace_id": "w9"
+        },
+        {
+          "agent": "codex",
+          "agent_status": "done",
+          "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+          "focused": false,
+          "pane_id": "w9:p6",
+          "revision": 422,
+          "scroll": {
+            "max_offset_from_bottom": 0,
+            "offset_from_bottom": 0,
+            "viewport_rows": 71
+          },
+          "tab_id": "w9:t5",
+          "terminal_id": "term_65d106ee2fa839",
+          "terminal_title": "Build isolated baseline DLL | kh2-multiplayer",
+          "terminal_title_stripped": "Build isolated baseline DLL | kh2-multiplayer",
+          "tokens": {
+            "clankie-plugin": "Clankie plugin 0.6.5 is older than 0.6.6. Save this session, then restart/resume"
+          },
+          "workspace_id": "w9"
+        }
+      ],
+      "type": "pane_list"
+    }
+  }
+]

@@ -1,0 +1,30 @@
+  SessionStart hooks
+  1 hook needs review before it can run.
+  [x] Hook 1
+› [!] Hook 2 · modified
+  Event     SessionStart
+  Source    Plugin - clankie-worker@clankie-fleet
+  Command   node -e "import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'bin/seat-hook.mjs')).href)" -- --codex
+  Mode      Sync
+  Timeout   30s
+  Trust     Modified since last trusted - review required
+
+  UserPromptSubmit hooks
+  1 hook needs review before it can run.
+› [!] Hook 1 · modified
+  Event     UserPromptSubmit
+  Source    Plugin - clankie-worker@clankie-fleet
+  Command   node -e "import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'bin/seat-hook.mjs')).href)" -- --codex
+  Mode      Sync
+  Timeout   30s
+  Trust     Modified since last trusted - review required
+
+  Stop hooks
+  1 hook needs review before it can run.
+› [!] Hook 1 · modified
+  Event     Stop
+  Source    Plugin - clankie-worker@clankie-fleet
+  Command   node -e "import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'bin/seat-hook.mjs')).href)" -- --codex
+  Mode      Async
+  Timeout   30s
+  Trust     Modified since last trusted - review required
