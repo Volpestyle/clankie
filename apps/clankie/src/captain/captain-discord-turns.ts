@@ -572,7 +572,8 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = ctx.conversations.roomConversation(normalized.lane, normalized.targetId);
     const executionConversationId = normalized.handoffConversationId ?? conversationId;
-    const naturalTurn = !deliveryId.startsWith("watch-");
+    // Owner guidance waits for the room's next natural turn, not an owner-directed one.
+    const naturalTurn = !deliveryId.startsWith("watch-") && !deliveryId.startsWith("room-fork-");
     const guidancePrompt = async (): Promise<() => string> => {
       if (!naturalTurn || ctx.deps.roomObservations === undefined) return () => normalized.prompt;
       const takeGuidance = await ctx.deps.roomObservations.prepare(
@@ -875,6 +876,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
   }
 
   const roomForksRunning = new Set<string>();
+  /**
+   * The authority an owner-directed room turn runs under while it is in flight.
+   * Only `room_turn`, which exists solely in the owner's operator-lane bank,
+   * creates one; the route and presence checks accept it in place of a Discord
+   * delivery receipt, so a reply target is never mistaken for the authority.
+   */
+  const roomForkGrants = new Map<string, RoomForkGrant>();
 
   /**
    * The owner's seat forks a turn into a room (ADR 0218, 2026-10-06). The room
@@ -912,24 +920,28 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       guildId,
       channelId,
       messageId: input.replyTo ?? `room-fork-${id}`,
+      deliveryId: `room-fork-${id}`,
       transportKind: "bot",
     };
-    const plan = planDiscordTurnSession({
-      baseSessionKey: origin.baseSessionKey,
-      durable: false,
-      actorId: origin.actorId,
-      guildId,
-      channelId,
-      transportKind: origin.transportKind,
-      settings: discord,
-    });
+    // The room's own grant decides the turn's tools, never the owner's personal
+    // machine access: the turn speaks in a shared room.
+    const systemTools =
+      discord.systemActorGuildIds.includes(guildId) &&
+      (discord.systemActorChannelIds.length === 0 || discord.systemActorChannelIds.includes(channelId));
     const owner: ConversationOwner = { conversationId: input.room, discord: origin };
-    const mode = plan.systemTools ? "machine" : "social";
-    if (!(await validateConversationOwner(owner, mode)))
+    const mode = systemTools ? "machine" : "social";
+    if (roomForksRunning.has(id)) return { state: "uncertain", room: input.room, code: "room_fork_running" };
+    roomForkGrants.set(id, { room: input.room, origin });
+    // A definite refusal before dispatch is never recorded, so the same request can retry.
+    if (!(await validateConversationOwner(owner, mode))) {
+      roomForkGrants.delete(id);
       return refuse("room_fork_room_authority_unavailable");
-
+    }
     const early = ctx.roomForks.begin(id, fingerprint, input.room, roomForksRunning.has(id));
-    if (early !== undefined) return early;
+    if (early !== undefined) {
+      roomForkGrants.delete(id);
+      return early;
+    }
     roomForksRunning.add(id);
     const settle = (result: RoomForkResult): RoomForkResult => {
       const settled = ctx.roomForks.settle(id, fingerprint, result);
@@ -970,7 +982,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       ].join("\n\n");
       const result = await dispatchDiscordTurn(
         {
-          sessionKey: `${plan.sessionKey}:fork:${id}`,
+          sessionKey: `${origin.baseSessionKey}:fork:${id}`,
           durable: false,
           lane: scope.lane,
           targetId: scope.targetId,
@@ -985,7 +997,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         `room-fork-${id}`,
         false,
         origin,
-        plan.systemTools,
+        systemTools,
         guard,
         "message",
       );
@@ -1044,7 +1056,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       });
     } finally {
       roomForksRunning.delete(id);
+      roomForkGrants.delete(id);
     }
+  }
+
+  /** The in-flight owner-directed room turn a route or presence write names, if any. */
+  function roomForkGrant(id: string): RoomForkGrant | undefined {
+    return roomForkGrants.get(id);
   }
 
   return {
@@ -1053,7 +1071,20 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     runDiscordWatchTurn,
     dispatchDiscordTurn,
     forkIntoRoom,
+    roomForkGrant,
   };
+}
+
+/** Authority for one in-flight owner-directed room turn (ADR 0218, 2026-10-06). */
+export interface RoomForkGrant {
+  readonly room: string;
+  /** Owner as actor; `deliveryId` is `room-fork-<id>`, never another member's message. */
+  readonly origin: DiscordWatchOrigin;
+}
+
+/** The fork ID an origin's delivery names, when it is an owner-directed room turn. */
+export function roomForkIdOf(deliveryId: string | undefined): string | undefined {
+  return deliveryId?.startsWith("room-fork-") === true ? deliveryId.slice("room-fork-".length) : undefined;
 }
 
 /** The seat's tool for an owner-directed room turn. */

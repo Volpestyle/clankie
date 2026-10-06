@@ -606,11 +606,31 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
               : "messageId" in write.payload
                 ? write.payload.messageId
                 : undefined);
+          // An owner-directed room turn's post carries its fork in the captain
+          // action key; that in-flight grant, not a reply target, is its origin.
+          const forkId = /^captain:room-fork:(.+):(?:send_reply|post_message)$/u.exec(
+            write.idempotencyKey,
+          )?.[1];
+          const grant = forkId === undefined ? undefined : ctx.dependencies.captain.roomForkGrant?.(forkId);
           const origin =
-            sourceId === undefined ? undefined : ctx.discordTurnReceipts.get(`discord:${sourceId}`)?.origin;
+            grant !== undefined
+              ? {
+                  baseSessionKey: grant.origin.baseSessionKey,
+                  presenceSessionId: `discord:${grant.origin.guildId ?? "dm"}:${grant.origin.channelId}`,
+                  characterId: "clankie",
+                  credentialRef: "discord_bot",
+                  transportKind: grant.origin.transportKind,
+                  ...(grant.origin.guildId === undefined ? {} : { guildId: grant.origin.guildId }),
+                  channelId: grant.origin.channelId,
+                  messageId: grant.origin.messageId,
+                  actorId: grant.origin.actorId,
+                }
+              : sourceId === undefined
+                ? undefined
+                : ctx.discordTurnReceipts.get(`discord:${sourceId}`)?.origin;
           if (
             origin === undefined ||
-            origin.messageId !== sourceId ||
+            (grant === undefined && origin.messageId !== sourceId) ||
             ("channelId" in write.payload &&
               write.payload.kind !== "go_live_start" &&
               origin.channelId !== write.payload.channelId) ||
@@ -633,7 +653,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
                   route: {
                     owner: {
                       conversationId,
-                      discord: {
+                      discord: grant?.origin ?? {
                         baseSessionKey: origin.baseSessionKey,
                         targetId: `${origin.guildId ?? "dm"}:${origin.channelId}`,
                         actorId: origin.actorId,
