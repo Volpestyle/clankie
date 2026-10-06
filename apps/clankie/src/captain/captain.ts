@@ -175,7 +175,7 @@ import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
-import type { CaptainPort, HireSeat, MessageSeat } from "./port.ts";
+import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } from "./port.ts";
 import { nativeHireProject, selectHireProject } from "./project-hire-context.ts";
 import { projectOnboarding } from "./project-onboarding.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
@@ -2513,7 +2513,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   /** Native delivery only. Health observations never start a service model turn. */
-  async function notifyFleetHealthAlert(pane: string, text: string): Promise<boolean> {
+  async function notifyFleetHealthAlert(
+    pane: string,
+    text: string,
+    observe?: (delivery: FleetHealthAlertDelivery) => void,
+  ): Promise<boolean> {
     if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
     const original = await herdrRunner.get(pane).catch(() => undefined);
     if (!original?.session) return false;
@@ -2531,7 +2535,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (JSON.stringify(currentRoute.owner) !== JSON.stringify(route.owner))
         throw new Error("Fleet health alert lead changed");
     };
-    return deliverNativeHealthAlert(route.owner, text, guard, route.native ?? route.parent);
+    const observeDelivery = observe
+      ? (delivery: FleetHealthAlertDelivery) => {
+          try {
+            observe(delivery);
+          } catch {
+            /* Observation cannot change delivery settlement. */
+          }
+        }
+      : undefined;
+    return deliverNativeHealthAlert(route.owner, text, guard, route.native ?? route.parent, observeDelivery);
   }
 
   async function notifyRuntimeHealthAlert(text: string): Promise<boolean> {
@@ -2549,6 +2562,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     text: string,
     guard: () => Promise<void>,
     recipient?: NativeSeatRecipient,
+    observe?: (delivery: FleetHealthAlertDelivery) => void,
   ): Promise<boolean> {
     if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
     if (!(await validateConversationOwner(owner))) return false;
@@ -2556,14 +2570,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const outbox = seatOutbox(owner.conversationId);
     if (outbox.uncertain()) return false;
     if (!recipient && outbox.bound()) {
-      const result = await outbox.deliver({
-        kind: "message",
-        conversationId: owner.conversationId,
-        source: "service",
-        content: text,
-        wantsReply: false,
-        signal: shutdown.signal,
-      });
+      const result = await outbox
+        .deliver({
+          kind: "message",
+          conversationId: owner.conversationId,
+          source: "service",
+          content: text,
+          wantsReply: false,
+          signal: shutdown.signal,
+        })
+        .catch((error: unknown) => {
+          observe?.({ outcome: "unconfirmed" });
+          throw error;
+        });
+      observe?.(
+        result.outcome === "delivered" &&
+          ["delivered", "consumed", "responded"].includes(result.deliveryStage ?? "")
+          ? { outcome: "accepted" }
+          : result.outcome === "unconfirmed"
+            ? { outcome: "unconfirmed", acknowledged: () => outbox.recoveryAcknowledged(result.messageId) }
+            : { outcome: "unavailable" },
+      );
       return ["delivered", "unconfirmed"].includes(result.outcome);
     }
     const target = recipient
@@ -2602,8 +2629,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
     ).catch((error: unknown) => {
       if (blocked) return undefined;
+      if (dispatchChecked) observe?.({ outcome: "unconfirmed" });
       throw error;
     });
+    if (
+      result?.outcome === "delivered" &&
+      dispatchChecked &&
+      ["delivered", "consumed", "responded"].includes(result.deliveryStage ?? "")
+    )
+      observe?.({ outcome: "accepted" });
+    else if (result?.outcome === "delivered" && dispatchChecked) {
+      const id = result.messageId;
+      observe?.({
+        outcome: "unconfirmed",
+        ...(id
+          ? {
+              acknowledged: () => nextTurnMailboxes.acknowledged(target.terminalId, binding, id, text),
+            }
+          : {}),
+      });
+    } else if (result?.outcome === "unconfirmed" && dispatchChecked) {
+      const id = result.messageId;
+      observe?.({
+        outcome: "unconfirmed",
+        ...(id
+          ? {
+              acknowledged: () =>
+                mailbox.recoveryAcknowledged(id) ||
+                nextTurnMailboxes.acknowledged(target.terminalId, binding, id, text),
+            }
+          : {}),
+      });
+    }
     return (
       !blocked &&
       result !== undefined &&

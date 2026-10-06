@@ -1,0 +1,144 @@
+{
+  "sandbox": {
+    "schemaVersion": 1,
+    "startedAt": "2026-10-06T14:38:55.078Z",
+    "observedAt": "2026-10-06T14:38:55.110Z",
+    "totals": {
+      "proof": {
+        "attempts": 0,
+        "refusals": 0,
+        "byReason": {}
+      },
+      "reports": {
+        "attempts": 0,
+        "failures": 0,
+        "byReason": {}
+      },
+      "nativeDiagnostics": {
+        "process_census_unavailable": 1,
+        "fd_list_unavailable": 1,
+        "argv_unavailable": 1
+      },
+      "transportDiagnostics": {}
+    },
+    "windows": [
+      {
+        "minutes": 5,
+        "proof": {
+          "attempts": 0,
+          "refusals": 0,
+          "byReason": {}
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "process_census_unavailable": 1,
+          "fd_list_unavailable": 1,
+          "argv_unavailable": 1
+        },
+        "transportDiagnostics": {},
+        "proofRefusalRate": 0,
+        "proofRefusalsPerMinute": 0,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      },
+      {
+        "minutes": 60,
+        "proof": {
+          "attempts": 0,
+          "refusals": 0,
+          "byReason": {}
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "process_census_unavailable": 1,
+          "fd_list_unavailable": 1,
+          "argv_unavailable": 1
+        },
+        "transportDiagnostics": {},
+        "proofRefusalRate": 0,
+        "proofRefusalsPerMinute": 0,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      }
+    ]
+  },
+  "ancestry": {
+    "schemaVersion": 1,
+    "startedAt": "2026-10-06T14:38:49.906Z",
+    "observedAt": "2026-10-06T14:38:49.921Z",
+    "totals": {
+      "proof": {
+        "attempts": 1,
+        "refusals": 1,
+        "byReason": {
+          "native_initial_unavailable": 1
+        }
+      },
+      "reports": {
+        "attempts": 0,
+        "failures": 0,
+        "byReason": {}
+      },
+      "nativeDiagnostics": {
+        "ancestry_bounds": 1
+      },
+      "transportDiagnostics": {}
+    },
+    "windows": [
+      {
+        "minutes": 5,
+        "proof": {
+          "attempts": 1,
+          "refusals": 1,
+          "byReason": {
+            "native_initial_unavailable": 1
+          }
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "ancestry_bounds": 1
+        },
+        "transportDiagnostics": {},
+        "proofRefusalRate": 1,
+        "proofRefusalsPerMinute": 0.2,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      },
+      {
+        "minutes": 60,
+        "proof": {
+          "attempts": 1,
+          "refusals": 1,
+          "byReason": {
+            "native_initial_unavailable": 1
+          }
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "ancestry_bounds": 1
+        },
+        "transportDiagnostics": {},
+        "proofRefusalRate": 1,
+        "proofRefusalsPerMinute": 0.016666666666666666,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      }
+    ]
+  }
+}

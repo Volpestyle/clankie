@@ -66,15 +66,37 @@ static int descendant(unsigned port) {
   return 0;
 }
 
+/* A real bounded ancestry deeper than the production MAX_CHAIN=64. Only
+ * the leaf opens the client socket; parents keep their actual lifetimes. */
+static int deep_ancestry(unsigned depth, unsigned port) {
+  if (depth) {
+    pid_t child = fork();
+    if (child < 0) return 1;
+    if (!child) _exit(deep_ancestry(depth - 1, port));
+    int status;
+    return waitpid(child, &status, 0) == child && WIFEXITED(status) ? WEXITSTATUS(status) : 2;
+  }
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  struct sockaddr_in address = {0};
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  address.sin_port = htons((uint16_t)port);
+  if (fd < 0 || connect(fd, (struct sockaddr *)&address, sizeof(address))) return 3;
+  printf("ready %d\n", getpid()); fflush(stdout);
+  sleep(5);
+  close(fd);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "churn") == 0) return churn();
   if (argc == 2 && strcmp(argv[1], "share") == 0) return share();
-  if (argc == 3 && strcmp(argv[1], "descendant") == 0) {
+  if (argc == 3 && (strcmp(argv[1], "descendant") == 0 || strcmp(argv[1], "ancestry") == 0)) {
     char *end = NULL;
     errno = 0;
     unsigned long port = strtoul(argv[2], &end, 10);
     if (errno || !*argv[2] || *end || port == 0 || port > 65535) return 5;
-    return descendant((unsigned)port);
+    return strcmp(argv[1], "ancestry") == 0 ? deep_ancestry(65, (unsigned)port) : descendant((unsigned)port);
   }
   return 6;
 }

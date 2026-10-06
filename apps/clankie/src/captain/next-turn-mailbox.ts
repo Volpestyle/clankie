@@ -82,6 +82,21 @@ export class NextTurnMailbox {
     this.save();
   }
 
+  /** Read one exact original acknowledgment without taking, storing or replaying mail. */
+  acknowledged(seat: string, binding: string | undefined, id: string, text: string): boolean {
+    const inbox = this.inboxes[seat];
+    if (this.unreadable || !binding || inbox?.binding !== binding || inbox.expiresAt <= this.now())
+      return false;
+    const originals = inbox.mail.filter((mail) => mail.id === id);
+    return (
+      originals.length === 1 &&
+      originals[0]!.expiresAt > this.now() &&
+      originals[0]!.fingerprint === createHash("sha256").update(text).digest("hex") &&
+      originals[0]!.taken &&
+      originals[0]!.delivered === true
+    );
+  }
+
   /** Check before selecting another channel: an old handoff cannot be replayed live. */
   receipt(seat: string, binding: string | undefined, text: string): FleetSeatDelivery | undefined {
     if (this.unreadable) return this.unreadableReceipt();

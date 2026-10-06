@@ -984,11 +984,19 @@ const fleetResources = await createFleetResourceRuntime({
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
 });
 const fleetHealthMetrics = new FleetHealthMetrics({
-  onProofAlert: (pane, window) =>
-    captain.notifyFleetHealthAlert(
-      pane,
-      `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
-    ),
+  onProofAlert: async (pane, window) => {
+    let delivery: import("./captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
+    await captain
+      .notifyFleetHealthAlert(
+        pane,
+        `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
+        (result) => {
+          delivery = result;
+        },
+      )
+      .catch(() => undefined);
+    return delivery;
+  },
 });
 const captain = createCaptain(
   {

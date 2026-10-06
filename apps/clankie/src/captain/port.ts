@@ -135,6 +135,12 @@ export interface LaneToolBank {
   readonly tools: readonly LaneTool[];
 }
 
+/** Exact health attempt settlement; submitted uncertainty is never acceptance. */
+export type FleetHealthAlertDelivery =
+  | { outcome: "accepted" }
+  | { outcome: "unavailable" }
+  | { outcome: "unconfirmed"; acknowledged?: () => boolean };
+
 /**
  * The seam between the HTTP app and the pi-based captain. The app layer parses
  * and authenticates; the captain owns sessions, tools, and persona.
@@ -179,7 +185,11 @@ export interface CaptainPort {
   ): Promise<OperatorConversation>;
   validateConversationOwner(owner: ConversationOwner, mode?: "machine" | "social"): Promise<boolean>;
   /** Freshly owned native lead only; never starts a service model turn. */
-  notifyFleetHealthAlert(pane: string, text: string): Promise<boolean>;
+  notifyFleetHealthAlert(
+    pane: string,
+    text: string,
+    observe?: (delivery: FleetHealthAlertDelivery) => void,
+  ): Promise<boolean>;
   notifyRuntimeHealthAlert(text: string): Promise<boolean>;
   wakeConversation(
     owner: ConversationOwner,
