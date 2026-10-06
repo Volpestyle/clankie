@@ -7,11 +7,30 @@ export async function runUpdateCommand(
   args: readonly string[],
   options: BrowserCommandOptions = {},
 ): Promise<unknown> {
+  const canary = args[0] === "canary";
   const status = args.length === 1 && args[0] === "status";
+  const policy: Record<string, number> = {};
+  if (canary) {
+    const fields: Record<string, { key: string; scale: number }> = {
+      "--window-seconds": { key: "windowMs", scale: 1000 },
+      "--sample-seconds": { key: "sampleIntervalMs", scale: 1000 },
+      "--cpu-percent": { key: "cpuPercent", scale: 1 },
+      "--health-ms": { key: "healthLatencyMs", scale: 1 },
+    };
+    for (let i = 1; i < args.length; i += 2) {
+      const field = fields[args[i] ?? ""];
+      const value = Number(args[i + 1]);
+      if (!field || !Number.isFinite(value) || value <= 0 || field.key in policy)
+        throw Error(
+          "Usage: clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]",
+        );
+      policy[field.key] = value * field.scale;
+    }
+  }
   let ref = "main";
   const holdIds: string[] = [];
   let actor: string | undefined, reason: string | undefined;
-  if (!status) {
+  if (!status && !canary) {
     for (let i = 0; i < args.length; i += 2) {
       const key = args[i],
         value = args[i + 1];
@@ -21,7 +40,7 @@ export async function runUpdateCommand(
         !["--ref", "--override-hold", "--actor", "--reason"].includes(key ?? "")
       )
         throw Error(
-          "Usage: clankie update [--ref REF] [--override-hold UUID --actor NAME --reason TEXT] | status",
+          "Usage: clankie update [--ref REF] [--override-hold UUID --actor NAME --reason TEXT] | status | canary",
         );
       if (key === "--ref") ref = value;
       else if (key === "--override-hold") holdIds.push(value);
@@ -38,12 +57,18 @@ export async function runUpdateCommand(
   });
   if (!credential?.token) throw Error("No operator credential is available");
   // No retry: a lost response may have accepted the durable operation. Read status instead.
-  const response = await (options.fetchImpl ?? fetch)(new URL("/v1/runtime-update", commandHost(options)), {
-    method: status ? "GET" : "POST",
-    headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-    ...(status ? {} : { body: JSON.stringify({ ref, ...(overrides.length ? { overrides } : {}) }) }),
-    signal: AbortSignal.timeout(30_000),
-  });
+  const read = status || (canary && Object.keys(policy).length === 0);
+  const response = await (options.fetchImpl ?? fetch)(
+    new URL(canary ? "/v1/runtime-update/canary" : "/v1/runtime-update", commandHost(options)),
+    {
+      method: read ? "GET" : canary ? "PUT" : "POST",
+      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      ...(read
+        ? {}
+        : { body: JSON.stringify(canary ? policy : { ref, ...(overrides.length ? { overrides } : {}) }) }),
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
   const result: unknown = await response.json();
   if (!response.ok && response.status !== 409)
     throw Error(`Runtime update unavailable (${response.status}): ${JSON.stringify(result)}`);

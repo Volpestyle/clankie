@@ -16,7 +16,15 @@ export function formatUpdateState(state: unknown): string {
   const latest = record(record(state).latest ?? record(state).operation);
   const running = `Running ${short(runtime.commit)}`;
   if (latest.phase === undefined) return `${running} · no update recorded`;
-  return `${running} · last update ${String(latest.ref ?? "main")} ${short(latest.oldCommit)} → ${short(latest.newCommit)} ${String(latest.phase)}`;
+  const canary = record(latest.canary);
+  const signal = canary.state === undefined ? "" : ` · canary ${String(canary.state)}`;
+  const measured =
+    typeof canary.cpuMeanPercent === "number" && typeof canary.healthP95Ms === "number"
+      ? ` (${canary.cpuMeanPercent.toFixed(1)}% CPU, ${Math.round(canary.healthP95Ms)} ms health p95)`
+      : "";
+  const previous =
+    canary.state === "failed" ? ` · previous healthy ${short(canary.previousHealthyCommit)}` : "";
+  return `${running} · last update ${String(latest.ref ?? "main")} ${short(latest.oldCommit)} → ${short(latest.newCommit)} ${String(latest.phase)}${signal}${measured}${previous}`;
 }
 
 export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promise<void> {
@@ -24,20 +32,52 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
   flow.begin("update");
   try {
     const state = await update(["status"]);
-    const pending = record(state).pending !== undefined && record(record(state).latest).healthy !== true;
+    const latest = record(record(state).latest);
+    const pending =
+      record(state).pending !== undefined &&
+      (latest.healthy !== true || record(latest.canary).state === "pending");
     const choice = await flow.readSelect({
       message: formatUpdateState(state),
       options: [
         {
           value: "main",
           label: "Update to latest main",
-          hint: pending ? "an update is already in flight" : "installs, restarts, checks health",
+          hint: pending ? "an update is already in flight" : "installs, restarts, observes health",
         },
         { value: "ref", label: "Update to a ref…", hint: "branch, tag or commit" },
+        { value: "canary", label: "Canary settings…", hint: "observation window, CPU and health budgets" },
       ],
       allowBack: true,
     });
     if (choice === undefined) return;
+    if (choice === "canary") {
+      const policy = record(record(await update(["canary"])).policy);
+      const fields = [
+        { key: "windowMs", flag: "--window-seconds", scale: 1000, label: "Observation window (seconds)" },
+        {
+          key: "sampleIntervalMs",
+          flag: "--sample-seconds",
+          scale: 1000,
+          label: "Sample interval (seconds)",
+        },
+        { key: "cpuPercent", flag: "--cpu-percent", scale: 1, label: "CPU budget (% of one core)" },
+        { key: "healthLatencyMs", flag: "--health-ms", scale: 1, label: "Health p95 budget (milliseconds)" },
+      ];
+      const args = ["canary"];
+      for (const field of fields) {
+        const value = await flow.readText({
+          message: `${field.label}; current ${Number(policy[field.key]) / field.scale}`,
+          allowBack: true,
+          validate: (value) =>
+            Number.isFinite(Number(value)) && Number(value) > 0 ? undefined : "Enter a positive number.",
+        });
+        if (value === undefined) return;
+        args.push(field.flag, value.trim());
+      }
+      await update(args);
+      shell.insertCommandResult("/update", "Canary settings saved for the next update.", "success");
+      return;
+    }
     let ref = "main";
     if (choice === "ref") {
       const typed = await flow.readText({

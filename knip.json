@@ -58,6 +58,9 @@
     },
     "apps/clankie": {
       "entry": [
+        "scripts/runtime-canary-live-proof.ts",
+        "test/fixtures/runtime-canary-cpu-preload.mjs",
+        "test/fixtures/runtime-canary-service.ts",
         "test/fixtures/mcp-stdio-bridge.ts",
         "src/computer-windows-host.ts",
         "src/hosted-body.ts",

@@ -79,3 +79,27 @@ installation through symlinks.
   runtime and a reversible version switch.
 - Developer ID signing, notarization, Intel macOS, Linux, and package-manager
   formulas are separate targets added when those distribution channels exist.
+
+## Release safety amendment (2026-10-05)
+
+[VUH-1706](https://linear.app/vuhlp/issue/VUH-1706) adds a separate fleet-load
+gate to release and manual runs. Pushes and pull requests retain their cheap
+checks. Its CPU and transport budgets exercise actual native bridges and fleet
+proof, including incident revisions; they are not model evaluations.
+
+[VUH-1707](https://linear.app/vuhlp/issue/VUH-1707) distinguishes successful
+service cutover from healthy steady operation. A new self-hosted Git runtime
+acquires an owned deploy hold before its listener admits another deployment,
+then observes CPU and health latency over a durable five-minute canary. A
+pass releases that hold under the registry lock and advances the healthy
+checkpoint. Failure retains the current pin and hold, names the previous healthy
+commit and claims one runtime-health alert. CPU regressions do not automatically
+roll back; the owner decides recovery. A restart requires a fresh full window.
+
+The detached helper remains dependency-free and records pending observation
+after liveness succeeds. Runtime targets without the coordinator are refused
+before installation or shutdown. Existing rollback on failed initial service
+liveness remains separate; confirmed pre-canary rollback cleans up only its own
+temporary hold. Settings use the operator API, launcher CLI and TUI, and apply
+to the next observation. The process-only metadata schema exposes cumulative
+CPU and a boot identity without conversation content or credentials.

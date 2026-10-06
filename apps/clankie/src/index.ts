@@ -15,6 +15,8 @@ import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
+import { RuntimeCanary } from "./runtime-canary.ts";
+import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
 import { DeployHolds } from "./deploy-holds.ts";
 import { deployHoldPresence } from "./deploy-hold-presence.ts";
@@ -950,6 +952,7 @@ const captain = createCaptain(
       ? {}
       : {
           runtimeUpdater: {
+            runtime: runtimeUpdater.runtime,
             status: runtimeUpdater.status,
             request: (ref: string, authority: import("../../tui/bin/runtime-updater.ts").UpdateAuthority) =>
               deployHolds.landing(`runtime-tool:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
@@ -1185,6 +1188,41 @@ const workerPluginNotices = new WorkerPluginNotices({
     return runtimes.fleetRun(fleet)(metadata);
   },
 });
+const runtimeCanary =
+  runtimeUpdater === undefined
+    ? undefined
+    : new RuntimeCanary({
+        updatesDirectory: join(process.env.HOME || homedir(), ".clankie", "updates"),
+        runtime: runtimeUpdater.runtime,
+        holds: deployHolds,
+        sample: createRuntimeHealthSampler({ healthUrl: `http://127.0.0.1:${port}/health` }),
+        alert: async (text) => {
+          const alerts = captain as typeof captain & {
+            notifyRuntimeHealthAlert?: (text: string) => Promise<boolean>;
+          };
+          if (!alerts.notifyRuntimeHealthAlert) {
+            logger.warn(
+              { event: "runtime.canary.alert_unavailable" },
+              "Runtime canary alert delivery is unavailable",
+            );
+            return false;
+          }
+          return alerts.notifyRuntimeHealthAlert(text);
+        },
+        onError: (error) =>
+          logger.warn(
+            { event: "runtime.canary.unavailable", error },
+            "Runtime canary requires reconciliation",
+          ),
+      });
+await runtimeCanary
+  ?.recover()
+  .catch((error) =>
+    logger.error(
+      { event: "runtime.canary.recovery_failed", error },
+      "Runtime canary recovery failed; update remains unresolved",
+    ),
+  );
 const workerMcp = new WorkerMcp({
   directory: join(stateRoot, "worker-grants"),
   credentials: operatorCredentialStore,
@@ -1232,6 +1270,7 @@ const clankie = await createClankieApp({
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
+  ...(runtimeCanary === undefined ? {} : { runtimeCanary }),
   refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({
       repoRoot,
@@ -1540,6 +1579,7 @@ const server = serve({
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
 });
+runtimeCanary?.start();
 // ADR 0204: opt-in LAN door for a self-hosted phone, device routes only.
 const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
 const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
@@ -1616,6 +1656,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await discordTracking.close();
+    await runtimeCanary?.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
