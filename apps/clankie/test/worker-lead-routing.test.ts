@@ -277,9 +277,37 @@ it("explicit watches retain their arming conversation after adoption and dedupli
   const second = await store.watch("lead-b", f.agent.terminalId, "explicit adopted observation");
   expect(second).toMatchObject({ outcome: "watching", alreadyWatching: false });
   await vi.waitFor(() => expect(settles).toHaveLength(2));
+  const originalWatches = JSON.parse(readFileSync(f.path, "utf8")).watches as Array<{
+    id: string;
+    conversationId: string;
+  }>;
+  expect(originalWatches).toHaveLength(2);
+  const firstWatch = originalWatches.find((watch) => watch.conversationId === "lead-a")!;
+  const secondWatch = originalWatches.find((watch) => watch.conversationId === "lead-b")!;
+  expect(firstWatch.id).not.toBe(secondWatch.id);
   for (const settle of settles) settle({ ...f.agent, status: "idle" });
   await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(2));
-  expect(wake).toHaveBeenCalledWith("lead-a", expect.stringContaining("explicit original observation"));
-  expect(wake).toHaveBeenCalledWith("lead-b", expect.stringContaining("explicit adopted observation"));
+  expect(wake).toHaveBeenCalledWith(
+    "lead-a",
+    expect.stringContaining("explicit original observation"),
+    undefined,
+    expect.any(Function),
+    {
+      messageId: `seat-watch-${firstWatch.id}`,
+      receipt: undefined,
+      reserve: expect.any(Function),
+    },
+  );
+  expect(wake).toHaveBeenCalledWith(
+    "lead-b",
+    expect.stringContaining("explicit adopted observation"),
+    undefined,
+    expect.any(Function),
+    {
+      messageId: `seat-watch-${secondWatch.id}`,
+      receipt: undefined,
+      reserve: expect.any(Function),
+    },
+  );
   store.close();
 });

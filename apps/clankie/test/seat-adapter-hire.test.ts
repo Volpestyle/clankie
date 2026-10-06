@@ -278,7 +278,12 @@ it("adapter uncertainty or release never becomes delivered or triggers another c
   const mailbox = vi.fn(async () => true);
   expect(await store.sendToSeat("term_0a1b2c", "follow-up", mailbox)).toBe(true);
   expect(send).toHaveBeenCalledWith("follow-up");
-  expect(runner.resolveTerminal).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledOnce();
+  // Capture ownership before dispatch, then refresh the exact seat at delivery.
+  expect(runner.resolveTerminal).toHaveBeenCalledTimes(2);
+  expect(runner.resolveTerminal).toHaveBeenNthCalledWith(1, "term_0a1b2c");
+  expect(runner.resolveTerminal).toHaveBeenNthCalledWith(2, "term_0a1b2c");
+  expect(mailbox).not.toHaveBeenCalled();
   expect(adapter.attach).toHaveBeenCalledTimes(1);
   expect(adapter.attach).toHaveBeenCalledWith(control.ref);
   expect(runner.promptAgent).not.toHaveBeenCalled();
