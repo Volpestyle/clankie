@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { cp, mkdtemp, readdir, readFile, rm, writeFile, lstat, mkdir } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, writeFile, lstat, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { bundledSkills } from "@clankie/settings";
@@ -63,6 +63,7 @@ it("assembles only selected skills in all release projections, with no checkout 
     );
   }
   const canonical = await readFile(join(repo, ".agents/skills/clankie/SKILL.md"), "utf8");
+  const resourceCanonical = await readFile(join(repo, ".agents/skills/fleet-resources/SKILL.md"), "utf8");
   // A complete installed release also has no packages/settings TypeScript source.
   const releasedCheck = spawnSync(
     process.execPath,
@@ -74,8 +75,10 @@ it("assembles only selected skills in all release projections, with no checkout 
   // Rebuild from canonical target content with neither snapshot nor target builder.
   // Only the repository-side helper's own materializer may be loaded.
   const releaseWorker = join(release, "integrations/claude-plugin/worker");
-  await rm(join(releaseWorker, "skills/clankie"), { recursive: true });
-  await rm(join(releaseWorker, "skills/clankie.bundle.json"));
+  for (const name of ["clankie", "fleet-resources"]) {
+    await rm(join(releaseWorker, "skills", name), { recursive: true });
+    await rm(join(releaseWorker, "skills", `${name}.bundle.json`));
+  }
   await rm(join(release, "integrations/codex-plugin/build.mjs"));
   await rm(join(release, "integrations/codex-plugin/skill-materializer.mjs"));
   await expect(prepareWorkerSkill(releaseWorker)).resolves.toBeUndefined();
@@ -89,17 +92,21 @@ it("assembles only selected skills in all release projections, with no checkout 
   ]) {
     expect(await readFile(join(release, directory, "clankie/SKILL.md"), "utf8")).toBe(canonical);
     expect((await lstat(join(release, directory, "clankie/SKILL.md"))).isFile()).toBe(true);
+    expect(await readFile(join(release, directory, "fleet-resources/SKILL.md"), "utf8")).toBe(
+      resourceCanonical,
+    );
+    expect((await lstat(join(release, directory, "fleet-resources/SKILL.md"))).isFile()).toBe(true);
     const parsed = loadSkills({
       cwd: release,
       agentDir: release,
-      skillPaths: [join(release, directory, "clankie")],
+      skillPaths: [join(release, directory, "clankie"), join(release, directory, "fleet-resources")],
       includeDefaults: false,
     });
     expect(parsed.diagnostics, directory).toEqual([]);
-    expect(
-      parsed.skills.map((skill) => skill.name),
-      directory,
-    ).toEqual(["clankie"]);
+    expect(parsed.skills.map((skill) => skill.name).sort(), directory).toEqual([
+      "clankie",
+      "fleet-resources",
+    ]);
   }
   // Isolate the actual installable worker: no repo source or builder remains.
   const standalone = await mkdtemp(join(tmpdir(), "standalone-worker-"));
@@ -110,11 +117,18 @@ it("assembles only selected skills in all release projections, with no checkout 
   const standaloneSkill = loadSkills({
     cwd: standalone,
     agentDir: standalone,
-    skillPaths: [join(worker, "skills/clankie")],
+    skillPaths: [join(worker, "skills")],
     includeDefaults: false,
   });
   expect(standaloneSkill.diagnostics).toEqual([]);
-  expect(standaloneSkill.skills.map((skill) => skill.name)).toEqual(["clankie"]);
+  expect(standaloneSkill.skills.map((skill) => skill.name).sort()).toEqual(["clankie", "fleet-resources"]);
+  const companionLink = /\[fleet-resources\]\(([^)]+)\)/u.exec(
+    await readFile(join(worker, "skills/clankie/SKILL.md"), "utf8"),
+  );
+  expect(companionLink).not.toBeNull();
+  expect(await readFile(resolve(worker, "skills/clankie", companionLink![1]!), "utf8")).toBe(
+    resourceCanonical,
+  );
   const nativePackageCheck = spawnSync(process.execPath, [join(worker, "bin/skill-bundle.mjs")], {
     encoding: "utf8",
     timeout: 5_000,
@@ -139,6 +153,36 @@ it("assembles only selected skills in all release projections, with no checkout 
     installed: true,
     enabled: true,
   });
+
+  const companion = join(worker, "skills/fleet-resources/SKILL.md");
+  const companionReceipt = join(worker, "skills/fleet-resources.bundle.json");
+  const receiptBytes = await readFile(companionReceipt, "utf8");
+  await writeFile(companion, "changed resource policy");
+  await expect(prepareWorkerSkill(worker)).rejects.toThrow(
+    "fleet-resources skill snapshot is missing, stale",
+  );
+  await writeFile(companion, resourceCanonical);
+  await writeFile(companionReceipt, JSON.stringify({ ...JSON.parse(receiptBytes), version: "old" }));
+  await expect(prepareWorkerSkill(worker)).rejects.toThrow(
+    "fleet-resources skill snapshot is missing, stale",
+  );
+  await writeFile(companionReceipt, receiptBytes);
+  await rm(companion);
+  await symlink(join(releaseWorker, "skills/fleet-resources/SKILL.md"), companion);
+  await expect(prepareWorkerSkill(worker)).rejects.toThrow("not a regular file");
+  await rm(companion);
+  await writeFile(companion, resourceCanonical);
+
+  // Updating the helper alone cannot silently accept a legacy clankie-only
+  // worker. The existing native installer must refresh its companion snapshot.
+  await rm(join(worker, "skills/fleet-resources"), { recursive: true });
+  await rm(companionReceipt);
+  await expect(prepareWorkerSkill(worker)).rejects.toThrow("fleet-resources skill snapshot is missing");
+  await cp(join(releaseWorker, "skills/fleet-resources"), join(worker, "skills/fleet-resources"), {
+    recursive: true,
+  });
+  await cp(join(releaseWorker, "skills/fleet-resources.bundle.json"), companionReceipt);
+  await expect(prepareWorkerSkill(worker)).resolves.toBeUndefined();
 
   await writeFile(join(worker, "skills/clankie/SKILL.md"), "stale or changed content");
   await expect(prepareWorkerSkill(worker)).rejects.toThrow("stale");

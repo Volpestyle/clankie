@@ -133,6 +133,7 @@ export interface TrustedDeviceIdentity {
 export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface ClankieAppDependencies {
+  fleetResources?: import("../fleet-resource-runtime.ts").FleetResourceRuntime;
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;

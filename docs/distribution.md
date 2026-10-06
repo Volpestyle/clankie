@@ -49,6 +49,7 @@ browser-downloaded package.
     ├── bin/clankie-herdr      # attach-only viewer shortcut
     ├── libexec/herdr          # Clankie-owned native worker runtime
     ├── libexec/local-fleet-proof # macOS kernel socket/process observer
+    ├── packages/fleet-resources/src/native.py # shared resource lock/process runner
     ├── .agents/skills/        # product and working skills
     ├── docs/cli.md            # headless command contract
     ├── apps/                  # bundled services, assets, and clankvox
@@ -72,6 +73,16 @@ need no compiler. Source-checkout `dev` and `start` prepare its build under
 the same artifact explicitly, reusing it only when its source, architecture,
 compiler flags and binary digest match. Missing or unsupported native observation
 refuses local admission; it never falls back to an expensive socket scan.
+
+The shared fleet resource governor also ships `packages/fleet-resources/src/native.py`.
+It uses Python 3's standard library for kernel file locks, process birth observations
+and command groups; macOS uses `/usr/bin/python3`, Linux uses `python3` on PATH.
+The hosted Linux image installs that interpreter. For self-hosted installations
+it is an explicit host prerequisite. A missing interpreter or helper
+refuses new heavy work and local builders without taking `/health` down. The
+helper path is resolved from the source or installed release, not a worker override.
+The journal lives in the OS account's `~/.clankie/fleet-resources` across releases
+and worktrees. See [resource commands](cli.md#fleet-resource-governor).
 
 Herdr ships as an official stable release binary, verified against the
 platform checksum in `scripts/release/herdr.json`. Its matching source archive

@@ -4,6 +4,7 @@ import type {
   OperatorAgentPersona,
   WorkerReportSummary,
   OperatorConversation,
+  FleetResourceSnapshot,
 } from "@clankie/protocol";
 
 export interface HerdrRosterAgent {
@@ -19,6 +20,7 @@ export interface LiveAgent {
 }
 
 export interface HerdrRosterSnapshot {
+  readonly resources?: FleetResourceSnapshot;
   readonly liveAgents?: readonly LiveAgent[];
   readonly workerReports?: readonly WorkerReportSummary[];
   readonly roomHandoffs?: readonly OperatorConversation[];
@@ -36,6 +38,7 @@ export class HerdrRoster {
   private liveAgents: readonly LiveAgent[] = [];
   private workerReports: readonly WorkerReportSummary[] = [];
   private roomHandoffs: readonly OperatorConversation[] = [];
+  private resources: FleetResourceSnapshot | undefined;
   private personas: readonly OperatorAgentPersona[] = [];
   private following: AbortController | undefined;
   private polling = false;
@@ -48,6 +51,7 @@ export class HerdrRoster {
   public snapshot(): HerdrRosterSnapshot {
     return {
       agents: this.agents,
+      ...(this.resources === undefined ? {} : { resources: this.resources }),
       liveAgents: this.liveAgents,
       workerReports: this.workerReports,
       roomHandoffs: this.roomHandoffs,
@@ -76,6 +80,10 @@ export class HerdrRoster {
           const fleet = await this.client.fleet(cursor, signal);
           if (signal.aborted) return;
           cursor = fleet.cursor;
+          const changedResources =
+            JSON.stringify(resourceDisplay(this.resources)) !==
+            JSON.stringify(resourceDisplay(fleet.resources));
+          this.resources = fleet.resources;
           const changedReports =
             JSON.stringify(this.workerReports) !== JSON.stringify(fleet.workerReports ?? []);
           this.workerReports = fleet.workerReports ?? [];
@@ -85,7 +93,8 @@ export class HerdrRoster {
               fleet.personas,
               fleet.roomHandoffs ?? [],
             )) ||
-            changedReports
+            changedReports ||
+            changedResources
           )
             onChange();
           continue;
@@ -158,4 +167,18 @@ export class HerdrRoster {
     }
     return JSON.stringify([this.agents, this.liveAgents, this.roomHandoffs, this.error]) !== before;
   }
+}
+
+/** Pressure values are sampled independently; repaint for admission or holder changes. */
+function resourceDisplay(resources: FleetResourceSnapshot | undefined) {
+  return resources === undefined
+    ? undefined
+    : {
+        policy: resources.policy,
+        capacity: resources.capacity,
+        healthy: resources.pressure.healthy,
+        reason: resources.pressure.reason,
+        leases: resources.leases,
+        queue: resources.queue,
+      };
 }

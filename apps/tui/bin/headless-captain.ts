@@ -47,6 +47,8 @@ import { runAccountsCommand } from "../src/command/accounts.ts";
 import { runWorkCommand } from "../src/command/work.ts";
 import { runIntegrationCommand } from "../src/command/integrate.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
+import { runHeavyCommand } from "../src/command/heavy.ts";
+import { runResourceStatusCommand, runSimulatorCommand } from "../src/command/fleet-resources.ts";
 import { forwardsToFleetHerdr, herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 import { runEffortCommand } from "../src/command/effort.ts";
@@ -90,6 +92,8 @@ export interface HeadlessCaptainCommandOptions {
   readonly operatorCredentialStore?: CredentialStore;
   /** Test seam for the brokered captain bearer the launcher injects. */
   readonly captainCredentialStore?: CredentialStore;
+  /** Isolated registry for real subprocess integration checks. */
+  readonly resourceGovernor?: import("@clankie/fleet-resources").FleetResourceGovernor;
   /**
    * Test seam for the process-table scan. Without it a service probe reads the
    * real machine, so a developer with a live bridge running sees a different
@@ -121,6 +125,11 @@ export async function runHeadlessCaptainCommand(
   const stderr = options.stderr ?? process.stderr;
   try {
     const env = options.env ?? process.env;
+    if (command === "heavy")
+      return await runHeavyCommand(rest, {
+        stderr,
+        ...(options.resourceGovernor === undefined ? {} : { governor: options.resourceGovernor }),
+      });
     if (command === "connect" || command === "login") {
       await connectHostedCli(
         command === "login" ? ["hosted", ...rest] : rest,
@@ -364,8 +373,16 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "fleet") {
+      if (rest.length === 1 && rest[0] === "resources") {
+        outputJson(stdout, await runResourceStatusCommand(options));
+        return 0;
+      }
       const result = await runFleetCommand(rest, options);
       outputJson(stdout, result);
+      return 0;
+    }
+    if (command === "simulator") {
+      outputJson(stdout, await runSimulatorCommand(rest, options));
       return 0;
     }
     if (command === "herdr") {

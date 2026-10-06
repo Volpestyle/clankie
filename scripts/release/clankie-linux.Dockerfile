@@ -14,7 +14,7 @@ RUN node scripts/build-release.mjs --hosted
 
 FROM node:24.20.0-bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git openssh-client procps lsof ripgrep curl \
+ && apt-get install -y --no-install-recommends ca-certificates git openssh-client procps lsof ripgrep curl python3 \
  && rm -rf /var/lib/apt/lists/*
 # The documented npm distribution installs the native platform binary and license.
 RUN npm install --global @anthropic-ai/claude-code@2.1.281 && npm cache clean --force

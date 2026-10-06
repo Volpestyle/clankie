@@ -94,6 +94,25 @@ it("follows handoff status and results without manufacturing seats or panes", as
       host: "pi",
     },
   });
+  const resources = {
+    schemaVersion: 1,
+    policy: {},
+    capacity: { heavySlots: 2, simulatorSlots: 1, used: 1 },
+    pressure: { sampledAtMs: 1, loadRatio: 0.1, availableMemoryMb: 10000, healthy: true },
+    leases: [
+      {
+        id: "owned-lease",
+        kind: "heavy",
+        state: "running",
+        seatId: "builder",
+        pid: 123,
+        executable: "node",
+        createdAtMs: 1,
+        lastUsedAtMs: 1,
+      },
+    ],
+    queue: [],
+  };
   const waits: ReturnType<typeof deferred<OperatorFleetSnapshot>>[] = [];
   const roster = new HerdrRoster({
     roster: async () => [],
@@ -110,6 +129,7 @@ it("follows handoff status and results without manufacturing seats or panes", as
     OperatorFleetSnapshotSchema.parse({
       schemaVersion: 1,
       cursor: "running",
+      resources,
       seats: [],
       personas: [],
       channels: [],
@@ -118,6 +138,11 @@ it("follows handoff status and results without manufacturing seats or panes", as
   );
   await vi.waitFor(() => expect(waits).toHaveLength(2));
   expect(roster.snapshot()).toMatchObject({ agents: [], liveAgents: [], roomHandoffs: [child] });
+  expect(roster.snapshot().resources?.leases[0]).toMatchObject({
+    seatId: "builder",
+    pid: 123,
+    executable: "node",
+  });
   const finished = {
     ...child,
     roomHandoff: { ...child.roomHandoff!, state: "completed", result: "Open until six" },
@@ -126,6 +151,7 @@ it("follows handoff status and results without manufacturing seats or panes", as
     OperatorFleetSnapshotSchema.parse({
       schemaVersion: 1,
       cursor: "completed",
+      resources: { ...resources, capacity: { ...resources.capacity, used: 0 }, leases: [] },
       seats: [],
       personas: [],
       channels: [],
@@ -134,6 +160,7 @@ it("follows handoff status and results without manufacturing seats or panes", as
   );
   await vi.waitFor(() => expect(waits).toHaveLength(3));
   expect(change).toHaveBeenCalledTimes(2);
+  expect(roster.snapshot().resources?.leases).toEqual([]);
   expect(roster.snapshot().roomHandoffs?.[0]?.roomHandoff).toMatchObject({
     state: "completed",
     result: "Open until six",

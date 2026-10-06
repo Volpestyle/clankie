@@ -180,6 +180,7 @@ export async function disconnectHostedCli(env: NodeJS.ProcessEnv = process.env) 
   };
 }
 export const HOSTED_LOCAL_ONLY = new Set([
+  "simulator",
   "integrate",
   "harness",
   "update",

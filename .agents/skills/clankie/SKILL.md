@@ -11,6 +11,11 @@ Use the assignment, current fleet connection and native tool catalog to establis
 where you are. A pane ID, environment variable or installed plugin is a clue,
 not proof of membership or permission.
 
+For local heavy commands and simulators, load [fleet-resources](../fleet-resources/SKILL.md).
+Native hire briefs include its command contract. `clankie heavy -- COMMAND` shares
+machine capacity across worktrees; `clankie fleet resources` names current holders
+and waits. Preserve task-specific permission and verification requirements.
+
 ## Find the usable route
 
 Start with the route your session actually exposes. Native `clankie` MCP tools

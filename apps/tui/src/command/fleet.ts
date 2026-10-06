@@ -6,7 +6,9 @@ import {
   FleetReportingStyleSchema,
   formatFleetAutonomyGuidance,
   type FleetAutonomy,
+  FleetResourcePolicySchema,
 } from "@clankie/protocol";
+import { createResourceGovernor, type FleetResourceGovernor } from "@clankie/fleet-resources";
 import { projectRolePolicy } from "@clankie/protocol/projects";
 import { readFile } from "node:fs/promises";
 import { HireProfileSchema } from "@clankie/protocol";
@@ -28,11 +30,15 @@ import type { machineSetupContext } from "./machine-setup.ts";
 const FLEET_USAGE = [
   "Usage: clankie fleet [status [--working-directory PATH]]",
   `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]`,
+  "       clankie fleet set [--heavy-slots auto|N] [--simulator-slots N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
+  "       clankie fleet resources",
   "       clankie fleet clear",
 ].join("\n");
 
 export interface FleetCommandOptions extends NonNullable<Parameters<typeof machineSetupContext>[1]> {
   readonly settings?: SettingsStore;
+  /** Isolated machine registry for integration fixtures. */
+  readonly resourceGovernor?: FleetResourceGovernor;
 }
 
 export interface FleetCommandResult {
@@ -57,9 +63,12 @@ function store(options: FleetCommandOptions): SettingsStore {
 
 export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>): string[] {
   const notes = fleet.notes.trim();
+  const resources = FleetResourcePolicySchema.parse(fleet.resources ?? {});
   return [
     `fleet size: ${fleet.size} — ${FLEET_SIZE_GUIDANCE[fleet.size]}`,
     `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,
+    `heavy capacity: ${resources.heavySlots ?? "automatic"} shared slots; simulators: ${resources.simulatorSlots}`,
+    `simulator idle: ${resources.simulatorIdleMs / 1000}s; load limit: ${resources.maxLoadRatio} per core; minimum available memory: ${resources.minAvailableMemoryMb} MiB`,
     ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
@@ -136,6 +145,14 @@ export async function fleetUpdate(
       }),
     },
   }));
+  if (change.resources !== undefined) {
+    const governor = options.resourceGovernor ?? createResourceGovernor();
+    try {
+      await governor.configure(updated.fleet.resources!);
+    } finally {
+      if (options.resourceGovernor === undefined) await governor.close();
+    }
+  }
   return await result(settings, updated.fleet, options);
 }
 
@@ -148,15 +165,38 @@ function isModelMode(value: string): value is FleetModelMode {
 }
 
 /** `set` takes each flag at most once, each with a value; anything else is a usage error. */
-async function parseSet(flags: readonly string[]): Promise<FleetUpdate> {
+async function parseSet(
+  flags: readonly string[],
+  resourceDefaults: FleetSettings["resources"],
+): Promise<FleetUpdate> {
   if (flags.length === 0 || flags.length % 2 !== 0) throw new Error(FLEET_USAGE);
   const change: FleetUpdate = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
+  const resources = FleetResourcePolicySchema.parse(resourceDefaults ?? {});
+  const resourceFlags = new Set<string>();
   for (let index = 0; index < flags.length; index += 2) {
     const flag = flags[index];
     const value = flags[index + 1] ?? "";
-    if (flag === "--hire-profile" && change.hire === undefined) {
+    if (
+      [
+        "--heavy-slots",
+        "--simulator-slots",
+        "--simulator-idle-seconds",
+        "--max-load-ratio",
+        "--minimum-free-memory-mb",
+      ].includes(flag ?? "")
+    ) {
+      if (resourceFlags.has(flag!)) throw new Error(FLEET_USAGE);
+      resourceFlags.add(flag!);
+      const number = Number(value);
+      if (flag === "--heavy-slots") resources.heavySlots = value === "auto" ? null : number;
+      else if (flag === "--simulator-slots") resources.simulatorSlots = number;
+      else if (flag === "--simulator-idle-seconds") resources.simulatorIdleMs = number * 1000;
+      else if (flag === "--max-load-ratio") resources.maxLoadRatio = number;
+      else resources.minAvailableMemoryMb = number;
+      change.resources = FleetResourcePolicySchema.parse(resources);
+    } else if (flag === "--hire-profile" && change.hire === undefined) {
       const text = await readFile(value, "utf8");
       if (Buffer.byteLength(text) > 16 * 1024) throw new Error("Hire profile is too large");
       change.hire = HireProfileSchema.parse(JSON.parse(text));
@@ -219,8 +259,21 @@ export async function runFleetCommand(
     throw new Error(FLEET_USAGE);
   }
   // `clear` returns every field to its default: no notes, no plan limit.
-  if (verb === "clear" && args.length === 1)
-    return await fleetUpdate({ ...FleetSettingsSchema.parse({}), ...FleetAutonomySchema.parse({}) }, options);
-  if (verb === "set") return await fleetUpdate(await parseSet(args.slice(1)), options);
+  if (verb === "clear" && args.length === 1) {
+    const current = (await store(options).load()).fleet;
+    return await fleetUpdate(
+      {
+        ...FleetSettingsSchema.parse({}),
+        ...FleetAutonomySchema.parse({}),
+        ...(current.resources === undefined ? {} : { resources: FleetResourcePolicySchema.parse({}) }),
+      },
+      options,
+    );
+  }
+  if (verb === "set")
+    return await fleetUpdate(
+      await parseSet(args.slice(1), (await store(options).load()).fleet.resources),
+      options,
+    );
   throw new Error(FLEET_USAGE);
 }

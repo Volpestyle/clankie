@@ -24,7 +24,7 @@ the configured selection and its catalog.
 Product/tool skills are always on: `clankie`, `this-machine`, `trace-clankie`, `work-items`,
 `research-team`, `computer-use-delegation`, `desktop-control`, `browser-use`, `herdr`,
 and every other skill authored in this repo (including `comparison-shopping`,
-`daily-digest`, `inbox-triage`, `trip-planning`, `minecraft` and `pokeagents`). Product exclusions are refused
+`daily-digest`, `fleet-resources`, `inbox-triage`, `trip-planning`, `minecraft` and `pokeagents`). Product exclusions are refused
 by the CLI and ignored by loaders if present in an older settings file.
 
 Everything selected from `vendor/opinionated-skills/` is opinionated, including
@@ -44,7 +44,7 @@ when Clankie is named or the fleet is confirmed; discovery alone does not hire
 an agent. Dotfiles can select the repo-owned source for Claude and Codex without
 copying it into the personal skills repository.
 
-The catalog contains **24 skills: 9 opinionated and 15 product/tool skills**.
+The catalog contains **25 skills: 9 opinionated and 16 product/tool skills**.
 VUH-1457 merged the three leadership entries into `lead`, with shared judgment,
 native hires and harness delivery. Its operations reference
 uses `hire_agent`, `message_seat` and `message_clankie`; Herdr holds visible terminals. The vendored dashboard plugin and board-specific references

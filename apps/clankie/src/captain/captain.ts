@@ -376,6 +376,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const unsubscribeFleets = deps.runtimes?.onChange(async () => {
     await refreshFleets();
   });
+  options.fleetResources?.bindSeats({
+    resolve: (seatId) => herdrRunner.resolveTerminal(seatId),
+    proof: (fleet, pane) => options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
+    isLocalFleet: async (fleet) => {
+      if (fleet === undefined || fleet === "default") return true;
+      await refreshFleets();
+      return namedLocal.some((entry) => entry.id === fleet);
+    },
+  });
   // Claude seats stay interactive in their pane and are driven through the
   // clankie-worker plugin: its channel carries the mailbox, its hooks report
   // each settled turn (VUH-1458).
@@ -518,6 +527,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     ...(options.nativeSummariesPath === undefined ? {} : { summariesPath: options.nativeSummariesPath }),
     ...(options.nativeLaunchPolicy === undefined ? {} : { nativeLaunchPolicy: options.nativeLaunchPolicy }),
+    ...(options.fleetResources === undefined ? {} : { fleetResources: options.fleetResources }),
     codexAccounts: async () => codexAccounts(await settings()),
     skillBundle: {
       repoRoot: options.repoRoot,
@@ -855,6 +865,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    */
   const seatStatuses = new Map<string, string>();
   const fleetChanges = new FleetChangeClock();
+  const stopResourceChanges = options.fleetResources?.onChange(() => fleetChanges.touch());
   // The one fleet fact Herdr does not keep (ADR 0163): bounded, process-local,
   // never persisted. Spawn edges need no window; they are read off the census.
   const promptEdges = new PromptEdgeWindow();
@@ -2178,6 +2189,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           remoteFleets,
         );
     const seats = await herdrWatches.withNativeStatus(workSeats, fleet.seats);
+    // Live proof is refreshed asynchronously. Missing census or an untracked
+    // head never establishes that an original process exited.
+    void options.fleetResources?.observeSeats(fleet.seats).catch(() => undefined);
     for (const seat of seats) {
       const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
       if (!observed) continue;
@@ -2569,6 +2583,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // never outnumber the seats the snapshot carries.
           tallies: [...seatLedger.tallies(seats.map((seat) => seat.seatId))],
           edges: [...deriveFleetEdges(liveEdgeSeats, promptEdges.recent(), seatMessages.recent())],
+          ...(options.fleetResources?.status() === undefined
+            ? {}
+            : { resources: options.fleetResources.status() }),
         },
       };
     }
@@ -2741,6 +2758,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return;
       }
       if (projection.kind === "status") {
+        void options.fleetResources?.observeSeatState(seatId, projection.status).catch(() => undefined);
         // A pane that was working and has stopped is this seat's run, and the
         // status it stopped at is the only thing the host knows about how it
         // went (ADR 0162). Recorded before the persona lookup: the ledger is
@@ -4252,6 +4270,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       seatOutboxes.clear();
       terminals.close();
       herdrWatches.close();
+      stopResourceChanges?.();
       await options.remoteOpenCode?.close();
       stopFleetChanges();
       autonomy.close();

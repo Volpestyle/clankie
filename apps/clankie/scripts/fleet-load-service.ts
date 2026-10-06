@@ -6,6 +6,7 @@ import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { HerdrBinding } from "@clankie/protocol";
+import type { FleetResourcePolicy } from "@clankie/fleet-resources";
 
 export interface FleetLoadServiceConfig {
   sourceRoot: string;
@@ -15,6 +16,8 @@ export interface FleetLoadServiceConfig {
   herdr: string;
   provider: string;
   bearer: string;
+  /** Explicit private registry for the separate manual resource burst only. */
+  fleetResources?: { directory: string; policy: FleetResourcePolicy };
 }
 
 /** Target modules resolve their dependencies in sourceRoot's own real install. */
@@ -56,6 +59,21 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     >,
   ]);
   const settings = new settingsModule.SettingsStore(join(config.root, "settings.json"));
+  const fleetResources = config.fleetResources
+    ? await (async () => {
+        const [runtime, resources] = await Promise.all([
+          load("apps/clankie/src/fleet-resource-runtime.ts") as Promise<
+            typeof import("../src/fleet-resource-runtime.ts")
+          >,
+          load("packages/fleet-resources/src/index.ts") as Promise<typeof import("@clankie/fleet-resources")>,
+        ]);
+        const fixture = config.fleetResources!;
+        return runtime.createFleetResourceRuntime({
+          governor: resources.createResourceGovernor({ directory: fixture.directory }),
+          policy: async () => fixture.policy,
+        });
+      })()
+    : undefined;
   const binding = async (): Promise<HerdrBinding> => ({
     runtime: "external",
     session: "default",
@@ -137,8 +155,10 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
       workerBridgeStatus: (fleet, pane) => worker.bridgeStatus(fleet, pane),
       fleetHireTools: () => worker.expectedFleetToolNames(),
       projectHireTools: (project) => worker.expectedProjectToolNames(project),
+      ...(fleetResources ? { fleetResources } : {}),
     },
   );
+  fleetResources?.start();
   membership = new membershipModule.FleetProjectMembership({
     settings: async () => (await settings.load()).projects,
     binding,
@@ -163,6 +183,7 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     fleetProjectMembership: membership,
     eventLogPath: join(config.root, "events.jsonl"),
     herdrBinding: () => ({ runtime: "external", session: "default", socketPath: config.socket }),
+    ...(fleetResources ? { fleetResources } : {}),
     authenticateCaptain: async (request) =>
       auth(request) ? { captainId: "fleet-load", steerSourceLane: "api" } : undefined,
     authenticateOperator: async (request) => (auth(request) ? { operatorId: "fleet-load" } : undefined),
@@ -218,6 +239,7 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     delay.disable();
     app.close();
     await captain.close();
+    await fleetResources?.close();
     await worker.close();
     await host.close();
     await link.close();

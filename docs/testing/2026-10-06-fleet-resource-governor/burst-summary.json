@@ -1,0 +1,298 @@
+{
+  "passed": true,
+  "startedAt": "2026-10-06T07:33:49.082Z",
+  "completedAt": "2026-10-06T07:35:11.472Z",
+  "sourceCommit": "e868c8935a0cad902ab72f9fde6ee0ac16529102",
+  "sourceDigests": {
+    "apps/clankie/scripts/fleet-resource-burst.ts": "d1bd6779c3f463bc9bdc5c19d64d5f8aec79eb7f1983e7ffc06a2d9d433bdaa9",
+    "apps/clankie/scripts/fleet-resource-burst-job.py": "2372be5d0ff765d95263a27fbdd547d92f371110339e9db64878e2e15b862960",
+    "apps/clankie/scripts/fleet-load-service.ts": "f6008a67de10dbd97d97167f5051aab084d18b119f38aba858f34868ece13d9a",
+    "apps/clankie/src/fleet-resource-runtime.ts": "0af294433d6ffbb7adb5e3d944f79a0dc7f1e985d0e69204bc6ee77709b8af17",
+    "apps/clankie/src/captain/captain.ts": "f1d971aa14b1bad494d8abd3e9173d811f8293354a7a608ab5ccc5809ab0a5e3",
+    "apps/clankie/src/app/runtime.ts": "97b722f432c80c980db38f88eb1854700608eebb18544c3eb674536a90a39148",
+    "packages/fleet-resources/src/governor.ts": "ad5a7bc4ff3e51c26d77d566f51f9b902d2b7cd09a6b797155cd883bd6ea90f5",
+    "packages/fleet-resources/src/native.py": "c1903ad0498e03503d657033cc3cc7ca0aee09630324a3b7003fbfc6ba5fb518",
+    "packages/fleet-resources/src/process.ts": "bb1967fb1e0d39b34021210c0df753a2390e897aa7611e3a0356d5c3d1fa04d3",
+    "packages/fleet-resources/src/pressure.ts": "55d258bb1ed2f6c7dab96488eaf4ab0324b07a5e172d3bf6a85c0eefc07a2ae1"
+  },
+  "policy": {
+    "heavySlots": 2,
+    "simulatorSlots": 0,
+    "simulatorIdleMs": 600000,
+    "maxLoadRatio": 16,
+    "minAvailableMemoryMb": 0
+  },
+  "budgets": {
+    "healthP95Ms": 250,
+    "serviceCpuMeanPercent": 10
+  },
+  "metrics": {
+    "maxActive": 2,
+    "maxUsed": 2,
+    "maxQueued": 8,
+    "elapsedMs": 67121,
+    "startDelaysMs": [13861, 13871, 35941, 35951, 51271, 51757, 60351, 60362, 64301, 64987],
+    "baselineCpuMeanPercent": 0.5433985498727689,
+    "burstCpuMeanPercent": 1.3510325436113018,
+    "baselineHealthP95Ms": 1.0335419999992155,
+    "burstHealthP95Ms": 1.029207999999926,
+    "maxJobRssMb": 31.796875
+  },
+  "receipts": [
+    {
+      "stage": "start",
+      "seatId": "burst-seat-8",
+      "pid": 96988,
+      "startTime": "1791272055.842386",
+      "at": 1791272055962,
+      "allocationMb": 16,
+      "maxRssMb": 31.6875
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-2",
+      "pid": 96991,
+      "startTime": "1791272055.853498",
+      "at": 1791272055972,
+      "allocationMb": 16,
+      "maxRssMb": 31.515625
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-8",
+      "pid": 96988,
+      "startTime": "1791272055.842386",
+      "at": 1791272057963,
+      "allocationMb": 16,
+      "maxRssMb": 31.703125
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-2",
+      "pid": 96991,
+      "startTime": "1791272055.853498",
+      "at": 1791272057980,
+      "allocationMb": 16,
+      "maxRssMb": 31.53125
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-9",
+      "pid": 9857,
+      "startTime": "1791272077.918542",
+      "at": 1791272078042,
+      "allocationMb": 16,
+      "maxRssMb": 31.53125
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-7",
+      "pid": 9998,
+      "startTime": "1791272077.930161",
+      "at": 1791272078052,
+      "allocationMb": 16,
+      "maxRssMb": 31.625
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-9",
+      "pid": 9857,
+      "startTime": "1791272077.918542",
+      "at": 1791272080044,
+      "allocationMb": 16,
+      "maxRssMb": 31.546875
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-7",
+      "pid": 9998,
+      "startTime": "1791272077.930161",
+      "at": 1791272080059,
+      "allocationMb": 16,
+      "maxRssMb": 31.640625
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-6",
+      "pid": 19603,
+      "startTime": "1791272093.255381",
+      "at": 1791272093372,
+      "allocationMb": 16,
+      "maxRssMb": 31.71875
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-3",
+      "pid": 19907,
+      "startTime": "1791272093.738419",
+      "at": 1791272093858,
+      "allocationMb": 16,
+      "maxRssMb": 31.703125
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-6",
+      "pid": 19603,
+      "startTime": "1791272093.255381",
+      "at": 1791272095382,
+      "allocationMb": 16,
+      "maxRssMb": 31.734375
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-3",
+      "pid": 19907,
+      "startTime": "1791272093.738419",
+      "at": 1791272095867,
+      "allocationMb": 16,
+      "maxRssMb": 31.703125
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-4",
+      "pid": 25447,
+      "startTime": "1791272102.334748",
+      "at": 1791272102452,
+      "allocationMb": 16,
+      "maxRssMb": 31.46875
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-1",
+      "pid": 25450,
+      "startTime": "1791272102.347250",
+      "at": 1791272102463,
+      "allocationMb": 16,
+      "maxRssMb": 31.78125
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-4",
+      "pid": 25447,
+      "startTime": "1791272102.334748",
+      "at": 1791272104457,
+      "allocationMb": 16,
+      "maxRssMb": 31.484375
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-1",
+      "pid": 25450,
+      "startTime": "1791272102.347250",
+      "at": 1791272104472,
+      "allocationMb": 16,
+      "maxRssMb": 31.796875
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-5",
+      "pid": 26625,
+      "startTime": "1791272106.279103",
+      "at": 1791272106402,
+      "allocationMb": 16,
+      "maxRssMb": 31.515625
+    },
+    {
+      "stage": "start",
+      "seatId": "burst-seat-10",
+      "pid": 27178,
+      "startTime": "1791272106.974527",
+      "at": 1791272107088,
+      "allocationMb": 16,
+      "maxRssMb": 31.703125
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-5",
+      "pid": 26625,
+      "startTime": "1791272106.279103",
+      "at": 1791272108404,
+      "allocationMb": 16,
+      "maxRssMb": 31.53125
+    },
+    {
+      "stage": "end",
+      "seatId": "burst-seat-10",
+      "pid": 27178,
+      "startTime": "1791272106.974527",
+      "at": 1791272109093,
+      "allocationMb": 16,
+      "maxRssMb": 31.703125
+    }
+  ],
+  "exited": [
+    {
+      "seatId": "burst-seat-8",
+      "pid": 96988,
+      "startTime": "1791272055.842386",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-2",
+      "pid": 96991,
+      "startTime": "1791272055.853498",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-9",
+      "pid": 9857,
+      "startTime": "1791272077.918542",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-7",
+      "pid": 9998,
+      "startTime": "1791272077.930161",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-6",
+      "pid": 19603,
+      "startTime": "1791272093.255381",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-3",
+      "pid": 19907,
+      "startTime": "1791272093.738419",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-4",
+      "pid": 25447,
+      "startTime": "1791272102.334748",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-1",
+      "pid": 25450,
+      "startTime": "1791272102.347250",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-5",
+      "pid": 26625,
+      "startTime": "1791272106.279103",
+      "state": "exited"
+    },
+    {
+      "seatId": "burst-seat-10",
+      "pid": 27178,
+      "startTime": "1791272106.974527",
+      "state": "exited"
+    }
+  ],
+  "limits": [
+    "Manual bounded fixture, not the 120s release fleet gate",
+    "Actual Captain/service and governor with private registry; load16/memory0 are explicit fixture owner policy overrides",
+    "Ten real 16MiB command jobs; no native coding TUI, external model/provider traffic, or CoreSimulator",
+    "CPU measures the actual service process; child helper CPU is separate"
+  ],
+  "cleanup": {
+    "ownedChildrenExited": true,
+    "privateDirectoryRemoved": true
+  },
+  "errors": [],
+  "composedMain": "2e1c08be6506b0c7d5ed6d18bda34a9b10c0affe",
+  "rawArtifactSha256": "50403a0726eedf486280e1d917f573788e230711bd5a658e3d15d2ece7a59586"
+}

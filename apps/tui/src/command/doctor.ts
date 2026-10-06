@@ -7,6 +7,7 @@ import { resolveOperatorCredential, resolveCaptainCredential } from "@clankie/cr
 import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import { readWorkingPreferences } from "./working-preferences.ts";
+import { runResourceStatusCommand } from "./fleet-resources.ts";
 import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
@@ -82,9 +83,10 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const [report, workerObservations] = await Promise.all([
+  const [report, workerObservations, resources] = await Promise.all([
     inspectInstall(options),
     inspectWorkerTools(options),
+    inspectResources(options),
   ]);
   const { workerTools, workerReports } = workerObservations;
   const workingPreferences = await readWorkingPreferences({
@@ -192,9 +194,30 @@ export async function doctorCommand(
     workerTools,
     workerReports,
     workingPreferences,
+    resources,
     ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
     linearRequestBudget,
   };
+}
+
+async function inspectResources(
+  options: InspectInstallOptions & { host?: string },
+): Promise<NonNullable<InstallDoctorReport["resources"]>> {
+  try {
+    return await runResourceStatusCommand({
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.host === undefined ? {} : { host: options.host }),
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      ...(options.credentialStore === undefined ? {} : { operatorCredentialStore: options.credentialStore }),
+    });
+  } catch {
+    // A legacy service, invalid response or missing credential must not hide
+    // the install's model, account and tool diagnostics or echo response data.
+    return {
+      status: "unavailable",
+      detail: "Fleet resource status unavailable; run `clankie fleet resources` to retry.",
+    };
+  }
 }
 
 async function inspectWorkerTools(options: InspectInstallOptions): Promise<{

@@ -702,6 +702,19 @@ export {
 } from "./operator-conversations.ts";
 
 export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";
+export {
+  FLEET_RESOURCES_PATH,
+  FLEET_SIMULATORS_PATH,
+  FleetResourcePolicySchema,
+  FleetResourceSnapshotSchema,
+  FleetSimulatorRequestSchema,
+  FleetSimulatorLeaseSchema,
+  FleetSimulatorStatusSchema,
+  FleetSimulatorResultSchema,
+  type FleetResourcePolicy,
+  type FleetResourceSnapshot,
+  type FleetSimulatorRequest,
+} from "./fleet-resources.ts";
 
 export * from "./work-items.ts";
 export {
