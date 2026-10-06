@@ -2,7 +2,9 @@
 
 Run after the core integrator lands and deploys the branch. This is a local
 service/native-seat proof; it requires no AWS operation or voice provider usage.
-Keep VUH-1739 open until the unsupported cases below have a supported path.
+VUH-1739 covers local Codex. Remote Codex and old Claude recovery are tracked
+separately in VUH-1742. Current local controllers use the in-place proof below;
+pre-0.6.5 worker plugins use the explicit restart fallback.
 
 1. Record deployed core SHA, worker plugin version, original pane IDs, original
    native root/descendant session IDs and the native Clankie tool inventory.
@@ -34,10 +36,37 @@ Keep VUH-1739 open until the unsupported cases below have a supported path.
    preparation await: no ensuing native mutation is allowed. Close the service
    during that await and require the same refusal.
 
-Remaining acceptance gaps: remote Codex has neither an isolated native config
-target nor durable original-controller recovery; imported old Claude bridge
-code has no supported original-mod replacement path; exact OpenCode
-model-visible MCP names are unavailable through its pinned public SDK. These
-must not be recorded as successful proof. A lost native mutation acknowledgment
-or crash-held claim must be reconciled through exact native/process evidence,
-never elapsed time, receipt deletion or mutation replay.
+## Pre-0.6.5 local Codex restart fallback
+
+Use an owned idle canary or a target with explicit restart authorization. This
+procedure grants no authority to restart an existing lane.
+
+1. Record its native thread UUID, account, cwd, plugin version, saved result and
+   current receipt state. Require roster/doctor `restart needed` and the exact
+   remediation command. Remote/Claude seats must not receive this local label.
+2. Retain any original receipt claim. An unresolved claim/lock or service fence,
+   busy native turn, unsent draft or missing saved result must refuse restart
+   without another report POST or a second TUI.
+3. With the receipt settled and the seat idle, run one command:
+   `clankie harness restart-tools --pane PANE`. Add `--report /absolute/report`
+   only when the completed result has not already been retained. Record its
+   `historyId`, original `threadId`, and `resumedSeatId`.
+4. Verify the same native thread UUID, saved account and cwd after native exit
+   and resume. Verify the new plugin/catalog contains both peer tools. Make one
+   new deliberate report and require a new stored receipt, with no replay of
+   the old report. Require that roster/doctor no longer says restart needed.
+5. A lost exit or resume acknowledgment remains held in tidy history. Inspect
+   that exact operation; do not invoke restart again or substitute another
+   thread to make the result appear successful.
+
+The manual `SEAT_REFRESH_NATIVE_TEST=1` test uses a real owned Herdr namespace,
+the production atomic CLI installer in an owned prefix, and loopback HTTP. It
+proves unsupported-occupant, authorization and schema refusals with the original
+shell PID unchanged and zero close/hire effects. It does not prove a successful
+old-plugin native restart; retain that live canary result separately.
+
+Other connection limits: remote Codex original-controller recovery and imported
+old Claude bridge replacement belong to VUH-1742; exact OpenCode model-visible
+MCP names remain unavailable through its pinned public SDK. None is a successful
+local Codex proof. Lost mutation acknowledgments or crash-held claims require
+exact native/process evidence, never elapsed time, receipt deletion or replay.

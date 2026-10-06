@@ -784,6 +784,8 @@ export const WorkerBridgeStatusSchema = z
       .regex(/^\d+\.\d+\.\d+$/u)
       .optional(),
     behind: z.boolean().optional(),
+    restartNeeded: z.boolean().optional(),
+    remediation: z.string().min(1).max(2048).optional(),
     runtimeRevision: z.string().min(1).max(256).optional(),
     expectedRuntimeRevision: z.string().min(1).max(256).optional(),
   })

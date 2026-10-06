@@ -11,6 +11,8 @@ import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import {
   FLEET_WORKER_CATALOG_REFRESH_PATH,
+  FLEET_WORKER_TOOL_RESTART_PATH,
+  FleetWorkerToolRestartResultSchema,
   FleetWorkerCatalogRefreshResultSchema,
 } from "@clankie/protocol/tool-catalog";
 
@@ -24,7 +26,7 @@ export async function runHarnessCommand(
   },
 ) {
   const usage =
-    "Usage: clankie harness install [--refresh-linked | --codex-source-setup /absolute/source-owned/script] [--project PROJECT] [--approve]; clankie harness refresh-tools [--pane PANE]";
+    "Usage: clankie harness install [--refresh-linked | --codex-source-setup /absolute/source-owned/script] [--project PROJECT] [--approve]; clankie harness refresh-tools [--pane PANE]; clankie harness restart-tools --pane PANE [--report /absolute/report]";
   if (args[0] !== "install") throw new Error(usage);
   const flags = new Map<string, string>();
   let approvalRequested = false;
@@ -205,4 +207,36 @@ export async function runWorkerToolRefreshCommand(
   );
   if (!response.ok) throw new Error(`Worker tool refresh returned ${response.status}`);
   return FleetWorkerCatalogRefreshResultSchema.parse(await response.json());
+}
+
+export async function runWorkerToolRestartCommand(
+  args: readonly string[],
+  options: BrowserCommandOptions = {},
+) {
+  if (
+    args[0] !== "restart-tools" ||
+    args[1] !== "--pane" ||
+    !args[2] ||
+    !(args.length === 3 || (args.length === 5 && args[3] === "--report" && args[4]))
+  )
+    throw new Error("Usage: clankie harness restart-tools --pane PANE [--report /absolute/report]");
+  const credential = await resolveOperatorCredential({
+    env: options.env ?? process.env,
+    ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+  });
+  if (!credential?.token) throw new Error("Worker tool restart needs the operator credential");
+  const response = await (options.fetchImpl ?? fetch)(
+    new URL(FLEET_WORKER_TOOL_RESTART_PATH, commandHost(options)),
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ paneId: args[2], ...(args[4] ? { reportPath: args[4] } : {}) }),
+      signal: AbortSignal.timeout(120_000),
+    },
+  );
+  if (!response.ok)
+    throw new Error(
+      `Worker tool restart returned ${response.status}; inspect the original operation before retrying`,
+    );
+  return FleetWorkerToolRestartResultSchema.parse(await response.json());
 }

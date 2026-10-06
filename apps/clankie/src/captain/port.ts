@@ -140,6 +140,10 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  restartWorkerTools?(
+    input: import("@clankie/protocol/tool-catalog").FleetWorkerToolRestartRequest,
+    authority: import("../worker-tool-refresh.ts").WorkerCatalogRefreshAuthority,
+  ): Promise<import("@clankie/protocol/tool-catalog").FleetWorkerToolRestartResult>;
   workerCatalogSeats?(): Promise<
     readonly { paneId: string; seatId: string; harness: string; sessionId?: string; status?: string }[]
   >;

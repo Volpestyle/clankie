@@ -155,12 +155,18 @@ import {
   type HerdrAgentSnapshot,
 } from "./herdr-watch.ts";
 import { hireDisplayName } from "./hire-name.ts";
+import { hasPendingInboundClaim } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { LaneLog } from "./lane-log.ts";
 import { buildLaneToolBank, laneAuthoredTools, laneAuthoredToolsNamed } from "./lane-tools.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
-import { nativeSessionId, savedSessionFleet } from "./native-session-resume.ts";
+import {
+  nativeSessionId,
+  savedSessionFleet,
+  savedCodexAccount,
+  nativeResumeArgs,
+} from "./native-session-resume.ts";
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
@@ -1673,10 +1679,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     runner: herdrRunner,
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
-    close: (seatId, guard) => herdrWatches.closeSeat(seatId, guard),
+    close: (seatId, guard, nativeOnly) => herdrWatches.closeSeat(seatId, guard, nativeOnly),
     untrack: (seatId) => herdrWatches.untrackSeat(seatId),
     hire: hireSeat,
     ...(deps.agentSessions?.resolve ? { resolve: (ref: string) => deps.agentSessions!.resolve!(ref) } : {}),
+    preflightResume: async (saved) => {
+      if (saved.host !== "local" || saved.file?.harness !== "codex")
+        throw new Error("Local Codex history required");
+      nativeResumeArgs(saved);
+      await savedCodexAccount(saved, codexAccounts(await settings()));
+    },
     changed: () => fleetChanges.touch(),
   });
   herdrWatches.tidy = paneTidy;
@@ -2201,6 +2213,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const fleetId = qualified?.fleet ?? "default";
       const pane = qualified?.id ?? observed.paneId;
       if (options.workerBridgeStatus) seat.workerTools = options.workerBridgeStatus(fleetId, pane);
+      const pluginVersion = seat.workerTools?.pluginVersion;
+      if (
+        !qualified &&
+        seat.harness === "codex" &&
+        pluginVersion &&
+        Number(pluginVersion.split(".")[0]) === 0 &&
+        (Number(pluginVersion.split(".")[1]) < 6 ||
+          (Number(pluginVersion.split(".")[1]) === 6 && Number(pluginVersion.split(".")[2]) < 5))
+      ) {
+        seat.workerTools = {
+          ...seat.workerTools!,
+          restartNeeded: true,
+          remediation: `Restart needed: clankie harness restart-tools --pane ${pane}. Keeps the native thread; requires idle, saved results and settled receipts.`,
+        };
+      }
       const report = options.workerReportBridgeStatus?.(fleetId, pane);
       if (report) seat.workerReportBridge = report;
     }
@@ -3767,6 +3794,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
     },
     tidyWorktrees: (repository, mergedInto) => paneTidy.worktrees(repository, mergedInto),
+    restartWorkerTools: async (input, authority) => {
+      const owner = { conversationId: conversations.defaultGlobalConversationId() };
+      await authority.guard();
+      const receiptSettled = async () => {
+        const binding = await deps.runtimes?.configuredBinding("default");
+        if (!binding?.socketPath) return false;
+        const directory = join(homedir(), ".clankie", "inbound-receipts");
+        const report = options.workerReportBridgeStatus?.("default", input.paneId);
+        return (
+          !(report && report.outcome !== "stored") &&
+          !inboundReceipts.hasPending(input.paneId) &&
+          ![binding.socketPath, ""].some((socket) =>
+            hasPendingInboundClaim(directory, JSON.stringify([socket, input.paneId])),
+          )
+        );
+      };
+      if (!(await receiptSettled())) return { outcome: "refused", reason: "report_receipt_unresolved" };
+      return paneTidy.restart(
+        { pane: input.paneId, ...(input.reportPath ? { reportPath: input.reportPath } : {}) },
+        {
+          owner,
+          current: () => !shutdown.signal.aborted && authority.current(),
+          authorize: async () => {
+            await authority.guard();
+            if (!(await receiptSettled())) throw new Error("report_receipt_unresolved");
+            return authority.current() && (await validateConversationOwner(owner));
+          },
+        },
+      );
+    },
 
     async laneMemoryCard(lane) {
       return renderMemoryCard(await deps.memory.recallMemoryCard(lane));

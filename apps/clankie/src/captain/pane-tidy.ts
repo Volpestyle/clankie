@@ -59,7 +59,9 @@ export type TidyFailure =
         | "undo_unconfirmed"
         | "authority_unavailable"
         | "busy"
-        | "invalid_reason";
+        | "invalid_reason"
+        | "restart_unsupported"
+        | "report_receipt_unresolved";
     };
 class Failure extends Error {
   readonly result: TidyFailure;
@@ -95,10 +97,11 @@ export class PaneTidy {
     runner: HerdrWatchRunner;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
     ownerValid(owner: ConversationOwner): Promise<boolean>;
-    close(seatId: string, guard: () => Promise<void>): Promise<boolean>;
+    close(seatId: string, guard: () => Promise<void>, nativeOnly?: boolean): Promise<boolean>;
     untrack(seatId: string): void;
     hire: HireSeat;
     resolve?(ref: string): Promise<SavedAgentSession>;
+    preflightResume?(session: SavedAgentSession): Promise<void>;
     changed(): void;
     now?: () => number;
   };
@@ -206,7 +209,14 @@ export class PaneTidy {
     }
   }
   async close(
-    input: { pane: string; reason: string; reportPath?: string },
+    input: {
+      pane: string;
+      reason: string;
+      reportPath?: string;
+      idleOnly?: boolean;
+      expected?: { terminalId: string; sessionKey: string };
+      nativeOnly?: boolean;
+    },
     source: ConversationAuthority,
   ): Promise<{ outcome: "closed"; entry: ClosedWorkerPane } | TidyFailure> {
     let lock: string | undefined;
@@ -219,6 +229,11 @@ export class PaneTidy {
         return fail("invalid_reason");
       const agent = await this.fresh(input.pane);
       const key = sessionKey(agent);
+      if (
+        input.expected &&
+        (agent.terminalId !== input.expected.terminalId || key !== input.expected.sessionKey)
+      )
+        return fail("provenance_unknown");
       if (
         this.pending.has(key) ||
         this.state.entries.some(
@@ -260,6 +275,7 @@ export class PaneTidy {
       const guard = async () => {
         await this.authority(authority);
         const latest = await this.fresh(agent.paneId);
+        if (input.idleOnly && !["idle", "waiting", "done"].includes(latest.status)) return fail("busy");
         if (
           latest.terminalId !== agent.terminalId ||
           sessionKey(latest) !== key ||
@@ -297,14 +313,18 @@ export class PaneTidy {
       this.state.entries.push(entry);
       this.save();
       let guardFailure: unknown;
-      const closed = await this.ports.close(agent.terminalId, async () => {
-        try {
-          await guard();
-        } catch (error) {
-          guardFailure = error;
-          throw error;
-        }
-      });
+      const closed = await this.ports.close(
+        agent.terminalId,
+        async () => {
+          try {
+            await guard();
+          } catch (error) {
+            guardFailure = error;
+            throw error;
+          }
+        },
+        input.nativeOnly,
+      );
       if (guardFailure) {
         this.state.entries = this.state.entries.filter((item) => item.id !== entry!.id);
         this.save();
@@ -328,6 +348,52 @@ export class PaneTidy {
       return error instanceof Failure ? error.result : { outcome: "failed", reason: "history_unavailable" };
     } finally {
       if (lock) this.pending.delete(lock);
+    }
+  }
+  /** Explicit operator recovery, composed from the same journaled close/resume
+   * boundaries as tidy. A lost exit/resume receipt never triggers another hire. */
+  async restart(
+    input: { pane: string; reportPath?: string },
+    source: ConversationAuthority,
+  ): Promise<import("@clankie/protocol/tool-catalog").FleetWorkerToolRestartResult> {
+    try {
+      await this.authority(source);
+      if (splitFleetQualified(input.pane)) return fail("restart_unsupported");
+      const original = await this.fresh(input.pane);
+      if (splitFleetQualified(original.paneId) || original.agent !== "codex")
+        return fail("restart_unsupported");
+      if (!original.session || original.session.kind !== "id") return fail("provenance_unknown");
+      if (!["idle", "waiting", "done"].includes(original.status)) return fail("busy");
+      // Validate the saved thread, cwd and registered account before exit.
+      // Ordinary resume revalidates them and retains any uncertain launch.
+      if (!this.ports.resolve || !this.ports.preflightResume) return fail("history_unavailable");
+      const saved = await this.ports.resolve(`local:${original.session.value}`);
+      if (saved.sessionId !== original.session.value || saved.workingDirectory !== original.workingDirectory)
+        return fail("history_unavailable");
+      await this.ports.preflightResume(saved);
+      await this.authority(source);
+      const closed = await this.close(
+        {
+          ...input,
+          reason: "Restart worker tools on the same native thread",
+          idleOnly: true,
+          nativeOnly: true,
+          expected: { terminalId: original.terminalId, sessionKey: sessionKey(original) },
+        },
+        source,
+      );
+      if (closed.outcome !== "closed") return closed;
+      const resumed = await this.undo(closed.entry.id, source);
+      if (resumed.outcome !== "reopened")
+        return { ...resumed, historyId: closed.entry.id, threadId: original.session.value };
+      return {
+        outcome: "restarted",
+        historyId: resumed.entry.id,
+        resumedSeatId: resumed.entry.resumedSeatId,
+        threadId: original.session.value,
+      };
+    } catch (error) {
+      return error instanceof Failure ? error.result : { outcome: "failed", reason: "history_unavailable" };
     }
   }
   async undo(
