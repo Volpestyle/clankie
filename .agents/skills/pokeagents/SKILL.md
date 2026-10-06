@@ -73,6 +73,20 @@ the play history. The driver chooses its own actions while you keep talking to
 the room. `pokeagent_stop` ends Clankie's sitting; it does not require stopping
 the shared world.
 
+Play defaults to 250,000 charged model tokens per sitting; `/games` or
+`clankie games budget max-tokens|max-cost-usd VALUE` changes the next sitting's
+defaults. Token accounting includes commentary and interrupted proposals;
+unknown usage reserves 16,000 tokens and stops a dollar-capped sitting. The last
+call can cross the threshold. `budget_exhausted`, `mind_unavailable` and
+`world_ended` are distinct terminal receipts. Five consecutive failed or invalid
+model decisions stop play after exponential backoff; a valid decision resets it.
+
+Notable stuck/looping states, two retired objectives, unavailable models and a
+departed world send bounded information to the original conversation. Decide
+whether to tell the room, use `pokeagent_guide` to suggest a different objective,
+or stop; these observations do not gate play or authorize new actions. The play
+mind keeps choosing. Voice can preempt twice per turn; later lines stay queued.
+
 The local host's default viewer is `http://127.0.0.1:7780/gallery`. Verify the
 configured viewer and actual frames before claiming the run is visible. A
 loopback link works only on the host machine. Clankie's Discord Activity is

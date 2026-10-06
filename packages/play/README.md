@@ -36,6 +36,29 @@ Sessions use the **rolling evidence policy**
 the bounded evidence window fills, it is sealed and a fresh one starts, with the
 roll counted in the trace. Open-ended play never dies at a receipt-sized cap.
 
+Pokémon sessions have a default 250,000 charged-token ceiling, configurable with
+`clankie games budget` (see [CLI reference](../../docs/cli.md)).
+Mind, voice and interrupted/repeated proposals all contribute to turn and summary
+usage. Missing provider usage reserves 16,000 tokens; unknown prices stay null,
+and a dollar cap fails closed. Thresholds are checked between calls, so one final
+call can exceed a limit; these are estimated model costs, not invoice guarantees.
+
+Each turn allows two voice preemptions, then finishes with later speech held in
+a 32-slot FIFO. Overflow merges into its last bounded slot. The existing
+`InterjectionQueue` default remains a latest-line slot for other consumers.
+Before an action, decoded map/scene/battle/menu/dialog state is sampled again;
+changed decision state gets at most two fresh proposals, then no action that turn.
+Frame animation alone does not invalidate an action. Failed or invalid decisions
+back off 1/2/4/8 seconds and stop after five consecutive failures; success resets
+the counter. Retry waits observe a requested stop.
+
+`onNotable` emits each kind once per sitting: stuck, two retired objectives,
+model unavailable, world ended (at the service boundary), and exhausted usage.
+The service queues these as information to the original conversation under its
+existing grant. Delivery never gates the motor; terminal admission waits at most
+two seconds. Clankie may guide the mind, speak to the room or stop. A missing
+conversation or delivery failure is logged without redirecting it elsewhere.
+
 ## Running it
 
 Clankie can start an installed local world through his machine tools, including

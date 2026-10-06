@@ -1,6 +1,7 @@
 import { DesktopSettingsSchema } from "./desktop.ts";
 import {
   AutonomySettingsSchema,
+  EmbodimentBudgetSchema,
   FLEET_WORKING_PREFERENCE_FIELDS,
   HireProfileSchema,
 } from "@clankie/protocol";
@@ -340,6 +341,8 @@ export const GameplaySettingsSchema = z
   .object({
     /** FireRed/Emerald in the hosted PokeAgent MMO. */
     pokeagentMmoEnabled: z.boolean().default(false),
+    /** Per-session Pokémon limits; omitted token cap uses 250,000 tokens. */
+    pokemonBudget: EmbodimentBudgetSchema.optional(),
     /** Rivals Agent session API; its bearer lives under rivals-agent in the broker. */
     rivalsUrl: z
       .url()

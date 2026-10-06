@@ -37,6 +37,7 @@ import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connecti
  */
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import type { BrowserSettings, GameplaySettings, SettingsStore } from "@clankie/settings";
+import { DEFAULT_POKEMON_PLAY_MAX_TOKENS } from "@clankie/protocol";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import { runShareCommand, shareConsoleCommand } from "./command/share.ts";
 import { hostedTransportFor } from "./command/hosted.ts";
@@ -76,7 +77,7 @@ import {
   type BrowserHarnessesResult,
 } from "./command/browser.ts";
 import { runSkillsCommand } from "./command/skills.ts";
-import { gamesSet, gamesStatus } from "./command/games.ts";
+import { gamesSet, gamesStatus, gamesBudgetSet } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runMinecraftCommand } from "./command/minecraft.ts";
 import { runMinecraftDriverMenu } from "./minecraft-driver-menu.ts";
@@ -2023,10 +2024,46 @@ async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStor
             hint: gameplay.pokeagentMmoEnabled ? "enabled" : "disabled",
             description: "FireRed or Emerald in the hosted multiplayer world.",
           },
+          {
+            value: "tokens",
+            label: "Pokémon token cap",
+            hint: String(gameplay.pokemonBudget?.maxTokens ?? DEFAULT_POKEMON_PLAY_MAX_TOKENS),
+          },
+          {
+            value: "cost",
+            label: "Pokémon cost cap (USD)",
+            hint: String(gameplay.pokemonBudget?.maxCostUsd ?? "off"),
+          },
         ],
         statusActions: [{ value: "done", label: "Done", hint: "restart Clankie to apply changes" }],
         initialValue: "mmo",
       });
+      if (selected === "tokens" || selected === "cost") {
+        const key = selected === "tokens" ? "maxTokens" : "maxCostUsd";
+        const value = await flow.readText({
+          message:
+            selected === "tokens"
+              ? "Tokens per Pokémon session (default restores 250000)"
+              : "USD per Pokémon session (default removes cost cap)",
+          defaultValue: String(
+            gameplay.pokemonBudget?.[key] ??
+              (selected === "tokens" ? DEFAULT_POKEMON_PLAY_MAX_TOKENS : "default"),
+          ),
+          allowBack: true,
+          validate: (text) =>
+            text === "default" ||
+            (Number.isFinite(Number(text)) &&
+              Number(text) > 0 &&
+              (selected === "cost" || Number.isSafeInteger(Number(text))))
+              ? undefined
+              : "Use a positive number or default.",
+        });
+        if (value !== undefined) {
+          await gamesBudgetSet(key, value === "default" ? undefined : Number(value), { settings });
+          flow.renderLine("Pokémon budget updated.", "success");
+        }
+        continue;
+      }
       if (selected !== "mmo") break;
       const enabled = !gameplay.pokeagentMmoEnabled;
       await gamesSet(enabled, { settings });

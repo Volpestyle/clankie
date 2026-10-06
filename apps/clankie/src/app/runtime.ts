@@ -50,7 +50,7 @@ import {
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/public-gateway";
-import { PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
+import { GameplaySettingsSchema, PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
@@ -1610,6 +1610,43 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ error: "captain_lease_conflict" }, 409);
       }
       throw error;
+    }
+  });
+
+  app.get("/v1/games/configuration", async (context) => {
+    const authorization = await authenticateCaptainOrOperator(context);
+    if ("denial" in authorization) return authorization.denial;
+    return context.json({ games: (await settingsSource.load()).gameplay, restart: "clankie restart" });
+  });
+
+  app.put("/v1/games/configuration", async (context) => {
+    const authorization = await authorizeOwnerSecrets(context.req.raw);
+    if (authorization !== true)
+      return context.json({ error: authorization }, authorization === "forbidden" ? 403 : 401);
+    const parsed = GameplaySettingsSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_game_configuration" }, 400);
+    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+    const updated = await settingsSource.update((current) => ({ ...current, gameplay: parsed.data }));
+    return context.json({ games: updated.gameplay, restart: "clankie restart" });
+  });
+
+  app.post("/v1/embodiment/sessions/live/guide", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = z
+      .strictObject({ text: z.string().trim().min(1).max(400), conversationId: z.string().min(1).max(256) })
+      .safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_play_direction" }, 400);
+    if (dependencies.guidePokemonPlay === undefined)
+      return context.json({ error: "play_direction_unavailable" }, 503);
+    const identity = operatorBodyIdentity(parsed.data.conversationId, context.req.raw);
+    if (identity === undefined) return context.json({ error: "conversation_authority_required" }, 403);
+    try {
+      return context.json(await dependencies.guidePokemonPlay(parsed.data.text, identity));
+    } catch {
+      return context.json({ error: "play_direction_not_authorized" }, 409);
     }
   });
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EmbodimentPlayNote, EmbodimentSession, WorldJoinRefusalReason } from "@clankie/protocol";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { joinWorld as askJoinWorld } from "../src/captain/play.ts";
 import { createWorldPlayExecution } from "../src/play-execution-world.ts";
 import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
@@ -86,6 +86,102 @@ async function playEnv(): Promise<NodeJS.ProcessEnv> {
 }
 
 describe("world play execution", () => {
+  it("enforces a configured usage ceiling and journals all charged calls with its terminal note", async () => {
+    const env = await playEnv();
+    const client = fakeClient({ kind: "start", session: { ...session(), budget: {} } });
+    const events: unknown[] = [];
+    let calls = 0;
+    const host = new PlayHost({
+      client,
+      logger: silentLogger,
+      environmentIds: ["pokemon-firered"],
+      execute: createWorldPlayExecution({
+        logger: silentLogger,
+        env,
+        gameplay: { pokeagentMmoEnabled: true, pokemonBudget: { maxTokens: 30 } },
+        createMind: async () => ({
+          metered: true,
+          decide: async (_view, _signal, report) => {
+            calls++;
+            report?.({
+              calls: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              chargedTokens: 15,
+              estimatedCostUsd: 0.01,
+              unreportedCalls: 0,
+            });
+            return {
+              monologue: "continuing",
+              intent: "press a",
+              action: { kind: "button_press", button: "a", holdFrames: 2 },
+            };
+          },
+        }),
+        joinWorld: async () => ({ outcome: "joined", body: fakeWorldBody() }),
+        createVoice: async () => undefined,
+        createActivitySink: async () => fakeActivitySink(() => {}),
+        onNotable: async (event, id) => {
+          events.push({ id, ...event });
+        },
+      }),
+    });
+    await host.poll();
+    await host.settled();
+    expect(calls).toBe(2);
+    expect(client.reports.at(-1)?.receipt).toMatchObject({ outcome: "budget_exhausted", turnsTaken: 2 });
+    expect(events).toEqual([{ id: "world-play-1", kind: "budget_exhausted", turn: 2, count: 30 }]);
+    const dir = env["CLANKIE_GBA_PLAY_JOURNAL_DIR"]!;
+    const lines = parseFreePlayJournal(
+      readFileSync(join(dir, readdirSync(dir).find((file) => file.endsWith(".jsonl"))!), "utf8"),
+    );
+    expect(lines.filter((line) => line.kind === "turn")).toHaveLength(2);
+    expect(lines.at(-1)).toMatchObject({
+      kind: "summary",
+      outcome: "budget_exhausted",
+      usage: { calls: 2, chargedTokens: 30, estimatedCostUsd: 0.02 },
+    });
+  });
+
+  it("settles as mind_unavailable after five fake provider failures and emits one captain note", async () => {
+    const env = await playEnv();
+    const client = fakeClient({ kind: "start", session: { ...session(), budget: { maxTurns: 100 } } });
+    const events: unknown[] = [];
+    let calls = 0;
+    const host = new PlayHost({
+      client,
+      logger: silentLogger,
+      environmentIds: ["pokemon-firered"],
+      execute: createWorldPlayExecution({
+        logger: silentLogger,
+        env,
+        createMind: async () => ({
+          decide: async () => {
+            calls++;
+            throw new Error("fake 401");
+          },
+        }),
+        joinWorld: async () => ({ outcome: "joined", body: fakeWorldBody() }),
+        createVoice: async () => undefined,
+        createActivitySink: async () => fakeActivitySink(() => {}),
+        onNotable: async (event) => {
+          events.push(event);
+        },
+      }),
+    });
+    vi.useFakeTimers();
+    try {
+      await host.poll();
+      const settled = host.settled();
+      await vi.runAllTimersAsync();
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(calls).toBe(5);
+    expect(client.reports.at(-1)?.receipt).toMatchObject({ outcome: "mind_unavailable", turnsTaken: 5 });
+    expect(events).toEqual([{ kind: "mind_unavailable", turn: 4, count: 5 }]);
+  });
   it("refuses before touching the world when the owner has disabled play", async () => {
     const client = fakeClient({ kind: "start", session: session() });
     const host = new PlayHost({
@@ -163,6 +259,7 @@ describe("world play execution", () => {
 
   it("records turns when the hosted world session ends instead of wiping the receipt", async () => {
     let sessionEnded = false;
+    const events: unknown[] = [];
     const body = fakeWorldBody({
       ended: () => sessionEnded,
       io: {
@@ -197,6 +294,9 @@ describe("world play execution", () => {
         createMind: buttonMasher,
         joinWorld: () => Promise.resolve({ outcome: "joined", body }),
         createActivitySink: () => Promise.resolve(fakeActivitySink(() => undefined)),
+        onNotable: async (event) => {
+          events.push(event);
+        },
       }),
       logger: silentLogger,
     });
@@ -204,6 +304,8 @@ describe("world play execution", () => {
     await host.settled();
     expect(client.reports.map((report) => report.state)).toEqual(["running", "stopped"]);
     expect(client.reports[1]?.receipt?.turnsTaken).toBeGreaterThan(0);
+    expect(client.reports[1]?.receipt?.outcome).toBe("world_ended");
+    expect(events).toEqual([{ kind: "world_ended", turn: 1, count: 1 }]);
   });
 
   it("restores the game mind from the previous hosted-world sitting", async () => {
@@ -381,6 +483,7 @@ describe("joinWorld captain ask", () => {
       { environmentId: "pokemon-firered", originLane: "discord_presence", requestedBy: "user-1" },
     );
     expect(intents[0]).not.toHaveProperty("venue");
+    expect(intents[0]).toMatchObject({ budget: { maxTokens: 250_000 } });
     expect(note).toEqual({
       action: "joined",
       sessionId: running.sessionId,

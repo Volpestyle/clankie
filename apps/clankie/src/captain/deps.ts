@@ -130,6 +130,10 @@ export interface CaptainDeps {
   };
   /** Granted hosted-world operations while a PokeAgents body is live. */
   readonly hostedWorld?: {
+    guide?(
+      text: string,
+      identity?: import("../body-lease-router.ts").BodyConversationIdentity,
+    ): Promise<unknown>;
     inspect():
       | { readonly outcome: "not_playing" }
       | {
