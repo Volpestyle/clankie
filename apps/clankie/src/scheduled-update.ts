@@ -26,7 +26,10 @@ export interface ScheduledUpdateOptions {
   readonly initialDelayMs?: number;
 }
 
-export function startScheduledUpdates(options: ScheduledUpdateOptions): { check(): Promise<string>; close(): void } {
+export function startScheduledUpdates(options: ScheduledUpdateOptions): {
+  check(): Promise<string>;
+  close(): void;
+} {
   const intervalMs = options.intervalMs ?? 60 * 60_000;
   let running = false;
   const check = async (): Promise<string> => {
@@ -54,7 +57,10 @@ export function startScheduledUpdates(options: ScheduledUpdateOptions): { check(
     } catch (error) {
       // A fleet hold or an unapproved version is a normal wait, not a fault.
       options.logger.info(
-        { event: "runtime.update.scheduled_wait", error: error instanceof Error ? error.message : String(error) },
+        {
+          event: "runtime.update.scheduled_wait",
+          error: error instanceof Error ? error.message : String(error),
+        },
         "Scheduled release install is waiting",
       );
       return "waiting";
