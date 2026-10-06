@@ -43,6 +43,8 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
   let turns = 0;
   let attempts = 0;
   let sessionStarts = 0;
+  let threadName: string | undefined;
+  let nativeNameSets = 0;
   const nativeThreadReads: { method: string; params: Record<string, unknown> | undefined }[] = [];
   const http = createServer((request, response) => {
     let bytes = "";
@@ -135,8 +137,14 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       if (rpc.method === "thread/resume" || rpc.method === "thread/turns/list")
         nativeThreadReads.push({ method: rpc.method, params: rpc.params });
       if (rpc.method === "mcpServerStatus/list") statusReads++;
+      if (rpc.method === "thread/name/set") {
+        expect(rpc.params).toEqual({ threadId: "thread", name: "Clankie worker" });
+        threadName = rpc.params!.name as string;
+        nativeNameSets++;
+      }
       if (rpc.method === "turn/start") {
         expect(assigned && catalogReceived).toBe(true);
+        expect(threadName).toBe("Clankie worker");
         turns++;
       }
       const result =
@@ -156,7 +164,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
             : rpc.method === "thread/loaded/list"
               ? { data: ["thread"], nextCursor: null }
               : rpc.method === "thread/read"
-                ? { thread: { id: "thread" } }
+                ? { thread: { id: "thread", name: threadName } }
                 : rpc.method === "thread/resume"
                   ? { thread: { id: "thread", turns: [] } }
                   : rpc.method === "thread/turns/list"
@@ -227,6 +235,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       result: { tools: [{ name: "message_clankie" }, { name: "clankie_tools" }, { name: "clankie_call" }] },
     });
     expect(sessionStarts).toBe(1);
+    expect(nativeNameSets).toBe(1);
     expect(nativeThreadReads).toEqual([
       { method: "thread/resume", params: { threadId: "thread", excludeTurns: true } },
       {
