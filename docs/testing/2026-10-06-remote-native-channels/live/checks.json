@@ -1,0 +1,30 @@
+{
+  "base": "f6260751f51652a239e11ad2b11db9228636b0e1",
+  "checks": [
+    {
+      "command": "~/.herdr-handoffs/clankie-backlog-20261003/bin/heavy pnpm exec vitest run --config vitest.config.ts apps/clankie/test/remote-codex-app-server.test.ts apps/clankie/test/codex-seat-adapter.test.ts",
+      "exitCode": 0,
+      "passed": 46
+    },
+    {
+      "command": "~/.herdr-handoffs/clankie-backlog-20261003/bin/heavy pnpm --filter @clankie/clankie typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm exec oxlint --deny-warnings apps/clankie/src/captain/remote-codex-app-server.ts apps/clankie/test/remote-codex-app-server.test.ts",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm exec oxfmt --check apps/clankie/src/captain/remote-codex-app-server.ts apps/clankie/test/remote-codex-app-server.test.ts",
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/check-doc-links.mjs",
+      "exitCode": 0,
+      "markdownFiles": 426
+    },
+    { "command": "git diff --check", "exitCode": 0 }
+  ],
+  "liveCandidateAcceptance": "not-run: needs integration/deployment and original receipt disposition",
+  "fullPnpmCheck": "integrator-owned, not run"
+}

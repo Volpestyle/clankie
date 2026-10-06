@@ -1,0 +1,21 @@
+{
+  "state": "abandoned",
+  "receiptId": "9a42ada0-5111-497e-b43c-25881932778c",
+  "evidence": {
+    "receiptId": "9a42ada0-5111-497e-b43c-25881932778c",
+    "receiptKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\.local\\\\share\\\\clankie-swarm\\\\vuh1381-schema15\",\"new\"]",
+    "fingerprint": "f8feed6a3ae8e3b283ac14f278e6c2b85b01a6947391bfaa818797a4c30f923c",
+    "target": { "fleet": "pc", "host": "volpe@supedupsilly", "session": "default", "shell": "powershell" },
+    "hostIdentity": "33f0512ba73f037faf1b7683c5be31b50d4a224ed51d44158a0efc16930a9bda",
+    "census": {
+      "observedAt": 1791264942288,
+      "panes": 5,
+      "processes": 552,
+      "sessions": 4,
+      "sha256": "e43325a4f4b8c09c2601a0b4095409bd794e5d05eca7b0a18afaa4bd2375bbf3"
+    },
+    "disposition": "abandoned",
+    "journal": "authenticated-recovery",
+    "allocation": { "paneId": "pc/wA:p2", "present": false }
+  }
+}
