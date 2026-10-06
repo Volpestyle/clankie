@@ -51,10 +51,30 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
           label: "Canary settings…",
           hint: "observation window, health budget, CPU advisory",
         },
+        {
+          value: "auto",
+          label: "Automatic installs…",
+          hint: "hosted bodies install official releases while idle",
+        },
       ],
       allowBack: true,
     });
     if (choice === undefined) return;
+    if (choice === "auto") {
+      const enabled = record(await update(["auto"])).autoUpdate === true;
+      const next = await flow.readSelect({
+        message: `Automatic installs are ${enabled ? "on" : "off"}. Managed bodies always install their approved release.`,
+        options: [
+          { value: "on", label: "On", hint: "install official releases while idle" },
+          { value: "off", label: "Off", hint: "install only when asked" },
+        ],
+        allowBack: true,
+      });
+      if (next === undefined) return;
+      await update(["auto", next]);
+      shell.insertCommandResult("/update", `Automatic installs ${next}.`, "success");
+      return;
+    }
     if (choice === "canary") {
       const policy = record(record(await update(["canary"])).policy);
       const fields = [

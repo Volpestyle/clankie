@@ -181,6 +181,7 @@ import {
 } from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { loadRuntimeProvider } from "./runtime-provider.ts";
+import { startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { createWorkItemsService } from "./work-items.ts";
@@ -292,7 +293,7 @@ if (hostedBody !== undefined) {
   const timer = setInterval(() => void accountDiagnostics.refresh(), 60_000);
   timer.unref();
 }
-const runtimeProvider = await loadRuntimeProvider({
+const loadedRuntimeProvider = await loadRuntimeProvider({
   env: process.env,
   store: operatorCredentialStore,
   modelCredentials: new BrokerCredentialStore(operatorCredentialStore, {
@@ -307,6 +308,8 @@ const runtimeProvider = await loadRuntimeProvider({
     ? {}
     : { onHeartbeatReport: (report) => bodyTelemetry.emit({ event: "body.heartbeat", ...report }) }),
 });
+// The same turn hooks feed managed policy and the idle check for scheduled installs.
+const { provider: runtimeProvider, activity: bodyActivity } = withBodyActivity(loadedRuntimeProvider);
 let runtimeProviderClosing: Promise<void> | undefined;
 function closeRuntimeProvider(): Promise<void> {
   return (runtimeProviderClosing ??= (async () => {
@@ -973,6 +976,29 @@ function releaseUpdaterOrNone() {
     return undefined;
   }
 }
+// A hosted image opts its body into idle official-release installs (ADR 0237).
+// A managed body always takes them; a self-run owner can turn them off.
+const scheduledUpdates =
+  runtimeUpdater !== undefined && process.env.CLANKIE_SCHEDULED_UPDATES === "1"
+    ? startScheduledUpdates({
+        updater: {
+          ...runtimeUpdater,
+          request: (ref, authority) =>
+            deployHolds.landing(`runtime-schedule:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
+        },
+        enabled: async () => hostedBody !== undefined || (await settingsStore.load()).host.autoUpdate,
+        idle: async () => {
+          const { turns, sharing } = bodyActivity();
+          if (turns > 0 || sharing) return false;
+          for (const fleet of await runtimes.fleets()) {
+            const panes = parseHerdrPaneList(await runtimes.fleetRun(fleet)(["pane", "list"]), true);
+            if (panes.some((pane) => pane.agent !== "unknown")) return false;
+          }
+          return true;
+        },
+        logger,
+      })
+    : undefined;
 try {
   const reconciled = runtimeUpdater?.reconcile?.();
   if (reconciled)
@@ -1860,6 +1886,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void localCompanionIssuer?.close();
   void localFleet.close().catch(() => undefined);
   localFleetServer?.close();
+  scheduledUpdates?.close();
   fleetLinks.close();
   fleetLinkServer?.close();
   const bodyRequestsStopped = clankie.stopBodyRequests();

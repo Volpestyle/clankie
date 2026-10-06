@@ -37,7 +37,8 @@ export interface RuntimeUpdatePlan {
   readonly initiator?: RuntimeUpdateInitiator;
 }
 export interface RuntimeUpdateInitiator {
-  readonly kind: "operator" | "cli" | "conversation";
+  /** `schedule` is a hosted body's own idle install (ADR 0237). */
+  readonly kind: "operator" | "cli" | "conversation" | "schedule";
   readonly operatorId?: string;
   readonly conversationId?: string;
   /** CLI environment claims are attribution, never admission proof. */
@@ -46,7 +47,7 @@ export interface RuntimeUpdateInitiator {
 }
 export function parseUpdateInitiator(input: unknown): RuntimeUpdateInitiator {
   const value = object(input);
-  if (!["operator", "cli", "conversation"].includes(String(value.kind)))
+  if (!["operator", "cli", "conversation", "schedule"].includes(String(value.kind)))
     throw Error("Invalid update initiator");
   return {
     kind: value.kind as RuntimeUpdateInitiator["kind"],

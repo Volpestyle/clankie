@@ -2,9 +2,12 @@ import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { HoldOverrideSchema } from "@clankie/protocol/integrate";
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+
+const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
 export const UPDATE_USAGE =
-  "Usage: clankie update [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\nOwner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.";
+  "Usage: clankie update [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\nOwner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.";
 
 export function parseUpdateArgs(args: readonly string[]) {
   args = args.filter((arg) => arg !== "--json");
@@ -67,6 +70,16 @@ export async function runUpdateCommand(
   args: readonly string[],
   options: BrowserCommandOptions & { previewRef?: string } = {},
 ): Promise<unknown> {
+  args = args.filter((arg) => arg !== "--json");
+  // Scheduled idle installs on a hosted body (ADR 0237); a managed body always takes them.
+  if (args[0] === "auto") {
+    const verb = args[1] ?? "status";
+    if (args.length > 2 || !["status", "on", "off"].includes(verb)) throw Error(AUTO_USAGE);
+    const store = new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+    if (verb !== "status")
+      await store.update((current) => ({ ...current, host: { ...current.host, autoUpdate: verb === "on" } }));
+    return { autoUpdate: (await store.load()).host.autoUpdate };
+  }
   const { canary, status, policy, ref, overrides, overrideHolds, reason } = parseUpdateArgs(args);
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
