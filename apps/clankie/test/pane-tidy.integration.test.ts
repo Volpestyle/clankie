@@ -131,6 +131,9 @@ async function fixture(options: { adopted?: boolean; unknown?: boolean; reattach
     hires,
     calls,
     watch,
+    setStatus: (status: string) => {
+      pane.agent_status = status;
+    },
     setAnsi: (next: string) => {
       ansi = next;
     },
@@ -285,13 +288,39 @@ it("stops before native close when its admitted turn is cancelled during the fin
   f.watch.close();
 });
 
-
 it("explicit restart refuses the captured busy Codex occupant before close or resume", async () => {
   const f = await fixture();
-  expect(await f.tidy.restart({ pane: "w1:p1", reportPath: f.reportPath }, authority)).toEqual({ outcome: "failed", reason: "busy" });
+  expect(await f.tidy.restart({ pane: "w1:p1", reportPath: f.reportPath }, authority)).toEqual({
+    outcome: "failed",
+    reason: "busy",
+  });
   expect(f.closes()).toBe(0);
   expect(f.hires).toEqual([]);
   expect(f.tidy.history()).toEqual([]);
-  expect(await f.tidy.restart({ pane: "pc/w1:p1" }, authority)).toEqual({ outcome: "failed", reason: "restart_unsupported" });
+  expect(await f.tidy.restart({ pane: "pc/w1:p1" }, authority)).toEqual({
+    outcome: "failed",
+    reason: "restart_unsupported",
+  });
   expect(f.closes()).toBe(0);
+});
+
+it("idle legacy restart without native exit refuses before saving a close intent, and terminal aliases cannot bypass pane guards", async () => {
+  const f = await fixture();
+  f.setStatus("idle");
+  expect(await f.tidy.restart({ pane: "w1:p1", reportPath: f.reportPath }, authority)).toEqual({
+    outcome: "failed",
+    reason: "native_exit_unavailable",
+  });
+  expect(await f.tidy.restart({ pane: "term_111", reportPath: f.reportPath }, authority)).toEqual({
+    outcome: "failed",
+    reason: "provenance_unknown",
+  });
+  expect(f.closes()).toBe(0);
+  expect(f.hires).toEqual([]);
+  expect(f.tidy.history()).toEqual([]);
+  expect(await f.tidy.restart({ pane: "w1:p1" }, authority)).toEqual({
+    outcome: "failed",
+    reason: "native_exit_unavailable",
+  });
+  expect(f.tidy.history()).toEqual([]);
 });

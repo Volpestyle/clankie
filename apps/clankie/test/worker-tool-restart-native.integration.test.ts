@@ -109,6 +109,12 @@ it.skipIf(process.env.SEAT_REFRESH_NATIVE_TEST !== "1")(
         body: JSON.stringify({ paneId: herdr.pane, replay: true }),
       });
       expect(invalid.status).toBe(400);
+      const alias = await fetch(`${host}/v1/fleet/worker-tool-restart`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ paneId: "term_alias" }),
+      });
+      expect(alias.status).toBe(400);
       const after = await herdr.cli("pane", "process-info", "--pane", herdr.pane);
       expect(after.result.process_info.shell_pid).toBe(before.result.process_info.shell_pid);
       expect(closes).toBe(0);

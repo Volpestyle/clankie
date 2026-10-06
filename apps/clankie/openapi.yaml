@@ -2306,8 +2306,8 @@ paths:
     post:
       tags: [Operator]
       operationId: restartLocalWorkerTools
-      summary: Restart one idle local Codex worker on the same native thread
-      description: Explicit operator action. Requires saved results, settled report receipts, known ownership, no draft and a verified native exit controller. Rechecks the original occupant before exit and journals close/resume. Unknown exit or resume receipts remain held; inspect tidy history before retrying. Remote workers and Claude are unsupported.
+      summary: Check admission for explicit same-thread worker restart
+      description: Explicit operator action. Requires saved results, settled report receipts, known ownership, no draft and a verified native exit controller. Rechecks the original occupant before exit and journals close/resume. Unknown exit or resume receipts remain held; inspect tidy history before retrying. Current local Codex lacks verified native exit and refuses before any close intent; successful automatic restart remains unsupported. Remote workers and Claude are unsupported.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -2318,7 +2318,7 @@ paths:
               additionalProperties: false
               required: [paneId]
               properties:
-                paneId: { type: string, minLength: 1, maxLength: 256 }
+                paneId: { type: string, minLength: 1, maxLength: 256, pattern: '^w[\w]+:p[\w]+$' }
                 reportPath: { type: string, minLength: 1, maxLength: 4096 }
       responses:
         "200":

@@ -83,7 +83,12 @@ export type FleetWorkerCatalogRefreshResult = z.infer<typeof FleetWorkerCatalogR
 /** Deliberate operator restart; never automatic deploy recovery. */
 export const FLEET_WORKER_TOOL_RESTART_PATH = "/v1/fleet/worker-tool-restart";
 export const FleetWorkerToolRestartRequestSchema = z.strictObject({
-  paneId: z.string().trim().min(1).max(256),
+  paneId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(256)
+    .regex(/^w[\w]+:p[\w]+$/u),
   reportPath: z.string().min(1).max(4096).optional(),
 });
 export const FleetWorkerToolRestartResultSchema = z.strictObject({

@@ -376,9 +376,14 @@ with a reason. Busy requests remain pending under their original authority.
 Roster `workerTools` and `/doctor` show observed/expected plugin versions and
 whether the observed runtime revision is behind. Local Codex seats started on
 worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh
-success. Use `clankie harness restart-tools --pane PANE` (TUI `/restart-tools
---pane PANE`), adding `--report /absolute/report` if the completed result is not
-already retained. The operator API is `POST /v1/fleet/worker-tool-restart` with
+success. The staging command `clankie harness restart-tools --pane PANE` (TUI
+`/restart-tools --pane PANE`) accepts canonical pane IDs only. It can take
+`--report /absolute/report` for a completed result. The current production local
+Codex adapter lacks verified native exit; an idle otherwise-eligible target
+returns `native_exit_unavailable` before any close intent. Automatic restart is
+unsupported. Owner native quit
+and saved-thread resume are required until that capability is available.
+The operator API is `POST /v1/fleet/worker-tool-restart` with
 `{"paneId":"PANE","reportPath":"/absolute/report"}` (`reportPath` is optional).
 
 Restart requires an idle seat, no draft, known lead ownership, saved results,
