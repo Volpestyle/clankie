@@ -31,6 +31,7 @@ async function fixture() {
       ...value.linearWebhook,
       following: true,
       url: "https://fixture.example/v1/hooks/linear",
+      wake: { ...value.linearWebhook.wake, ownerUserEmails: ["owner@example.test"] },
     },
   }));
   const wakes: { id: string; prompt: string | undefined }[] = [];
@@ -161,7 +162,7 @@ async function fixture() {
       createdAt: NOW.toISOString(),
       webhookTimestamp: NOW.getTime(),
       organizationId: account.workspaceId,
-      actor: { id: "james-fixture", name: "James", email: "volpestyle@gmail.com" },
+      actor: { id: "james-fixture", name: "James", email: "owner@example.test" },
       url: "https://linear.app/fixture/issue/VUH-1678/linear-wake",
       data: {
         id: randomUUID(),
@@ -244,7 +245,7 @@ it("keeps issue titles and actor names inside quoted JSON through the signed web
     await (
       await f.post(
         f.body(
-          { actor: { id: "james-fixture", name, email: "volpestyle@gmail.com" } },
+          { actor: { id: "james-fixture", name, email: "owner@example.test" } },
           { issue: { id: f.issueId, identifier: "VUH-1678", title } },
         ),
       )

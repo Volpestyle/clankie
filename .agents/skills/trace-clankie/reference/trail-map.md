@@ -43,8 +43,9 @@ in `~/.clankie/captain/conversations/linear-event-receipts.json`, so pruning
 history or changing the target does not admit an event again.
 
 `clankie linear status` reports webhook readiness, following and the selected
-wake chat. Only rule-matched signed events wake it; defaults select James's
-comments/mentions by signed email `volpestyle@gmail.com`. Own writes stay quiet.
+wake chat. Only rule-matched signed events wake it; defaults select the owner's
+comments/mentions by signed `ownerUserIds` / `ownerUserEmails`, which start
+empty, so nothing wakes until one is set. Own writes stay quiet.
 The attribution journal and write receipts retain signature-based provenance
 and exact-echo suppression; a shared Linear account name is not human proof.
 The special inbox conversation, read/ack cursors and

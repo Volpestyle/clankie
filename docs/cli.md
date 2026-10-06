@@ -900,9 +900,11 @@ issue UUID and link rather than dropping the event.
 | Off (default) | Accepted events remain visible | None from incoming events              |
 | On            | Accepted events remain visible | One coalesced wake for eligible events |
 
-The default rules wake only for comments or mentions by James, identified by the
-signed user email `volpestyle@gmail.com`. Other actors and other changes stay
-quiet. The connected tracker account remains Clankie's and his fleet's publishing
+The default rules wake only for comments or mentions by the owner, identified by
+a signed Linear user ID or email in `ownerUserIds` / `ownerUserEmails`. Both
+start empty, so a new install wakes on nothing until the owner sets one; while
+following is on, `clankie linear status` and `clankie doctor` warn about the
+missing owner identity. Other actors and other changes stay quiet. The connected tracker account remains Clankie's and his fleet's publishing
 identity; it does not become the human owner. Display names and notification
 subtitles do not prove authorship. A wake supplies context, never new permission.
 [ADR 0214](adr/0214-linear-wakes-require-attribution-and-rules.md) records the
@@ -975,7 +977,7 @@ following must still be active.
 
 ```sh
 clankie linear wake show
-clankie linear wake set --owner-user-emails volpestyle@gmail.com --actors owner
+clankie linear wake set --owner-user-emails owner@example.com --actors owner
 clankie linear wake set --types issueNewComment,issueCommentMention,issueMention
 clankie linear wake set --exclude-types issueSubscribed
 ```
@@ -988,7 +990,7 @@ omitted fields. Malformed rules fail without writing. The result contains `ok`,
 | Flag                  | JSON field                  | Meaning / default                                         |
 | --------------------- | --------------------------- | --------------------------------------------------------- |
 | `--owner-user-ids`    | `ownerUserIds`              | Additional explicit owner Linear IDs; initially empty     |
-| `--owner-user-emails` | `ownerUserEmails`           | Signed owner user emails; default `volpestyle@gmail.com`  |
+| `--owner-user-emails` | `ownerUserEmails`           | Signed owner user emails; initially empty                 |
 | `--actors`            | `actors`                    | Any of `owner`, `human`, `self`, `users`; default `owner` |
 | `--user-ids`          | `userIds`                   | Exact IDs selected by `users`; initially empty            |
 | `--types`             | `notificationTypes`         | Included activity types; empty allows all                 |
@@ -2282,7 +2284,7 @@ account overrides remain unsupported. Profile selection confers no grants.
 same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the
 defaults and effective project role profiles. The hire result's `profile` shows
 the effective launch preferences. These settings affect new hires, not running
-agents. James's global agent instructions remain owner-authored.
+agents. The owner's global agent instructions remain owner-authored.
 
 `clankie agents rename NAME|PERSONA_ID NEW_NAME` changes an agent's saved display
 name. Quote names containing spaces. `/agents rename NAME "NEW NAME"` is the
@@ -4542,7 +4544,7 @@ delta. Typing requires verified focus; clear-and-type and guessed element IDs
 refuse. Dispatch or a changed PNG alone cannot confirm an effect. Windows
 input rechecks host Win32 person activity before each dispatch, requires a two-second
 quiet margin and refuses shell/system targets and system-switching shortcuts.
-Any native error retires the host. Release remains gated on James's W8 live
+Any native error retires the host. Release remains gated on owner-run live
 stop evidence; fixtures do not prove native interrupt behavior. Windows
 setup is in [desktop control](desktop-control.md#windows-observation-host).
 A host without an attached adapter returns `computer_body_unavailable`.

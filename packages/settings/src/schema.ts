@@ -607,7 +607,7 @@ export const LinearWakeSettingsSchema = z
   .object({
     ownerUserIds: z.array(z.string().min(1).max(256)).max(100).default([]),
     /** Matched only against verified webhook actor email, never display names. */
-    ownerUserEmails: z.array(z.email().max(320)).max(100).default(["volpestyle@gmail.com"]),
+    ownerUserEmails: z.array(z.email().max(320)).max(100).default([]),
     actors: z
       .array(z.enum(["owner", "human", "self", "users"]))
       .max(4)

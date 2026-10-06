@@ -70,12 +70,13 @@ you can set them yourself from an operator conversation through
 `linear_wake({ action: "set", wake: {…}, conversationId: "global-default" })`
 or `clankie linear wake set`. The tool patches supplied rule fields and can
 change the target. The CLI patches named flags; `--json-stdin` replaces rules.
-Defaults select `owner`, with `ownerUserEmails: ["volpestyle@gmail.com"]`, and
-only comment/mention types. `ownerUserIds` starts empty and can add exact owner
-IDs. Signed email/ID proof is required; a display name or subtitle is not identity.
+Defaults select `owner` and only comment/mention types. `ownerUserIds` and
+`ownerUserEmails` both start empty, so the `owner` selector matches nobody until
+the owner sets one; `clankie linear status` and doctor warn while following is
+on. Signed email/ID proof is required; a display name or subtitle is not identity.
 
 ```sh
-clankie linear wake set --owner-user-emails volpestyle@gmail.com --actors owner
+clankie linear wake set --owner-user-emails owner@example.com --actors owner
 clankie linear wake set --types issueNewComment,issueCommentMention,issueMention
 ```
 
