@@ -19,6 +19,8 @@ import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
+import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
+import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { registerSeatRoutes } from "../src/app/seat-routes.ts";
@@ -32,6 +34,7 @@ interface NativeRow {
   title: string;
   agent_session: { source: string; kind: "path"; value: string };
   cwd: string;
+  parent_pane_id?: string;
 }
 const fixtures: Array<{ root: string; captain: ReturnType<typeof createCaptain> }> = [];
 const resources: (() => Promise<void>)[] = [];
@@ -52,6 +55,7 @@ async function fixture(
   configure?: (root: string, rows: NativeRow[]) => Promise<void>,
   reportHealth?: Map<string, WorkerReportBridgeStatus>,
   oneOwner = false,
+  bind = true,
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
@@ -123,8 +127,10 @@ async function fixture(
   if (rebound) rows[0]!.terminal_id = "term_rebound";
   await configure?.(root, rows);
   const waits = new Map<string, Set<() => void>>();
+  const nativeRequests: string[][] = [];
   let censusGate: { entered(): void; wait: Promise<void> } | undefined;
   const execute = async (args: readonly string[], signal?: AbortSignal): Promise<string> => {
+    nativeRequests.push([...args]);
     if (censusGate && args[0] === "agent" && args[1] === "list") {
       const held = censusGate;
       censusGate = undefined;
@@ -191,8 +197,10 @@ async function fixture(
   );
   fixtures.push({ root, captain });
   // Bind real native outboxes before a scheduled wake, so no model is called.
-  await captain.pollSeatEvents(0, undefined, "global-default");
-  await captain.pollSeatEvents(0, undefined, second.conversation.conversationId);
+  if (bind) {
+    await captain.pollSeatEvents(0, undefined, "global-default");
+    await captain.pollSeatEvents(0, undefined, second.conversation.conversationId);
+  }
   const leadSessions = new Map([
     ["global-default", randomUUID()],
     [second.conversation.conversationId, randomUUID()],
@@ -201,6 +209,7 @@ async function fixture(
     root,
     captain,
     rows,
+    nativeRequests,
     other: second.conversation.conversationId,
     holdNextCensus: () => {
       let entered!: () => void;
@@ -239,6 +248,190 @@ async function fixture(
     },
   };
 }
+
+it("refuses new native health messages behind a durable head receipt until its exact acknowledgment", async () => {
+  const originalId = randomUUID();
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    async (root) => {
+      new DeliveryFence(join(root, "delivery-receipts", "head", "global-default.json")).begin(originalId, {
+        messageId: originalId,
+        fingerprint: deliveryFingerprint("An earlier original message"),
+      });
+    },
+    undefined,
+    false,
+    false,
+  );
+  expect(await f.captain.notifyRuntimeHealthAlert("Runtime health alert: high CPU held.")).toBe(false);
+  expect(await f.captain.notifyFleetHealthAlert("w1:p1", "Fleet proof alert: refusal rate held.")).toBe(
+    false,
+  );
+  expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+  expect(await f.captain.pollSeatEvents(0, undefined, f.other)).toEqual([]);
+  expect(
+    new DeliveryFence(join(f.root, "delivery-receipts", "head", "global-default.json")).entries(),
+  ).toHaveLength(1);
+  expect(await f.captain.acknowledgeSeatEvent(randomUUID(), "global-default")).toBe(false);
+  expect(await f.captain.notifyRuntimeHealthAlert("Runtime health recovery: CPU is normal.")).toBe(false);
+  expect(await f.captain.acknowledgeSeatEvent(originalId, "global-default")).toBe(true);
+  expect(await f.captain.pollSeatEvents(1, undefined, "global-default")).toEqual([]);
+  const poll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  const delivery = f.captain.notifyRuntimeHealthAlert("Runtime health alert: high CPU still held.");
+  const [event] = await poll;
+  expect(event?.content).toBe("Runtime health alert: high CPU still held.");
+  expect(event?.id).not.toBe(originalId);
+  expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
+  expect(await delivery).toBe(true);
+  expect(
+    f.nativeRequests.filter(
+      (args) => !["get", "list", "wait", "snapshot", "process-info"].includes(args[1]!),
+    ),
+  ).toEqual([]);
+  expect(
+    new ConversationJournal(join(f.root, "conversations"))
+      .read("global-default")
+      .some((event) => event.type === "turn"),
+  ).toBe(false);
+});
+
+it("refuses a parent native health message behind its durable fleet mailbox without alternate dispatch", async () => {
+  const originalId = randomUUID();
+  const f = await fixture(60 * 60_000, undefined, false, true, async (root, rows) => {
+    rows[3]!.parent_pane_id = "w1:p3";
+    const parent = rows[2]!;
+    const binding = deliveryFingerprint(
+      JSON.stringify([parent.pane_id, parent.terminal_id, parent.agent, parent.agent_session]),
+    );
+    new DeliveryFence(join(root, "delivery-receipts", "fleet", "term_3.json")).begin(originalId, {
+      messageId: originalId,
+      fingerprint: deliveryFingerprint("The parent's earlier original message"),
+      sessionId: binding,
+    });
+  });
+  expect(await f.captain.pollFleetSeatEvents("w1:p3", 0)).toEqual([]);
+  expect(await f.captain.notifyFleetHealthAlert("w1:p4", "Fleet proof alert: parent-owned failure.")).toBe(
+    false,
+  );
+  expect(await f.captain.pollFleetSeatEvents("w1:p3", 0)).toEqual([]);
+  expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+  expect(await f.captain.pollSeatEvents(0, undefined, f.other)).toEqual([]);
+  expect(await f.captain.acknowledgeFleetSeatEvent("w1:p3", randomUUID())).toBe(false);
+  expect(await f.captain.acknowledgeFleetSeatEvent("w1:p3", originalId)).toBe(true);
+  const poll = f.captain.pollFleetSeatEvents("w1:p3", 3000);
+  const delivery = f.captain.notifyFleetHealthAlert("w1:p4", "Fleet proof alert: parent-owned failure.");
+  const [event] = (await poll)!;
+  expect(event?.content).toBe("Fleet proof alert: parent-owned failure.");
+  expect(event?.id).not.toBe(originalId);
+  expect(await f.captain.acknowledgeFleetSeatEvent("w1:p3", event!.id)).toBe(true);
+  expect(await delivery).toBe(true);
+  expect(
+    f.nativeRequests.filter(
+      (args) => !["get", "list", "wait", "snapshot", "process-info"].includes(args[1]!),
+    ),
+  ).toEqual([]);
+  expect(
+    new ConversationJournal(join(f.root, "conversations"))
+      .read("global-default")
+      .some((event) => event.type === "turn"),
+  ).toBe(false);
+});
+
+it("does not accept an older identical native control receipt as a fresh health dispatch", async () => {
+  const text = "Fleet proof alert: parent-owned failure.";
+  const originalId = randomUUID();
+  const f = await fixture(60 * 60_000, undefined, false, true, async (root, rows) => {
+    rows[3]!.parent_pane_id = "w1:p3";
+    new DeliveryFence(join(root, "herdr-watches.json.delivery-receipts.json")).begin("term_3", {
+      messageId: originalId,
+      fingerprint: deliveryFingerprint(text),
+    });
+  });
+  expect(await f.captain.pollFleetSeatEvents("w1:p3", 1)).toEqual([]);
+  expect(await f.captain.notifyFleetHealthAlert("w1:p4", text)).toBe(false);
+  expect(await f.captain.pollFleetSeatEvents("w1:p3", 0)).toEqual([]);
+  expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+  expect(
+    new DeliveryFence(join(f.root, "herdr-watches.json.delivery-receipts.json")).pending("term_3")?.messageId,
+  ).toBe(originalId);
+  expect(
+    f.nativeRequests.filter(
+      (args) => !["get", "list", "wait", "snapshot", "process-info"].includes(args[1]!),
+    ),
+  ).toEqual([]);
+});
+
+it("retries an unaccepted report incident after one minute and recovers only after native acceptance", async () => {
+  const originalId = randomUUID();
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    async (root) => {
+      new DeliveryFence(join(root, "delivery-receipts", "head", "global-default.json")).begin(originalId, {
+        messageId: originalId,
+        fingerprint: deliveryFingerprint("An earlier original message"),
+      });
+    },
+    undefined,
+    true,
+  );
+  const roster = await f.captain.serveOperatorConversation({ op: "roster", schemaVersion: 1 });
+  if (roster.op !== "roster") throw new Error("Missing report health roster");
+  const now = Date.now();
+  const failed = roster.seats.map((seat) => ({
+    ...seat,
+    ...(seat.efficiency?.ownerConversationId === "global-default"
+      ? {
+          workerReportBridge: {
+            outcome: "uncertain" as const,
+            reason: "binding_timeout" as const,
+            observedAt: new Date(now).toISOString(),
+          },
+        }
+      : {}),
+  }));
+  const alerts = new FleetReportFailureAlerts();
+  const [incident] = alerts.observe(failed, now);
+  expect(incident?.kind).toBe("incident");
+  expect(alerts.observe(failed, now)).toEqual([]); // Nested native census sees a pending dispatch.
+  const accepted = await f.captain.notifyFleetHealthAlert("w1:p1", incident!.text);
+  expect(accepted).toBe(false);
+  alerts.settle(incident!, accepted, now);
+  expect(alerts.observe(failed, now + 59_999)).toEqual([]);
+  expect(alerts.observe(roster.seats, now + 60_000)).toEqual([]); // No accepted incident to recover.
+  const [retry] = alerts.observe(failed, now + 60_000);
+  expect(retry?.kind).toBe("incident");
+  expect(await f.captain.acknowledgeSeatEvent(originalId, "global-default")).toBe(true);
+  const poll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  const delivery = f.captain.notifyFleetHealthAlert("w1:p1", retry!.text);
+  const [event] = await poll;
+  expect(event?.content).toContain("Fleet report bridge alert");
+  expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
+  const retryAccepted = await delivery;
+  expect(retryAccepted).toBe(true);
+  alerts.settle(retry!, retryAccepted, now + 60_000);
+  expect(alerts.observe(failed, now + 60_000)).toEqual([]);
+  const [recovery] = alerts.observe(roster.seats, now + 60_000);
+  expect(recovery?.kind).toBe("recovery");
+  const recoveryPoll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  const recoveryDelivery = f.captain.notifyFleetHealthAlert("w1:p1", recovery!.text);
+  const [recovered] = await recoveryPoll;
+  expect(recovered?.content).toContain("Fleet report bridge recovery");
+  expect(await f.captain.acknowledgeSeatEvent(recovered!.id, "global-default")).toBe(true);
+  alerts.settle(recovery!, await recoveryDelivery, now + 60_000);
+  expect(alerts.observe(roster.seats, now + 60_000)).toEqual([]);
+  expect(await f.captain.pollSeatEvents(0, undefined, f.other)).toEqual([]);
+  expect(
+    new ConversationJournal(join(f.root, "conversations"))
+      .read("global-default")
+      .some((event) => event.type === "turn"),
+  ).toBe(false);
+});
 
 it("alerts only the owning native lead for three current report failures, clears and rearms once", async () => {
   const reports = new Map<string, WorkerReportBridgeStatus>();
