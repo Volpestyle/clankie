@@ -49,9 +49,7 @@
         "passed": 9,
         "failed": 0,
         "skipped": 0,
-        "files": [
-          "apps/tui/test/fleet-resources-cli.integration.test.ts"
-        ]
+        "files": ["apps/tui/test/fleet-resources-cli.integration.test.ts"]
       }
     ],
     "additional": [
@@ -81,10 +79,7 @@
       "@clankie/tui"
     ],
     "workspaceConcurrency": 1,
-    "logs": [
-      ".local/verification/vuh1740/typecheck.log",
-      ".local/verification/vuh1740/typecheck-final.log"
-    ],
+    "logs": [".local/verification/vuh1740/typecheck.log", ".local/verification/vuh1740/typecheck-final.log"],
     "note": "Initial TUI optional-field error corrected; final core+TUI rerun passes. Protocol/settings unchanged combined checks and governor final PID 1 availability package rerun pass."
   },
   "lint": {
@@ -143,10 +138,7 @@
   },
   "pythonSyntax": {
     "passed": true,
-    "files": [
-      "packages/fleet-resources/src/native.py",
-      "apps/clankie/scripts/fleet-resource-burst-job.py"
-    ]
+    "files": ["packages/fleet-resources/src/native.py", "apps/clankie/scripts/fleet-resource-burst-job.py"]
   },
   "linuxPackaging": {
     "python3IncludedInRuntimeStage": true,
