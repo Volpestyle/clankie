@@ -1168,6 +1168,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       lane.session.setThinkingLevel(selection.thinkingLevel);
     }
     if (lane.session.resourceLoader instanceof CaptainResourceLoader) {
+      // Not a no-op: resetting the same tools makes pi rebuild the system
+      // prompt, which re-reads skills and context files from disk.
       lane.session.setActiveToolsByName(lane.session.getActiveToolNames());
     }
   }
