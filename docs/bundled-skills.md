@@ -13,12 +13,12 @@ install and is always on. There is one class and no selection setting:
 `clankie doctor` includes it. Checkout-only skills live in `.agents/dev-skills`
 and do not ship.
 
-The catalog includes leadership and process skills (`lead`, `shared-checkout`,
-`tidy`, `linear-issues`, `linear-orient`, `reflect`, `c`, `p`,
-`solution-space`) beside product and tool skills such as `clankie`,
-`this-machine`, `trace-clankie`, `work-items`, `research-team`,
-`computer-use-delegation`, `desktop-control`, `browser-use`, `herdr` and
-`fleet-resources`. The directory listing is the authoritative inventory.
+The catalog holds 19 skills: leadership and process skills (`lead`,
+`shared-checkout`, `tidy`, `linear-issues`, `linear-orient`) beside product and
+tool skills (`clankie`, `this-machine`, `trace-clankie`, `work-items`,
+`research-team`, `desktop-control`, `herdr`, `fleet-resources`, `pokeagents`,
+`minecraft`) and errands (`comparison-shopping`, `daily-digest`, `inbox-triage`,
+`trip-planning`). The directory listing is the authoritative inventory.
 
 The `lead` and `linear-issues` skills read the current effective
 `fleet.closure` and `fleet.machineSetup`, including project overrides. Defaults
@@ -140,3 +140,15 @@ native input evidence, refusal reasons and the remaining read/close race.
   Volpestyle/skills became repo-owned skills in `.agents/skills`; the
   `skills.opinionated`/`skills.exclude` settings, the `clankie skills`
   selection subcommands and `hire_agent`'s `skills` override were removed.
+- **2026-10-06, usage cut** (21-day usage audit;
+  [ADR 0236](adr/0236-clankie-owns-the-skills-he-ships.md)).
+  Unbundled; the owner keeps global copies, and the retired-name filter does
+  not cover these names, so those copies stay loadable:
+  - `reflect`: 54 load sessions, only 1 from the bundled copy.
+  - `c`: 51 worker sessions, 1 from Clankie, 1 owner-typed `/c`.
+  - `p`: 34 worker sessions, none from Clankie.
+  - `solution-space`: 38 worker sessions, 1 from Clankie.
+
+  Folded: `computer-use-delegation` (3 loads in 383 listings, none from Clankie)
+  into `desktop-control`'s delegation reference, and `browser-use` (4 loads in
+  320 listings) into `this-machine`'s browser reference.

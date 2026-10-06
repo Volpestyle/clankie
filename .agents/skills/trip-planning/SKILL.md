@@ -20,7 +20,8 @@ Use the given origin, destination, dates, party size and budget. Resolve missing
 dates or departure location before pricing; make reasonable, stated assumptions
 for optional preferences. Include mobility and accessibility needs when supplied.
 
-Load `browser-use` for the service-owned browser and inspect its current schemas.
+Use your service-owned browser tools (this-machine's browser reference) and
+inspect their current schemas.
 An admitted fleet worker discovers connected tools through `clankie_tools` /
 `clankie_call`; use the exposed route rather than assuming operator tool names.
 If the browser is unavailable, report that limitation and provide only an

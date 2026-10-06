@@ -222,7 +222,7 @@ describe("the reach card's computer-use lines", () => {
     expect(card).toContain("- codex: Mac apps and their Chrome");
     expect(card).toContain("- claude: their Chrome (hire with `chrome: true`)");
     expect(card).toContain("`hire_agent`");
-    expect(card).toContain("`computer-use-delegation`");
+    expect(card).toContain("`desktop-control`");
   });
 
   it("says nothing when no harness here can take the work", () => {

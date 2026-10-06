@@ -15,7 +15,8 @@ Peekaboo is Clankie's own hands. Where a computer-use harness is installed and
 signed in (Codex computer use, Claude in Chrome), hard multi-step work in the
 owner's apps usually goes to a hired seat instead; see
 [ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md) and
-the [computer-use-delegation skill](../.agents/skills/computer-use-delegation/SKILL.md).
+the desktop-control skill's
+[delegation reference](../.agents/skills/desktop-control/reference/delegation.md).
 `clankie browser harnesses` lists what this machine has.
 
 ## Execution and authority

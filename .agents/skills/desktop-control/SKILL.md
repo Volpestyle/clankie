@@ -4,6 +4,8 @@ description: >-
   Use when Clankie needs general native computer use: macOS hands or native Windows
   control through the shared computer body. Screenshots,
   accessibility inspection, clicking, typing, scrolling, dragging, or menus.
+  Also covers handing a hard task in the person's own apps or signed-in Chrome
+  to a computer-use harness seat (Codex computer use, Claude in Chrome).
   Use browser tools for web pages and purpose-built APIs when they cover the task.
 ---
 
@@ -17,8 +19,10 @@ unnecessary for this workflow. Operator and authenticated Discord machine grants
 own machine access; social rooms do not.
 
 When your reach card lists a computer-use harness, a long flow in your
-person's apps usually goes better as a hired seat. `computer-use-delegation`
-has that pattern. This skill is for driving the desktop yourself.
+person's apps usually goes better as a hired seat:
+[delegating to a computer-use seat](reference/delegation.md) covers choosing the
+harness, the brief, human checks and the report. The rest of this skill is for
+driving the desktop yourself.
 
 The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
 does not drive apps. Peekaboo is his own hands, guided by this session's current

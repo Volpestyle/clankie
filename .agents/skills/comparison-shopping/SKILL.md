@@ -10,7 +10,8 @@ the request. Ask for a missing detail only if it changes the recommendation.
 Use a region or postal code when enough; researching prices needs no full
 delivery address or payment details.
 
-Load `browser-use` for the service-owned browser and inspect its current schemas.
+Use your service-owned browser tools (this-machine's browser reference) and
+inspect their current schemas.
 An admitted fleet worker discovers connected tools through `clankie_tools` /
 `clankie_call`; use the exposed route rather than assuming operator tool names.
 If browsing fails, label any comparison provisional and do not present remembered
