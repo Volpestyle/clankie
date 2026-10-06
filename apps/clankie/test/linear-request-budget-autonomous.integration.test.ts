@@ -10,7 +10,7 @@ import { LinearRequestBudget } from "../src/linear-request-budget.ts";
 import { API_ACCESS, API_REFRESH, USER_ID, createLinearApiProvider } from "./fixtures/linear-api-provider.ts";
 
 // Explicit manual lane: a real 60-second lifecycle timer, never enabled by ordinary CI.
-it.skipIf(process.env.CLANKIE_LINEAR_WARNING_TIMER_TEST !== "1")(
+it.skipIf(process.env.LINEAR_WARNING_TIMER_TEST !== "1")(
   "retries native warning admission autonomously after 60 real seconds without another provider request",
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "linear-budget-autonomous-"));
