@@ -9,6 +9,9 @@ import type { DeployHolds } from "./deploy-holds.ts";
 import { FleetHarnessRefreshRequestSchema } from "@clankie/protocol/fleet-settings";
 import {
   FLEET_WORKER_CATALOG_REFRESH_PATH,
+  FLEET_WORKER_TOOL_RESTART_PATH,
+  FleetWorkerToolRestartRequestSchema,
+  FleetWorkerToolRestartResultSchema,
   FleetWorkerCatalogRefreshRequestSchema,
   FleetWorkerCatalogRefreshResultSchema,
 } from "@clankie/protocol/tool-catalog";
@@ -43,6 +46,7 @@ export function createRuntimeUpdateRoutes(options: {
   readonly setup?: FleetSettingsContextDependencies | undefined;
   readonly pluginVersionInstalled?: ((version: string) => void) | undefined;
   readonly refreshWorkerCatalogs?: RefreshWorkerCatalogs | undefined;
+  readonly restartWorkerTools?: import("./captain/port.ts").CaptainPort["restartWorkerTools"] | undefined;
   readonly authorize: (request: Request) => Promise<UpdateAuthority | undefined>;
 }): Hono {
   const app = new Hono();
@@ -97,6 +101,25 @@ export function createRuntimeUpdateRoutes(options: {
       throw error;
     }
     return context.json({ policy, appliesTo: "next_canary" }, 200, { "Cache-Control": "no-store" });
+  });
+  app.post(FLEET_WORKER_TOOL_RESTART_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
+    const authority = await options.authorize(context.req.raw);
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    const input = FleetWorkerToolRestartRequestSchema.safeParse(
+      await context.req.json().catch(() => undefined),
+    );
+    if (!input.success) return context.json({ error: "invalid_worker_tool_restart" }, 400);
+    if (!options.restartWorkerTools) return context.json({ error: "worker_tool_restart_unavailable" }, 503);
+    context.header("Cache-Control", "no-store");
+    try {
+      await authority.guard();
+      if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+      return context.json(
+        FleetWorkerToolRestartResultSchema.parse(await options.restartWorkerTools(input.data, authority)),
+      );
+    } catch {
+      return context.json({ error: "worker_tool_restart_failed" }, 503);
+    }
   });
   app.post(FLEET_WORKER_CATALOG_REFRESH_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
     const authority = await options.authorize(context.req.raw);

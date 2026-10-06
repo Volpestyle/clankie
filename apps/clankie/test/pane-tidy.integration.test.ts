@@ -284,3 +284,14 @@ it("stops before native close when its admitted turn is cancelled during the fin
   expect(f.tidy.history()).toEqual([]);
   f.watch.close();
 });
+
+
+it("explicit restart refuses the captured busy Codex occupant before close or resume", async () => {
+  const f = await fixture();
+  expect(await f.tidy.restart({ pane: "w1:p1", reportPath: f.reportPath }, authority)).toEqual({ outcome: "failed", reason: "busy" });
+  expect(f.closes()).toBe(0);
+  expect(f.hires).toEqual([]);
+  expect(f.tidy.history()).toEqual([]);
+  expect(await f.tidy.restart({ pane: "pc/w1:p1" }, authority)).toEqual({ outcome: "failed", reason: "restart_unsupported" });
+  expect(f.closes()).toBe(0);
+});

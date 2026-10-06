@@ -477,6 +477,14 @@ skill are independent facts. Static installation is not live native membership.
 Doctor and roster `workerTools` separately report observed worker catalogs,
 pending requests, missing tools and stalled reads with their reasons. An unknown
 catalog remains `not-observed`; those observations grant no tool authority.
+Local Codex seats on worker plugins before 0.6.5 show `restart needed`. An explicit
+operator can run `clankie harness restart-tools --pane PANE`, adding `--report
+/absolute/report` when results have not been retained. It requires idle, no draft,
+known lead ownership and settled receipts; verified native exit and journaled
+resume keep the same thread/account/cwd. A lost receipt stays held in tidy history:
+inspect the original operation before retrying. Never use this to replay an
+uncertain report or automatically restart existing lanes. Remote/Claude recovery
+is separate.
 Roster `workerReportBridge` separately records the last report outcome, time and
 fixed safe reason. Done/idle hires held for fifteen minutes without a stored
 report since their latest brief carry `finished, unreported`. Three failed seats

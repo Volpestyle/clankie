@@ -25,7 +25,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["harness"],
     lines: [
-      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh native plugins under current fleet policy",
+      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh native plugins under current fleet policy\n  harness refresh-tools [--pane PANE]  Refresh an original native catalog\n  harness restart-tools --pane PANE [--report /absolute/report]  Restart an idle local Codex seat on the same thread",
     ],
   },
   {

@@ -79,3 +79,19 @@ export const FleetWorkerCatalogRefreshResultSchema = z
   })
   .strict();
 export type FleetWorkerCatalogRefreshResult = z.infer<typeof FleetWorkerCatalogRefreshResultSchema>;
+
+/** Deliberate operator restart; never automatic deploy recovery. */
+export const FLEET_WORKER_TOOL_RESTART_PATH = "/v1/fleet/worker-tool-restart";
+export const FleetWorkerToolRestartRequestSchema = z.strictObject({
+  paneId: z.string().trim().min(1).max(256),
+  reportPath: z.string().min(1).max(4096).optional(),
+});
+export const FleetWorkerToolRestartResultSchema = z.strictObject({
+  outcome: z.enum(["restarted", "refused", "failed"]),
+  reason: z.string().max(1024).optional(),
+  threadId: z.string().min(1).max(256).optional(),
+  historyId: z.string().uuid().optional(),
+  resumedSeatId: z.string().min(1).max(256).optional(),
+});
+export type FleetWorkerToolRestartRequest = z.infer<typeof FleetWorkerToolRestartRequestSchema>;
+export type FleetWorkerToolRestartResult = z.infer<typeof FleetWorkerToolRestartResultSchema>;

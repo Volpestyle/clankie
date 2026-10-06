@@ -3261,7 +3261,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return record.owner;
   }
 
-  public async closeSeat(seatId: string, guard?: () => Promise<void>): Promise<boolean> {
+  public async closeSeat(seatId: string, guard?: () => Promise<void>, nativeOnly = false): Promise<boolean> {
     if (this.closed || this.runner.closePane === undefined) return false;
     try {
       const current = await this.runner.resolveTerminal(seatId);
@@ -3275,6 +3275,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // itself through its original process-bound controller; Herdr removes
       // its command pane on process exit. Never fall back to physical close.
       if (
+        nativeOnly ||
         this.state.preparedPanes?.some(
           (entry) =>
             entry.paneId === current.paneId ||

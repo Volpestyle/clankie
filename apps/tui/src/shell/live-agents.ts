@@ -75,6 +75,7 @@ function bridgeRemediation({ seat }: LiveAgent): string | undefined {
 
 /** Catalog served is an observation of the bridge, not proof of native tool loading. */
 function workerToolsText({ seat }: LiveAgent, { ansi }: AgentTheme): string {
+  if (seat.workerTools?.restartNeeded) return ansi.yellow("tools restart needed");
   switch (seat.workerTools?.status) {
     case "ready":
       return ansi.dim("tools catalog served");
@@ -458,6 +459,9 @@ export class LiveAgentPicker implements Component {
           ...(selected.seat.workerTools
             ? [
                 `Worker tools: ${clean(selected.seat.workerTools.reason)}`,
+                ...(selected.seat.workerTools.remediation
+                  ? [clean(selected.seat.workerTools.remediation)]
+                  : []),
                 `Plugin: ${selected.seat.workerTools.pluginVersion ?? "unknown"} / deployed ${selected.seat.workerTools.expectedPluginVersion ?? "unknown"}${selected.seat.workerTools.behind ? " · behind" : ""}`,
               ]
             : [

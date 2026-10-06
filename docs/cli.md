@@ -374,7 +374,21 @@ The authenticated API is `POST /v1/fleet/worker-tool-refresh` with `{}` or
 `{"paneId":"PANE"}`. Each result is `refreshed`, `skipped-busy`, or `failed`
 with a reason. Busy requests remain pending under their original authority.
 Roster `workerTools` and `/doctor` show observed/expected plugin versions and
-whether the observed runtime revision is behind. These fields grant no access.
+whether the observed runtime revision is behind. Local Codex seats started on
+worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh
+success. Use `clankie harness restart-tools --pane PANE` (TUI `/restart-tools
+--pane PANE`), adding `--report /absolute/report` if the completed result is not
+already retained. The operator API is `POST /v1/fleet/worker-tool-restart` with
+`{"paneId":"PANE","reportPath":"/absolute/report"}` (`reportPath` is optional).
+
+Restart requires an idle seat, no draft, known lead ownership, saved results,
+settled report receipts, and a verified native exit controller. It rechecks the
+original occupant before exit, records the close, and resumes the same native
+thread through the saved account and working directory. The result returns the
+thread, history ID, and resumed seat ID. A missing exit/resume acknowledgment
+stays held in tidy history; inspect it before retrying. Restart is an explicit
+operator action, never automatic deployment recovery. Remote Codex and Claude
+restarts are outside this command. These fields grant no access.
 
 Known native busy state also holds deployment metadata publication until idle.
 The current implementation cannot safely refresh remote Codex configurations

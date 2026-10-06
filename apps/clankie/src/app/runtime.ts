@@ -929,6 +929,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       setup: { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },
       pluginVersionInstalled: dependencies.pluginVersionInstalled,
       refreshWorkerCatalogs: dependencies.refreshWorkerCatalogs,
+      restartWorkerTools: dependencies.captain.restartWorkerTools,
       holds: dependencies.deployHolds,
       authorize: async (request) => {
         const identity = await authenticateOperator(request, dependencies);

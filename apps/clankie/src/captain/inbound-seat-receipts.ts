@@ -42,6 +42,16 @@ export class InboundSeatReceipts {
     this.shutdown = options.signal;
   }
 
+  /** Restart cannot discard an active original or an unreadable admission fence. */
+  public hasPending(paneId: string): boolean {
+    if ([...this.active.values()].some((attempt) => attempt.paneId === paneId)) return true;
+    try {
+      return this.fence.pending(paneId) !== undefined;
+    } catch {
+      return true;
+    }
+  }
+
   private abandoned(attempt: InboundAttempt): boolean {
     return !!this.shutdown?.aborted || !!attempt.signal?.aborted || this.now() >= attempt.stamp.deadlineAt;
   }

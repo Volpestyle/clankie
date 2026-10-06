@@ -1,5 +1,5 @@
 import { runDesktopCommand } from "./command/desktop.ts";
-import { runWorkerToolRefreshCommand } from "./command/harness.ts";
+import { runWorkerToolRefreshCommand, runWorkerToolRestartCommand } from "./command/harness.ts";
 import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
 import { runProjectRolesMenu } from "./project-role-menu.ts";
 import { runProjectsMenu } from "./project-menu.ts";
@@ -243,6 +243,28 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         );
       } catch (error) {
         shell.insertCommandResult("/refresh-tools", String(error), "error");
+      }
+    },
+  });
+  commands.push({
+    name: "restart-tools",
+    aliases: [],
+    description: "Restart an idle local Codex worker on its saved native thread",
+    argumentHint: "--pane PANE [--report /absolute/report]",
+    takesArgument: true,
+    async run(argument, shell) {
+      try {
+        const result = await runWorkerToolRestartCommand([
+          "restart-tools",
+          ...splitQuotedArguments(argument),
+        ]);
+        shell.insertCommandResult(
+          "/restart-tools",
+          JSON.stringify(result, null, 2),
+          result.outcome === "restarted" ? "success" : "error",
+        );
+      } catch (error) {
+        shell.insertCommandResult("/restart-tools", String(error), "error");
       }
     },
   });
