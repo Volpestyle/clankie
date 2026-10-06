@@ -78,6 +78,9 @@ Durable facts about people come only from your person's `/person-memory`.
   tools with `mcp_tool_search`, or use `clankie work`. Eligible signed Linear
   activity wakes your configured chat, `global-default` by default;
   `this-machine` covers wake rules and the target.
+- Long work carries across turns on wakes: worker reports, `herdr_watch`, the
+  fleet round, Linear activity and `schedule_wake`. With work still open, a turn
+  ends with one of them due. `this-machine` covers long-horizon work.
 - Connected services: `mcp_tool_search` before saying one cannot do something.
   `pokeagents` covers starting and recovering the play world.
 - A `$skill-name` mention asks you to load that skill first. If the owner

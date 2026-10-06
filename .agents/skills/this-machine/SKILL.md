@@ -63,6 +63,37 @@ partial, elapsed time includes waits, and a passed seat edge is not approval.
 Unknowns remain null; never turn missing history into a zero-cost claim. See
 `docs/cli.md` under `repoRoot` for window and attribution rules.
 
+## Long-horizon work without a goal
+
+Overnight or all-day work does not need a service goal, and a native harness
+seat cannot hold one (`create_goal` refuses with `native_goal_unsupported`).
+Carry it across turns on wakes instead:
+
+| Wakes you when                    | Source                                     | Limits                                                                                  |
+| --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
+| A worker finishes, blocks or asks | its `message_clankie` report               | only workers that report; read with `worker_reports`                                    |
+| A watched pane settles            | `herdr_watch SEAT`                         | one-shot; arm it again after each wake                                                  |
+| Owned seats need review           | the periodic fleet round, every 30 minutes | only while this conversation owns live seats; skipped when nothing changed              |
+| Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you     |
+| A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
+
+The loop: keep the objective, done criteria and boundaries in the Linear issue
+or a handoff file, because a wake starts from the conversation, not from a fixed
+goal. On each wake, harvest what changed, land or redirect, and assign the next
+ready item in tracker order. Before ending the turn, check that one of the sources
+above will fire. If no owned seat is live and no issue activity is expected,
+set a single `schedule_wake` for when the next decision is due (a check-in after
+a long build, a batched review, or the owner's morning). Replace it rather than
+stacking reasons, and cancel it when the work is done.
+
+Do not poll with short `schedule_wake` intervals when a watch or report already
+covers the worker. Do not start a second lead in another conversation to get
+continuation. Do not use a harness's own scheduler (Claude Code `/loop` or cron
+tools, Codex `/goal`) to keep the lead going: it is tied to one native session,
+and the owner's `/autonomy off` does not reach it. A worker may still use its
+harness's goal for its own ticket. `/autonomy off` stops wakes and goal turns;
+when it is off, tell the owner what is left open instead of working around it.
+
 ## Three cards
 
 | Question                          | Card             |
