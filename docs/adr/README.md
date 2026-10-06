@@ -94,6 +94,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 
 - [0235 — Worker catalog refresh keeps the original controller](0235-worker-catalog-refresh-keeps-the-original-controller.md)
 - [0236 — Clankie owns the skills he ships](0236-clankie-owns-the-skills-he-ships.md)
+- [0237 — Hosted bodies update themselves to official releases](0237-hosted-bodies-update-themselves-to-official-releases.md)
 
 ## Archived decisions
 
