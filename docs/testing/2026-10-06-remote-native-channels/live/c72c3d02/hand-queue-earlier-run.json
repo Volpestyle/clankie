@@ -1,0 +1,179 @@
+{
+  "issue": "VUH-1527",
+  "result": "hand-started-queue-recheck-passed",
+  "runtimeAtNativeTurns": "7ee4da048fe40682d54e013591032ec06e28f727",
+  "nonce": "7ee4da04-tess-loop-20261006",
+  "seatId": "pc/term_65d2b5f3dbfbd1a",
+  "conversationId": "conv-754e89e3-865a-4868-9c8b-8b30887eb1c1",
+  "reportReceiptId": "a735f118-d092-4f62-8f2a-c936e3f940ea",
+  "nativeCompletion": {
+    "observedAt": "2026-10-06T13:02:49.4605405Z",
+    "pane": "wG:p1",
+    "terminal": "term_65d2b5f3dbfbd1a",
+    "session": "01a1114a-4cea-7210-a27b-4d33ba2c2eb4",
+    "nativeStatus": "done",
+    "lifecycle": [
+      {
+        "utc": "2026-10-06T12:57:26.214Z",
+        "type": "task_started",
+        "turnId": "01a1114a-5235-7f51-ad02-d06a4dfabe05",
+        "lastAgentMessage": null
+      },
+      {
+        "utc": "2026-10-06T12:58:26.580Z",
+        "type": "task_complete",
+        "turnId": "01a1114a-5235-7f51-ad02-d06a4dfabe05",
+        "lastAgentMessage": "Exact `message_clankie` result:\n\n```json\n{\"schemaVersion\":1,\"received\":true,\"deliveryStage\":\"stored\",\"deliveryId\":\"a735f118-d092-4f62-8f2a-c936e3f940ea\",\"binding\":\"bb7e48319bd2dcbdc2b300766f13d433ab81d2773f489c79442ed2999a01b056\",\"fingerprint\":\"806d9f8326cec70926057d09006803d1a403f8a194ca5c378423c21971973c92\"}\n```\n\nCalled exactly once. TUI remains open for one native owner reply.\n\nTESS1527_LOOP_HAND_START_OK"
+      },
+      {
+        "utc": "2026-10-06T13:00:14.012Z",
+        "type": "task_started",
+        "turnId": "01a1114c-e2bb-71e3-81d0-ced7e8c97edd",
+        "lastAgentMessage": null
+      },
+      {
+        "utc": "2026-10-06T13:00:24.959Z",
+        "type": "task_complete",
+        "turnId": "01a1114c-e2bb-71e3-81d0-ced7e8c97edd",
+        "lastAgentMessage": "TESS1527_LOOP_HAND_QUEUE_REPLY_OK"
+      }
+    ],
+    "clankieToolCalls": []
+  },
+  "steerResult": {
+    "schemaVersion": 1,
+    "status": "seat_undelivered",
+    "deliveryStage": "rejected",
+    "conversationId": "conv-754e89e3-865a-4868-9c8b-8b30887eb1c1",
+    "seatId": "pc/term_65d2b5f3dbfbd1a",
+    "currentRevision": 0,
+    "safeCursor": "000000000000",
+    "detail": "This agent's native connection cannot steer the running turn. Choose Queue or use its terminal. Nothing was sent."
+  },
+  "freshQueueResult": {
+    "schemaVersion": 1,
+    "status": "accepted",
+    "deliveryStage": "consumed",
+    "conversationId": "conv-754e89e3-865a-4868-9c8b-8b30887eb1c1",
+    "runId": "run-4dcd0b14-f830-4aac-b47a-ad07561e2d49",
+    "revision": 1,
+    "safeCursor": "000000000000",
+    "seatDelivery": {
+      "state": "queued",
+      "detail": "Queued until the current Codex turn ends (a goal may keep it pending until the goal ends); active-turn delivery was not confirmed."
+    }
+  },
+  "noDaemon": true,
+  "noRelaunch": true,
+  "typingFallback": false,
+  "cleanup": {
+    "utc": "2026-10-06T13:03:35.1754166Z",
+    "closed": ["wG:p2", "wG:p1"],
+    "remaining": [
+      {
+        "pane": "w9:p1",
+        "terminal": "term_65d0ca2fa70f81"
+      },
+      {
+        "pane": "w9:p2",
+        "terminal": "term_65d0ca3cb067b2"
+      },
+      {
+        "pane": "w9:p3",
+        "terminal": "term_65d0e2463eaeb3"
+      },
+      {
+        "pane": "w9:p4",
+        "terminal": "term_65d0e8822cbf54"
+      },
+      {
+        "pane": "w9:p6",
+        "terminal": "term_65d106ee2fa839"
+      }
+    ],
+    "captured": [
+      {
+        "pid": 504792,
+        "created": "2026-10-06T12:45:23.1129500Z"
+      },
+      {
+        "pid": 630344,
+        "created": "2026-10-06T12:57:23.3611340Z"
+      },
+      {
+        "pid": 263052,
+        "created": "2026-10-06T12:57:23.4041010Z"
+      },
+      {
+        "pid": 746900,
+        "created": "2026-10-06T12:57:23.5487040Z"
+      },
+      {
+        "pid": 402184,
+        "created": "2026-10-06T12:57:23.6126000Z"
+      },
+      {
+        "pid": 642632,
+        "created": "2026-10-06T12:57:25.2042840Z"
+      },
+      {
+        "pid": 336032,
+        "created": "2026-10-06T12:57:25.2212960Z"
+      },
+      {
+        "pid": 584412,
+        "created": "2026-10-06T12:57:25.2310570Z"
+      },
+      {
+        "pid": 231192,
+        "created": "2026-10-06T12:57:25.2358830Z"
+      },
+      {
+        "pid": 570996,
+        "created": "2026-10-06T12:57:25.2436690Z"
+      },
+      {
+        "pid": 45580,
+        "created": "2026-10-06T12:57:25.2484300Z"
+      },
+      {
+        "pid": 552372,
+        "created": "2026-10-06T12:57:25.2509780Z"
+      },
+      {
+        "pid": 510756,
+        "created": "2026-10-06T12:57:25.2544440Z"
+      },
+      {
+        "pid": 140124,
+        "created": "2026-10-06T12:57:25.2607540Z"
+      },
+      {
+        "pid": 77944,
+        "created": "2026-10-06T12:57:25.2650880Z"
+      },
+      {
+        "pid": 727224,
+        "created": "2026-10-06T12:57:25.2711520Z"
+      },
+      {
+        "pid": 290120,
+        "created": "2026-10-06T12:57:25.3065430Z"
+      },
+      {
+        "pid": 469152,
+        "created": "2026-10-06T12:57:25.4194760Z"
+      },
+      {
+        "pid": 235256,
+        "created": "2026-10-06T12:57:54.2010090Z"
+      },
+      {
+        "pid": 165156,
+        "created": "2026-10-06T12:57:54.2711690Z"
+      }
+    ],
+    "survivors": [],
+    "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+  }
+}

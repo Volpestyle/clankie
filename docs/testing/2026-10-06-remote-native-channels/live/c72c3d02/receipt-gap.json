@@ -1,0 +1,167 @@
+{
+  "issue": "VUH-1527",
+  "runtime": {
+    "pid": 96605,
+    "commit": "c72c3d028438a41d1d8666f516ff0c1dfe469501",
+    "root": "/Users/james/.clankie/pinned",
+    "instanceId": "b8857518-7790-48f6-b0f9-683d68fd7eef"
+  },
+  "requestAt": "2026-10-06T14:33:49.697Z",
+  "intentId": "03fee986-a3c4-4501-a3bf-6cc4d8e34791",
+  "afterReceiptId": "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+  "conversationId": "conv-18bd3cd9-ec33-4b11-9f3d-f8b07552e004",
+  "publicHireResult": {
+    "op": "spawn_seat",
+    "schemaVersion": 1,
+    "result": {
+      "outcome": "failed",
+      "reason": "start_unconfirmed",
+      "detail": "fleet_unreachable: fleet pc: mux_client_request_session: session request failed: Session open refused by peer\nkex_exchange_identification: read: Connection reset by peer\nConnection reset by 100.108.214.60 port 22",
+      "deliveryStage": "uncertain"
+    }
+  },
+  "retainedOriginal": {
+    "receiptId": "3989da1d-2af3-4a58-bae9-0b35aee0d828",
+    "fingerprint": "866c5925c55d1dc6cbcd594fdfee79158cf5fe208f9052223e70683244a80336",
+    "remoteLaunchCommitted": true,
+    "paneIdRecorded": false,
+    "sessionIdRecorded": false,
+    "occupantIdRecorded": false,
+    "target": {
+      "fleet": "pc",
+      "host": "volpe@supedupsilly",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "settlement": {
+      "state": "refused",
+      "receiptId": "3989da1d-2af3-4a58-bae9-0b35aee0d828",
+      "detail": "Original allocation is missing or still active."
+    }
+  },
+  "hostJournalObservation": {
+    "observedAt": "2026-10-06T14:48:14.4690679Z",
+    "receiptId": "3989da1d-2af3-4a58-bae9-0b35aee0d828",
+    "exactClaimMatched": true,
+    "state": "launching",
+    "openedAt": 1791297235242,
+    "hostIdentity": "33f0512ba73f037faf1b7683c5be31b50d4a224ed51d44158a0efc16930a9bda",
+    "sha256": "a8bdd9608bbf90b862c58bed61a3b5d46b990067711be48f4b5bc76182eebb57",
+    "hasRecoveryEvidence": false,
+    "openedAtUtc": "2026-10-06T14:33:55.242Z",
+    "readOnly": true,
+    "settlementPerformed": false
+  },
+  "baseline": {
+    "observedAt": "2026-10-06T14:33:02.2558881Z",
+    "panes": [
+      {
+        "pane": "w9:p1",
+        "terminal": "term_65d0ca2fa70f81"
+      },
+      {
+        "pane": "w9:p2",
+        "terminal": "term_65d0ca3cb067b2"
+      },
+      {
+        "pane": "w9:p3",
+        "terminal": "term_65d0e2463eaeb3"
+      },
+      {
+        "pane": "w9:p4",
+        "terminal": "term_65d0e8822cbf54"
+      },
+      {
+        "pane": "w9:p6",
+        "terminal": "term_65d106ee2fa839"
+      }
+    ],
+    "codexConfigSource": ["C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml"],
+    "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+  },
+  "censusAfterFailure": {
+    "observedAt": "2026-10-06T14:34:13.0977226Z",
+    "panes": [
+      {
+        "pane": "w9:p1",
+        "terminal": "term_65d0ca2fa70f81"
+      },
+      {
+        "pane": "w9:p2",
+        "terminal": "term_65d0ca3cb067b2"
+      },
+      {
+        "pane": "w9:p3",
+        "terminal": "term_65d0e2463eaeb3"
+      },
+      {
+        "pane": "w9:p4",
+        "terminal": "term_65d0e8822cbf54"
+      },
+      {
+        "pane": "w9:p6",
+        "terminal": "term_65d106ee2fa839"
+      },
+      {
+        "pane": "wH:p1",
+        "terminal": "term_65d2ce41e95bb1c"
+      }
+    ],
+    "codexConfigSource": ["C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml"],
+    "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+  },
+  "rootObservation": {
+    "observedAt": "2026-10-06T14:45:44.3688706Z",
+    "paneId": "wH:p1",
+    "terminalId": "term_65d2ce41e95bb1c",
+    "processes": [
+      {
+        "pid": 450920,
+        "parentPid": 402600,
+        "name": "powershell.exe",
+        "created": "2026-10-06T14:34:07.3903120Z"
+      }
+    ],
+    "visible": "PS C:\\Users\\volpe\\repos\\kh2-multiplayer>",
+    "ownership": "not receipt-bound; timing/cwd/census are circumstantial",
+    "workspace": [
+      {
+        "active_tab_id": "wH:t1",
+        "agent_status": "unknown",
+        "focused": false,
+        "label": "kh2-multiplayer",
+        "number": 2,
+        "pane_count": 1,
+        "tab_count": 1,
+        "workspace_id": "wH"
+      }
+    ],
+    "tab": [
+      {
+        "agent_status": "unknown",
+        "focused": false,
+        "label": "1",
+        "number": 1,
+        "pane_count": 1,
+        "tab_id": "wH:t1",
+        "workspace_id": "wH"
+      }
+    ],
+    "closed": false
+  },
+  "sshObservation": {
+    "lanReadSucceeded": true,
+    "tailscalePing": "pong via 192.168.4.123:41641 in 9ms",
+    "processesAt": "2026-10-06T14:48:14.4690679Z",
+    "sshdProcessCount": 96,
+    "sshdProcessesBornAfter1448Z": 72,
+    "explicitMaxSessionsOrMaxStartups": [],
+    "limitsChanged": false,
+    "processesKilled": false
+  },
+  "resend": false,
+  "alternativeLaunch": false,
+  "receiptFilesDeleted": false,
+  "nativeReportPeerCatalog": "not reached in this acceptance",
+  "decisionNeeded": "Whether to permit independently new read-only test work at the same location after host-authenticated abandonment that explicitly retains unknown original allocation fate. Default remains blocked."
+}

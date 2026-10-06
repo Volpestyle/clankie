@@ -1,13 +1,17 @@
 # Remote native channels and authenticated receipt recovery (VUH-1527)
 
-Current live result on runtime `7ee4da04`: a new owned PC Codex hire received its
-brief and native follow-up, completed both turns, and woke the original lead for
-the exact follow-up turn. Connected Linear reading and tracker isolation passed;
-loss of the hire's dedicated SSH forward returned explicit unavailable delivery
-without another launch. Hired-worker reports and peer discovery still reject
-native binding. A hand-started `--no-daemon` Codex report stored successfully, but
-its native Queue reply returned `seat_offline` while the TUI remained live.
-VUH-1527 stays open; see the [current acceptance and exact gaps](live/7ee4da04/README.md).
+Current live result on runtime `c72c3d02`: the first new-intent PC hire stopped
+with an uncertain SSH outcome before recording a worker allocation. Original
+`3989da1d` remains fenced; its exact authenticated host journal is `launching`,
+and deployed recovery refuses the missing allocation. Report, peer exchange,
+catalog and the complete fresh acceptance remain unproven. VUH-1527 stays open;
+see the [current evidence and required decision](live/c72c3d02/README.md).
+
+The earlier `7ee4da04` run proved hire, brief, follow-up, exact completion wake,
+tracker isolation and explicit SSH-loss refusal, with sender/peer/catalog gaps.
+A subsequent owned hand-started `--no-daemon` Queue recheck passed and was cleaned
+up; [bounded native proof](live/c72c3d02/hand-queue-earlier-run.json) retains that
+distinct result without rewriting the [earlier failures](live/7ee4da04/README.md).
 
 A [fresh-root naming and catalog repair](sender-naming/CHECKS.md) now prevents native automatic title helpers from revoking managed remote sender authority without granting those helpers an exception. Both fixes passed native security review; deployed PC acceptance remains pending.
 
