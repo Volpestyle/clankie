@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { writeFile } from "node:fs/promises";
+import { writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { ResourceStore } from "../../src/store.ts";
 import { processIdentity, resourceNativeHelperPath, resourcePython } from "../../src/process.ts";
@@ -18,7 +18,9 @@ const lease = {
   lastUsedAtMs: Date.now(),
 };
 await new ResourceStore(directory).transaction((state) => state.leases.push(lease));
-await writeFile(claimReceipt, JSON.stringify({ id: lease.id, token: lease.token }));
+const pendingClaimReceipt = `${claimReceipt}.pending`;
+await writeFile(pendingClaimReceipt, JSON.stringify({ id: lease.id, token: lease.token }));
+await rename(pendingClaimReceipt, claimReceipt);
 if (mode === "registered") {
   const runner = spawn(
     resourcePython,
