@@ -116,7 +116,7 @@ tell Clankie when done. Use Codex for acceptance while Claude is signed out.
 No accounts/configuration, existing panes or desktop controls changed.
 
 VUH-1709 normal PC update still needs confirmation that Pell landed and deployed
-`9ab0e1af`. VUH-1563's three-step James check is already on its ticket. Linear
-issue reads and comment writes now return fleet-tool HTTP 403; no connector
-substitution was used. `message_clankie` remains fenced by its original uncertain
+`9ab0e1af`. VUH-1563's three-step James check is already on its ticket. The Linear issue read returned fleet-tool HTTP 403 during this run, but the
+handoff comment at 03:58Z succeeded as Clankie ([comment](https://linear.app/vuhlp/issue/VUH-1527#comment-beeb7fd9-85c8-438d-b9e8-fb746a4114ea)). No other
+Linear write returned 403 this turn, and no connector substitution was used. `message_clankie` remains fenced by its original uncertain
 receipt; reports are visible in Tess's pane for Clankie to relay.
