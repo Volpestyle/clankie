@@ -60,7 +60,7 @@ function window(
   };
 }
 
-/** Only fixed reason counters leave this collector; internal seat keys expire in five minutes. */
+/** Fixed counters leave this collector; unresolved alerts retain their bounded seat slots. */
 export class FleetHealthMetrics {
   private readonly now: () => number;
   private readonly startedAt: string;
@@ -101,7 +101,11 @@ export class FleetHealthMetrics {
   private prune(minute: number) {
     for (const at of this.buckets.keys()) if (at <= minute - 60 || at > minute) this.buckets.delete(at);
     for (const [pane, seat] of this.seats) {
-      if (seat.lastSeen <= minute - 5) this.seats.delete(pane);
+      // Inactivity is not receipt settlement. Retain an in-flight/unconfirmed
+      // original even when its rate buckets expire, or a new observation could
+      // dispatch a distinct alert into the same unresolved recipient. The 512
+      // slot admission cap refuses new seats instead of evicting held originals.
+      if (!seat.alertPending && seat.lastSeen <= minute - 5) this.seats.delete(pane);
       else for (const at of seat.buckets.keys()) if (at <= minute - 5 || at > minute) seat.buckets.delete(at);
     }
     for (const [key, report] of this.reports) if (report.lastSeen <= minute - 60) this.reports.delete(key);

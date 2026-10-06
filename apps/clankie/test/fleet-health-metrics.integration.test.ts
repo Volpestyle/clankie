@@ -53,7 +53,7 @@ it("reads a held next-turn alert's original acknowledgment after reload without 
   }
 });
 
-it("holds an unconfirmed proof alert and starts cooldown only after its exact original acknowledgment", async () => {
+it("holds an unconfirmed proof alert across inactivity and bounded admission until its exact original acknowledgment", async () => {
   const directory = await mkdtemp(join(tmpdir(), "proof-alert-receipt-"));
   const outbox = new SeatOutbox({ uncertaintyPath: join(directory, "receipts.json"), boundGraceMs: 30 });
   let now = Date.parse("2026-10-06T12:00:00Z"),
@@ -88,11 +88,19 @@ it("holds an unconfirmed proof alert and starts cooldown only after its exact or
     expect(original).toBeDefined();
     await new Promise((resolve) => setTimeout(resolve, 70));
     expect(outbox.uncertain()).toBe(true);
-    for (let minute = 0; minute < 6; minute++) {
-      now += 60_000;
-      refusal();
-    }
+    // No proof observations for longer than the seat/rate expiry interval.
+    now += 6 * 60_000;
+    expect(metrics.snapshot().windows[0].proof.attempts).toBe(0);
+    refusal();
     expect(attempts).toBe(1);
+    // Fill the remaining bounded slots with genuine collector observations.
+    // Overflow must refuse admission, never evict the unresolved original.
+    for (let seat = 0; seat < 511; seat++)
+      metrics.observeProof("fleet", { source: "proof_success" }, `w2:p${seat}`);
+    metrics.observeProof("fleet", { source: "proof", reason: "missing_binding" }, "w3:p1");
+    refusal();
+    expect(attempts).toBe(1);
+    expect(metrics.snapshot().totals.proof.attempts).toBe(515);
     expect(outbox.acknowledge("invented-original", binding)).toBe(false);
     expect(outbox.acknowledge(original!.id, "c".repeat(64))).toBe(false);
     expect(outbox.recoveryAcknowledged(original!.id)).toBe(false);
