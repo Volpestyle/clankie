@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, open } from "node:fs/promises";
+import { mkdir, readFile, open, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -8,6 +9,7 @@ import {
   type IntegrationBatch,
   type IntegrationRepo,
   type IntegrationRun,
+  type IntegrationQueueStatus,
   type HoldOverride,
 } from "@clankie/protocol/integrate";
 import { DeployHolds, durableJson, withDirectoryLock } from "./deploy-holds.ts";
@@ -15,7 +17,11 @@ import { integrationEnvironment } from "./integrate-environment.ts";
 
 const execute = promisify(execFile);
 const now = () => new Date().toISOString();
-const active = new Set(["queued", "composing", "installing", "gating", "pushing"]);
+const active = new Set(["queued", "composing", "installing", "gating", "isolating", "pushing"]);
+interface PendingIntegration {
+  batch: IntegrationBatch;
+  guard: () => Promise<void>;
+}
 interface IntegrationOptions {
   directory: string;
   core: string;
@@ -39,6 +45,8 @@ export async function integrationSources(runtimeRoot: string): Promise<{ core: s
 export class IntegrationQueue {
   private tail: Promise<void> = Promise.resolve();
   private running = new Set<string>();
+  private pending: PendingIntegration[] = [];
+  private draining = false;
   readonly options: IntegrationOptions;
   constructor(options: IntegrationOptions) {
     this.options = options;
@@ -51,10 +59,28 @@ export class IntegrationQueue {
     batch.updatedAt = now();
     await durableJson(this.path(batch.id), IntegrationBatchSchema.parse(batch));
   }
+  private async read(id: string): Promise<IntegrationBatch> {
+    return IntegrationBatchSchema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
+  }
   async status(id: string): Promise<IntegrationBatch> {
-    const batch = IntegrationBatchSchema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
-    // A lost process never manufactures a pass. Retain the original durable record for diagnosis.
-    if (active.has(batch.state) && !this.running.has(id))
+    const receipt = await this.read(id);
+    const shared = receipt.batchId ? await this.read(receipt.batchId) : receipt;
+    const batch = receipt.batchId
+      ? {
+          ...shared,
+          id: receipt.id,
+          request: receipt.request,
+          batchId: shared.id,
+          attempts: receipt.attempts,
+        }
+      : shared;
+    if (receipt.batchId && ["conflict", "failed"].includes(receipt.state))
+      return { ...batch, state: receipt.state, error: receipt.error };
+    // Polling a member must not mistake the failed shared attempt for its final result.
+    if (shared.state === "failed" && this.running.has(shared.id) && (shared.members?.length ?? 0) > 1)
+      return { ...batch, state: "isolating" };
+    // A lost process never manufactures a pass. Retain the original record for diagnosis.
+    if (active.has(batch.state) && !this.running.has(shared.id))
       return {
         ...batch,
         state: "interrupted",
@@ -62,6 +88,32 @@ export class IntegrationQueue {
           "Operation interrupted or owned by another process; inspect record and retained locks before starting a fresh batch",
       };
     return batch;
+  }
+  async snapshot(): Promise<IntegrationQueueStatus> {
+    const directory = join(this.options.directory, "batches");
+    const ids = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+    const batches: IntegrationBatch[] = [];
+    for (const id of ids) {
+      if (!/^[a-f0-9-]{36}$/u.test(id)) continue;
+      // The request directory can exist briefly before its first atomic record.
+      const receipt = await this.read(id).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (receipt && !receipt.batchId) batches.push(await this.status(id));
+    }
+    batches.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const completed = batches.filter((b) => !active.has(b.state) && b.state !== "interrupted");
+    completed.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return {
+      running: batches.filter((b) => active.has(b.state) && b.state !== "queued"),
+      waiting: batches.filter((b) => b.state === "queued"),
+      ...(completed[0] ? { lastResult: completed[0] } : {}),
+      interrupted: batches.filter((b) => b.state === "interrupted"),
+    };
   }
   async start(request: IntegrationRun, guard: () => Promise<void>): Promise<IntegrationBatch> {
     try {
@@ -92,30 +144,135 @@ export class IntegrationQueue {
     );
     this.running.add(batch.id);
     await this.save(batch);
+    this.pending.push({ batch, guard });
+    this.schedule();
+    return batch;
+  }
+  private schedule(): void {
+    if (this.draining) return;
+    this.draining = true;
     this.tail = this.tail
+      .catch(() => undefined)
       .then(async () => {
         try {
           await withDirectoryLock(join(this.options.directory, "queue.lock"), async () => {
-            await guard();
-            await this.composeAndGate(batch);
-            // The landing path is deliberately separate from composition and recorded gates.
-            if (batch.state === "passed" && request.push) await this.land(batch.id, request.overrides, guard);
+            while (this.pending.length) {
+              const first = this.pending.shift()!;
+              const members = [first];
+              const request = first.batch.request;
+              // Preserve FIFO and keep restores / gate-only requests / distinct override intent apart.
+              while (!request.restore && this.pending.length) {
+                const next = this.pending[0]!.batch.request;
+                if (
+                  next.restore ||
+                  next.push !== request.push ||
+                  JSON.stringify(next.overrides) !== JSON.stringify(request.overrides)
+                )
+                  break;
+                members.push(this.pending.shift()!);
+              }
+              try {
+                await this.runMembers(members);
+              } finally {
+                for (const member of members) this.running.delete(member.batch.id);
+              }
+            }
           });
         } catch (error) {
-          batch.state = "failed";
-          batch.error = String(error);
-          await this.save(batch);
+          // A retained cross-process lock is a refusal, never permission to run a second gate.
+          for (const member of this.pending.splice(0)) {
+            member.batch.state = "failed";
+            member.batch.error = String(error);
+            await this.save(member.batch);
+            this.running.delete(member.batch.id);
+          }
         } finally {
-          this.running.delete(batch.id);
+          this.draining = false;
+          if (this.pending.length) this.schedule();
         }
-      })
-      .catch(() => {
-        this.running.delete(batch.id);
       });
-    return batch;
   }
   async wait(): Promise<void> {
-    await this.tail;
+    do {
+      await this.tail;
+    } while (this.draining);
+  }
+
+  private async runMembers(input: PendingIntegration[], fresh = false): Promise<void> {
+    const members: PendingIntegration[] = [];
+    for (const member of input) {
+      try {
+        await member.guard();
+        members.push(member);
+      } catch (error) {
+        member.batch.state = "failed";
+        member.batch.error = String(error);
+        await this.save(member.batch);
+      }
+    }
+    if (!members.length) return;
+    const first = members[0]!.batch;
+    const requests = members.map((m) => m.batch.request);
+    const id = members.length === 1 && !fresh ? first.id : randomUUID();
+    const batch: IntegrationBatch =
+      id === first.id
+        ? first
+        : {
+            schemaVersion: 1,
+            id,
+            // Shared options come from the first request; members retain every bounded input.
+            request: { ...first.request, id },
+            state: "queued",
+            createdAt: now(),
+            updatedAt: now(),
+            evidence: this.path(id),
+            repos: [],
+          };
+    batch.members = requests;
+    this.running.add(id);
+    await this.save(batch);
+    for (const member of members) {
+      if (member.batch.id === id) continue;
+      member.batch.batchId = id;
+      member.batch.attempts = [...(member.batch.attempts ?? []), id];
+      await this.save(member.batch);
+    }
+    let remaining = members;
+    try {
+      try {
+        await this.composeAndGate(batch);
+      } catch (error) {
+        batch.state = "failed";
+        batch.error = String(error);
+        await this.save(batch);
+      }
+      remaining = members.filter((m) => !batch.excluded?.some((e) => e.id === m.batch.id));
+      for (const excluded of batch.excluded ?? []) {
+        const member = members.find((m) => m.batch.id === excluded.id)!;
+        if (member.batch.id !== id) {
+          member.batch.state = excluded.state;
+          member.batch.error = excluded.error;
+          await this.save(member.batch);
+        }
+      }
+      if (batch.state === "failed" && remaining.length > 1) {
+        batch.state = "isolating";
+        await this.save(batch);
+        // Bounded diagnosis: every failed subset gets smaller; good subsets get fresh attestations.
+        const middle = Math.ceil(remaining.length / 2);
+        await this.runMembers(remaining.slice(0, middle), true);
+        await this.runMembers(remaining.slice(middle), true);
+        batch.state = "failed";
+        batch.error = `${batch.error ?? "Shared gate failed"}; isolated members have separate results (use their request IDs)`;
+        await this.save(batch);
+      } else if (batch.state === "passed" && batch.request.push) {
+        await this.land(id, batch.request.overrides, async () => {
+          for (const member of remaining) await member.guard();
+        });
+      }
+    } finally {
+      this.running.delete(id);
+    }
   }
 
   private async git(cwd: string, args: string[]): Promise<string> {
@@ -188,9 +345,9 @@ export class IntegrationQueue {
       throw Error("Restore requires a recorded passed batch");
     const names: ("core" | "app")[] = restore
       ? restore.repos.map((r) => r.name)
-      : batch.request.app === undefined
-        ? ["core"]
-        : ["core", "app"];
+      : (batch.members ?? [batch.request]).some((member) => member.app !== undefined)
+        ? ["core", "app"]
+        : ["core"];
     batch.state = "composing";
     await this.save(batch);
     for (const name of names) {
@@ -217,10 +374,13 @@ export class IntegrationQueue {
         base,
         directory,
         head: base,
-        commits: (name === "core" ? batch.request.core : (batch.request.app ?? [])).map((commit) => ({
-          commit,
-          state: "pending",
-        })),
+        commits: (batch.members ?? [batch.request]).flatMap((member) =>
+          (name === "core" ? member.core : (member.app ?? [])).map((commit) => ({
+            commit,
+            memberId: member.id,
+            state: "pending" as const,
+          })),
+        ),
       };
       batch.repos.push(repo);
       await this.save(batch);
@@ -244,40 +404,59 @@ export class IntegrationQueue {
         repo.head = await this.head(repo);
         await this.save(batch);
       }
-      let blocked = false;
-      for (const item of repo.commits) {
-        if (blocked) {
-          item.state = "blocked";
-          continue;
-        }
-        try {
-          const commit = await this.git(source, ["rev-parse", "--verify", `${item.commit}^{commit}`]);
-          item.commit = commit;
-          // Local source may carry approved unpushed objects absent from the clone's advertised refs.
-          await this.git(directory, ["fetch", source, commit]);
-          const ancestry = await this.git(directory, ["merge-base", commit, "HEAD"]);
-          if (ancestry === commit) item.state = "already_present";
-          else {
-            await this.git(directory, ["cherry-pick", "--empty=drop", commit]);
-            item.state = "applied";
+    }
+    batch.excluded = [];
+    for (const member of batch.members ?? [batch.request]) {
+      const before = batch.repos.map((r) => r.head);
+      let failure: NonNullable<IntegrationBatch["excluded"]>[number] | undefined;
+      for (const repo of batch.repos) {
+        for (const item of repo.commits.filter((c) => c.memberId === member.id)) {
+          if (failure) {
+            item.state = "blocked";
+            continue;
           }
-          repo.head = await this.head(repo);
-          item.head = repo.head;
-        } catch (error) {
-          const conflicts = (await this.git(directory, ["diff", "--name-only", "--diff-filter=U"]))
-            .split("\n")
-            .filter(Boolean);
-          item.state = conflicts.length ? "conflict" : "failed";
-          item.conflicts = conflicts;
-          item.error = String(error);
-          blocked = true;
+          try {
+            const commit = await this.git(repo.source, ["rev-parse", "--verify", `${item.commit}^{commit}`]);
+            item.commit = commit;
+            await this.git(repo.directory, ["fetch", repo.source, commit]);
+            const ancestry = await this.git(repo.directory, ["merge-base", commit, "HEAD"]);
+            if (ancestry === commit) item.state = "already_present";
+            else {
+              await this.git(repo.directory, ["cherry-pick", "--empty=drop", commit]);
+              item.state = "applied";
+            }
+            repo.head = await this.head(repo);
+            item.head = repo.head;
+          } catch (error) {
+            const conflicts = (await this.git(repo.directory, ["diff", "--name-only", "--diff-filter=U"]))
+              .split("\n")
+              .filter(Boolean);
+            item.state = conflicts.length ? "conflict" : "failed";
+            item.conflicts = conflicts;
+            item.error = String(error);
+            failure = { id: member.id, state: item.state, error: item.error };
+          }
+          await this.save(batch);
         }
-        await this.save(batch);
+      }
+      if (failure) {
+        batch.excluded.push(failure);
+        // A request is atomic across both siblings. Roll it back before applying another member.
+        for (const [index, repo] of batch.repos.entries()) {
+          await this.git(repo.directory, ["cherry-pick", "--abort"]).catch(() => undefined);
+          await this.git(repo.directory, ["reset", "--hard", before[index]!]);
+          repo.head = before[index]!;
+          for (const item of repo.commits.filter((c) => c.memberId === member.id && c.state === "applied")) {
+            item.state = "blocked";
+            delete item.head;
+          }
+        }
       }
       await this.save(batch);
     }
-    if (batch.repos.some((r) => r.commits.some((c) => c.state === "conflict" || c.state === "failed"))) {
-      batch.state = "conflict";
+    if (batch.excluded.length === (batch.members ?? [batch.request]).length) {
+      batch.state = batch.excluded.some((e) => e.state === "conflict") ? "conflict" : "failed";
+      batch.error = batch.excluded.map((e) => `${e.id}: ${e.error}`).join("; ");
       await this.save(batch);
       return;
     }
@@ -317,6 +496,12 @@ export class IntegrationQueue {
 
   async land(id: string, overrides: HoldOverride[], guard: () => Promise<void>): Promise<IntegrationBatch> {
     const batch = await this.status(id);
+    if (batch.batchId) {
+      if (["conflict", "failed", "interrupted"].includes(batch.state))
+        throw Error(`Request ${id} has no landable pass (${batch.state})`);
+      await this.land(batch.batchId, overrides, guard);
+      return this.status(id);
+    }
     if (batch.state === "pushed") return batch;
     if (!["passed", "held", "partial"].includes(batch.state))
       throw Error(`Batch ${id} has no landable pass (${batch.state})`);

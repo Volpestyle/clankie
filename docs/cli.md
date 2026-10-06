@@ -44,7 +44,7 @@ the real command: `clankie up` suggests `clankie start`.
 | Rule                            | What it means                                                                                                                          |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | One JSON document on stdout     | Agents parse stdout. Progress and human narration go to stderr.                                                                        |
-| Exit 0 or 1                     | 0 is success. 1 is failure. `doctor` always exits 0 — `ok` means the card was produced.                                                |
+| Exit 0 or 1                     | 0 is success. 1 is failure. `doctor` inspection exits 0 — `ok` means the card was produced; explicit setup actions can fail.           |
 | Secrets never as flags          | No API keys, Discord tokens, or operator bearers on the command line. `/auth` and `/discord` in the console, or the credential broker. |
 | Fail closed, secret-free errors | Failure messages never echo tokens, pairing codes, or response bodies.                                                                 |
 | Host                            | `CLANKIE_CONTROL_PLANE_URL` (default `http://127.0.0.1:4310`). `CLANKIE_CAPTAIN_URL` is a compatibility alias.                         |
@@ -170,6 +170,10 @@ events contain fixed numeric and enum metadata only. Conversation text, worker
 reports, credentials, and command output never enter this projection.
 
 ### `doctor`
+
+`clankie doctor --install-main-guard REPO [--json]` explicitly installs the
+tracked landing guard after owner approval. Ordinary doctor only inspects and
+offers it for the caller's clankie or clankie-app checkout.
 
 The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
 `clankie doctor` prints one line: `ready`, or the most important problem and
@@ -616,7 +620,7 @@ the service returned `spawned`; completion still needs the matching native event
 
 ```bash
 clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]
-clankie integrate status UUID
+clankie integrate status [UUID]
 clankie integrate push UUID [--override-hold UUID --actor NAME --reason TEXT]
 clankie integrate revert PASSED_BATCH_UUID [--push]
 clankie integrate holds
@@ -624,6 +628,17 @@ clankie integrate hold --holder NAME --reason TEXT [--pane ID|--seat ID] [--id U
 clankie integrate release UUID --actor NAME --reason TEXT
 ```
 
+Everyone, including the owner's interactive panes, lands clankie and clankie-app
+through the queue: commit, push a branch, run
+`clankie integrate <sha> --push --no-wait`, then follow with
+`clankie integrate status`. With no UUID, status shows running batches, waiting
+requests, the last result and interrupted work. `status UUID` reads a request
+receipt, including its shared batch and attempts. `/integrate` shows this queue
+in the TUI.
+
+Requests arriving during a gate coalesce into the next compatible batch.
+Conflicting members roll back; failed shared gates split to isolate failing
+requests. Gate-only runs, restores and distinct owner overrides stay separate.
 An ordered approved batch composes on fresh origin in independent throwaway
 core/app worktrees, performs real installs and full checks with private home,
 state, credentials and package stores, and records tested HEAD and exit codes
@@ -633,6 +648,13 @@ Revert creates a new commit restoring a passed tree. Named holds block push and
 deploy; explicit owner overrides name the hold, actor and reason and are audited.
 Requires a local source-checkout service. See [integration](integration.md) for
 evidence paths, isolation limits, uncertain sends and crash recovery.
+
+Doctor offers the tracked main push guard in clankie and clankie-app. Install
+only after the owner approves hook installation on this Mac:
+`clankie doctor --install-main-guard /path/to/repo`. Existing hooks are preserved.
+The explicit owner recovery bypass requires `CLANKIE_MAIN_PUSH_BYPASS=owner`
+and `CLANKIE_MAIN_PUSH_REASON`, and records a local audit. Integration clones
+keep client hooks disabled. See [integration](integration.md#direct-main-push-guard).
 
 ### `restart [service]`
 

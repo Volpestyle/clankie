@@ -28,7 +28,7 @@ export const IntegrationRunSchema = z
 export type IntegrationRun = z.infer<typeof IntegrationRunSchema>;
 export const IntegrationRequestSchema = z.union([
   IntegrationRunSchema,
-  z.object({ action: z.literal("status"), id: Id }).strict(),
+  z.object({ action: z.literal("status"), id: Id.optional() }).strict(),
   z.object({ action: z.literal("push"), id: Id, overrides: Overrides }).strict(),
   z.object({ action: z.literal("holds") }).strict(),
   z
@@ -73,6 +73,7 @@ const IntegrationRepoSchema = z.object({
   commits: z.array(
     z.object({
       commit: Commit,
+      memberId: Id.optional(),
       state: z.enum(["pending", "applied", "already_present", "conflict", "blocked", "failed"]),
       head: Sha.optional(),
       conflicts: z.array(z.string()).optional(),
@@ -101,6 +102,7 @@ export const IntegrationBatchSchema = z.object({
     "conflict",
     "installing",
     "gating",
+    "isolating",
     "failed",
     "passed",
     "held",
@@ -114,12 +116,27 @@ export const IntegrationBatchSchema = z.object({
   evidence: z.string(),
   repos: z.array(IntegrationRepoSchema),
   error: z.string().optional(),
+  // Request receipts retain their original input and point to the shared attestation.
+  batchId: Id.optional(),
+  attempts: z.array(Id).optional(),
+  members: z.array(IntegrationRunSchema).optional(),
+  excluded: z
+    .array(z.object({ id: Id, state: z.enum(["conflict", "failed"]), error: z.string() }))
+    .optional(),
 });
 export type IntegrationBatch = z.infer<typeof IntegrationBatchSchema>;
+export const IntegrationQueueStatusSchema = z.object({
+  running: z.array(IntegrationBatchSchema),
+  waiting: z.array(IntegrationBatchSchema),
+  lastResult: IntegrationBatchSchema.optional(),
+  interrupted: z.array(IntegrationBatchSchema),
+});
+export type IntegrationQueueStatus = z.infer<typeof IntegrationQueueStatusSchema>;
 export const IntegrationResponseSchema = z.object({
   ok: z.boolean(),
   batch: IntegrationBatchSchema.optional(),
   holds: z.array(DeployHoldSchema).optional(),
+  queue: IntegrationQueueStatusSchema.optional(),
   error: z.string().optional(),
 });
 export type IntegrationResponse = z.infer<typeof IntegrationResponseSchema>;

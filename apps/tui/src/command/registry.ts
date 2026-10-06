@@ -13,7 +13,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["integrate"],
     lines: [
-      "  integrate SHA... [--app SHA]... [--push] | status UUID | push UUID | revert UUID | holds | hold | release  Compose, isolate the full gate, and land approved commits (JSON)",
+      "  integrate SHA... [--app SHA]... [--push] | status [UUID] | push UUID | revert UUID | holds | hold | release  Compose, isolate the full gate, and land approved commits (JSON)",
     ],
   },
   {

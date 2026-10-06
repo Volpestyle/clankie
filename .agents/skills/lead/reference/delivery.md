@@ -27,17 +27,30 @@ keep what is missing in a focused follow-up.
 
 ## Landing Clankie's own changes
 
-In Clankie's source-checkout service, hand approved commits to
-`clankie integrate` in order (repeat `--app SHA` for the app), with `--push` for
-an authorized landing. It composes fresh origin in independent worktrees,
-installs real packages, runs isolated full gates and keeps the tested HEAD and
-exit evidence. Read the batch record before claiming delivery: a passing gate is
-not a confirmed push, and a partial batch can land core while the app is still
-pending. Retry after a definite app rejection skips landed core; reconcile an
-uncertain send through origin first. Never switch a worktree while its gate
-runs, accept a pass for another HEAD, gate against live shared state, or force
-push a rollback: `integrate revert PASSED_BATCH_UUID` restores a known good tree
-with a new gated commit.
+Everyone, including James's interactive panes, lands clankie and clankie-app
+through the queue. Commit, push a branch, run
+`clankie integrate <sha> --push --no-wait` (repeat `--app SHA` for the app), then
+follow with `clankie integrate status`; `status UUID` reads one request receipt.
+Never push main directly. Doctor offers the tracked pre-push guard for either
+checkout with `clankie doctor --install-main-guard REPO`; installing it on this
+Mac requires James's approval. The explicit owner recovery bypass and its
+local audit are documented in `docs/integration.md`.
+
+The service composes fresh origin in independent worktrees. Compatible requests
+waiting during a gate join the next batch, with one full gate for the composed
+core/app pair. Conflicting requests roll back as a whole; failed shared gates
+split into smaller batches until the failing request is reported. Each receipt
+keeps its original input, shared batch ID and attempted evidence. Restores,
+gate-only requests and distinct hold overrides keep their separate intent.
+
+Read the receipt before claiming delivery: a passing gate is not a confirmed
+push, and a partial batch can land core while the app is still pending. Retry
+after a definite app rejection skips landed core; reconcile an uncertain send
+through origin first. Never switch a worktree while its gate runs, accept a pass
+for another HEAD, gate against live shared state, or force push a rollback:
+`integrate revert PASSED_BATCH_UUID` restores a known good tree with a new gated
+commit. Integration clones disable client hooks; the live checkout guard does
+not affect their attested landing.
 
 Protect live tests with `integrate hold --holder NAME --reason TEXT --pane ID`
 (or `--seat ID`). Holds never expire and appear in `integrate holds` even when

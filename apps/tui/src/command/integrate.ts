@@ -12,7 +12,7 @@ import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 
 const usage =
-  "Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status UUID | push UUID | revert PASSED_UUID [--push] | holds | hold --holder NAME --reason TEXT [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT\nOwner override: --override-hold UUID --actor NAME --reason TEXT (repeat --override-hold for every hold)";
+  "Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] | push UUID | revert PASSED_UUID [--push] | holds | hold --holder NAME --reason TEXT [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT\nOwner override: --override-hold UUID --actor NAME --reason TEXT (repeat --override-hold for every hold)";
 
 function integrationRequest(args: readonly string[]): { request: IntegrationRequest; wait: boolean } {
   const positional: string[] = [];
@@ -71,10 +71,10 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
       overrides,
     };
   } else if (["status", "push", "release"].includes(verb)) {
-    if (rest.length !== 1) throw Error(usage);
+    if (verb === "status" ? rest.length > 1 : rest.length !== 1) throw Error(usage);
     input = {
       action: verb,
-      id: rest[0],
+      ...(rest[0] ? { id: rest[0] } : {}),
       ...(verb === "push" ? { overrides } : verb === "release" ? { actor, reason } : {}),
     };
   } else {
@@ -119,7 +119,7 @@ export async function runIntegrationCommand(
     wait &&
     request.action === "run" &&
     result.batch &&
-    ["queued", "composing", "installing", "gating", "pushing"].includes(result.batch.state)
+    ["queued", "composing", "installing", "gating", "isolating", "pushing"].includes(result.batch.state)
   ) {
     await setTimeout(1_000);
     result = await client.integrate({ action: "status", id: request.id });

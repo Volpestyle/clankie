@@ -1,3 +1,4 @@
+import { serve } from "@hono/node-server";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -12,6 +13,8 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { deployHoldPresence } from "../src/deploy-hold-presence.ts";
+import { installMainPushGuard } from "../../tui/src/main-push-guard.ts";
+import { createIntegrationRoutes } from "../src/integrate-routes.ts";
 import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
 
 const execute = promisify(execFile);
@@ -24,12 +27,12 @@ afterEach(async () => {
 async function git(directory: string, ...args: string[]): Promise<string> {
   return (await execute("git", ["-c", "core.hooksPath=/dev/null", "-C", directory, ...args])).stdout.trim();
 }
-async function fixture(gateExtra = "", withApp = false) {
+async function fixture(gateExtra: string | ((root: string) => string) = "", withApp = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-integrate-")));
   roots.push(root);
   async function repo(name: string) {
     const source = join(root, name === "core" ? "clankie" : "clankie-app");
-    const origin = join(root, `${name}.git`);
+    const origin = join(root, `${name === "core" ? "clankie" : "clankie-app"}.git`);
     await mkdir(source);
     await git(root, "init", "--bare", origin);
     await git(source, "init", "-b", "main");
@@ -69,7 +72,7 @@ writeFileSync(descriptor, 'private-fixture');
 mkdirSync(dirname(process.env.CLANKIE_CREDENTIALS_FILE), { recursive: true });
 writeFileSync(process.env.CLANKIE_CREDENTIALS_FILE, '{}');
 console.log('fixture-gate-isolated', process.cwd());
-${name === "core" ? gateExtra : ""}
+${name === "core" ? (typeof gateExtra === "function" ? gateExtra(root) : gateExtra) : ""}
 `,
     );
     await execute("pnpm", ["install", "--lockfile-only"], { cwd: source });
@@ -364,4 +367,179 @@ it("records core landed/app pending on app rejection and retries only app", asyn
   expect(await readFile(count, "utf8")).toBe("landed\n");
   expect(landed.repos[0]!.push).toEqual(partial.repos[0]!.push);
   expect(await git(f.app!.source, "ls-remote", "origin", "refs/heads/main")).toContain(landed.repos[1]!.head);
+});
+
+async function until(check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw Error("Fixture gate did not reach barrier");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+const barrier = (root: string, extra = "") => `
+const fs = await import('node:fs');
+const root = ${JSON.stringify(root)};
+fs.appendFileSync(join(root, 'gate-count'), 'gate\\n');
+fs.writeFileSync(join(root, 'started'), 'gating');
+while (!existsSync(join(root, 'release'))) await new Promise(r => setTimeout(r, 20));
+${extra}
+`;
+async function queueCli(f: Awaited<ReturnType<typeof fixture>>) {
+  const api = createIntegrationRoutes({
+    queue: f.queue,
+    holds: f.holds,
+    authorize: async (request) =>
+      request.headers.get("authorization") === "Bearer fixture-owner" ? guard : undefined,
+  });
+  const server = serve({ fetch: api.fetch, port: 0, hostname: "127.0.0.1" });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  cleanups.push(() => {
+    server.close();
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw Error("Missing fixture HTTP address");
+  return { host: `http://127.0.0.1:${address.port}`, env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" } };
+}
+
+it("CLI/API coalesces arrivals during a real gate, isolating a cross-repo conflict and landing healthy members once", async () => {
+  const f = await fixture((root) => barrier(root), true);
+  const cli = await queueCli(f);
+  // The app input conflicts with freshly fetched main; its paired core input must roll back too.
+  const appBase = await commit(f.app!.source, "shared", "base");
+  await git(f.app!.source, "push", "origin", "HEAD:main");
+  const appBad = await commit(f.app!.source, "shared", "approved");
+  await git(f.app!.source, "checkout", "-b", "remote", appBase);
+  await commit(f.app!.source, "shared", "remote");
+  await git(f.app!.source, "push", "origin", "HEAD:main");
+  await git(f.app!.source, "checkout", "main");
+  const initial = await commit(f.core.source, "initial", "one");
+  const a = await commit(f.core.source, "a", "healthy");
+  const paired = await commit(f.core.source, "paired", "must not land");
+  const b = await commit(f.core.source, "b", "healthy");
+  await installMainPushGuard(f.core.source);
+  await installMainPushGuard(f.app!.source);
+  const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  await runIntegrationCommand([initial, "--id", ids[0]!, "--push", "--no-wait"], cli);
+  await until(async () => (await runIntegrationCommand(["status", ids[0]!], cli)).batch?.state === "gating");
+  await runIntegrationCommand([a, "--id", ids[1]!, "--push", "--no-wait"], cli);
+  await runIntegrationCommand([paired, "--app", appBad, "--id", ids[2]!, "--push", "--no-wait"], cli);
+  await runIntegrationCommand([b, "--id", ids[3]!, "--push", "--no-wait"], cli);
+  const queued = (await runIntegrationCommand(["status"], cli)).queue!;
+  expect(queued.running.map((r) => r.state)).toEqual(["gating"]);
+  expect(queued.waiting.map((r) => r.id)).toEqual(ids.slice(1));
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+  const aResult = (await runIntegrationCommand(["status", ids[1]!], cli)).batch!;
+  const bResult = (await runIntegrationCommand(["status", ids[3]!], cli)).batch!;
+  expect(aResult.state).toBe("pushed");
+  expect(bResult.state).toBe("pushed");
+  expect(aResult.batchId).toBe(bResult.batchId);
+  expect(aResult.members?.map((m) => m.id)).toEqual(ids.slice(1));
+  expect((await runIntegrationCommand(["status", ids[2]!], cli)).batch?.state).toBe("conflict");
+  await expect(f.queue.land(ids[2]!, [], guard)).rejects.toThrow("no landable pass");
+  const core = aResult.repos.find((r) => r.name === "core")!;
+  for (const repo of aResult.repos)
+    expect(await git(repo.directory, "config", "core.hooksPath")).toBe("/dev/null");
+  expect(core.commits.find((c) => c.memberId === ids[2])?.state).toBe("blocked");
+  expect(await git(core.directory, "ls-tree", "--name-only", core.head)).not.toContain("paired");
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(core.head);
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(2);
+  const finished = (await runIntegrationCommand(["status"], cli)).queue!;
+  expect(finished.running).toEqual([]);
+  expect(finished.waiting).toEqual([]);
+  expect(finished.lastResult).toMatchObject({
+    state: "pushed",
+    excluded: [{ id: ids[2], state: "conflict" }],
+  });
+  expect((await new IntegrationQueue(f.queue.options).status(ids[1]!)).state).toBe("pushed");
+  expect((await runIntegrationCommand([a, "--id", ids[1]!, "--push", "--no-wait"], cli)).batch?.id).toBe(
+    ids[1],
+  );
+  await expect(runIntegrationCommand([b, "--id", ids[1]!, "--push", "--no-wait"], cli)).rejects.toThrow(
+    "different request",
+  );
+  process.stdout.write(
+    "coalescing-evidence " +
+      JSON.stringify({
+        gating: queued.running.map((r) => r.state),
+        waiting: queued.waiting.length,
+        members: aResult.members?.length,
+        sharedBatch: aResult.batchId,
+        healthy: [aResult.state, bResult.state],
+        excluded: finished.lastResult?.excluded?.map((e) => e.state),
+        coreGates: 2,
+        sourceGuards: "installed",
+        cloneHooks: "/dev/null",
+      }) +
+      "\n",
+  );
+});
+
+it("bisects a failed shared real gate, reports the bad request, and lands both healthy requests", async () => {
+  const f = await fixture((root) => barrier(root, "if (existsSync('broken')) process.exit(9);"));
+  const initial = await commit(f.core.source, "initial", "one");
+  const good = await commit(f.core.source, "good", "healthy");
+  const bad = await commit(f.core.source, "broken", "fails gate");
+  const later = await commit(f.core.source, "later", "healthy");
+  const request = (sha: string) =>
+    IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [sha], push: true });
+  const first = request(initial),
+    a = request(good),
+    failing = request(bad),
+    b = request(later);
+  await f.queue.start(first, guard);
+  await until(async () => (await f.queue.status(first.id)).state === "gating");
+  for (const r of [a, failing, b]) await f.queue.start(r, guard);
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+  expect((await f.queue.status(a.id)).state).toBe("pushed");
+  expect((await f.queue.status(b.id)).state).toBe("pushed");
+  const rejected = await f.queue.status(failing.id);
+  expect(rejected.state).toBe("failed");
+  expect(rejected.repos[0]!.gate?.exitCode).toBe(9);
+  expect(rejected.attempts).toHaveLength(3);
+  const landed = (await f.queue.status(b.id)).repos[0]!;
+  expect(await git(landed.directory, "ls-tree", "--name-only", landed.head)).toContain("good");
+  expect(await git(landed.directory, "ls-tree", "--name-only", landed.head)).toContain("later");
+  expect(await git(landed.directory, "ls-tree", "--name-only", landed.head)).not.toContain("broken");
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(6);
+  expect((await new IntegrationQueue(f.queue.options).status(failing.id)).state).toBe("failed");
+  process.stdout.write(
+    "isolation-evidence " +
+      JSON.stringify({
+        healthy: [(await f.queue.status(a.id)).state, (await f.queue.status(b.id)).state],
+        failing: rejected.state,
+        exitCode: rejected.repos[0]!.gate?.exitCode,
+        attempts: rejected.attempts?.length,
+        coreGates: 6,
+      }) +
+      "\n",
+  );
+});
+
+it("keeps gate-only requests separate from auto-push intent and reports interrupted receipts after process loss", async () => {
+  const f = await fixture((root) => barrier(root));
+  const initial = await commit(f.core.source, "initial", "one");
+  const candidate = await commit(f.core.source, "candidate", "gate only");
+  const landing = await commit(f.core.source, "landing", "push");
+  const request = (sha: string, push: boolean) =>
+    IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [sha], push });
+  const first = request(initial, true),
+    only = request(candidate, false),
+    push = request(landing, true);
+  await f.queue.start(first, guard);
+  await until(async () => (await f.queue.status(first.id)).state === "gating");
+  await f.queue.start(only, guard);
+  await f.queue.start(push, guard);
+  const reload = await new IntegrationQueue(f.queue.options).snapshot();
+  expect(reload.interrupted.map((r) => r.id)).toEqual(expect.arrayContaining([first.id, only.id, push.id]));
+  await writeFile(join(f.root, "release"), "go");
+  await f.queue.wait();
+  expect((await f.queue.status(only.id)).state).toBe("passed");
+  expect((await f.queue.status(push.id)).state).toBe("pushed");
+  expect((await f.queue.status(push.id)).members).toHaveLength(1);
+  expect((await readFile(join(f.root, "gate-count"), "utf8")).trim().split("\n")).toHaveLength(3);
+  expect(
+    await git((await f.queue.status(push.id)).repos[0]!.directory, "ls-tree", "--name-only", "HEAD"),
+  ).not.toContain("candidate");
 });

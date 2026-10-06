@@ -1,3 +1,4 @@
+import { inspectMainPushGuard } from "../main-push-guard.ts";
 import { FleetHealthMetricsSnapshotSchema, FLEET_HEALTH_METRICS_PATH } from "@clankie/protocol";
 import {
   FLEET_TOOL_CATALOG_HEALTH_PATH,
@@ -83,10 +84,11 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const [report, workerObservations, resources] = await Promise.all([
+  const [report, workerObservations, resources, mainPushGuard] = await Promise.all([
     inspectInstall(options),
     inspectWorkerTools(options),
     inspectResources(options),
+    inspectMainPushGuard(options.cwd ?? process.cwd()),
   ]);
   const { workerTools, workerReports } = workerObservations;
   const workingPreferences = await readWorkingPreferences({
@@ -189,6 +191,15 @@ export async function doctorCommand(
   }
   return {
     ...report,
+    mainPushGuard,
+    remediations: [
+      ...report.remediations,
+      ...(mainPushGuard.status === "offered"
+        ? [mainPushGuard.detail + " — `" + mainPushGuard.installCommand + "`."]
+        : mainPushGuard.status === "conflict"
+          ? [mainPushGuard.detail]
+          : []),
+    ],
     remoteHarnesses,
     toolCatalogHealth,
     workerTools,
