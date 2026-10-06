@@ -182,11 +182,16 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
   });
   const receipts = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
   const wakeRuns: number[] = [];
+  const wakeSettlements: number[] = [];
   autonomy.start(async (id, prompt, origin) => {
     wakeRuns.push(Date.now());
-    const result = conversations.submitInternal(id, prompt, origin);
-    if (result.status !== "accepted" || !(await conversations.awaitRunResult(result.runId)))
-      throw new Error("Internal autonomy turn failed");
+    try {
+      const result = conversations.submitInternal(id, prompt, origin);
+      if (result.status !== "accepted" || !(await conversations.awaitRunResult(result.runId)))
+        throw new Error("Internal autonomy turn failed");
+    } finally {
+      wakeSettlements.push(Date.now());
+    }
   });
   const close = async () => {
     autonomy.close();
@@ -230,6 +235,7 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
     script,
     sessions,
     wakeRuns,
+    wakeSettlements,
     close,
     pollSeat,
     report,
@@ -408,21 +414,36 @@ it("lets a fresh seat's SessionStart projection cover pending service turns inst
 });
 
 it("keeps failed service wakes on exponential backoff instead of a retry storm", async () => {
-  // Timers are simulated; file I/O in each service run stays real, so time
-  // advances in small steps and yields to it between steps.
+  // Timers are simulated; service I/O stays real. Freeze the clock until each
+  // failure settles, because backoff starts then rather than at admission.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(new Date("2026-10-05T16:59:59Z"));
   const f = fixture();
   f.conversations.rememberNativeHead(ID, "claude-lead");
   f.script.fail = true;
   f.autonomy.scheduleWake(ID, "2026-10-05T17:00:00Z", "Review the pending work");
-  for (let elapsed = 0; elapsed < 60_000; elapsed += 250) {
-    await vi.advanceTimersByTimeAsync(250);
-    for (let tick = 0; tick < 4; tick += 1) await new Promise((resolve) => setImmediate(resolve));
+  const settleWake = async (count: number) => {
+    const deadline = performance.now() + 5_000;
+    while (f.wakeSettlements.length < count) {
+      if (performance.now() > deadline) throw new Error("Service wake did not settle");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    // Let AutonomyStore observe the rejection and arm its retry without
+    // advancing Date while the real service turn is still being persisted.
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  await vi.advanceTimersByTimeAsync(1_000);
+  await settleWake(1);
+  for (const [index, delay] of [5_000, 10_000, 20_000].entries()) {
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    expect(f.wakeRuns).toHaveLength(index + 1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settleWake(index + 2);
   }
-  // Retry gaps double from five seconds (to the 250 ms step that observed each failure).
-  const gaps = f.wakeRuns.slice(1).map((at, index) => Math.round((at - f.wakeRuns[index]!) / 1_000));
-  expect(gaps).toEqual([5, 10, 20]);
+  await vi.advanceTimersByTimeAsync(24_000);
+  expect(f.wakeRuns).toHaveLength(4);
+  const gaps = f.wakeRuns.slice(1).map((at, index) => at - f.wakeSettlements[index]!);
+  expect(gaps).toEqual([5_000, 10_000, 20_000]);
   expect(f.sessions.flatMap((session) => session.prompts)).toEqual([]);
   expect(f.autonomy.status(ID).wake?.at).toBe("2026-10-05T17:00:00.000Z");
 });
