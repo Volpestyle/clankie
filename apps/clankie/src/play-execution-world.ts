@@ -14,6 +14,7 @@ import {
   latestPlayJourneyContinuity,
   type ClankieVoice,
   type FreePlayMind,
+  type FreePlayNotable,
   type FreePlayTurn,
 } from "@clankie/play";
 import type { PlayVoiceClient } from "@clankie/play-voice";
@@ -44,6 +45,7 @@ export interface WorldPlayExecutionOptions {
   clock?: () => Date;
   interjections?: InterjectionQueue;
   onTurn?: (turn: FreePlayTurn) => void;
+  onNotable?: (event: FreePlayNotable, sessionId: string) => Promise<void>;
   activityObservations?: ActivityObservationWritePort;
   playSight?: PlaySightProjection;
   /** Live hosted-world operations for the captain while this body is playing. */
@@ -143,8 +145,9 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
     };
 
     try {
+      const interjections = options.interjections ?? new InterjectionQueue(32);
       return await runEmbodiedPlay({
-        session,
+        session: { ...session, budget: { ...options.gameplay?.pokemonBudget, ...session.budget } },
         control,
         onRunning,
         logger: options.logger,
@@ -182,18 +185,21 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
           if (png === null) return undefined;
           return { png: Buffer.from(png), width: PLAY_STREAM_WIDTH, height: PLAY_STREAM_HEIGHT };
         },
-        attach: () => options.hostedWorld?.attach(body),
+        attach: () => options.hostedWorld?.attach(body, interjections),
         extraCleanup: () => options.hostedWorld?.detach(body),
         ...(options.createVoice === undefined ? {} : { createVoice: options.createVoice }),
         ...(options.createActivitySink === undefined
           ? {}
           : { createActivitySink: options.createActivitySink }),
-        ...(options.interjections === undefined ? {} : { interjections: options.interjections }),
+        interjections,
         ...(options.activityObservations === undefined
           ? {}
           : { activityObservations: options.activityObservations }),
         ...(options.playSight === undefined ? {} : { playSight: options.playSight }),
         ...(options.onTurn === undefined ? {} : { onTurn: options.onTurn }),
+        ...(options.onNotable === undefined
+          ? {}
+          : { onNotable: (event) => options.onNotable!(event, session.sessionId) }),
         silentVoiceLog: "no play voice seam; this playthrough has no spoken narration",
         finishedLog: "world playthrough finished",
       });

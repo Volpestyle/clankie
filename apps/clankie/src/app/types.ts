@@ -234,6 +234,10 @@ export interface ClankieAppDependencies {
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
   bodyPlaySessions?: BodyPlaySessions;
+  guidePokemonPlay?: (
+    text: string,
+    identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
+  ) => Promise<unknown>;
   minecraft?: MinecraftService;
   minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
   minecraftPrivateDelivery?: Pick<

@@ -547,7 +547,12 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   unclassified names stay off `pokeagent_world` until classified. The play loop
   owns BODY (`world.join`, `world.leave`, `play.observe`, `play.act`,
   `play.frame`, `play.watch`); the mind owns session, who, regions, travel, and
-  challenges.
+  challenges. Pokémon usage caps, failure backoff, bounded voice preemption and
+  pre-action state rechecks live above this body seam in `packages/play`.
+  The service sends each notable kind once to the original conversation under
+  its existing grant, including terminal events after the initiating turn ends.
+  `pokeagent_guide` offers context to that conversation's play mind; it never
+  forces an action or replaces the mind's choice. See [play](../packages/play/README.md).
 - **Auth.** Provider keys and OAuth tokens live in the credential broker
   (Keychain), written by the TUI `/auth` flow and read by pi through a
   credential-store bridge. Compatibility model/media provider keys may fall

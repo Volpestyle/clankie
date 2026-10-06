@@ -24,6 +24,7 @@ import { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyPlaySessions } from "./body-play-sessions.ts";
+import { notifyPokemonPlay } from "./play-notifications.ts";
 import { MinecraftMcpPort } from "./minecraft-mcp.ts";
 import { MinecraftService } from "./minecraft.ts";
 import { MinecraftPlayHost } from "./minecraft-play-host.ts";
@@ -1044,6 +1045,7 @@ const captain = createCaptain(
       },
     },
     hostedWorld: {
+      guide: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
       inspect: () => hostedWorld.inspect(),
       invoke: (name, input, identity) =>
         hostedWorld.invoke(name, input, () => bodyPlaySessions.guardOwner(identity)),
@@ -1259,6 +1261,7 @@ const clankie = await createClankieApp({
   bodyVoiceStays,
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
   bodyPlaySessions,
+  guidePokemonPlay: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
   minecraft,
   minecraftHost,
   minecraftPrivateDelivery,
@@ -1667,6 +1670,9 @@ function createConfiguredPlayExecution(): PlayExecution {
     playSight,
     hostedWorld,
     gameplay: startupSettings.gameplay,
+    onNotable: async (event, sessionId) => {
+      await notifyPokemonPlay(captain, bodyPlaySessions, event, sessionId);
+    },
     createActivitySink: async () =>
       activityPlay.createSink(
         "Clankie's live play",

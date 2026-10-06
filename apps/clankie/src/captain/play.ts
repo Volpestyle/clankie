@@ -8,6 +8,7 @@
  * which he must voice as "starting it up", never "I'm playing".
  */
 import { randomUUID } from "node:crypto";
+import { DEFAULT_POKEMON_PLAY_MAX_TOKENS } from "@clankie/protocol";
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import type {
   CaptainSessionLaneV2,
@@ -48,12 +49,16 @@ const DEFAULT_POLL_MS = 400;
 
 /**
  * The owner's default (2026-07-26): no cap on turns or duration — he plays
- * until asked to stop. The env knobs restore a cap when one is wanted.
+ * until asked to stop. Model usage now has a default ceiling; turn/duration knobs remain opt-in.
  */
 function defaultPlayBudget(env: NodeJS.ProcessEnv = process.env): EmbodimentBudget {
   const turns = Number.parseInt(env["CLANKIE_PLAY_MAX_TURNS"] ?? "", 10);
   const durationMs = Number.parseInt(env["CLANKIE_PLAY_MAX_DURATION_MS"] ?? "", 10);
+  const tokens = Number(env["CLANKIE_PLAY_MAX_TOKENS"]);
+  const costUsd = Number(env["CLANKIE_PLAY_MAX_COST_USD"]);
   return {
+    maxTokens: Number.isSafeInteger(tokens) && tokens > 0 ? tokens : DEFAULT_POKEMON_PLAY_MAX_TOKENS,
+    ...(Number.isFinite(costUsd) && costUsd > 0 ? { maxCostUsd: costUsd } : {}),
     ...(Number.isSafeInteger(turns) && turns > 0 ? { maxTurns: turns } : {}),
     ...(Number.isSafeInteger(durationMs) && durationMs > 0 ? { maxDurationMs: durationMs } : {}),
   };
@@ -71,7 +76,7 @@ export async function joinWorld(ports: PlayPorts, input: StartPlayInput): Promis
       requestedBy: input.requestedBy,
       requestedAt: new Date().toISOString(),
       environmentId: input.environmentId,
-      budget: input.budget ?? defaultPlayBudget(),
+      budget: { ...defaultPlayBudget(), ...input.budget },
     },
     input.bodyIdentity,
   );

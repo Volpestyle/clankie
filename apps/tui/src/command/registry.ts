@@ -212,6 +212,10 @@ const HEADLESS_COMMAND_HELP = [
   { nouns: ["play"], lines: ["  play status              Live embodiment session (JSON)"] },
   {
     nouns: ["play"],
+    lines: ["  play guide TEXT --conversation ID  Suggest a Pokémon objective or approach"],
+  },
+  {
+    nouns: ["play"],
     lines: ["  play stop                Stop the live playthrough at the next turn boundary"],
   },
   { nouns: ["model"], lines: ["  model [status]           Captain model and local providers (JSON)"] },
@@ -280,7 +284,13 @@ const HEADLESS_COMMAND_HELP = [
       "                           Desktop quiet hours (HH:mm, IANA time zone); applies immediately",
     ],
   },
-  { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
+  {
+    nouns: ["games"],
+    lines: [
+      "  games status|set on|off  Read or set PokeAgent gameplay availability",
+      "  games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <value|default>",
+    ],
+  },
   {
     nouns: ["browser"],
     lines: [

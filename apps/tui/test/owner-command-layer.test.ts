@@ -243,6 +243,13 @@ describe("canonical owner command layer", () => {
       env,
     );
     await run(["games", "set", "off"], env);
+    await run(["games", "budget", "max-tokens", "5000"], env);
+    await run(["games", "budget", "max-cost-usd", "0.25"], env);
+    expect(await gamesStatus({ env })).toMatchObject({
+      games: { pokemonBudget: { maxTokens: 5000, maxCostUsd: 0.25 } },
+    });
+    await run(["games", "budget", "max-cost-usd", "default"], env);
+    expect(await gamesStatus({ env })).toMatchObject({ games: { pokemonBudget: { maxTokens: 5000 } } });
     await run(
       [
         "discord",
