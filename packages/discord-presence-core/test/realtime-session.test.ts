@@ -145,6 +145,27 @@ async function openTranscription(overrides: Partial<RealtimeTranscriptionSession
   return { session, socket, timers, factory, transcripts, closes };
 }
 
+it("closes a connected socket when current authority changes after an awaited guard, before private configuration", async () => {
+  const socket = new FakeRealtimeSocket();
+  let authorized = true;
+  await expect(
+    openRealtimeConversationSession({
+      apiKey: "fixture-key",
+      instructions: "Private persona must not reach this socket",
+      socketFactory: async () => socket,
+      guard: async () => {
+        queueMicrotask(() => {
+          authorized = false;
+        });
+      },
+      current: () => authorized,
+      onAudioDelta: (pcm) => pcm.fill(0),
+    }),
+  ).rejects.toThrow("voice_session_stale");
+  expect(socket.closed).toBe(true);
+  expect(socket.sentRaw).toEqual([]);
+});
+
 describe("realtime conversation session", () => {
   it("opens with VAD that can neither create nor interrupt a response, and the local tool set", async () => {
     const { socket } = await openConversation();

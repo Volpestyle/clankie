@@ -274,6 +274,8 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
               openRealtime: (handlers) =>
                 openRealtimeConversationSession({
                   ...common,
+                  ...(open.guard === undefined ? {} : { guard: open.guard }),
+                  ...(open.current === undefined ? {} : { current: open.current }),
                   model: config.realtimeModel,
                   outputModality: "text",
                   instructions: dialogue
@@ -316,6 +318,8 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
       : (open: TranscriptVoiceConversationOpenInput) =>
           openRealtimeConversationSession({
             ...common,
+            ...(open.guard === undefined ? {} : { guard: open.guard }),
+            ...(open.current === undefined ? {} : { current: open.current }),
             ...(config.realtimeProvider === "xai"
               ? {
                   provider: "xai" as const,

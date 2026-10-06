@@ -402,6 +402,10 @@ export interface RealtimeTranscriptionSessionOptions extends RealtimeSessionComm
 export type XaiStreamingTranscriptionSessionOptions = Omit<RealtimeTranscriptionSessionOptions, "model">;
 
 export interface RealtimeConversationSessionOptions extends RealtimeSessionCommonOptions {
+  /** Trusted admission; checked after connect before any private session frame. */
+  readonly guard?: () => Promise<void>;
+  /** Synchronous final admission fence after the awaited guard. */
+  readonly current?: () => boolean;
   /** Wire-level session dialect. The event stream remains OpenAI-compatible. */
   readonly provider?: "openai" | "xai";
   readonly model?: string;
@@ -1355,6 +1359,19 @@ export async function openRealtimeConversationSession(
 ): Promise<RealtimeConversationSession> {
   const model = nonEmpty(options.model ?? DEFAULT_CONVERSATION_MODEL, "Realtime conversation model");
   const socket = await connect(options, { model });
+  if (options.guard !== undefined || options.current !== undefined) {
+    try {
+      if (options.guard !== undefined) await options.guard();
+      if (options.current?.() === false) throw new Error("voice_session_stale");
+    } catch (error) {
+      try {
+        socket.close();
+      } catch {
+        /* Preserve the denied admission error. */
+      }
+      throw error;
+    }
+  }
   return construct(socket, () => new RealtimeConversationSession(socket, options));
 }
 
