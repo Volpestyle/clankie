@@ -63,24 +63,35 @@ reason. These vocabulary samples are contract inputs, not claims that the OS
 produced every possible failure. Native diagnostics never add terminal proof
 attempts or inflate the refusal denominator.
 
+The additional manual `fleet-additional-os-native.integration.test.ts` uses the
+unchanged production helper and real owned kernel transitions to produce
+`executable_unavailable`, `fd_list_bounds`, `executable_changed`, `argv_changed`,
+`process_changed`, `ancestry_unavailable`, and `ancestry_changed`. Six checks
+cover those seven reasons; direct helper refusals enter the production schema
+and collector. [Actual redacted events and scope](../../docs/testing/2026-10-06-additional-defensive-os/README.md)
+distinguish these observations from full HTTP admission proofs. The earlier
+[four defensive producers](https://github.com/Volpestyle/clankie/blob/e8a7b71e/docs/testing/2026-10-06-proof-alert-defensive-os/README.md)
+cover `ancestry_bounds`, `process_census_unavailable`, `fd_list_unavailable`, and
+`argv_unavailable` separately.
+
 ## Explicit OS coverage limits
 
 The following defensive or race-dependent branches are not forced by these
 fixtures. Their tokens are covered by the vocabulary contract above.
 
-| Condition                                                | Unexercised reasons                                                                                |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Timing, allocation or process-list API failure           | `clock_unavailable`, `allocation_failed`, `process_census_unavailable`                             |
-| Inaccessible, oversized or malformed FD observations     | `fd_list_unavailable`, `fd_list_bounds`, `fd_record_invalid`, `socket_identity_invalid`            |
-| Unavailable, changing, too-deep or inconsistent ancestry | `process_changed`, `ancestry_unavailable`, `ancestry_changed`, `ancestry_bounds`, `ancestry_cycle` |
-| Unavailable or changing executable/argument observations | `executable_unavailable`, `executable_changed`, `argv_unavailable`, `argv_changed`                 |
+| Condition                           | Unexercised reasons                            |
+| ----------------------------------- | ---------------------------------------------- |
+| Timing or allocation failure        | `clock_unavailable`, `allocation_failed`       |
+| Malformed FD or socket observations | `fd_record_invalid`, `socket_identity_invalid` |
+| Cyclic ancestry                     | `ancestry_cycle`                               |
 
 A healthy kernel does not return negative FD records or a cyclic process parent
 tree. Those checks remain useful fail-closed guards against incompatible or
 inconsistent observations; removing them because a fixture cannot produce them
 would weaken validation. Clock and allocation failures would require disrupting
-the OS or injecting failures. Timing-dependent changes can happen in production
-but cannot be promised on each run without replacing native observations.
+the OS or injecting failures. The manual race workloads above bound repeated
+fresh observations; their success on this host does not promise an event at a
+specific attempt elsewhere.
 `clock_unavailable` also covers a failure in the bounded monotonic retry wait.
 Pure final-check budget expiration reports `budget_exhausted` without inventing
 a socket mismatch.
@@ -130,3 +141,8 @@ FLEET_PROOF_NATIVE_TEST=1 PROJECT_NATIVE_PROOF_TEST=1 pnpm exec vitest run --con
 Native cases are manual opt-ins. They add no build, subprocess churn or Herdr
 daemon to per-push CI. The vocabulary/HTTP contract uses no native build and
 remains a fast portable integration check.
+
+Run the additional manual cases under the fleet's heavy wrapper with
+`FLEET_ADDITIONAL_OS_TEST=1`; build the production helper first. The owning
+fixtures' [lifetime and reproduction notes](../../apps/clankie/test/helpers/native-proof-churn/README.md)
+describe their bounded processes and cleanup.
