@@ -1,0 +1,60 @@
+{
+  "pane": "pc/w9:p7",
+  "seat": "pc/term_65d230238463aa",
+  "session": "01a10f1b-c563-7590-a83f-0f719efc5890",
+  "nativeVersion": "0.160.1",
+  "prompt": "Do not use tools or edit files. Reply only TESS_PC_READY.",
+  "response": "TESS_PC_READY",
+  "hookFailures": 2,
+  "processes": [
+    {
+      "ProcessId": 477836,
+      "ParentProcessId": 361304,
+      "Name": "cmd.exe",
+      "CreationDate": "/Date(1791254839555)/",
+      "ExecutablePath": "C:\\Windows\\system32\\cmd.exe",
+      "CommandLine": "C:\\Windows\\system32\\cmd.exe /c \"\"C:\\Users\\volpe\\dotfiles\\.local\\agents\\bin\\codex.cmd\" \"Do not use tools or edit files. Reply only TESS_PC_READY.\" \""
+    },
+    {
+      "ProcessId": 670320,
+      "ParentProcessId": 477836,
+      "Name": "python.exe",
+      "CreationDate": "/Date(1791254839571)/",
+      "ExecutablePath": "C:\\Users\\volpe\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+      "CommandLine": "\"C:\\Users\\volpe\\AppData\\Local\\Programs\\Python\\Python311\\python.exe\"  \"C:\\Users\\volpe\\dotfiles\\scripts\\agent-launch.py\" codex \"Do not use tools or edit files. Reply only TESS_PC_READY.\""
+    },
+    {
+      "ProcessId": 88988,
+      "ParentProcessId": 670320,
+      "Name": "node.exe",
+      "CreationDate": "/Date(1791254839634)/",
+      "ExecutablePath": "C:\\Program Files\\nodejs\\node.EXE",
+      "CommandLine": "\"C:\\Program Files\\nodejs\\node.EXE\" C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js --no-daemon \"Do not use tools or edit files. Reply only TESS_PC_READY.\""
+    },
+    {
+      "ProcessId": 431008,
+      "ParentProcessId": 88988,
+      "Name": "codex.exe",
+      "CreationDate": "/Date(1791254839667)/",
+      "ExecutablePath": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+      "CommandLine": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe --no-daemon \"Do not use tools or edit files. Reply only TESS_PC_READY.\""
+    },
+    {
+      "ProcessId": 507700,
+      "ParentProcessId": 431008,
+      "Name": "node.exe",
+      "CreationDate": "/Date(1791254840876)/",
+      "ExecutablePath": "C:\\Program Files\\nodejs\\node.exe",
+      "CommandLine": "\"C:\\Program Files\\nodejs\\node.exe\" C:\\Users\\volpe\\.clankie\\claude-plugin\\worker\\bin\\fleet-mcp.mjs"
+    }
+  ],
+  "listeners": {
+    "RootPid": 477836,
+    "CodexPid": 431008,
+    "ListenerCount": 0,
+    "Listeners": []
+  },
+  "cleanup": {
+    "ownedPaneAbsent": true
+  }
+}
