@@ -363,9 +363,15 @@ it("passes only work classification across the runtime boundary and excludes rev
 });
 
 it("carries model keys only in the encrypted envelope and still checks machine authority", async () => {
-  const set = vi.fn(async () => ({ ok: true as const }));
+  const guardResults: boolean[] = [];
+  const set = vi.fn<ModelKeysPort["set"]>(async (_providerId, _apiKey, guard) => {
+    const authorized = (await guard?.()) === true;
+    guardResults.push(authorized);
+    return authorized ? { ok: true } : { ok: false, error: "forbidden" };
+  });
   const models: ModelKeysPort = {
     list: async () => ({ model: null, effectiveModel: null, providers: [] }),
+    readiness: async () => ({ ready: false, reason: "no_model" }),
     set,
     validate: async () => ({ ok: true }),
     select: async () => ({ ok: true }),
@@ -391,7 +397,8 @@ it("carries model keys only in the encrypted envelope and still checks machine a
       ).status,
     ).toBe(426);
   }
-  expect(set).toHaveBeenCalledExactlyOnceWith("openai", marker);
+  expect(set).toHaveBeenCalledExactlyOnceWith("openai", marker, expect.any(Function));
+  expect(guardResults).toEqual([true]);
 });
 
 it("carries account-connection codes only in the encrypted envelope and never returns a token", async () => {

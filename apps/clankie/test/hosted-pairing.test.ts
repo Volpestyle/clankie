@@ -20,6 +20,7 @@ import { HostedBodyClient } from "../src/hosted-body.ts";
 import { HostedPairing, createHostedPairing } from "../src/hosted-pairing.ts";
 import { PublicGatewayConnector } from "../src/public-gateway-connector.ts";
 import { hostedFixture } from "./fixtures/hosted-body.ts";
+import type { ModelKeysPort } from "../src/model-keys.ts";
 const apps: ClankieApp[] = [],
   dirs: string[] = [];
 afterEach(() => {
@@ -72,12 +73,18 @@ describe("hosted pairing v2", () => {
       relayUrl: "http://127.0.0.1:4321",
     });
     const onHostedPairing = vi.fn();
-    const setModelKey = vi.fn(async () => ({ ok: true as const }));
+    const guardResults: boolean[] = [];
+    const setModelKey = vi.fn<ModelKeysPort["set"]>(async (_providerId, _apiKey, guard) => {
+      const authorized = (await guard?.()) === true;
+      guardResults.push(authorized);
+      return authorized ? { ok: true } : { ok: false, error: "forbidden" };
+    });
     const app = await createClankieApp({
       captain: createStubCaptain(),
       hostedPairing: pairing,
       modelKeys: {
         list: async () => ({ model: null, effectiveModel: null, providers: [] }),
+        readiness: async () => ({ ready: false, reason: "no_model" }),
         set: setModelKey,
         validate: async () => ({ ok: true }),
         select: async () => ({ ok: true }),
@@ -154,7 +161,8 @@ describe("hosted pairing v2", () => {
       body: JSON.stringify({ providerId: "openai", apiKey: "hosted-owner-key" }),
     });
     expect(setKey.status).toBe(200);
-    expect(setModelKey).toHaveBeenCalledExactlyOnceWith("openai", "hosted-owner-key");
+    expect(setModelKey).toHaveBeenCalledExactlyOnceWith("openai", "hosted-owner-key", expect.any(Function));
+    expect(guardResults).toEqual([true]);
     // An active gateway cannot substitute any signed response field or another request/host.
     for (const field of ["ephemeralPublicKey", "iv", "ciphertext"] as const)
       expect(
