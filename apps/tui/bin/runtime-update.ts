@@ -73,7 +73,7 @@ interface RuntimeServiceReceipt {
   }[];
   readonly runtime?: RuntimeBootIdentity;
 }
-export function parseServiceReceipt(input: unknown): RuntimeServiceReceipt {
+function parseServiceReceipt(input: unknown): RuntimeServiceReceipt {
   const value = object(input);
   if (
     typeof value.ok !== "boolean" ||
