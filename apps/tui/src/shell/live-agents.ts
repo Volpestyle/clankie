@@ -110,6 +110,11 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, showEfficiency = tru
     seat.fleet === undefined ? undefined : theme.ansi.dim(clean(seat.machine ?? seat.fleet)),
     bridgeWarning(agent, theme),
     workerToolsText(agent, theme),
+    seat.workerReportBridge
+      ? (seat.workerReportBridge.outcome === "stored" ? theme.ansi.dim : theme.ansi.red)(
+          `report ${seat.workerReportBridge.outcome} · ${clean(seat.workerReportBridge.observedAt)} · ${seat.workerReportBridge.reason}`,
+        )
+      : theme.ansi.dim("report unknown"),
     ...(showEfficiency ? (seat.efficiency?.flags.map((flag) => theme.ansi.red(clean(flag))) ?? []) : []),
   ]
     .filter((part): part is string => part !== undefined)

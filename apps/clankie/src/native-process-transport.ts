@@ -62,7 +62,11 @@ class NativeProcessTransport {
       transportDiagnostic(report, "cancelled");
       return Promise.resolve(undefined);
     }
-    if (this.failed || this.queue.length >= 128) {
+    if (this.failed) {
+      transportDiagnostic(report, this.failureReason);
+      return Promise.resolve(undefined);
+    }
+    if (this.queue.length >= 128) {
       transportDiagnostic(report, "queue_full");
       return Promise.resolve(undefined);
     }
@@ -200,8 +204,10 @@ export function nativeProcessRequest(
     args.length > 9 ||
     args.some((arg) => !/^[\x21-\x7e]+$/u.test(arg)) ||
     args.join(" ").length > 4_000
-  )
+  ) {
+    transportDiagnostic(report, "protocol_invalid");
     return Promise.resolve(undefined);
+  }
   let transport = transports.get(helper);
   if (!transport) {
     transport = new NativeProcessTransport(helper);
