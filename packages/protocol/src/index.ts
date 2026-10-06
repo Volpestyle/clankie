@@ -537,6 +537,7 @@ export {
   EmbodimentIntentIdSchema,
   type EmbodimentIntentId,
   EmbodimentBudgetSchema,
+  DEFAULT_POKEMON_PLAY_MAX_TOKENS,
   type EmbodimentBudget,
   EmbodimentIntentSchema,
   type EmbodimentIntent,

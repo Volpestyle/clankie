@@ -18,6 +18,7 @@ import {
   type ClankieVoice,
   type FreePlayJournal,
   type FreePlayMind,
+  type FreePlayNotable,
   type FreePlayProvenance,
   type FreePlayTurn,
   type GbaDriverIo,
@@ -30,7 +31,7 @@ import {
 } from "@clankie/interactive-environment";
 import { resolveConfiguredLanguageModel } from "@clankie/model-provider";
 import { createBrokeredPlayVoiceClient, type PlayVoiceClient } from "@clankie/play-voice";
-import type { EmbodimentSession } from "@clankie/protocol";
+import { DEFAULT_POKEMON_PLAY_MAX_TOKENS, type EmbodimentSession } from "@clankie/protocol";
 import { createBrokeredActivityFrameSink, type ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { personaInstructions, SettingsStore } from "@clankie/settings";
 import type { ActivityObservationWritePort } from "./activity-observation.ts";
@@ -138,12 +139,14 @@ export async function resolvePlayMind(options: {
       character,
       providerOptions,
       requestTimeoutMs,
+      ...(configured.cost === undefined ? {} : { pricing: configured.cost }),
     }),
     voiceAgent: createModelVoice({
       model: configured.model,
       character,
       providerOptions,
       requestTimeoutMs,
+      ...(configured.cost === undefined ? {} : { pricing: configured.cost }),
     }),
   };
 }
@@ -194,6 +197,7 @@ export interface EmbodiedPlayInput {
   activityObservations?: ActivityObservationWritePort;
   playSight?: PlaySightProjection;
   onTurn?: (turn: FreePlayTurn) => void;
+  onNotable?: (event: FreePlayNotable) => Promise<void>;
   silentVoiceLog: string;
   finishedLog: string;
 }
@@ -273,7 +277,7 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
 
   let voice: PlayVoiceClient | undefined;
   let unsubscribe: (() => void) | undefined;
-  const interjections = input.interjections ?? new InterjectionQueue();
+  const interjections = input.interjections ?? new InterjectionQueue(32);
   try {
     voice =
       input.createVoice === undefined ? await createBrokeredPlayVoiceClient() : await input.createVoice();
@@ -310,6 +314,19 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
     });
   };
 
+  // Notifications are information only. Once admitted, delivery never blocks the motor.
+  // The loop emits each kind once per session; this chain preserves terminal ordering.
+  let notifications = Promise.resolve();
+  const notify = (event: FreePlayNotable): void => {
+    notifications = notifications
+      .then(() => input.onNotable?.(event))
+      .catch(() => {
+        logger.warn(
+          { sessionId: session.sessionId, kind: event.kind },
+          "Pokémon play information delivery unavailable",
+        );
+      });
+  };
   let journal: FreePlayJournal | undefined;
   let journalFailureLogged = false;
   try {
@@ -362,6 +379,8 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
 
     const result = await runFreePlay({
       io: surface.io,
+      budget: { maxTokens: DEFAULT_POKEMON_PLAY_MAX_TOKENS, ...session.budget },
+      onNotable: notify,
       mind,
       turns: session.budget.maxTurns ?? Number.MAX_SAFE_INTEGER,
       audience:
@@ -463,7 +482,20 @@ export async function runEmbodiedPlay(input: EmbodiedPlayInput): ReturnType<Play
     });
 
     surface.observeFrames(null);
-    const outcome = control.stopRequested() || surface.ended() ? "stopped" : "budget_exhausted";
+    const outcome = control.stopRequested()
+      ? "stopped"
+      : surface.ended()
+        ? "world_ended"
+        : (result.outcome ?? "budget_exhausted");
+    if (surface.ended()) notify({ kind: "world_ended", turn: result.turns.length, count: 1 });
+    // Give the existing conversation queue bounded time to admit the last information.
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2_000);
+      notifications.finally(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
     const durationMs = clock().getTime() - startedAt;
     const framesDropped =
       (sink?.droppedFrameCount ?? 0) + framesDroppedWithoutSink + surface.extraDroppedFrames();

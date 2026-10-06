@@ -106,8 +106,29 @@ describe("games console command", () => {
     await gamesCommand(settings).run("", shell);
 
     expect((await settings.load()).gameplay).toEqual({ pokeagentMmoEnabled: true });
-    expect(menus[0]?.options.map((option) => option.label)).toEqual(["○ PokeAgent MMO"]);
+    expect(menus[0]?.options.map((option) => option.label)).toEqual([
+      "○ PokeAgent MMO",
+      "Pokémon token cap",
+      "Pokémon cost cap (USD)",
+    ]);
     expect(menus[1]?.options[0]?.label).toBe("✓ PokeAgent MMO");
+  });
+
+  it("uses the canonical budget writer from the token/cost dialog", async () => {
+    const settings = await store();
+    const selections = ["tokens", "cost", "done"];
+    const entries = ["5000", "0.25"];
+    const shell = {
+      setupFlow: {
+        begin() {},
+        end() {},
+        renderLine() {},
+        readSelect: async () => selections.shift(),
+        readText: async () => entries.shift(),
+      },
+    } as unknown as ClankieFaceShell;
+    await gamesCommand(settings).run("", shell);
+    expect((await settings.load()).gameplay.pokemonBudget).toEqual({ maxTokens: 5000, maxCostUsd: 0.25 });
   });
 
   it("turns PokeAgent play off and on from an argument", async () => {

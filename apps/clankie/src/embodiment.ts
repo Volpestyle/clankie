@@ -74,7 +74,9 @@ const StopRequestedDataSchema = z.object({
 });
 const TerminalDataSchema = z.object({
   sessionId: z.string().min(1),
-  outcome: z.enum(["stopped", "budget_exhausted", "failed", "lease_lapsed"]).optional(),
+  outcome: z
+    .enum(["stopped", "budget_exhausted", "failed", "lease_lapsed", "mind_unavailable", "world_ended"])
+    .optional(),
   turnsTaken: z.number().int().nonnegative().optional(),
   durationMs: z.number().int().nonnegative().optional(),
   framesPublished: z.number().int().nonnegative().optional(),

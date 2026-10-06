@@ -75,6 +75,7 @@ const evidence = (): FreePlayTurnEvidence => ({
     objectiveRecovery: false,
     verifiedInteractions: [],
     decisionPreemptions: 0,
+    stateRedecisions: 0,
   },
   timing: {
     decisionStartedAt: "2026-08-15T21:00:00.000Z",

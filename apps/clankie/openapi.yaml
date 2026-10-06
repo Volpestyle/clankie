@@ -3964,12 +3964,54 @@ paths:
         "403": { description: Operator authority required }
         "503": { description: Settings unavailable }
 
+  /v1/games/configuration:
+    get:
+      tags: [Embodiment]
+      operationId: getGamesConfiguration
+      summary: Pokémon play defaults
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      responses:
+        "200":
+          {
+            description: Gameplay settings and restart instruction. An absent token override defaults to 250000 charged tokens.,
+          }
+    put:
+      tags: [Embodiment, Operator]
+      operationId: putGamesConfiguration
+      summary: Replace gameplay configuration for subsequent sittings
+      description: Owner operator or a device with Take Control. Restart Clankie to apply defaults. Usage caps include mind, commentary and interrupted decisions; the last call can cross a threshold. Missing usage reserves 16000 tokens and makes estimated cost unknown, which stops a dollar-capped session.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                pokeagentMmoEnabled: { type: boolean, default: false }
+                rivalsUrl: { type: string, format: uri }
+                pokemonBudget:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    maxTokens: { type: integer, minimum: 1, default: 250000 }
+                    maxCostUsd: { type: number, exclusiveMinimum: 0 }
+                    maxTurns: { type: integer, minimum: 1 }
+                    maxDurationMs: { type: integer, minimum: 1 }
+      responses:
+        "200": { description: Updated gameplay configuration and restart instruction }
+        "400": { description: Invalid configuration }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "503": { description: Settings unavailable }
+
   /v1/embodiment/intents:
     post:
       tags: [Embodiment]
       operationId: postEmbodimentIntent
       summary: Ask to start or stop play
-      description: Select an existing writable captain conversation with conversationId. The operator identity is authenticated separately; originLane and requestedBy are host-stamped. A competing body lease returns a typed refusal. In-process captain tools carry their own admitted conversation identity.
+      description: Select an existing writable captain conversation with conversationId. The operator identity is authenticated separately; originLane and requestedBy are host-stamped. A competing body lease returns a typed refusal. In-process captain tools carry their own admitted conversation identity. Budget accepts maxTokens (default 250000), maxCostUsd, maxTurns and maxDurationMs. Terminal receipts distinguish stopped, budget_exhausted, mind_unavailable and world_ended.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -3986,7 +4028,7 @@ paths:
                   requestedBy: local-operator
                   requestedAt: "2026-08-15T20:00:00.000Z"
                   environmentId: pokemon-firered
-                  budget: {}
+                  budget: { maxTokens: 250000, maxCostUsd: 1 }
               stop:
                 value:
                   kind: stop
@@ -4025,6 +4067,32 @@ paths:
           description: Stop submitted
         "404":
           description: Not playing
+
+  /v1/embodiment/sessions/live/guide:
+    post:
+      tags: [Embodiment, Operator]
+      operationId: guideLivePokemonPlay
+      summary: Suggest an objective or approach to the owning Pokémon mind
+      description: Requires the selected conversation's live play ownership and current authority. Direction is bounded context; the play mind chooses its own objective and action. Does not start play.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [text, conversationId]
+              properties:
+                text: { type: string, minLength: 1, maxLength: 400 }
+                conversationId: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200": { description: Queued direction or not_playing refusal }
+        "400": { description: Invalid direction }
+        "401": { description: Operator authentication required }
+        "403": { description: Selected conversation authority required }
+        "409": { description: Play ownership or authority changed }
+        "503": { description: Play direction unavailable }
 
   /v1/embodiment/sessions/live/activity:
     get:

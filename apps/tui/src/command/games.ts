@@ -1,6 +1,8 @@
+import { EmbodimentBudgetSchema, type EmbodimentBudget } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath, type GameplaySettings } from "@clankie/settings";
 
-const GAMES_USAGE = "Usage: clankie games [status]\n       clankie games set on|off";
+const GAMES_USAGE =
+  "Usage: clankie games [status]\n       clankie games set on|off\n       clankie games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <positive number|default>";
 
 export interface GamesCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -45,6 +47,24 @@ export async function gamesSet(
   };
 }
 
+export async function gamesBudgetSet(
+  key: keyof EmbodimentBudget,
+  value: number | undefined,
+  options: GamesCommandOptions = {},
+): Promise<GamesCommandResult> {
+  const settings = store(options);
+  const updated = await settings.update((current) => {
+    const budget = { ...current.gameplay.pokemonBudget };
+    if (value === undefined) delete budget[key];
+    else budget[key] = value;
+    return {
+      ...current,
+      gameplay: { ...current.gameplay, pokemonBudget: EmbodimentBudgetSchema.parse(budget) },
+    };
+  });
+  return { ok: true, games: updated.gameplay, settingsFile: settings.path, restart: "clankie restart" };
+}
+
 export async function runGamesCommand(
   args: readonly string[],
   options: GamesCommandOptions = {},
@@ -53,6 +73,17 @@ export async function runGamesCommand(
   if (verb === undefined || verb === "status") return await gamesStatus(options);
   if (verb === "set" && args.length === 2 && (args[1] === "on" || args[1] === "off")) {
     return await gamesSet(args[1] === "on", options);
+  }
+  if (verb === "budget" && args.length === 3) {
+    const keys: Record<string, keyof EmbodimentBudget> = {
+      "max-tokens": "maxTokens",
+      "max-cost-usd": "maxCostUsd",
+      "max-turns": "maxTurns",
+      "max-duration-ms": "maxDurationMs",
+    };
+    const key = keys[args[1]!];
+    if (key !== undefined)
+      return gamesBudgetSet(key, args[2] === "default" ? undefined : Number(args[2]), options);
   }
   throw new Error(GAMES_USAGE);
 }

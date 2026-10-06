@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FreePlayUsageReporter } from "./free-play-usage.ts";
 import { FREE_PLAY_REPLY_MAX, FREE_PLAY_SPEAK_MAX } from "./free-play-bounds.ts";
 
 /**
@@ -70,7 +71,8 @@ export interface VoiceView {
 
 export interface ClankieVoice {
   /** Returns a raw object validated against VoiceDecisionSchema by the caller. */
-  decide(view: VoiceView): Promise<unknown>;
+  readonly metered?: boolean;
+  decide(view: VoiceView, onUsage?: FreePlayUsageReporter): Promise<unknown>;
 }
 
 export const VOICE_SYSTEM_PROMPT = [
