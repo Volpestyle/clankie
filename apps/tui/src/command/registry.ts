@@ -353,6 +353,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["hire-receipt"],
+    lines: [
+      "  hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID",
+      "                           Seal an authenticated no-launch window; retain the original receipt.",
+    ],
+  },
+  {
     nouns: ["stance"],
     lines: [
       "  stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]",

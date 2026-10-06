@@ -1,13 +1,28 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import { DeliveryStageSchema } from "@clankie/protocol";
+import {
+  DeliveryStageSchema,
+  HireNoLaunchEvidenceSchema,
+  type HireNoLaunchEvidence,
+} from "@clankie/protocol";
 
 export const ReceiptSchema = z
   .object({
     messageId: z.string().min(1),
     fingerprint: z.string(),
+    /** Host reservation begins before any remote hire effect. Legacy records have no window. */
+    remoteAdmission: z
+      .object({
+        target: HireNoLaunchEvidenceSchema.shape.target,
+        nonce: z.string().regex(/^[a-f0-9]{64}$/u),
+      })
+      .strict()
+      .optional(),
+    /** Irreversible service-owned barrier; a remote journal reset cannot erase launch intent. */
+    remoteLaunchCommitted: z.literal(true).optional(),
+    settlement: HireNoLaunchEvidenceSchema.optional(),
     sessionId: z.string().optional(),
     /** Original native occupant observed by the host, never inferred from pane/name. */
     occupantId: z.string().optional(),
@@ -64,7 +79,18 @@ export class DeliveryFence {
   public pending(key: string): UncertainReceipt | undefined {
     if (this.unreadable) return { messageId: "unreadable-receipts", fingerprint: "" };
     const receipt = this.records.get(key);
-    return receipt?.completed ? undefined : receipt;
+    return receipt?.completed || receipt?.settlement ? undefined : receipt;
+  }
+
+  public settled(key: string): UncertainReceipt | undefined {
+    const receipt = this.records.get(key);
+    return !this.unreadable && receipt?.settlement ? receipt : undefined;
+  }
+
+  public settlement(messageId: string): HireNoLaunchEvidence | undefined {
+    return this.unreadable
+      ? undefined
+      : [...this.records.values()].find((receipt) => receipt.messageId === messageId)?.settlement;
   }
 
   public completed(key: string): UncertainReceipt | undefined {
@@ -79,7 +105,7 @@ export class DeliveryFence {
   public entries(): readonly (readonly [string, UncertainReceipt])[] {
     return this.unreadable
       ? [["unreadable-receipts", { messageId: "unreadable-receipts", fingerprint: "" }]]
-      : [...this.records.entries()].filter(([, receipt]) => !receipt.completed);
+      : [...this.records.entries()].filter(([, receipt]) => !receipt.completed && !receipt.settlement);
   }
 
   /** Persist before crossing the uncertain boundary. A persistence failure sends nothing. */
@@ -87,10 +113,10 @@ export class DeliveryFence {
     key: string,
     receipt: Omit<UncertainReceipt, "messageId"> & { messageId?: string },
   ): UncertainReceipt {
-    if (this.pending(key) || this.completed(key))
+    if (this.pending(key) || this.completed(key) || this.settled(key))
       throw new Error("Delivery is uncertain; reconcile its original receipt before any retry");
     for (const [id, value] of this.records)
-      if (value.completed && value.completed.at <= Date.now() - COMPLETED_RETENTION_MS)
+      if (!value.settlement && value.completed && value.completed.at <= Date.now() - COMPLETED_RETENTION_MS)
         this.records.delete(id);
     const value = { ...receipt, messageId: receipt.messageId ?? randomUUID() };
     const previous = this.records.get(key);
@@ -111,7 +137,7 @@ export class DeliveryFence {
     delivery: Omit<NonNullable<UncertainReceipt["completed"]>, "at">,
   ): void {
     const previous = this.records.get(key);
-    if (this.unreadable || previous?.messageId !== messageId || previous.completed)
+    if (this.unreadable || previous?.messageId !== messageId || previous.completed || previous.settlement)
       throw new Error("Missing original delivery receipt");
     this.records.set(key, { ...previous, completed: { at: Date.now(), ...delivery } });
     try {
@@ -124,15 +150,64 @@ export class DeliveryFence {
 
   public update(key: string, messageId: string, fields: Partial<Omit<UncertainReceipt, "messageId">>): void {
     const previous = this.records.get(key);
-    if (this.unreadable || previous?.messageId !== messageId)
+    if (
+      this.unreadable ||
+      previous?.messageId !== messageId ||
+      previous.settlement ||
+      (previous.remoteLaunchCommitted &&
+        Object.hasOwn(fields, "remoteLaunchCommitted") &&
+        fields.remoteLaunchCommitted !== true)
+    )
       throw new Error("Missing original delivery receipt");
     this.records.set(key, { ...previous, ...fields });
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.records.set(key, previous);
+      throw error;
+    }
+  }
+
+  /** Retain the original identity, key and authenticated evidence permanently. Never dispatch. */
+  public settleNotLaunched(key: string, messageId: string, evidence: HireNoLaunchEvidence): void {
+    const previous = this.records.get(key);
+    const proof = HireNoLaunchEvidenceSchema.parse(evidence);
+    if (
+      this.unreadable ||
+      previous?.messageId !== messageId ||
+      !previous.remoteAdmission ||
+      previous.remoteLaunchCommitted ||
+      previous.paneId ||
+      previous.sessionId ||
+      previous.occupantId ||
+      previous.completed ||
+      previous.settlement ||
+      proof.receiptId !== messageId ||
+      proof.receiptKey !== key ||
+      proof.fingerprint !== previous.fingerprint ||
+      JSON.stringify(proof.target) !== JSON.stringify(previous.remoteAdmission.target) ||
+      proof.window.sealedAt < proof.window.openedAt ||
+      proof.census.observedAt < proof.window.openedAt ||
+      proof.census.observedAt > proof.window.sealedAt
+    )
+      throw new Error("Original hire has no complete authenticated no-launch window");
+    this.records.set(key, { ...previous, settlement: proof });
+    try {
+      this.save();
+    } catch (error) {
+      this.records.set(key, previous);
+      throw error;
+    }
   }
 
   /** Only the mechanism calls this after matching an acknowledgment or proving no dispatch. */
   public reconcile(key: string, messageId: string): boolean {
-    if (this.unreadable || this.records.get(key)?.messageId !== messageId) return false;
+    if (
+      this.unreadable ||
+      this.records.get(key)?.messageId !== messageId ||
+      this.records.get(key)?.settlement
+    )
+      return false;
     const previous = this.records.get(key)!;
     this.records.delete(key);
     try {
@@ -178,8 +253,22 @@ export class DeliveryFence {
     if (this.path === undefined) return;
     mkdirSync(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(Object.fromEntries(this.records))}\n`, { mode: 0o600 });
+    const descriptor = openSync(temporary, "wx", 0o600);
+    try {
+      writeFileSync(descriptor, `${JSON.stringify(Object.fromEntries(this.records))}\n`);
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
     renameSync(temporary, this.path);
+    if (process.platform !== "win32") {
+      const parent = openSync(dirname(this.path), "r");
+      try {
+        fsyncSync(parent);
+      } finally {
+        closeSync(parent);
+      }
+    }
   }
 }
 

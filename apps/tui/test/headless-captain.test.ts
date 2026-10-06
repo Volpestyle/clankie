@@ -64,6 +64,56 @@ function healthyFetch(calls: string[] = []): typeof fetch {
 }
 
 describe("headless clankie commands", () => {
+  it("sends only an original hire UUID through the operator CLI and exposes a refusal without redispatch", async () => {
+    const receiptId = "11111111-1111-4111-8111-111111111111";
+    const requests: Array<{ authorization: string | undefined; path: string | undefined; body: unknown }> =
+      [];
+    const server = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      requests.push({
+        authorization: request.headers.authorization,
+        path: request.url,
+        body: JSON.parse(body),
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          op: "settle_hire_receipt",
+          schemaVersion: 1,
+          result: { state: "refused", receiptId, detail: "Original legacy window is unavailable" },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Missing fixture HTTP port");
+      const output = outputBuffer();
+      const code = await runHeadlessCaptainCommand(["hire-receipt", "settle", receiptId], {
+        repoRoot: process.cwd(),
+        env: {
+          ...(await stateEnv()),
+          CLANKIE_CAPTAIN_TOKEN: "captain-fixture-secret",
+          CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
+        },
+        stdout: output.stream,
+      });
+      expect(code).toBe(1);
+      expect(JSON.parse(output.text())).toMatchObject({ state: "refused", receiptId });
+      expect(requests).toEqual([
+        {
+          authorization: "Bearer captain-fixture-secret",
+          path: "/operator/v1/dispatch",
+          body: { op: "settle_hire_receipt", schemaVersion: 1, receiptId },
+        },
+      ]);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
   it("does not project stored Discord settings back as environment overrides for config commands", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-discord-command-"));
     tempDirs.push(root);

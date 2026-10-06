@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-06T03:22:11.937Z",
+  "mode": "Read-only original journal; execute refusal against isolated exact-byte copy",
+  "originalSha256": "16ad094ea91ba2852ccd32d59e85b40ccd15c4ad6fef4f2d6c26f2ec9426cc6b",
+  "receipts": [
+    {
+      "id": "9a42ada0-5111-497e-b43c-25881932778c",
+      "pane": "pc/wA:p2",
+      "recordedWindow": false,
+      "launchGuard": false,
+      "result": {
+        "state": "refused",
+        "receiptId": "9a42ada0-5111-497e-b43c-25881932778c",
+        "detail": "Original receipt lacks a complete no-launch window, or already allocated a pane/process/session. Current absence is insufficient."
+      }
+    },
+    {
+      "id": "e70fd47b-264a-42c3-aac9-7f25b6636a4f",
+      "pane": "pc/wA:p3",
+      "recordedWindow": false,
+      "launchGuard": false,
+      "result": {
+        "state": "refused",
+        "receiptId": "e70fd47b-264a-42c3-aac9-7f25b6636a4f",
+        "detail": "Original receipt lacks a complete no-launch window, or already allocated a pane/process/session. Current absence is insufficient."
+      }
+    }
+  ],
+  "claudeMessageIdIsNativeHireUuid": false,
+  "originalUnchanged": true
+}

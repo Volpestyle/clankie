@@ -55,6 +55,14 @@ state or a successful workspace focus as a delivery receipt or model-seen proof;
 messages still use native delivery and unconfirmed sends must not be retried
 blindly.
 
+For a fenced native remote hire, `clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID`
+can seal only a host-authenticated, recorded no-launch window. The native UUID is
+distinct from an MCP call ID or a `seat-…` message acknowledgement. Legacy missing
+history, an allocated pane or an attempted launch refuses; current absence is not
+historical proof. Settlement retains the receipt/evidence and permanently blocks
+its original key. Never delete receipts, resubmit the original, or change its cwd
+to escape the fence. See `docs/cli.md` under `repoRoot` for the operator boundary.
+
 For accepted-issue cost evidence, use `clankie metrics --issue ISSUE --since ISO
 --until ISO` or `clankie metrics --issues --worker LABEL`. The operator route
 projects retained native history and existing ledgers. Report its `coverage`

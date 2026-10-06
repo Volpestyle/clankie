@@ -88,6 +88,8 @@ import {
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
+import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
+import type { HireReceiptSettlement } from "@clankie/protocol";
 import { workerSkills } from "./worker-skills.ts";
 import {
   readHerdrSeatTranscript,
@@ -738,6 +740,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly hireOwners: HireOwners;
   private readonly validateOwner: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   private readonly activeHires = new Set<string>();
+  private readonly remoteHireReceipts: RemoteHireReceipts | undefined;
+  private readonly remoteLaunches = new Set<string>();
   private readonly runner: HerdrWatchRunner;
   private readonly seatAdapters: ReadonlyMap<string, HarnessSeatAdapter>;
   private readonly remoteSeatAdapters:
@@ -776,6 +780,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     path: string,
     options: {
       readonly validateOwner?: (owner: ConversationOwner) => Promise<boolean>;
+      readonly remoteHireReceipts?: RemoteHireReceipts;
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly projectHirePolicy?: ProjectHirePolicy;
       readonly fleetHireTools?: () => Promise<readonly string[]>;
@@ -839,6 +844,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } = {},
   ) {
     this.path = path;
+    this.remoteHireReceipts = options.remoteHireReceipts;
     this.validateOwner = options.validateOwner;
     this.hireOwners = new HireOwners(`${path}.owners.json`);
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
@@ -1691,6 +1697,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       input.workingDirectory,
       resume?.sessionId ?? "new",
     ]);
+    const settled = this.hireReceipts.settled(receiptKey);
+    if (settled)
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: `Original hire ${settled.messageId} is settled-not-launched. Its receipt is retained; this original intent cannot dispatch again.`,
+      };
     let pending = this.hireReceipts.pending(receiptKey);
     if (
       pending?.paneId !== undefined &&
@@ -1793,6 +1806,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let result: HerdrSeatSpawnResult;
     let watch: HerdrWatchRecord | undefined;
     try {
+      if (input.fleet && this.remoteHireReceipts) {
+        const claim = await this.remoteHireReceipts.claim(input.fleet, {
+          receiptId: receipt.messageId,
+          receiptKey,
+          fingerprint: receipt.fingerprint,
+        });
+        if (claim) {
+          // Persist the exact target/nonce before crossing SSH, including lost reserve ACKs.
+          this.hireReceipts.update(receiptKey, receipt.messageId, {
+            remoteAdmission: { target: claim.target, nonce: claim.nonce },
+          });
+          await this.remoteHireReceipts.reserve(claim);
+        }
+      }
       result =
         resume === undefined
           ? await this.startSeat(input, subjectOverride, brief, undefined, receiptKey, authority)
@@ -1816,6 +1843,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         );
       }
       if (result.outcome === "spawned") adopt?.(result, this.projectContexts.get(input)?.projectId);
+      if (result.outcome !== "spawned" && this.hireReceipts.pending(receiptKey)?.remoteLaunchCommitted)
+        result = { ...result, reason: "start_unconfirmed", deliveryStage: "uncertain" };
       if (
         result.outcome === "spawned" ||
         !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason)
@@ -1830,6 +1859,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       result = { outcome: "failed", reason: "start_unconfirmed", detail: String(error) };
     } finally {
       this.activeHires.delete(receiptKey);
+      this.remoteLaunches.delete(receiptKey);
     }
     console.info(
       "hire_agent:",
@@ -1852,6 +1882,79 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return { ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) };
   }
 
+  private remoteClaim(
+    key: string,
+    receipt: import("./delivery-fence.ts").UncertainReceipt,
+  ): RemoteHireClaim | undefined {
+    return receipt.remoteAdmission
+      ? {
+          receiptId: receipt.messageId,
+          receiptKey: key,
+          fingerprint: receipt.fingerprint,
+          ...receipt.remoteAdmission,
+        }
+      : undefined;
+  }
+
+  /** Irreversible local guard plus the remote host's exclusive launch CAS, before every effect. */
+  private async commitRemoteLaunch(key?: string): Promise<void> {
+    if (!key || this.remoteLaunches.has(key)) return;
+    const receipt = this.hireReceipts.pending(key);
+    if (!receipt) throw new Error("Original hire receipt is unavailable");
+    const claim = this.remoteClaim(key, receipt);
+    if (!claim) return;
+    if (!this.remoteHireReceipts || receipt.remoteLaunchCommitted)
+      throw new Error("Original remote launch cannot dispatch again");
+    this.hireReceipts.update(key, receipt.messageId, { remoteLaunchCommitted: true });
+    await this.remoteHireReceipts.launch(claim);
+    this.remoteLaunches.add(key);
+  }
+
+  /** Operator recovery only. Takes identity, never caller-supplied evidence or a launch request. */
+  public async settleHireReceipt(
+    receiptId: string,
+    guard?: () => Promise<void>,
+  ): Promise<HireReceiptSettlement> {
+    const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
+    if (!guard) return refused("Operator settlement authority is required; nothing settled.");
+    try {
+      await guard();
+    } catch {
+      return refused("Operator settlement authority is unavailable; nothing settled.");
+    }
+    const settled = this.hireReceipts.settlement(receiptId);
+    if (settled) return { state: "settled-not-launched", receiptId, evidence: settled };
+    const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
+    if (!original) return refused("No unresolved original native hire receipt; nothing dispatched.");
+    const [key, receipt] = original;
+    if (this.activeHires.has(key)) return refused("Original hire is still active; nothing settled.");
+    const claim = this.remoteClaim(key, receipt);
+    if (
+      !claim ||
+      !this.remoteHireReceipts ||
+      receipt.remoteLaunchCommitted ||
+      receipt.paneId ||
+      receipt.sessionId ||
+      receipt.occupantId
+    )
+      return refused(
+        "Original receipt lacks a complete no-launch window, or already allocated a pane/process/session. Current absence is insufficient.",
+      );
+    try {
+      await guard();
+      const evidence = await this.remoteHireReceipts.seal(claim);
+      await guard();
+      if (this.activeHires.has(key))
+        return refused("Original hire became active during census; local receipt remains fenced.");
+      this.hireReceipts.settleNotLaunched(key, receiptId, evidence);
+      return { state: "settled-not-launched", receiptId, evidence };
+    } catch (error) {
+      return refused(
+        `Authenticated host settlement unavailable: ${reasonDetail(error)}. Original receipt retained.`,
+      );
+    }
+  }
+
   private async resumeSeat(
     input: SpawnOperatorSeat,
     session: SavedAgentSession,
@@ -1861,6 +1964,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrSeatSpawnResult> {
     try {
       if (this.closed) throw new Error("Native hire service is closed");
+      await this.commitRemoteLaunch(receiptKey);
       if (authority !== undefined) {
         const held = this.hireOwners.sessionOwner(
           JSON.stringify([input.fleet ?? "local", input.harness, session.sessionId]),
@@ -2168,6 +2272,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         control: { mode: "unavailable", reason: unavailableReason, detail },
       };
     }
+    if (this.nativeLaunchPolicy?.prepare) await this.commitRemoteLaunch(receiptKey);
     const prepared = await this.nativeLaunchPolicy?.prepare?.({
       seat: structuredClone(input),
       resumed: resume !== undefined,
@@ -2295,6 +2400,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       });
       if (authority !== undefined) await assertConversationAuthority(authority);
       await this.admitProjectLaunch(input);
+      await this.commitRemoteLaunch(receiptKey);
       if (adapter?.prepare) {
         if (input.chrome) throw new Error(`${input.harness} has no supported Chrome launch option`);
         const requestedModel =

@@ -278,6 +278,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       );
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
     const workerOwnerOp =
+      parsed.data.op === "settle_hire_receipt" ||
       parsed.data.op === "readopt_seat" ||
       parsed.data.op === "worker_reports" ||
       parsed.data.op === "acknowledge_worker_reports";

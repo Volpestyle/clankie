@@ -348,6 +348,27 @@ Already-loaded older operator bridges need their MCP process refreshed to gain
 these protocols; refreshing only the fleet mailbox is insufficient. The native
 seat need not be restarted for a supported bridge.
 
+`clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID` calls the operator-only
+`settle_hire_receipt` operation. This is the native hire receipt UUID, not an MCP
+call UUID or a `seat-…` message acknowledgement. The service takes a fresh census
+through the original configured SSH host/session and closes its guarded host
+reservation. Only a reservation whose entire window precedes every pane, process,
+session or resume/send effect can become `settled-not-launched`. Evidence records
+the original key/fingerprint, target, host identity, interval and census digest.
+An irreversible service launch flag and the host's exclusive launch/seal transition
+prevent a late dispatch or a reset host journal from granting settlement.
+
+Legacy receipts without that recorded window, already allocated panes, attempted
+launches, incomplete census, changed connection or revoked authority are refused.
+Current absence cannot reconstruct history. Receipts and evidence are retained;
+the original key stays blocked permanently and no request is resent. This does
+not authorize another hire under the same key or bypass a pending message receipt.
+An abandoned host-operation lock is a refusal, never an invitation to delete it.
+The host OS and configured SSH principal are trusted; a compromised host cannot
+attest its own history. The journal covers service-authorized effects, not arbitrary
+programs launched outside Clankie's controlled hire path. It adds no fleet tool,
+worker authority, account setup or TUI setting.
+
 ### `integrate`
 
 ```bash

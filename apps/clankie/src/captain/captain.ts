@@ -58,6 +58,7 @@ import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
+import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
@@ -448,6 +449,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return selectHireProject(source, destination, input.projectId);
   };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    ...(deps.fleets?.shell === undefined
+      ? {}
+      : {
+          remoteHireReceipts: createRemoteHireReceipts({
+            fleet: async (id) => {
+              await refreshFleets();
+              return remoteFleets.find((fleet) => fleet.id === id);
+            },
+            local: async (id) => {
+              await refreshFleets();
+              return namedLocal.some((fleet) => fleet.id === id);
+            },
+            shell: (fleet) => deps.fleets!.shell!(fleet),
+          }),
+        }),
     ...(options.fleetHireTools ? { fleetHireTools: options.fleetHireTools } : {}),
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},

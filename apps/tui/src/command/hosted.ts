@@ -191,6 +191,7 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "autostart",
   "awake",
   "herdr",
+  "hire-receipt",
   "discord",
   "voice",
   "gateway",
