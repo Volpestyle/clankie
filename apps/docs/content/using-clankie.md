@@ -6,142 +6,89 @@ job. You do not need to learn agent terminology to talk to him.
 
 ## Everyday help
 
-Give him a little context and a useful outcome. A few things to try:
+Give him a little context and the outcome you want:
 
 - “Turn these scattered notes into a plan for the weekend.”
 - “Help me draft a kind, clear reply. Here's what happened.”
 - “Compare these three ideas and tell me what you would choose.”
 - “Make a birthday-card picture with a sleepy robot in a garden.”
 
-You can steer him as he works: add a constraint, correct an assumption, or ask
-for a shorter answer. If a request needs a connection he does not have, he
-should say what is missing. A request to draft a message and a request to send
-it are different instructions; tell him which outcome you want.
+Steer him as he works: add a constraint, correct an assumption, ask for a
+shorter answer. If he lacks a connection a request needs, he should say so.
+Drafting a message and sending it are different requests; say which you mean.
 
 ## Memory and personality
 
-Tell him what matters, and ask him to keep it: “Remember that I prefer quiet
-places and short walks.” You can ask what he remembers and correct a stale
-note. In the local console, `/memory` lets you inspect, edit, and forget
-memories directly.
+Ask him to keep what matters: “Remember that I prefer quiet places and short
+walks.” You can ask what he remembers and correct it. In the console, `/memory`
+lets you browse, edit, and forget notes directly.
 
-His memories are selected notes, separate from conversation history. Notes
-stay until forgotten. He can search them, but memory is not a promise
-to reproduce every past message. The [memory reference](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)
-explains storage and privacy between conversations and Discord rooms.
+Memories are selected notes, separate from conversation history, and stay until
+forgotten. He can search them, but memory is not a record of every message. The
+[memory reference](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)
+explains what each conversation and Discord room can see.
 
-Clankie has a character of his own. On a DIY installation, `/persona` lets you
-shape his name and character; it does not require rebuilding the software.
+His character is his own. On a DIY installation, `/persona` shapes his name,
+character, and look ([customize](/diy/#persona)).
 
 ## Making things together
 
-Explain the purpose, audience, and constraints. A useful brief might be:
-“Help me make a simple website for my bakery. Start with the opening page and
-show me a preview before publishing anything.”
+Give the purpose, audience, and constraints: “Help me make a simple website for
+my bakery. Start with the opening page and show me a preview before publishing
+anything.”
 
-Ask for the finished file or a preview you can inspect. Files he delivers belong
-to the conversation, so you can return to the result. Images require an image
-model; short video generation is a separate, optional capability on a configured
-DIY installation. A render may take time. Ask what is still running rather than
-starting a duplicate request.
+Files he delivers stay with the conversation. Images need an image model; short
+video is a separate optional capability. Renders take time, so ask what is still
+running rather than starting a duplicate.
 
 ## Bigger jobs and helper agents
 
-Clankie can do work himself or assemble a team. Tell him the outcome, your
-constraints, and any decisions you want to make yourself. You can ask who is
-doing what, open a helper's conversation, and steer the work as it develops.
+Clankie can do the work himself or assemble a team. Tell him the outcome, your
+constraints, and the decisions you want to keep. Ask who is doing what, open a
+helper's conversation, and steer as it develops.
 
-Tell him how you want agents to work: “Commit and push without asking, ask me
-before official releases, and keep reports short and plain.” Owner defaults
-apply across projects; a project can override each choice or inherit it.
-Verification can request independent review and sealing, or making the change,
-running relevant checks and reading the results. View or change these choices by
-talking to Clankie or using the app's project settings. Every helper receives the
-resolved preferences for its project. On a DIY installation, `clankie fleet
-status` and `clankie doctor --json` expose the same workspace preferences for
-agents you launch yourself. Preferences keep the existing access boundaries.
+Tell him how agents should work: “Commit and push without asking, ask me before
+releases, and keep reports short.” Owner defaults apply everywhere, a project
+can override them, and every helper receives the result. Change them by asking
+Clankie, in the app's project settings, or with `clankie fleet` on a DIY
+installation. Preferences never widen access.
 
-For DIY users, helper agents use the installed and authenticated tools you
-choose. [Customize Clankie](/diy/#bring-your-own-team) explains the setup. Hosted
-worker availability depends on the service and plan; the [current plans](https://clankie.bot/#plans)
-are the source for those limits.
-
-The tiny town in **Commons** shows the team at work. Select a figure to reach
-the agent behind it, see their progress, or ask a follow-up. The **Bulletin**
-lists every open task, who assigned it and who holds it, with stuck work first.
-Tap a notice to message whoever holds it.
+DIY helpers use the harnesses you install and sign in to
+([bring your own team](/diy/#bring-your-own-team)). Hosted helper limits follow
+your [plan](https://clankie.bot/#plans).
 
 ## The app
 
-**Messages is home.** Clankie is pinned at the top. Start there for a question,
-an idea, or a piece of work. Agent contacts and shared conversations let you
-follow a larger job without keeping a terminal open.
+**Messages is home.** Clankie is pinned at the top, with a contact for each
+agent so you can follow a larger job without a terminal.
 
-| View     | When it helps                                                                                                          |
-| -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Messages | Talk to Clankie, read replies and files, or speak to an individual helper.                                             |
-| Commons  | See the team's activity as a small world of agent figures; select one to open its conversation or controls.            |
-| Terminal | Inspect the actual terminal behind a connected worker, with direct input when your device has the required permission. |
+| View     | When it helps                                                                      |
+| -------- | ---------------------------------------------------------------------------------- |
+| Messages | Talk to Clankie, read replies and files, or message an individual helper.          |
+| Commons  | See the team as a little world of agent figures; tap one to open its conversation. |
+| Terminal | Watch the real terminal behind a worker, and type into it if your device may.      |
 
-The app reaches the same service as your other connected devices. Available
-controls depend on the host's capabilities and the access granted to that
-device. You can use Messages without learning the deeper views.
+What each device can do depends on the host and the access granted when it
+paired. Messages alone is enough to use Clankie.
 
 ## Discord, voice, and game night
 
-On a configured Mac, Clankie can join Discord conversations, speak in voice,
-play requested YouTube music, and play Pokémon from his own seat in a separate
-PokeAgents world. These are optional integrations, not part of basic setup.
+On a configured Mac, Clankie can chat in Discord, talk in voice channels, play
+requested YouTube music, and play Pokémon from his own seat in a PokeAgents
+world. None of this is part of basic setup.
 
-The official bot supports text, voice, and Activity sharing for existing play, art, animations, demos and audio. Hosted Activity routing is included in the service; customers set up no application or tunnel. The official Activity application and its verification remain release gates.
-Watching someone else's screen share and publishing Discord Go Live use the
-separate personal-lab body, with its own explicit opt-in and restrictions.
-Those distinctions matter when you try something you saw in the promo. Start
-with [Discord and play setup](/diy/#hang-out-and-play).
+The official bot handles text, voice, and a watch-me-play Activity. Sharing
+art, animations, and demos through the Activity is built but still awaiting its
+live Discord check. Watching someone's screen share and going Live need the
+separate personal-lab body. Start with [Discord and play setup](/diy/#hang-out-and-play).
 
 ## Leaving work running
 
 Closing a window does not stop the service. A local Mac must stay awake and
-online; hosted availability follows its account and resource limits.
+online; hosted availability follows your plan.
 
-For a DIY task that should continue across turns in a Pi-owned conversation,
-use `/goal` and explicitly enable `/autonomy`. Goals have a finite token budget;
-you can pause the goal or turn continuation off. This is
-separate from keeping an ordinary conversation open. See [ongoing work](/diy/#give-him-ongoing-work)
-for the controls and their limits.
+For DIY work that should continue across turns, set a `/goal` and turn on
+`/autonomy`. Goals have a token budget and can be paused at any time
+([ongoing work](/diy/#give-him-ongoing-work)).
 
-Next: [how he works](/how-it-works/) explains the service, memory, models, and
-connections underneath. [Get started](/get-started/) covers installation and pairing.
-
-## Give him a visual persona
-
-On a DIY installation, put PNG/JPEG/WebP images or MOV/MP4/WebM videos in a folder and run
-`clankie persona images set ~/Pictures/clankie-vibe`, or choose **Persona images**
-in `/persona`. Check `clankie persona images status`, then restart Clankie.
-Top-level files color his vibe: the feel of who he is, not what he looks like.
-Put physical character references in `appearance/`; only these feed self-portraits.
-He uses up to eight stills/contact sheets total. Videos need ffmpeg/ffprobe and each
-contributes one sheet of ten chronological tiles; audio is ignored. Status lists
-viewable sheet paths. His written character wins. Voice uses a short description
-instead of images. `clankie persona images clear` clears the selection without
-deleting the originals. Images are sent to your configured models when used.
-Hosted paths refer to folders already on the hosted machine; this does not
-upload files from your phone or Mac. See the [CLI reference](/cli/).
-
-## Machines and devices
-
-A **machine** is where agents run. A **device** is a paired phone or desktop
-portal. `clankie machines` shows each machine's Herdr sessions, availability and
-worker count; add `--json` for scripts. `clankie machines discover` refreshes
-local sessions and SSH candidates without prompting or starting remote software.
-
-Add a machine with `clankie machines add pc --ssh my-pc`, then inspect
-`clankie machines sessions pc`. Connect an existing session with
-`clankie machines sessions pc --connect work --id pc-work`. Transcript access
-is available immediately after adding. Named connections apply without a
-restart; removing a machine detaches Clankie without stopping its workers.
-Changing the default workspace still requires `clankie restart captain`.
-
-`clankie herdr` opens the full workspace. `clankie herdr status` prints the
-machine summary; `herdr status --json` includes machine rows and default-binding details.
-Phones and desktop portals remain under `clankie pair` and `clankie devices`.
+Next: [how he works](/how-it-works/) explains what sits underneath.

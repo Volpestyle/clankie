@@ -1,7 +1,7 @@
 # An owned desktop runtime for Clankie
 
 Status: retained design proposal, 2026-09-05. This is a dated investigation,
-not the current installation guide. See [desktop control](desktop-control.md)
+not the current installation guide. See [desktop control](../desktop-control.md)
 for the supported paths and their evidence limits. No independent desktop
 runtime is implemented or live-proven by this document.
 
@@ -58,7 +58,7 @@ Peekaboo's local patch at
 existing window-routed events. Its inert tests and CLI build pass. Its installed
 signed host remains unchanged, and the patch does not establish cross-Space or
 independent keyboard-focus support. Source: `~/dev/Peekaboo`. The installed
-workflow and its current limits remain in [desktop control](desktop-control.md).
+workflow and its current limits remain in [desktop control](../desktop-control.md).
 
 Cua Driver is another relevant source reference. The inspected commit is
 `95817401b8bfc627fa577adb018578e119715f3d` in `trycua/cua`. Its macOS
@@ -72,7 +72,7 @@ implementation for this product requirement.
 
 ## Maintained native fixture
 
-[`tools/desktop-fixture`](../tools/desktop-fixture/README.md) is the first executable
+[`tools/desktop-fixture`](../../tools/desktop-fixture/README.md) is the first executable
 part of the proof work. It builds an input recipient with an opaque click target,
 an accessible editor, two same-process target windows, and a separate operator
 role. It records native activation/key-window events and samples foreground state.

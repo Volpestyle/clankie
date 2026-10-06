@@ -1,13 +1,10 @@
 # Spider-Man through Rivals Agent
 
-**The bridge stays disabled under [VUH-1325](https://linear.app/vuhlp/issue/VUH-1325).**
-Independent review accepts the bridge sources with input path `a7f3445`; the
-lift for reviewed practice-range paths does not authorize Clankie's bridge.
-Clankie remains disconnected. No deployment, reconnection, task re-enabling or
-sitting until the lead schedules it; `rivals-l4` owns the desktop. The lead must
-verify the launcher's explicit cooldown argument before re-enabling. Every
-sitting records the kit patch and cooldown regime. The commands below describe
-the interface, not run authorization. Replay checks do not establish live input safety.
+**The bridge is disabled.** [VUH-1325](https://linear.app/vuhlp/issue/VUH-1325)
+tracks re-enabling it. Before any sitting, verify the launcher's explicit
+cooldown argument; every sitting records its kit patch and cooldown regime.
+The commands below describe the interface, not authorization to run, and replay
+checks do not establish live input safety.
 
 Clankie's `rivals` tool starts, observes, steers, shares, and stops a Spider-Man
 practice-range sitting. Rivals Agent supplies the tactical policy and fast pad
