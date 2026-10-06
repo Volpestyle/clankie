@@ -46,6 +46,13 @@ lifetime. Join their `runId` to the accepted/completed/failed `events.jsonl` tur
 A service-interrupted attempt stays uncertain. Read first and acknowledge only
 fully reviewed offered IDs with `clankie agents reports ack ID... --conversation ID`.
 
+For a stuck `message_clankie` claim, compare the exact authenticated receipt with
+the worker's running bridge version. Worker bridge 0.6.2 recognizes only `stored`;
+it keeps returning `uncertain` even when the service returns an exact sealed
+`definitive: not_sent`. Updated files on disk do not update an already imported
+bridge. Keep the original claim and truthful receipt; never label an unsent
+message `stored`, delete runtime state, or send a replacement to bypass this gap.
+
 ## Where to look
 
 - Operator console chat (the TUI dialogue): `~/.clankie/captain/conversations/<conversationId>/`

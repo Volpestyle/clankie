@@ -65,10 +65,13 @@ const ProcessBirthSchema = z
   .strict();
 
 /** Fresh same-user process lifetime only; no executable, argv or display-time authority. */
-export async function observeNativeBirth(processPid: number): Promise<readonly [string, string] | undefined> {
+export async function observeNativeBirth(
+  processPid: number,
+  signal?: AbortSignal,
+): Promise<readonly [string, string] | undefined> {
   if (process.platform !== "darwin" || !pid.safeParse(processPid).success) return undefined;
   try {
-    const reply = await nativeProcessRequest(fleetProcessHelper(), ["--birth", String(processPid)]);
+    const reply = await nativeProcessRequest(fleetProcessHelper(), ["--birth", String(processPid)], signal);
     if (!reply) return undefined;
     const result = ProcessBirthSchema.parse(JSON.parse(reply.stdout)).process;
     return result.pid === processPid && result.uid === process.getuid?.() ? result.birth : undefined;
@@ -82,15 +85,20 @@ export async function observeCodexServer(
   processPid: number,
   endpoint: string,
   canonicalSocketPath: string,
+  signal?: AbortSignal,
 ): Promise<readonly [string, string] | undefined> {
   if (process.platform !== "darwin" || !pid.safeParse(processPid).success) return undefined;
   try {
-    const reply = await nativeProcessRequest(fleetProcessHelper(), [
-      "--codex-server",
-      String(processPid),
-      Buffer.from(endpoint).toString("hex"),
-      Buffer.from(canonicalSocketPath).toString("hex"),
-    ]);
+    const reply = await nativeProcessRequest(
+      fleetProcessHelper(),
+      [
+        "--codex-server",
+        String(processPid),
+        Buffer.from(endpoint).toString("hex"),
+        Buffer.from(canonicalSocketPath).toString("hex"),
+      ],
+      signal,
+    );
     if (!reply) return undefined;
     const result = ProcessBirthSchema.parse(JSON.parse(reply.stdout)).process;
     return result.pid === processPid && result.uid === process.getuid?.() ? result.birth : undefined;
@@ -247,6 +255,7 @@ export async function observeSocketProcess(
   expected?: NativeSocketOwner,
   report?: (event: NativeProcessDiagnostic) => void,
   transportReport?: (reason: NativeTransportReason) => void,
+  signal?: AbortSignal,
 ): Promise<NativeSocketProcess | undefined> {
   if (
     process.platform !== "darwin" ||
@@ -269,7 +278,7 @@ export async function observeSocketProcess(
         ...(expected === undefined ? [] : [String(expected.pid), ...expected.birth, expected.socket]),
         ...(report === undefined ? [] : ["--diagnostics"]),
       ],
-      undefined,
+      signal,
       transportReport,
     );
     if (!reply) return undefined;

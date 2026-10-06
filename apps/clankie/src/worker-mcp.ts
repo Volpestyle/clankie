@@ -93,9 +93,9 @@ type WorkerAuthorization = {
   pane?: string;
   /** Observational process generation; never part of authorization. */
   bridgeId?: string;
-  validateFleet?(): boolean | Promise<boolean>;
+  validateFleet?(signal?: AbortSignal): boolean | Promise<boolean>;
   /** Optional author attribution only; this never changes the connected tool grant. */
-  nativeWriteProof?(): Promise<ProjectProcessProof | undefined>;
+  nativeWriteProof?(signal?: AbortSignal): Promise<ProjectProcessProof | undefined>;
   currentFleet?: (() => boolean) | undefined;
 };
 const FleetSearchSchema = z
@@ -247,7 +247,7 @@ export class WorkerMcp {
   >();
   private readonly fleetRequests = new Map<
     string,
-    { authorize(): Promise<WorkerAuthorization>; signal: AbortSignal; deadline: number }
+    { authorize(signal: AbortSignal): Promise<WorkerAuthorization>; signal: AbortSignal; deadline: number }
   >();
 
   private bridge(authority: WorkerAuthorization) {
@@ -355,7 +355,7 @@ export class WorkerMcp {
 
   private async fleetRequest(
     request: Request,
-    authorize: () => Promise<WorkerAuthorization>,
+    authorize: (signal: AbortSignal) => Promise<WorkerAuthorization>,
     observed?: (response: Response, signal: AbortSignal) => Promise<void>,
   ): Promise<Response> {
     const proof = randomUUID();
@@ -368,16 +368,17 @@ export class WorkerMcp {
     try {
       const response = await this.handleAuthorized(
         new Request(request, { headers, signal }),
-        async (token) => {
+        async (token, cancellation) => {
           const current = this.fleetRequests.get(token);
           if (!current) throw new Error("Fleet request no longer active");
-          current.signal.throwIfAborted();
-          const authority = await beforeWorkerDeadline(
-            current.signal,
-            "Worker fleet authentication",
-            current.authorize,
+          const admissionSignal = cancellation
+            ? AbortSignal.any([current.signal, cancellation])
+            : current.signal;
+          admissionSignal.throwIfAborted();
+          const authority = await beforeWorkerDeadline(admissionSignal, "Worker fleet authentication", () =>
+            current.authorize(admissionSignal),
           );
-          current.signal.throwIfAborted();
+          admissionSignal.throwIfAborted();
           return { ...authority, ...(bridgeId.success ? { bridgeId: bridgeId.data } : {}) };
         },
       );
@@ -721,19 +722,25 @@ export class WorkerMcp {
   async handleLocalFleet(request: Request, identity: LocalFleetIdentity): Promise<Response> {
     return this.fleetRequest(
       request,
-      async () => {
-        if (!(await identity.validate()))
+      async (signal) => {
+        if (!(await identity.validate(signal)))
           throw new LocalFleetAdmissionError("Local fleet membership unavailable");
         const fleet = identity.fleet ?? "default";
         return this.fleetAuthorization(
           fleet,
-          () => identity.validate(),
+          (cancellation) =>
+            identity.validate(cancellation ? AbortSignal.any([signal, cancellation]) : signal),
           identity.current === undefined ? undefined : () => identity.current!(),
           identity.pane,
-          async () => {
-            if (!(await identity.validate())) return undefined;
-            const observed = await identity.projectProof?.();
-            if (observed?.fleet !== fleet || observed.pane !== identity.pane || !(await identity.validate()))
+          async (cancellation) => {
+            const attributionSignal = cancellation ? AbortSignal.any([signal, cancellation]) : signal;
+            if (!(await identity.validate(attributionSignal))) return undefined;
+            const observed = await identity.projectProof?.(attributionSignal);
+            if (
+              observed?.fleet !== fleet ||
+              observed.pane !== identity.pane ||
+              !(await identity.validate(attributionSignal))
+            )
               return undefined;
             return observed;
           },
@@ -747,7 +754,18 @@ export class WorkerMcp {
         // Display delivery is bounded and cannot deny tools or cause an uncertain replay.
         const expected = this.options.pluginExpectedVersion?.();
         if (session.pluginNoticeVersion === expected && expected !== undefined) return;
-        const delivered = await this.options.pluginVersionObserved?.(identity, version);
+        const noticeIdentity: LocalFleetIdentity = {
+          ...identity,
+          validate: (cancellation) =>
+            identity.validate(cancellation ? AbortSignal.any([signal, cancellation]) : signal),
+          ...(identity.projectProof
+            ? {
+                projectProof: (cancellation?: AbortSignal) =>
+                  identity.projectProof!(cancellation ? AbortSignal.any([signal, cancellation]) : signal),
+              }
+            : {}),
+        };
+        const delivered = await this.options.pluginVersionObserved?.(noticeIdentity, version);
         signal.throwIfAborted();
         if (delivered && expected !== undefined && this.sessions.get(id) === session)
           session.pluginNoticeVersion = expected;
@@ -816,7 +834,7 @@ export class WorkerMcp {
     const records: GrantRecord[] = [];
     if (await this.fleetToolsEnabled()) {
       const catalog = (await this.options.host.catalog("operator")).filter(
-        (tool) => tool.server !== "minecraft",
+        (tool) => tool.server !== "minecraft" && (wanted === undefined || tool.qualifiedName === wanted),
       );
       for (const server of new Set(catalog.map((tool) => tool.server))) {
         try {
@@ -858,7 +876,7 @@ export class WorkerMcp {
 
   private async handleAuthorized(
     request: Request,
-    authenticate: (token: string) => Promise<WorkerAuthorization>,
+    authenticate: (token: string, signal?: AbortSignal) => Promise<WorkerAuthorization>,
   ): Promise<Response> {
     if (this.closed) return Response.json({ error: "worker_bridge_closed" }, { status: 503 });
     const token = request.headers.get("authorization")?.match(/^Bearer (\S+)$/u)?.[1];
@@ -866,8 +884,13 @@ export class WorkerMcp {
       return Response.json({ error: "worker_authentication_required" }, { status: 401 });
     let authority: WorkerAuthorization;
     try {
-      authority = await authenticate(token);
+      authority = await authenticate(token, request.signal);
     } catch (error) {
+      if (request.signal.aborted)
+        return Response.json(
+          { error: "worker_authentication_timeout", reason: "Worker admission timed out or was cancelled" },
+          { status: 504 },
+        );
       if (error instanceof LocalFleetAdmissionError)
         return Response.json({ error: "local_process_membership_required" }, { status: 403 });
       return Response.json(
@@ -954,7 +977,7 @@ export class WorkerMcp {
         extra.signal,
         "Worker catalog discovery",
         async (signal) => {
-          const current = await authenticate(extra.authInfo?.token ?? "");
+          const current = await authenticate(extra.authInfo?.token ?? "", signal);
           signal.throwIfAborted();
           if (current.key !== authority.key) throw new Error("Worker session changed");
           if (current.fleet !== undefined) {
@@ -1007,7 +1030,7 @@ export class WorkerMcp {
           extra.signal,
           "Worker tool call",
           async (signal, remaining) => {
-            const authorityNow = await authenticate(extra.authInfo?.token ?? "");
+            const authorityNow = await authenticate(extra.authInfo?.token ?? "", signal);
             signal.throwIfAborted();
             if (authorityNow.key !== authority.key) throw new Error("Worker session changed");
             let name = call.params.name;
@@ -1192,7 +1215,14 @@ export class WorkerMcp {
               server: current.server,
               tool: rule.name,
               arguments: args,
-              ...(authorityNow.nativeWriteProof ? { nativeWriteProof: authorityNow.nativeWriteProof } : {}),
+              ...(authorityNow.nativeWriteProof
+                ? {
+                    nativeWriteProof: (attributionSignal?: AbortSignal) =>
+                      authorityNow.nativeWriteProof!(
+                        attributionSignal ? AbortSignal.any([signal, attributionSignal]) : signal,
+                      ),
+                  }
+                : {}),
               delegation: {
                 binding: current.grant.profileHash,
                 grantId: current.grant.grantId,

@@ -68,7 +68,8 @@
         "test/helpers/project-native-proof/client.mjs",
         "test/helpers/project-native-proof/foreground-keeper.mjs",
         "test/helpers/project-native-proof/harness.mjs",
-        "test/helpers/project-native-proof/process-churn.mjs"
+        "test/helpers/project-native-proof/process-churn.mjs",
+        "test/helpers/local-fleet-cancellation/fixture.mjs"
       ]
     },
     "packages/protocol": {

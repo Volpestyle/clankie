@@ -190,7 +190,11 @@ try {
   link = new LocalFleetLink({
     directory: join(env.CLANKIE_STATE!, "links"),
     binding,
-    prove: localFleetProof({ binding, herdrBinary: "herdr", privateSeat: native.allows }),
+    prove: localFleetProof({
+      binding,
+      herdrBinary: "herdr",
+      privateSeat: (chain, pane, current) => native.allows(chain, pane, current),
+    }),
   });
   const workerMcp = new WorkerMcp({ directory: join(root, "grants"), credentials, host: mcp as never });
   const bearer = `clankie_op_${randomBytes(32).toString("base64url")}`;

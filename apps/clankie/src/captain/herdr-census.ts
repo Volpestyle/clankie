@@ -189,6 +189,7 @@ export interface LocalCodexRecoveryOptions {
   readonly herdrSession?: string;
   /** Trusted observer selects native guards when it supplies its own Herdr transport. */
   readonly nativeProof?: true;
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -200,6 +201,7 @@ export async function recoverLocalCodexSession(
   entry: Pick<HerdrCensusAgent, "paneId" | "agent" | "session">,
   options: LocalCodexRecoveryOptions = {},
 ): Promise<HerdrCensusAgent["session"]> {
+  options.signal?.throwIfAborted();
   if (entry.agent !== "codex" || entry.session !== undefined) return entry.session;
   const socket =
     options.bridgeSocket ?? process.env.HERDR_SOCKET_PATH ?? join(homedir(), ".config/herdr/herdr.sock");
@@ -220,6 +222,7 @@ export async function recoverLocalCodexSession(
         records.some((record) => /^\d+\.\d{6}$/u.test(record.start))));
   try {
     const observePane = async () => {
+      options.signal?.throwIfAborted();
       const response =
         options.runCommand === undefined && nativeProof
           ? JSON.stringify(
@@ -227,10 +230,11 @@ export async function recoverLocalCodexSession(
                 { runtime: "external", socketPath: socket, session },
                 "pane.process_info",
                 { pane_id: entry.paneId },
-                { timeoutMs: 2_000 },
+                { timeoutMs: 2_000, ...(options.signal ? { signal: options.signal } : {}) },
               ),
             )
           : (await run("herdr", ["pane", "process-info", "--pane", entry.paneId])).stdout;
+      options.signal?.throwIfAborted();
       const value = JSON.parse(response)?.result?.process_info;
       if (value?.pane_id !== entry.paneId || value.foreground_process_group_id === value.shell_pid)
         throw new Error("No native foreground occupant");
@@ -275,13 +279,18 @@ export async function recoverLocalCodexSession(
     if (matching.length !== 1) return undefined;
     const launch = matching[0]!;
     const lifetime = async (pid: number) => {
+      options.signal?.throwIfAborted();
       if (nativeProof) {
-        const observed = (await observeNativeProcesses(process.pid, pid))?.processes[1];
+        const observed = (
+          await observeNativeProcesses(process.pid, pid, undefined, undefined, options.signal)
+        )?.processes[1];
+        options.signal?.throwIfAborted();
         if (!observed || basename(observed.executable) !== "codex")
           throw new Error("Native process lifetime unavailable");
         return nativeProcessReceipt(observed.birth, pid === launch.pid ? launch.start : undefined);
       }
       const output = (await run("/bin/ps", ["-p", String(pid), "-o", "lstart=,comm="])).stdout;
+      options.signal?.throwIfAborted();
       const match =
         /^\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/u.exec(
           output,
@@ -290,15 +299,24 @@ export async function recoverLocalCodexSession(
       return match[1]!;
     };
     const serverProof = async () => {
+      options.signal?.throwIfAborted();
       if (nativeProof) {
         const canonicalSocketPath = await realpath(native.endpoint.slice("unix://".length));
-        const birth = await observeCodexServer(launch.pid, native.endpoint, canonicalSocketPath);
+        options.signal?.throwIfAborted();
+        const birth = await observeCodexServer(
+          launch.pid,
+          native.endpoint,
+          canonicalSocketPath,
+          options.signal,
+        );
+        options.signal?.throwIfAborted();
         if (!birth || nativeProcessReceipt(birth, launch.start) !== launch.start)
           throw new Error("Private server identity unavailable");
         return;
       }
       if ((await lifetime(launch.pid)) !== launch.start) throw new Error("Private server lifetime changed");
       const command = (await run("/bin/ps", ["-p", String(launch.pid), "-o", "command="])).stdout.trim();
+      options.signal?.throwIfAborted();
       if (!command.endsWith(` app-server --listen ${native.endpoint}`))
         throw new Error("Private server address changed");
       const sockets = (await run("/usr/sbin/lsof", ["-nP", "-a", "-p", String(launch.pid), "-U", "-Fn"]))
@@ -313,15 +331,26 @@ export async function recoverLocalCodexSession(
     // argv identifies the requested resume. The live server must still have
     // exactly that native thread loaded; a later /new or /resume cannot reuse
     // the old process command as authority for its previous occupant.
+    options.signal?.throwIfAborted();
     const codexSocket = await openCodexSocket(`ws+unix://${native.endpoint.slice("unix://".length)}:/`);
     if (!codexSocket) return undefined;
     const client = new CodexAppServerClient(codexSocket, () => {}, 2_000);
+    const abort = () => {
+      client.close();
+      // This read-only proof owns its socket; do not await a broken peer's close handshake.
+      codexSocket.terminate();
+    };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) abort();
     try {
+      options.signal?.throwIfAborted();
       await client.initialize();
+      options.signal?.throwIfAborted();
       const loaded = (await client.request("thread/loaded/list", {})) as {
         data?: unknown;
         nextCursor?: unknown;
       };
+      options.signal?.throwIfAborted();
       if (
         !Array.isArray(loaded.data) ||
         loaded.data.length === 0 ||
@@ -335,6 +364,7 @@ export async function recoverLocalCodexSession(
       // this root; a second independent root makes the pane's selection ambiguous.
       const parents = new Map<string, string>();
       for (const id of loaded.data) {
+        options.signal?.throwIfAborted();
         if (id === native.threadId) continue;
         const response = (await client.request("thread/read", { threadId: id, includeTurns: false })) as {
           thread?: { id?: unknown; parentThreadId?: unknown };
@@ -353,14 +383,17 @@ export async function recoverLocalCodexSession(
         }
       }
     } finally {
+      options.signal?.removeEventListener("abort", abort);
       client.close();
     }
+    options.signal?.throwIfAborted();
     if (
       JSON.stringify(await observePane()) !== JSON.stringify(native) ||
       (await lifetime(native.pid)) !== started
     )
       return undefined;
     await serverProof();
+    options.signal?.throwIfAborted();
     // Revocation/replacement during the observation cannot resurrect a record.
     if (
       !readLocalCodexRecords(options.localCodexRecordsPath).some(
@@ -370,6 +403,7 @@ export async function recoverLocalCodexSession(
       return undefined;
     return recovered;
   } catch {
+    options.signal?.throwIfAborted();
     return undefined;
   }
 }

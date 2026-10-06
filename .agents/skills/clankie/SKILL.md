@@ -91,6 +91,13 @@ reconnect the exact thread with its original cwd, account home and flags after
 its runtime unloads. Never restart a shared daemon, fork automatically, or
 replay an uncertain tool call. Controller-owned hires need controller recovery.
 
+Runtime and on-disk plugin updates do not replace an already-imported worker
+receipt parser. An older 0.6.2 bridge cannot consume an exact negative
+`definitive: not_sent` receipt. Keep its claim and have the original controller
+refresh that MCP connection on the same thread; the next call reconciles only
+the original, and a separate deliberate call sends the later report. Never
+delete the claim or report a sealed negative as a positive stored delivery.
+
 Before an authorized write, load `linear-issues` for read-before-write, labels,
 media and editorial rules. Read the record again immediately before updating it.
 Keep evidence on the assigned issue. After a timed-out mutation, inspect the

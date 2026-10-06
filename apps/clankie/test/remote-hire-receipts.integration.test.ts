@@ -153,6 +153,7 @@ for (const revoked of ["authority", "target", "profile"] as const)
             if (phase === "launch") revoke();
           },
           seal: async () => deniedEffect("seal"),
+          recover: async () => deniedEffect("recover"),
         },
         nativeLaunchPolicy: {
           admit: async () => {},

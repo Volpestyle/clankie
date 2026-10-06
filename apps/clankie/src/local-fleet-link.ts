@@ -10,12 +10,12 @@ export interface LocalFleetIdentity {
   readonly fleet?: string;
   readonly pane: string;
   /** Fresh socket/process admission; current() alone never grants authority. */
-  validate(): Promise<boolean>;
+  validate(signal?: AbortSignal): Promise<boolean>;
   /** Synchronous link revocation only; never substitutes for async process admission. */
   current?(): boolean;
-  projectProof?(): Promise<ProjectProcessProof | undefined>;
+  projectProof?(signal?: AbortSignal): Promise<ProjectProcessProof | undefined>;
   /** Full fresh socket, ancestry and native-session admission, not a bare project observation. */
-  admittedProjectProof?(): Promise<ProjectProcessProof | undefined>;
+  admittedProjectProof?(signal?: AbortSignal): Promise<ProjectProcessProof | undefined>;
 }
 
 /**
@@ -32,8 +32,12 @@ export class LocalFleetLink {
   private readonly options: {
     directory: string;
     binding(): Promise<HerdrBinding | undefined>;
-    prove(socket: Socket, pane: string): Promise<boolean>;
-    projectProof?(socket: Socket, pane: string): Promise<ProjectProcessProof | undefined>;
+    prove(socket: Socket, pane: string, signal?: AbortSignal): Promise<boolean>;
+    projectProof?(
+      socket: Socket,
+      pane: string,
+      signal?: AbortSignal,
+    ): Promise<ProjectProcessProof | undefined>;
   };
   constructor(options: LocalFleetLink["options"]) {
     this.options = options;
@@ -61,16 +65,34 @@ export class LocalFleetLink {
       if (seat && decodeURIComponent(seat[1]!) !== pane)
         return Response.json({ error: "local_pane_required" }, { status: 403 });
       const current = () => this.open && env.incoming.socket.destroyed !== true;
+      const cancellation = (signal?: AbortSignal) =>
+        signal ? AbortSignal.any([request.signal, signal]) : request.signal;
       const identity = {
         current,
         fleet: "default",
         pane,
-        validate: async () => current() && (await this.options.prove(env.incoming.socket, pane)) && current(),
-        projectProof: async () =>
-          this.open ? this.options.projectProof?.(env.incoming.socket, pane) : undefined,
-        admittedProjectProof: async () => {
+        validate: async (signal?: AbortSignal) => {
+          const cancelled = cancellation(signal);
+          cancelled.throwIfAborted();
+          const admitted = current() && (await this.options.prove(env.incoming.socket, pane, cancelled));
+          cancelled.throwIfAborted();
+          return admitted && current();
+        },
+        projectProof: async (signal?: AbortSignal) => {
+          const cancelled = cancellation(signal);
+          cancelled.throwIfAborted();
+          const proof = this.open
+            ? await this.options.projectProof?.(env.incoming.socket, pane, cancelled)
+            : undefined;
+          cancelled.throwIfAborted();
+          return proof;
+        },
+        admittedProjectProof: async (signal?: AbortSignal) => {
+          const cancelled = cancellation(signal);
+          cancelled.throwIfAborted();
           if (!current()) return undefined;
-          const proof = await this.options.projectProof?.(env.incoming.socket, pane);
+          const proof = await this.options.projectProof?.(env.incoming.socket, pane, cancelled);
+          cancelled.throwIfAborted();
           return current() ? proof : undefined;
         },
       };
@@ -79,8 +101,16 @@ export class LocalFleetLink {
       // broad fleet admission here; a missing project prover never bypasses it.
       const nativePeer =
         this.options.projectProof !== undefined && /\/peer(?:s|-messages)(?:\/[^/]+)?$/u.test(path);
-      if (path !== "/v1/fleet/mcp" && !nativePeer && !(await identity.validate()))
-        return Response.json({ error: "local_process_membership_required" }, { status: 403 });
+      if (path !== "/v1/fleet/mcp" && !nativePeer) {
+        try {
+          if (!(await identity.validate()))
+            return Response.json({ error: "local_process_membership_required" }, { status: 403 });
+        } catch (error) {
+          if (request.signal.aborted)
+            return Response.json({ error: "local_admission_cancelled" }, { status: 504 });
+          throw error;
+        }
+      }
       this.identities.set(request, identity);
       try {
         return await forward(request);

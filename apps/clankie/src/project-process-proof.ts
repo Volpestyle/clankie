@@ -129,6 +129,7 @@ export function createProjectProcessObserver(options: {
         const session =
           agent.session ??
           (await recoverLocalCodexSession(agent, {
+            ...(options.signal ? { signal: options.signal } : {}),
             ...(options.run === undefined ? { nativeProof: true as const } : {}),
             bridgeSocket: binding.socketPath,
             herdrSession: binding.session,
