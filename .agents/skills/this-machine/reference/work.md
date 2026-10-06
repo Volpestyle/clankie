@@ -35,27 +35,10 @@ when it is off, tell the owner what is left open instead of working around it.
 
 ## Lead review rounds
 
-For every watch wake and periodic lead round (30 minutes by default), load
-`lead` and inspect every seat owned by this conversation. Use
-`clankie agents efficiency --conversation ID` or `fleet_efficiency` with
-`action: "show"`; the roster and agent dock carry plain efficiency flags.
-Periodic checks skip a model turn for unchanged, unflagged evidence and coalesce
-while a review turn is outstanding. Wake prompts carry
-bounded summaries; use the tool or CLI for the full owned roster. Context
-percentage is the latest native Codex model-input snapshot and may age between
-responses. Claude context/effort and OpenCode or remote telemetry remain unknown.
-Original report acceptance or attempt remains progress after acknowledgment;
-acknowledgment creates no new progress. Automatic commit evidence requires the
-seat's captured branch and exclusive linked worktree, with HEAD advanced since
-admission; primary or shared checkouts do not count. Ask the worker or re-hire to
-change its effort. Record inspected
-scope, tracker status or substantive progress with
-`clankie agents efficiency review SEAT --conversation ID --json-stdin`;
-the JSON requires `evidence` and optionally accepts `offScope`,
-`assignmentStatus`, `deliverable` and `progressAt`. The tool's `review` action
-records the same evidence for an exact owned native session. It changes no
-tracker state, ownership, harness settings or report receipts. Follow the
-`lead` skill for action and worker-report reconciliation.
+Every watch wake and periodic round (30 minutes by default) reviews all seats
+this conversation owns. Load `lead`: its
+[fleet tools](../../lead/reference/fleet-tools.md#efficiency-rounds) reference
+covers `fleet_efficiency`, the CLI equivalent and what each observation proves.
 
 ## Watching workers
 
@@ -137,13 +120,8 @@ credential or device signing key. See ADR 0130 for that remaining boundary.
 
 ## Tidying worktrees
 
-When tidying, load `tidy` and list remaining merged, clean worktrees with
-`clankie agents tidy-worktrees --repo /canonical/repository/path
-[--merged-into REF]` or `list_tidy_worktrees`. Listing does not remove anything
-or fetch refs; the default ref is `origin/main`. Main, dirty, unmerged, locked,
-prunable and live-pane worktrees are excluded. An incomplete pane census returns
-no candidates. Verify ownership and fresh landing evidence before removing an
-owned worktree, after keeping its results. Full contracts: `{repoRoot}/docs/cli.md`.
+Load `tidy`; `lead`'s [fleet tools](../../lead/reference/fleet-tools.md#closing-panes-and-tidying-worktrees)
+covers `list_tidy_worktrees`, pane closes and what makes a worktree safe to remove.
 
 ## Project onboarding and membership
 

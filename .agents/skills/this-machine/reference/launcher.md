@@ -14,9 +14,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Start at login                         | `clankie autostart status`, `clankie autostart enable`                                                                                                             |
 | Are processes up                       | `clankie status` (JSON; `clankie health` is an alias)                                                                                                              |
 | Sustained CPU or slow health           | `clankie runtime-health status`; `clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300`; `/runtime-health` opens the settings menu |
-| Bundled skill classes and selection    | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                          |
-| Turn opinionated guidance off/on       | `clankie skills opinionated off` / `on`                                                                                                                            |
-| Exclude/restore an opinionated skill   | `clankie skills exclude NAME` / `include NAME`                                                                                                                     |
+| Shipped skills                         | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                          |
 | Service model + local providers        | `clankie model status`                                                                                                                                             |
 | Add a local OpenAI-compatible runtime  | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                                                                                          |
 | Switch service model                   | `clankie model set provider/model`                                                                                                                                 |

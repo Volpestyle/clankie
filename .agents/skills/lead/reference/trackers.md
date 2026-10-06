@@ -1,4 +1,6 @@
-# Durable trackers
+# Trackers
+
+Record-keeping for [lead](../SKILL.md).
 
 Use the existing tracker and workflow. Local records suit a bounded delivery whose
 owners share a checkout; an external tracker helps when work spans sessions,
@@ -58,6 +60,15 @@ unperformed action explicit; missing product behavior still needs the scope
 owner's disposition above. Workers report to the transition owner rather than
 waiting for a separate owner acceptance under `lead`.
 
+## What stays out of the record
+
+The record holds product, engineering and design decisions, accepted results and
+remaining gaps. Pane assignments, leadership changes, local queues and usage
+limits belong in live messages. Tracker assignment acquires no file claim or
+resource lease. Give each shared record one editing owner: send a landed result
+or closure blocker to that owner once instead of also editing the record, and
+update only the docs and decisions your own change affects.
+
 ## Local records
 
 Use the repository's existing layout. Keep the shared plan lead-owned and link
@@ -73,8 +84,10 @@ archives or commit large media merely to make it discoverable.
 
 ## Mapping to Linear
 
-Use the direct workspace Linear MCP and load `linear-issues` before writing;
-it owns read-before-write, media publication and result-update mechanics.
+For Clankie's fleet, write through Clankie's connected Linear account (his own
+tools, or `clankie_tools` / `clankie_call` for a worker), never a harness's own
+connector, and load `linear-issues` before writing; it owns read-before-write,
+media publication and result-update mechanics.
 Inspect the existing project, issues and workflow before creating anything.
 
 | Work concept                                  | Linear representation                                               |

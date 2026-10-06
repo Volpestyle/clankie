@@ -93,6 +93,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0234 — Games share one extension contract](0234-games-share-one-extension-contract.md)
 
 - [0235 — Worker catalog refresh keeps the original controller](0235-worker-catalog-refresh-keeps-the-original-controller.md)
+- [0236 — Clankie owns the skills he ships](0236-clankie-owns-the-skills-he-ships.md)
 
 ## Archived decisions
 

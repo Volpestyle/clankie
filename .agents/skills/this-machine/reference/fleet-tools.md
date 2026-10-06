@@ -128,27 +128,10 @@ confirm those through the native harness. Unavailable observations stay unproven
 
 ## Worker report routing
 
-Workers' `message_clankie` reports reach the conversation that hired them.
-Messaging a worker with `message_seat` adopts it under the sending conversation;
-its reports and completion watches then follow that lead. The service resolves
-this persisted route, including remote fleet seats; the worker never chooses it.
-Without persisted adoption, the host uses the exact census parent/launcher pane
-and native occupant to reach its attached conversation or existing native
-channel. Explicit adoption wins. With no eligible parent (or a removed adopted
-conversation), `global-default` receives a report tagged `unadopted` with its
-reason and parent pane when known. Read `workerReportRouting` on the roster and
-durable accepted turn; `clankie doctor` names parent panes lacking an observed
-bridge in `linkedSession.parentLeads`. Names, tabs and report text prove no
-ownership, and bridge process observations prove neither tools nor delivery.
-Revoked room grants or missing original room proof remain a refusal. Reconcile
-the original receipt after uncertainty; adoption, detach and restart never
-redirect an accepted report ID.
-
-A worker with proven native membership, on this machine or a linked one, writes
-with its plugin's `message_clankie`; the report names the agent, its machine and
-seat. Answer with `message_seat` to that seat if you choose to; a Codex session
-you did not start on another machine receives it through that machine's
-`codex queue`.
+Reports reach the hiring or adopting conversation; the worker never chooses.
+`workerReportRouting` on the roster and `linkedSession.parentLeads` in doctor
+show the route and any lead pane missing a bridge. Routing rules and recovery:
+`lead`'s [fleet tools](../../lead/reference/fleet-tools.md#report-routing).
 
 ## Preparing linked machines
 

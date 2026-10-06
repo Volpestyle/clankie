@@ -26,18 +26,6 @@ is guidance to verify against current evidence, not scheduled execution. The app
 offers the same controls and hides the new ones on older servers without the
 `workingPreferences:true` capability. Never edit settings JSON directly.
 
-## Optional working guidance
-
-Opinionated skills are on by default. An owner turns them off with
-`clankie skills opinionated off`, or uses `/skills` in the console. Product/tool
-and repo-authored skills always remain. `clankie skills exclude NAME` removes an
-individual opinionated skill; `include NAME` restores it when the class is on.
-These settings apply to new sessions and local hires. Start a fresh Claude seat
-or reset the service conversation to remove already-loaded guidance; no service
-restart is needed for the setting itself. Never edit settings JSON directly.
-
-Turning guidance off leaves Clankie able to lead using his own instructions and
-native hire/message tools.
 Local `hire_agent` can use `skills: "plain"` or
 `"bundled"` for a single hire; its result records the condition. Global/project
 skills discovered independently by a harness are outside Clankie's bundle switch.
