@@ -58,6 +58,7 @@
     },
     "apps/clankie": {
       "entry": [
+        "src/play-execution-shared.ts",
         "scripts/fleet-load.ts",
         "scripts/fleet-load-worker.mjs",
         "scripts/runtime-canary-live-proof.ts",
