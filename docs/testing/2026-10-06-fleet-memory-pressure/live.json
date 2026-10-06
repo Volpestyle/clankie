@@ -1,0 +1,31 @@
+{
+  "before": {
+    "at": "2026-10-06T23:40:18.308Z",
+    "percent": 84,
+    "stdout": "The system has 137438953472 (8388608 pages with a page size of 16384).\nSystem-wide memory free percentage: 84%\n"
+  },
+  "after": {
+    "at": "2026-10-06T23:40:18.478Z",
+    "percent": 84,
+    "stdout": "The system has 137438953472 (8388608 pages with a page size of 16384).\nSystem-wide memory free percentage: 84%\n"
+  },
+  "first": {
+    "loadRatio": 0.5627983940972222,
+    "availableMemoryMb": 110100.48,
+    "sampledAtMs": 1791330018476,
+    "healthy": true
+  },
+  "refreshed": {
+    "loadRatio": 0.5310601128472222,
+    "availableMemoryMb": 108789.76,
+    "sampledAtMs": 1791330019649,
+    "healthy": true
+  },
+  "totalMemoryBytes": 137438953472,
+  "repeated": [
+    110100.48, 110100.48, 110100.48, 110100.48, 110100.48, 110100.48, 110100.48, 110100.48, 110100.48,
+    110100.48, 110100.48, 110100.48
+  ],
+  "readsBeforeExpiry": 1,
+  "nativeMemoryReads": 2
+}

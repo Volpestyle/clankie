@@ -32,6 +32,36 @@ export async function nativeBoundaryAvailable(): Promise<boolean> {
   });
   return JSON.parse(stdout) === true;
 }
+let pendingMemory: Promise<number> | undefined;
+let memoryCache: { at: number; availableMemoryMb: number } | undefined;
+/** Shared one-second pressure cache, never used for process or lease authority. */
+export async function darwinAvailableMemoryMb(): Promise<number> {
+  if (memoryCache && performance.now() - memoryCache.at < 1_000) return memoryCache.availableMemoryMb;
+  pendingMemory ??= execute(resourcePython, ["-I", resourceNativeHelperPath(), "memory"], {
+    encoding: "utf8",
+    timeout: 1_500,
+    maxBuffer: 16_384,
+    killSignal: "SIGKILL",
+  })
+    .then(({ stdout }) => {
+      const reply: unknown = JSON.parse(stdout);
+      if (
+        !record(reply) ||
+        !keys(reply, ["schemaVersion", "availablePercent", "totalMemoryBytes"]) ||
+        reply.schemaVersion !== 1 ||
+        !integer(reply.availablePercent, 0, 100) ||
+        !integer(reply.totalMemoryBytes, 1, Number.MAX_SAFE_INTEGER)
+      )
+        throw new Error("Darwin memory observation unavailable");
+      const availableMemoryMb = (reply.totalMemoryBytes * reply.availablePercent) / 100 / 1024 ** 2;
+      memoryCache = { at: performance.now(), availableMemoryMb };
+      return availableMemoryMb;
+    })
+    .finally(() => {
+      pendingMemory = undefined;
+    });
+  return pendingMemory;
+}
 /** Undefined means proved absence; uncertain native reads reject and retain leases. */
 export async function processIdentity(pid = process.pid): Promise<ProcessIdentity | undefined> {
   const { stdout } = await execute(
