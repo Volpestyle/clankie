@@ -13,19 +13,30 @@ not select that corpus. `pnpm test:eval` uses `vitest.eval.config.ts` to run it.
 Authority and evaluator-runner unit regressions remain ordinary tests; they do
 not execute evaluations.
 
-| Lane                | Command                          | Evidence and limits                                                                                                                                                       |
-| ------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Full gate           | `pnpm check`                     | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                                                                          |
-| Computer body       | `pnpm test:computer-integration` | Explicit real Chromium/localhost-fixture contract proof; excluded from default tests and checks. No comparison or model calls.                                            |
-| Windows observation | `pnpm test:windows-observation`  | Explicit real Chromium/HTTP proof of Windows adapter translation and delegated authority; no PC input or claim of native Windows readiness. Excluded from default checks. |
-| Host integration    | `pnpm test:integration`          | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                                                                                 |
-| Manual offline eval | `pnpm test:eval`                 | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases.                                                   |
+| Lane                | Command                          | Evidence and limits                                                                                                                                                                                    |
+| ------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Full gate           | `pnpm check`                     | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                                                                                                       |
+| Fleet load          | `pnpm check:load`                | Isolated real service, Herdr and ten simulated Codex worker bridges; CPU, health/tool latency, admission and Linear-call budgets. JSON evidence in `.data/qa/fleet-load.json`. Release or manual only. |
+| Computer body       | `pnpm test:computer-integration` | Explicit real Chromium/localhost-fixture contract proof; excluded from default tests and checks. No comparison or model calls.                                                                         |
+| Windows observation | `pnpm test:windows-observation`  | Explicit real Chromium/HTTP proof of Windows adapter translation and delegated authority; no PC input or claim of native Windows readiness. Excluded from default checks.                              |
+| Host integration    | `pnpm test:integration`          | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                                                                                                              |
+| Manual offline eval | `pnpm test:eval`                 | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases.                                                                                |
 
 The host-integration command selects tests already in the full gate. The eval
 command is separate and never runs implicitly. Retries are disabled. CI cancels
 superseded runs on the same ref, retains manual full-check reports for seven
 days, and keeps its 30-minute ceiling. The private app's full client/host journey
 and native builds run at release time or on an explicit manual run.
+
+The fleet load gate is separate from `pnpm check` and default tests. Version-tag
+releases and explicit `workflow_dispatch` runs select it; ordinary pushes and
+pull requests do not. It exercises fixture workers and a local Linear provider,
+without model calls or owner credentials. See the retained JSON for workload,
+source revision, budgets and measured outcomes.
+The default ceilings are 9.9% captain-process CPU, 250 ms health p95, 2,000 ms
+tool p95, zero admission refusals and 24 provider calls/minute. See the
+[incident replay proof](2026-10-05-release-fleet-load/README.md) for calibration
+and the distinction between an admission failure and measured regressions.
 
 ## Isolation and reproducibility
 

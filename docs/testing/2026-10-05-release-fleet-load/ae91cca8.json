@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "outcome": "failed",
+  "sourceCommit": "ae91cca8186f5b4d83197a930f213039d59f94c2",
+  "recordedAt": "2026-10-06T03:11:24.730Z",
+  "budgets": {
+    "steadyCpuPercent": 9.9,
+    "healthP95Ms": 250,
+    "toolP95Ms": 2000,
+    "admissionRefusals": 0,
+    "linearCallsPerMinute": 24
+  },
+  "metrics": {
+    "elapsedSeconds": 0,
+    "readyWorkers": 1,
+    "steadyCpuPercent": null,
+    "cpuP95Percent": null,
+    "nativeDescendantCpuPercent": null,
+    "healthP95Ms": null,
+    "healthRequests": 0,
+    "toolP95Ms": null,
+    "toolCalls": 0,
+    "fleetP95Ms": null,
+    "fleetRequests": 0,
+    "admissionRefusals": 25,
+    "linearCalls": 0,
+    "linearCallsPerMinute": null,
+    "linearByTool": {},
+    "eventLoopP95Ms": null
+  },
+  "workload": {
+    "workers": 10,
+    "durationSeconds": 120,
+    "warmupSeconds": 10,
+    "fleetFreshReadMs": 1000,
+    "fleetLongPollMs": 20000,
+    "catalogMs": 5000,
+    "mailboxMs": 25000,
+    "workerToolMs": 30000,
+    "workerToolPhase": "evenly staggered within the 30-second cadence",
+    "workPanelMs": 60000,
+    "codex": {
+      "bytes": 75582102,
+      "files": 532,
+      "largeParents": 2,
+      "largeMb": 32
+    }
+  },
+  "errors": [
+    "Real worker admission refused with local_process_membership_required/worker_request_failed before all ten bridges were ready; measurement window never started."
+  ]
+}

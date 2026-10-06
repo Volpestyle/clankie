@@ -147,6 +147,7 @@ On an Apple silicon Mac with the [repository toolchain](../CONTRIBUTING.md):
 ```bash
 pnpm release:build
 pnpm release:smoke
+pnpm check:load
 ```
 
 The build writes `dist/clankie-darwin-arm64.tar.gz` and its checksum. It fails
@@ -164,5 +165,5 @@ and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
 setup, supported capabilities and remaining managed-hosting requirements.
 
 Pushing a version tag matching `package.json` (for example `v0.3.3`) runs the
-full repository check, builds and smoke-tests the archive on an Apple silicon
+full repository check and fleet load gate, builds and smoke-tests the archive on an Apple silicon
 GitHub runner, and uploads both assets to the matching GitHub Release.

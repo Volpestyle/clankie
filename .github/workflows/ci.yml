@@ -45,6 +45,9 @@ jobs:
         run: pnpm mcp:check
       - run: pnpm check
         if: github.event_name == 'workflow_dispatch'
+      - name: Manual fleet load gate
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm check:load
       - run: pnpm --filter @clankie/vox build
         if: github.event_name == 'workflow_dispatch'
       - uses: actions/upload-artifact@v4

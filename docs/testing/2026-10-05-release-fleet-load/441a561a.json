@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "outcome": "failed",
+  "sourceCommit": "441a561aad7d490d0b9c317d7afd41c1ed63a942",
+  "recordedAt": "2026-10-06T03:05:04.281Z",
+  "budgets": {
+    "steadyCpuPercent": 9.9,
+    "healthP95Ms": 250,
+    "toolP95Ms": 1000,
+    "admissionRefusals": 0,
+    "linearCallsPerMinute": 24
+  },
+  "metrics": {
+    "elapsedSeconds": 120.004,
+    "readyWorkers": 10,
+    "steadyCpuPercent": 76.07235132095977,
+    "cpuP95Percent": 94.81183876546336,
+    "nativeDescendantCpuPercent": 54.57500000000001,
+    "healthP95Ms": 483.96595899999375,
+    "healthRequests": 120,
+    "toolP95Ms": 11175,
+    "toolCalls": 38,
+    "fleetP95Ms": 5001.378333000001,
+    "fleetRequests": 63,
+    "admissionRefusals": 45,
+    "linearCalls": 40,
+    "linearCallsPerMinute": 19.999333355554814,
+    "linearByTool": {
+      "list_issues": 2,
+      "get_issue": 38
+    },
+    "eventLoopP95Ms": 715.128831
+  },
+  "workload": {
+    "workers": 10,
+    "durationSeconds": 120,
+    "warmupSeconds": 10,
+    "fleetFreshReadMs": 1000,
+    "fleetLongPollMs": 20000,
+    "catalogMs": 5000,
+    "mailboxMs": 25000,
+    "workerToolMs": 30000,
+    "workerToolPhase": "evenly staggered within the 30-second cadence",
+    "workPanelMs": 60000,
+    "codex": {
+      "bytes": 75582102,
+      "files": 532,
+      "largeParents": 2,
+      "largeMb": 32
+    }
+  },
+  "errors": [
+    "steady CPU: 76.07235132095977 exceeds budget 9.9",
+    "health p95: 483.96595899999375 exceeds budget 250",
+    "tool p95: 11175 exceeds budget 1000",
+    "admission refusals: 45 exceeds budget 0"
+  ]
+}
