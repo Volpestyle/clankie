@@ -1,9 +1,16 @@
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import {
+  CAPTAIN_LANE_ENTRIES_MAX,
   CAPTAIN_SILENT_REPLY_SENTINEL,
+  CaptainTurnMediaSchema,
+  deliveredFileRefConversationKey,
+  isDeliveredFileRef,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
+  type CaptainTurnMedia,
 } from "@clankie/protocol";
+import { conversationStorageKey } from "../delivered-files.ts";
+import { type RoomForkReceipts, type RoomForkResult } from "./room-forks.ts";
 import { resolveDiscordSettings, type ClankieSettings } from "@clankie/settings";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
@@ -78,6 +85,7 @@ export interface CreateDiscordTurnsContext {
   ) => void;
   readonly syncModel: (lane: LaneSession) => Promise<void>;
   readonly turnSettled: TurnSettledLog;
+  readonly roomForks: RoomForkReceipts;
 }
 export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
   /** The session a planned Discord turn runs in, whether a message or a watch woke it. */
@@ -856,14 +864,241 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     });
     await toolProgress?.complete();
     tryAppendTurnSettled(ctx.turnSettled, metrics, "completed", new Date(), tokensEnd);
+    const attached = roomTurnMedia(lane.capture.media, lane.capture.room);
     return {
       state: "settled",
       captainSessionId: normalized.sessionKey,
       turnId,
-      response: message,
-      ...(lane.capture.media === undefined ? {} : { media: lane.capture.media }),
+      response: attached.note === undefined ? message : withMediaNote(message, attached.note),
+      ...(attached.media === undefined ? {} : { media: attached.media }),
     };
   }
 
-  return { validateConversationOwner, wakeConversation, runDiscordWatchTurn, dispatchDiscordTurn };
+  const roomForksRunning = new Set<string>();
+
+  /**
+   * The owner's seat forks a turn into a room (ADR 0218, 2026-10-06). The room
+   * turn runs under the room's own grants and mouth, starts from the room's own
+   * bounded log plus the seat's brief, and never inherits the seat's transcript.
+   * Its outcome returns as one bounded result and is recorded in both logs.
+   */
+  async function forkIntoRoom(input: RoomForkInput): Promise<RoomForkResult> {
+    const fingerprint = createHash("sha256")
+      .update(
+        JSON.stringify([input.sourceConversationId, input.room, input.brief, input.replyTo, input.file]),
+      )
+      .digest("hex");
+    const id = input.requestId ?? fingerprint.slice(0, 32);
+    const refuse = (code: string): RoomForkResult => ({ state: "failed", room: input.room, code });
+    const scope = ctx.conversations.conversation(input.room)?.scope;
+    if (scope?.kind !== "room" || scope.lane !== "discord_presence")
+      return refuse("room_fork_not_a_text_room");
+    const separator = scope.targetId.indexOf(":");
+    const guildId = scope.targetId.slice(0, separator);
+    const channelId = scope.targetId.slice(separator + 1);
+    if (separator <= 0 || guildId === "dm") return refuse("room_fork_guild_room_required");
+    if (input.file !== undefined && input.replyTo === undefined)
+      return refuse("room_fork_file_needs_reply_to");
+    if (ctx.deps.discordActions === undefined) return refuse("room_fork_discord_unavailable");
+    const { settings: discord } = resolveDiscordSettings(
+      (await ctx.settings()).discord,
+      ctx.options.discordEnvironment,
+    );
+    if (discord.ownerUserId === undefined) return refuse("room_fork_owner_unconfigured");
+    const origin: DiscordWatchOrigin = {
+      baseSessionKey: `discord:clankie:discord:${guildId}:${channelId}`,
+      targetId: scope.targetId,
+      actorId: discord.ownerUserId,
+      guildId,
+      channelId,
+      messageId: input.replyTo ?? `room-fork-${id}`,
+      transportKind: "bot",
+    };
+    const plan = planDiscordTurnSession({
+      baseSessionKey: origin.baseSessionKey,
+      durable: false,
+      actorId: origin.actorId,
+      guildId,
+      channelId,
+      transportKind: origin.transportKind,
+      settings: discord,
+    });
+    const owner: ConversationOwner = { conversationId: input.room, discord: origin };
+    const mode = plan.systemTools ? "machine" : "social";
+    if (!(await validateConversationOwner(owner, mode)))
+      return refuse("room_fork_room_authority_unavailable");
+
+    const early = ctx.roomForks.begin(id, fingerprint, input.room, roomForksRunning.has(id));
+    if (early !== undefined) return early;
+    roomForksRunning.add(id);
+    const settle = (result: RoomForkResult): RoomForkResult => {
+      const settled = ctx.roomForks.settle(id, fingerprint, result);
+      ctx.conversations.recordToolAction(input.sourceConversationId, {
+        toolCallId: `room-fork-${id}`,
+        name: ROOM_FORK_TOOL,
+        ok: settled.state === "posted" || settled.state === "silent",
+        detail: JSON.stringify(settled),
+      });
+      return settled;
+    };
+    try {
+      let media: CaptainTurnMedia | undefined;
+      if (input.file !== undefined) {
+        if (ctx.options.deliveredFiles === undefined) return settle(refuse("room_fork_files_unavailable"));
+        const published = await ctx.options.deliveredFiles.publish({
+          conversationId: roomKey(scope.lane, scope.targetId),
+          sourceRoot: input.workspace,
+          path: input.file.path,
+          ...(input.file.filename === undefined ? {} : { filename: input.file.filename }),
+        });
+        media = { artifactRef: published.artifactRef, filename: published.filename };
+      }
+      const guard = async () => {
+        if (!(await validateConversationOwner(owner, mode)))
+          throw new Error("Room authority changed during the owner-directed turn");
+      };
+      const prompt = [
+        "Your owner, working from the operator seat, is asking you to act in this room. Their brief is below; it is the only context from outside this room. Your reply posts in this channel" +
+          (input.replyTo === undefined ? "." : " as a reply to the message they named.") +
+          ` If, after reading the room, nothing should be said, reply with exactly ${CAPTAIN_SILENT_REPLY_SENTINEL}.`,
+        ctx.conversations.roomForkContext(
+          input.room,
+          (await ctx.laneLog.read(scope.lane, scope.targetId, CAPTAIN_LANE_ENTRIES_MAX)).entries,
+        ),
+        `[Owner brief]\n${input.brief}`,
+        ...(media === undefined ? [] : [`[The owner attached ${media.filename}; it posts with your reply.]`]),
+      ].join("\n\n");
+      const result = await dispatchDiscordTurn(
+        {
+          sessionKey: `${plan.sessionKey}:fork:${id}`,
+          durable: false,
+          lane: scope.lane,
+          targetId: scope.targetId,
+          prompt,
+          images: [],
+          heard: "[Owner-directed room turn]",
+          actorId: origin.actorId,
+          guildId,
+          channelId,
+          messageId: origin.messageId,
+        },
+        `room-fork-${id}`,
+        false,
+        origin,
+        plan.systemTools,
+        guard,
+        "message",
+      );
+      const base = {
+        room: input.room,
+        channelId,
+        ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+      };
+      if (result.state === "silent" || result.state === "absorbed")
+        return settle({ state: "silent", ...base });
+      if (result.state === "failed")
+        return settle({
+          state: result.deliveryStage === "uncertain" ? "uncertain" : "failed",
+          ...base,
+          code: result.code,
+        });
+      const text = boundedDiscordReply(result.state === "settled" ? result.response : result.prompt);
+      const attached = media ?? (result.state === "settled" ? result.media : undefined);
+      await guard();
+      const posted = await ctx.deps.discordActions.execute(
+        input.replyTo === undefined
+          ? {
+              action: "post_message",
+              callId: `room-fork:${id}`,
+              actorId: origin.actorId,
+              guildId,
+              channelId,
+              text,
+            }
+          : {
+              action: "send_reply",
+              callId: `room-fork:${id}`,
+              actorId: origin.actorId,
+              guildId,
+              channelId,
+              messageId: input.replyTo,
+              text,
+              ...(attached === undefined ? {} : { media: attached }),
+            },
+        guard,
+      );
+      return settle({
+        state: posted.ok ? "posted" : "failed",
+        ...base,
+        text: text.slice(0, 1_600),
+        ...(posted.messageId === undefined ? {} : { messageId: posted.messageId }),
+        ...(attached === undefined ? {} : { file: attached.filename }),
+        ...(posted.ok ? {} : { code: posted.message.slice(0, 256) }),
+      });
+    } catch (error) {
+      // The turn or post may have happened; never rerun it under this request.
+      return settle({
+        state: "uncertain",
+        room: input.room,
+        code: (error instanceof Error ? error.message : String(error)).slice(0, 256),
+      });
+    } finally {
+      roomForksRunning.delete(id);
+    }
+  }
+
+  return {
+    validateConversationOwner,
+    wakeConversation,
+    runDiscordWatchTurn,
+    dispatchDiscordTurn,
+    forkIntoRoom,
+  };
+}
+
+/** The seat's tool for an owner-directed room turn. */
+export const ROOM_FORK_TOOL = "room_turn";
+
+export interface RoomForkInput {
+  /** The owner's conversation the seat is driving; its log records the action. */
+  readonly sourceConversationId: string;
+  /** The room conversation ID, as `conversations` lists it. */
+  readonly room: string;
+  readonly brief: string;
+  readonly replyTo?: string;
+  readonly file?: { readonly path: string; readonly filename?: string };
+  /** Where `file.path` resolves: the owner's conversation workspace. */
+  readonly workspace: string;
+  /** Stable retry key; defaults to a hash of the request itself. */
+  readonly requestId?: string;
+}
+
+/** Said in the room when a file he made this turn cannot ride the reply. */
+export const ROOM_MEDIA_DROPPED_NOTE = "(I couldn't attach the file I made for this one.)";
+
+/**
+ * Media never costs him the reply. A ref the schema refuses, or a delivered
+ * file minted for a different room, is dropped and the words go out with a
+ * short note instead of the whole turn failing (ADR 0088, 2026-10-06).
+ */
+export function roomTurnMedia(
+  media: CaptainTurnMedia | undefined,
+  room: string | undefined,
+): { readonly media?: CaptainTurnMedia; readonly note?: string } {
+  if (media === undefined) return {};
+  const parsed = CaptainTurnMediaSchema.safeParse(media);
+  if (!parsed.success) return { note: ROOM_MEDIA_DROPPED_NOTE };
+  if (
+    isDeliveredFileRef(parsed.data.artifactRef) &&
+    (room === undefined ||
+      deliveredFileRefConversationKey(parsed.data.artifactRef) !== conversationStorageKey(room))
+  )
+    return { note: ROOM_MEDIA_DROPPED_NOTE };
+  return { media: parsed.data };
+}
+
+/** Appends the note within the settled response bound. */
+export function withMediaNote(message: string, note: string): string {
+  const suffix = `\n\n${note}`;
+  return `${message.slice(0, 16_384 - suffix.length)}${suffix}`;
 }

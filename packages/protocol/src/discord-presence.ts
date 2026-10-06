@@ -51,6 +51,9 @@ export const TLDRAW_ARTIFACT_DIRECTORY = "tldraw";
 /** Sole write target of Discord stream-watch stills, relative to the attachment root. */
 export const SHARE_ARTIFACT_DIRECTORY = "shares";
 
+/** Sole write target of the delivered-file host, relative to the attachment root. */
+export const DELIVERED_FILE_DIRECTORY = "delivered";
+
 export const GENERATED_MEDIA_REF_PATTERN = new RegExp(
   `^sha256:[0-9a-f]{64}:${GENERATED_MEDIA_DIRECTORY}/[A-Za-z0-9._-]+$`,
   "u",
@@ -68,6 +71,12 @@ const TLDRAW_ARTIFACT_REF_PATTERN = new RegExp(
 
 const SHARE_ARTIFACT_REF_PATTERN = new RegExp(
   `^sha256:[0-9a-f]{64}:${SHARE_ARTIFACT_DIRECTORY}/[A-Za-z0-9._-]+$`,
+  "u",
+);
+
+/** `delivered/<conversation key>/<artifact id>/content`, exactly as the host mints it. */
+const DELIVERED_FILE_REF_PATTERN = new RegExp(
+  `^sha256:[0-9a-f]{64}:${DELIVERED_FILE_DIRECTORY}/([0-9a-f]{32})/[0-9a-f]{48}/content$`,
   "u",
 );
 
@@ -120,20 +129,38 @@ export function isShareArtifactRef(artifactRef: string): boolean {
 }
 
 /**
+ * Whether a reference names a file the delivered-file host copied out of his
+ * conversation workspace with `deliver_file` (ADR 0088, 2026-10-06 amendment).
+ * Unlike the hosts above, he chooses the content; the owner accepted that for
+ * the room he is answering. The service therefore also binds the ref's
+ * conversation key to that room before a reply carries it.
+ */
+export function isDeliveredFileRef(artifactRef: string): boolean {
+  return DELIVERED_FILE_REF_PATTERN.test(artifactRef);
+}
+
+/** The conversation storage key a delivered-file ref was minted under. */
+export function deliveredFileRefConversationKey(artifactRef: string): string | undefined {
+  return DELIVERED_FILE_REF_PATTERN.exec(artifactRef)?.[1];
+}
+
+/**
  * Whether a reference may ride his reply without an approval (ADR 0088).
  *
  * Every one of these directories is written only by a governed service-side
  * host, so what he shows a room is always something a tool of his actually
  * produced. The distinction this preserves is against *arbitrary* files under
  * the attachment root — a repository file, a support bundle — which keep
- * `send_attachment` and its `publish-external` approval.
+ * `send_attachment` and its `publish-external` approval. A delivered file is
+ * one he chose to hand to the room on this turn; the service checks its room.
  */
 export function isAttachableTurnMediaRef(artifactRef: string): boolean {
   return (
     isGeneratedMediaRef(artifactRef) ||
     isBrowserArtifactRef(artifactRef) ||
     isTldrawArtifactRef(artifactRef) ||
-    isShareArtifactRef(artifactRef)
+    isShareArtifactRef(artifactRef) ||
+    isDeliveredFileRef(artifactRef)
   );
 }
 
@@ -148,9 +175,7 @@ export function isAttachableTurnMediaRef(artifactRef: string): boolean {
  */
 export const CaptainTurnMediaSchema = z
   .object({
-    artifactRef: z
-      .string()
-      .refine(isAttachableTurnMediaRef, "expected a generated-media or browser artifact reference"),
+    artifactRef: z.string().refine(isAttachableTurnMediaRef, "expected an attachable turn media reference"),
     filename: z.string().min(1).max(200),
   })
   .strict();
@@ -320,7 +345,24 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("send_reply"),
     text: z.string().trim().min(1).max(2_000),
+    /** Host-captured turn media (ADR 0085/0088); the schema admits only attachable refs. */
+    media: CaptainTurnMediaSchema.optional(),
   }).strict(),
+  /**
+   * A message an owner-directed room turn posts without answering a specific
+   * message (ADR 0218, 2026-10-06). The service stamps every ID; the model
+   * supplies only the words.
+   */
+  z
+    .object({
+      action: z.literal("post_message"),
+      callId: z.string().min(1).max(256),
+      actorId: z.string().min(1).max(128),
+      guildId: z.string().min(1).max(128).optional(),
+      channelId: z.string().min(1).max(128),
+      text: z.string().trim().min(1).max(2_000),
+    })
+    .strict(),
   /**
    * "He has started writing" — the mid-turn signal ADR 0118 left unbuilt.
    * Host-stamped from the reply stream, never a model tool: it carries no
@@ -645,9 +687,7 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
       channelId: z.string().min(1),
       messageId: z.string().min(1),
       content: z.string().min(1).max(2_000),
-      artifactRef: z
-        .string()
-        .refine(isAttachableTurnMediaRef, "expected a generated-media or browser artifact reference"),
+      artifactRef: z.string().refine(isAttachableTurnMediaRef, "expected an attachable turn media reference"),
       filename: z.string().min(1).max(200),
     })
     .strict(),

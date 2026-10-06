@@ -83,6 +83,8 @@ import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { createConversationRunner } from "./captain-conversation-runner.ts";
 import { createDiscordTurns } from "./captain-discord-turns.ts";
+import { RoomForkReceipts } from "./room-forks.ts";
+import { roomForkTool } from "./room-fork-tool.ts";
 import { NATIVE_GOAL_UNSUPPORTED } from "./captain-goals.ts";
 import { captainModelExtension, modelCard, sessionPurpose } from "./captain-model.ts";
 import { createOperatorService } from "./captain-operator-service.ts";
@@ -240,53 +242,60 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
     };
   }
-  const { validateConversationOwner, wakeConversation, runDiscordWatchTurn, dispatchDiscordTurn } =
-    createDiscordTurns({
-      get buildSession() {
-        return buildSession;
-      },
-      get workingDirectory() {
-        return workingDirectory;
-      },
-      get options() {
-        return options;
-      },
-      get durableSession() {
-        return durableSession;
-      },
-      get conversations() {
-        return conversations;
-      },
-      get settings() {
-        return settings;
-      },
-      get deps() {
-        return deps;
-      },
-      get seatOutbox() {
-        return seatOutbox;
-      },
-      watchRecipientBinding: async (conversationId) =>
-        inboundBinding(await operatorNativeSource(conversationId)),
-      get shutdown() {
-        return shutdown;
-      },
-      get roomConversations() {
-        return roomConversations;
-      },
-      get laneLog() {
-        return laneLog;
-      },
-      get captureEvaluationStart() {
-        return captureEvaluationStart;
-      },
-      get syncModel() {
-        return syncModel;
-      },
-      get turnSettled() {
-        return turnSettled;
-      },
-    });
+  const roomForks = new RoomForkReceipts(join(options.stateDir, "room-forks.json"));
+  const {
+    validateConversationOwner,
+    wakeConversation,
+    runDiscordWatchTurn,
+    dispatchDiscordTurn,
+    forkIntoRoom,
+  } = createDiscordTurns({
+    get buildSession() {
+      return buildSession;
+    },
+    get workingDirectory() {
+      return workingDirectory;
+    },
+    get options() {
+      return options;
+    },
+    get durableSession() {
+      return durableSession;
+    },
+    get conversations() {
+      return conversations;
+    },
+    get settings() {
+      return settings;
+    },
+    get deps() {
+      return deps;
+    },
+    get seatOutbox() {
+      return seatOutbox;
+    },
+    watchRecipientBinding: async (conversationId) =>
+      inboundBinding(await operatorNativeSource(conversationId)),
+    get shutdown() {
+      return shutdown;
+    },
+    get roomConversations() {
+      return roomConversations;
+    },
+    get laneLog() {
+      return laneLog;
+    },
+    get captureEvaluationStart() {
+      return captureEvaluationStart;
+    },
+    get syncModel() {
+      return syncModel;
+    },
+    get turnSettled() {
+      return turnSettled;
+    },
+    roomForks,
+  });
   const workingDirectory = options.workingDirectory ?? homedir();
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
   const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
@@ -2126,9 +2135,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       messageSeat,
       workerReportActions,
     );
+    const ownerTools =
+      lane === "operator" && toolLane === "operator" && capture.targetId !== undefined
+        ? [
+            roomForkTool((input) =>
+              forkIntoRoom({
+                ...input,
+                sourceConversationId: capture.targetId!,
+                workspace: workingDirectory,
+              }),
+            ),
+          ]
+        : [];
     return lane === "operator" && conversationId !== undefined
-      ? { ...bank, tools: [...bank.tools, ...nativeRoomHandoffs.tools(conversationId)] }
-      : bank;
+      ? { ...bank, tools: [...bank.tools, ...nativeRoomHandoffs.tools(conversationId), ...ownerTools] }
+      : { ...bank, tools: [...bank.tools, ...ownerTools] };
   }
 
   async function recordNativeToolCatalog(

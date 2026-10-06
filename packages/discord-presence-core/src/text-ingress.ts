@@ -332,6 +332,10 @@ interface RetainedDelivery {
   readonly expiresAtMs: number;
 }
 
+/** Said once, as the reply, when his turn for a message settled as failed. */
+export const DISCORD_TURN_FAILED_NOTICE =
+  "I hit a problem answering this one and couldn't finish it. I've flagged it so it gets looked at.";
+
 const DEFAULT_DELIVERY_RETENTION_MS = 7 * 60 * 60 * 1_000;
 const DEFAULT_MAX_RETAINED_DELIVERIES = 50_000;
 /** Discord shows "typing…" for about ten seconds per post; a turn that thinks longer re-posts to stay visible. */
@@ -586,6 +590,11 @@ export class DiscordTextIngress {
         reason: result.code,
         ...(result.turnId === undefined ? {} : { turnId: result.turnId }),
       });
+      // A settled failure is final, and the owner was alerted when it settled.
+      // Someone who asked him directly hears that once, through the same
+      // per-message reply key, so a retry or restart cannot post it twice.
+      if (message.guildId === undefined || !this.unprompted(message))
+        await this.postFailureNotice(message, identity).catch(() => undefined);
       return { state: "failed", code: result.code };
     }
 
@@ -752,6 +761,27 @@ export class DiscordTextIngress {
   }
 
   /** True when he is being shown this rather than asked to answer it. */
+  private async postFailureNotice(
+    message: DiscordInboundMessage,
+    identity: DiscordPresenceWrite["identity"],
+  ): Promise<void> {
+    const write = DiscordPresenceWriteSchema.parse({
+      schemaVersion: 1,
+      idempotencyKey: `${message.id}:reply`,
+      sourceDeliveryId: message.id,
+      action: "discord.presence.reply",
+      identity,
+      content: DISCORD_TURN_FAILED_NOTICE,
+      payload: {
+        kind: "reply",
+        channelId: message.channelId,
+        messageId: message.id,
+        content: DISCORD_TURN_FAILED_NOTICE,
+      },
+    });
+    await this.port.executeDiscordPresenceAction(write);
+  }
+
   private unprompted(message: DiscordInboundMessage): boolean {
     return !message.mentionsBot && !addressesCharacter(message.body, this.config.characterNames ?? []);
   }

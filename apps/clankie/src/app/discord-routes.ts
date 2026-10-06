@@ -19,6 +19,7 @@ import {
   DiscordChannelProjectionMessagePath,
   DiscordChannelProjectionMessageSchema,
   DiscordPresenceChannelTurnRequestSchema,
+  type DiscordPresenceChannelTurnRequest,
   DiscordPresenceWriteSchema,
   DiscordRoomEvidenceSchema,
   DiscordStreamWatchReportSchema,
@@ -124,6 +125,15 @@ export interface RegisterDiscordRoutesContext {
     string,
     { result: DiscordChannelProjectionMessageResult; expiresAtMs: number }
   >;
+}
+
+interface UnansweredMessage {
+  readonly channelId: string;
+  readonly deliveryId: string;
+}
+
+function unanswered(request: DiscordPresenceChannelTurnRequest): UnansweredMessage {
+  return { channelId: request.trigger.channelId, deliveryId: request.deliveryId };
 }
 
 export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
@@ -761,6 +771,36 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     });
   });
 
+  /** A message he could not answer reaches the owner once, at settlement. */
+  function alertUnanswered(where: UnansweredMessage, code: string): void {
+    void ctx.dependencies.captain
+      .notifyRuntimeHealthAlert(
+        `I couldn't answer a Discord message (${code}) in channel ${where.channelId}, ` +
+          `message ${where.deliveryId}. It will not be retried automatically.`,
+      )
+      .catch(() => undefined);
+  }
+
+  /**
+   * Durably settle a turn whose run will never report: begun before a restart,
+   * or thrown. Returns undefined when the receipt cannot record it.
+   */
+  function settleUnfinishedTurn(
+    deliveryKey: string,
+    fingerprint: string,
+    where: UnansweredMessage,
+    code = "captain_turn_interrupted",
+  ): CaptainChannelTurnResult | undefined {
+    const result: CaptainChannelTurnResult = { state: "failed", deliveryStage: "uncertain", code };
+    try {
+      ctx.discordTurnReceipts.settle(deliveryKey, fingerprint, result);
+    } catch {
+      return undefined;
+    }
+    alertUnanswered(where, code);
+    return result;
+  }
+
   /** One Discord text/voice message becomes one captain turn. Discord family only. */
   ctx.app.post("/v1/captain/channel-turns", async (context) => {
     const body = await readJson(context.req.raw);
@@ -791,7 +831,15 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     if (receipt?.settled !== undefined) return context.json(receipt.settled);
     let record = ctx.captainTurnResults.get(deliveryKey);
     if (record === undefined && receipt !== undefined) {
-      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
+      // Begun by a service process that has since exited without settling it.
+      // Its run may have had effects, so it is never replayed; settling it says
+      // so once instead of answering every retry with a transient-looking 502.
+      const interrupted = ctx.discordTurnReceipts.abandoned(receipt, ctx.clock())
+        ? settleUnfinishedTurn(deliveryKey, receipt.fingerprint, unanswered(request))
+        : undefined;
+      return interrupted === undefined
+        ? context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502)
+        : context.json(interrupted);
     }
     if (record === undefined) {
       try {
@@ -816,11 +864,26 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
         return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
       }
       const turn = Promise.resolve().then(async () => {
-        const result = CaptainChannelTurnResultSchema.parse(
-          await ctx.dependencies.captain.submitDiscordTurn(request),
-        );
+        let result: CaptainChannelTurnResult;
+        try {
+          result = CaptainChannelTurnResultSchema.parse(
+            await ctx.dependencies.captain.submitDiscordTurn(request),
+          );
+        } catch {
+          // A thrown turn is as final as a failed one; settle it so the bridge
+          // stops asking. If even that cannot be recorded, it stays uncertain.
+          const failed = settleUnfinishedTurn(
+            deliveryKey,
+            fingerprint,
+            unanswered(request),
+            "captain_turn_failed",
+          );
+          if (failed === undefined) throw new Error("captain_channel_turn_uncertain");
+          return failed;
+        }
         const staged = { ...result, deliveryStage: discordDeliveryStage(result) };
         ctx.discordTurnReceipts.settle(deliveryKey, fingerprint, staged);
+        if (staged.state === "failed") alertUnanswered(unanswered(request), staged.code);
         return staged;
       });
       record = { fingerprint, lane: expectedLane, result: turn };
@@ -876,8 +939,18 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     }
     if (receipt.settled !== undefined) return context.json(receipt.settled);
     const record = ctx.captainTurnResults.get(deliveryKey);
-    if (record === undefined)
-      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
+    if (record === undefined) {
+      const interrupted =
+        receipt.origin === undefined || !ctx.discordTurnReceipts.abandoned(receipt, ctx.clock())
+          ? undefined
+          : settleUnfinishedTurn(deliveryKey, receipt.fingerprint, {
+              channelId: receipt.origin.channelId,
+              deliveryId: receipt.origin.messageId,
+            });
+      return interrupted === undefined
+        ? context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502)
+        : context.json(interrupted);
+    }
     if (record.rejected)
       return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
     return record.settled === undefined

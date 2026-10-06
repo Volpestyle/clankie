@@ -28,6 +28,7 @@ export {
   addressesCharacter,
   CATCH_UP_INTERVAL_MS,
   boundedDiscordReply,
+  DISCORD_TURN_FAILED_NOTICE,
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   parseDiscordReplyPolicy,

@@ -13,6 +13,8 @@ const ReceiptSchema = z
   .object({
     fingerprint: z.string().min(1),
     requiredGuard: z.boolean().optional(),
+    /** The service process that began the turn, so a successor can tell it is gone. */
+    beganBy: z.strictObject({ instanceId: z.string().min(1), pid: z.number().int() }).optional(),
     lane: z.enum(["discord_text", "discord_voice"]),
     settled: CaptainChannelTurnResultSchema.optional(),
     bodyConversationId: z.string().optional(),
@@ -40,6 +42,7 @@ export class DiscordTurnReceipts {
   private readonly path: string | undefined;
   private unreadable = false;
   private readonly guards = new Map<string, () => Promise<void>>();
+  private readonly instanceId = randomUUID();
 
   public constructor(path?: string) {
     this.path = path;
@@ -59,7 +62,10 @@ export class DiscordTurnReceipts {
 
   public begin(id: string, receipt: Receipt): void {
     if (this.get(id) !== undefined) throw new Error("Discord delivery already recorded");
-    this.records.set(id, ReceiptSchema.parse(receipt));
+    this.records.set(
+      id,
+      ReceiptSchema.parse({ ...receipt, beganBy: { instanceId: this.instanceId, pid: process.pid } }),
+    );
     this.save(); // No dispatch unless this durable write succeeds.
   }
 
@@ -69,6 +75,19 @@ export class DiscordTurnReceipts {
       throw new Error("Discord receipt mismatch");
     this.records.set(id, { ...receipt, settled: CaptainChannelTurnResultSchema.parse(result) });
     this.save();
+  }
+
+  /**
+   * Whether an unsettled turn's run can no longer report: it was begun by another
+   * service process that has exited. Receipts from before that was recorded use
+   * the Discord message's own age instead. Unknown stays unknown.
+   */
+  public abandoned(receipt: Receipt, now: Date): boolean {
+    if (receipt.settled !== undefined) return false;
+    if (receipt.beganBy !== undefined)
+      return receipt.beganBy.instanceId !== this.instanceId && !processAlive(receipt.beganBy.pid);
+    const sentAt = receipt.origin === undefined ? undefined : snowflakeTime(receipt.origin.messageId);
+    return sentAt !== undefined && now.getTime() - sentAt > LEGACY_ABANDONED_AFTER_MS;
   }
 
   public settleWrite(id: string, fingerprint: string, result: DiscordPresenceWriteResult): void {
@@ -130,4 +149,21 @@ export class DiscordTurnReceipts {
       throw error;
     }
   }
+}
+
+/** Longer than any room turn runs; only used for receipts that predate `beganBy`. */
+const LEGACY_ABANDONED_AFTER_MS = 6 * 60 * 60_000;
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function snowflakeTime(id: string): number | undefined {
+  if (!/^[0-9]{15,20}$/u.test(id)) return undefined;
+  return Number((BigInt(id) >> 22n) + 1420070400000n);
 }

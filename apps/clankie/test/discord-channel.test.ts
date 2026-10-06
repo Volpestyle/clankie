@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -160,7 +161,7 @@ describe("Discord channel turn routes", () => {
     expect(calls).toBe(1);
   });
 
-  it("answers uncertain on a rejected turn and never dispatches the same delivery again", async () => {
+  it("settles a rejected turn as uncertain and never dispatches the same delivery again", async () => {
     let calls = 0;
     const { app } = await createClankieApp({
       captain: createStubCaptain({
@@ -178,11 +179,16 @@ describe("Discord channel turn routes", () => {
       authenticateCaptain: () =>
         Promise.resolve({ captainId: "discord-bridge", steerSourceLane: "discord_text" }),
     });
+    // A settled answer, not a transient 502, so the bridge stops asking.
     const failed = await post(app, turnRequest(), "Bearer discord-captain");
-    expect(failed.status).toBe(502);
+    expect(failed.status).toBe(200);
     const retried = await post(app, turnRequest(), "Bearer discord-captain");
-    expect(retried.status).toBe(502);
-    await expect(retried.json()).resolves.toMatchObject({ deliveryStage: "uncertain" });
+    expect(retried.status).toBe(200);
+    await expect(retried.json()).resolves.toMatchObject({
+      state: "failed",
+      deliveryStage: "uncertain",
+      code: "captain_turn_failed",
+    });
     expect(calls).toBe(1);
   });
   it("persists before dispatch, survives restart and retention time, then records only the original late result", async () => {
@@ -241,6 +247,73 @@ describe("Discord channel turn routes", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it.each(["exited-process", "legacy-old-message"] as const)(
+    "settles an abandoned turn once (%s), alerts the owner once, and never reruns it",
+    async (origin) => {
+      const directory = mkdtempSync(join(tmpdir(), "discord-receipts-"));
+      const path = join(directory, "receipts.json");
+      const alerts: string[] = [];
+      let calls = 0;
+      // A real Discord snowflake from 2026-10-05, so the legacy rule can date it.
+      const request = { ...turnRequest(), deliveryId: "1556651594169323582" };
+      const dependencies = {
+        discordTurnReceiptPath: path,
+        clock: () => new Date("2026-10-06T21:00:00Z"),
+        captain: createStubCaptain({
+          submitDiscordTurn: () => {
+            calls += 1;
+            return new Promise<never>(() => undefined);
+          },
+          notifyRuntimeHealthAlert: async (text: string) => {
+            alerts.push(text);
+            return true;
+          },
+        }),
+        authenticateCaptain: async () => ({
+          captainId: "discord-bridge",
+          steerSourceLane: "discord_text" as const,
+        }),
+      };
+      const async = { "content-type": "application/json", prefer: "respond-async" };
+      try {
+        const original = await createClankieApp(dependencies);
+        const begun = await original.app.request("/v1/captain/channel-turns", {
+          method: "POST",
+          headers: async,
+          body: JSON.stringify(request),
+        });
+        expect(begun.status).toBe(202);
+        original.close();
+        // The process that began it is gone; a pre-upgrade receipt names no process at all.
+        const receipts = JSON.parse(readFileSync(path, "utf8"));
+        const key = `discord:${request.deliveryId}`;
+        if (origin === "exited-process") receipts[key].beganBy.pid = spawnSync("true").pid;
+        else delete receipts[key].beganBy;
+        writeFileSync(path, JSON.stringify(receipts));
+
+        const restarted = await createClankieApp(dependencies);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const retry = await post(restarted.app, request);
+          expect(retry.status).toBe(200);
+          await expect(retry.json()).resolves.toEqual({
+            state: "failed",
+            deliveryStage: "uncertain",
+            code: "captain_turn_interrupted",
+          });
+        }
+        expect((await restarted.app.request(`/v1/captain/channel-turns/${request.deliveryId}`)).status).toBe(
+          200,
+        );
+        expect(calls).toBe(1);
+        expect(alerts).toHaveLength(1);
+        expect(alerts[0]).toContain(request.deliveryId);
+        restarted.close();
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.each(["rejected", "typed-failure"] as const)(
     "retains %s across restart without a replacement turn",

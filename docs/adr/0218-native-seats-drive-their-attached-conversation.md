@@ -386,3 +386,52 @@ and handoff state, with a scripted model. It covers the following:
 - failed service wakes keep their backoff.
 
 No live harness, provider or production state was exercised.
+
+## Owner-directed room turns, 2026-10-06
+
+James asked that the operator seat, whichever harness holds it, be able to
+speak in a Discord room itself, "it just works". Until now the seat could only
+answer rooms that had escalated to it (attachment grants no room authority,
+above). The seat's generic Discord write tool refused outright.
+
+**Decision.** The owner's seat forks a turn into a room with the `room_turn`
+tool. It is in the operator lane's bank only, so only the owner-authenticated
+seat holds it. Workers, peers, rooms and room-attached seat banks never get it.
+
+- **Authority stays the room's.** The fork runs as that room's own turn, with
+  the owner as its Discord actor. It takes the room's current grants (machine
+  tools only where the room grants them to the owner), body lease and mouth,
+  and it posts through the existing `send_reply`/`post_message` captain actions
+  and their per-call receipts. The seat holds no Discord credential and chooses
+  no channel ID; the room conversation names it.
+- **Context: brief in, bounded result out, no transcript inheritance.** The
+  fork starts a one-shot session from the room's own history, projected with
+  the same `projectConversation` and budget used by the service handoff. That
+  history is the room log plus its heard/said lane log, which is where
+  per-message handoff children leave the live conversation. Added to it is the
+  brief the seat writes. Nothing else from the owner's conversation reaches a
+  shared room. The private operator transcript never does, except as the
+  seat's own words in the brief.
+- **One result, two logs.** The seat gets one bounded result: posted, silent,
+  failed or uncertain; channel, reply target, message ID, the posted words up
+  to 1,600 characters, and the attached file name. The room log records the
+  room turn. The seat's conversation records a `room_turn` tool event with the
+  same result, so projections and handoffs see it.
+- **A file rides the reply.** `file` names a workspace file. The
+  delivered-file host publishes it under the room's key and it posts with the
+  reply (ADR 0088, 2026-10-06), so it needs `replyTo`. A file the fork delivers
+  itself rides the same way.
+- **Retries never rerun.** A request ID, by default a hash of the request,
+  maps to one settled result in `room-forks.json`. A retry returns it. A run
+  interrupted by restart reports `uncertain` and is never rerun.
+
+```mermaid
+flowchart LR
+  Seat["Owner's seat (any harness)"] -- "room_turn: room, brief, replyTo?, file?" --> Fork
+  RoomLog["Room log + heard/said lane log"] -- "projectConversation (bounded)" --> Fork
+  Fork["One-shot room turn<br/>room grants, owner as actor"] -- "send_reply / post_message" --> Mouth["Room's Discord mouth<br/>body lease, receipts"]
+  Fork -- "room turn" --> RoomLog
+  Fork -- "bounded result" --> Seat
+  Fork -- "room_turn tool event" --> SeatLog["Seat's conversation log"]
+  SeatLog -. "never" .-x Fork
+```

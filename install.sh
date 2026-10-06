@@ -91,13 +91,41 @@ for command in clankie clankie-herdr; do
 done
 
 echo "Installed Clankie $version: $bin_link"
+# A fresh Mac has no ~/.local/bin on PATH; add it to the login shell's profile
+# once, unless CLANKIE_NO_MODIFY_PATH is set.
 case ":${PATH:-}:" in
-  *":$bin_dir:"*) ;;
-  *) echo "Add $bin_dir to PATH, then run: clankie" ;;
+  *":$bin_dir:"*) echo "Run: clankie" ;;
+  *)
+    case "${SHELL:-}" in
+      */zsh) profile="$HOME/.zprofile" ;;
+      */bash) profile="$HOME/.bash_profile" ;;
+      *) profile="" ;;
+    esac
+    path_line="export PATH=\"$bin_dir:\$PATH\""
+    if [ -n "${CLANKIE_NO_MODIFY_PATH:-}" ] || [ -z "$profile" ]; then
+      echo "Add $bin_dir to PATH, then run: clankie"
+      echo "  $path_line"
+    else
+      if ! grep -Fqx "$path_line" "$profile" 2>/dev/null; then
+        printf '\n# Added by the Clankie installer\n%s\n' "$path_line" >>"$profile"
+        echo "Added $bin_dir to PATH in $profile"
+      fi
+      echo "Open a new Terminal window, then run: clankie"
+    fi
+    ;;
 esac
 
 # Existing links follow the release, even when installed without a terminal.
-"$bin_link" harness install --refresh-linked
+# This script is served from main for every tag; a release older than the
+# harness command (v0.3.3 and earlier) has nothing to link, so the install ends.
+if ! refreshed=$("$bin_link" harness install --refresh-linked 2>&1); then
+  case "$refreshed" in
+    *'unknown command "harness"'*) exit 0 ;;
+  esac
+  printf '%s\n' "$refreshed" >&2
+  exit 1
+fi
+printf '%s\n' "$refreshed"
 # Review new optional harness installations only in an interactive owner terminal.
 if [ -t 0 ] && [ -t 1 ]; then
   "$bin_link" harness install

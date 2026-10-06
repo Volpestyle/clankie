@@ -60,6 +60,18 @@ Keychain, and no Clankie/model/native-harness settings copied from another user.
 Use a separate Mac/VM or log out other users so their Clankie ports cannot be
 mistaken for this account's service. Record that environment choice.
 
+A disposable [tart](https://tart.run) VM keeps the owner's own session and
+agents running beside the test. Clone the vanilla image (login `admin`/`admin`,
+no guest agent, so drive it through the window or SSH) for each run and delete
+it afterwards; the APFS clone costs almost no extra disk:
+
+```sh
+tart clone ghcr.io/cirruslabs/macos-tahoe-vanilla:26.6.2 onboard-test
+tart set onboard-test --cpu 4 --memory 8192
+tart run onboard-test
+tart delete onboard-test
+```
+
 1. Stage a release containing both VUH-1656 slices. Record its tag, source SHAs
    and archive SHA-256. Build/release staging belongs to the later owner run;
    the worker has not built a candidate. Install the tagged release through the

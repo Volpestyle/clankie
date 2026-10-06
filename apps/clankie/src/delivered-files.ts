@@ -446,7 +446,8 @@ async function contentMatches(path: string, mediaType: string): Promise<boolean>
   }
 }
 
-function conversationStorageKey(conversationId: string): string {
+/** The key a delivered-file ref names, so a room can recognize its own files. */
+export function conversationStorageKey(conversationId: string): string {
   return createHash("sha256").update(conversationId).digest("hex").slice(0, 32);
 }
 

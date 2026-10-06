@@ -13,6 +13,7 @@ import {
   DISCORD_PRESENCE_ACTION_RISK_CLASS,
   isShareArtifactRef,
   isAttachableTurnMediaRef,
+  deliveredFileRefConversationKey,
   DiscordPresenceActionSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteSchema,
@@ -783,6 +784,16 @@ describe("protocol", () => {
     expect(isShareArtifactRef(shareRef)).toBe(true);
     expect(isAttachableTurnMediaRef(shareRef)).toBe(true);
     expect(isAttachableTurnMediaRef(`sha256:${"a".repeat(64)}:tmp/frame.jpg`)).toBe(false);
+    // A delivered file rides a room reply only in the exact shape its host mints.
+    const deliveredRef = `sha256:${"a".repeat(64)}:delivered/${"b".repeat(32)}/${"c".repeat(48)}/content`;
+    expect(isAttachableTurnMediaRef(deliveredRef)).toBe(true);
+    expect(deliveredFileRefConversationKey(deliveredRef)).toBe("b".repeat(32));
+    for (const forged of [
+      `sha256:${"a".repeat(64)}:delivered/${"b".repeat(32)}/../../secrets/content`,
+      `sha256:${"a".repeat(64)}:delivered/${"b".repeat(32)}/${"c".repeat(48)}/meta.json`,
+      `sha256:${"a".repeat(64)}:delivered/room/${"c".repeat(48)}/content`,
+    ])
+      expect(isAttachableTurnMediaRef(forged)).toBe(false);
     expect(DISCORD_PRESENCE_ACTION_RISK_CLASS["discord.presence.react"]).toBe("narrative-write");
     const write = DiscordPresenceWriteSchema.parse({
       schemaVersion: 1,
