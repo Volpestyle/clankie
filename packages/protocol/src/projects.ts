@@ -8,6 +8,7 @@ import {
   ProjectAutonomyPatchSchema,
 } from "./autonomy.ts";
 import type { WorkerBridgeStatus } from "./index.ts";
+import { WorkInitSettingsSchema } from "./work-items.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -245,6 +246,10 @@ export const CreateProjectSettingsSchema = z
       .strict()
       .nullable()
       .optional(),
+    /** Creates a missing convention with work init only after explicit CREATE. */
+    trackerSetup: WorkInitSettingsSchema.extend({
+      backend: WorkInitSettingsSchema.shape.backend.unwrap(),
+    }).optional(),
     /** Preference only; neither field implies or changes a numeric hire cap. */
     fleet: z
       .object({
@@ -424,7 +429,7 @@ export const FleetProjectMembershipSnapshotSchema = z
             z
               .object({
                 outcome: z.literal("member"),
-                source: z.literal("hire"),
+                source: z.enum(["hire", "workspace"]),
                 projectId: ProjectIdSchema,
                 /** Current saved project role of the host-bound persona, if known. */
                 role: OperatorAgentRoleSchema.optional(),

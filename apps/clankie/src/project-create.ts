@@ -5,9 +5,11 @@ import {
   createProjectSettings,
   observeProjectEnrollment,
   projectsRevision,
+  observeProjectTrackerSetup,
   type SettingsStore,
 } from "@clankie/settings";
 import type { CreateProjectSettings } from "@clankie/protocol/projects";
+import { initializeConvention } from "@clankie/work-items";
 
 /** The direct owner route and question confirmation share this existing commit boundary. */
 export async function applyProjectCreate(
@@ -25,9 +27,37 @@ export async function applyProjectCreate(
       if (model) resolveHireModel(catalog, profile.harness, model);
   }
   await requireOwner();
-  const initial = await observeProjectEnrollment(original.projects, input);
+  let initial = await observeProjectEnrollment(original.projects, input);
   if (expectedObservation && !isDeepStrictEqual(initial, expectedObservation))
     throw new Error("Project enrollment changed");
+  if (input.trackerSetup) {
+    const reviewed = initial;
+    let trackerParent = reviewed.trackerSetup?.parent;
+    await initializeConvention(input.workspacePath, input.trackerSetup, {
+      createOnly: true,
+      guard: async () => {
+        await requireOwner();
+        const current = await settings.load();
+        if (projectsRevision(current.projects) !== input.expectedRevision)
+          throw new Error("Project settings changed");
+        const observation = await observeProjectEnrollment(current.projects, input);
+        if (
+          !isDeepStrictEqual(observation.directories, reviewed.directories) ||
+          (trackerParent && !isDeepStrictEqual(observation.trackerSetup?.parent, trackerParent))
+        )
+          throw new Error("Project workspace changed");
+        // Pin the newly created parent on the first post-mkdir guard too.
+        trackerParent ??= observation.trackerSetup?.parent;
+        await observeProjectTrackerSetup(input.workspacePath);
+        await requireOwner();
+      },
+    });
+    // Setup is part of the reviewed CREATE, consumed once by its question claim.
+    input = { ...input, trackerSetup: undefined };
+    initial = await observeProjectEnrollment(original.projects, input);
+    if (!isDeepStrictEqual(initial.directories, reviewed.directories))
+      throw new Error("Project workspace changed after tracker setup");
+  }
   await requireOwner();
   let before: string | undefined;
   const updated = await settings.update(

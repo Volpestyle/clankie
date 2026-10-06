@@ -24,6 +24,10 @@ const ObservationSchema = z
   .object({
     directories: z.array(directory).max(8192),
     tracker: directory.extend({ sha256: hash }).strict().optional(),
+    trackerSetup: z
+      .object({ path: z.string().max(4096), parent: directory.optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 const ImmutableSchema = z
@@ -140,6 +144,9 @@ export function projectOnboarding(settings: Pick<SettingsStore, "load" | "update
         directories: creation.immutable.observation.directories,
         ...(creation.immutable.observation.tracker
           ? { tracker: creation.immutable.observation.tracker }
+          : {}),
+        ...(creation.immutable.observation.trackerSetup
+          ? { trackerSetup: creation.immutable.observation.trackerSetup }
           : {}),
       }),
   };

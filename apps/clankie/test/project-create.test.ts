@@ -42,6 +42,7 @@ async function fixture() {
   }));
   let authorized: true | "forbidden" | "authentication_required" = true;
   let race: (() => Promise<void>) | undefined;
+  let onAuthorize: ((request: Request) => Promise<void>) | undefined;
   const settings = {
     load: () => store.load(),
     update: (mutate: Parameters<SettingsStore["update"]>[0], guard?: () => Promise<void>) =>
@@ -50,7 +51,10 @@ async function fixture() {
         await guard?.();
       }),
   };
-  const app = createProjectRoutes(async () => authorized, settings);
+  const app = createProjectRoutes(async (request) => {
+    await onAuthorize?.(request);
+    return authorized;
+  }, settings);
   const command = async (patch = {}) => ({
     projectId: "new",
     name: "New",
@@ -81,6 +85,9 @@ async function fixture() {
     tracking,
     deny: (value: typeof authorized = "forbidden") => {
       authorized = value;
+    },
+    authorize: (value: NonNullable<typeof onAuthorize>) => {
+      onAuthorize = value;
     },
     race: (value: () => Promise<void>) => {
       race = value;
@@ -231,6 +238,80 @@ it("concurrent creates with one revision never overwrite or silently upsert", as
   ]);
   expect((await f.store.load()).projects.projects.filter((x) => x.id === "new")).toHaveLength(1);
 });
+it("concurrent reviewed CREATE cannot replace the first saved tracker after both absence checks", async () => {
+  const f = await fixture();
+  const barrier = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  const ready = { new: barrier(), other: barrier() };
+  const release = { new: barrier(), other: barrier() };
+  const calls = new Map<"new" | "other", number>();
+  const observations: { projectId: string; authorization: number }[] = [];
+  f.authorize(async (request) => {
+    // Body-limit middleware can replace Request objects; the diagnostic query
+    // identifies each test attempt without consuming its JSON or granting authority.
+    const projectId = new URL(request.url).searchParams.get("attempt");
+    if (projectId !== "new" && projectId !== "other") throw new Error("Unknown fixture attempt");
+    const count = (calls.get(projectId) ?? 0) + 1;
+    calls.set(projectId, count);
+    observations.push({ projectId, authorization: count });
+    // Middleware plus three tracker guards place the eighth authorization after
+    // the temporary file and final absence checks, immediately before publication.
+    if (count === 8) {
+      ready[projectId].resolve();
+      await release[projectId].promise;
+    }
+  });
+  const first = await f.command({
+    trackerSetup: { backend: "github", githubRepo: "fixture/first-owner", note: "Retain this choice" },
+    trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+  });
+  const second = { ...first, projectId: "other", trackerSetup: { backend: "default" } };
+  const create = async (input: { projectId: string }) =>
+    f.app.request(`${PROJECT_CREATE_SETTINGS_PATH}?attempt=${input.projectId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  const firstResponse = create(first);
+  const secondResponse = create(second);
+  try {
+    await Promise.race([
+      Promise.all([ready.new.promise, ready.other.promise]),
+      ...[firstResponse, secondResponse].map((pending) =>
+        pending.then(async (response) => {
+          throw new Error(
+            `CREATE returned before publication barrier: ${JSON.stringify({ status: response.status, body: await response.clone().json(), observations })}`,
+          );
+        }),
+      ),
+    ]);
+    release.new.resolve();
+    expect((await firstResponse).status).toBe(201);
+    const sentinel = await readFile(f.tracking);
+    expect(JSON.parse(sentinel.toString())).toMatchObject({
+      backend: "github",
+      github: { repo: "fixture/first-owner" },
+      note: "Retain this choice",
+    });
+    release.other.resolve();
+    expect((await secondResponse).status).toBe(409);
+    expect(await readFile(f.tracking)).toEqual(sentinel);
+    expect((await f.store.load()).projects.projects.map((project) => project.id)).toEqual([
+      "existing",
+      "new",
+    ]);
+  } finally {
+    release.new.resolve();
+    release.other.resolve();
+    await Promise.allSettled([firstResponse, secondResponse]);
+  }
+});
+
 it("binds the existing convention without changing its bytes or choosing a backend", async () => {
   const f = await fixture();
   await f.tracker();

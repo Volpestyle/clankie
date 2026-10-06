@@ -1848,15 +1848,18 @@ paths:
       summary: Create a reviewed project with one canonical local workspace
       description: >-
         Owner only. Strict fields are projectId, name, workspacePath, expectedRevision,
-        roles, workerCap, trackerRef and fleet. The service supplies primary/local
+        roles, workerCap, trackerRef, trackerSetup and fleet. The service supplies primary/local
         workspace identity and its platform. Nullable caps inherit; zero is preserved.
         Fleet preferences are not numeric caps. Optional trackerRef must name primary
-        and .clankie/tracking.json, an existing valid canonical convention. No tracker
-        initialization, remote enrollment, assignments, hires or grants. Rechecks
+        and .clankie/tracking.json, an existing valid canonical convention unless
+        trackerSetup supplies reviewed work-init inputs for a missing convention.
+        Tracker save precedes settings save; a partial failure can leave only the
+        convention. No automatic retry, account choice, provider project/label
+        creation, remote enrollment, assignments, hires or grants. Rechecks
         canonical directory/tracker identity, settings revision and owner authority
         before the existing SettingsStore rename. These asynchronous observations
         are not cross-process compare-and-swap or atomic authority/filesystem checks.
-        This documents landed source, not an installed CLI or running-service update.
+        This documents the source contract, not an installed CLI or running-service update.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1930,6 +1933,20 @@ paths:
                   properties:
                     workspaceId: { type: string, enum: [primary] }
                     path: { type: string, enum: [.clankie/tracking.json] }
+                trackerSetup:
+                  type: object
+                  additionalProperties: false
+                  required: [backend]
+                  description: Existing work-init inputs for a missing convention; requires trackerRef
+                  properties:
+                    backend: { type: string, enum: [default, markdown, github, linear] }
+                    directory: { type: string, minLength: 1, maxLength: 256 }
+                    githubRepo: { type: string, minLength: 1, maxLength: 200 }
+                    linearTeam: { type: string, minLength: 1, maxLength: 64 }
+                    linearProject: { type: string, minLength: 1, maxLength: 200 }
+                    linearLabel: { type: string, minLength: 1, maxLength: 64 }
+                    decisions: { type: string, minLength: 1, maxLength: 256 }
+                    note: { type: string, maxLength: 1000 }
                 fleet:
                   type: [object, "null"]
                   additionalProperties: false
@@ -1941,7 +1958,7 @@ paths:
         "400": { description: Malformed or unsupported creation fields }
         "401": { description: Owner authentication required }
         "403": { description: Caller is not the owner }
-        "409": { description: project_create_conflict or project_tracker_unavailable; no retry or setup }
+        "409": { description: project_create_conflict or project_tracker_unavailable; no automatic retry }
         "413": { description: Request exceeds 16 KiB }
         "503": { description: Settings writes unavailable }
   /v1/operator/projects/remove-workspace:

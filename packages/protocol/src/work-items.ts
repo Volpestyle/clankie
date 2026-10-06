@@ -58,6 +58,21 @@ export const WORK_ITEM_LABELS_MAX = 20;
 export const WorkItemLabelSchema = z.string().max(WORK_ITEM_LABEL_MAX);
 export const WorkLinearLabelSchema = TextSchema(WORK_ITEM_LABEL_MAX);
 
+/** Owner-reviewed inputs shared by work init and a project's explicit CREATE. */
+export const WorkInitSettingsSchema = z
+  .object({
+    backend: WorkBackendKindSchema.optional(),
+    directory: z.string().min(1).max(256).optional(),
+    githubRepo: z.string().min(1).max(200).optional(),
+    linearTeam: z.string().min(1).max(64).optional(),
+    linearProject: z.string().min(1).max(200).optional(),
+    linearLabel: WorkLinearLabelSchema.optional(),
+    decisions: z.string().min(1).max(256).optional(),
+    note: z.string().max(1000).optional(),
+  })
+  .strict();
+export type WorkInitSettings = z.infer<typeof WorkInitSettingsSchema>;
+
 export const WorkItemSchema = z
   .object({
     /** Backend-native id: `W-ab12cd`, a GitHub issue number `#42`, a Linear `VUH-123`. */
