@@ -2359,8 +2359,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     for (const alert of reportFailureAlerts.observe(seats)) {
       const seat = seats.find((seat) => seat.seatId === alert.seatId);
       const pane = seat && seatLeadOwners.get(seat)?.observed.paneId;
-      if (!pane) continue;
-      void notifyFleetHealthAlert(pane, alert.text).catch(() => undefined);
+      if (!pane) {
+        reportFailureAlerts.settle(alert, false);
+        continue;
+      }
+      void notifyFleetHealthAlert(pane, alert.text)
+        .then((accepted) => reportFailureAlerts.settle(alert, accepted))
+        .catch(() => reportFailureAlerts.settle(alert, false));
     }
   }
 
@@ -2405,8 +2410,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
     if (!(await validateConversationOwner(owner))) return false;
     await guard();
-    const outbox = seatOutboxes.get(owner.conversationId);
-    if (!recipient && (outbox?.bound() || outbox?.uncertain())) {
+    const outbox = seatOutbox(owner.conversationId);
+    if (outbox.uncertain()) return false;
+    if (!recipient && outbox.bound()) {
       const result = await outbox.deliver({
         kind: "message",
         conversationId: owner.conversationId,
@@ -2423,11 +2429,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (!target?.session) return false;
     const binding = inboundBinding(target);
     if (recipient && binding !== recipient.binding) return false;
+    const mailbox = fleetSeatMailbox(
+      fleetMailboxes,
+      target.terminalId,
+      join(options.stateDir, "delivery-receipts", "fleet"),
+    );
+    if (mailbox.uncertain()) return false;
+    let blocked = false;
+    let dispatchChecked = false;
     const finalGuard = async () => {
       await guard();
       if (!(await validateConversationOwner(owner))) throw new Error("Health alert owner changed");
       if (recipient && !(await nativeRecipientCurrent(recipient)))
         throw new Error("Health alert native lead changed");
+      if (outbox.uncertain() || mailbox.uncertain()) {
+        blocked = true;
+        throw new Error("Health alert recipient has an unresolved original receipt; nothing was sent");
+      }
+      dispatchChecked = true;
     };
     const result = await deliverToSeat(
       target.terminalId,
@@ -2438,8 +2457,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ...(binding === undefined ? {} : { recipientBinding: binding }),
         fence: async (current) => inboundBinding(current) === binding,
       },
+    ).catch((error: unknown) => {
+      if (blocked) return undefined;
+      throw error;
+    });
+    return (
+      !blocked &&
+      result !== undefined &&
+      (result.outcome === "delivered" || (result.outcome === "unconfirmed" && dispatchChecked))
     );
-    return ["delivered", "unconfirmed"].includes(result.outcome);
   }
 
   /** Read every fleet-owned record against one stable Herdr change cursor. */
