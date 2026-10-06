@@ -31,3 +31,14 @@ hook errors and show its session seated in Clankie's roster. Changed native hook
 definitions require the owner's `/hooks` trust review. Linux was not run; POSIX
 behavior has Mac shell evidence only. Leave the issue open until live evidence
 covers its acceptance criteria.
+
+Native contract confirmation: the [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks)
+identifies `PLUGIN_ROOT` as the installed plugin root supplied to hooks. The local
+OpenAI Codex source at `008bbd5884122dc95aaece19ecfe0fc6a59dcf36` sets it in
+`codex-rs/hooks/src/engine/discovery.rs` and applies hook environment variables in
+`engine/command_runner.rs`. That runner selects `COMSPEC`/`cmd.exe /C` on Windows
+and `SHELL`/`/bin/sh -lc` on POSIX. Reading the environment in Node follows the
+native contract without depending on either shell's variable syntax.
+
+The additional harness-profile version check passed, 9 tests (28 focused tests
+in total). No executable inputs changed after those checks.
