@@ -51,3 +51,31 @@ export const FleetToolCatalogHealthPageSchema = z
   })
   .strict();
 export type FleetToolCatalogHealthPage = z.infer<typeof FleetToolCatalogHealthPageSchema>;
+
+export const FLEET_WORKER_CATALOG_REFRESH_PATH = "/v1/fleet/worker-tool-refresh";
+export const FleetWorkerCatalogRefreshRequestSchema = z
+  .object({
+    paneId: z.string().trim().min(1).max(256).optional(),
+  })
+  .strict();
+export const FleetWorkerCatalogRefreshResultSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    revision: z.string().min(1).max(256),
+    seats: z
+      .array(
+        z
+          .object({
+            paneId: z.string().min(1).max(256),
+            seatId: z.string().min(1).max(256).optional(),
+            threadId: z.string().min(1).max(256).optional(),
+            revision: z.string().min(1).max(256),
+            outcome: z.enum(["refreshed", "skipped-busy", "failed"]),
+            reason: z.string().max(1024).optional(),
+          })
+          .strict(),
+      )
+      .max(256),
+  })
+  .strict();
+export type FleetWorkerCatalogRefreshResult = z.infer<typeof FleetWorkerCatalogRefreshResultSchema>;

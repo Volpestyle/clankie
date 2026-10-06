@@ -105,6 +105,7 @@ export async function tui(api, options) {
       } else {
         if (!initialized) throw new Error("Native worker is not initialized");
         if (message.method === "status") result = await runtime.status();
+        else if (message.method === "refreshToolCatalog") result = await runtime.refreshToolCatalog();
         else if (message.method === "send") result = await runtime.send(message.input);
         else if (message.method === "history") result = await runtime.history();
         else if (message.method === "settlement") result = await runtime.settlement(message.input);

@@ -2,10 +2,14 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import { occupantIdForHerdrSession, parseHerdrAgentList } from "./captain/herdr-census.ts";
 import { type HerdrBinding } from "@clankie/protocol";
-import { LocalCodexStateSchema as StateSchema, isLocalCodexEndpoint } from "./local-codex-records.ts";
+import {
+  LocalCodexStateSchema as StateSchema,
+  isLocalCodexEndpoint,
+  type LocalCodexRecord,
+} from "./local-codex-records.ts";
 import type { z } from "zod";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import { observeNativeBirth, nativeProcessReceipt } from "./local-fleet-process.ts";
@@ -52,6 +56,7 @@ interface Entry {
   endpoint?: string | undefined;
   parent?: { paneId: string; occupantId: string } | undefined;
   restored?: true;
+  catalogConfig?: LocalCodexRecord["catalogConfig"];
 }
 interface DurableSeats {
   /** Controller-owned launch records; incoming requests never create them. */
@@ -110,6 +115,7 @@ export class LocalCodexSeats {
               nativeOccupantId: seat.nativeOccupantId,
               ...(seat.threadId === undefined ? {} : { threadId: seat.threadId }),
               ...(seat.endpoint === undefined ? {} : { endpoint: seat.endpoint }),
+              ...(seat.catalogConfig === undefined ? {} : { catalogConfig: seat.catalogConfig }),
               ...(seat.parent === undefined ? {} : { parent: seat.parent }),
             },
           ]
@@ -132,6 +138,94 @@ export class LocalCodexSeats {
     } finally {
       closeSync(directory);
     }
+  }
+
+  get catalogRecordsPath(): string | undefined {
+    return this.durable?.path;
+  }
+
+  /** Only completed controller-created registrations are candidates; records confer no mutation authority. */
+  catalogCandidates(paneId?: string): LocalCodexRecord[] {
+    return [...this.seats].flatMap(([pid, seat]) =>
+      seat.capturedStart && seat.nativeOccupantId && (paneId === undefined || paneId === seat.pane)
+        ? [
+            {
+              pid,
+              pane: seat.pane,
+              binding: { ...seat.binding },
+              start: seat.capturedStart,
+              nativeOccupantId: seat.nativeOccupantId,
+              ...(seat.threadId === undefined ? {} : { threadId: seat.threadId }),
+              ...(seat.endpoint === undefined ? {} : { endpoint: seat.endpoint }),
+              ...(seat.parent === undefined ? {} : { parent: { ...seat.parent } }),
+              ...(seat.catalogConfig === undefined ? {} : { catalogConfig: { ...seat.catalogConfig } }),
+            },
+          ]
+        : [],
+    );
+  }
+
+  assertCatalogCurrent(candidate: LocalCodexRecord): void {
+    const current = this.catalogCandidates(candidate.pane).find((entry) => entry.pid === candidate.pid);
+    const binding = this.binding();
+    if (
+      !isDeepStrictEqual(current, candidate) ||
+      binding?.socketPath !== candidate.binding.socketPath ||
+      binding.session !== candidate.binding.session
+    )
+      throw new Error("original_local_codex_registration_changed");
+    if (this.durable) {
+      const stored = StateSchema.parse(JSON.parse(readFileSync(this.durable.path, "utf8"))).seats;
+      if (!stored.some((entry) => isDeepStrictEqual(entry, candidate)))
+        throw new Error("original_local_codex_record_changed");
+    }
+  }
+
+  async guardCatalog(candidate: LocalCodexRecord, signal?: AbortSignal): Promise<void> {
+    this.assertCatalogCurrent(candidate);
+    // Catalog recovery separately proves the native foreground, owned socket,
+    // and registered loaded-thread digest. A stale Herdr agent hook must not
+    // prevent that proof after a service restart. MCP admission still uses the
+    // stricter allows() path below.
+    if ((await this.observeStart(candidate.pid, candidate.start, signal)) !== candidate.start)
+      throw new Error("original_local_codex_identity_unavailable");
+    signal?.throwIfAborted();
+    this.assertCatalogCurrent(candidate);
+  }
+
+  /** Retain only identity derived from the original native controller's read-only proof. */
+  retainCatalogIdentity(
+    candidate: LocalCodexRecord,
+    identity: { endpoint: string; threadId?: string },
+  ): LocalCodexRecord {
+    this.assertCatalogCurrent(candidate);
+    const seat = this.seats.get(candidate.pid)!;
+    if (
+      !isLocalCodexEndpoint(identity.endpoint) ||
+      (seat.endpoint !== undefined && seat.endpoint !== identity.endpoint) ||
+      (identity.threadId !== undefined &&
+        (occupantIdForHerdrSession({ source: "herdr:codex", kind: "id", value: identity.threadId }) !==
+          candidate.nativeOccupantId ||
+          (seat.threadId !== undefined && seat.threadId !== identity.threadId)))
+    )
+      throw new Error("original_local_codex_native_identity_changed");
+    seat.endpoint = identity.endpoint;
+    if (identity.threadId !== undefined) seat.threadId = identity.threadId;
+    this.save();
+    return this.catalogCandidates(candidate.pane).find((entry) => entry.pid === candidate.pid)!;
+  }
+
+  retainCatalogConfig(
+    candidate: LocalCodexRecord,
+    config: NonNullable<LocalCodexRecord["catalogConfig"]>,
+  ): LocalCodexRecord {
+    this.assertCatalogCurrent(candidate);
+    const seat = this.seats.get(candidate.pid)!;
+    if (seat.catalogConfig !== undefined && !isDeepStrictEqual(seat.catalogConfig, config))
+      throw new Error("original_local_codex_config_changed");
+    seat.catalogConfig = { ...config };
+    this.save();
+    return this.catalogCandidates(candidate.pane).find((entry) => entry.pid === candidate.pid)!;
   }
 
   register(pid: number, pane: string): LocalCodexRegistration {

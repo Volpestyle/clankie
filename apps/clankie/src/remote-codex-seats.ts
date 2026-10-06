@@ -21,6 +21,13 @@ export interface RemoteCodexRegistration {
   bindThread(threadId: string, soleThread: () => Promise<boolean>): void;
   observeThread(threadId: string): void;
 }
+export interface RemoteCodexCatalogResult {
+  readonly paneId: string;
+  readonly threadId?: string;
+  readonly revision: string;
+  readonly outcome: "failed";
+  readonly reason: string;
+}
 interface Entry {
   readonly launch: RemoteCodexLaunch;
   readonly linkAlive: () => boolean;
@@ -87,6 +94,56 @@ export class RemoteCodexSeats {
     return entry?.threadId && entry.linkAlive() && isDeepStrictEqual(entry.launch.fleet, fleet)
       ? { ...entry.launch.server }
       : undefined;
+  }
+
+  /**
+   * Registered remote controllers currently have no isolated native config
+   * provenance or durable refresh journal. Report that boundary without using
+   * an account-wide config, replaying a receipt, or recreating lost authority.
+   * A missing registration returns no row: the roster adds its own explicit
+   * recovery failure for observed seats that this registry does not own.
+   */
+  async refreshCatalogs(input: {
+    readonly paneId?: string;
+    readonly revision: string;
+    readonly signal?: AbortSignal;
+  }): Promise<RemoteCodexCatalogResult[]> {
+    const candidates = [...this.entries.entries()]
+      .filter(([key]) => input.paneId === undefined || key === input.paneId)
+      .sort(([left], [right]) => left.localeCompare(right));
+    const results: RemoteCodexCatalogResult[] = [];
+    for (const [paneId, entry] of candidates) {
+      const result: RemoteCodexCatalogResult = {
+        paneId,
+        ...(entry.threadId === undefined ? {} : { threadId: entry.threadId }),
+        revision: input.revision,
+        outcome: "failed",
+        reason: "remote_codex_catalog_refresh_isolated_config_unavailable",
+      };
+      let reason: string | undefined;
+      if (input.signal?.aborted) reason = "remote_codex_catalog_refresh_cancelled";
+      else if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(input.revision))
+        reason = "remote_codex_catalog_revision_invalid";
+      else if (!entry.threadId || !entry.soleThread) reason = "original_remote_codex_thread_unbound";
+      else {
+        try {
+          if (!entry.linkAlive()) reason = "original_remote_codex_link_unavailable";
+          else {
+            const fleet = await this.fleet(entry.launch.fleet.id);
+            if (input.signal?.aborted) reason = "remote_codex_catalog_refresh_cancelled";
+            else if (this.entries.get(paneId) !== entry)
+              reason = "original_remote_codex_registration_changed";
+            else if (!entry.linkAlive()) reason = "original_remote_codex_link_unavailable";
+            else if (!isDeepStrictEqual(fleet, entry.launch.fleet))
+              reason = "original_remote_codex_fleet_changed";
+          }
+        } catch {
+          reason = "original_remote_codex_registration_unavailable";
+        }
+      }
+      results.push(reason === undefined ? result : { ...result, reason });
+    }
+    return results;
   }
 
   async allows(

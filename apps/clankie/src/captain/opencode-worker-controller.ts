@@ -29,7 +29,15 @@ export interface OpenCodeController {
   /** Admission is armed only after the native allocation is returned and captured. */
   bind(check: (socket: Socket) => Promise<boolean>, guard: () => Promise<void>): void;
   request(
-    method: "initialize" | "status" | "send" | "history" | "settlement" | "interrupt" | "exit",
+    method:
+      | "initialize"
+      | "status"
+      | "send"
+      | "history"
+      | "settlement"
+      | "refreshToolCatalog"
+      | "interrupt"
+      | "exit",
     input?: unknown,
     timeoutMs?: number,
     beforeDispatch?: () => Promise<boolean>,
@@ -74,6 +82,7 @@ export async function createOpenCodeController(input: {
   let lastAcknowledgment: string | undefined;
   let activeSend: { messageId: string; text: string } | undefined;
   let activeExit: { beforeDispatch?: () => Promise<boolean> } | undefined;
+  let activeRefresh: { beforeDispatch?: () => Promise<boolean> } | undefined;
   const pending = new Map<
     string,
     { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
@@ -146,11 +155,17 @@ export async function createOpenCodeController(input: {
       if (original !== peer) throw unavailable();
       if (frame.method === "authorize") {
         const action = z
-          .object({ action: z.enum(["initialize", "send", "history", "interrupt", "exit"]) })
+          .object({
+            action: z.enum(["initialize", "send", "history", "refreshToolCatalog", "interrupt", "exit"]),
+          })
           .parse(frame.input).action;
         if (action !== "initialize" && !sessionId) throw unavailable();
         if (action === "exit") {
           if (!activeExit || (activeExit.beforeDispatch && !(await activeExit.beforeDispatch())))
+            throw unavailable();
+        }
+        if (action === "refreshToolCatalog") {
+          if (!activeRefresh || (activeRefresh.beforeDispatch && !(await activeRefresh.beforeDispatch())))
             throw unavailable();
         }
       } else if (frame.method === "claim") {
@@ -274,6 +289,10 @@ export async function createOpenCodeController(input: {
         if (!sessionId || activeExit) throw unavailable();
         activeExit = beforeDispatch === undefined ? {} : { beforeDispatch };
       }
+      if (method === "refreshToolCatalog") {
+        if (!sessionId || activeRefresh) throw unavailable();
+        activeRefresh = beforeDispatch === undefined ? {} : { beforeDispatch };
+      }
       if (method === "send" && (!sessionId || fence.pending(sessionId)))
         throw new Error("An earlier native delivery is uncertain; no resend");
       if (method === "send") {
@@ -321,6 +340,7 @@ export async function createOpenCodeController(input: {
       } finally {
         if (method === "send") activeSend = undefined;
         if (method === "exit") activeExit = undefined;
+        if (method === "refreshToolCatalog") activeRefresh = undefined;
       }
     },
     async acknowledge(id) {

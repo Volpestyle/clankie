@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import type { Duplex } from "node:stream";
 import { trustInstalledCodexWorkerHooks } from "./codex-hook-trust.ts";
-import { isolatedCodexConfig, watchCodexCatalog } from "./codex-catalog-refresh.ts";
+import { isolatedCodexConfig } from "./codex-catalog-refresh.ts";
 import type { SeatQuestion, SeatQuestionAnswer, SeatQuestionResult } from "@clankie/agent-hosts";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -612,7 +612,6 @@ export async function startCodexAppServerSeat(options: {
   let client: CodexAppServerClient | undefined;
   let closed = false;
   let stopped = false;
-  let stopCatalogWatch: (() => void) | undefined;
   if (
     options.catalogRefreshHome &&
     options.catalogRefreshHome !==
@@ -625,7 +624,6 @@ export async function startCodexAppServerSeat(options: {
   const stoppedServer = () => {
     if (stopped) return;
     stopped = true;
-    stopCatalogWatch?.();
     options.onServerStopped?.();
   };
   const server = await (options.server ?? localCodexServer)({
@@ -651,7 +649,6 @@ export async function startCodexAppServerSeat(options: {
   const close = async () => {
     if (closed) return;
     closed = true;
-    stopCatalogWatch?.();
     client?.close();
     try {
       await server.close();
@@ -784,18 +781,8 @@ export async function startCodexAppServerSeat(options: {
     };
     client = new CodexAppServerClient(socket, observe);
     await client.initialize(true);
-    if (catalogConfig && server.catalogSignalPath) {
-      stopCatalogWatch = watchCodexCatalog({
-        signalPath: server.catalogSignalPath,
-        configPath: catalogConfig,
-        request: (method, params) => client!.request(method, params),
-        onError: (error) =>
-          options.onEvent?.({
-            method: "mcpServer/catalogRefresh/failed",
-            params: { message: String(error) },
-          }),
-      });
-    }
+    // The durable local seat coordinator owns catalog signals, including after
+    // this service heap dies. A second per-launch watcher must never race it.
     const read: CodexNativeRead = {
       request(method, params) {
         if (!["account/read", "account/rateLimits/read", "thread/list", "config/read"].includes(method))
@@ -1039,7 +1026,7 @@ export async function startCodexAppServerSeat(options: {
           const status = record(
             await client!.request(
               "mcpServerStatus/list",
-              { threadId, detail: "toolsAndAuthOnly" },
+              { threadId, serverName: "clankie", detail: "toolsAndAuthOnly" },
               Math.min(2_000, deadline - Date.now()),
             ),
           );

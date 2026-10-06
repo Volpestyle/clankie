@@ -362,6 +362,29 @@ change an in-flight observation. `/update` offers the same settings in the TUI.
 A restart of the observed service starts a fresh full window for its new boot
 identity; elapsed downtime never counts as healthy observation.
 
+The service also schedules an in-place tool refresh for running workers. Local
+managed Codex controllers keep their original thread and descendants, wait for
+idle, update only the private Clankie transport revision with a native config
+version check, and reload once. A lost mutation acknowledgment is held for
+read-only reconciliation. No turn or uncertain report is replayed.
+
+`clankie harness refresh-tools [--pane PANE]`, TUI `/refresh-tools [--pane PANE]`,
+and the operator tool `refresh_worker_tools` request one or all observed seats.
+The authenticated API is `POST /v1/fleet/worker-tool-refresh` with `{}` or
+`{"paneId":"PANE"}`. Each result is `refreshed`, `skipped-busy`, or `failed`
+with a reason. Busy requests remain pending under their original authority.
+Roster `workerTools` and `/doctor` show observed/expected plugin versions and
+whether the observed runtime revision is behind. These fields grant no access.
+
+Known native busy state also holds deployment metadata publication until idle.
+The current implementation cannot safely refresh remote Codex configurations
+or recover their original controllers after a service restart. Claude supports
+native list-change adoption for an already current bridge, but replacing old
+imported bridge code remains unverified. OpenCode verifies the original native
+MCP connection; its public SDK does not expose exact model-visible MCP names.
+These cases remain visible per-seat failures or verification gaps, never
+successful refresh claims. See [ADR 0235](adr/0235-worker-catalog-refresh-keeps-the-original-controller.md).
+
 The CLI and TUI `/update` return an accepted/pending operation, not a success
 claim. `clankie update status` and `/update status` read the durable old/new commit,
 phase, per-service receipts and exact service boot identity. `initiator` records

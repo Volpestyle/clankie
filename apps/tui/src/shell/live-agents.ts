@@ -456,7 +456,10 @@ export class LiveAgentPicker implements Component {
           step ?? this.theme.ansi.dim("Step unavailable"),
           ...shownCatalogDetail,
           ...(selected.seat.workerTools
-            ? [`Worker tools: ${clean(selected.seat.workerTools.reason)}`]
+            ? [
+                `Worker tools: ${clean(selected.seat.workerTools.reason)}`,
+                `Plugin: ${selected.seat.workerTools.pluginVersion ?? "unknown"} / deployed ${selected.seat.workerTools.expectedPluginVersion ?? "unknown"}${selected.seat.workerTools.behind ? " · behind" : ""}`,
+              ]
             : [
                 this.theme.ansi.dim("Worker tools: no authenticated observation; native catalog unverified."),
               ]),

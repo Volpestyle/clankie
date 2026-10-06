@@ -26,6 +26,15 @@ export const LocalCodexStateSchema = z
           nativeOccupantId: z.string().min(1),
           threadId: z.string().min(1).optional(),
           endpoint: z.string().refine(isLocalCodexEndpoint).optional(),
+          /** Native config/read provenance, never an owner-provided path. */
+          catalogConfig: z
+            .object({
+              home: z.string().min(1),
+              filePath: z.string().min(1),
+              signalPath: z.string().min(1).optional(),
+            })
+            .strict()
+            .optional(),
           parent: z
             .object({
               paneId: z.string().regex(/^w[\w]+:p[\w]+$/u),
@@ -38,6 +47,8 @@ export const LocalCodexStateSchema = z
     ),
   })
   .strict();
+
+export type LocalCodexRecord = z.infer<typeof LocalCodexStateSchema>["seats"][number];
 
 function localCodexRecordsPath(): string {
   return join(

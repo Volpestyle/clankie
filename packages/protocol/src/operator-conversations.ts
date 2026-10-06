@@ -774,6 +774,17 @@ export const WorkerBridgeStatusSchema = z
     observedAt: z.string().datetime().optional(),
     pendingSince: z.string().datetime().optional(),
     tools: z.array(z.string().min(1).max(256)).max(4096).optional(),
+    pluginVersion: z
+      .string()
+      .regex(/^\d+\.\d+\.\d+$/u)
+      .optional(),
+    expectedPluginVersion: z
+      .string()
+      .regex(/^\d+\.\d+\.\d+$/u)
+      .optional(),
+    behind: z.boolean().optional(),
+    runtimeRevision: z.string().min(1).max(256).optional(),
+    expectedRuntimeRevision: z.string().min(1).max(256).optional(),
   })
   .strict();
 export type WorkerBridgeStatus = z.infer<typeof WorkerBridgeStatusSchema>;

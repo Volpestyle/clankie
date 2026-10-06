@@ -179,10 +179,13 @@ describe("Codex original native startup catalog", () => {
     expect(report.tools).toEqual(["message_clankie"]);
     expect(reads).toEqual([
       { method: "thread/loaded/list", params: {} },
-      { method: "mcpServerStatus/list", params: { threadId: "original", detail: "toolsAndAuthOnly" } },
       {
         method: "mcpServerStatus/list",
-        params: { threadId: "original", detail: "toolsAndAuthOnly", cursor: "next" },
+        params: { threadId: "original", serverName: "clankie", detail: "toolsAndAuthOnly" },
+      },
+      {
+        method: "mcpServerStatus/list",
+        params: { threadId: "original", serverName: "clankie", detail: "toolsAndAuthOnly", cursor: "next" },
       },
     ]);
     expect(FleetSeatToolCatalogSchema.safeParse(report).success).toBe(true);

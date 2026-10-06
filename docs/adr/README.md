@@ -92,6 +92,8 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0233 — Activity shares own their media scope](0233-activity-shares-own-their-media-scope.md)
 - [0234 — Games share one extension contract](0234-games-share-one-extension-contract.md)
 
+- [0235 — Worker catalog refresh keeps the original controller](0235-worker-catalog-refresh-keeps-the-original-controller.md)
+
 ## Archived decisions
 
 **Archived** means superseded or retired for the scope named below. These records

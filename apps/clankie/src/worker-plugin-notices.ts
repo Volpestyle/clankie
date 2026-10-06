@@ -57,7 +57,7 @@ export class WorkerPluginNotices {
         older
           ? [
               "--token",
-              `clankie-plugin=Clankie plugin ${version} is older than ${expectedVersion}. Save this session, then restart/resume this harness in this pane to load the refreshed plugin. Nothing was restarted.`,
+              `clankie-plugin=Clankie plugin ${version} is older than ${expectedVersion}. Request an in-place worker tool refresh; busy seats refresh when idle. Check the per-seat result if refresh fails.`,
             ]
           : ["--clear-token", "clankie-plugin"],
       );

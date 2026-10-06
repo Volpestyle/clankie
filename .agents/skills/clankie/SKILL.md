@@ -92,10 +92,15 @@ current admission, tool grant and account binding and never dispatches a write.
 A `No durable native binding` receipt
 means no new message was sent; report the pane and inspect its native binding.
 
-The bridge reports catalog changes every five seconds. Locally hired Codex
-seats with a dedicated app-server and isolated config refresh at the next model
-step on the same thread. Codex 0.160.0 otherwise ignores MCP list-change
-notifications; `/mcp` or a fresh status connection does not refresh that thread.
+The bridge observes schemas and authenticated runtime revisions every five
+seconds. Deploys schedule local managed Codex refresh through its original
+controller, private config version and loaded root/descendant inventory, at
+idle. The operator can request one or all with `refresh_worker_tools`,
+`clankie harness refresh-tools [--pane PANE]`, or TUI `/refresh-tools`.
+Read each `refreshed`, `skipped-busy`, or `failed` result. Roster/doctor versions
+and runtime-behind fields are observations, not tool authority. Codex 0.160.0
+ignores MCP list-change notifications; a fresh observer connection does not
+refresh the original thread.
 For manual or remote clients, report the stale catalog and ask the owner to
 reconnect the exact thread with its original cwd, account home and flags after
 its runtime unloads. Never restart a shared daemon, fork automatically, or
@@ -104,8 +109,11 @@ replay an uncertain tool call. Controller-owned hires need controller recovery.
 Runtime and on-disk plugin updates do not replace an already-imported worker
 receipt parser. An older 0.6.2 bridge cannot consume an exact negative
 `definitive: not_sent` receipt. Keep its claim and have the original controller
-refresh that MCP connection on the same thread; the next call reconciles only
-the original, and a separate deliberate call sends the later report. Never
+refresh that MCP connection on the same thread. A refreshed bridge reads the
+retained original once after active calls settle; it sends no replacement.
+An unresolved original stays held. A separate deliberate call after settlement
+sends the later report. Remote Codex controller/config recovery and replacing
+old imported Claude bridge code remain explicit verification gaps. Never
 delete the claim or report a sealed negative as a positive stored delivery.
 
 Before an authorized write, load `linear-issues` for read-before-write, labels,

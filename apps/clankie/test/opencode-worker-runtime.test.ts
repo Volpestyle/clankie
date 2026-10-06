@@ -7,12 +7,13 @@ const otherSession = "ses_ownerSession456";
 const messageId = "msg_controllerRequest123";
 const cwd = "/projects/worker";
 
-function fixture(resume = false) {
+function fixture(resume = false, activity = true) {
   let route: { name: string; params?: { sessionID: string } } = resume
     ? { name: "session", params: { sessionID: sessionId } }
     : { name: "home" };
   let watch = () => {};
   let connected = true;
+  const events = new Map<string, Set<(event: unknown) => void>>();
   const abort = new AbortController();
   const state = {
     ready: true,
@@ -23,6 +24,14 @@ function fixture(resume = false) {
   const api = {
     app: { version: "1.18.18" },
     lifecycle: { signal: abort.signal },
+    event: {
+      on: (type: string, handler: (event: unknown) => void) => {
+        const listeners = events.get(type) ?? new Set();
+        listeners.add(handler);
+        events.set(type, listeners);
+        return () => listeners.delete(handler);
+      },
+    },
     route: {
       get current() {
         return route;
@@ -56,15 +65,21 @@ function fixture(resume = false) {
       session: {
         create: vi.fn(async () => ({ data: { id: sessionId } })),
         get: vi.fn(async () => ({ data: { id: sessionId, directory: cwd } })),
-        status: vi.fn(async () => ({
-          data: state.status === "idle" ? {} : { [sessionId]: { type: state.status } },
-        })),
+        status: vi.fn(
+          async (): Promise<{ data: Record<string, { type: string }> }> => ({
+            data: state.status === "idle" ? {} : { [sessionId]: { type: state.status } },
+          }),
+        ),
         messages: vi.fn(async () => ({ data: [] as unknown[] })),
         promptAsync: vi.fn(async () => ({ response: { status: 204 } })),
         abort: vi.fn(async () => ({ data: true })),
       },
       permission: { list: vi.fn(async () => ({ data: state.permissions })) },
       question: { list: vi.fn(async () => ({ data: state.questions })) },
+      mcp: {
+        connect: vi.fn(async () => ({ data: true })),
+        status: vi.fn(async () => ({ data: { clankie: { status: "connected" } } })),
+      },
     },
   };
   const controller = {
@@ -80,12 +95,16 @@ function fixture(resume = false) {
     claim: vi.fn(async (_claim: unknown) => {}),
     receipt: vi.fn(async (_receipt: unknown) => {}),
   };
+  if (!activity) Object.defineProperty(api, "event", { value: undefined });
   const runtime = createOpenCodeWorkerRuntime(api, controller);
   return {
     api,
     state,
     controller,
     runtime,
+    event: (type: string, properties: unknown) => {
+      for (const handler of events.get(type) ?? []) handler({ id: "native-event", type, properties });
+    },
     switch: (id = otherSession) => api.route.navigate("session", { sessionID: id }),
     disconnect: () => {
       connected = false;
@@ -107,6 +126,221 @@ test("first initializer creates and observes one session before caller mounts th
   await expect(f.initialize()).rejects.toThrow("only once");
   expect(f.api.client.session.create).toHaveBeenCalledTimes(1);
   expect(f.api.route.navigate).toHaveBeenCalledTimes(1);
+});
+
+test("catalog refresh observes the original worker MCP without replacing its transport, session or draft", async () => {
+  const f = fixture(true);
+  await f.initialize();
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "refreshed",
+    reason: "original-native-clankie-connection-observed",
+  });
+  expect(f.controller.authorize).toHaveBeenLastCalledWith("refreshToolCatalog");
+  expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(f.api.client.mcp.status).toHaveBeenCalledExactlyOnceWith(
+    {},
+    expect.objectContaining({ throwOnError: true, signal: expect.any(AbortSignal) }),
+  );
+  expect(f.api.client.session.create).not.toHaveBeenCalled();
+  expect(f.api.route.navigate).not.toHaveBeenCalled();
+  expect(f.api.client.session.promptAsync).not.toHaveBeenCalled();
+  expect(f.api.client.session.abort).not.toHaveBeenCalled();
+  expect(f.api.keymap.dispatchCommand).not.toHaveBeenCalled();
+  expect(f.controller.claim).not.toHaveBeenCalled();
+});
+
+test.each(["busy", "permission", "question", "child-busy", "child-permission"])(
+  "catalog refresh skips %s without interrupting, reconnecting, or answering",
+  async (kind) => {
+    const f = fixture(true);
+    await f.initialize();
+    if (kind === "busy") f.state.status = "busy";
+    if (kind === "permission") f.state.permissions = [{ sessionID: sessionId }];
+    if (kind === "question") f.state.questions = [{ sessionID: sessionId }];
+    if (kind === "child-permission") f.state.permissions = [{ sessionID: otherSession }];
+    if (kind === "child-busy")
+      f.api.client.session.status.mockResolvedValue({ data: { [otherSession]: { type: "busy" } } });
+    expect(await f.runtime.refreshToolCatalog()).toEqual({
+      outcome: "skipped-busy",
+      reason: "native-session-busy",
+    });
+    expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+    expect(f.api.client.session.promptAsync).not.toHaveBeenCalled();
+    expect(f.api.client.session.abort).not.toHaveBeenCalled();
+    expect(f.controller.claim).not.toHaveBeenCalled();
+  },
+);
+
+test.each(["authorize", "status"])(
+  "catalog refresh cannot report success after an original route change during %s",
+  async (phase) => {
+    const f = fixture(true);
+    await f.initialize();
+    const change = () => {
+      f.switch();
+      f.switch(sessionId);
+    };
+    if (phase === "authorize") f.controller.authorize.mockImplementation(async () => change());
+    if (phase === "status")
+      f.api.client.mcp.status.mockImplementation(async () => {
+        change();
+        return { data: { clankie: { status: "connected" } } };
+      });
+    expect(await f.runtime.refreshToolCatalog()).toEqual({
+      outcome: "failed",
+      reason: "original-native-control-unavailable",
+    });
+    expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+    if (phase === "authorize") expect(f.api.client.mcp.status).not.toHaveBeenCalled();
+    expect(f.api.client.session.promptAsync).not.toHaveBeenCalled();
+    expect(f.api.client.session.create).not.toHaveBeenCalled();
+  },
+);
+
+test("catalog refresh rechecks owner decisions after admission and reports unavailable native APIs honestly", async () => {
+  const f = fixture(true);
+  await f.initialize();
+  f.controller.authorize.mockImplementation(async () => {
+    f.state.questions.push({ sessionID: sessionId });
+  });
+  expect((await f.runtime.refreshToolCatalog()).outcome).toBe("skipped-busy");
+  expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+  const unsupported = fixture(true);
+  await unsupported.initialize();
+  Object.defineProperty(unsupported.api.client, "mcp", { value: undefined });
+  expect(await unsupported.runtime.refreshToolCatalog()).toEqual({
+    outcome: "failed",
+    reason: "native-mcp-refresh-unsupported",
+  });
+});
+
+test.each(["busy", "busy-to-idle", "permission", "question"])(
+  "native child %s during awaited admission holds catalog observation with a monotonic activity fence",
+  async (phase) => {
+    const f = fixture(true);
+    await f.initialize();
+    f.controller.authorize.mockImplementation(async () => {
+      if (phase === "permission" || phase === "question")
+        f.event(`${phase}.asked`, { id: "native-child-decision", sessionID: otherSession });
+      else {
+        f.event("session.status", { sessionID: otherSession, status: { type: "busy" } });
+        if (phase === "busy-to-idle")
+          f.event("session.status", { sessionID: otherSession, status: { type: "idle" } });
+      }
+    });
+    expect(await f.runtime.refreshToolCatalog()).toEqual({
+      outcome: "skipped-busy",
+      reason: "native-session-busy",
+    });
+    expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+    expect(f.api.client.session.promptAsync).not.toHaveBeenCalled();
+    f.controller.authorize.mockResolvedValue();
+    if (phase === "busy") {
+      expect((await f.runtime.refreshToolCatalog()).outcome).toBe("skipped-busy");
+      f.event("session.status", { sessionID: otherSession, status: { type: "idle" } });
+    }
+    expect((await f.runtime.refreshToolCatalog()).outcome).toBe("refreshed");
+    expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+    expect(f.api.client.mcp.status).toHaveBeenCalledOnce();
+  },
+);
+
+test("unavailable or malformed native activity observations cannot confirm an idle connection", async () => {
+  const f = fixture(true);
+  await f.initialize();
+  f.event("session.status", { sessionID: otherSession, status: { type: "unknown-native-status" } });
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "failed",
+    reason: "native-mcp-refresh-unsupported",
+  });
+  expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(await f.runtime.status()).toBe("idle");
+  const unsupported = fixture(true, false);
+  await unsupported.initialize();
+  expect((await unsupported.runtime.refreshToolCatalog()).outcome).toBe("failed");
+  expect(unsupported.api.client.mcp.connect).not.toHaveBeenCalled();
+  unsupported.runtime.close();
+});
+
+test("native activity during connection observation defers refresh without reconnect or abort", async () => {
+  const f = fixture(true);
+  await f.initialize();
+  f.api.client.mcp.status.mockImplementation(async () => {
+    f.event("session.status", { sessionID: otherSession, status: { type: "busy" } });
+    return { data: { clankie: { status: "connected" } } };
+  });
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "skipped-busy",
+    reason: "native-session-busy",
+  });
+  expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(f.api.client.session.abort).not.toHaveBeenCalled();
+});
+
+test("connected observation requires no native reconnect capability", async () => {
+  const f = fixture(true);
+  await f.initialize();
+  Object.defineProperty(f.api.client.mcp, "connect", {
+    get: () => {
+      throw new Error("Transport replacement must not be inspected");
+    },
+  });
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "refreshed",
+    reason: "original-native-clankie-connection-observed",
+  });
+  expect(f.api.client.mcp.status).toHaveBeenCalledOnce();
+});
+
+test.each(["busy", "question"])("local native %s during status observation holds refresh", async (phase) => {
+  const f = fixture(true);
+  await f.initialize();
+  f.api.client.mcp.status.mockImplementation(async () => {
+    if (phase === "busy") f.state.status = "busy";
+    else f.state.questions = [{ sessionID: sessionId }];
+    return { data: { clankie: { status: "connected" } } };
+  });
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "skipped-busy",
+    reason: "native-session-busy",
+  });
+  expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+});
+
+test("native connected status is required for observation; raw errors stay private", async () => {
+  const f = fixture(true);
+  await f.initialize();
+  f.api.client.mcp.status.mockResolvedValue({ data: { clankie: { status: "failed" } } });
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "failed",
+    reason: "native-mcp-refresh-unconfirmed",
+  });
+  f.api.client.mcp.status.mockRejectedValue(new Error("secret from native config"));
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "failed",
+    reason: "original-native-control-unavailable",
+  });
+});
+
+test("one pending original catalog observation holds concurrent controller actions without a model turn", async () => {
+  const f = fixture(true);
+  await f.initialize();
+  let finish = () => {};
+  f.api.client.mcp.status.mockImplementation(
+    () => new Promise((resolve) => (finish = () => resolve({ data: { clankie: { status: "connected" } } }))),
+  );
+  const original = f.runtime.refreshToolCatalog();
+  await vi.waitFor(() => expect(f.api.client.mcp.status).toHaveBeenCalledOnce());
+  expect(await f.runtime.refreshToolCatalog()).toEqual({
+    outcome: "skipped-busy",
+    reason: "native-action-pending",
+  });
+  expect((await f.send()).outcome).toBe("unavailable");
+  expect(f.controller.claim).not.toHaveBeenCalled();
+  finish();
+  expect((await original).outcome).toBe("refreshed");
+  expect(f.api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(f.api.client.session.promptAsync).not.toHaveBeenCalled();
 });
 
 test("native exit authorizes the original session and refuses a route change during authorization", async () => {

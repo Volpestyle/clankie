@@ -1,7 +1,7 @@
 import { runComputerCommand } from "../src/command/computer.ts";
 import { runShareCommand } from "../src/command/share.ts";
 import { runDesktopCommand } from "../src/command/desktop.ts";
-import { runHarnessCommand } from "../src/command/harness.ts";
+import { runHarnessCommand, runWorkerToolRefreshCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
 import { runBodyCommand } from "../src/command/body.ts";
 import { MachineInventorySchema } from "@clankie/protocol";
@@ -341,6 +341,11 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "harness") {
+      if (rest[0] === "refresh-tools") {
+        const result = await runWorkerToolRefreshCommand(rest, options);
+        outputJson(stdout, result);
+        return result.seats.some((seat) => seat.outcome === "failed") ? 1 : 0;
+      }
       const result = await runHarnessCommand(rest, options);
       outputJson(stdout, result);
       return !Array.isArray(result) && result.ok === false ? 1 : 0;

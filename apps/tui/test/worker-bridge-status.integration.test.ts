@@ -40,6 +40,11 @@ const observations: readonly WorkerBridgeStatus[] = [
   {
     status: "missing",
     reason: "Authenticated catalog omitted clankie_call.",
+    pluginVersion: "0.6.4",
+    expectedPluginVersion: "0.6.7",
+    runtimeRevision: "before-deploy",
+    expectedRuntimeRevision: "after-deploy",
+    behind: true,
     observedAt,
     tools: ["clankie_tools"],
   },
@@ -207,7 +212,13 @@ it("preserves observed missing/stalled/unknown tools through real HTTP, the publ
     ...observations.map(({ status }) => status),
     "not-observed",
   ]);
-  expect(report.workerTools?.workers[3]).toMatchObject({ tools: ["clankie_tools"], status: "missing" });
+  expect(report.workerTools?.workers[3]).toMatchObject({
+    tools: ["clankie_tools"],
+    status: "missing",
+    pluginVersion: "0.6.4",
+    expectedPluginVersion: "0.6.7",
+    behind: true,
+  });
   expect(report.workerReports?.workers.find((worker) => worker.seatId === "pc/stalled")).toMatchObject({
     report: { outcome: "uncertain", reason: "binding_timeout", observedAt },
     flags: ["finished, unreported"],
@@ -221,6 +232,7 @@ it("preserves observed missing/stalled/unknown tools through real HTTP, the publ
   expect(human).toContain(
     "✗ Worker pc/missing tools · missing · Authenticated catalog omitted clankie_call.",
   );
+  expect(human).toContain("plugin 0.6.4 / deployed 0.6.7 · behind");
   expect(human).toContain(
     "✗ Worker pc/stalled tools · stalled · clankie_call exceeded its bridge observation deadline. Try again.",
   );

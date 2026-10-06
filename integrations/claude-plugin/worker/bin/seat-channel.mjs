@@ -254,6 +254,9 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
       let cursor;
       let toolsState;
       let peerMessages;
+      let runtimeRevision;
+      let pluginVersion;
+      let refreshPending = false;
       for (let page = 0; page < 32; page++) {
         const result = await request("tools/list", cursor === undefined ? {} : { cursor }, deadline);
         if (!Array.isArray(result?.tools)) throw new Error("Malformed granted catalog");
@@ -270,8 +273,34 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
             throw new Error("Inconsistent fleet peer settings metadata");
           peerMessages = peers;
         }
+        const revision = result._meta?.clankie?.runtimeRevision;
+        const version = result._meta?.clankie?.pluginVersion;
+        const hold = result._meta?.clankie?.refreshPending;
+        if (hold !== undefined && typeof hold !== "boolean")
+          throw new Error("Invalid native refresh publication boundary");
+        refreshPending ||= hold === true;
+        if (revision !== undefined) {
+          if (
+            typeof revision !== "string" ||
+            !revision ||
+            revision.length > 256 ||
+            (runtimeRevision !== undefined && runtimeRevision !== revision)
+          )
+            throw new Error("Inconsistent fleet runtime revision");
+          runtimeRevision = revision;
+        }
+        if (version !== undefined) {
+          if (
+            typeof version !== "string" ||
+            !/^\d+\.\d+\.\d+$/u.test(version) ||
+            (pluginVersion !== undefined && pluginVersion !== version)
+          )
+            throw new Error("Inconsistent fleet plugin version");
+          pluginVersion = version;
+        }
         if (tools.length > 4096) throw new Error("Granted catalog exceeds its bound");
-        if (result.nextCursor == null) return { tools, toolsState, peerMessages };
+        if (result.nextCursor == null)
+          return { tools, toolsState, peerMessages, runtimeRevision, pluginVersion, refreshPending };
         if (typeof result.nextCursor !== "string" || !result.nextCursor || cursors.has(result.nextCursor))
           throw new Error("Invalid granted catalog pagination");
         cursor = result.nextCursor;
@@ -316,6 +345,15 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   let link = readLink();
   let verifiedTools;
   let verifiedPeers;
+  let verifiedRevision;
+  let runtimeRevision;
+  let expectedPluginVersion;
+  let activeToolCalls = 0;
+  let catalogNotificationPending = false;
+  let receiptReconciliationPending;
+  let publishedCatalog;
+  let publishedRuntimeRevision;
+  const idleWaiters = new Set();
   let discoveryReason = "";
   let catalogSequence = 0;
   let verifiedToolsSequence = 0;
@@ -330,6 +368,9 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     if (!next || next.fleet !== link?.fleet || next.socket !== link?.socket) {
       verifiedTools = undefined;
       verifiedPeers = undefined;
+      verifiedRevision = undefined;
+      runtimeRevision = undefined;
+      expectedPluginVersion = undefined;
     }
     link = next;
     return true;
@@ -419,13 +460,15 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     link ? [MESSAGE_TOOL, ...(verifiedTools ?? []), ...(verifiedPeers ? PEER_TOOLS : [])] : [];
   let reportObservation;
   let toolObservation = { status: "missing", reason: "Catalog not observed" };
-  const report = (status, reason = "", tools = advertised()) => {
+  const report = (status, reason = "", tools = publishedCatalog ?? []) => {
     toolObservation = { status, reason };
     granted.report({
       ...(reportObservation === undefined ? {} : { report: reportObservation }),
       status,
       reason: reason.slice(0, 500),
       tools: tools.map((tool) => tool.name).slice(0, 128),
+      ...(publishedRuntimeRevision === undefined ? {} : { runtimeRevision: publishedRuntimeRevision }),
+      pluginVersion: PLUGIN_VERSION,
     });
   };
   const readCatalog = async (signal) => {
@@ -443,6 +486,13 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       try {
         const result = await granted.list(signal);
         assertSource();
+        if (result.refreshPending && verifiedTools !== undefined) {
+          // A newer busy observation fences older lookups still in flight.
+          verifiedToolsSequence = Math.max(sequence, verifiedToolsSequence);
+          peerMessages = verifiedPeers ? "on" : "off";
+          reasons.push("Original native session is busy; keeping its published catalog");
+          return verifiedTools;
+        }
         peerMessages = result.peerMessages;
         const tools = result.toolsState === "off" ? [] : result.tools;
         if (
@@ -452,8 +502,14 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         )
           throw new Error("Connected fleet tools have not returned their complete wrapper catalog");
         if (sequence >= verifiedToolsSequence) {
+          const previousRevision = verifiedRevision;
           verifiedTools = tools;
           verifiedToolsSequence = sequence;
+          runtimeRevision = result.runtimeRevision;
+          expectedPluginVersion = result.pluginVersion;
+          verifiedRevision = JSON.stringify([runtimeRevision, expectedPluginVersion]);
+          if (previousRevision !== undefined && previousRevision !== verifiedRevision)
+            receiptReconciliationPending = verifiedRevision;
         }
         return verifiedTools;
       } catch (error) {
@@ -503,9 +559,10 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     assertSource();
     discoveryReason = reasons.join("; ").slice(0, 2_000);
     if (failures.length) throw failures[0];
-    return { tools: advertised(), reason: discoveryReason };
+    return { tools: advertised(), reason: discoveryReason, runtimeRevision };
   };
   const catalog = createCatalogWatcher({
+    revision: () => verifiedRevision,
     list: async () => {
       const result = await listAdvertisedTools();
       firstCatalogVerified = true;
@@ -513,11 +570,24 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       return result.tools;
     },
     notify: async () => {
-      // The notification remains useful to clients that implement MCP refresh.
-      send({ method: "notifications/tools/list_changed" });
-      await signalCodexCatalog(process.env.CLANKIE_CODEX_CATALOG_SIGNAL);
+      catalogNotificationPending = true;
+      await flushCatalogNotification();
     },
   });
+  async function flushCatalogNotification() {
+    // Never change the native catalog while an MCP tool result is outstanding.
+    // Coalesce observations; emit only after the last result has been sent.
+    if (activeToolCalls) return;
+    if (receiptReconciliationPending !== undefined) {
+      const revision = receiptReconciliationPending;
+      receiptReconciliationPending = undefined;
+      await reconcileRefresh(revision);
+    }
+    if (activeToolCalls || !catalogNotificationPending) return;
+    catalogNotificationPending = false;
+    send({ method: "notifications/tools/list_changed" });
+    await signalCodexCatalog(process.env.CLANKIE_CODEX_CATALOG_SIGNAL);
+  }
   let firstListComplete = false;
   let firstCatalogVerified = false;
   let firstListPending;
@@ -681,11 +751,37 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       }
     },
   });
+  let refreshReconciliation;
+  let refreshReconciliationRevision;
+  let refreshIdentity = process.env.CLANKIE_CATALOG_REVISION;
+  let retainedInbound;
+  let retainedPeer;
+  function reconcileRefresh(revision = refreshIdentity) {
+    if (!revision) return refreshReconciliation ?? Promise.resolve();
+    refreshIdentity = revision;
+    if (refreshReconciliationRevision === revision) return refreshReconciliation;
+    refreshReconciliationRevision = revision;
+    const previous = refreshReconciliation;
+    refreshReconciliation = (async () => {
+      // Serial observations cannot race a prior reconciliation of this journal.
+      await previous;
+      // GET the retained originals once; an empty journal never sends anything.
+      const [inbound, peer] = await Promise.all([
+        sendInbound.reconcilePending(),
+        sendPeer.reconcilePending(),
+      ]);
+      retainedInbound = inbound?.deliveryStage === "uncertain" ? inbound : undefined;
+      retainedPeer = peer?.deliveryStage === "uncertain" ? peer : undefined;
+    })();
+    return refreshReconciliation;
+  }
   async function messageClankie(text) {
     if (!paneId) return { isError: true, text: "This session is not in a Herdr pane Clankie can answer." };
     const body = String(text ?? "").trim();
     if (!body) return { isError: true, text: "Say what to tell him." };
-    const receipt = await sendInbound(body.slice(0, TEXT_MAX));
+    await reconcileRefresh();
+    const receipt = retainedInbound ?? (await sendInbound(body.slice(0, TEXT_MAX)));
+    retainedInbound = undefined;
     return { isError: !receipt.received, text: JSON.stringify(receipt) };
   }
 
@@ -703,6 +799,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       });
     if (method === "notifications/initialized") {
       initialized = true;
+      void reconcileRefresh().catch((error) => log(`receipt reconciliation failed (${String(error)})`));
       // A grant issued or revoked while this session runs changes its tools.
       if (!startedCatalogWatch) {
         startedCatalogWatch = true;
@@ -722,10 +819,23 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     }
     if (method === "ping") return send({ id, result: {} });
     if (method === "tools/list") {
-      const result = await listAdvertisedTools();
+      let result;
+      for (;;) {
+        if (activeToolCalls && publishedCatalog !== undefined) {
+          send({ id, result: { tools: publishedCatalog } });
+          return;
+        }
+        while (activeToolCalls) await new Promise((resolve) => idleWaiters.add(resolve));
+        result = await listAdvertisedTools();
+        // A call can start while the HTTP/native-status lookup is pending.
+        // Re-enter the barrier before publishing its new definitions.
+        if (!activeToolCalls) break;
+      }
       firstCatalogVerified = true;
       catalog.observe(result.tools);
       send({ id, result: { tools: result.tools } });
+      publishedCatalog = result.tools;
+      publishedRuntimeRevision = result.runtimeRevision;
       startPolling();
       report("ready", result.reason, result.tools);
       return;
@@ -755,7 +865,9 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       }
       if (params?.name === "message_peer") {
         const args = params?.arguments;
-        const receipt = await sendPeer(args?.seat, args?.text);
+        await reconcileRefresh();
+        const receipt = retainedPeer ?? (await sendPeer(args?.seat, args?.text));
+        retainedPeer = undefined;
         return send({
           id,
           result: {
@@ -825,19 +937,32 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         send({ id: null, error: { code: -32700, message: "Parse error" } });
         continue;
       }
-      void handle(message).catch((error) => {
-        log(String(error));
-        if (message.id !== undefined)
-          send({
-            id: message.id,
-            error: {
-              code: -32000,
-              message: error instanceof Error ? error.message : "Clankie request failed",
-            },
-          });
-        if (message.method === "tools/list")
-          report(error instanceof FleetRequestTimeout ? "stalled" : "missing", String(error));
-      });
+      const toolCall = message.method === "tools/call";
+      if (toolCall) activeToolCalls += 1;
+      void handle(message)
+        .catch((error) => {
+          log(String(error));
+          if (message.id !== undefined)
+            send({
+              id: message.id,
+              error: {
+                code: -32000,
+                message: error instanceof Error ? error.message : "Clankie request failed",
+              },
+            });
+          if (message.method === "tools/list")
+            report(error instanceof FleetRequestTimeout ? "stalled" : "missing", String(error));
+        })
+        .finally(() => {
+          if (toolCall) activeToolCalls -= 1;
+          if (!activeToolCalls) {
+            for (const resolve of idleWaiters) resolve();
+            idleWaiters.clear();
+          }
+          void flushCatalogNotification().catch((error) =>
+            log(`catalog notification failed (${String(error)})`),
+          );
+        });
     }
   });
   const stop = () => {

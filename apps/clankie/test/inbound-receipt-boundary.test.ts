@@ -186,6 +186,45 @@ it("settles the old bridge's sealed unknown original through HTTP after service 
   }
 });
 
+it("refresh reconciles a retained original by GET once, then permits a separate deliberate report", async () => {
+  const f = await fixture();
+  try {
+    await createLegacySender(f.options())("Original before deploy");
+    const original = await f.claim();
+    await f.restart();
+    let reads = 0;
+    const transport = f.options();
+    const refreshed = createInboundSender({
+      ...transport,
+      request: (suffix, init) => {
+        if (!init) reads += 1;
+        return transport.request(suffix, init);
+      },
+    });
+    expect(await refreshed.reconcilePending()).toMatchObject({
+      deliveryId: original.deliveryId,
+      binding: original.binding,
+      fingerprint: original.fingerprint,
+      received: false,
+      definitive: "not_sent",
+      deliveryStage: "unavailable",
+    });
+    expect(reads).toBe(1);
+    expect(f.posts).toHaveLength(1);
+    expect(await refreshed.reconcilePending()).toBeUndefined();
+    expect(reads).toBe(1);
+    f.allowPost();
+    const later = await refreshed("Separate deliberate report after refresh");
+    // This fixture has no adopted live lead receiver. It must still submit a
+    // fresh intent and return that receiver refusal, rather than the old claim.
+    expect(later).toMatchObject({ received: false, deliveryStage: "unavailable" });
+    expect(later.deliveryId).not.toBe(original.deliveryId);
+    expect(f.posts).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
 it.each(["authorization", "binding", "fingerprint"] as const)(
   "keeps the original claim when its HTTP receipt read has mismatched %s",
   async (mismatch) => {

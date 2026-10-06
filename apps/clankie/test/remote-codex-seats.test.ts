@@ -100,3 +100,88 @@ it("rechecks allocation and link after the protocol observation", async () => {
   });
   expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(false);
 });
+
+it("reports the remote refresh boundary without borrowing config authority or consuming the original thread proof", async () => {
+  const f = fixture();
+  const request = { revision: "runtime:f6260751" };
+  expect(await f.seats.refreshCatalogs(request)).toEqual([
+    {
+      paneId: "pc/w1:p1",
+      revision: request.revision,
+      outcome: "failed",
+      reason: "original_remote_codex_thread_unbound",
+    },
+  ]);
+  f.registration.bindThread("thread", f.check);
+  expect(await f.seats.refreshCatalogs(request)).toEqual([
+    {
+      paneId: "pc/w1:p1",
+      threadId: "thread",
+      revision: request.revision,
+      outcome: "failed",
+      reason: "remote_codex_catalog_refresh_isolated_config_unavailable",
+    },
+  ]);
+  expect(f.check).not.toHaveBeenCalled();
+  expect(f.seats.server(f.launch.fleet, f.launch.pane)).toEqual(f.launch.server);
+  expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(true);
+  expect(f.check).toHaveBeenCalledTimes(1);
+  expect(await f.seats.refreshCatalogs({ ...request, paneId: "other/w1:p1" })).toEqual([]);
+  expect(await new RemoteCodexSeats(async () => f.launch.fleet).refreshCatalogs(request)).toEqual([]);
+});
+
+it("reports cancellation, changed fleet and lost link without turning an unsupported refresh into authority", async () => {
+  const f = fixture();
+  f.registration.bindThread("thread", f.check);
+  const request = { paneId: "pc/w1:p1", revision: "runtime:f6260751" };
+  const signal = AbortSignal.abort(new Error("Owner cancelled"));
+  expect(await f.seats.refreshCatalogs({ ...request, signal })).toMatchObject([
+    { outcome: "failed", reason: "remote_codex_catalog_refresh_cancelled" },
+  ]);
+  expect(await f.seats.refreshCatalogs({ ...request, revision: "bad\nrevision" })).toMatchObject([
+    { outcome: "failed", reason: "remote_codex_catalog_revision_invalid" },
+  ]);
+  f.changeFleet();
+  expect(await f.seats.refreshCatalogs(request)).toMatchObject([
+    { outcome: "failed", reason: "original_remote_codex_fleet_changed" },
+  ]);
+  f.stop();
+  expect(await f.seats.refreshCatalogs(request)).toMatchObject([
+    { outcome: "failed", reason: "original_remote_codex_link_unavailable" },
+  ]);
+  expect(f.check).not.toHaveBeenCalled();
+});
+
+it("does not adopt a replacement registration while observing the original refresh boundary", async () => {
+  const f = fixture();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seats = new RemoteCodexSeats(async () => {
+    await held;
+    return f.launch.fleet;
+  });
+  const original = seats.register(f.launch, () => true);
+  original.bindThread("original", f.check);
+  const pending = seats.refreshCatalogs({ revision: "runtime:f6260751" });
+  const replacement = seats.register(f.launch, () => true);
+  replacement.bindThread("replacement", f.check);
+  release();
+  expect(await pending).toMatchObject([
+    {
+      paneId: "pc/w1:p1",
+      threadId: "original",
+      outcome: "failed",
+      reason: "original_remote_codex_registration_changed",
+    },
+  ]);
+  expect(await seats.refreshCatalogs({ revision: "runtime:f6260751" })).toMatchObject([
+    {
+      threadId: "replacement",
+      outcome: "failed",
+      reason: "remote_codex_catalog_refresh_isolated_config_unavailable",
+    },
+  ]);
+  expect(f.check).not.toHaveBeenCalled();
+});

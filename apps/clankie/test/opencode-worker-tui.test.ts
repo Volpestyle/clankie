@@ -48,8 +48,17 @@ test("awaited first TUI plugin initialization binds before prompt mounting, then
   let mounted = false;
   let route: { name: string; params?: { sessionID: string } } = { name: "home" };
   let dispose = () => {};
+  const events = new Map<string, Set<(event: unknown) => void>>();
   const api = {
     app: { version: "1.18.18" },
+    event: {
+      on: (type: string, handler: (event: unknown) => void) => {
+        const listeners = events.get(type) ?? new Set();
+        listeners.add(handler);
+        events.set(type, listeners);
+        return () => listeners.delete(handler);
+      },
+    },
     lifecycle: {
       signal: new AbortController().signal,
       onDispose(fn: () => void) {
@@ -83,6 +92,10 @@ test("awaited first TUI plugin initialization binds before prompt mounting, then
       },
       permission: { list: async () => ({ data: [] }) },
       question: { list: async () => ({ data: [] }) },
+      mcp: {
+        connect: vi.fn(async () => ({ data: true })),
+        status: vi.fn(async () => ({ data: { clankie: { status: "connected" } } })),
+      },
     },
   };
   cleanups.push(async () => dispose());
@@ -105,6 +118,51 @@ test("awaited first TUI plugin initialization binds before prompt mounting, then
   });
   expect(api.client.session.promptAsync).toHaveBeenCalledOnce();
   await controller.acknowledge(messageId);
+  expect(await controller.request("refreshToolCatalog")).toEqual({
+    outcome: "refreshed",
+    reason: "original-native-clankie-connection-observed",
+  });
+  expect(api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(api.client.mcp.status).toHaveBeenCalledExactlyOnceWith(
+    {},
+    expect.objectContaining({ throwOnError: true }),
+  );
+  expect(api.client.session.create).toHaveBeenCalledOnce();
+  expect(api.client.session.promptAsync).toHaveBeenCalledOnce();
+  expect(api.route.navigate).toHaveBeenCalledOnce();
+  expect(await controller.request("refreshToolCatalog", undefined, 1000, async () => false)).toEqual({
+    outcome: "failed",
+    reason: "original-native-control-unavailable",
+  });
+  expect(api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(api.client.mcp.status).toHaveBeenCalledOnce();
+  expect(await controller.request("refreshToolCatalog", undefined, 1000, async () => true)).toMatchObject({
+    outcome: "refreshed",
+  });
+  expect(api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(api.client.mcp.status).toHaveBeenCalledTimes(2);
+  expect(api.client.session.promptAsync).toHaveBeenCalledOnce();
+  const childStatus = (type: string) => {
+    for (const handler of events.get("session.status") ?? [])
+      handler({
+        id: "native-child-status",
+        type: "session.status",
+        properties: { sessionID: "ses_nativeChild456", status: { type } },
+      });
+  };
+  expect(
+    await controller.request("refreshToolCatalog", undefined, 1000, async () => {
+      childStatus("busy");
+      return true;
+    }),
+  ).toEqual({ outcome: "skipped-busy", reason: "native-session-busy" });
+  expect(api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(api.client.mcp.status).toHaveBeenCalledTimes(2);
+  childStatus("idle");
+  expect(await controller.request("refreshToolCatalog")).toMatchObject({ outcome: "refreshed" });
+  expect(api.client.mcp.connect).not.toHaveBeenCalled();
+  expect(api.client.mcp.status).toHaveBeenCalledTimes(3);
+  expect(api.client.session.promptAsync).toHaveBeenCalledOnce();
   await expect(controller.request("initialize", { cwd: directory })).rejects.toThrow();
   expect(api.client.session.create).toHaveBeenCalledOnce();
   dispose();

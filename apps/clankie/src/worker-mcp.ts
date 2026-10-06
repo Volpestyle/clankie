@@ -195,6 +195,12 @@ const BridgeNotificationSchema = z.object({
     reason: z.string().max(500),
     tools: z.array(z.string().min(1).max(256)).max(128).optional(),
     report: WorkerReportBridgeStatusSchema.optional(),
+
+    pluginVersion: z
+      .string()
+      .regex(/^\d+\.\d+\.\d+$/u)
+      .optional(),
+    runtimeRevision: z.string().min(1).max(256).optional(),
   }),
 });
 
@@ -215,6 +221,9 @@ export class WorkerMcp {
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
     minecraft?: Pick<MinecraftService, "workerCommand">;
     pluginExpectedVersion?(): string;
+    /** Service-owned generation; informative metadata, never an admission credential. */
+    runtimeRevision?: string;
+    catalogRefreshPending?: (fleet: string, pane: string) => Promise<boolean>;
     pluginVersionObserved?(identity: LocalFleetIdentity, version: string): Promise<boolean>;
   };
   private readonly sessions = new Map<
@@ -231,10 +240,25 @@ export class WorkerMcp {
     }
   >();
   private readonly requestTimeoutMs: number;
+  private runtimeRevision: string;
+  private readonly catalogRevisions = new Map<string, string>();
+
+  /** Display/refresh signal only: never grants a tool or a delivery capability. */
+  requestCatalogRefresh(fleet: string, pane: string, revision: string): void {
+    if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(revision)) throw new Error("Invalid catalog revision");
+    this.catalogRevisions.set(JSON.stringify([fleet, pane]), revision);
+  }
+
+  expectRuntimeRevision(revision: string): void {
+    if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(revision)) throw new Error("Invalid runtime revision");
+    this.runtimeRevision = revision;
+    this.catalogRevisions.clear();
+  }
   private readonly callReceipts: DurableReceiptStore<WorkerCallReceipt>;
   private closed = false;
   constructor(options: WorkerMcp["options"]) {
     this.options = options;
+    this.runtimeRevision = options.runtimeRevision ?? randomUUID();
     const timeout = options.requestTimeoutMs ?? WORKER_REQUEST_TIMEOUT_MS;
     if (!Number.isInteger(timeout) || timeout <= 0) throw new Error("Invalid worker request timeout");
     this.requestTimeoutMs = Math.min(timeout, WORKER_REQUEST_TIMEOUT_MS);
@@ -251,6 +275,9 @@ export class WorkerMcp {
       generation: string | undefined;
       last?: WorkerBridgeStatus;
       lastReport?: WorkerReportBridgeStatus;
+
+      pluginVersion?: string;
+      runtimeRevision?: string;
       active: Map<symbol, { since: number; operation: string }>;
     }
   >();
@@ -274,6 +301,21 @@ export class WorkerMcp {
   bridgeStatus(fleet: string, pane: string): WorkerBridgeStatus {
     const state = this.bridges.get(JSON.stringify([fleet, pane]));
     const pending = state && [...state.active.values()].sort((a, b) => a.since - b.since)[0];
+    const expectedPluginVersion = this.options.pluginExpectedVersion?.();
+    const version = state?.pluginVersion;
+    const expectedRuntimeRevision =
+      this.catalogRevisions.get(JSON.stringify([fleet, pane])) ?? this.runtimeRevision;
+    const observation = {
+      ...(version === undefined ? {} : { pluginVersion: version }),
+      ...(expectedPluginVersion === undefined ? {} : { expectedPluginVersion }),
+      ...(version === undefined || expectedPluginVersion === undefined
+        ? {}
+        : {
+            behind: version !== expectedPluginVersion || state?.runtimeRevision !== expectedRuntimeRevision,
+          }),
+      ...(state?.runtimeRevision === undefined ? {} : { runtimeRevision: state.runtimeRevision }),
+      expectedRuntimeRevision,
+    };
     if (pending) {
       const stalled = Date.now() - pending.since >= this.requestTimeoutMs;
       return {
@@ -281,9 +323,16 @@ export class WorkerMcp {
         reason: `${pending.operation}${stalled ? " exceeded the worker deadline" : " is pending"}`,
         pendingSince: new Date(pending.since).toISOString(),
         ...(state.last?.tools ? { tools: state.last.tools } : {}),
+        ...observation,
       };
     }
-    return state?.last ?? { status: "not-observed", reason: "Worker bridge catalog has not been observed" };
+    return {
+      ...(state?.last ?? {
+        status: "not-observed" as const,
+        reason: "Worker bridge catalog has not been observed",
+      }),
+      ...observation,
+    };
   }
 
   reportBridgeStatus(fleet: string, pane: string): WorkerReportBridgeStatus | undefined {
@@ -352,6 +401,9 @@ export class WorkerMcp {
     if (this.bridge(authority) !== state || authority.currentFleet?.() === false) return;
     if (reported.report && authority.fleet !== undefined && authority.pane !== undefined)
       this.reportBridgeObserved(authority.fleet, authority.pane, reported.report);
+
+    if (reported.pluginVersion !== undefined) state.pluginVersion = reported.pluginVersion;
+    if (reported.runtimeRevision !== undefined) state.runtimeRevision = reported.runtimeRevision;
     const missing = expected.filter((name) => !reported.tools?.includes(name));
     if (state.last?.status === "stalled" && reported.status === "ready") return;
     state.last = {
@@ -1028,6 +1080,12 @@ export class WorkerMcp {
           if (current.fleet !== undefined) {
             const connected = await this.fleetToolsEnabled();
             const peerMessages = (await this.options.fleetPeerMessages?.()) ?? "off";
+            const refreshPending =
+              this.options.catalogRefreshPending && current.pane !== undefined
+                ? await beforeWorkerDeadline(signal, "Native catalog publication boundary", () =>
+                    this.options.catalogRefreshPending!(current.fleet!, current.pane!),
+                  )
+                : false;
             signal.throwIfAborted();
             const tools = connected ? FLEET_TOOLS : [];
             this.catalogServed(
@@ -1041,6 +1099,13 @@ export class WorkerMcp {
                 clankie: {
                   tools: connected ? "connected" : "off",
                   peerMessages,
+                  refreshPending,
+                  runtimeRevision:
+                    this.catalogRevisions.get(JSON.stringify([authority.fleet, authority.pane])) ??
+                    this.runtimeRevision,
+                  ...(this.options.pluginExpectedVersion === undefined
+                    ? {}
+                    : { pluginVersion: this.options.pluginExpectedVersion() }),
                 },
               },
             };
@@ -1379,8 +1444,15 @@ export class WorkerMcp {
       });
       if (authority.fleet !== undefined && authority.pane !== undefined) {
         const key = JSON.stringify([authority.fleet, authority.pane]);
-        if (this.bridges.get(key)?.generation !== authority.bridgeId)
+        if (!this.bridges.has(key) || this.bridges.get(key)?.generation !== authority.bridgeId)
           this.bridges.set(key, { generation: authority.bridgeId, active: new Map() });
+        const state = this.bridges.get(key)!;
+        if (
+          initialize.success &&
+          initialize.data.params.clientInfo.name === "clankie-worker" &&
+          /^\d+\.\d+\.\d+$/u.test(initialize.data.params.clientInfo.version)
+        )
+          state.pluginVersion = initialize.data.params.clientInfo.version;
       }
     } else await server.close();
     return response;

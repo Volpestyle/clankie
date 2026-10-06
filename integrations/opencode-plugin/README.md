@@ -128,6 +128,24 @@ completion requires the matching finished native reply. Route changes, lost
 control and uncertain sends never trigger another launch or resend. Native
 interrupt targets only the bound session.
 
+`clankie harness refresh-tools [--pane PANE]` uses that same original controller
+to observe the existing `clankie` MCP connection. The service publishes its
+catalog revision while idle, and OpenCode's native `tools/list_changed` handler
+reads definitions through the existing client. Refresh never calls native
+`mcp.connect` or closes a transport: the pinned reconnect replaces the client
+without an atomic activity guard and could interrupt a call beginning during
+the request. The service requires an actual bridge `tools/list` observation at
+the requested revision as well as the native SDK's connected status.
+Running sessions (including background native sessions), owner decisions and
+concurrent controller actions skip refresh. Process, account, session route and
+fleet admission remain fenced before observation and after the native response.
+An original native event observer holds refresh when a child becomes busy or
+an owner decision appears during awaited admission, even if that activity ends
+before the admission returns. Missing activity observation refuses refresh.
+The operation preserves the displayed session, draft and in-flight calls and
+submits no model turn. Native connected acceptance is recorded separately from exact
+model-visible tool names, which OpenCode's public TUI SDK does not expose.
+
 Registered dedicated worker SQLite history is available through
 `clankie agents list` and `clankie agents read`. It is bounded stored v1 content,
 not proof of the currently displayed session or control.

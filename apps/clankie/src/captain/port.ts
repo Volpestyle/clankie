@@ -140,6 +140,13 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  workerCatalogSeats?(): Promise<
+    readonly { paneId: string; seatId: string; harness: string; sessionId?: string; status?: string }[]
+  >;
+  refreshNativeWorkerCatalog?(
+    paneId: string,
+    input: { revision: string; beforeDispatch?: () => Promise<void> },
+  ): Promise<{ outcome: "refreshed" | "skipped-busy" | "failed"; reason: string }>;
   fleetEfficiency?(
     conversationId: string,
     review?: import("./fleet-efficiency-tools.ts").FleetEfficiencyReview,

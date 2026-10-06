@@ -135,7 +135,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       "stored",
     );
   };
-  return async (text) => {
+  const send = async (text) => {
     let record;
     let phase = "local";
     try {
@@ -229,4 +229,17 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       );
     }
   };
+  // A refreshed bridge settles the retained original by GET only. Never call
+  // send with a placeholder: an empty journal must not create a new intent.
+  return Object.assign(send, {
+    async reconcilePending() {
+      let record;
+      try {
+        record = inspect();
+        return record === undefined ? undefined : await reconcile(record, record.text);
+      } catch {
+        return uncertain(record);
+      }
+    },
+  });
 }

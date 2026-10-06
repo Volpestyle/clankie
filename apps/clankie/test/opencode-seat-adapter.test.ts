@@ -44,7 +44,12 @@ async function fixture() {
     select: vi.fn(),
     pending: () => pending,
     request: vi.fn(
-      async (method: Parameters<OpenCodeController["request"]>[0], input?: unknown): Promise<unknown> => {
+      async (
+        method: Parameters<OpenCodeController["request"]>[0],
+        input?: unknown,
+        _timeoutMs?: number,
+        _beforeDispatch?: () => Promise<boolean>,
+      ): Promise<unknown> => {
         if (method === "initialize") {
           const profiles = await readdir(join(directory, "opencode-workers", "profiles"));
           await writeOpenCodeNativeSession(
@@ -61,6 +66,8 @@ async function fixture() {
             state: "queued",
           };
         if (method === "interrupt") return true;
+        if (method === "refreshToolCatalog")
+          return { outcome: "refreshed", reason: "original-native-clankie-connection-observed" };
         return "idle";
       },
     ),
@@ -204,6 +211,44 @@ test("bound callback precedes first brief; substituted ref and changed held proc
   expect((await prepared.start(f.view)).outcome).toBe("failed");
   expect(f.controller.request.mock.calls.some(([method]) => method === "send")).toBe(false);
   expect(f.controller.close).toHaveBeenCalledOnce();
+});
+
+test("catalog refresh uses the held original controller, fences before dispatch and after native acceptance", async () => {
+  const f = await fixture();
+  const prepared = await f.adapter.prepare!(f.launch);
+  cleanups.push(() => prepared.dispose());
+  const started = await prepared.start(f.view);
+  if (started.outcome !== "started") throw new Error("fixture start");
+  const originalRequest = f.controller.request.getMockImplementation()!;
+  const beforeDispatch = vi.fn(async () => {});
+  f.controller.request.mockImplementation(async (method, input, timeout, guard) => {
+    if (method === "refreshToolCatalog") {
+      expect(timeout).toBe(45_000);
+      expect(await guard?.()).toBe(true);
+    }
+    return originalRequest(method, input);
+  });
+  expect(await started.control.refreshToolCatalog?.({ revision: "new-build", beforeDispatch })).toEqual({
+    outcome: "refreshed",
+    reason: "original-native-clankie-connection-observed",
+  });
+  expect(beforeDispatch).toHaveBeenCalledOnce();
+  expect(f.controller.request.mock.calls.filter(([method]) => method === "refreshToolCatalog")).toHaveLength(
+    1,
+  );
+  expect(f.controller.request.mock.calls.some(([method]) => method === "send")).toBe(false);
+  expect(f.native.createCommandTab).not.toHaveBeenCalled();
+  f.controller.request.mockImplementation(async (method) => {
+    if (method === "refreshToolCatalog") {
+      f.root.proof.mockRejectedValue(new Error("held root changed during observation"));
+      return { outcome: "refreshed", reason: "original-native-clankie-connection-observed" };
+    }
+    return "idle";
+  });
+  expect(await started.control.refreshToolCatalog?.()).toEqual({
+    outcome: "failed",
+    reason: "original-native-control-unavailable",
+  });
 });
 
 test("unavailable before dispatch is not falsely uncertain; accepted delivery requires final proof and ack", async () => {

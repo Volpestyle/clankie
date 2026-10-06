@@ -1,4 +1,5 @@
 import { runDesktopCommand } from "./command/desktop.ts";
+import { runWorkerToolRefreshCommand } from "./command/harness.ts";
 import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
 import { runProjectRolesMenu } from "./project-role-menu.ts";
 import { runProjectsMenu } from "./project-menu.ts";
@@ -220,6 +221,28 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         );
       } catch (error) {
         shell.insertCommandResult("/update", String(error), "error");
+      }
+    },
+  });
+  commands.push({
+    name: "refresh-tools",
+    aliases: [],
+    description: "Refresh running workers' Clankie tools in place",
+    argumentHint: "[--pane PANE]",
+    takesArgument: true,
+    async run(argument, shell) {
+      try {
+        const result = await runWorkerToolRefreshCommand([
+          "refresh-tools",
+          ...splitQuotedArguments(argument),
+        ]);
+        shell.insertCommandResult(
+          "/refresh-tools",
+          JSON.stringify(result, null, 2),
+          result.seats.some((seat) => seat.outcome === "failed") ? "error" : "success",
+        );
+      } catch (error) {
+        shell.insertCommandResult("/refresh-tools", String(error), "error");
       }
     },
   });

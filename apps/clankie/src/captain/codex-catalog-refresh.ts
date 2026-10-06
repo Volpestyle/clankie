@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
@@ -33,6 +32,8 @@ export function watchCodexCatalog(input: {
   signalPath: string;
   configPath: string;
   request(method: string, params: Record<string, unknown>): Promise<unknown>;
+  /** Service-owned durable coordinator; this watcher never mutates native configuration. */
+  refresh?: (revision: string) => Promise<void>;
   onError(error: unknown): void;
   intervalMs?: number;
 }): () => void {
@@ -56,14 +57,8 @@ export function watchCodexCatalog(input: {
       }
       if (failures >= 3) return;
       if (!/^[a-f0-9-]{36}$/u.test(signal)) throw new Error("Invalid Codex catalog signal");
-      await input.request("config/value/write", {
-        keyPath: "mcp_servers.clankie.env.CLANKIE_CATALOG_REVISION",
-        value: randomUUID(),
-        mergeStrategy: "upsert",
-        filePath: input.configPath,
-      });
-      if (stopped) return;
-      await input.request("config/mcpServer/reload", {});
+      if (!input.refresh) throw new Error("Durable managed Codex catalog coordinator is required");
+      await input.refresh(signal);
       published = signal;
       failures = 0;
     } catch (error) {

@@ -12,6 +12,23 @@ export function fenceFleetSeatAdapter(
   const fence = (control: SeatControl): SeatControl => ({
     ...control,
     ref: control.ref,
+    ...(control.refreshToolCatalog === undefined
+      ? {}
+      : {
+          refreshToolCatalog: async (input) => {
+            await admit();
+            const result = await control.refreshToolCatalog!({
+              ...input,
+              beforeDispatch: async () => {
+                await admit();
+                await input?.beforeDispatch?.();
+                await admit();
+              },
+            });
+            await admit();
+            return result;
+          },
+        }),
     send: async (message, options) =>
       (await current()) ? control.send(message, options) : { outcome: "offline", detail },
     status: async () => ((await current()) ? control.status() : "offline"),

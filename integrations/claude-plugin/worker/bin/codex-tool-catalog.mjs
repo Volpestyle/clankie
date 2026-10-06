@@ -6,7 +6,12 @@ const object = (value) => value !== null && typeof value === "object" && !Array.
  * thread would create one. Neither proves what the interactive pane accepted.
  * https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/request_processors/mcp_processor.rs
  */
-export async function codexToolCatalogReport({ sessionId, bridge = "worker", request }) {
+export async function codexToolCatalogReport({
+  sessionId,
+  bridge = "worker",
+  request,
+  requireConnected = false,
+}) {
   const report = {
     schemaVersion: 1,
     harness: "codex",
@@ -30,6 +35,7 @@ export async function codexToolCatalogReport({ sessionId, bridge = "worker", req
     for (;;) {
       const status = await request("mcpServerStatus/list", {
         threadId: sessionId,
+        serverName: "clankie",
         detail: "toolsAndAuthOnly",
         ...(cursor === undefined ? {} : { cursor }),
       });
@@ -43,14 +49,20 @@ export async function codexToolCatalogReport({ sessionId, bridge = "worker", req
     }
     // A complete original-thread inventory proving the server absent/rejected
     // is a mismatch (accepted no tools), rather than an observation failure.
-    if (matches.length === 0) return report;
+    if (matches.length === 0) {
+      if (requireConnected) throw new Error("Original Codex Clankie server is absent");
+      return report;
+    }
     if (matches.length !== 1) throw new Error("Native Codex Clankie server is ambiguous");
     const row = matches[0];
     if (
       ["failed", "disabled", "cancelled", "disconnected"].includes(row.runtimeStatus) ||
       row.toolsError != null
-    )
+    ) {
+      if (requireConnected)
+        throw new Error("Original Codex Clankie server is disconnected or rejected tools");
       return report;
+    }
     if (row.runtimeStatus !== "connected")
       throw new Error(`Native Codex Clankie server is ${String(row.runtimeStatus ?? "unverified")}`);
     if (!object(row.tools)) throw new Error("Malformed native Clankie tool catalog");
