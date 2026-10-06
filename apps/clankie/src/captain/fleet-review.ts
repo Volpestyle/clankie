@@ -46,6 +46,11 @@ export function fleetRoundEvidence(seats: readonly OperatorFleetSeat[]): {
         leadSeatId: seat.workerReportRouting.leadSeatId,
         leadPaneId: seat.workerReportRouting.leadPaneId,
       },
+      reportBridge: seat.workerReportBridge && {
+        outcome: seat.workerReportBridge.outcome,
+        reason: seat.workerReportBridge.reason,
+        lastStoredAt: seat.workerReportBridge.lastStoredAt,
+      },
     };
   });
   rows.sort(
@@ -86,6 +91,7 @@ export function fleetReviewContext(seats: readonly OperatorFleetSeat[], budget =
       lastReportAt: efficiency?.lastReportAt,
       reportFailures: efficiency?.reportFailures,
       reportRoute: seat.workerReportRouting?.source,
+      reportBridge: seat.workerReportBridge,
     })}`;
     if (row.length + 1 > remaining - 160) {
       omitted++;
@@ -99,6 +105,49 @@ export function fleetReviewContext(seats: readonly OperatorFleetSeat[], budget =
       `> ${JSON.stringify({ omittedSeats: omitted, totalSeats: seats.length, details: "Use fleet_efficiency for the full roster" })}`,
     );
   return lines.join("\n");
+}
+
+/** One alert per owning conversation while at least three current seats are failing. */
+export class FleetReportFailureAlerts {
+  private readonly alerted = new Set<string>();
+
+  observe(seats: readonly OperatorFleetSeat[], now = Date.now()): { seatId: string; text: string }[] {
+    const owners = new Map<string, OperatorFleetSeat[]>();
+    for (const seat of seats) {
+      const owner = seat.efficiency?.ownerConversationId;
+      if (!owner) continue;
+      const owned = owners.get(owner) ?? [];
+      owned.push(seat);
+      owners.set(owner, owned);
+    }
+    for (const owner of this.alerted) if (!owners.has(owner)) this.alerted.delete(owner);
+    const alerts: { seatId: string; text: string }[] = [];
+    for (const [owner, owned] of owners) {
+      const failed = new Map(
+        owned
+          .filter((seat) => {
+            const report = seat.workerReportBridge;
+            if (!report || report.outcome === "stored") return false;
+            const age = now - Date.parse(report.observedAt);
+            return age >= 0 && age <= 10 * 60_000;
+          })
+          .map((seat) => [seat.seatId, seat]),
+      );
+      if (failed.size >= 3 && !this.alerted.has(owner)) {
+        this.alerted.add(owner);
+        alerts.push({
+          seatId: [...failed.values()][0]!.seatId,
+          text: `Fleet report bridge alert: ${failed.size} of your current seats reported receipt failures within 10 minutes. ${JSON.stringify([...failed.values()].slice(0, 8).map((seat) => ({ seatId: seat.seatId.slice(0, 128), outcome: seat.workerReportBridge!.outcome, reason: seat.workerReportBridge!.reason })))}. Inspect roster or doctor report health; unresolved originals must be reconciled without replay.`,
+        });
+      } else if (failed.size < 3 && this.alerted.delete(owner)) {
+        alerts.push({
+          seatId: owned[0]!.seatId,
+          text: `Fleet report bridge recovery: ${failed.size} of your current seats have recent receipt failures; the three-seat alert has cleared.`,
+        });
+      }
+    }
+    return alerts;
+  }
 }
 
 /** A separate cadence never replaces an owner's scheduled wake. */

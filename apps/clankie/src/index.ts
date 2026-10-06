@@ -131,6 +131,7 @@ import {
   createRemoteWorktreeRootObserver,
 } from "./remote-project-proof.ts";
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
+import { FleetHealthMetrics } from "./fleet-health-metrics.ts";
 import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
 import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
@@ -942,6 +943,15 @@ const minecraftHost = new MinecraftHostService({
   }),
 });
 let fleetProjectMembership: FleetProjectMembership | undefined;
+const fleetHealthMetrics = new FleetHealthMetrics({
+  onProofAlert: (pane, window) =>
+    captain
+      .notifyFleetHealthAlert(
+        pane,
+        `Fleet proof refusals exceeded 1% over 5 minutes: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
+      )
+      .then(() => undefined),
+});
 const captain = createCaptain(
   {
     activitySharing,
@@ -1074,6 +1084,7 @@ const captain = createCaptain(
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
     fleetHireTools: () => workerMcp.expectedFleetToolNames(),
     workerBridgeStatus: (fleet, pane) => workerMcp.bridgeStatus(fleet, pane),
+    workerReportBridgeStatus: (fleet, pane) => workerMcp.reportBridgeStatus(fleet, pane),
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,
@@ -1155,7 +1166,7 @@ const localFleet = new LocalFleetLink({
   directory: join(stateRoot, "links"),
   binding: localFleetBinding,
   projectProof: localProjectProof({
-    diagnostics: localProofDiagnostics(logger, "project"),
+    diagnostics: localProofDiagnostics(logger, "project", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding) =>
@@ -1165,7 +1176,7 @@ const localFleet = new LocalFleetLink({
       grokNative.allows(chain, pane, binding, proof.nativeOccupantId),
   }),
   prove: localFleetProof({
-    diagnostics: localProofDiagnostics(logger, "fleet"),
+    diagnostics: localProofDiagnostics(logger, "fleet", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding) =>
@@ -1190,6 +1201,7 @@ const workerMcp = new WorkerMcp({
   credentials: operatorCredentialStore,
   host: mcpHost,
   minecraft,
+  reportBridgeObserved: (fleet, pane, report) => fleetHealthMetrics.observeReport(fleet, pane, report),
   pluginVersionObserved: (identity, version) => workerPluginNotices.observe(identity, version),
   pluginExpectedVersion: () => workerPluginNotices.expected(),
   projects: async () => (await settingsStore.load()).projects,
@@ -1202,6 +1214,7 @@ const workerMcp = new WorkerMcp({
 });
 
 const clankie = await createClankieApp({
+  fleetHealthMetrics,
   discordPermissions: (query, body) =>
     managedDiscord
       ? managedDiscord.permissions(query, body)

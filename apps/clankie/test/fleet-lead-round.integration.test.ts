@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import { OperatorConversationServiceResultSchema } from "@clankie/protocol";
+import { OperatorConversationServiceResultSchema, type WorkerReportBridgeStatus } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -16,6 +19,10 @@ import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
+import { createMcpHost } from "../src/mcp-host.ts";
+import { WorkerMcp } from "../src/worker-mcp.ts";
+import { registerSeatRoutes } from "../src/app/seat-routes.ts";
+import type { ClankieAppDependencies } from "../src/app/types.ts";
 
 interface NativeRow {
   pane_id: string;
@@ -27,8 +34,10 @@ interface NativeRow {
   cwd: string;
 }
 const fixtures: Array<{ root: string; captain: ReturnType<typeof createCaptain> }> = [];
+const resources: (() => Promise<void>)[] = [];
 const exec = promisify(execFile);
 afterEach(async () => {
+  for (const close of resources.splice(0).reverse()) await close();
   for (const f of fixtures.splice(0)) {
     await f.captain.close();
     await rm(f.root, { recursive: true, force: true });
@@ -41,6 +50,8 @@ async function fixture(
   rebound = false,
   healthy = false,
   configure?: (root: string, rows: NativeRow[]) => Promise<void>,
+  reportHealth?: Map<string, WorkerReportBridgeStatus>,
+  oneOwner = false,
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
@@ -90,7 +101,9 @@ async function fixture(
     };
     rows.push(row);
     if (i === 4) continue;
-    const owner = { conversationId: i <= 2 ? "global-default" : second.conversation.conversationId };
+    const owner = {
+      conversationId: i <= 2 || oneOwner ? "global-default" : second.conversation.conversationId,
+    };
     const occupantId = occupantIdForHerdrSession(row.agent_session);
     owners.bind(
       row.pane_id,
@@ -173,6 +186,7 @@ async function fixture(
       seatAdapters: [],
       discordEnvironment: {},
       fleetRoundIntervalMs: roundMs,
+      workerReportBridgeStatus: (_fleet, pane) => reportHealth?.get(pane),
     },
   );
   fixtures.push({ root, captain });
@@ -225,6 +239,120 @@ async function fixture(
     },
   };
 }
+
+it("alerts only the owning native lead for three current report failures, clears and rearms once", async () => {
+  const reports = new Map<string, WorkerReportBridgeStatus>();
+  const f = await fixture(60 * 60_000, undefined, false, true, undefined, reports, true);
+  const inspect = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1050));
+    const result = await f.captain.serveOperatorConversation({ op: "roster", schemaVersion: 1 });
+    expect(result.op).toBe("roster");
+    return result;
+  };
+  const failure = (): WorkerReportBridgeStatus => ({
+    outcome: "uncertain",
+    reason: "binding_timeout",
+    observedAt: new Date().toISOString(),
+  });
+  reports.set("w1:p1", failure());
+  reports.set("w1:p2", failure());
+  reports.set("w1:p4", failure()); // An unowned seat never satisfies the lead threshold.
+  reports.set("w1:p3", { ...failure(), observedAt: new Date(Date.now() - 11 * 60_000).toISOString() });
+  await inspect();
+  expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+  reports.set("w1:p3", failure());
+  const poll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  await inspect();
+  const [event] = await poll;
+  expect(event?.kind).toBe("message");
+  expect(event?.content).toContain("3 of your current seats");
+  expect(event?.content).not.toContain("w1:p4");
+  expect(await f.captain.pollSeatEvents(0, undefined, f.other)).toEqual([]);
+  expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
+  await inspect();
+  expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+  reports.set("w1:p3", { outcome: "stored", reason: "stored", observedAt: new Date().toISOString() });
+  const recoveryPoll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  await inspect();
+  const [recovery] = await recoveryPoll;
+  expect(recovery?.content).toContain("Fleet report bridge recovery");
+  expect(await f.captain.acknowledgeSeatEvent(recovery!.id, "global-default")).toBe(true);
+  reports.set("w1:p3", failure());
+  const repeatedPoll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  await inspect();
+  const [repeated] = await repeatedPoll;
+  expect(repeated?.content).toContain("3 of your current seats");
+  expect(await f.captain.acknowledgeSeatEvent(repeated!.id, "global-default")).toBe(true);
+  const runtimePoll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+  const runtimeAlert = f.captain.notifyRuntimeHealthAlert(
+    "Runtime health alert: high CPU held for five minutes.",
+  );
+  const [runtime] = await runtimePoll;
+  expect(runtime?.content).toContain("Runtime health alert");
+  expect(await f.captain.acknowledgeSeatEvent(runtime!.id, "global-default")).toBe(true);
+  expect(await runtimeAlert).toBe(true);
+  expect(
+    new ConversationJournal(join(f.root, "conversations"))
+      .read("global-default")
+      .some((event) => event.type === "turn"),
+  ).toBe(false);
+});
+
+it("ingests content-free seat report health over authenticated HTTP into the real worker service and roster", async () => {
+  const reports = new Map<string, WorkerReportBridgeStatus>();
+  const f = await fixture(60 * 60_000, undefined, false, true, undefined, reports);
+  const settings = new SettingsStore(join(f.root, "settings.json"));
+  const credentials = new FileCredentialStore(join(f.root, "credentials.json"));
+  const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
+  const worker = new WorkerMcp({
+    directory: join(f.root, "grants"),
+    credentials,
+    host,
+    reportBridgeObserved: (_fleet, pane, report) => reports.set(pane, report),
+  });
+  const app = new Hono();
+  registerSeatRoutes({
+    app,
+    dependencies: { captain: f.captain, workerMcp: worker } as ClankieAppDependencies,
+    authenticateLane: async (context) =>
+      context.req.header("authorization") === "Bearer report-health-fixture"
+        ? { lane: "operator" }
+        : { denial: context.json({ error: "authentication_required" }, 401) },
+  });
+  const server = serve({ hostname: "127.0.0.1", port: 0, fetch: app.fetch });
+  await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing health route fixture address");
+  resources.push(async () => {
+    await worker.close();
+    await host.close();
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      if ("closeAllConnections" in server) server.closeAllConnections();
+    });
+  });
+  const post = (body: unknown, pane = "w1:p1", token = "report-health-fixture") =>
+    fetch(`http://127.0.0.1:${address.port}/v1/fleet/seats/${encodeURIComponent(pane)}/messages/health`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const report: WorkerReportBridgeStatus = {
+    outcome: "uncertain",
+    reason: "binding_timeout",
+    observedAt: new Date().toISOString(),
+  };
+  expect((await post(report, "w1:p1", "wrong")).status).toBe(401);
+  expect((await post({ ...report, text: "private body" })).status).toBe(400);
+  expect((await post(report, "missing")).status).toBe(403);
+  expect((await post(report)).status).toBe(202);
+  expect(worker.reportBridgeStatus("default", "w1:p1")).toEqual(report);
+  await new Promise((resolve) => setTimeout(resolve, 1050));
+  const roster = await f.captain.serveOperatorConversation({ op: "roster", schemaVersion: 1 });
+  if (roster.op !== "roster") throw new Error("Missing report health roster");
+  expect(roster.seats.find((seat) => seat.seatId === "term_1")?.workerReportBridge).toEqual(report);
+  expect(JSON.stringify(roster.seats)).not.toContain("private body");
+});
 
 it("a real watch wake includes every owned seat and never another lead's or unowned worker", async () => {
   const f = await fixture();
