@@ -23,14 +23,20 @@ checks through Terminal's setuid-root `/usr/bin/login` ancestor without granting
 that ancestor ownership or using a weaker owner observation. Unknown, malformed,
 changed or exited ancestors still refuse admission.
 
-There are at most 32 complete attempts, each with a 200 ms monotonic budget
-and an independent 600 ms total cap, inside the body's 1 s active-helper timeout.
-Only existing transient census/descriptor races or an expired attempt can start
-a fresh complete proof. Retries wait a randomized 1–8 ms, clipped to the remaining
-total budget even when a signal interrupts the wait. This avoids consuming all
-retries in a few milliseconds during unrelated process churn. Neither a pause
-nor an extra attempt carries forward a partial census. Hard identity, ancestry
-and shared-owner refusals retain their existing behavior.
+The helper inspects the bounded union of its all-process, effective-user and
+real-user PID lists. A process born between list calls is inspected, including
+its sockets; it does not invalidate the entire census. A confirmed exit can be
+skipped. An inaccessible live same-user process still refuses the proof.
+
+Stale descriptors or a changed process lifetime retry only that PID. Each local
+retry discards its partial owner and repeats the complete process/FD observation.
+Only agreeing before/after lifetimes contribute an owner. Completed observations
+of other processes survive this local retry, while the chosen owner, socket and
+ancestry retain their final rechecks. There are at most 32 local attempts per
+PID, within the unchanged 200 ms scan and 600 ms job caps; a scan whose budget
+expires can restart within the existing 32-scan ceiling. Retries wait 1–8 ms,
+clipped to the total budget. Hard identity, ancestry and shared-owner refusals
+remain unchanged. Persistent uncertainty or exceeded bounds refuses access.
 
 The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
@@ -189,7 +195,8 @@ budgets and diagnostic flags. Socket mode still performs its complete process/FD
 census, requires one distinct socket owner and revalidates exact lifetime and
 socket identities; a newly shared descriptor refuses even after an earlier job
 succeeded. Process mode repeats the same full BSD/path/argument observations.
-All proof modes share the independent 32-attempt, per-job 600 ms total bound.
+All proof modes retain the 32-scan ceiling and independent per-job 600 ms total
+bound; socket scans also bound their PID-local retries within those clocks.
 Request and captured output buffers are erased and freed after each job. The
 body bounds the waiting queue to 128 jobs and starts each job's 1 s timeout at
 active dispatch. Waiting time is not a 1 s enqueue deadline; an uncanceled
@@ -251,9 +258,9 @@ limits.
 
 A process can replace a listed socket FD with a non-socket before the kernel
 socket query. macOS returns `ENOTSOCK`; like `EBADF`, this requires a complete
-fresh census, rather than skipping the descriptor or treating it as permanent
-owner rejection. Sustained churn can exhaust the bounded attempts and refuse
-access. A complete census may also succeed during unrelated descriptor churn;
+fresh observation of that PID, without skipping its uncertain descriptor or
+restarting unrelated processes. Sustained churn can exhaust the bounded attempts
+and refuse access. A complete census may also succeed during unrelated descriptor churn;
 churn alone never implies a mandatory refusal. The HTTP integration retains
 either outcome and checks exactly one forwarding effect for verified admission,
 zero for refusal, unchanged owner/socket identity, and recovery after churn stops.
@@ -265,6 +272,15 @@ descriptor churn, stale owner/socket pins, and a live owner's changed ancestry
 after its original parent exits. It retains every native observation under
 `.local/project-proof/churn/native/integration/`; fresh ancestry facts do not
 independently authorize membership in that former parent's pane.
+
+The manual `native-admission-scheduled-churn.integration.test.ts` schedules real
+births after `PROC_ALL_PIDS` and real FD closure after `PROC_PIDLISTFDS`. Its
+separately compiled fixture wraps scheduling calls but returns only actual
+libproc results. It requires HTTP admission at both native checkpoints within
+2 s, without restarting the global scan, and rejects outsiders, another pane,
+shared client FDs and a second owner born between PID lists. The shipped helper
+has no test controls. Evidence stays in `.local/admission-churn/`; see the
+[bounded-admission report](../../docs/testing/2026-10-06-admission-churn/README.md).
 
 An exact `local_process_membership_required` HTTP403 occurs before dispatch for
 that request and can safely be followed by a fresh request. The existing worker
