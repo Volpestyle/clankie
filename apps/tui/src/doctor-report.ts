@@ -109,7 +109,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
 }
 
 /** Optional machine metadata is bounded and independent of captain readiness. */
-export function formatResourceLines(resources: InstallDoctorReport["resources"]): string[] {
+function formatResourceLines(resources: InstallDoctorReport["resources"]): string[] {
   if (!resources) return [];
   if ("status" in resources) return [`  ○ Fleet resources · unavailable · ${clean(resources.detail)}`];
   const holder = (entry: { seatId?: string | undefined; pid?: number | undefined }) =>

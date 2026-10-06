@@ -60,6 +60,7 @@
       "entry": [
         "src/play-execution-shared.ts",
         "scripts/fleet-load.ts",
+        "scripts/fleet-resource-burst.ts",
         "scripts/fleet-load-worker.mjs",
         "scripts/runtime-canary-live-proof.ts",
         "test/fixtures/runtime-canary-cpu-preload.mjs",
@@ -79,6 +80,9 @@
     },
     "packages/protocol": {
       "entry": ["test/fixtures/*.ts"]
+    },
+    "packages/fleet-resources": {
+      "entry": ["test/fixtures/*.mjs"]
     },
     "apps/discord-user-session": {
       "entry": ["src/presence-runtime-module.ts"]

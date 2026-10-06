@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -73,4 +73,3 @@ export async function processSnapshot(): Promise<ProcessIdentity[]> {
     });
   return pendingSnapshot;
 }
-export { spawn };

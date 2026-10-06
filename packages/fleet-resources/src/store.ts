@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { defaultResourcePolicy, ResourceStateSchema, type ResourceState } from "./model.ts";
 import { resourceNativeHelperPath, resourcePython } from "./process.ts";
 
-export const emptyResourceState = (): ResourceState => ({
+const emptyResourceState = (): ResourceState => ({
   schemaVersion: 1,
   policy: defaultResourcePolicy(),
   leases: [],
