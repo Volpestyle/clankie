@@ -1,3 +1,5 @@
+import { CheckoutReportSchema } from "@clankie/protocol";
+import { runCheckoutsCommand } from "./checkouts.ts";
 import { FleetHealthMetricsSnapshotSchema, FLEET_HEALTH_METRICS_PATH } from "@clankie/protocol";
 import {
   FLEET_TOOL_CATALOG_HEALTH_PATH,
@@ -67,6 +69,21 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
       : undefined;
   if (pressured)
     return `Linear request budget is ${pressured.status} at ${Math.round(pressured.utilization * 100)}% — run \`clankie linear budget\`.`;
+  const checkouts = report.checkouts;
+  if (checkouts && "checkouts" in checkouts) {
+    const stale = checkouts.checkouts.filter(
+      (entry) => entry.outcome === "unavailable" || entry.behind || entry.ahead || entry.staleWorktrees,
+    );
+    if (stale.length)
+      return (
+        stale
+          .map(
+            (entry) =>
+              `${entry.path}: ${entry.outcome === "unavailable" ? "unavailable" : `${entry.behind} behind, ${entry.ahead} ahead, ${entry.staleWorktrees} stale worktrees`}`,
+          )
+          .join("\n") + "\nRun `clankie checkouts sync` and the tidy action; local work is preserved."
+      );
+  }
   return "ready";
 }
 
@@ -83,10 +100,19 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const [report, workerObservations, resources] = await Promise.all([
+  const [report, workerObservations, resources, checkouts] = await Promise.all([
     inspectInstall(options),
     inspectWorkerTools(options),
     inspectResources(options),
+    runCheckoutsCommand(["status"], {
+      ...options,
+      ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
+    })
+      .then((value) => CheckoutReportSchema.parse(value))
+      .catch(() => ({
+        status: "unavailable" as const,
+        detail: "Checkout status unavailable; run clankie checkouts status",
+      })),
   ]);
   const { workerTools, workerReports } = workerObservations;
   const workingPreferences = await readWorkingPreferences({
@@ -195,6 +221,7 @@ export async function doctorCommand(
     workerReports,
     workingPreferences,
     resources,
+    checkouts,
     ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
     linearRequestBudget,
   };

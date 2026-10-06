@@ -1,3 +1,4 @@
+import { CheckoutStatusSchema } from "./checkouts.ts";
 import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
 import { WorkerReportBridgeStatusSchema } from "./worker-report-health.ts";
@@ -794,6 +795,8 @@ export type WorkerBridgeStatus = z.infer<typeof WorkerBridgeStatusSchema>;
 
 export const OperatorFleetSeatSchema = z
   .object({
+    /** Cached owner repository observation; not freshness admission proof. */
+    checkout: CheckoutStatusSchema.optional(),
     /** Host-observed bridge facts, not tool or message delivery acceptance. */
     harnessBridge: OperatorHarnessBridgeSchema.optional(),
     /** Native client acceptance for this exact occupying session. */

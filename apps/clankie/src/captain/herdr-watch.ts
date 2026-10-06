@@ -176,6 +176,7 @@ export interface HerdrAgentSnapshot {
   readonly title: string;
   readonly session?: HerdrAgentSession;
   readonly workingDirectory?: string;
+  readonly foregroundWorkingDirectory?: string;
 }
 
 type SpawnOperatorSeat = HireRequest & { harness: NonNullable<HireRequest["harness"]> };
@@ -369,6 +370,7 @@ function snapshotOf(value: unknown): HerdrAgentSnapshot {
     title: titleOf(value),
     ...(session === undefined ? {} : { session }),
     ...(typeof value.cwd === "string" ? { workingDirectory: value.cwd } : {}),
+    ...(typeof value.foreground_cwd === "string" ? { foregroundWorkingDirectory: value.foreground_cwd } : {}),
   };
 }
 

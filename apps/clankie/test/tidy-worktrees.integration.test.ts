@@ -241,3 +241,69 @@ it("withholds candidates when a live pane appears during the inventory", async (
     excluded: [{ path: f.repo, reason: "inventory_changed" }],
   });
 });
+
+it("foreground cwd protects a worktree even when the pane startup cwd is main", async () => {
+  const f = await fixture();
+  const live = await f.worktree("foreground-live");
+  const native = inventory(() => [{ ...pane(f.repo), foreground_cwd: live }]);
+  const result = await tidy(f.root, native.runner).worktrees(f.repo);
+  expect(result.candidates).toEqual([]);
+  expect(result.excluded).toContainEqual({ path: live, reason: "live_pane" });
+});
+
+it("prune saves ignored evidence, removes a merged clean worktree and only deletes its merged branch", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  // A real local origin gives prune its required successful fetch boundary.
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  await git(f.repo, ["config", "branch.main.remote", "origin"]);
+  await git(f.repo, ["config", "branch.main.merge", "refs/heads/main"]);
+  const path = await f.worktree("landed");
+  const common = await git(f.repo, ["rev-parse", "--git-common-dir"]);
+  await writeFile(join(f.repo, common, "info", "exclude"), ".local/\n");
+  await mkdir(join(path, ".local"));
+  await writeFile(join(path, ".local", "proof.txt"), "kept evidence\n");
+  const result = await pruneTidyWorktree(
+    f.repo,
+    path,
+    join(f.root, "evidence"),
+    inventory(() => []).runner,
+    async () => {},
+  );
+  expect(result).toMatchObject({ outcome: "removed", path, branchDeleted: true });
+  expect(existsSync(path)).toBe(false);
+  expect(await readFile(join(result.evidencePath!, "proof.txt"), "utf8")).toBe("kept evidence\n");
+  expect(await git(f.repo, ["branch", "--list", "landed"])).toBe("");
+});
+
+it("prune retains dirty, live, unmerged and main trees and refuses an unavailable census", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  const dirty = await f.worktree("prune-dirty");
+  await writeFile(join(dirty, "draft.txt"), "keep\n");
+  const live = await f.worktree("prune-live");
+  const unmerged = await f.worktree("prune-unmerged");
+  await writeFile(join(unmerged, "base.txt"), "unfinished\n");
+  await git(unmerged, ["add", "base.txt"]);
+  await git(unmerged, ["commit", "-m", "unfinished"]);
+  const native = inventory(() => [pane(live)]);
+  for (const [path, reason] of [
+    [f.repo, "main_worktree"],
+    [dirty, "dirty"],
+    [live, "live_pane"],
+    [unmerged, "unmerged"],
+  ]) {
+    expect(
+      await pruneTidyWorktree(f.repo, path!, join(f.root, "evidence"), native.runner, async () => {}),
+    ).toMatchObject({ outcome: "kept", reason });
+    expect(existsSync(path!)).toBe(true);
+  }
+  expect((await pruneTidyWorktree(f.repo, live, join(f.root, "evidence"), {}, async () => {})).outcome).toBe(
+    "unavailable",
+  );
+});

@@ -1,3 +1,4 @@
+import { syncOwnerCheckout } from "@clankie/settings";
 /** Local host updater: one private operation, one detached helper, no mutation retry. */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -203,6 +204,10 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       if (assertPinnedRuntime(checkout, runtimePath, run) !== oldCommit)
         throw Error("Pinned runtime changed during fetch");
       const { newCommit } = target;
+      await authority.guard();
+      if (!authority.current()) throw Error("Update authority expired before checkout sync");
+      const ownerCheckoutSync =
+        target.resolvedRef === "refs/remotes/origin/main" ? await syncOwnerCheckout(checkout) : undefined;
       const initiator = parseUpdateInitiator(authority.initiator ?? { kind: "operator" });
       // The running pin is moved during cutover; all git operations need a stable repository cwd.
       const repository = dirname(
@@ -225,6 +230,7 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
           oldCommit,
           newCommit,
           resolvedRef: target.resolvedRef,
+          ...(ownerCheckoutSync === undefined ? {} : { ownerCheckoutSync }),
           ...(target.warning === undefined ? {} : { warning: target.warning }),
           initiator,
           oldInstanceId: boot.instanceId,
@@ -241,6 +247,7 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
           oldCommit,
           newCommit,
           resolvedRef: target.resolvedRef,
+          ...(ownerCheckoutSync === undefined ? {} : { ownerCheckoutSync }),
           ...(target.warning === undefined ? {} : { warning: target.warning }),
           initiator,
           phase: "scheduled",

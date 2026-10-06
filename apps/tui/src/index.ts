@@ -144,6 +144,7 @@ const conversationClient = createCaptainOperatorConversationClient(
         ...(callerHerdrSocket ? { herdrSocketPath: callerHerdrSocket } : {}),
       })
     : undefined,
+  { includeCheckouts: true },
 );
 const herdrRoster = new HerdrRoster(conversationClient);
 const herdrOptions = {

@@ -1123,7 +1123,22 @@ function herdrWatchTools(
             execute: async (_id, input) => {
               const authority = captureConversationAuthority(turn.conversationAuthority);
               await assertConversationAuthority(authority);
-              return json(await watches.tidy!.worktrees(input.repository, input.mergedInto));
+              return json(await watches.tidy!.worktreeReport(input.repository, input.mergedInto));
+            },
+          }),
+          defineTool({
+            name: "prune_tidy_worktree",
+            label: "Remove a landed worktree",
+            description:
+              "After keeping its result, remove one merged, clean, inactive linked worktree in an enrolled root. Fetches origin/main, preserves .local evidence, rechecks all panes including foreground cwd, and uses git worktree remove without force. Deletes its branch only when merged. Never removes main or managed runtime trees; list_tidy_worktrees explains kept trees.",
+            parameters: Type.Object({
+              repository: Type.String({ minLength: 1, maxLength: 4096 }),
+              path: Type.String({ minLength: 1, maxLength: 4096 }),
+            }),
+            execute: async (_id, input) => {
+              const authority = captureConversationAuthority(turn.conversationAuthority);
+              await assertConversationAuthority(authority);
+              return json(await watches.tidy!.pruneWorktree(input.repository, input.path, authority));
             },
           }),
           defineTool({

@@ -406,6 +406,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("roster"),
       schemaVersion: z.literal(1),
+      includeCheckouts: z.boolean().optional(),
       includeWork: z.boolean().optional(),
     })
     .strict(),
@@ -421,6 +422,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       /** Opt-in keeps older strict response schemas usable. */
       includeWork: z.boolean().optional(),
       includeClosedPanes: z.boolean().optional(),
+      includeCheckouts: z.boolean().optional(),
       /** Omitted preserves the full durable directory for existing clients. */
       view: z.literal("home").optional(),
       cursor: OperatorConversationCursorSchema.optional(),
@@ -1213,6 +1215,7 @@ export function createOperatorConversationServiceClient(
     readonly fleetWaitMs?: number;
     readonly includeWork?: boolean;
     readonly includeClosedPanes?: boolean;
+    readonly includeCheckouts?: boolean;
   } = {},
 ): OperatorConversationServiceClient {
   const tailIdleMs = options.tailIdleMs ?? 250;
@@ -1308,7 +1311,12 @@ export function createOperatorConversationServiceClient(
       return result.acknowledged;
     },
     async roster() {
-      const result = await dispatch({ op: "roster", schemaVersion: 1, ...workProjection });
+      const result = await dispatch({
+        op: "roster",
+        schemaVersion: 1,
+        ...workProjection,
+        ...(options.includeCheckouts === true ? { includeCheckouts: true } : {}),
+      });
       if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
       return result.seats;
     },
@@ -1321,6 +1329,7 @@ export function createOperatorConversationServiceClient(
           ...(cursor === undefined ? {} : { cursor }),
           waitMs: fleetWaitMs,
           ...(options.includeClosedPanes === true ? { includeClosedPanes: true } : {}),
+          ...(options.includeCheckouts === true ? { includeCheckouts: true } : {}),
         },
         signal,
       );

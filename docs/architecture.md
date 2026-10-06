@@ -734,3 +734,13 @@ inside the existing encrypted device envelope. No local body or operator bearer
 is started or exported. See the [ADR 0173 amendment](adr/0173-the-gateway-cannot-read-device-traffic.md#amendment-the-mac-can-be-a-hosted-operator-device-2026-09-27-vuh-1110)
 for authority and the [CLI contract](cli.md#local-and-hosted-connection-modes)
 for supported commands and recovery. Fleet ticket issuance stays private.
+
+Owner checkout maintenance uses `packages/settings/src/checkouts.ts` for native
+Git observations, safe fast-forward, and new-hire freshness admission.
+`/v1/checkouts` reports enrolled local repositories; `/v1/checkouts/sync` and
+`/v1/checkouts/prune` require operator authentication. Confirmed integration
+pushes and main runtime updates persist checkout-sync results. Fresh hires
+verify fetched main on their actual machine before any launch; saved resumes
+retain their directory. Tidy's exact-worktree removal preserves `.local`
+evidence and rechecks complete local pane and Git inventories. Roster and
+doctor report cached-ref observations without fetching during their reads.

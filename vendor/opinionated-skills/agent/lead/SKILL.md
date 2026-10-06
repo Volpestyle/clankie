@@ -394,10 +394,23 @@ slices and reviews share that checkout under distinct path ownership; do not
 create another worktree for each turn or review. After landing, retain needed
 reports and ignored evidence, verify the branch is merged at the requested
 remote destination and the tree is clean, then remove the owned worktree.
+After every confirmed integrator push, run `clankie checkouts sync` for the
+registered local owner repositories, or select one with `--repository`. The
+native integration queue does this automatically and retains its result.
+A blocked sync reports local commits or overlapping edits with file ages;
+keep the owner work intact and surface the blocker. New hires start in a clean
+checkout containing freshly fetched `origin/main`, never an old local main or
+a stale deliverable worktree. Doctor and roster counts use cached refs; they
+are observations, not fetch proof.
+
 Every tidy result also lists remaining merged-and-clean worktrees with their
 paths and merge/clean evidence, so the cleanup owner can act. On supporting
 Clankie installs, `list_tidy_worktrees` provides read-only candidates and
-exclusion reasons; listing a candidate does not remove it. Dirty, unmerged,
+exclusion reasons with observed owners and registration age; listing a
+candidate does not remove it. `prune_tidy_worktree` performs an authorized exact
+removal in an enrolled root after preserving `.local` evidence and freshly
+checking merged, clean and inactive state, including foreground cwd. Preserve
+live workers' owned trees even when their pane's startup cwd is main. Dirty, unmerged,
 active or another owner's worktree is not a cleanup candidate. Follow the
 repository's shared-checkout rule when it does not use isolated worktrees.
 

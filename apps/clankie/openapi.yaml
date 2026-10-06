@@ -42,6 +42,75 @@ tags:
 security: []
 
 paths:
+  /v1/checkouts:
+    get:
+      tags: [Operator]
+      operationId: inspectOwnerCheckouts
+      summary: Inspect enrolled local owner checkouts against cached origin/main
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Observation time, cached ref freshness, checkout branch, HEAD, ahead/behind, dirty state and stale/linked worktree counts
+        "401":
+          description: Operator authentication required
+        "503":
+          description: Checkout maintenance unavailable
+  /v1/checkouts/sync:
+    post:
+      tags: [Operator]
+      operationId: syncOwnerCheckouts
+      summary: Fetch and safely fast-forward enrolled owner main checkouts
+      description: Preserves local commits and overlapping edits; blocked results name files and modification age. Never stashes or resets.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                repository:
+                  {
+                    type: string,
+                    description: Exact enrolled owner checkout; omit for all local repositories,
+                  }
+      responses:
+        "200":
+          description: Per-checkout current, updated, blocked or unavailable results with blockers and ageSeconds
+        "400":
+          description: Invalid request
+        "401":
+          description: Operator authentication required
+        "409":
+          description: Repository enrollment refused
+  /v1/checkouts/prune:
+    post:
+      tags: [Operator]
+      operationId: pruneLandedWorktree
+      summary: Preserve evidence and remove one merged clean inactive enrolled worktree
+      description: Fetches main, copies ignored .local evidence, rechecks cwd and foreground cwd of local panes, and uses git worktree remove without force. Deletes only merged branches. Main and runtime trees stay protected.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [repository, path]
+              properties:
+                repository: { type: string }
+                path: { type: string }
+      responses:
+        "200":
+          description: Removed, kept or unavailable result with evidencePath and branchDeleted when applicable
+        "400":
+          description: Invalid request
+        "401":
+          description: Operator authentication required
+        "409":
+          description: Enrollment or nested-worktree protection refused
   /v1/activity/shares:
     post:
       tags: [Media]
@@ -3089,7 +3158,7 @@ paths:
                 value: { op: list, schemaVersion: 1 }
               roster:
                 summary: List live Herdr seats
-                value: { op: roster, schemaVersion: 1 }
+                value: { op: roster, schemaVersion: 1, includeCheckouts: true }
               create:
                 summary: Create a global conversation
                 value:
@@ -5693,6 +5762,18 @@ components:
             properties:
               path: { type: string }
               reason: { type: string }
+        retained:
+          type: array
+          description: Reporting only; observed pane owners and registration age do not authorize deletion
+          items:
+            type: object
+            required: [path, reason, owner]
+            properties:
+              path: { type: string }
+              reason: { type: string }
+              owner: { type: string, description: Native pane name or unattributed }
+              ageSeconds: { type: number }
+              ageKind: { type: string, enum: [worktree-registration] }
     LinearWakeRules:
       type: object
       additionalProperties: false

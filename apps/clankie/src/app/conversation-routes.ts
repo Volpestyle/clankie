@@ -97,6 +97,51 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     );
   });
 
+  ctx.app.get("/v1/checkouts", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    if (!ctx.dependencies.captain.checkoutReport)
+      return context.json({ error: "checkouts_unavailable" }, 503);
+    return context.json(await ctx.dependencies.captain.checkoutReport());
+  });
+  for (const action of ["sync", "prune"] as const) {
+    ctx.app.post(`/v1/checkouts/${action}`, async (context) => {
+      const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+      if (!identity || identity === "unavailable")
+        return context.json({ error: "operator_authentication_required" }, 401);
+      const parsed = (
+        action === "sync"
+          ? z.strictObject({ repository: z.string().min(1).max(4096).optional() })
+          : z.strictObject({ repository: z.string().min(1).max(4096), path: z.string().min(1).max(4096) })
+      ).safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+      try {
+        if (action === "sync") {
+          if (!ctx.dependencies.captain.syncCheckouts)
+            return context.json({ error: "checkouts_unavailable" }, 503);
+          return context.json(await ctx.dependencies.captain.syncCheckouts(parsed.data.repository));
+        }
+        if (!ctx.dependencies.captain.pruneWorktree)
+          return context.json({ error: "checkouts_unavailable" }, 503);
+        return context.json(
+          await ctx.dependencies.captain.pruneWorktree(
+            parsed.data.repository!,
+            "path" in parsed.data && typeof parsed.data.path === "string" ? parsed.data.path : "",
+          ),
+        );
+      } catch (error) {
+        return context.json(
+          {
+            error: "refused",
+            message: error instanceof Error ? error.message : "Checkout operation refused",
+          },
+          409,
+        );
+      }
+    });
+  }
+
   // The operator conversation contract (TUI direct, relay in front for
   // devices) and the lanes view — the captain's HTTP face. Both clients send
   // the shared captain token, the same credential the channel-turn door takes.

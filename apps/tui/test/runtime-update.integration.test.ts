@@ -388,3 +388,23 @@ it("cuts over isolated launcher services while a real unowned activity tunnel su
     await new Promise<void>((resolve) => tunnel.once("exit", () => resolve()));
   }
 }, 30_000);
+
+it.each([false, true])(
+  "main update safely syncs the owner checkout and journals blocked edits (dirty=%s)",
+  async (dirty) => {
+    const f = fixture();
+    if (dirty) writeFileSync(join(f.source, "content"), "owner draft");
+    const accepted = await f.updater.request("main", authority);
+    expect(accepted.latest?.ownerCheckoutSync).toMatchObject({
+      path: f.source,
+      outcome: dirty ? "blocked" : "updated",
+      ...(dirty
+        ? { blockers: [{ path: "content", ageSeconds: expect.any(Number) }] }
+        : { before: f.old, after: f.latest }),
+    });
+    expect(f.updater.status().latest?.ownerCheckoutSync).toEqual(accepted.latest?.ownerCheckoutSync);
+    expect(f.git(f.source, "rev-parse", "HEAD")).toBe(dirty ? f.old : f.latest);
+    expect(readFileSync(join(f.source, "content"), "utf8")).toBe(dirty ? "owner draft" : "remote repair");
+    expect(f.git(f.runtime, "rev-parse", "HEAD")).toBe(f.old);
+  },
+);
