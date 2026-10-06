@@ -3231,7 +3231,7 @@ retired. Use `fleet set --tools off` to disable standing fleet tools.
 `/access` exposes status, verification and revocation; issue from the terminal.
 See [worker access](worker-access.md) for restrictions and account bindings.
 
-### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
+### `stance <working|thinking|stuck|hauling|resting|celebrate> [--activity KIND] [--note TEXT] [--for SECONDS]`
 
 For agents, not for people ([ADR 0148](adr/0148-an-agent-moves-its-own-figure.md)).
 Say what you are doing with your own figure in the commons; the operator's app
@@ -3254,6 +3254,16 @@ goes back to being posed by what its pane is observed to be doing.
 
 `{"outcome":"unseated"}` means the pane holds no fleet seat — normal in a plain
 shell pane, and not an error.
+
+`--activity reading|editing|testing|planning|waiting` explicitly states the kind
+of work for the World activity bubble. For example, before a generic shell test
+run: `clankie stance working --activity testing --for 60`. The roster/fleet read
+returns `seat.activity` with its kind and `source: stated`, or `native_tool` when
+a fresh outstanding known native tool establishes it. Unknown kinds are refused;
+notes and shell arguments are never classified. Omitting `--activity` on the
+next stance clears it. The statement expires, belongs to this exact occupying
+session, and is absent for idle/offline seats. Unsupported native telemetry
+can still carry a live explicit statement; absence means unknown.
 
 ### `discord [status]`
 

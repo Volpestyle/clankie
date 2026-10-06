@@ -115,3 +115,43 @@ statements.
 - An agent has to know it has a figure. The op is reachable, and the CLI's help
   says so, but nothing yet prompts an agent to use it — that belongs in agent
   instructions, not in the protocol.
+
+## Amendment: the host states the current work kind (VUH-1719)
+
+Implemented on the core branch in October 2026; app integration and deployment
+remain separate. The fleet read carries optional `seat.activity`, with `kind`
+`reading | editing | testing | planning | waiting` and the evidence source.
+This supplies the fact required by app ADR 0022/0030 and VUH-1710/1719; the
+app renders the latest read, never classifies `doing`, stance notes or shell
+command strings, and draws no activity bubble when this field is absent.
+
+Two sources share this one read:
+
+- `source: native_tool` names an outstanding tool and its `startedAt`. Core
+  maps explicit known native tool names (Read/Grep/Glob/search, Edit/Write/patch,
+  test/build tools, plan tools, and question tools). A generic shell, interpreter
+  or MCP wrapper is unknown: its arguments are not interpreted. Local Codex and
+  Claude journals reuse the existing exact-session, bounded 2 MiB tail cache;
+  no per-read transcript discovery or new subscription is added. Conflicting
+  or unknown concurrent calls establish no single observed kind. Completion,
+  failure, a native turn boundary, a missing/replaced file, idle/offline status
+  or an observation older than five minutes removes the native fact.
+- `source: stated` carries an explicit kind, `statedAt` and `expiresAt` from
+  `clankie stance working --activity testing --for 60`. This covers generic
+  shells, unsupported harnesses, and work the native journal cannot distinguish.
+  It is an agent statement, not a measurement of the shell's effects. Native
+  observations take precedence while fresh; otherwise the live statement may
+  stand. Omitting `--activity` in a replacement statement clears the kind.
+
+Statements retain the existing stance identity and expiry rules, and are now
+bound to the exact occupant as well as its temporary seat. A replacement native
+session cannot inherit the previous agent's statement, and a captain restart
+forgets statements. Activity is emitted only for `working` or `blocked` seats;
+unknown, free and offline seats carry none. Activity changes advance the same
+fleet cursor, including disappearance on the next refreshed read.
+
+The API and CLI expose the same enum; there is no app-owned fallback or second
+world projection. The textual twin is: Reading or searching / Editing / Running
+tests or builds / Planning / Waiting on you, selected from `activity.kind`. The
+app owns icons and accessible figure labels. Supporting an additional native
+tool requires an explicit host mapping; an unknown name never becomes a guess.
