@@ -15,6 +15,7 @@ const link = pane && readLink();
 if (!link) {
   write({ status: "unlinked" });
 } else {
+  let validated = false;
   try {
     let input = "";
     for await (const chunk of process.stdin) {
@@ -42,6 +43,7 @@ if (!link) {
       (report.error !== undefined && (typeof report.error !== "string" || report.error.length > 1024))
     )
       throw new Error("Invalid native Claude catalog report");
+    validated = true;
     const response = await fetch(seatRoute(link, pane, "tool-catalog"), {
       method: "POST",
       redirect: "error",
@@ -92,29 +94,34 @@ if (!link) {
       write(result);
     }
   } catch (error) {
-    const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
-    const refused = error?.cause?.code === "ECONNREFUSED";
-    const disconnected = ["ECONNRESET", "EPIPE", "UND_ERR_SOCKET"].includes(error?.cause?.code);
-    write(
-      verdict(
-        timeout
-          ? "timeout"
-          : refused
-            ? "connection_refused"
-            : disconnected
-              ? "link_disconnected"
-              : "report_failed",
-        timeout
-          ? `Clankie tool check timed out after ${REQUEST_MS / 1000}s waiting for its fleet link and native pane proof.`
-          : refused
-            ? "Clankie tool check connection was refused by the fleet link."
-            : disconnected
-              ? "Clankie tool check lost its fleet link before a reply arrived."
-              : "Clankie tool check could not complete its report through the fleet link.",
-        timeout || refused || disconnected
-          ? "Clankie will retry automatically. If it persists, ask Clankie to inspect the PC fleet link/SSH health; run clankie doctor --machine pc on his machine."
-          : `Run clankie doctor in this pane to inspect its fleet link. ${RECONNECT}`,
-      ),
-    );
+    if (!validated) {
+      process.stderr.write("clankie-worker: Invalid native Claude catalog report\n");
+      process.exitCode = 1;
+    } else {
+      const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
+      const refused = error?.cause?.code === "ECONNREFUSED";
+      const disconnected = ["ECONNRESET", "EPIPE", "UND_ERR_SOCKET"].includes(error?.cause?.code);
+      write(
+        verdict(
+          timeout
+            ? "timeout"
+            : refused
+              ? "connection_refused"
+              : disconnected
+                ? "link_disconnected"
+                : "report_failed",
+          timeout
+            ? `Clankie tool check timed out after ${REQUEST_MS / 1000}s waiting for its fleet link and native pane proof.`
+            : refused
+              ? "Clankie tool check connection was refused by the fleet link."
+              : disconnected
+                ? "Clankie tool check lost its fleet link before a reply arrived."
+                : "Clankie tool check could not complete its report through the fleet link.",
+          timeout || refused || disconnected
+            ? "Clankie will retry automatically. If it persists, ask Clankie to inspect the PC fleet link/SSH health; run clankie doctor --machine pc on his machine."
+            : `Run clankie doctor in this pane to inspect its fleet link. ${RECONNECT}`,
+        ),
+      );
+    }
   }
 }
