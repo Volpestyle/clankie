@@ -96,6 +96,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -131,6 +132,7 @@ import {
   createRemoteWorktreeRootObserver,
 } from "./remote-project-proof.ts";
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
+import { FleetHealthMetrics } from "./fleet-health-metrics.ts";
 import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
 import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
@@ -143,6 +145,7 @@ import { retireLinearNotifications } from "./linear-notifications.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
+import { LinearRequestBudget } from "./linear-request-budget.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -603,8 +606,21 @@ const boundApp = (): ClankieApp => {
 // Durable revision receipts distinguish captain echoes from delegated worker
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
+let notifyLinearBudgetWarning: ((text: string) => Promise<boolean>) | undefined;
+const linearRequestBudget = new LinearRequestBudget({
+  onAlert: (account) => {
+    const text = `Linear request budget reached ${Math.round(account.utilization * 100)}% (${account.used}/${account.limit} requests in an hour) at ${new Date().toISOString()}. Background reads slow at 80%; writes retain priority. Inspect clankie linear budget.`;
+    logger.warn({ event: "linear.request_budget.warning", ...account }, text);
+    if (notifyLinearBudgetWarning) return notifyLinearBudgetWarning(text);
+    return false;
+  },
+});
 const mcpHost = createMcpHost({
-  linearApiTracker: createLinearApiTracker({ credentials: operatorCredentialStore }),
+  linearApiTracker: createLinearApiTracker({
+    credentials: operatorCredentialStore,
+    requestBudget: linearRequestBudget,
+  }),
+  linearRequestBudget,
   localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
@@ -942,6 +958,15 @@ const minecraftHost = new MinecraftHostService({
   }),
 });
 let fleetProjectMembership: FleetProjectMembership | undefined;
+const fleetHealthMetrics = new FleetHealthMetrics({
+  onProofAlert: (pane, window) =>
+    captain
+      .notifyFleetHealthAlert(
+        pane,
+        `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
+      )
+      .then(() => undefined),
+});
 const captain = createCaptain(
   {
     activitySharing,
@@ -1074,6 +1099,7 @@ const captain = createCaptain(
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
     fleetHireTools: () => workerMcp.expectedFleetToolNames(),
     workerBridgeStatus: (fleet, pane) => workerMcp.bridgeStatus(fleet, pane),
+    workerReportBridgeStatus: (fleet, pane) => workerMcp.reportBridgeStatus(fleet, pane),
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,
@@ -1155,7 +1181,7 @@ const localFleet = new LocalFleetLink({
   directory: join(stateRoot, "links"),
   binding: localFleetBinding,
   projectProof: localProjectProof({
-    diagnostics: localProofDiagnostics(logger, "project"),
+    diagnostics: localProofDiagnostics(logger, "project", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding) =>
@@ -1165,7 +1191,7 @@ const localFleet = new LocalFleetLink({
       grokNative.allows(chain, pane, binding, proof.nativeOccupantId),
   }),
   prove: localFleetProof({
-    diagnostics: localProofDiagnostics(logger, "fleet"),
+    diagnostics: localProofDiagnostics(logger, "fleet", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding) =>
@@ -1190,6 +1216,7 @@ const workerMcp = new WorkerMcp({
   credentials: operatorCredentialStore,
   host: mcpHost,
   minecraft,
+  reportBridgeObserved: (fleet, pane, report) => fleetHealthMetrics.observeReport(fleet, pane, report),
   pluginVersionObserved: (identity, version) => workerPluginNotices.observe(identity, version),
   pluginExpectedVersion: () => workerPluginNotices.expected(),
   projects: async () => (await settingsStore.load()).projects,
@@ -1201,7 +1228,30 @@ const workerMcp = new WorkerMcp({
   },
 });
 
+notifyLinearBudgetWarning = (text) => captain.notifyRuntimeHealthAlert(text);
+const runtimeHealth = new RuntimeHealthObserver({
+  settings: async () => (await settingsStore.load()).runtimeHealth,
+  healthUrl: `http://127.0.0.1:${port}/health`,
+  notify: (text) => captain.notifyRuntimeHealthAlert(text),
+  observed: (observation) =>
+    bodyTelemetry?.emit({
+      event: "body.runtime_health",
+      state: observation.state,
+      durationMs: observation.durationMs,
+      reasons: observation.reasons,
+      ...(observation.cpuPercent === undefined ? {} : { cpuPercent: observation.cpuPercent }),
+      ...(observation.healthLatencyMs === undefined ? {} : { healthLatencyMs: observation.healthLatencyMs }),
+    }),
+  unavailable: () =>
+    logger.warn(
+      { event: "runtime.health.observation_unavailable" },
+      "Runtime health observation unavailable",
+    ),
+});
 const clankie = await createClankieApp({
+  runtimeHealth: () => runtimeHealth.snapshot(),
+  fleetHealthMetrics,
+  linearRequestBudget,
   discordPermissions: (query, body) =>
     managedDiscord
       ? managedDiscord.permissions(query, body)
@@ -1540,6 +1590,8 @@ const server = serve({
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
 });
+if (server.listening) runtimeHealth.start();
+else server.once("listening", () => runtimeHealth.start());
 // ADR 0204: opt-in LAN door for a self-hosted phone, device routes only.
 const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
 const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
@@ -1596,6 +1648,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
   hostPower.stop();
+  runtimeHealth.stop();
   void closeRuntimeProvider().catch(() =>
     logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
   );

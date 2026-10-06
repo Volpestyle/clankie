@@ -10,6 +10,8 @@ import {
 } from "@clankie/protocol";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { afterEach, expect, it } from "vitest";
+import { withFleetAgentHealth } from "../src/session/herdr-connection.ts";
+import { occupantIdForHerdrSession } from "../../clankie/src/captain/herdr-census.ts";
 import { doctorCommand } from "../src/command/doctor.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
 import { createClankieFaceAnsiTheme } from "../src/face/clankie-face-theme.ts";
@@ -64,6 +66,29 @@ async function fixture() {
     // Host profile/process health and catalog observations are independent.
     harnessBridge: { status: "live-process", detail: "Native host process observed" },
     workerTools,
+    ...(workerTools.status === "ready"
+      ? {
+          workerReportBridge: {
+            outcome: "stored" as const,
+            reason: "stored" as const,
+            observedAt,
+            lastStoredAt: observedAt,
+          },
+        }
+      : workerTools.status === "stalled"
+        ? {
+            workerReportBridge: {
+              outcome: "uncertain" as const,
+              reason: "binding_timeout" as const,
+              observedAt,
+            },
+            efficiency: {
+              checkedAt: observedAt,
+              ownerConversationId: "global-default",
+              flags: ["finished, unreported"],
+            },
+          }
+        : {}),
   }));
   seats.push({
     seatId: "pc/legacy",
@@ -183,7 +208,16 @@ it("preserves observed missing/stalled/unknown tools through real HTTP, the publ
     "not-observed",
   ]);
   expect(report.workerTools?.workers[3]).toMatchObject({ tools: ["clankie_tools"], status: "missing" });
+  expect(report.workerReports?.workers.find((worker) => worker.seatId === "pc/stalled")).toMatchObject({
+    report: { outcome: "uncertain", reason: "binding_timeout", observedAt },
+    flags: ["finished, unreported"],
+  });
   const human = formatDoctorReport(report);
+  expect(human).toContain(
+    `✗ Worker pc/stalled report · uncertain at ${observedAt} · binding_timeout · finished, unreported`,
+  );
+  expect(human).toContain(`✓ Worker pc/ready report · stored at ${observedAt} · stored`);
+  expect(human).toContain("○ Worker pc/legacy report · unknown");
   expect(human).toContain(
     "✗ Worker pc/missing tools · missing · Authenticated catalog omitted clankie_call.",
   );
@@ -218,4 +252,36 @@ it("reports unknown rather than healthy when the roster contract or observation 
     error: "Worker tool observations need the captain credential",
   });
   expect(f.requests.slice(requests).some(({ op }) => op === "roster")).toBe(false);
+});
+
+it("adds report health to native agent-list JSON only for the same fleet and occupying session", async () => {
+  const f = await fixture();
+  const session = { source: "herdr:codex", kind: "id" as const, value: "current-session" };
+  const seat = {
+    ...f.seats.find((row) => row.workerReportBridge?.outcome === "uncertain")!,
+    seatId: "pc/term-native",
+    occupantId: occupantIdForHerdrSession(session),
+  };
+  f.setSeats([seat]);
+  const row = {
+    terminal_id: "term-native",
+    pane_id: "w1:p2",
+    agent: "codex",
+    agent_status: "done",
+    agent_session: session,
+    native_field: "preserved",
+  };
+  const stdout = JSON.stringify({ id: "cli:agent:list", result: { type: "agent_list", agents: [row] } });
+  const enriched = JSON.parse(await withFleetAgentHealth(stdout, { ...f.options, connectionId: "pc" }));
+  expect(enriched.result.agents[0]).toEqual({
+    ...row,
+    workerReportBridge: seat.workerReportBridge,
+    reportFlags: ["finished, unreported"],
+  });
+  f.setSeats([{ ...seat, occupantId: "other-session" }]);
+  expect(
+    JSON.parse(await withFleetAgentHealth(stdout, { ...f.options, connectionId: "pc" })).result.agents[0],
+  ).toEqual(row);
+  f.setSeats([seat]);
+  expect(JSON.parse(await withFleetAgentHealth(stdout, f.options)).result.agents[0]).toEqual(row);
 });

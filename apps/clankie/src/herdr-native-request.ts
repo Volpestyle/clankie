@@ -2,6 +2,13 @@ import { createConnection } from "node:net";
 import { randomUUID } from "node:crypto";
 import type { HerdrBinding } from "@clankie/protocol";
 
+/** The fixed provider code survives without exposing provider text or other error fields. */
+export class NativePaneNotFoundError extends Error {
+  constructor() {
+    super("Native pane is unavailable");
+  }
+}
+
 /** The existing native JSONL transport; fresh reads and cancellation close before settling. */
 export function nativeRequest(
   binding: HerdrBinding,
@@ -57,7 +64,13 @@ export function nativeRequest(
         const value = JSON.parse(
           new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, newline)),
         );
-        if (value.id !== id || value.error) return finish(new Error("Native control refused request"));
+        if (value.id !== id) return finish(new Error("Native control refused request"));
+        if (value.error)
+          return finish(
+            value.error.code === "pane_not_found"
+              ? new NativePaneNotFoundError()
+              : new Error("Native control refused request"),
+          );
         finish(undefined, value);
       } catch {
         finish(new Error("Invalid native control response"));

@@ -119,10 +119,21 @@ export function createPrioritySortedLinearIssueReader(
             outcome = { kind: "error", error };
           }
           assertCurrent();
-          selected.cached = {
-            outcome,
-            expiresAt: clock() + (outcome.kind === "snapshot" ? successTtlMs : failureRetryMs),
-          };
+          // A local budget refusal is caller-priority-specific, not a provider failure.
+          // Keep foreground reads free to use their reserved headroom immediately.
+          if (
+            outcome.kind === "error" &&
+            typeof outcome.error === "object" &&
+            outcome.error !== null &&
+            "code" in outcome.error &&
+            outcome.error.code === "linear_request_budget"
+          )
+            delete selected.cached;
+          else
+            selected.cached = {
+              outcome,
+              expiresAt: clock() + (outcome.kind === "snapshot" ? successTtlMs : failureRetryMs),
+            };
           return outcome;
         })();
       }

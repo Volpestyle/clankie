@@ -1,0 +1,101 @@
+# Proof reason coverage
+
+`fleet-health-metrics-native.integration.test.ts` runs the real macOS helper,
+live loopback TCP sockets, an isolated Herdr daemon and a service-owned private
+registry. It asserts all thirteen terminal refusal counters independently of
+native retry diagnostics: seventeen attempts, fifteen refusals and two admissions.
+It also checks a real provider method refusal and an actual reply corrupted by
+an owned Unix relay. No kernel observations or successful provider responses
+are fabricated.
+
+| Terminal reason              | Exercised boundary                                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `unsupported_platform`       | Host platform configuration refuses a live socket.                                                                |
+| `invalid_pane`               | An invalid caller pane claim on a live socket.                                                                    |
+| `closed_socket`              | The owned TCP peer is closed; project coverage also closes it after a real native observation.                    |
+| `missing_binding`            | The service supplies no current Herdr binding.                                                                    |
+| `native_initial_unavailable` | The compiled helper is unavailable at the initial checkpoint.                                                     |
+| `native_final_unavailable`   | The real initial observation succeeds, then the final helper is unavailable.                                      |
+| `pane_unavailable`           | Real Herdr returns `pane_not_found` on the initial pane read.                                                     |
+| `not_member`                 | Neither the actual ancestry nor the service registry grants membership.                                           |
+| `snapshot_changed`           | The TCP owner's actual parent exits between observations.                                                         |
+| `pane_changed`               | The owned pane is removed between the initial and final Herdr reads.                                              |
+| `private_seat_expired`       | The service revokes its actual private registry entry between checks.                                             |
+| `binding_changed`            | The service changes its Herdr binding between checks.                                                             |
+| `observation_failed`         | The real Herdr control socket is unavailable, rejects an unknown method, or returns a reply corrupted in transit. |
+
+Only Herdr's fixed `pane_not_found` code is preserved by the native control
+transport. Other provider errors, invalid JSON, incorrect reply IDs and transport
+failures remain generic failures. An initial missing pane maps to
+`pane_unavailable`; a missing final pane maps to `pane_changed`. Both refuse
+admission. A project socket that closes during asynchronous observation maps to
+`closed_socket`, separately from changes in binding or native observations.
+
+## Native diagnostic evidence
+
+The manual native churn test asserts real `multiple_owners`, `owner_mismatch`,
+`socket_mismatch`, `invalid_arguments` and `owner_not_found` counters. It uses a
+second real PID sharing the connected FD, an invalid server-owned lifetime/socket
+pin, and a previously owned TCP pair after both endpoints close.
+
+The project HTTP integration uses real `execv` with a 4097-byte `argv[0]`. The
+kernel permits the exec, but the helper's bounded argument observation emits
+`argv_invalid`; the project request refuses with HTTP 403 and no forwarded
+effect. Project process diagnostics are passed through the same schema and
+collector as socket diagnostics; diagnostic hooks do not affect admission.
+
+The redacted fixture
+[`exhausted-diagnostics.json`](../../apps/clankie/test/fixtures/local-fleet-proof/exhausted-diagnostics.json)
+retains actual `budget_exhausted` and `attempts_exhausted` events from independent
+FD-churn runs on unchanged commit `8fcf47a54b578629386bdbc306db3ae2205d57f4`.
+Both original requests returned HTTP 403 with zero forwarded effects. Their
+source run names, checkpoint, attempt and fixed event fields are retained;
+variable PIDs, ports, paths and other request data are omitted. Those same runs
+also observed `socket_unavailable`, `process_unavailable` and
+`process_census_changed`. The captures prove these OS branches occurred; a
+golden replay does not claim to force their occurrence on every machine.
+
+`fleet-health-metrics.integration.test.ts` derives the complete 27-reason native
+vocabulary from the helper's diagnostic declarations, compares it to the protocol
+enum, and checks every token through the collector and authenticated HTTP schema.
+It also counts the captured exhaustion events and rejects an unknown diagnostic
+reason. These vocabulary samples are contract inputs, not claims that the OS
+produced every possible failure. Native diagnostics never add terminal proof
+attempts or inflate the refusal denominator.
+
+## Explicit OS coverage limits
+
+The following defensive or race-dependent branches are not forced by these
+fixtures. Their tokens are covered by the vocabulary contract above.
+
+| Condition                                                | Unexercised reasons                                                                                |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Timing, allocation or process-list API failure           | `clock_unavailable`, `allocation_failed`, `process_census_unavailable`                             |
+| Inaccessible, oversized or malformed FD observations     | `fd_list_unavailable`, `fd_list_bounds`, `fd_record_invalid`, `socket_identity_invalid`            |
+| Unavailable, changing, too-deep or inconsistent ancestry | `process_changed`, `ancestry_unavailable`, `ancestry_changed`, `ancestry_bounds`, `ancestry_cycle` |
+| Unavailable or changing executable/argument observations | `executable_unavailable`, `executable_changed`, `argv_unavailable`, `argv_changed`                 |
+
+A healthy kernel does not return negative FD records or a cyclic process parent
+tree. Those checks remain useful fail-closed guards against incompatible or
+inconsistent observations; removing them because a fixture cannot produce them
+would weaken validation. Clock and allocation failures would require disrupting
+the OS or injecting failures. Timing-dependent changes can happen in production
+but cannot be promised on each run without replacing native observations.
+`clock_unavailable` also covers a failure in the bounded monotonic retry wait.
+Pure final-check budget expiration reports `budget_exhausted` without inventing
+a socket mismatch.
+
+## Focused checks
+
+```sh
+pnpm fleet-proof:build
+FLEET_PROOF_NATIVE_TEST=1 PROJECT_NATIVE_PROOF_TEST=1 pnpm exec vitest run --config vitest.config.ts \
+  apps/clankie/test/fleet-health-metrics-native.integration.test.ts \
+  apps/clankie/test/native-proof-churn.integration.test.ts \
+  apps/clankie/test/project-native-proof.integration.test.ts \
+  apps/clankie/test/fleet-health-metrics.integration.test.ts
+```
+
+Native cases are manual opt-ins. They add no build, subprocess churn or Herdr
+daemon to per-push CI. The vocabulary/HTTP contract uses no native build and
+remains a fast portable integration check.

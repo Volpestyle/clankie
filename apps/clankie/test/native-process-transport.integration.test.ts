@@ -11,6 +11,7 @@ import {
   type NativeTransportReason,
 } from "../src/native-process-transport.ts";
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
+import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
 
 const roots: string[] = [];
 interface Journal {
@@ -103,10 +104,13 @@ pipeIt.each(["wrong-id", "extra-frame", "oversized", "stderr", "dead"])(
   async (mode) => {
     const f = await fixture();
     const reasons: NativeTransportReason[] = [];
-    const first = nativeProcessRequest(f.helper, [mode], undefined, (reason) => reasons.push(reason));
-    const queued = nativeProcessRequest(f.helper, ["must-not-dispatch"], undefined, (reason) =>
-      reasons.push(reason),
-    );
+    const metrics = new FleetHealthMetrics();
+    const report = (reason: NativeTransportReason) => {
+      reasons.push(reason);
+      metrics.observeProof("fleet", { source: "transport", reason });
+    };
+    const first = nativeProcessRequest(f.helper, [mode], undefined, report);
+    const queued = nativeProcessRequest(f.helper, ["must-not-dispatch"], undefined, report);
     const rows = await f.received();
     const pid = rows[0]!.pid;
     expect(await first).toBeUndefined();
@@ -116,6 +120,10 @@ pipeIt.each(["wrong-id", "extra-frame", "oversized", "stderr", "dead"])(
       mode === "dead" ? "helper_unavailable" : "protocol_invalid",
       mode === "dead" ? "helper_unavailable" : "protocol_invalid",
     ]);
+    expect(metrics.snapshot().totals.transportDiagnostics).toEqual({
+      [mode === "dead" ? "helper_unavailable" : "protocol_invalid"]: 2,
+    });
+    expect(metrics.snapshot().totals.proof.attempts).toBe(0);
     expect((await f.journal()).filter((row) => row.kind === "request").map((row) => row.mode)).toEqual([
       mode,
     ]);
@@ -166,14 +174,37 @@ pipeIt("waits for inherited stdout/stderr to close after the helper PID has alre
 pipeIt("bounds a silent real child by the production deadline and waits for its death", async () => {
   const f = await fixture();
   const reasons: NativeTransportReason[] = [];
+  const metrics = new FleetHealthMetrics();
   const began = performance.now();
-  const pending = nativeProcessRequest(f.helper, ["timeout"], undefined, (reason) => reasons.push(reason));
+  const pending = nativeProcessRequest(f.helper, ["timeout"], undefined, (reason) => {
+    reasons.push(reason);
+    metrics.observeProof("fleet", { source: "transport", reason });
+  });
   const pid = (await f.received())[0]!.pid;
   expect(await pending).toBeUndefined();
   expect(performance.now() - began).toBeLessThan(3_000);
   expect(reasons).toEqual(["timeout"]);
+  expect(metrics.snapshot().totals.transportDiagnostics).toEqual({ timeout: 1 });
   expect(alive(pid)).toBe(false);
   expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
+});
+
+pipeIt("counts bounded queue overflow and cancellation through an actual held helper", async () => {
+  const f = await fixture();
+  const metrics = new FleetHealthMetrics();
+  const report = (reason: NativeTransportReason) =>
+    metrics.observeProof("fleet", { source: "transport", reason });
+  const active = nativeProcessRequest(f.helper, ["hold"], undefined, report);
+  await f.received();
+  const signals = Array.from({ length: 128 }, () => new AbortController());
+  const queued = signals.map((signal) => nativeProcessRequest(f.helper, ["queued"], signal.signal, report));
+  expect(await nativeProcessRequest(f.helper, ["overflow"], undefined, report)).toBeUndefined();
+  for (const signal of signals) signal.abort();
+  expect(await Promise.all(queued)).toEqual(Array(128).fill(undefined));
+  await f.release();
+  expect(await active).toBeDefined();
+  expect(metrics.snapshot().totals.transportDiagnostics).toEqual({ queue_full: 1, cancelled: 128 });
+  expect(metrics.snapshot().totals.proof.attempts).toBe(0);
 });
 
 pipeIt(

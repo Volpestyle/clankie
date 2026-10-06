@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { Socket } from "node:net";
 import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
+import { FleetNativeDiagnosticReasonSchema } from "@clankie/protocol";
 import { nativeProcessRequest, type NativeTransportReason } from "./native-process-transport.ts";
 
 const birth = z.tuple([z.string().regex(/^[1-9]\d{0,19}$/u), z.string().regex(/^\d{1,6}$/u)]);
@@ -114,6 +115,8 @@ export async function observeNativeProcesses(
   processHelper = fleetProcessHelper(),
   execute?: (command: string, args: string[]) => Promise<string>,
   signal?: AbortSignal,
+  report?: (event: NativeProcessDiagnostic) => void,
+  transport?: (reason: NativeTransportReason) => void,
 ): Promise<NativeProcessSnapshot | undefined> {
   if (
     (execute === undefined && process.platform !== "darwin") ||
@@ -125,9 +128,20 @@ export async function observeNativeProcesses(
     return undefined;
   try {
     const args = ["--processes", String(shellPid), String(agentPid)];
-    const stdout = execute
-      ? await execute(processHelper, args)
-      : (await nativeProcessRequest(processHelper, args, signal))?.stdout;
+    let stdout: string | undefined;
+    if (execute) stdout = await execute(processHelper, args);
+    else {
+      const reply = await nativeProcessRequest(
+        processHelper,
+        report ? [...args, "--diagnostics"] : args,
+        signal,
+        transport,
+      );
+      if (reply) {
+        nativeDiagnostics(reply.stderr, report);
+        stdout = reply.stdout;
+      }
+    }
     if (stdout === undefined) return undefined;
     const parsed = ProcessSnapshotSchema.safeParse(JSON.parse(stdout));
     if (!parsed.success) return undefined;
@@ -144,7 +158,7 @@ export async function observeNativeProcesses(
   }
 }
 
-const DiagnosticSchema = z
+export const NativeProcessDiagnosticSchema = z
   .object({
     schemaVersion: z.literal(1),
     stage: z.enum([
@@ -162,42 +176,14 @@ const DiagnosticSchema = z
       "executable",
       "argv",
     ]),
-    reason: z.enum([
-      "clock_unavailable",
-      "invalid_arguments",
-      "process_census_unavailable",
-      "process_census_changed",
-      "allocation_failed",
-      "process_unavailable",
-      "process_changed",
-      "fd_list_unavailable",
-      "fd_list_bounds",
-      "fd_record_invalid",
-      "socket_unavailable",
-      "socket_identity_invalid",
-      "multiple_owners",
-      "owner_not_found",
-      "budget_exhausted",
-      "owner_mismatch",
-      "socket_mismatch",
-      "ancestry_bounds",
-      "ancestry_cycle",
-      "ancestry_unavailable",
-      "ancestry_changed",
-      "attempts_exhausted",
-      "executable_unavailable",
-      "argv_unavailable",
-      "argv_invalid",
-      "executable_changed",
-      "argv_changed",
-    ]),
+    reason: FleetNativeDiagnosticReasonSchema,
     errno: z.number().int().min(0),
     attempt: z.number().int().min(0).max(32),
     retry: z.boolean(),
   })
   .strict();
 
-export type NativeProcessDiagnostic = z.infer<typeof DiagnosticSchema>;
+export type NativeProcessDiagnostic = z.infer<typeof NativeProcessDiagnosticSchema>;
 
 /** Opt-in fixed kernel stages only; observation cannot change admission. */
 function nativeDiagnostics(stderr: string, report?: (event: NativeProcessDiagnostic) => void) {
@@ -206,7 +192,7 @@ function nativeDiagnostics(stderr: string, report?: (event: NativeProcessDiagnos
   for (const line of stderr.split("\n")) {
     if (!line.startsWith(prefix)) continue;
     try {
-      const parsed = DiagnosticSchema.safeParse(JSON.parse(line.slice(prefix.length)));
+      const parsed = NativeProcessDiagnosticSchema.safeParse(JSON.parse(line.slice(prefix.length)));
       if (parsed.success) void Promise.resolve(report(parsed.data)).catch(() => {});
     } catch {
       // Neither a malformed diagnostic nor its observer changes the proof.

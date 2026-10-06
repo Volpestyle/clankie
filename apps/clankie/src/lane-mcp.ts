@@ -7,6 +7,7 @@
  * would not already hold.
  */
 import { randomUUID } from "node:crypto";
+import { withLinearRequestPriority } from "./linear-request-budget.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -156,8 +157,13 @@ export function createLaneMcpEndpoint({
         };
       }
       const args = request.params.arguments ?? {};
+      const requestPriority = request.params._meta?.clankieRequestPriority;
+      if (requestPriority !== undefined && requestPriority !== "background")
+        return failure("Invalid request priority. Nothing dispatched.");
       const invoke = async () => {
-        const result = await tool.call(args);
+        const result = await (requestPriority === "background"
+          ? withLinearRequestPriority("background", () => tool.call(args))
+          : tool.call(args));
         return { content: [...result.content], ...(result.isError === true ? { isError: true } : {}) };
       };
       const protectedTool = SeatCallToolSchema.safeParse(tool.name);

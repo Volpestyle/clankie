@@ -1,3 +1,4 @@
+import { FleetHealthMetricsSnapshotSchema, FLEET_HEALTH_METRICS_PATH } from "@clankie/protocol";
 import {
   FLEET_TOOL_CATALOG_HEALTH_PATH,
   FleetToolCatalogHealthPageSchema,
@@ -16,6 +17,10 @@ import {
   type InspectInstallOptions,
   type InstallDoctorReport,
 } from "../install-doctor.ts";
+import {
+  LINEAR_REQUEST_BUDGET_PATH,
+  LinearRequestBudgetReportSchema,
+} from "@clankie/protocol/linear-request-budget";
 
 export type { ExecFileImpl, InstallDoctorReport };
 
@@ -45,6 +50,8 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
   if (report.doorway.state === "connecting") {
     return "Phone access is still connecting — run `clankie gateway status` to check again.";
   }
+  if (report.runtimeHealth?.state === "alarm")
+    return `Runtime health alarm (${report.runtimeHealth.reasons.join(" and ")}) — run \`clankie runtime-health status\`.`;
   const remediation = report.remediations[0];
   if (remediation !== undefined) {
     const line = remediation.replace(/\s+/gu, " ").trim();
@@ -52,6 +59,13 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
       ? line
       : `${line} Run \`clankie\`, then \`/setup\`.`;
   }
+  const budget = report.linearRequestBudget;
+  const pressured =
+    budget && "accounts" in budget
+      ? budget.accounts.find((account) => account.status !== "normal")
+      : undefined;
+  if (pressured)
+    return `Linear request budget is ${pressured.status} at ${Math.round(pressured.utilization * 100)}% — run \`clankie linear budget\`.`;
   return "ready";
 }
 
@@ -68,7 +82,11 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const [report, workerTools] = await Promise.all([inspectInstall(options), inspectWorkerTools(options)]);
+  const [report, workerObservations] = await Promise.all([
+    inspectInstall(options),
+    inspectWorkerTools(options),
+  ]);
+  const { workerTools, workerReports } = workerObservations;
   const workingPreferences = await readWorkingPreferences({
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.host === undefined ? {} : { host: options.host }),
@@ -76,6 +94,25 @@ export async function doctorCommand(
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     ...(options.credentialStore === undefined ? {} : { operatorCredentialStore: options.credentialStore }),
   });
+  let fleetHealthMetrics: InstallDoctorReport["fleetHealthMetrics"];
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (credential) {
+      const response = await (options.fetchImpl ?? fetch)(
+        `${commandHost(options)}${FLEET_HEALTH_METRICS_PATH}`,
+        {
+          headers: { authorization: `Bearer ${credential.token}` },
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+      if (response.ok) fleetHealthMetrics = FleetHealthMetricsSnapshotSchema.parse(await response.json());
+    }
+  } catch {
+    /* An old or unreachable service has no metrics observation. */
+  }
   let toolCatalogHealth: NonNullable<InstallDoctorReport["toolCatalogHealth"]>;
   try {
     const credential = await resolveOperatorCredential({
@@ -99,6 +136,28 @@ export async function doctorCommand(
     };
   }
   let remoteHarnesses: readonly unknown[];
+  let linearRequestBudget: NonNullable<InstallDoctorReport["linearRequestBudget"]>;
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("Linear request budget needs the operator credential");
+    const response = await (options.fetchImpl ?? fetch)(
+      `${commandHost(options)}${LINEAR_REQUEST_BUDGET_PATH}`,
+      {
+        headers: { authorization: `Bearer ${credential.token}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) throw new Error(`Linear request budget unavailable (HTTP ${response.status})`);
+    linearRequestBudget = LinearRequestBudgetReportSchema.parse(await response.json());
+  } catch (error) {
+    linearRequestBudget = {
+      status: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
   try {
     const inventory = await runRuntimeCommand(["list"], options);
     const fleets = Array.isArray(inventory.connections)
@@ -126,12 +185,22 @@ export async function doctorCommand(
       { status: "unavailable", detail: error instanceof Error ? error.message : String(error) },
     ];
   }
-  return { ...report, remoteHarnesses, toolCatalogHealth, workerTools, workingPreferences };
+  return {
+    ...report,
+    remoteHarnesses,
+    toolCatalogHealth,
+    workerTools,
+    workerReports,
+    workingPreferences,
+    ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
+    linearRequestBudget,
+  };
 }
 
-async function inspectWorkerTools(
-  options: InspectInstallOptions,
-): Promise<NonNullable<InstallDoctorReport["workerTools"]>> {
+async function inspectWorkerTools(options: InspectInstallOptions): Promise<{
+  workerTools: NonNullable<InstallDoctorReport["workerTools"]>;
+  workerReports: NonNullable<InstallDoctorReport["workerReports"]>;
+}> {
   try {
     const credential = await resolveCaptainCredential({
       env: options.env ?? process.env,
@@ -148,18 +217,30 @@ async function inspectWorkerTools(
     );
     const seats = await client.roster();
     return {
-      workers: seats.map((seat) => ({
-        seatId: seat.seatId,
-        title: seat.title,
-        ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
-        ...(seat.workerTools ?? {
-          status: "not-observed" as const,
-          reason: "No authenticated worker tool observation; native catalog is unverified.",
-        }),
-      })),
+      workerTools: {
+        workers: seats.map((seat) => ({
+          seatId: seat.seatId,
+          title: seat.title,
+          ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
+          ...(seat.workerTools ?? {
+            status: "not-observed" as const,
+            reason: "No authenticated worker tool observation; native catalog is unverified.",
+          }),
+        })),
+      },
+      workerReports: {
+        workers: seats.map((seat) => ({
+          seatId: seat.seatId,
+          title: seat.title,
+          ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
+          ...(seat.workerReportBridge === undefined ? {} : { report: seat.workerReportBridge }),
+          flags: (seat.efficiency?.flags ?? []).filter((flag) => flag === "finished, unreported"),
+        })),
+      },
     };
   } catch (error) {
-    return { workers: [], error: error instanceof Error ? error.message : String(error) };
+    const failure = { workers: [], error: error instanceof Error ? error.message : String(error) };
+    return { workerTools: failure, workerReports: failure };
   }
 }
 

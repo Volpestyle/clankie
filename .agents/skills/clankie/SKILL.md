@@ -58,6 +58,16 @@ Paginate when the response says more exists. For identity,
 it with the intended workspace/account and connection record. Names and portraits
 alone are not identity proof.
 
+Ordinary owner and lead reads retain priority. Mark automated Linear polling with
+`clankie_call({name, arguments, background: true})`; at 80% budget use, background
+reads share a one-minute interval and may return `linear_request_budget` with a
+retry time before sending. Honor that time. Admitted reads may finish pagination;
+writes and webhook context reads retain priority within the hard cap. Authorized
+operator scripts use `clankie linear read TOOL --json-stdin --background` for the
+same policy. `clankie linear budget` and doctor show actual requests, provider
+remaining/reset observations, and the warning at 50%. Account setup is separate
+from the connected-request counters.
+
 Fleet admission grants every tool from verified connected accounts while
 `fleet.tools` is `connected`; no project, native session or workspace proof is
 needed for tools. Bearer links prove only the fleet, not a pane or mailbox.

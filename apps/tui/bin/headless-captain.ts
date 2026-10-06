@@ -76,6 +76,7 @@ import { runOperatorCredentialCommand } from "../src/command/operator-credential
 import { runGatewayCommand } from "../src/command/gateway.ts";
 import { runAutostartCommand } from "../src/command/autostart.ts";
 import { runAwakeCommand } from "../src/command/awake.ts";
+import { runRuntimeHealthCommand } from "../src/command/runtime-health.ts";
 import { commandHelp } from "../src/command/registry.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
 
@@ -154,7 +155,7 @@ export async function runHeadlessCaptainCommand(
       const transport = await hostedTransportFor(env);
       // These existing commands are HTTP-only. The transport replaces their local
       // bearer inside the envelope; no Mac credential is read or transmitted.
-      if (["conversations", "conversation", "send"].includes(command ?? "") || discordHttp)
+      if (["conversations", "conversation", "send", "runtime-health"].includes(command ?? "") || discordHttp)
         return runHeadlessCaptainCommand(args, {
           ...options,
           ...transport,
@@ -211,6 +212,10 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "awake") {
       outputJson(stdout, await runAwakeCommand(rest, options));
+      return 0;
+    }
+    if (command === "runtime-health") {
+      outputJson(stdout, await runRuntimeHealthCommand(rest, options));
       return 0;
     }
     if (command === "pair") return await runPairCommand(rest, options);

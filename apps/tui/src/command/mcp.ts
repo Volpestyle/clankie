@@ -110,7 +110,11 @@ interface ChannelNotification extends Notification {
 export interface LaneToolUpstream {
   readonly instructions?: string | undefined;
   listTools(): Promise<readonly Tool[]>;
-  callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult>;
+  callTool(
+    name: string,
+    args: Record<string, unknown>,
+    options?: { readonly background?: boolean },
+  ): Promise<CallToolResult>;
   /** Long-poll the seat's outbox; empty when nothing arrived inside `waitMs`, or once `signal` aborts. */
   pollEvents(waitMs: number, signal?: AbortSignal): Promise<readonly OperatorSeatEvent[]>;
   acknowledge?(eventId: string): Promise<boolean>;
@@ -301,7 +305,14 @@ export function createSeatBridge(
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name !== REPLY_TOOL_NAME) {
-      return upstream.callTool(request.params.name, request.params.arguments ?? {});
+      const purpose = request.params._meta?.clankieRequestPriority;
+      if (purpose !== undefined && purpose !== "background")
+        return { isError: true, content: [{ type: "text", text: "Invalid request priority" }] };
+      return upstream.callTool(
+        request.params.name,
+        request.params.arguments ?? {},
+        purpose === "background" ? { background: true } : undefined,
+      );
     }
     const args = request.params.arguments ?? {};
     const eventId = typeof args.event_id === "string" ? args.event_id : "";
@@ -620,7 +631,7 @@ export async function connectLaneUpstream(input: {
       } while (cursor !== undefined);
       return collected;
     },
-    async callTool(name, args) {
+    async callTool(name, args, options) {
       const tool = name === "message_seat" || name === "hire_agent" ? name : undefined;
       // One identity belongs to this intent, including the explicit pre-admission
       // replay above. Receipt recovery never dispatches the intent again.
@@ -636,7 +647,14 @@ export async function connectLaneUpstream(input: {
               {
                 name,
                 arguments: args,
-                ...(id === undefined ? {} : { _meta: { [SEAT_CALL_META]: { id } } }),
+                ...(id === undefined && options?.background !== true
+                  ? {}
+                  : {
+                      _meta: {
+                        ...(id === undefined ? {} : { [SEAT_CALL_META]: { id } }),
+                        ...(options?.background === true ? { clankieRequestPriority: "background" } : {}),
+                      },
+                    }),
               },
               undefined,
               { timeout: REQUEST_TIMEOUT_MS },
@@ -878,6 +896,20 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   const sendInbound = createInboundSender({
     directory: join(env.HOME ?? homedir(), ".clankie", "inbound-receipts"),
     scope: JSON.stringify([env.HERDR_SOCKET_PATH ?? "", paneId]),
+    onObservation: async (observation) => {
+      const credential = await resolveOperatorCredential({
+        env,
+        ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+      });
+      if (!credential || !paneId) return;
+      await fetch(new URL(`${fleetSeatMessagesPath(paneId)}/health`, commandHost({ ...options, env })), {
+        method: "POST",
+        redirect: "error",
+        headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+        body: JSON.stringify(observation),
+        signal: AbortSignal.timeout(2_000),
+      });
+    },
     request: async (suffix, init) => {
       const credential = await resolveOperatorCredential({
         env,

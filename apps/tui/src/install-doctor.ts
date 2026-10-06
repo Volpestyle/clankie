@@ -75,6 +75,7 @@ export interface InstallDoctorReport {
   readonly ok: true;
   readonly kind: InstallKind;
   readonly version: string;
+  readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
   readonly repoRoot: string;
   readonly model: string | null;
   /** Whether Clankie can take a turn at all: a model, and something to authenticate it. */
@@ -103,6 +104,9 @@ export interface InstallDoctorReport {
   };
   readonly emailConfigured: boolean;
   readonly linear?: ReturnType<typeof linearFollowStatus>;
+  readonly linearRequestBudget?:
+    | import("@clankie/protocol/linear-request-budget").LinearRequestBudgetReport
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly tracker?: {
     readonly backend: "linear" | "local";
     readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";
@@ -127,6 +131,17 @@ export interface InstallDoctorReport {
     })[];
     readonly error?: string;
   };
+  readonly workerReports?: {
+    readonly workers: readonly {
+      readonly seatId: string;
+      readonly title: string;
+      readonly fleet?: string;
+      readonly report?: import("@clankie/protocol").WorkerReportBridgeStatus;
+      readonly flags: readonly string[];
+    }[];
+    readonly error?: string;
+  };
+  readonly fleetHealthMetrics?: import("@clankie/protocol").FleetHealthMetricsSnapshot;
   readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };
@@ -253,7 +268,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     pluginBundle,
   );
   const laneTools = await inspectLaneTools(commandHost({ env }), options.fetchImpl ?? fetch);
-  const { doorway, lastSleep } = await probeHealth({
+  const { doorway, lastSleep, runtimeHealth } = await probeHealth({
     env,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
@@ -288,6 +303,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
 
   return {
     ok: true,
+    ...(runtimeHealth === undefined ? {} : { runtimeHealth }),
     kind,
     version: await readInstallVersion(options.repoRoot, kind),
     repoRoot: options.repoRoot,

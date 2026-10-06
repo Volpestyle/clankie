@@ -12,7 +12,12 @@ import {
   readSeatTelemetry,
   type SeatCommitBaseline,
 } from "./seat-telemetry.ts";
-import { fleetReviewContext, fleetRoundEvidence, startFleetRounds } from "./fleet-review.ts";
+import {
+  fleetReviewContext,
+  fleetRoundEvidence,
+  FleetReportFailureAlerts,
+  startFleetRounds,
+} from "./fleet-review.ts";
 import { FleetEfficiencyReviewSchema, type FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
@@ -1733,6 +1738,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (delivery.outcome === "offline")
       return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
+    if (seat) seatEfficiency.assign(seat.occupantId, { owner: authority.owner });
     if (questionAnswer !== undefined) return { ...delivery, seatId, status: "answered" };
     if (delivery.state === "queued" && delivery.detail !== undefined)
       return { ...delivery, seatId, status: "queued_until_turn_end" };
@@ -2127,12 +2133,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const seats = await herdrWatches.withNativeStatus(workSeats, fleet.seats);
     for (const seat of seats) {
       const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
-      if (!observed || !options.workerBridgeStatus) continue;
+      if (!observed) continue;
       const qualified = splitFleetQualified(observed.paneId);
-      seat.workerTools = options.workerBridgeStatus(
-        qualified?.fleet ?? "default",
-        qualified?.id ?? observed.paneId,
-      );
+      const fleetId = qualified?.fleet ?? "default";
+      const pane = qualified?.id ?? observed.paneId;
+      if (options.workerBridgeStatus) seat.workerTools = options.workerBridgeStatus(fleetId, pane);
+      const report = options.workerReportBridgeStatus?.(fleetId, pane);
+      if (report) seat.workerReportBridge = report;
     }
     const nextWork = JSON.stringify(
       seats.map((seat) => [
@@ -2140,6 +2147,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.assignment,
         seat.harnessBridge,
         seat.workerTools,
+        seat.workerReportBridge,
         seat.status,
         seat.summary,
       ]),
@@ -2314,6 +2322,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           assignment: seat.assignment,
           goal: seat.goal,
           reportRoute: seat.workerReportRouting,
+          reportBridge: seat.workerReportBridge,
           reports: reportSummaries(undefined, observedAgent(lead.observed), true),
           telemetry: await readSeatTelemetry(lead.observed, {
             commitBaseline: exclusive ? baseline : undefined,
@@ -2341,7 +2350,122 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       fleetChanges.touch();
     }
     liveSeats = projected;
+    observeReportFailureAlerts(projected);
     return projected;
+  }
+
+  const reportFailureAlerts = new FleetReportFailureAlerts();
+  function observeReportFailureAlerts(seats: readonly OperatorFleetSeat[]): void {
+    for (const alert of reportFailureAlerts.observe(seats)) {
+      const seat = seats.find((seat) => seat.seatId === alert.seatId);
+      const pane = seat && seatLeadOwners.get(seat)?.observed.paneId;
+      if (!pane) {
+        reportFailureAlerts.settle(alert, false);
+        continue;
+      }
+      void notifyFleetHealthAlert(pane, alert.text)
+        .then((accepted) => reportFailureAlerts.settle(alert, accepted))
+        .catch(() => reportFailureAlerts.settle(alert, false));
+    }
+  }
+
+  /** Native delivery only. Health observations never start a service model turn. */
+  async function notifyFleetHealthAlert(pane: string, text: string): Promise<boolean> {
+    if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
+    const original = await herdrRunner.get(pane).catch(() => undefined);
+    if (!original?.session) return false;
+    const fleet = await observeFleet(true);
+    const route = await workerReportRoute(original, fleet);
+    if (!["adoption", "parent"].includes(route.diagnostic.source)) return false;
+    if (!(await validateConversationOwner(route.owner))) return false;
+    const guard = async () => {
+      if (shutdown.signal.aborted || !(await validateConversationOwner(route.owner)))
+        throw new Error("Fleet health alert owner is unavailable");
+      const current = await herdrRunner.get(pane).catch(() => undefined);
+      if (!current || inboundBinding(current) !== inboundBinding(original))
+        throw new Error("Fleet health alert occupant changed");
+      const currentRoute = await workerReportRoute(current, await observeFleet(true));
+      if (JSON.stringify(currentRoute.owner) !== JSON.stringify(route.owner))
+        throw new Error("Fleet health alert lead changed");
+    };
+    return deliverNativeHealthAlert(route.owner, text, guard, route.native ?? route.parent);
+  }
+
+  async function notifyRuntimeHealthAlert(text: string): Promise<boolean> {
+    return deliverNativeHealthAlert(
+      { conversationId: conversations.defaultGlobalConversationId() },
+      text,
+      async () => {
+        if (shutdown.signal.aborted) throw new Error("Runtime health alert stopped");
+      },
+    );
+  }
+
+  async function deliverNativeHealthAlert(
+    owner: ConversationOwner,
+    text: string,
+    guard: () => Promise<void>,
+    recipient?: NativeSeatRecipient,
+  ): Promise<boolean> {
+    if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
+    if (!(await validateConversationOwner(owner))) return false;
+    await guard();
+    const outbox = seatOutbox(owner.conversationId);
+    if (outbox.uncertain()) return false;
+    if (!recipient && outbox.bound()) {
+      const result = await outbox.deliver({
+        kind: "message",
+        conversationId: owner.conversationId,
+        source: "service",
+        content: text,
+        wantsReply: false,
+        signal: shutdown.signal,
+      });
+      return ["delivered", "unconfirmed"].includes(result.outcome);
+    }
+    const target = recipient
+      ? await herdrRunner.get(recipient.paneId).catch(() => undefined)
+      : await operatorNativeSource(owner.conversationId);
+    if (!target?.session) return false;
+    const binding = inboundBinding(target);
+    if (recipient && binding !== recipient.binding) return false;
+    const mailbox = fleetSeatMailbox(
+      fleetMailboxes,
+      target.terminalId,
+      join(options.stateDir, "delivery-receipts", "fleet"),
+    );
+    if (mailbox.uncertain()) return false;
+    let blocked = false;
+    let dispatchChecked = false;
+    const finalGuard = async () => {
+      await guard();
+      if (!(await validateConversationOwner(owner))) throw new Error("Health alert owner changed");
+      if (recipient && !(await nativeRecipientCurrent(recipient)))
+        throw new Error("Health alert native lead changed");
+      if (outbox.uncertain() || mailbox.uncertain()) {
+        blocked = true;
+        throw new Error("Health alert recipient has an unresolved original receipt; nothing was sent");
+      }
+      dispatchChecked = true;
+    };
+    const result = await deliverToSeat(
+      target.terminalId,
+      text,
+      { conversationId: owner.conversationId, source: "captain" },
+      {
+        guard: finalGuard,
+        ...(binding === undefined ? {} : { recipientBinding: binding }),
+        fence: async (current) => inboundBinding(current) === binding,
+      },
+    ).catch((error: unknown) => {
+      if (blocked) return undefined;
+      throw error;
+    });
+    return (
+      !blocked &&
+      result !== undefined &&
+      (result.outcome === "delivered" || (result.outcome === "unconfirmed" && dispatchChecked))
+    );
   }
 
   /** Read every fleet-owned record against one stable Herdr change cursor. */
@@ -3551,6 +3675,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     setDesignatedConversationHead: async (id, head) => conversations.setDesignatedHead(id, head),
     validateConversationOwner,
     wakeConversation,
+    notifyFleetHealthAlert,
+    notifyRuntimeHealthAlert,
 
     async fleetEfficiency(conversationId, review) {
       const owner = { conversationId };
