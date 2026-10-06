@@ -378,6 +378,8 @@ export interface VoiceConversationPort {
   cancelResponse(requestEventId: string): void;
   truncate(itemId: string, audioEndMs: number): void;
   submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
+  /** Close a text brain's tool exchange without paying for a spoken continuation. */
+  settleFunctionCallSilently?(callId: string): void;
   close(): void;
 }
 
@@ -3548,13 +3550,15 @@ export class DiscordVoiceSession {
     if (outcome.state === "declined") {
       // The captain chose silence (defensive — voice never offers the
       // decline path). Nothing is spoken and nothing is receipted; the
-      // function call is left unresolved rather than provoking a response
-      // whose audio would only be dropped, because deciding to stay quiet
-      // must not cost a response (ADR 0051 via ADR 0057).
+      // no provider response is requested. Text brains may settle their local
+      // tool history without speaking; native realtime providers retain their
+      // existing unresolved-call semantics (ADR 0051 via ADR 0057).
+      this.settleFunctionCallSilentlySafely(call.callId);
       this.emitRealtimeTool(call, exchange, "completed", guildId, channelId, "captain_declined");
       return;
     }
     if (outcome.state === "absorbed") {
+      this.settleFunctionCallSilentlySafely(call.callId);
       this.emitRealtimeTool(call, exchange, "completed", guildId, channelId, "captain_absorbed");
       return;
     }
@@ -3698,6 +3702,14 @@ export class DiscordVoiceSession {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  private settleFunctionCallSilentlySafely(callId: string): void {
+    try {
+      this.conversation?.settleFunctionCallSilently?.(callId);
+    } catch {
+      // A boundary that cannot retain the admitted result closes itself; never replay the tool.
     }
   }
 

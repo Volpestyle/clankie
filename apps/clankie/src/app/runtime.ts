@@ -50,7 +50,16 @@ import {
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/public-gateway";
+<<<<<<< HEAD
 import { GameplaySettingsSchema, PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
+=======
+import {
+  assertNoSecretShapedValue,
+  PersonaSettingsSchema,
+  SettingsStore,
+  VoiceSettingsSchema,
+} from "@clankie/settings";
+>>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
@@ -692,6 +701,65 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       restart: "Restart Clankie to apply persona images.",
       images: personaImageStatus(await loadPersonaImages(updated.persona.imagesDir)),
     });
+  });
+
+  app.on(["GET", "POST"], "/v1/operator/voice", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, dependencies);
+    if (identity === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!identity) return context.json({ error: "operator_authentication_required" }, 401);
+    const guard = async (): Promise<void> => {
+      const current = await authenticateOperator(context.req.raw, dependencies);
+      if (current === "unavailable") throw new Error("operator_authentication_unavailable");
+      if (context.req.raw.signal.aborted || current?.operatorId !== identity.operatorId)
+        throw new Error("operator_authentication_required");
+    };
+    try {
+      let updated;
+      if (context.req.method === "POST") {
+        // Defaults belong to the full stored configuration, never an omitted
+        // patch field (Zod applies nested defaults even inside optional fields).
+        const patch = z
+          .object({
+            ...VoiceSettingsSchema.shape,
+            realtimeProvider: VoiceSettingsSchema.shape.realtimeProvider.removeDefault(),
+            ttsProvider: VoiceSettingsSchema.shape.ttsProvider.removeDefault(),
+            xAiReasoningEffort: VoiceSettingsSchema.shape.xAiReasoningEffort.removeDefault(),
+          })
+          .partial()
+          .strict()
+          .safeParse(await readJson(context.req.raw));
+        if (!patch.success) return context.json({ error: "malformed" }, 400);
+        try {
+          assertNoSecretShapedValue(patch.data);
+        } catch {
+          return context.json({ error: "malformed" }, 400);
+        }
+        if (!settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
+        updated = await settingsSource.update((value) => {
+          const voice = VoiceSettingsSchema.safeParse({ ...value.voice, ...patch.data });
+          if (!voice.success) throw new Error("voice_settings_malformed");
+          return { ...value, voice: voice.data };
+        }, guard);
+      } else updated = await settingsSource.load();
+      const voice = VoiceSettingsSchema.parse(updated.voice);
+      assertNoSecretShapedValue(voice);
+      await guard();
+      context.header("cache-control", "no-store");
+      return context.json({
+        voice,
+        ...(context.req.method === "POST"
+          ? { restart: "Restart the active Discord body to apply voice settings." }
+          : {}),
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.message : "";
+      if (name === "voice_settings_malformed") return context.json({ error: "malformed" }, 400);
+      if (name === "operator_authentication_required") return context.json({ error: name }, 401);
+      if (name === "operator_authentication_unavailable") return context.json({ error: name }, 503);
+      logger.warn({ phase: "operator_voice_settings" }, "voice settings persistence unavailable");
+      return context.json({ error: "settings_unavailable" }, 503);
+    }
   });
 
   const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {

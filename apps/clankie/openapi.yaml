@@ -2337,6 +2337,7 @@ paths:
         "400": { description: Invalid persona patch }
         "401": { description: Operator authentication required }
         "503": { description: Settings persistence unavailable }
+<<<<<<< HEAD
   /v1/operator/runtime-health:
     get:
       tags: [Operator]
@@ -2364,10 +2365,39 @@ paths:
         one alarm and one recovery with incident duration; it creates no service
         model turn. The schema and bounded ranges live in @clankie/protocol.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+=======
+  /v1/operator/voice:
+    get:
+      tags: [Operator]
+      operationId: getOperatorVoice
+      summary: Read the owner-authored voice settings
+      description: Native owner/self-hosted voice control; this route is not admitted by the paired hosted-device bridge. Returns stored provider, model and public voice identifiers with schema defaults. Environment overrides, provider credentials and other owner settings are omitted. Does not start voice or contact providers.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Stored voice settings; Cache-Control is no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [voice]
+                properties:
+                  voice: { $ref: "#/components/schemas/VoiceSettings" }
+        "401": { description: Operator authentication required }
+        "503": { description: Operator authentication or settings read unavailable }
+    post:
+      tags: [Operator]
+      operationId: updateOperatorVoice
+      summary: Apply a validated partial voice settings update
+      description: Native owner/self-hosted voice control; this route is not admitted by the paired hosted-device bridge. Merges a strict patch into the current settings under the atomic settings store. The merged configuration must satisfy VoiceSettings, including Anthropic's ElevenLabs voice requirement. Preserves inactive provider models and unrelated settings. Unknown fields and token-shaped values are refused; provider keys belong in the credential broker. Owner authority is rechecked before persistence. Changes stored settings only and requires an active Discord body restart to apply; does not restart a body or contact providers.
+      security: [{ operatorBearer: [] }]
+>>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
       requestBody:
         required: true
         content:
           application/json:
+<<<<<<< HEAD
             example:
               schemaVersion: 1
               expectedRevision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -2380,6 +2410,24 @@ paths:
         "409": { description: Settings revision or owner authority changed }
         "503": { description: Settings unavailable }
 
+=======
+            schema: { $ref: "#/components/schemas/VoiceSettingsPatch" }
+      responses:
+        "200":
+          description: Updated stored voice settings; Cache-Control is no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [voice, restart]
+                properties:
+                  voice: { $ref: "#/components/schemas/VoiceSettings" }
+                  restart: { type: string, const: "Restart the active Discord body to apply voice settings." }
+        "400": { description: Malformed, secret-shaped or incompatible voice settings patch }
+        "401": { description: Operator authentication required or revoked before persistence }
+        "503": { description: Operator authentication or settings persistence unavailable }
+>>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
   /health:
     get:
       tags: [Health]
@@ -5096,6 +5144,55 @@ paths:
 
 components:
   schemas:
+    VoiceSettingsPatch:
+      type: object
+      additionalProperties: false
+      description: Partial owner voice settings. The server validates the merged configuration against VoiceSettings; omission preserves the current field.
+      properties:
+        realtimeProvider: { type: string, enum: [openai, xai, anthropic] }
+        ttsProvider:
+          type: string
+          enum: [openai, elevenlabs]
+          description: openai means the selected realtime provider's native speech output. Anthropic requires elevenlabs; xai currently requires native output.
+        openAiRealtimeModel: { type: string, pattern: '^[\w.-]{1,128}$' }
+        openAiTranscribeModel: { type: string, pattern: '^[\w.-]{1,128}$' }
+        openAiVoice: { type: string, minLength: 1, maxLength: 64 }
+        xAiRealtimeModel: { type: string, pattern: '^[\w.-]{1,128}$' }
+        anthropicModel:
+          type: string
+          pattern: '^[\w.-]{1,128}$'
+          description: Unset uses the runtime default claude-sonnet-5-5.
+        xAiVoice: { type: string, pattern: '^[\w-]{1,128}$' }
+        xAiReasoningEffort: { type: string, enum: [high, none] }
+        elevenLabsVoiceId: { type: string, pattern: '^[\w-]{1,128}$' }
+        elevenLabsModelId: { type: string, pattern: '^[\w-]{1,128}$' }
+    VoiceSettings:
+      allOf:
+        - { $ref: "#/components/schemas/VoiceSettingsPatch" }
+        - type: object
+          required: [realtimeProvider, ttsProvider, xAiReasoningEffort]
+          properties:
+            realtimeProvider: { default: openai }
+            ttsProvider: { default: openai }
+            xAiReasoningEffort: { default: high }
+          if:
+            properties:
+              ttsProvider: { const: elevenlabs }
+          then:
+            required: [elevenLabsVoiceId]
+          allOf:
+            - if:
+                properties:
+                  realtimeProvider: { const: anthropic }
+              then:
+                properties:
+                  ttsProvider: { const: elevenlabs }
+            - if:
+                properties:
+                  realtimeProvider: { const: xai }
+              then:
+                properties:
+                  ttsProvider: { const: openai }
     SupportGrantCreateRequest:
       type: object
       additionalProperties: false

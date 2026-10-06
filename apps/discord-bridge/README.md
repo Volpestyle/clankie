@@ -50,16 +50,29 @@ Explicit shell values override unset non-secret settings. The main groups are:
 
 Secrets do not belong in that file. `DISCORD_BOT_TOKEN`, `DISCORD_USER_TOKEN`,
 and `CLANKIE_CAPTAIN_TOKEN` are hard startup errors. Voice uses the brokered API
-credential matching `openai` or `xai`; external speech also uses brokered
-`elevenlabs`. Their API-key environment names are rejected by this process when
+credential matching `openai`, `xai`, or `anthropic`; the Anthropic brain also
+requires a separate `openai` transcription credential. External speech uses
+brokered `elevenlabs`. Their API-key environment names are rejected by this process when
 those paths are active.
 
 The shared voice topology stays the same across providers. OpenAI uses its
 realtime transcription session; xAI uses raw-binary streaming STT at `/v1/stt`.
-Both feed attributed text into one engaged realtime conversation. Grok defaults
+Both feed attributed text into one engaged conversation. Grok defaults
 to the pinned `grok-voice-think-fast-2.0` model and `eve` voice; `/voice` can
 change both and xAI's `high`/`none` reasoning effort. xAI does not expose a
 streaming-STT model selector, so no fake model knob is presented.
+
+The optional Anthropic brain uses the existing OpenAI transcriber, streams
+Claude text into the existing ElevenLabs mouth, and retains the same group
+floor, tools and interruption handling. Select it through `/voice` or
+`clankie voice brain set anthropic claude-sonnet-5-5` after configuring an
+ElevenLabs voice ID. It requires brokered `anthropic`, `openai`, and `elevenlabs`
+API keys. OpenAI receives consented room audio; Anthropic receives attributed
+text and admitted context; ElevenLabs receives the words Clankie chooses to say.
+The model ID is explicit and is never silently replaced by a catalog fallback.
+Changes take effect after restarting the active body. This is a self-hosted
+experiment; [James's manual trial](../../docs/testing/2026-10-06-sonnet-voice/manual-trial.md)
+must establish call latency, interruption and how it sounds.
 
 For OpenAI plus ElevenLabs, explicit `voice.elevenLabsModelId: eleven_v4_turbo`
 selects `/v1/text-to-dialogue/multi-stream-input`. It registers the existing

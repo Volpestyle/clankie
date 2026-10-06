@@ -251,6 +251,18 @@ Everything else about the launcher (Linear activity, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
 [launcher details](reference/launcher.md).
 
+Voice brain providers are `openai`, `xai`, and `anthropic`. Anthropic defaults
+to `claude-sonnet-5-5` and needs an existing ElevenLabs voice ID plus separate
+brokered API keys for `anthropic`, `openai` transcription, and `elevenlabs`.
+Configure identifiers and missing keys with `/voice`; status never reveals keys.
+Brain switches preserve inactive models. OpenAI preserves the current speech
+output, while xAI selects native speech and Anthropic selects ElevenLabs.
+Inspect `clankie voice status` for environment overrides and the prior settings
+before arranging a restart of active work. These settings commands make no
+provider call and never restart automatically. To restore native OpenAI speech
+after a Claude trial, select the OpenAI stack with `/voice` as well as restoring
+the brain; an originally unset brain model can be restored with `brain model clear`.
+
 Discord setup connects one server with Participant or Admin, fleet display and
 a tracking level. Participant follows Discord permissions. Admin controls the
 dedicated server through `discord_server_action`, including channels, categories,

@@ -358,3 +358,115 @@ describe("headless ElevenLabs model selection", () => {
     }
   });
 });
+
+describe("headless voice brain selection", () => {
+  it("refuses unusable effective environment overrides before persisting a valid candidate", async () => {
+    const env = await isolatedEnv();
+    const store = new SettingsStore(defaultSettingsPath(env));
+    const before = await store.update((current) => ({
+      ...current,
+      voice: {
+        ...current.voice,
+        ttsProvider: "elevenlabs",
+        elevenLabsVoiceId: "owned_voice",
+      },
+    }));
+    for (const { args, overrides, errorField } of [
+      {
+        args: ["voice", "brain", "set", "anthropic"],
+        overrides: { CLANKIE_VOICE_REALTIME_PROVIDER: "xai" },
+        errorField: "ttsProvider",
+      },
+      {
+        args: ["voice", "brain", "set", "openai", "saved-valid-model"],
+        overrides: { CLANKIE_VOICE_REALTIME_MODEL: "../unsafe" },
+        errorField: "openAiRealtimeModel",
+      },
+      {
+        args: ["voice", "model", "set", "eleven_v4_turbo"],
+        overrides: { CLANKIE_VOICE_TTS_PROVIDER: "unsupported" },
+        errorField: "ttsProvider",
+      },
+    ]) {
+      const stdout = outputBuffer(),
+        stderr = outputBuffer();
+      expect(
+        await runHeadlessCaptainCommand(args, {
+          repoRoot: "/unused",
+          env: { ...env, ...overrides },
+          stdout: stdout.stream,
+          stderr: stderr.stream,
+        }),
+      ).toBe(1);
+      expect(stderr.text()).toContain(errorField);
+      expect(await store.load()).toEqual(before);
+    }
+  });
+
+  it("selects an Anthropic brain, honors model overrides, and restores the retained native stacks", async () => {
+    const env = await isolatedEnv();
+    const store = new SettingsStore(defaultSettingsPath(env));
+    const before = await store.update((current) => ({
+      ...current,
+      voice: {
+        ...current.voice,
+        elevenLabsVoiceId: "owned_voice",
+        openAiRealtimeModel: "saved-openai-brain",
+        openAiTranscribeModel: "gpt-realtime-whisper",
+        xAiRealtimeModel: "saved-xai-brain",
+      },
+      discord: { ...current.discord, voiceConsentPolicy: "presence" },
+    }));
+    const selected = await run(["voice", "brain", "set", "anthropic", "claude-sonnet-5-5"], env);
+    expect(selected).toMatchObject({
+      voice: {
+        realtimeProvider: "anthropic",
+        anthropicModel: "claude-sonnet-5-5",
+        ttsProvider: "elevenlabs",
+        elevenLabsVoiceId: "owned_voice",
+        openAiRealtimeModel: "saved-openai-brain",
+        xAiRealtimeModel: "saved-xai-brain",
+      },
+    });
+    expect(
+      await run(["voice", "status"], { ...env, CLANKIE_VOICE_REALTIME_MODEL: "explicit-brain" }),
+    ).toMatchObject({
+      voice: { anthropicModel: "claude-sonnet-5-5" },
+      effectiveVoice: { anthropicModel: "explicit-brain" },
+    });
+    await run(["voice", "brain", "model", "clear"], env);
+    expect((await store.load()).voice.anthropicModel).toBeUndefined();
+    await run(["voice", "brain", "set", "xai"], env);
+    expect((await store.load()).voice).toMatchObject({
+      realtimeProvider: "xai",
+      xAiRealtimeModel: "saved-xai-brain",
+      ttsProvider: "openai",
+    });
+    await run(["voice", "brain", "set", "openai"], env);
+    expect(await store.load()).toEqual(before);
+  });
+
+  it("refuses missing external voice setup and invalid brain commands without writing", async () => {
+    const env = await isolatedEnv();
+    const store = new SettingsStore(defaultSettingsPath(env));
+    const before = await store.load();
+    for (const args of [
+      ["voice", "brain", "set", "anthropic"],
+      ["voice", "brain", "set", "unknown"],
+      ["voice", "brain", "set", "openai", "../unsafe"],
+      ["voice", "brain", "model", "clear", "extra"],
+    ]) {
+      const stdout = outputBuffer(),
+        stderr = outputBuffer();
+      expect(
+        await runHeadlessCaptainCommand(args, {
+          repoRoot: "/unused",
+          env,
+          stdout: stdout.stream,
+          stderr: stderr.stream,
+        }),
+      ).toBe(1);
+      expect(await store.load()).toEqual(before);
+    }
+  });
+});

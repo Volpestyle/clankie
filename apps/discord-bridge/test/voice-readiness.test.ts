@@ -6,6 +6,8 @@ import {
   mintDiscordVoiceBridgeToken,
 } from "@clankie/credential-broker";
 import { Buffer } from "node:buffer";
+import { once } from "node:events";
+import { createServer, type IncomingHttpHeaders } from "node:http";
 import { Routes } from "discord.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -240,6 +242,79 @@ describe("Discord group voice readiness", () => {
     expect(JSON.stringify(report)).not.toContain("xai-secret");
   });
 
+  it("reports the Anthropic brain, separate OpenAI transcription key and ElevenLabs without echoing secrets", async () => {
+    const store = new MemoryCredentialStore({
+      anthropic: { type: "api", key: "anthropic-secret" },
+      elevenlabs: { type: "api", key: "elevenlabs-secret" },
+    });
+    const options = {
+      env: {
+        DISCORD_VOICE_ENABLED: "true",
+        CLANKIE_VOICE_REALTIME_PROVIDER: "anthropic",
+        CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+        CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "owned_voice",
+      },
+      store,
+      api: {
+        inspectDiscordReadiness: () => Promise.resolve(controlPlane),
+        fetchDiscordVoiceBriefing: () => Promise.resolve(briefing),
+      },
+      voxProbe: readyVoxProbe,
+      wakeProbe: () =>
+        Promise.resolve({
+          listener: { ok: true, detail: "OpenAI transcription opened" },
+          engaged: { ok: true, detail: "Claude responded" },
+          capability: { ok: true, detail: "web lookup routed through ask_clankie" },
+        }),
+    };
+    const missing = await inspectDiscordVoiceReadiness(options);
+    expect(checkByName(missing, "anthropic brain credential").ok).toBe(true);
+    expect(checkByName(missing, "openai transcription credential").ok).toBe(false);
+    store.credentials.set("openai", { type: "api", key: "openai-transcription-secret" });
+    const present = await inspectDiscordVoiceReadiness(options);
+    expect(checkByName(present, "openai transcription credential").ok).toBe(true);
+    expect(checkByName(present, "ElevenLabs voice credential").ok).toBe(true);
+    expect(checkByName(present, "realtime configuration").detail).toContain(
+      "openai/gpt-realtime-whisper listener",
+    );
+    expect(present.realtime).toMatchObject({
+      provider: "anthropic",
+      transcriptionProvider: "openai",
+      realtimeModel: "claude-sonnet-5-5",
+      voice: "owned_voice",
+      ttsProvider: "elevenlabs",
+    });
+    for (const key of ["anthropic-secret", "openai-transcription-secret", "elevenlabs-secret"])
+      expect(JSON.stringify(present)).not.toContain(key);
+    const forbidden = await inspectDiscordVoiceReadiness({
+      ...options,
+      env: { ...options.env, ANTHROPIC_API_KEY: "forbidden-secret" },
+    });
+    expect(checkByName(forbidden, "credential environment").ok).toBe(false);
+    expect(JSON.stringify(forbidden)).not.toContain("forbidden-secret");
+  });
+
+  it("refuses to reuse the Anthropic key as a transcription key before opening any provider", async () => {
+    const result = await probeVoiceWakeTransition({
+      apiKey: "anthropic-secret",
+      config: parseVoiceRealtimeEnv({
+        CLANKIE_VOICE_REALTIME_PROVIDER: "anthropic",
+        CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+        CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "owned_voice",
+      }),
+      socketFactory: async () => {
+        throw new Error("provider transport must not open");
+      },
+      fetchImpl: async () => {
+        throw new Error("provider HTTP must not open");
+      },
+    });
+    expect(result.listener).toMatchObject({ ok: false });
+    expect(result.listener.detail).toContain("separate brokered openai transcription credential");
+    expect(result.engaged.ok).toBe(false);
+    expect(result.capability.ok).toBe(false);
+  });
+
   it("fails the realtime configuration check when retired cascade envs are set", async () => {
     const store = new MemoryCredentialStore();
     store.credentials.set("openai", { type: "api", key: "openai-secret" });
@@ -336,6 +411,105 @@ class FakeProbeSocket implements RealtimeSocket {
 }
 
 describe("voice wake-transition probe", () => {
+  it("probes Claude through the real Anthropic SDK/HTTP boundary with only the separate OpenAI listener socket", async () => {
+    const requests: { headers: IncomingHttpHeaders; body: { model: string; tools: { name: string }[] } }[] =
+      [];
+    const server = createServer((request, response) => {
+      void (async () => {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        requests.push({ headers: request.headers, body });
+        const events = [
+          {
+            type: "message_start",
+            message: {
+              id: "message_fixture",
+              type: "message",
+              role: "assistant",
+              model: body.model,
+              content: [],
+              stop_reason: null,
+              stop_sequence: null,
+              usage: { input_tokens: 20, output_tokens: 0 },
+            },
+          },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "call_fixture", name: "ask_clankie", input: {} },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: {
+              type: "input_json_delta",
+              partial_json: JSON.stringify({ request: "Look up the current weather in Chicago." }),
+            },
+          },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "tool_use", stop_sequence: null },
+            usage: { output_tokens: 8 },
+          },
+          { type: "message_stop" },
+        ];
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(
+          events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+        );
+      })().catch(() => response.writeHead(500).end());
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("HTTP fixture did not listen");
+    const sockets: FakeProbeSocket[] = [];
+    try {
+      const result = await probeVoiceWakeTransition({
+        apiKey: "anthropic-api-fixture",
+        transcriptionApiKey: "openai-transcription-fixture",
+        config: parseVoiceRealtimeEnv({
+          CLANKIE_VOICE_REALTIME_PROVIDER: "anthropic",
+          CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+          CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "owned_voice",
+        }),
+        socketFactory: async (url, headers) => {
+          expect(url.startsWith("wss://api.openai.com/v1/realtime")).toBe(true);
+          expect(headers.authorization).toBe("Bearer openai-transcription-fixture");
+          const socket = new FakeProbeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        fetchImpl: (input, init) => {
+          expect(String(input)).toBe("https://api.anthropic.com/v1/messages");
+          return fetch(`http://127.0.0.1:${address.port}/messages`, init);
+        },
+        timeoutMs: 1_000,
+      });
+      expect(result.listener.ok).toBe(true);
+      expect(result.engaged.ok, result.engaged.detail).toBe(true);
+      expect(result.capability.ok).toBe(true);
+      // Readiness never creates an ElevenLabs synthesis socket or native brain socket.
+      expect(sockets).toHaveLength(1);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.headers["x-api-key"]).toBe("anthropic-api-fixture");
+      expect(requests[0]?.body.model).toBe("claude-sonnet-5-5");
+      expect(requests[0]?.body.tools.map((tool) => tool.name)).toContain("ask_clankie");
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("HTTP fixture close timed out")), 2_000);
+        server.close((error) => {
+          clearTimeout(timeout);
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
+  });
+
   it("opens the listener, then the engaged session, responds, and closes both", async () => {
     const sockets: FakeProbeSocket[] = [];
     const socketFactory: RealtimeSocketFactory = (url, headers) => {

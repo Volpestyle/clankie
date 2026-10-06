@@ -11,13 +11,17 @@
   },
   "dependencies": {
     "@clankie/interactive-environment": "workspace:*",
+    "@clankie/model-provider": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/vox-client": "workspace:*",
+    "ai": "7.0.19",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
+    "@types/ws": "8.18.1",
     "typescript": "5.9.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "ws": "8.21.0"
   }
 }

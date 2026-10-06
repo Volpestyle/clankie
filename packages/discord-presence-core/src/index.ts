@@ -260,6 +260,7 @@ export {
   type DiscordWebhookPostPlan,
 } from "./discord-rest.ts";
 export {
+  DEFAULT_ANTHROPIC_VOICE_MODEL,
   DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
   DEFAULT_VOICE_REALTIME_MODEL,
   DEFAULT_VOICE_REALTIME_PROVIDER,
@@ -292,6 +293,7 @@ export {
   type VoiceTtsProvider,
   type XaiVoiceReasoningEffort,
 } from "./voice-composition.ts";
+export { openAnthropicVoiceConversation } from "./anthropic-voice.ts";
 export {
   VoiceBodyLease,
   VoiceBodyLeaseDenied,

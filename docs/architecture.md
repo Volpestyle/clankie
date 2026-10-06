@@ -138,6 +138,15 @@ starts a replacement turn. Only the original exact turn result settles that rece
 blanket retry override or automatic reconciliation from another session's transcript. Pending means
 `stored`, an explicit native acknowledgment means `consumed` (not model-read), and a completed
 channel result reports `responded`; unknown failures stay `uncertain`.
+
+The self-hosted voice brain is selected through `/voice` or `clankie voice brain`.
+OpenAI/xAI realtime and the optional Claude text brain share that same floor and
+voice tools. Claude uses the existing per-speaker OpenAI transcription and
+ElevenLabs speech wrapper; it receives attributed text, and interruptions abort
+its request and retire the mouth's output. Native owner voice-setting changes
+persist public settings and require a body restart. Hosted provider selection is
+separate; [the manual Sonnet trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
+owns live latency and quality proof.
 The service normalizes it — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
 attached — and prompts a pi session. Every room gets a continuing session (a pi

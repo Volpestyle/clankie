@@ -167,6 +167,75 @@ describe("/voice", () => {
     expect(credentials.get("xai")).toEqual({ type: "api", key: "xai-secret" });
   });
 
+  it("configures Claude with separate transcription and speech keys, preserving inactive models", async () => {
+    const { credentials, services, settings } = await testServices();
+    await settings.update((current) => ({
+      ...current,
+      voice: {
+        ...current.voice,
+        openAiRealtimeModel: "saved-openai-brain",
+        xAiRealtimeModel: "saved-xai-brain",
+      },
+    }));
+    const voice = command(buildVoiceCommands(services), "voice");
+    const view = testShell(
+      ["provider", "anthropic", "done"],
+      ["sk-ant-oat01-refused", "anthropic-api-secret", "openai-transcription-secret", "elevenlabs-secret"],
+      ["claude-sonnet-5-5", "gpt-realtime-whisper", "owned_voice", "eleven_v4_turbo"],
+    );
+    await voice.run("", view.shell);
+    expect((await settings.load()).voice).toMatchObject({
+      realtimeProvider: "anthropic",
+      anthropicModel: "claude-sonnet-5-5",
+      ttsProvider: "elevenlabs",
+      elevenLabsVoiceId: "owned_voice",
+      elevenLabsModelId: "eleven_v4_turbo",
+      openAiTranscribeModel: "gpt-realtime-whisper",
+      openAiRealtimeModel: "saved-openai-brain",
+      xAiRealtimeModel: "saved-xai-brain",
+    });
+    expect(credentials.get("anthropic")).toEqual({ type: "api", key: "anthropic-api-secret" });
+    expect(credentials.get("openai")).toEqual({ type: "api", key: "openai-transcription-secret" });
+    expect(credentials.get("elevenlabs")).toEqual({ type: "api", key: "elevenlabs-secret" });
+    const status = testShell([]);
+    await voice.run("status", status.shell);
+    const rendered = status.results.map((result) => result.text).join("\n");
+    expect(rendered).toContain("Anthropic claude-sonnet-5-5");
+    expect(rendered).toContain("transcription: OpenAI gpt-realtime-whisper");
+    expect(rendered).not.toContain("MISSING");
+    for (const key of ["anthropic-api-secret", "openai-transcription-secret", "elevenlabs-secret"])
+      expect(rendered).not.toContain(key);
+    expect(JSON.stringify(await settings.load())).not.toContain("secret");
+  });
+
+  it("keeps the prior stack when Claude setup is cancelled before external speech is complete", async () => {
+    const { services, settings } = await testServices();
+    const before = await settings.load();
+    const voice = command(buildVoiceCommands(services), "voice");
+    await voice.run("", testShell(["provider", "anthropic", "done"], [], ["", "", undefined]).shell);
+    expect(await settings.load()).toEqual(before);
+  });
+
+  it("refuses an incompatible effective environment before saving Claude settings or keys", async () => {
+    const { credentials, services, settings } = await testServices();
+    const before = await settings.load();
+    const voice = command(
+      buildVoiceCommands({ ...services, env: { CLANKIE_VOICE_REALTIME_PROVIDER: "xai" } }),
+      "voice",
+    );
+    const view = testShell(
+      ["provider", "anthropic", "done"],
+      ["anthropic-api-secret", "openai-transcription-secret", "elevenlabs-secret"],
+      ["claude-sonnet-5-5", "gpt-realtime-whisper", "owned_voice", "eleven_v4_turbo"],
+    );
+    await expect(voice.run("", view.shell)).rejects.toThrow(
+      "elevenlabs text output requires realtimeProvider openai or anthropic",
+    );
+    expect(await settings.load()).toEqual(before);
+    expect(credentials.size).toBe(0);
+    expect(view.lines).not.toContain("Saved. Restart the active Discord body to apply.");
+  });
+
   it("writes nothing when the wizard is cancelled mid-step", async () => {
     const { services, settings } = await testServices();
     const voice = command(buildVoiceCommands(services), "voice");

@@ -173,6 +173,9 @@ if (voiceEnabled && process.env.OPENAI_API_KEY) {
 if (voiceEnabled && process.env.XAI_API_KEY) {
   throw new Error("XAI_API_KEY must not be set. Reuse the brokered xai credential.");
 }
+if (voiceEnabled && process.env.ANTHROPIC_API_KEY) {
+  throw new Error("ANTHROPIC_API_KEY must not be set. Reuse the brokered anthropic credential.");
+}
 if (voiceEnabled && (process.env.ELEVENLABS_API_KEY ?? process.env.XI_API_KEY)) {
   throw new Error(
     "ELEVENLABS_API_KEY and XI_API_KEY must not be set. Store the ElevenLabs key under the brokered elevenlabs provider.",
@@ -325,6 +328,13 @@ if (voiceEnabled && realtimeCredential?.type !== "api") {
     `Discord voice requires a brokered ${provider} API credential; OAuth and environment credentials are not accepted by the realtime boundary.`,
   );
 }
+const transcriptionCredential =
+  voiceRealtimeConfig?.realtimeProvider === "anthropic" ? await credentialStore.get("openai") : undefined;
+if (voiceRealtimeConfig?.realtimeProvider === "anthropic" && transcriptionCredential?.type !== "api") {
+  throw new Error(
+    "Anthropic Discord voice requires a separate brokered openai API credential for transcription.",
+  );
+}
 // The external voice (ADR 0070) follows the exact openai credential shape:
 // broker-resolved, API-type only, resolved once at startup.
 const elevenLabsCredential =
@@ -386,6 +396,9 @@ const voiceSession =
         },
         realtime: createVoiceRealtimePorts({
           apiKey: realtimeCredential.key,
+          ...(transcriptionCredential?.type === "api"
+            ? { transcriptionApiKey: transcriptionCredential.key }
+            : {}),
           ...(elevenLabsCredential?.type === "api" ? { elevenLabsApiKey: elevenLabsCredential.key } : {}),
           config: voiceRealtimeConfig,
         }),

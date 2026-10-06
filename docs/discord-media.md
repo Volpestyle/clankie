@@ -21,6 +21,28 @@ The canonical current media diagram is in
 [ADR 0128](adr/0128-vox-is-the-sole-discord-media-owner.md). The old
 `discord-media.jpg` export is a historical pre-migration snapshot.
 
+## Voice brain selection
+
+The shared group floor receives authenticated room text and consented,
+per-speaker transcripts. OpenAI and xAI can supply the engaged realtime brain;
+the optional Anthropic text brain uses OpenAI transcription and streams Claude
+replies through the existing ElevenLabs mouth. `/voice` or
+`clankie voice brain set anthropic claude-sonnet-5-5` selects it after an
+ElevenLabs voice ID is configured. The Anthropic path requires separate brokered
+`anthropic`, `openai`, and `elevenlabs` API keys and a body restart.
+
+All three use the same floor, room authority, voice tools and interruption
+handling. Attributed transcript/context stays user-role data; the brain's trusted
+instructions still come from Clankie's persona and admitted lane. Tool results
+remain paired with their originating calls. Interruptions abort the text request
+and retire speech output; unknown provider usage remains unknown. Inactive
+provider models remain stored so the original stack can be restored.
+
+This is a self-hosted experiment. [James's short manual trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
+records time to first audio, barge-in and how he sounds. Local provider fixtures
+prove transport and cancellation behavior; real call quality is still a manual
+gate. The hosted fleet's provider selection is separate.
+
 ## YouTube music
 
 There is no `/music` command. Ask Clankie in ordinary TUI/Discord text or voice,

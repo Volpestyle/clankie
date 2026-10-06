@@ -120,7 +120,10 @@ const characterId = process.env.CLANKIE_CHARACTER_ID ?? "clankie";
 const voiceEnabled = process.env.DISCORD_USER_SESSION_VOICE_ENABLED === "true";
 const voiceTranscriptLoggingEnabled = process.env.DISCORD_VOICE_TRANSCRIPT_LOGGING_ENABLED === "true";
 const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
-if (voiceEnabled && (process.env.OPENAI_API_KEY || process.env.XAI_API_KEY)) {
+if (
+  voiceEnabled &&
+  (process.env.OPENAI_API_KEY || process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY)
+) {
   throw new Error("Voice provider API keys must come from the credential broker, not the environment.");
 }
 if (voiceEnabled && (process.env.ELEVENLABS_API_KEY || process.env.XI_API_KEY)) {
@@ -265,6 +268,13 @@ if (voiceEnabled && realtimeCredential?.type !== "api") {
     `User-session voice requires a brokered ${provider} API credential; environment credentials are not accepted.`,
   );
 }
+const transcriptionCredential =
+  voiceConfig?.realtimeProvider === "anthropic" ? await credentialStore.get("openai") : undefined;
+if (voiceConfig?.realtimeProvider === "anthropic" && transcriptionCredential?.type !== "api") {
+  throw new Error(
+    "Anthropic user-session voice requires a separate brokered openai API credential for transcription.",
+  );
+}
 const elevenLabsCredential =
   voiceConfig?.ttsProvider === "elevenlabs" ? await credentialStore.get("elevenlabs") : undefined;
 if (voiceConfig?.ttsProvider === "elevenlabs" && elevenLabsCredential?.type !== "api") {
@@ -347,6 +357,9 @@ const voiceSession =
         }),
         realtime: createVoiceRealtimePorts({
           apiKey: realtimeCredential.key,
+          ...(transcriptionCredential?.type === "api"
+            ? { transcriptionApiKey: transcriptionCredential.key }
+            : {}),
           ...(elevenLabsCredential?.type === "api" ? { elevenLabsApiKey: elevenLabsCredential.key } : {}),
           config: voiceConfig,
         }),

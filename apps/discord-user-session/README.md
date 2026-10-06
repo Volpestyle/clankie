@@ -77,9 +77,17 @@ the lab-body allowlists. Configuration may narrow the recorded opt-in, never
 widen it.
 
 Voice provider settings are shared with the bot body and configured through
-`/voice`. The active body uses the selected brokered `openai` or `xai` API key,
+`/voice`. The active body uses the selected brokered `openai`, `xai`, or `anthropic` API key,
 model, voice, and xAI reasoning effort; both bodies therefore sound and wake
 the same way after an active-body switch.
+
+The optional Claude text brain (`clankie voice brain set anthropic claude-sonnet-5-5`)
+uses separate brokered OpenAI transcription and ElevenLabs speech credentials.
+The shared voice composition receives attributed transcripts, streams Claude's
+reply into the existing ElevenLabs mouth, and retains the same floor and tools.
+It requires a configured ElevenLabs voice ID and a body restart. Call quality
+and latency remain [James's manual trial](../../docs/testing/2026-10-06-sonnet-voice/manual-trial.md);
+this setting does not change hosted fleet provider selection.
 
 Whenever this active body has a voice session, it hosts the fixed
 `ws://127.0.0.1:4323/play` loopback endpoint from `@clankie/play-voice` for

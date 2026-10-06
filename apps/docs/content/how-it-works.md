@@ -35,6 +35,13 @@ console, and a Discord room do not each create a new personality. They do have
 separate conversation histories and permissions. Sharing an identity does not
 mean every room receives everything said elsewhere.
 
+Self-hosted Discord voice can use OpenAI/xAI realtime or an optional Claude text
+brain with OpenAI transcription and ElevenLabs speech. These choices share the
+same room permissions and turn-taking. The owner selects the stack through
+`/voice` or `clankie voice brain`, then restarts the active body. The Sonnet path
+is an experiment whose call latency and quality still need the owner's manual
+trial; it does not change the hosted service's provider selection.
+
 His built-in agent uses [pi](https://pi.dev) for models, sessions, tools, skills,
 and compaction. Clankie adds durable identity, memory, the connections around
 him, and the authority each caller carries. Optional

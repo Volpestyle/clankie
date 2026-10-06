@@ -1,15 +1,17 @@
 import { SettingsStore, resolveVoiceSettings, type VoiceSettings } from "@clankie/settings";
 import type { RedactedCredential } from "@clankie/credential-broker";
+import { assertModelCredentialAllowed } from "@clankie/model-provider";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface VoiceCommandServices {
   settings: SettingsStore;
+  readonly env?: NodeJS.ProcessEnv;
   /** Redacted view of what the credential broker already holds. */
   listCredentials: () => Promise<Record<string, RedactedCredential>>;
   removeCredential: (providerId: string) => Promise<unknown>;
   /**
    * Stores a voice-vendor secret in the credential broker. `/voice` writes to
-   * the same `openai`, `xai`, and `elevenlabs` entries `/auth` manages; keys
+   * the same `openai`, `xai`, `anthropic`, and `elevenlabs` entries `/auth` manages; keys
    * never touch settings.json.
    */
   setCredential: (providerId: string, key: string) => Promise<void>;
@@ -18,9 +20,11 @@ export interface VoiceCommandServices {
 const ELEVENLABS_PROVIDER_ID = "elevenlabs";
 const OPENAI_PROVIDER_ID = "openai";
 const XAI_PROVIDER_ID = "xai";
+const ANTHROPIC_PROVIDER_ID = "anthropic";
 const DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime-2.1";
 const DEFAULT_OPENAI_TRANSCRIBE_MODEL = "gpt-realtime-whisper";
 const DEFAULT_XAI_REALTIME_MODEL = "grok-voice-think-fast-2.0";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
 const VENDOR_IDENTIFIER = /^[\w-]{1,128}$/u;
 const MODEL_IDENTIFIER = /^[\w.-]{1,128}$/u;
 
@@ -63,19 +67,26 @@ export function describeVoice(
   settings: VoiceSettings,
   realtimeKeyStored: boolean,
   elevenLabsKeyStored: boolean,
+  openAiTranscriptionKeyStored = false,
 ): string[] {
   const realtime =
-    settings.realtimeProvider === "xai"
+    settings.realtimeProvider === "anthropic"
       ? [
-          `realtime: xAI ${settings.xAiRealtimeModel ?? DEFAULT_XAI_REALTIME_MODEL}`,
-          `  voice: ${settings.xAiVoice ?? "eve"}`,
-          `  reasoning: ${settings.xAiReasoningEffort}`,
+          `voice brain: Anthropic ${settings.anthropicModel ?? DEFAULT_ANTHROPIC_MODEL}`,
+          `  transcription: OpenAI ${settings.openAiTranscribeModel ?? DEFAULT_OPENAI_TRANSCRIBE_MODEL}`,
+          `  transcription API key: ${openAiTranscriptionKeyStored ? "stored in the credential broker (redacted)" : "MISSING — store it under provider openai"}`,
         ]
-      : [
-          `realtime: OpenAI ${settings.openAiRealtimeModel ?? DEFAULT_OPENAI_REALTIME_MODEL}`,
-          `  transcriber: ${settings.openAiTranscribeModel ?? DEFAULT_OPENAI_TRANSCRIBE_MODEL}`,
-          `  voice: ${settings.openAiVoice ?? "marin"}`,
-        ];
+      : settings.realtimeProvider === "xai"
+        ? [
+            `realtime: xAI ${settings.xAiRealtimeModel ?? DEFAULT_XAI_REALTIME_MODEL}`,
+            `  voice: ${settings.xAiVoice ?? "eve"}`,
+            `  reasoning: ${settings.xAiReasoningEffort}`,
+          ]
+        : [
+            `realtime: OpenAI ${settings.openAiRealtimeModel ?? DEFAULT_OPENAI_REALTIME_MODEL}`,
+            `  transcriber: ${settings.openAiTranscribeModel ?? DEFAULT_OPENAI_TRANSCRIBE_MODEL}`,
+            `  voice: ${settings.openAiVoice ?? "marin"}`,
+          ];
   realtime.push(
     `  API key: ${realtimeKeyStored ? "stored in the credential broker (redacted)" : `MISSING — store it under provider ${settings.realtimeProvider}`}`,
   );
@@ -93,7 +104,7 @@ export function describeVoice(
 
 async function showVoiceStatus(shell: ClankieFaceShell, services: VoiceCommandServices): Promise<void> {
   const stored = await services.settings.load();
-  const resolved = resolveVoiceSettings(stored.voice);
+  const resolved = resolveVoiceSettings(stored.voice, services.env ?? process.env);
   const credentials = await services.listCredentials();
   const lines = [
     `settings file: ${services.settings.path}`,
@@ -102,7 +113,8 @@ async function showVoiceStatus(shell: ClankieFaceShell, services: VoiceCommandSe
       resolved.settings,
       resolved.settings.realtimeProvider in credentials &&
         credentials[resolved.settings.realtimeProvider]?.type === "api",
-      ELEVENLABS_PROVIDER_ID in credentials,
+      credentials[ELEVENLABS_PROVIDER_ID]?.type === "api",
+      credentials[OPENAI_PROVIDER_ID]?.type === "api",
     ),
   ];
   if (resolved.overriddenByEnvironment.length > 0) {
@@ -116,21 +128,33 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
   flow.begin("voice");
   try {
     for (;;) {
+      const current = (await services.settings.load()).voice;
       const action = await flow.readSelect({
         message: "Voice",
         options: [
           {
             value: "provider",
             label: "Voice stack",
-            hint: "OpenAI, Grok, or ElevenLabs",
+            hint: "OpenAI, Grok, Claude, or ElevenLabs",
             description: "Choose the realtime agent, model, voice, and optional external speech output.",
           },
           {
             value: "realtime-credential",
-            label: "Realtime API key",
+            label: "Voice brain API key",
             hint: "broker-owned",
-            description: "Store the selected OpenAI or xAI API key without leaving this wizard.",
+            description: "Store the selected OpenAI, xAI, or Anthropic API key without leaving this wizard.",
           },
+          ...(current.realtimeProvider === "anthropic"
+            ? [
+                {
+                  value: "transcription-credential",
+                  label: "OpenAI transcription API key",
+                  hint: "broker-owned",
+                  description:
+                    "Anthropic receives text; a separate OpenAI API key transcribes consented audio.",
+                },
+              ]
+            : []),
           {
             value: "credential",
             label: "ElevenLabs API key",
@@ -149,6 +173,8 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
       }
       if (choice === "provider") await editProvider(shell, services);
       else if (choice === "realtime-credential") await editRealtimeCredential(shell, services);
+      else if (choice === "transcription-credential")
+        await editApiCredential(shell, services, OPENAI_PROVIDER_ID, "OpenAI transcription");
       else if (choice === "credential") await editElevenLabsCredential(shell, services);
     }
   } finally {
@@ -160,10 +186,11 @@ async function apply(
   services: VoiceCommandServices,
   patch: (current: VoiceSettings) => VoiceSettings,
 ): Promise<void> {
-  await services.settings.update((current) => ({
-    ...current,
-    voice: patch(current.voice),
-  }));
+  await services.settings.update((current) => {
+    const voice = patch(current.voice);
+    resolveVoiceSettings(voice, services.env ?? process.env);
+    return { ...current, voice };
+  });
 }
 
 function readModel(
@@ -200,6 +227,13 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
         label: "Grok Voice",
         hint: "xAI native",
         description: "xAI streaming STT wakes a Grok Voice agent that speaks with an xAI voice.",
+      },
+      {
+        value: "anthropic",
+        label: "Claude voice brain",
+        hint: "OpenAI transcription + ElevenLabs",
+        description:
+          "Claude reasons over attributed text; OpenAI transcribes and ElevenLabs speaks his replies.",
       },
       {
         value: "elevenlabs",
@@ -280,6 +314,54 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
     return;
   }
 
+  if (providerChoice === "anthropic") {
+    const model = await readModel(
+      flow,
+      "Anthropic voice brain model (blank keeps the current/default)",
+      current.anthropicModel ?? DEFAULT_ANTHROPIC_MODEL,
+    );
+    if (model === undefined) return;
+    const transcriber = await readModel(
+      flow,
+      "OpenAI transcription model (blank keeps the current/default)",
+      current.openAiTranscribeModel ?? DEFAULT_OPENAI_TRANSCRIBE_MODEL,
+    );
+    if (transcriber === undefined) return;
+    const speech = await readElevenLabsSettings(shell, current);
+    if (speech === undefined) return;
+    await apply(services, (settings) => ({
+      ...settings,
+      realtimeProvider: "anthropic",
+      ttsProvider: "elevenlabs",
+      ...speech,
+      ...(model.trim().length > 0 ? { anthropicModel: model.trim() } : {}),
+      ...(transcriber.trim().length > 0 ? { openAiTranscribeModel: transcriber.trim() } : {}),
+    }));
+    flow.renderLine("Saved. Restart the active Discord body to apply.", "success");
+    await offerMissingRealtimeCredential(shell, services, ANTHROPIC_PROVIDER_ID);
+    await offerMissingRealtimeCredential(shell, services, OPENAI_PROVIDER_ID);
+    await offerMissingElevenLabsCredential(shell, services);
+    return;
+  }
+
+  const speech = await readElevenLabsSettings(shell, current);
+  if (speech === undefined) return;
+  await apply(services, (settings) => ({
+    ...settings,
+    realtimeProvider: "openai",
+    ttsProvider: "elevenlabs",
+    ...speech,
+  }));
+  flow.renderLine("Saved. Restart the bridge to apply.", "success");
+  await offerMissingRealtimeCredential(shell, services, OPENAI_PROVIDER_ID);
+  await offerMissingElevenLabsCredential(shell, services);
+}
+
+async function readElevenLabsSettings(
+  shell: ClankieFaceShell,
+  current: VoiceSettings,
+): Promise<Pick<VoiceSettings, "elevenLabsVoiceId" | "elevenLabsModelId"> | undefined> {
+  const flow = shell.setupFlow;
   const voiceId = await flow.readText({
     message: "ElevenLabs voice id (from the ElevenLabs voice library)",
     placeholder: current.elevenLabsVoiceId ?? "",
@@ -292,7 +374,7 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
   const resolvedVoiceId = voiceId.trim().length > 0 ? voiceId.trim() : current.elevenLabsVoiceId;
   if (resolvedVoiceId === undefined) {
     flow.renderLine("An ElevenLabs voice id is required; nothing was changed.", "error");
-    return;
+    return undefined;
   }
 
   const modelId = await flow.readText({
@@ -302,21 +384,21 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
   });
   if (modelId === undefined) return;
 
-  await apply(services, (settings) => ({
-    ...settings,
-    realtimeProvider: "openai",
-    ttsProvider: "elevenlabs",
+  return {
     elevenLabsVoiceId: resolvedVoiceId,
     ...(modelId.trim().length > 0 ? { elevenLabsModelId: modelId.trim() } : {}),
-  }));
-  flow.renderLine("Saved. Restart the bridge to apply.", "success");
-  await offerMissingRealtimeCredential(shell, services, OPENAI_PROVIDER_ID);
+  };
+}
 
+async function offerMissingElevenLabsCredential(
+  shell: ClankieFaceShell,
+  services: VoiceCommandServices,
+): Promise<void> {
   // The provider is settings; the key is broker. Finish the thought here so
   // an operator is never left with a configured voice that cannot speak.
   const credentials = await services.listCredentials();
-  if (!(ELEVENLABS_PROVIDER_ID in credentials)) {
-    flow.renderLine(
+  if (credentials[ELEVENLABS_PROVIDER_ID]?.type !== "api") {
+    shell.setupFlow.renderLine(
       "No ElevenLabs API key is stored yet — without it the bridge refuses to start voice.",
       "warning",
     );
@@ -336,13 +418,13 @@ async function editRealtimeCredential(
   services: VoiceCommandServices,
 ): Promise<void> {
   const provider = (await services.settings.load()).voice.realtimeProvider;
-  await editApiCredential(shell, services, provider, provider === "xai" ? "xAI" : "OpenAI");
+  await editApiCredential(shell, services, provider, providerLabel(provider));
 }
 
 async function offerMissingRealtimeCredential(
   shell: ClankieFaceShell,
   services: VoiceCommandServices,
-  providerId: "openai" | "xai",
+  providerId: "openai" | "xai" | "anthropic",
 ): Promise<void> {
   const credential = (await services.listCredentials())[providerId];
   if (credential?.type === "api") return;
@@ -350,7 +432,11 @@ async function offerMissingRealtimeCredential(
     `No ${providerId} API key is stored yet — voice cannot start without one.`,
     "warning",
   );
-  await editApiCredential(shell, services, providerId, providerId === "xai" ? "xAI" : "OpenAI");
+  await editApiCredential(shell, services, providerId, providerLabel(providerId));
+}
+
+function providerLabel(providerId: "openai" | "xai" | "anthropic"): string {
+  return providerId === "anthropic" ? "Anthropic" : providerId === "xai" ? "xAI" : "OpenAI";
 }
 
 async function editApiCredential(
@@ -390,6 +476,13 @@ async function editApiCredential(
       const trimmed = value.trim();
       if (trimmed.length === 0) return "Required.";
       if (/\s/u.test(trimmed)) return "A key contains no whitespace — check for a stray paste.";
+      if (providerId === ANTHROPIC_PROVIDER_ID) {
+        try {
+          assertModelCredentialAllowed(providerId, { type: "api", key: trimmed });
+        } catch (error) {
+          return error instanceof Error ? error.message : "An Anthropic API key is required.";
+        }
+      }
       return undefined;
     },
   });
