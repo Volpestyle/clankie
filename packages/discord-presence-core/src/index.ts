@@ -67,6 +67,8 @@ export {
   ADDRESSED_OFFER_TURN_ITEM,
   ENGAGED_OFFER_TURN_ITEM,
   DiscordVoiceSession,
+  DEFAULT_VOICE_RECORDING_LIMIT_MS,
+  DEFAULT_VOICE_GRACEFUL_END_TIMEOUT_MS,
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
   FLOOR_WORK_HEARTBEAT_MS,
@@ -81,6 +83,8 @@ export {
   type DiscordVoiceRealtimePorts,
   type DiscordVoiceSessionOptions,
   type DiscordVoiceSessionStatus,
+  type DiscordVoiceAnnouncementResult,
+  type DiscordVoiceGracefulEndResult,
   type DiscordVoiceTranscript,
   type DiscordVoiceSpokenTranscript,
   type JoinDiscordVoiceInput,
@@ -302,6 +306,20 @@ export {
 export { tryHandleVoiceOutputControl, type VoiceOutputControlPort } from "./voice-output-control.ts";
 
 export { voiceRoomEvidence } from "./voice-room-evidence.ts";
+export {
+  DiscordVoxGatewayBridge,
+  type DiscordVoxGuild,
+  type DiscordVoxSession,
+  type DiscordVoiceGatewayAdapter,
+  type DiscordVoiceGatewayAdapterCreator,
+  type DiscordVoiceGatewayCallbacks,
+} from "./vox-gateway.ts";
+export {
+  probeVoxProcess,
+  startOfficialBotVox,
+  waitForVoxProcessReady,
+  type VoxProcessProbeResult,
+} from "./vox-process.ts";
 export { discordDirectoryPage, discordChannelKind } from "./directory.ts";
 export { tryHandleDiscordDirectoryRequest } from "./directory-control.ts";
 export { DiscordPermissionCache } from "./permission-cache.ts";

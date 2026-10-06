@@ -1,12 +1,28 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { DiscordPresenceAttachmentSchema } from "./index.ts";
+import {
+  CaptainChannelTurnResultSchema,
+  DiscordPresenceAttachmentSchema,
+  DiscordPresenceChannelTurnRequestSchema,
+} from "./index.ts";
 
 /** Trusted connection ingress, never an operator or general-purpose captain bearer. */
 export const DISCORD_INGRESS_PATH = "/v1/discord/ingress";
 export const DISCORD_INGRESS_DOMAIN = "clankie-discord-ingress-v1";
 export const DiscordIdSchema = z.string().regex(/^[0-9]{1,20}$/u);
 const Encoded32 = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+/** Connection-owned voice RPCs carry no credential or general operator authority. */
+export const DiscordIngressVoiceSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("briefing"), consentedUserIds: z.array(DiscordIdSchema).max(25) }).strict(),
+  z.object({ action: z.literal("handoff"), request: DiscordPresenceChannelTurnRequestSchema }).strict(),
+  z
+    .object({
+      action: z.literal("self_tool"),
+      tool: z.enum(["recall_episodes", "get_self_state", "remember_episode"]),
+      arguments: z.record(z.string(), z.unknown()),
+    })
+    .strict(),
+]);
 export const DiscordIngressEventSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -21,14 +37,28 @@ export const DiscordIngressEventSchema = z
     actorId: DiscordIdSchema,
     /** Asserted only by the authenticated connection, never by message content. */
     owner: z.boolean(),
-    kind: z.enum(["mention", "dm", "reply", "slash"]),
+    kind: z.enum(["mention", "dm", "reply", "slash", "voice"]),
+    voice: DiscordIngressVoiceSchema.optional(),
     content: z.string().max(16_384),
     attachments: z.array(DiscordPresenceAttachmentSchema).max(4).default([]),
   })
   .strict()
   .refine((e) => e.expiresAtMs > e.eventAtMs && e.expiresAtMs - e.eventAtMs <= 300_000)
   .refine((e) => e.content.trim().length > 0 || e.attachments.length > 0)
-  .refine((e) => (e.kind === "dm") === (e.guildId === undefined));
+  .refine((e) => (e.kind === "dm") === (e.guildId === undefined))
+  .refine((e) => (e.kind === "voice") === (e.voice !== undefined))
+  .refine((e) => {
+    if (e.voice?.action !== "handoff") return true;
+    const r = e.voice.request;
+    return (
+      r.trigger.kind === "voice_event" &&
+      r.trigger.guildId === e.guildId &&
+      r.trigger.channelId === e.channelId &&
+      r.trigger.actorId === e.actorId &&
+      r.identity.transportKind === "bot" &&
+      r.identity.credentialRef === "hosted_discord"
+    );
+  });
 export type DiscordIngressEvent = z.infer<typeof DiscordIngressEventSchema>;
 export function discordEventDigest(event: DiscordIngressEvent): string {
   return createHash("sha256")
@@ -87,6 +117,16 @@ export const DiscordIngressEnvelopeSchema = z
   .strict();
 export type DiscordIngressEnvelope = z.infer<typeof DiscordIngressEnvelopeSchema>;
 export const DiscordIngressResultSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("voice"),
+      result: z.union([
+        z.object({ instructions: z.string().max(12_000), briefing: z.string().max(8_000) }).strict(),
+        CaptainChannelTurnResultSchema,
+        z.object({ text: z.string().max(2_000), isError: z.boolean() }).strict(),
+      ]),
+    })
+    .strict(),
   z.object({ state: z.literal("reply"), text: z.string().min(1).max(16_384) }).strict(),
   z.object({ state: z.literal("silent") }).strict(),
   z.object({ state: z.literal("pending") }).strict(),

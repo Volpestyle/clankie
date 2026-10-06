@@ -37,7 +37,7 @@ import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
-import { createHostedDiscordIngress } from "./discord-ingress.ts";
+import { createHostedDiscordIngress, createHostedDiscordVoiceCallback } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
@@ -1124,6 +1124,10 @@ const hostedDiscord =
         statePath: join(stateRoot, "discord-ingress.json"),
         captain,
         onWork: () => runtimeProvider.heartbeat?.interactive(),
+        voice: createHostedDiscordVoiceCallback(
+          (request) => boundApp().app.fetch(request),
+          discordVoiceBridgeToken,
+        ),
       });
 async function linearFollowing(): Promise<boolean> {
   const current = await settingsStore.load();
