@@ -155,14 +155,6 @@ delivery retries at most once a minute, and a retained uncertain native receipt
 counts as accepted so it is not replayed. These observations create no service
 model turn. Include incident and recovery evidence in the next Linear check-in.
 
-An operator catalog report with fresh process/session proof preserves the exact
-native attachment to that conversation. A bare transcript attachment still
-requires complete registered inventories before routing. Service logs retain
-`native.health_alert.delivery` with the content fingerprint, conversation,
-outcome and fixed routing reason; they omit the alert text and provider errors.
-`submitted` includes a retained uncertain native dispatch and does not prove
-the recipient read the alert. Inspect its original native acknowledgment.
-
 The public `/health` observation and consented hosted `body.runtime_health`
 events contain fixed numeric and enum metadata only. Conversation text, worker
 reports, credentials, and command output never enter this projection.

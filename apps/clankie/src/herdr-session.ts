@@ -286,7 +286,6 @@ export class ExecutionConnections {
     /** Where each ssh fleet keeps its multiplexed control socket (ADR 0184). */
     sshControlDirectory?: string;
     fleetRun?: (fleet: HerdrFleet) => HerdrFleetRun;
-    fleetObserver?: (fleet: HerdrFleet) => FleetShellRun | undefined;
   };
   private readonly fleetRuns = new Map<string, { key: string; run: HerdrFleetRun }>();
   /** Each ssh fleet's link back to this service (VUH-1527), reported beside its reachability. */
@@ -317,7 +316,6 @@ export class ExecutionConnections {
       this.options.fleetRun?.(fleet) ??
       createHerdrFleetRun(fleet, {
         controlDirectory: this.options.sshControlDirectory ?? join(homedir(), ".clankie", "ssh"),
-        observer: () => this.options.fleetObserver?.(fleet),
       });
     this.fleetRuns.set(fleet.id, { key, run });
     return run;

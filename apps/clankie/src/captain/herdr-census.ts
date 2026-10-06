@@ -727,37 +727,23 @@ export async function readFleet(
     readonly localCodexRecordsPath?: string;
   } = {},
 ): Promise<ObservedFleet> {
-  // Herdr's snapshot contains the same complete AgentInfo rows as agent.list,
-  // alongside placement. Read them together, once, without an authority cache.
-  const [local, remote] = await Promise.all([
+  const [local, remote, remotePlacements] = await Promise.all([
     options.localAvailable === false
       ? Promise.resolve<ObservedFleet>({ seats: [] })
       : readLocalFleet(options),
+    readRemoteFleets(options.fleets ?? []),
     Promise.all(
       (options.fleets ?? []).map(async (fleet) => {
-        try {
-          const stdout = await fleet.run(["api", "snapshot"]);
-          const snapshot = JSON.parse(stdout).result?.snapshot;
-          if (!Array.isArray(snapshot?.agents)) throw new Error("Complete Herdr snapshot unavailable");
-          return {
-            fleet,
-            agents: parseHerdrAgentList(JSON.stringify({ result: { agents: snapshot.agents } })).map(
-              (entry) => qualifyAgent(fleet.id, entry),
-            ),
-            placements: parseHerdrTerminalCatalog(stdout)
-              .slice(0, MAX_AGENTS)
-              .map(
-                ({ terminalId, workspace, tab }) =>
-                  [`${fleet.id}/${terminalId}`, { workspace, tab }] as const,
-              ),
-          };
-        } catch {
-          return { fleet, agents: [], placements: [] };
-        }
+        const catalog = await readTerminalCatalog({
+          runCommand: async (_command, args) => ({ stdout: await fleet.run(args), stderr: "" }),
+        });
+        return catalog.map(
+          ({ terminalId, workspace, tab }) => [`${fleet.id}/${terminalId}`, { workspace, tab }] as const,
+        );
       }),
     ),
   ]);
-  const placements = new Map<string, OperatorHerdrPlacement>(remote.flatMap((entry) => entry.placements));
+  const placements = new Map<string, OperatorHerdrPlacement>(remotePlacements.flat());
   const remoteSeats = remote.flatMap((entry) =>
     "error" in entry
       ? []
@@ -860,7 +846,14 @@ async function readLocalFleet(
             socket: options.bridgeSocket,
             runtimePid,
             panes,
-            run: async (command, args) => (await run(command, args)).stdout,
+            run: async (command, args) =>
+              (
+                await (
+                  options.runCommand ??
+                  ((cmd, argv) =>
+                    defaultRunner(cmd, argv, { ...process.env, HERDR_SOCKET_PATH: options.bridgeSocket }))
+                )(command, args)
+              ).stdout,
           }),
         };
       }

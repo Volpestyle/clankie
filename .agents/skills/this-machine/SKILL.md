@@ -240,15 +240,6 @@ index). Configure through the headless CLI:
 | Play session                           | `clankie play status` / `clankie play stop`                                                                                                                        |
 | Spider-Man gameplay skill              | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                               |
 
-Runtime and canary alerts use the owner's exact native `global-default`
-attachment, with no service model turn. A kernel-proven operator catalog can
-preserve that attachment; a bare transcript mapping needs complete registered
-inventories. If delivery is unavailable, inspect `native.health_alert.delivery`
-in the service log for its fixed reason and original content fingerprint.
-`submitted` can retain an uncertain dispatch: reconcile its original receipt,
-never send a replacement. Include the alarm, recovery and duration in the next
-Linear check-in; an available notifier does not prove that check-in occurred.
-
 `clankie linear budget` and `clankie doctor --json` show account request usage.
 At 50%, a native warning remains pending until admission succeeds; refused or
 failed admission retries after 60 seconds without spending a provider request.

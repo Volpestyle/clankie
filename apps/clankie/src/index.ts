@@ -738,12 +738,10 @@ const email = createEmailPort({
 });
 
 const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
-let proofFleetLinks: FleetLinks | undefined;
 const runtimes = new ExecutionConnections({
   settings: settingsStore,
   primary: herdr,
   sshControlDirectory: join(stateRoot, "ssh"),
-  fleetObserver: (fleet) => proofFleetLinks?.observer(fleet),
 });
 const integrationDirectory = join(stateRoot, "integration");
 const deployHolds = new DeployHolds(integrationDirectory, (hold) =>
@@ -864,6 +862,7 @@ const localProjectProcessObserver = createProjectProcessObserver({
   binding: localFleetBinding,
   herdrBinary: "herdr",
 });
+let proofFleetLinks: FleetLinks | undefined;
 const remoteCodexSeats = new RemoteCodexSeats(async (id) =>
   (await runtimes.fleets()).find((fleet) => fleet.id === id),
 );
@@ -1122,7 +1121,6 @@ const captain = createCaptain(
   },
   {
     fleetResources,
-    onHealthAlertDelivery: (result) => logger.info({ event: "native.health_alert.delivery", ...result }),
     projectHireIdentity: projectProcessObserver,
     fleetProjectMembership: () => fleetProjectMembership,
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),

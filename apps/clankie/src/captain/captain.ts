@@ -2046,21 +2046,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ]
         : operatorTools;
     if (expected === undefined) return undefined;
-    if (report.bridge === "operator" && proof && report.conversationId) {
-      // This caller has kernel/native-session proof and explicitly reports its
-      // operator conversation. Preserve that qualified binding while the
-      // transcript attachment and current occupant still agree. A later bare
-      // discovery must not depend on unrelated offline fleet inventories.
-      const current = await herdrRunner.get(paneId).catch(() => undefined);
-      if (
-        !current ||
-        inboundBinding(current) !== inboundBinding(agent) ||
-        conversations.attachedConversationForNative(current) !== report.conversationId ||
-        !(await validateConversationOwner({ conversationId: report.conversationId }))
-      )
-        return undefined;
-      conversations.rememberNativeSource(report.conversationId, current);
-    }
     const health = toolCatalogHealth.record(identity, report, expected);
     fleetChanges.touch();
     return health;
@@ -2521,84 +2506,65 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     guard: () => Promise<void>,
     recipient?: NativeSeatRecipient,
   ): Promise<boolean> {
-    const outcome = (submitted: boolean, reason: string) => {
-      options.onHealthAlertDelivery?.({
-        fingerprint: deliveryFingerprint(text),
+    if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
+    if (!(await validateConversationOwner(owner))) return false;
+    await guard();
+    const outbox = seatOutbox(owner.conversationId);
+    if (outbox.uncertain()) return false;
+    if (!recipient && outbox.bound()) {
+      const result = await outbox.deliver({
+        kind: "message",
         conversationId: owner.conversationId,
-        outcome: submitted ? "submitted" : "unavailable",
-        reason,
+        source: "service",
+        content: text,
+        wantsReply: false,
+        signal: shutdown.signal,
       });
-      return submitted;
-    };
-    try {
-      if (shutdown.signal.aborted || !text.trim() || text.length > 4000)
-        return outcome(false, "stopped_or_invalid");
-      if (!(await validateConversationOwner(owner))) return outcome(false, "owner_unavailable");
-      await guard();
-      const outbox = seatOutbox(owner.conversationId);
-      if (outbox.uncertain()) return outcome(false, "owner_receipt_unresolved");
-      if (!recipient && outbox.bound()) {
-        const result = await outbox.deliver({
-          kind: "message",
-          conversationId: owner.conversationId,
-          source: "service",
-          content: text,
-          wantsReply: false,
-          signal: shutdown.signal,
-        });
-        return outcome(
-          ["delivered", "unconfirmed"].includes(result.outcome),
-          `owner_mailbox_${result.outcome}`,
-        );
-      }
-      const target = recipient
-        ? await herdrRunner.get(recipient.paneId).catch(() => undefined)
-        : await operatorNativeSource(owner.conversationId);
-      if (!target?.session) return outcome(false, "native_source_unavailable");
-      const binding = inboundBinding(target);
-      if (recipient && binding !== recipient.binding) return outcome(false, "native_recipient_changed");
-      const mailbox = fleetSeatMailbox(
-        fleetMailboxes,
-        target.terminalId,
-        join(options.stateDir, "delivery-receipts", "fleet"),
-      );
-      if (mailbox.uncertain()) return outcome(false, "native_receipt_unresolved");
-      let blocked = false;
-      let dispatchChecked = false;
-      const finalGuard = async () => {
-        await guard();
-        if (!(await validateConversationOwner(owner))) throw new Error("Health alert owner changed");
-        if (recipient && !(await nativeRecipientCurrent(recipient)))
-          throw new Error("Health alert native lead changed");
-        if (outbox.uncertain() || mailbox.uncertain()) {
-          blocked = true;
-          throw new Error("Health alert recipient has an unresolved original receipt; nothing was sent");
-        }
-        dispatchChecked = true;
-      };
-      const result = await deliverToSeat(
-        target.terminalId,
-        text,
-        { conversationId: owner.conversationId, source: "captain" },
-        {
-          guard: finalGuard,
-          ...(binding === undefined ? {} : { recipientBinding: binding }),
-          fence: async (current) => inboundBinding(current) === binding,
-        },
-      ).catch((error: unknown) => {
-        if (blocked) return undefined;
-        throw error;
-      });
-      return outcome(
-        !blocked &&
-          result !== undefined &&
-          (result.outcome === "delivered" || (result.outcome === "unconfirmed" && dispatchChecked)),
-        blocked ? "receipt_unresolved_before_dispatch" : `native_${result?.outcome ?? "unavailable"}`,
-      );
-    } catch (error) {
-      outcome(false, "native_dispatch_failed");
-      throw error;
+      return ["delivered", "unconfirmed"].includes(result.outcome);
     }
+    const target = recipient
+      ? await herdrRunner.get(recipient.paneId).catch(() => undefined)
+      : await operatorNativeSource(owner.conversationId);
+    if (!target?.session) return false;
+    const binding = inboundBinding(target);
+    if (recipient && binding !== recipient.binding) return false;
+    const mailbox = fleetSeatMailbox(
+      fleetMailboxes,
+      target.terminalId,
+      join(options.stateDir, "delivery-receipts", "fleet"),
+    );
+    if (mailbox.uncertain()) return false;
+    let blocked = false;
+    let dispatchChecked = false;
+    const finalGuard = async () => {
+      await guard();
+      if (!(await validateConversationOwner(owner))) throw new Error("Health alert owner changed");
+      if (recipient && !(await nativeRecipientCurrent(recipient)))
+        throw new Error("Health alert native lead changed");
+      if (outbox.uncertain() || mailbox.uncertain()) {
+        blocked = true;
+        throw new Error("Health alert recipient has an unresolved original receipt; nothing was sent");
+      }
+      dispatchChecked = true;
+    };
+    const result = await deliverToSeat(
+      target.terminalId,
+      text,
+      { conversationId: owner.conversationId, source: "captain" },
+      {
+        guard: finalGuard,
+        ...(binding === undefined ? {} : { recipientBinding: binding }),
+        fence: async (current) => inboundBinding(current) === binding,
+      },
+    ).catch((error: unknown) => {
+      if (blocked) return undefined;
+      throw error;
+    });
+    return (
+      !blocked &&
+      result !== undefined &&
+      (result.outcome === "delivered" || (result.outcome === "unconfirmed" && dispatchChecked))
+    );
   }
 
   /** Read every fleet-owned record against one stable Herdr change cursor. */

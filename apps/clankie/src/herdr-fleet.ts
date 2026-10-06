@@ -284,8 +284,6 @@ interface FleetCommandOptions {
   readonly controlDirectory: string;
   readonly execFile?: typeof execFile;
   readonly maxControlAgeMs?: number;
-  /** The existing resident fleet relay, resolved afresh for each read. */
-  readonly observer?: () => FleetShellRun | undefined;
 }
 
 function launchFailureMarker(command: string): string | undefined {
@@ -363,20 +361,6 @@ const REMOTE_HERDR_TIMEOUT_MS = 20_000;
 export function createHerdrFleetRun(fleet: HerdrFleet, options: FleetCommandOptions): HerdrFleetRun {
   return async (args, signal, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
     const command = remoteHerdrCommand(fleet, args);
-    // Census reads can use the same authenticated resident Windows relay as
-    // process proofs. Writes and cancellable waits retain their original path.
-    const read =
-      args.length === 2 &&
-      ((args[0] === "agent" && args[1] === "list") ||
-        (args[0] === "pane" && args[1] === "list") ||
-        (args[0] === "api" && args[1] === "snapshot"));
-    const observer = read && !signal && fleet.ssh.shell === "powershell" ? options.observer?.() : undefined;
-    if (observer) {
-      const stdout = await observer(command, timeoutMs);
-      const reported = herdrError(stdout);
-      if (reported !== undefined) throw reported;
-      return stdout;
-    }
     const { error, stdout, stderr } = await runFleetCommand(fleet, options, command, timeoutMs, signal);
     const reported = herdrError(stdout);
     if (reported !== undefined) throw reported;
