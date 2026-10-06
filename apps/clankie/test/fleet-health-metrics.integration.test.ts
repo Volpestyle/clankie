@@ -1,6 +1,8 @@
 import { once } from "node:events";
 import { Server as HttpServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Socket } from "node:net";
 import { serve } from "@hono/node-server";
 import { createLogger } from "@clankie/observability";
@@ -20,6 +22,96 @@ import { localProofDiagnostics } from "../src/local-fleet-proof-log.ts";
 import { closeNativeProcessObservers, nativeProcessRequest } from "../src/native-process-transport.ts";
 import { runMetricsCommand } from "../../tui/src/command/metrics.ts";
 import { NativeProcessDiagnosticSchema } from "../src/local-fleet-process.ts";
+import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { NextTurnMailbox } from "../src/captain/next-turn-mailbox.ts";
+
+it("reads a held next-turn alert's original acknowledgment after reload without rewriting its journal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "proof-alert-hook-"));
+  const path = join(directory, "mail.json");
+  try {
+    const mailbox = new NextTurnMailbox(path);
+    mailbox.observe("owned-seat", "original-binding", "original-native-process");
+    const original = mailbox.store("owned-seat", "original-binding", "Owned held alert");
+    expect(original.deliveryStage).toBe("stored");
+    const id = "messageId" in original ? original.messageId! : "";
+    expect(mailbox.acknowledged("owned-seat", "original-binding", id, "Owned held alert")).toBe(false);
+    expect(mailbox.take("owned-seat", "original-binding")?.messageIds).toEqual([id]);
+    expect(mailbox.acknowledged("owned-seat", "original-binding", id, "Owned held alert")).toBe(false);
+    mailbox.acknowledge("owned-seat", "original-binding", [id]);
+    const bytes = await readFile(path, "utf8");
+    const reloaded = new NextTurnMailbox(path);
+    expect(reloaded.acknowledged("owned-seat", "wrong-binding", id, "Owned held alert")).toBe(false);
+    expect(reloaded.acknowledged("owned-seat", "original-binding", "invented", "Owned held alert")).toBe(
+      false,
+    );
+    expect(reloaded.acknowledged("owned-seat", "original-binding", id, "Different content")).toBe(false);
+    expect(reloaded.acknowledged("owned-seat", "original-binding", id, "Owned held alert")).toBe(true);
+    expect(await readFile(path, "utf8")).toBe(bytes);
+    expect(reloaded.take("owned-seat", "original-binding")).toBeUndefined();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("holds an unconfirmed proof alert and starts cooldown only after its exact original acknowledgment", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "proof-alert-receipt-"));
+  const outbox = new SeatOutbox({ uncertaintyPath: join(directory, "receipts.json"), boundGraceMs: 30 });
+  let now = Date.parse("2026-10-06T12:00:00Z"),
+    attempts = 0;
+  const binding = "b".repeat(64);
+  const metrics = new FleetHealthMetrics({
+    now: () => now,
+    onProofAlert: async () => {
+      attempts++;
+      const result = await outbox.deliver({
+        kind: "message",
+        conversationId: "owned-protocol-client",
+        source: "service",
+        content: "Owned proof alert",
+        wantsReply: false,
+        recipientBinding: binding,
+      });
+      if (result.outcome === "unconfirmed")
+        return {
+          outcome: "unconfirmed",
+          acknowledged: () => outbox.recoveryAcknowledged(result.messageId),
+        };
+      return { outcome: result.outcome === "delivered" ? "accepted" : "unavailable" };
+    },
+  });
+  const refusal = () =>
+    metrics.observeProof("fleet", { source: "proof", reason: "missing_binding" }, "w1:p1");
+  try {
+    const poll = outbox.poll(5_000, undefined, binding);
+    refusal();
+    const [original] = await poll;
+    expect(original).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(outbox.uncertain()).toBe(true);
+    for (let minute = 0; minute < 6; minute++) {
+      now += 60_000;
+      refusal();
+    }
+    expect(attempts).toBe(1);
+    expect(outbox.acknowledge("invented-original", binding)).toBe(false);
+    expect(outbox.acknowledge(original!.id, "c".repeat(64))).toBe(false);
+    expect(outbox.recoveryAcknowledged(original!.id)).toBe(false);
+    expect(outbox.acknowledge(original!.id, binding)).toBe(true);
+    refusal();
+    expect(attempts).toBe(1);
+    for (let minute = 0; minute < 4; minute++) {
+      now += 60_000;
+      refusal();
+    }
+    expect(attempts).toBe(1);
+    now += 60_000;
+    refusal();
+    expect(attempts).toBe(2);
+  } finally {
+    outbox.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 it("counts terminal real socket refusals, keeps diagnostics separate, and serves authenticated 5/60-minute CLI rates", async () => {
   let now = Date.parse("2026-10-05T12:00:00Z");

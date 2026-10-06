@@ -2860,7 +2860,10 @@ five- and sixty-minute windows show failure fractions and failures per minute;
 counters contain no process IDs, paths, argv, report bodies or credentials.
 Doctor includes the same windows. A live seat with more than 1% terminal proof
 refusals in five minutes produces a native alert to its current owning lead,
-with a five-minute cooldown; native retries are counted separately from terminal
+with a five-minute cooldown after exact native acknowledgment. A submitted but
+unconfirmed alert stays held without replay; later proof observations read only
+its original acknowledgment before starting that cooldown. Unavailable delivery
+may retry after one minute. Native retries are counted separately from terminal
 refusals. Metrics restart with the service and state their coverage start.
 
 ### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`

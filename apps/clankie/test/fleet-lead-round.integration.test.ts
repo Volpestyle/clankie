@@ -926,15 +926,23 @@ it("proof threshold retries an unavailable native alert, then cools down only af
   );
   let now = Date.now();
   const attempts: Promise<boolean>[] = [];
+  const settlements: string[] = [];
   const metrics = new FleetHealthMetrics({
     now: () => now,
     onProofAlert: (pane, rates) => {
+      let observed: import("../src/captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
       const delivery = f.captain.notifyFleetHealthAlert(
         pane,
         `Fleet proof alert: ${rates.proof.refusals}/${rates.proof.attempts} refused.`,
+        (result) => {
+          observed = result;
+        },
       );
       attempts.push(delivery);
-      return delivery;
+      return delivery.then(() => {
+        settlements.push(observed.outcome);
+        return observed;
+      });
     },
   });
   const proof = localFleetProof({
@@ -970,6 +978,8 @@ it("proof threshold retries an unavailable native alert, then cools down only af
     expect(attempts).toHaveLength(2);
     expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
     expect(await attempts[1]).toBe(true);
+    await Promise.resolve();
+    expect(settlements).toEqual(["unavailable", "accepted"]);
     now += 60_000;
     await refuse();
     expect(attempts).toHaveLength(2);

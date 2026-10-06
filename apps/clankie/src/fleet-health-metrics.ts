@@ -8,6 +8,9 @@ import {
   type WorkerReportBridgeStatus,
 } from "@clankie/protocol";
 import type { LocalFleetProofDiagnostic } from "./local-fleet-proof.ts";
+import type { FleetHealthAlertDelivery } from "./captain/port.ts";
+
+type ProofAlertResult = boolean | FleetHealthAlertDelivery;
 
 type Counters = FleetHealthMetricsSnapshot["totals"];
 const MINUTE = 60_000;
@@ -71,17 +74,24 @@ export class FleetHealthMetrics {
       alertAt?: number;
       attemptAt?: number;
       alertPending?: boolean;
+      acknowledged?: () => boolean;
     }
   >();
   private readonly reports = new Map<string, { signature: string; lastSeen: number }>();
   private readonly options: {
     now?: () => number;
-    onProofAlert?(pane: string, window: FleetHealthMetricsWindow): boolean | Promise<boolean>;
+    onProofAlert?(
+      pane: string,
+      window: FleetHealthMetricsWindow,
+    ): ProofAlertResult | Promise<ProofAlertResult>;
   };
   constructor(
     options: {
       now?: () => number;
-      onProofAlert?(pane: string, window: FleetHealthMetricsWindow): boolean | Promise<boolean>;
+      onProofAlert?(
+        pane: string,
+        window: FleetHealthMetricsWindow,
+      ): ProofAlertResult | Promise<ProofAlertResult>;
     } = {},
   ) {
     this.options = options;
@@ -138,6 +148,18 @@ export class FleetHealthMetrics {
     if (!bucket) seat.buckets.set(minute, (bucket = empty()));
     update(bucket);
     const rates = window(5, seat.buckets, minute);
+    if (seat.alertPending && seat.acknowledged) {
+      try {
+        // Read only the original acknowledgment. Never redispatch a held alert.
+        if (seat.acknowledged()) {
+          seat.alertPending = false;
+          delete seat.acknowledged;
+          seat.alertAt = minute;
+        }
+      } catch {
+        // Missing/conflicting original evidence remains held.
+      }
+    }
     if (
       event.source === "proof" &&
       rates.proofRefusalRate > 0.01 &&
@@ -148,15 +170,20 @@ export class FleetHealthMetrics {
       seat.attemptAt = minute;
       seat.alertPending = true;
       const original = seat;
-      const settled = (accepted: boolean) => {
+      const settled = (delivery: ProofAlertResult | undefined) => {
         // A replaced/expired seat observation cannot acquire an old cooldown.
         if (this.seats.get(pane) !== original) return;
+        if (typeof delivery === "object" && delivery.outcome === "unconfirmed") {
+          if (delivery.acknowledged) original.acknowledged = delivery.acknowledged;
+          return;
+        }
         original.alertPending = false;
-        if (accepted) original.alertAt = Math.floor(this.now() / MINUTE);
+        if (delivery === true || (typeof delivery === "object" && delivery.outcome === "accepted"))
+          original.alertAt = Math.floor(this.now() / MINUTE);
       };
       try {
         void Promise.resolve(this.options.onProofAlert?.(pane, rates))
-          .then((accepted) => settled(accepted === true))
+          .then(settled)
           .catch(() => settled(false));
       } catch {
         settled(false);
