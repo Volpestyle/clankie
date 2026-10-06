@@ -2006,6 +2006,10 @@ The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 | `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                     |
 | `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                          |
 
+Available memory is what the kernel can reclaim without swapping: free,
+speculative and inactive pages on macOS, `MemAvailable` on Linux, and free
+memory elsewhere.
+
 CLI edits update the journal immediately; API edits are reconciled by the body
 within its five-second refresh. High pressure delays queued heavy work and refuses
 new local hires with a reason. Existing accepted agents keep running. Missing
