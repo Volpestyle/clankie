@@ -2224,7 +2224,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.workerTools = {
           ...seat.workerTools!,
           restartNeeded: true,
-          remediation: `Restart needed: native exit is unavailable for local Codex. Preserve the original thread and receipts; owner native quit plus same-thread resume is required.`,
+          remediation: `Restart needed: automatic legacy restart is disabled. The lead can close this seat when idle and hire a fresh worker. Retain the original thread evidence and settle original receipts without replay.`,
         };
       }
       const report = options.workerReportBridgeStatus?.(fleetId, pane);

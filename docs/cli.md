@@ -376,24 +376,20 @@ with a reason. Busy requests remain pending under their original authority.
 Roster `workerTools` and `/doctor` show observed/expected plugin versions and
 whether the observed runtime revision is behind. Local Codex seats started on
 worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh
-success. The staging command `clankie harness restart-tools --pane PANE` (TUI
-`/restart-tools --pane PANE`) accepts canonical pane IDs only. It can take
-`--report /absolute/report` for a completed result. The current production local
-Codex adapter lacks verified native exit; an idle otherwise-eligible target
-returns `native_exit_unavailable` before any close intent. Automatic restart is
-unsupported. Owner native quit
-and saved-thread resume are required until that capability is available.
-The operator API is `POST /v1/fleet/worker-tool-restart` with
-`{"paneId":"PANE","reportPath":"/absolute/report"}` (`reportPath` is optional).
+success. Automatic restart of those legacy seats is disabled. They retire
+naturally; deployment or refresh never quits them. The lead may close an idle
+legacy seat through the existing tidy path and hire a fresh worker with the
+current plugin. First retain its handoff, issue/evidence links and original
+thread reference, settle original receipts, and check that it has no unsent
+draft. The old thread's evidence stays on disk; a fresh hire receives that
+handoff as context, rather than replaying an old report or resuming the old
+thread automatically. See the [manual retirement steps](testing/worker-tool-refresh/manual-proof.md#pre-065-local-codex-manual-retirement).
 
-Restart requires an idle seat, no draft, known lead ownership, saved results,
-settled report receipts, and a verified native exit controller. It rechecks the
-original occupant before exit, records the close, and resumes the same native
-thread through the saved account and working directory. The result returns the
-thread, history ID, and resumed seat ID. A missing exit/resume acknowledgment
-stays held in tidy history; inspect it before retrying. Restart is an explicit
-operator action, never automatic deployment recovery. Remote Codex and Claude
-restarts are outside this command. These fields grant no access.
+The compatibility command `clankie harness restart-tools --pane PANE` and
+`POST /v1/fleet/worker-tool-restart` remain safe refusal surfaces for local
+Codex. An otherwise eligible idle target returns `native_exit_unavailable`
+before any close/history intent. They are not the manual retirement path and
+do not enable supervised quit/resume. Remote Codex and Claude remain VUH-1742.
 
 Known native busy state also holds deployment metadata publication until idle.
 The current implementation cannot safely refresh remote Codex configurations

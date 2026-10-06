@@ -96,17 +96,15 @@ The local host observation currently supports macOS; remote/Windows native
 acceptance remains separate. Roster samples live for at most five seconds;
 explicit doctor reads probe again.
 
-Local Codex seats on worker plugins before 0.6.5 show `restart needed`. An explicit
-operator can inspect the staging restart command `clankie harness restart-tools
---pane PANE`; it accepts canonical pane IDs only and does not implement a
-working automatic exit for current local Codex controllers. It requires idle, no draft,
-known lead ownership and settled receipts. Production local Codex currently lacks
-verified native exit; the command refuses `native_exit_unavailable` before any
-close intent. Owner native quit plus saved-thread resume is still required.
-A controller with verified native exit can journal resume of the same thread/account/cwd. A lost receipt stays held in tidy history:
-inspect the original operation before retrying. Never use this to replay an
-uncertain report or automatically restart existing lanes. Remote/Claude recovery
-is separate.
+Local Codex seats on worker plugins before 0.6.5 show `restart needed` and retire
+naturally. Automatic legacy restart is disabled. When the lead chooses to retire
+one, retain its handoff and original thread/evidence references, settle original
+receipts, verify idle/no draft, close it through the existing tidy path, then
+hire a fresh worker with the current plugin and that handoff. The old thread's
+evidence stays on disk. Never replay an uncertain report or claim that the new
+hire resumed the old thread. `clankie harness restart-tools --pane PANE` remains
+a canonical-pane compatibility refusal: `native_exit_unavailable` occurs before
+any close intent. It is not this manual path. Remote/Claude recovery is separate.
 Roster `workerReportBridge` separately records the last report outcome, time and
 fixed safe reason. Done/idle hires held for fifteen minutes without a stored
 report since their latest brief carry `finished, unreported`. Three failed seats
