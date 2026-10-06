@@ -74,6 +74,11 @@ describe("conversation play lifetime", () => {
   it("authenticates API selected conversations and refuses bearer-only or competing starts", async () => {
     const f = fixture();
     const captain = createStubCaptain();
+    captain.validateConversationOwner = async (owner) =>
+      ["conversation-a", "conversation-b"].includes(owner.conversationId);
+    const world = new HostedWorldSession();
+    const queue = new (await import("@clankie/play")).InterjectionQueue(32);
+    world.attach(fakeWorldBody(), queue);
     captain.seatContext = (id) =>
       ["conversation-a", "conversation-b"].includes(id ?? "")
         ? { conversationId: id!, cwd: "/tmp" }
@@ -85,6 +90,7 @@ describe("conversation play lifetime", () => {
       authenticateCaptain: async () => ({ captainId: "generic" }),
       bodyLeases: { store: f.store, router: new BodyLeaseRouter(f.store), confirmStopped: async () => false },
       bodyPlaySessions: f.sessions,
+      guidePokemonPlay: (text, identity) => world.guide(text, () => f.sessions.guardOwner(identity)),
     });
     const post = (conversationId?: string, authorization = "Bearer operator") =>
       app.request("/v1/embodiment/intents", {
@@ -99,11 +105,23 @@ describe("conversation play lifetime", () => {
     });
     expect((await post("conversation-a")).status).toBe(200);
     expect(embodiment.liveSession()).toMatchObject({ originLane: "operator", requestedBy: "owner" });
+    expect(f.sessions.owner(embodiment.liveSession()!.sessionId)?.conversationId).toBe("conversation-a");
+    const guide = (conversationId: string) =>
+      app.request("/v1/embodiment/sessions/live/guide", {
+        method: "POST",
+        headers: { authorization: "Bearer operator", "content-type": "application/json" },
+        body: JSON.stringify({ conversationId, text: "try visiting the lab" }),
+      });
+    expect((await guide("conversation-b")).status).toBe(409);
+    expect(queue.take()).toBeNull();
+    expect(await (await guide("conversation-a")).json()).toMatchObject({ outcome: "ok" });
+    expect(queue.take()).toContain("try visiting the lab");
     expect(await (await post("conversation-b")).json()).toMatchObject({
       outcome: "refused",
       bodyLease: { outcome: "busy", lease: { conversationId: "conversation-a" } },
     });
     f.sessions.settle(embodiment.liveSession()!.sessionId, true);
+    expect(f.sessions.owner(embodiment.liveSession()!.sessionId)).toBeUndefined();
     f.store.close();
   });
   it("requires host identity and persists the pin before a start becomes claimable", async () => {

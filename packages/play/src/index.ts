@@ -11,6 +11,7 @@ export {
   InterjectionQueue,
   runFreePlay,
   type FreePlayMind,
+  type FreePlayNotable,
   type FreePlayProvenance,
   type FreePlaySettledTurn,
   type FreePlayTurn,
@@ -33,3 +34,5 @@ export {
 } from "./play-journey.ts";
 export { createModelFreePlayMind, createModelVoice } from "./free-play-mind.ts";
 export type { ClankieVoice } from "./free-play-voice.ts";
+
+export { type FreePlayUsage, type FreePlayUsageReporter } from "./free-play-usage.ts";

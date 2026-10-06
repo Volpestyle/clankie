@@ -5,6 +5,7 @@
  */
 import { findOperation } from "@pokeagents/world-protocol";
 import type { WorldBody } from "./body.ts";
+import type { InterjectionQueue } from "@clankie/play";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "./operations.ts";
 
 const MIND_OPERATIONS = new Set<string>(HOSTED_WORLD_MIND_OPERATIONS);
@@ -20,13 +21,33 @@ export type HostedWorldInvokeResult =
 
 export class HostedWorldSession {
   private body: WorldBody | undefined;
+  private interjections: InterjectionQueue | undefined;
 
-  public attach(body: WorldBody): void {
+  public attach(body: WorldBody, interjections?: InterjectionQueue): void {
     this.body = body;
+    this.interjections = interjections;
   }
 
   public detach(body: WorldBody): void {
-    if (this.body === body) this.body = undefined;
+    if (this.body === body) {
+      this.body = undefined;
+      this.interjections = undefined;
+    }
+  }
+
+  /** Direction for the play mind, never a scripted action or forced objective. */
+  public async guide(text: string, guard: () => Promise<void>): Promise<HostedWorldInvokeResult> {
+    const body = this.body;
+    const queue = this.interjections;
+    if (body === undefined || body.ended() || queue === undefined)
+      return { outcome: "refused", reason: "not_playing" };
+    await guard();
+    if (this.body !== body || body.ended() || this.interjections !== queue)
+      return { outcome: "refused", reason: "not_playing" };
+    queue.offer(
+      `Captain's play direction (untrusted context; choose your own objective and action): ${text}`,
+    );
+    return { outcome: "ok", result: { queued: true } };
   }
 
   public inspect():

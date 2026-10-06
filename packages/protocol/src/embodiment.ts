@@ -41,17 +41,19 @@ export const EmbodimentIntentIdSchema = z.string().min(1).max(200);
 export type EmbodimentIntentId = z.infer<typeof EmbodimentIntentIdSchema>;
 
 /**
- * An absent field is "no cap" — the owner's chosen default (2026-07-26): he
- * plays until asked to stop. The stop ask and lease mechanics are the standing
- * controls; a present field is a caller's deliberate bound and must still be a
- * positive integer.
+ * Turn/duration limits are opt-in. Pokémon applies a default model-token ceiling
+ * when maxTokens is absent; maxCostUsd optionally adds a priced usage ceiling.
+ * The stop ask and lease mechanics remain available throughout play.
  */
 export const EmbodimentBudgetSchema = z
   .object({
     maxTurns: z.number().int().positive().optional(),
     maxDurationMs: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+    maxCostUsd: z.number().positive().finite().optional(),
   })
   .strict();
+export const DEFAULT_POKEMON_PLAY_MAX_TOKENS = 250_000;
 export type EmbodimentBudget = z.infer<typeof EmbodimentBudgetSchema>;
 
 const embodimentIntentBase = {
@@ -198,6 +200,8 @@ export const EmbodimentSessionOutcomeSchema = z.enum([
   "budget_exhausted",
   "failed",
   "lease_lapsed",
+  "mind_unavailable",
+  "world_ended",
 ]);
 export type EmbodimentSessionOutcome = z.infer<typeof EmbodimentSessionOutcomeSchema>;
 

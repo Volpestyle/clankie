@@ -1257,6 +1257,14 @@ winds down at the next turn boundary — this is not a process kill. A live
 session returns JSON. Idle is the sentence `Nothing is playing.` (exit 0, not
 JSON).
 
+### `play guide TEXT --conversation CONVERSATION_ID`
+
+Suggest an objective or approach to the live Pokémon mind. The authenticated
+`POST /v1/embodiment/sessions/live/guide` accepts `{text, conversationId}` and
+checks the selected conversation's play ownership again before queueing it.
+Clankie can use `pokeagent_guide` from that conversation; the mind still chooses
+its objective and actions. This does not start a sitting or affect another game.
+
 ### `rivals`
 
 `rivals connect URL [--token-stdin]` / `disconnect` configure the Rivals Agent origin live; its
@@ -1594,12 +1602,31 @@ Quiet hours suppress them without changing the source-derived mood. Desktop
 clients also honor macOS Focus, discard expired expressions, and show them
 without taking keyboard focus. Publishing does not confirm a client displayed it.
 
-### `games [status]` / `games set on|off`
+### `games [status]` / `games set on|off` / `games budget`
 
 Read or set whether the PokeAgent MMO body is available. JSON contains the
-`games.pokeagentMmoEnabled` boolean, `settingsFile`, and
-`"restart": "clankie restart captain"`. The TUI `/games` command calls this
-same writer.
+`games.pokeagentMmoEnabled`, optional `games.pokemonBudget`, `settingsFile`, and
+`"restart": "clankie restart"`. The TUI `/games` exposes availability and token/cost
+caps using the same writer. Restart to apply defaults to subsequent sittings.
+
+```sh
+clankie games budget max-tokens 250000
+clankie games budget max-cost-usd 1
+clankie games budget max-cost-usd default
+```
+
+`max-turns` and `max-duration-ms` accept positive integers too. `default` removes
+an override. Pokémon defaults to 250,000 charged model tokens, including
+commentary and interrupted decisions; turn/duration and dollar caps are optional.
+The authenticated `GET`/`PUT /v1/games/configuration` reads/replaces this gameplay
+configuration. Embodiment start intents can override these defaults with `budget`.
+
+Journals record input/output tokens, charged tokens, model calls and estimated
+USD on each turn and the summary. A metered call without usage reserves 16,000
+charged tokens and marks cost unknown; a dollar-capped session then stops. Caps
+are checked between calls, so the last call can exceed a threshold. Cost is an
+estimate from registry prices, not an invoice. Terminal receipts name
+`budget_exhausted`, `mind_unavailable`, `world_ended` or `stopped`.
 
 ### `browser tools` / `browser call TOOL JSON`
 

@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { EmbodimentEnvironmentIdSchema, EmbodimentVenueSchema } from "@clankie/protocol";
 import { z } from "zod";
+import { FreePlayUsageSchema } from "./free-play-usage.ts";
 import {
   FreePlayJournaledTurnSchema,
   FreePlayTurnEvidenceSchema,
@@ -137,6 +138,7 @@ const FreePlayJournalSummaryV1Schema = z
     outcome: z.string().min(1).max(64),
     turnsTaken: z.number().int().nonnegative(),
     accepted: z.number().int().nonnegative(),
+    usage: FreePlayUsageSchema.optional(),
     durationMs: z.number().int().nonnegative(),
     framesPublished: z.number().int().nonnegative(),
     framesDropped: z.number().int().nonnegative(),
@@ -342,6 +344,7 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
           outcome,
           turnsTaken: result.turns.length,
           accepted: result.accepted,
+          usage: result.usage,
           durationMs,
           framesPublished,
           framesDropped,

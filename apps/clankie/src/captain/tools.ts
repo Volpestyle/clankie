@@ -165,7 +165,14 @@ export function captainTools(
   const streamWatch = deps.streamWatch;
   const enabled = new Set(
     gameplay.pokeagentMmoEnabled
-      ? ["pokeagent_join_mmo", "pokeagent_world", "pokeagent_stop", "pokeagent_observe", "pokeagent_recall"]
+      ? [
+          "pokeagent_join_mmo",
+          "pokeagent_world",
+          "pokeagent_guide",
+          "pokeagent_stop",
+          "pokeagent_observe",
+          "pokeagent_recall",
+        ]
       : [],
   );
   return [
@@ -345,6 +352,7 @@ export function captainTools(
             originLane: lane,
             requestedBy: turnActor(turn, lane),
             bodyIdentity: turn.bodyIdentity,
+            ...(gameplay.pokemonBudget === undefined ? {} : { budget: gameplay.pokemonBudget }),
           }),
         ),
     }),
@@ -413,6 +421,20 @@ export function captainTools(
         }
         return json(await hosted.invoke(operation, input, turn.bodyIdentity));
       },
+    }),
+    defineTool({
+      name: "pokeagent_guide",
+      label: "PokeAgent: guide play",
+      description:
+        "Suggest a different objective or approach to your live Pokémon play mind. Use after a notable moment or when the room asks to change direction. The mind chooses its own objective and actions; only the conversation owning play can guide it. You can also tell the room what happened or use pokeagent_stop.",
+      parameters: Type.Object({ text: Type.String({ minLength: 1, maxLength: 400 }) }),
+      execute: async (_id, input) =>
+        json(
+          (await deps.hostedWorld?.guide?.(input.text, turn.bodyIdentity)) ?? {
+            outcome: "refused",
+            reason: "not_playing",
+          },
+        ),
     }),
     defineTool({
       name: "pokeagent_stop",
