@@ -4,7 +4,8 @@ Run after the core integrator lands and deploys the branch. This is a local
 service/native-seat proof; it requires no AWS operation or voice provider usage.
 VUH-1739 covers local Codex. Remote Codex and old Claude recovery are tracked
 separately in VUH-1742. Current local controllers use the in-place proof below;
-pre-0.6.5 worker plugins use the explicit restart fallback.
+pre-0.6.5 worker plugins show restart needed. Automatic restart remains blocked
+because the production local Codex adapter lacks verified original-TUI exit.
 
 1. Record deployed core SHA, worker plugin version, original pane IDs, original
    native root/descendant session IDs and the native Clankie tool inventory.
@@ -47,7 +48,11 @@ procedure grants no authority to restart an existing lane.
 2. Retain any original receipt claim. An unresolved claim/lock or service fence,
    busy native turn, unsent draft or missing saved result must refuse restart
    without another report POST or a second TUI.
-3. With the receipt settled and the seat idle, run one command:
+3. Current production local Codex must return `native_exit_unavailable` before
+   saving a close intent, with the original TUI intact. This is a capability
+   refusal, not a successful restart. The following positive proof applies only
+   once a verified native exit capability exists. With the receipt settled and
+   the seat idle, run one command:
    `clankie harness restart-tools --pane PANE`. Add `--report /absolute/report`
    only when the completed result has not already been retained. Record its
    `historyId`, original `threadId`, and `resumedSeatId`.

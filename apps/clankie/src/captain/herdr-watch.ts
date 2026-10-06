@@ -3261,6 +3261,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return record.owner;
   }
 
+  /** Read-only capability preflight. Missing native exit cannot create a
+   * close_unconfirmed journal when no exit could ever have been attempted. */
+  public async nativeExitAvailable(agent: HerdrAgentSnapshot): Promise<boolean> {
+    if (this.closed) return false;
+    try {
+      const control = await this.seatControl.attach(agent);
+      if (!control?.verify || !control.exit || control.ref.paneId !== agent.paneId) return false;
+      await control.verify();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   public async closeSeat(seatId: string, guard?: () => Promise<void>, nativeOnly = false): Promise<boolean> {
     if (this.closed || this.runner.closePane === undefined) return false;
     try {

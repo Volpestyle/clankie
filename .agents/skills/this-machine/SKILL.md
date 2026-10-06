@@ -478,10 +478,13 @@ Doctor and roster `workerTools` separately report observed worker catalogs,
 pending requests, missing tools and stalled reads with their reasons. An unknown
 catalog remains `not-observed`; those observations grant no tool authority.
 Local Codex seats on worker plugins before 0.6.5 show `restart needed`. An explicit
-operator can run `clankie harness restart-tools --pane PANE`, adding `--report
-/absolute/report` when results have not been retained. It requires idle, no draft,
-known lead ownership and settled receipts; verified native exit and journaled
-resume keep the same thread/account/cwd. A lost receipt stays held in tidy history:
+operator can inspect the staging restart command `clankie harness restart-tools
+--pane PANE`; it accepts canonical pane IDs only and does not implement a
+working automatic exit for current local Codex controllers. It requires idle, no draft,
+known lead ownership and settled receipts. Production local Codex currently lacks
+verified native exit; the command refuses `native_exit_unavailable` before any
+close intent. Owner native quit plus saved-thread resume is still required.
+A controller with verified native exit can journal resume of the same thread/account/cwd. A lost receipt stays held in tidy history:
 inspect the original operation before retrying. Never use this to replay an
 uncertain report or automatically restart existing lanes. Remote/Claude recovery
 is separate.

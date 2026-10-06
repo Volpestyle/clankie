@@ -60,6 +60,7 @@ export type TidyFailure =
         | "authority_unavailable"
         | "busy"
         | "invalid_reason"
+        | "native_exit_unavailable"
         | "restart_unsupported"
         | "report_receipt_unresolved";
     };
@@ -102,6 +103,7 @@ export class PaneTidy {
     hire: HireSeat;
     resolve?(ref: string): Promise<SavedAgentSession>;
     preflightResume?(session: SavedAgentSession): Promise<void>;
+    nativeExitAvailable?(agent: HerdrAgentSnapshot): Promise<boolean>;
     changed(): void;
     now?: () => number;
   };
@@ -360,10 +362,13 @@ export class PaneTidy {
       await this.authority(source);
       if (splitFleetQualified(input.pane)) return fail("restart_unsupported");
       const original = await this.fresh(input.pane);
+      if (original.paneId !== input.pane) return fail("provenance_unknown");
       if (splitFleetQualified(original.paneId) || original.agent !== "codex")
         return fail("restart_unsupported");
       if (!original.session || original.session.kind !== "id") return fail("provenance_unknown");
       if (!["idle", "waiting", "done"].includes(original.status)) return fail("busy");
+      if (!(await this.ports.nativeExitAvailable?.(original))) return fail("native_exit_unavailable");
+      await this.authority(source);
       // Validate the saved thread, cwd and registered account before exit.
       // Ordinary resume revalidates them and retains any uncertain launch.
       if (!this.ports.resolve || !this.ports.preflightResume) return fail("history_unavailable");

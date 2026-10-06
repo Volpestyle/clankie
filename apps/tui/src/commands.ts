@@ -249,7 +249,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   commands.push({
     name: "restart-tools",
     aliases: [],
-    description: "Restart an idle local Codex worker on its saved native thread",
+    description: "Check native restart admission; current local Codex exit is unavailable",
     argumentHint: "--pane PANE [--report /absolute/report]",
     takesArgument: true,
     async run(argument, shell) {

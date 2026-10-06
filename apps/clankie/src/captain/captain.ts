@@ -1683,6 +1683,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     untrack: (seatId) => herdrWatches.untrackSeat(seatId),
     hire: hireSeat,
     ...(deps.agentSessions?.resolve ? { resolve: (ref: string) => deps.agentSessions!.resolve!(ref) } : {}),
+    nativeExitAvailable: (agent) => herdrWatches.nativeExitAvailable(agent),
     preflightResume: async (saved) => {
       if (saved.host !== "local" || saved.file?.harness !== "codex")
         throw new Error("Local Codex history required");
@@ -2225,7 +2226,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.workerTools = {
           ...seat.workerTools!,
           restartNeeded: true,
-          remediation: `Restart needed: clankie harness restart-tools --pane ${pane}. Keeps the native thread; requires idle, saved results and settled receipts.`,
+          remediation: `Restart needed: native exit is unavailable for local Codex. Preserve the original thread and receipts; owner native quit plus same-thread resume is required.`,
         };
       }
       const report = options.workerReportBridgeStatus?.(fleetId, pane);
@@ -3797,6 +3798,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     restartWorkerTools: async (input, authority) => {
       const owner = { conversationId: conversations.defaultGlobalConversationId() };
       await authority.guard();
+      if (!/^w[\w]+:p[\w]+$/u.test(input.paneId)) return { outcome: "refused", reason: "invalid_pane" };
       const receiptSettled = async () => {
         const binding = await deps.runtimes?.configuredBinding("default");
         if (!binding?.socketPath) return false;
