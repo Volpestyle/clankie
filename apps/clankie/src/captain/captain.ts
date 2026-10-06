@@ -301,6 +301,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         (options.openCodeNative ?? options.grokNative ?? options.piNative)?.createCommandTab,
         {
           localCodexBinding: () => deps.runtimes?.configuredBinding("default") ?? Promise.resolve(undefined),
+          ...(deps.runtimes ? { localReadBinding: () => deps.runtimes!.configuredBinding("default") } : {}),
         },
       ),
     async () =>

@@ -1,3 +1,4 @@
+import { nativeHerdrRead } from "../herdr-native-read.ts";
 import { inspectLiveHarnessBridges } from "../../../../integrations/claude-plugin/worker/bin/harness-live.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -802,7 +803,23 @@ async function readLocalFleet(
     readonly localCodexRecordsPath?: string;
   } = {},
 ): Promise<ObservedFleet> {
-  const run = options.runCommand ?? defaultRunner;
+  const run: HerdrCensusRunner =
+    options.runCommand ??
+    ((command, args) => {
+      if (command === "herdr" && options.bridgeSocket) {
+        const read = nativeHerdrRead(
+          {
+            runtime: "external",
+            socketPath: options.bridgeSocket,
+            session: options.herdrSession ?? "default",
+          },
+          args,
+          { timeoutMs: CENSUS_TIMEOUT_MS },
+        );
+        if (read !== undefined) return read.then((stdout) => ({ stdout, stderr: "" }));
+      }
+      return defaultRunner(command, args);
+    });
   try {
     // The agent list names each seat's workspace and tab only by id; their
     // labels and order live in the snapshot. A seat without one is still a seat.

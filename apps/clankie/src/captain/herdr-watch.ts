@@ -1,3 +1,4 @@
+import { nativeHerdrRead } from "../herdr-native-read.ts";
 import { createHireLayout, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { realpath } from "node:fs/promises";
@@ -445,13 +446,28 @@ export function createHerdrWatchRunner(
     readonly localCodexRecovery?: false;
     readonly localCodexRecordsPath?: string;
     readonly localCodexBinding?: () => Promise<{ socketPath: string; session: string } | undefined>;
+    /** Current configured socket for local read-only roster/process observations. */
+    readonly localReadBinding?: () => Promise<{ socketPath: string; session: string } | undefined>;
     readonly runLocalCommand?: HerdrCensusRunner;
   } = {},
 ): HerdrWatchRunner {
-  const runHerdr = (args: readonly string[], signal?: AbortSignal, timeoutMs?: number): Promise<string> =>
-    available?.() === false
-      ? Promise.reject(new Error("Herdr execution is unavailable"))
-      : exec(args, signal, timeoutMs);
+  const runHerdr = async (
+    args: readonly string[],
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<string> => {
+    if (available?.() === false) throw new Error("Herdr execution is unavailable");
+    if (observation.localReadBinding) {
+      const binding = await observation.localReadBinding();
+      if (binding === undefined) throw new Error("Herdr execution is unavailable");
+      const read = nativeHerdrRead({ runtime: "external", ...binding }, args, {
+        ...(signal ? { signal } : {}),
+        timeoutMs: timeoutMs ?? HERDR_COMMAND_TIMEOUT_MS,
+      });
+      if (read !== undefined) return read;
+    }
+    return exec(args, signal, timeoutMs);
+  };
   const createTab = createHireLayout(runHerdr, createCommandTab);
   const recover = async (agent: HerdrAgentSnapshot): Promise<HerdrAgentSnapshot> => {
     if (observation.localCodexRecovery === false || agent.agent !== "codex" || agent.session !== undefined)

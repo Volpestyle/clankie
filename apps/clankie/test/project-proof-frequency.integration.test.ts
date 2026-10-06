@@ -264,8 +264,11 @@ nativeIt(
           return project(socket, pane);
         },
       });
-      const runner = createHerdrWatchRunner(undefined, async (args) =>
-        JSON.stringify(await herdr.cli(...args)),
+      const runner = createHerdrWatchRunner(
+        undefined,
+        async (args) => JSON.stringify(await herdr.cli(...args)),
+        undefined,
+        { localReadBinding: async () => binding },
       );
       const peers = new PeerSeatMessages({
         path: join(herdr.root, "peer-receipts.json"),
