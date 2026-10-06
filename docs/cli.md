@@ -4360,7 +4360,7 @@ setup script on that remote machine. Select it explicitly; Clankie never writes
 through the config symlink:
 
 ```sh
-clankie herdr prepare pc --codex-source-setup 'C:\Users\volpe\dotfiles\scripts\codex-worker-setup.py'
+clankie herdr prepare studio --codex-source-setup 'C:\Users\me\dotfiles\scripts\codex-worker-setup.py'
 ```
 
 For owner mode or a new source setup, add `--approve` and confirm interactively.
