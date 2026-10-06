@@ -1,0 +1,39 @@
+{
+  "close": {
+    "id": "cli:pane:close",
+    "result": {
+      "type": "ok"
+    }
+  },
+  "remainingPanes": [
+    {
+      "paneId": "w9:p1",
+      "terminalId": "term_65d0ca2fa70f81"
+    },
+    {
+      "paneId": "w9:p2",
+      "terminalId": "term_65d0ca3cb067b2"
+    },
+    {
+      "paneId": "w9:p3",
+      "terminalId": "term_65d0e2463eaeb3"
+    },
+    {
+      "paneId": "w9:p4",
+      "terminalId": "term_65d0e8822cbf54"
+    },
+    {
+      "paneId": "w9:p6",
+      "terminalId": "term_65d106ee2fa839"
+    },
+    {
+      "paneId": "wB:p1",
+      "terminalId": "term_65d25662f39fec"
+    },
+    {
+      "paneId": "wB:p2",
+      "terminalId": "term_65d25664f95b3d"
+    }
+  ],
+  "ownedPaneAbsent": true
+}
