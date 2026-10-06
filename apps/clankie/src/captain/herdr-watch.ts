@@ -1719,18 +1719,80 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch (error) {
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
     }
-    const receiptKey = JSON.stringify([
+    const baseReceiptKey = JSON.stringify([
       input.fleet ?? "local",
       input.harness,
       input.workingDirectory,
       resume?.sessionId ?? "new",
     ]);
+    let receiptKey = baseReceiptKey;
+    let fresh: ReturnType<DeliveryFence["freshHireAdmission"]> | undefined;
+    if (input.freshIntent) {
+      try {
+        if (!authority || !brief?.trim() || resume || !this.remoteHireReceipts)
+          throw new Error(
+            "freshIntent requires current hiring authority, a new remote brief and host receipts",
+          );
+        const projectId = this.projectContexts.get(input)?.projectId ?? input.projectId;
+        const freshScope = { ...input, ...(projectId === undefined ? {} : { projectId }) };
+        fresh = this.hireReceipts.freshHireAdmission(
+          baseReceiptKey,
+          freshScope,
+          authority.owner,
+          deliveryFingerprint(brief),
+        );
+        const target = await this.remoteHireReceipts.claim(input.fleet!, {
+          receiptId: input.freshIntent.id,
+          receiptKey: fresh.key,
+          fingerprint: deliveryFingerprint(brief),
+        });
+        if (!target || !isDeepStrictEqual(target.target, fresh.target))
+          throw new Error("The settled original's remote host target changed or disconnected");
+        await assertConversationAuthority(authority);
+        // The sibling check and begin below have no await between them.
+        fresh = this.hireReceipts.freshHireAdmission(
+          baseReceiptKey,
+          freshScope,
+          authority.owner,
+          deliveryFingerprint(brief),
+        );
+        receiptKey = fresh.key;
+      } catch (error) {
+        return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+      }
+    }
+    const latestFreshOccupant = async (expected: HerdrAgentSnapshot) => {
+      await this.assertRemoteHireAuthority(input, receiptKey, authority);
+      return this.runner.resolveTerminal(expected.terminalId);
+    };
+    const assertFreshOccupant = (expected: HerdrAgentSnapshot, latest: HerdrAgentSnapshot | undefined) => {
+      if (
+        !expected.session ||
+        !latest?.session ||
+        latest.paneId !== expected.paneId ||
+        latest.terminalId !== expected.terminalId ||
+        latest.agent !== input.harness ||
+        nativeSessionId(latest) !== nativeSessionId(expected) ||
+        occupantIdForHerdrSession(latest.session) !== occupantIdForHerdrSession(expected.session)
+      )
+        throw new Error("The fresh hire's exact native occupant changed before adoption");
+      // No await may follow this final observation/latch before adoption and reconciliation.
+      if (this.closed || !authority?.current())
+        throw new Error("Fresh hire authority is unavailable before adoption");
+    };
     const settled = this.hireReceipts.settled(receiptKey);
     if (settled)
       return {
         outcome: "failed",
         reason: "not_ready",
         detail: `Original hire ${settled.messageId} is settled. Its receipt is retained; this original intent cannot dispatch again.`,
+      };
+    if (fresh && this.hireReceipts.completed(receiptKey))
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail:
+          "This fresh intent already settled its admission. Its retained UUID cannot launch again; inspect its original seat.",
       };
     let pending = this.hireReceipts.pending(receiptKey);
     if (pending?.recoveryRequested)
@@ -1809,6 +1871,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
           pending.fingerprint === deliveryFingerprint(brief ?? "") &&
           agent !== undefined
         ) {
+          try {
+            if (fresh) assertFreshOccupant(agent, await latestFreshOccupant(agent));
+          } catch (error) {
+            return {
+              outcome: "failed",
+              reason: "delivery_unconfirmed",
+              deliveryStage: "uncertain",
+              detail: reasonDetail(error),
+            };
+          }
           let watch: HerdrWatchRecord | undefined;
           if (authority !== undefined) {
             await assertConversationAuthority(authority);
@@ -1832,6 +1904,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
             undefined,
           );
           await this.observeHireIdentity(receiptKey, agent, input, authority);
+          try {
+            if (fresh) assertFreshOccupant(agent, await latestFreshOccupant(agent));
+          } catch (error) {
+            return {
+              outcome: "failed",
+              reason: "delivery_unconfirmed",
+              deliveryStage: "uncertain",
+              detail: reasonDetail(error),
+            };
+          }
           adopt?.(recovered, this.projectContexts.get(input)?.projectId);
           this.hireReceipts.reconcile(receiptKey, pending.messageId);
           // Adoption and the exact delivery receipt commit synchronously above.
@@ -1858,12 +1940,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     const receipt = this.hireReceipts.begin(receiptKey, {
       fingerprint: deliveryFingerprint(brief ?? ""),
+      ...(fresh ? { freshHire: fresh.metadata } : {}),
       ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
       ...(resume === undefined ? { beforeIds: [] } : {}),
     });
     this.activeHires.add(receiptKey);
     let result: HerdrSeatSpawnResult;
     let watch: HerdrWatchRecord | undefined;
+    let spawnedProof: HerdrAgentSnapshot | undefined;
     try {
       if (input.fleet && this.remoteHireReceipts) {
         const claim = await this.remoteHireReceipts.claim(input.fleet, {
@@ -1871,6 +1955,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
           receiptKey,
           fingerprint: receipt.fingerprint,
         });
+        if (fresh && (!claim || !isDeepStrictEqual(claim.target, fresh.target)))
+          throw new Error("The settled original's remote host target changed before reservation");
         if (claim) {
           // Persist the exact target/nonce before crossing SSH, including lost reserve ACKs.
           this.hireReceipts.update(receiptKey, receipt.messageId, {
@@ -1895,6 +1981,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error("Hired seat ownership could not be bound to its exact native session");
         await assertConversationAuthority(authority);
         await this.bindHireOwner(proof, input, authority);
+        spawnedProof = proof;
         watch = this.watchHiredSeat(
           result.seat.seatId,
           result.seat.occupantId,
@@ -1902,7 +1989,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
           false,
         );
       }
-      if (result.outcome === "spawned") adopt?.(result, this.projectContexts.get(input)?.projectId);
+      if (result.outcome === "spawned") {
+        if (fresh) {
+          if (!spawnedProof) throw new Error("Fresh hire native proof is unavailable before adoption");
+          assertFreshOccupant(spawnedProof, await latestFreshOccupant(spawnedProof));
+        }
+        adopt?.(result, this.projectContexts.get(input)?.projectId);
+      }
       if (result.outcome !== "spawned" && this.hireReceipts.pending(receiptKey)?.remoteLaunchCommitted)
         result = { ...result, reason: "start_unconfirmed", deliveryStage: "uncertain" };
       if (

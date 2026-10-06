@@ -1,0 +1,10 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/lark-projects
+
+{"level":30,"time":"2026-10-06T04:04:52.240Z","service":"clankie","version":"0.2.0","deviceId":"control","operatorId":"operator","msg":"device revoked"}
+{"level":30,"time":"2026-10-06T04:04:52.310Z","service":"clankie","version":"0.2.0","deviceId":"control","operatorId":"operator","msg":"device revoked"}
+
+ Test Files  3 passed (3)
+      Tests  70 passed (70)
+   Start at  23:04:33
+   Duration  18.93s (transform 7.24s, setup 45ms, import 14.24s, tests 4.22s, environment 0ms)

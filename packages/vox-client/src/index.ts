@@ -266,11 +266,11 @@ export interface VoxClient extends VoxStreamClient {
 
 export function resolveVoxBin(
   env: NodeJS.ProcessEnv = process.env,
-  candidates: readonly string[] = defaultVoxBinCandidates(),
+  candidates?: readonly string[],
 ): string | undefined {
   const configured = env.CLANKIE_VOX_BIN?.trim();
   if (configured !== undefined) return existsSync(configured) ? configured : undefined;
-  return candidates.find((candidate) => existsSync(candidate));
+  return (candidates ?? defaultVoxBinCandidates()).find((candidate) => existsSync(candidate));
 }
 
 export function defaultVoxRoot(): string {

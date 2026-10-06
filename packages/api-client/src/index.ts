@@ -37,6 +37,9 @@ import {
   IssueMetricsReportSchema,
   type IssueMetricsQuery,
   type IssueMetricsReport,
+  FLEET_HEALTH_METRICS_PATH,
+  FleetHealthMetricsSnapshotSchema,
+  type FleetHealthMetricsSnapshot,
   DISCORD_SETUP_TEST_POST_PATH,
   DiscordSetupTestPostRequestSchema,
   DiscordSetupTestPostResultSchema,
@@ -820,6 +823,13 @@ export class ClankieApiClient {
       await this.request<unknown>(`${ISSUE_METRICS_PATH}${suffix}`, {
         headers: this.operatorHeaders(),
       }),
+    );
+  }
+
+  public async readFleetHealthMetrics(): Promise<FleetHealthMetricsSnapshot> {
+    return parseProtocolResponse(
+      FleetHealthMetricsSnapshotSchema,
+      await this.request(FLEET_HEALTH_METRICS_PATH, { headers: this.operatorHeaders(), redirect: "error" }),
     );
   }
 

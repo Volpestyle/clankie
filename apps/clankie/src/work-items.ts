@@ -6,12 +6,11 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
-  WorkBackendKindSchema,
-  WorkConventionSchema,
+  WorkInitSettingsSchema,
   WorkEvidenceSchema,
   WorkItemStatusSchema,
   WorkItemPrioritySchema,
-  WorkLinearLabelSchema,
+  type WorkProjectResult,
   type WorkConvention,
   type WorkItem,
   type WorkRepo,
@@ -22,10 +21,13 @@ import {
   discoverConvention,
   readConvention,
   resolveTracker,
+  readProjectWork,
   backendFor,
   trackerToolsFor,
   type WorkItemPatch,
-  writeConvention,
+  initializeConvention,
+  WorkInitDecisionRequired,
+  WorkInitInvalid,
   type CommandRunner,
   githubRestApi,
   type GhRunner,
@@ -62,26 +64,14 @@ const COMMAND_TIMEOUT_MS = 30_000;
 
 export const WorkRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("repos") }).strict(),
+  z.object({ action: z.literal("project"), repo: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal("discover"), repo: z.string().min(1).max(4096) }).strict(),
-  z
-    .object({
-      action: z.literal("init"),
-      repo: z.string().min(1).max(4096),
-      backend: WorkBackendKindSchema.optional(),
-      directory: z.string().min(1).max(256).optional(),
-      githubRepo: z.string().min(1).max(200).optional(),
-      linearTeam: z.string().min(1).max(64).optional(),
-      linearProject: z.string().min(1).max(200).optional(),
-      linearLabel: WorkLinearLabelSchema.optional(),
-      decisions: z.string().min(1).max(256).optional(),
-      note: z.string().max(1000).optional(),
-    })
-    .strict(),
+  WorkInitSettingsSchema.extend({ action: z.literal("init"), repo: z.string().min(1).max(4096) }).strict(),
   z
     .object({
       action: z.literal("list"),
       repo: z.string().min(1).max(4096),
-      status: z.array(WorkItemStatusSchema).max(5).optional(),
+      status: z.array(WorkItemStatusSchema).max(6).optional(),
       owner: z.string().min(1).max(128).optional(),
       label: z.string().trim().min(1).max(64).optional(),
       limit: z.number().int().min(1).max(250).optional(),
@@ -165,6 +155,7 @@ export interface WorkItemsServiceOptions {
 }
 
 export type WorkResult =
+  | WorkProjectResult
   | { readonly repos: WorkRepo[] }
   | {
       readonly repo: WorkRepo;
@@ -234,6 +225,48 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   const registryPath = join(options.stateDirectory, "work-repos.json");
   const writeReceipts = new WorkWriteReceipts(join(options.stateDirectory, "work-write-receipts.json"));
   const writeLocks = new Map<string, Promise<unknown>>();
+  // Shared GitHub collection reads, including the existing issue poller. Token
+  // fingerprints isolate bindings; rejected pages cool down instead of retrying per device.
+  const githubReads = new Map<string, { expires: number; promise: Promise<unknown[]> }>();
+  const cacheGithub = (
+    api: NonNullable<TrackerDeps["github"]>,
+    binding: string,
+  ): NonNullable<TrackerDeps["github"]> => ({
+    async request(method, path, body) {
+      try {
+        return await api.request(method, path, body);
+      } finally {
+        if (method !== "GET") githubReads.clear();
+      }
+    },
+    async list(path) {
+      const key = `${binding}:${path}`;
+      const now = clock().getTime();
+      for (const [key, entry] of githubReads) if (entry.expires <= now) githubReads.delete(key);
+      let entry = githubReads.get(key);
+      if (!entry) {
+        if (githubReads.size >= 128)
+          throw new Error("GitHub work reads are busy; retry after a snapshot expires");
+        entry = { expires: Number.POSITIVE_INFINITY, promise: Promise.resolve([]) };
+        const selected = entry;
+        entry.promise = api.list(path).then(
+          (value) => {
+            selected.expires = clock().getTime() + 60_000;
+            return value;
+          },
+          (error) => {
+            selected.expires = clock().getTime() + 30_000;
+            throw error;
+          },
+        );
+        githubReads.set(key, entry);
+      }
+      const result = await entry.promise;
+      if (githubReads.get(key) !== entry)
+        throw new Error("GitHub work snapshot changed. Read the work again.");
+      return structuredClone(result);
+    },
+  });
   const run = options.run ?? defaultRun;
   const clock = options.clock ?? (() => new Date());
 
@@ -321,11 +354,14 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       ...(token === undefined
         ? {}
         : {
-            github: githubRestApi({
-              token,
-              ...(options.githubApiBase === undefined ? {} : { baseUrl: options.githubApiBase }),
-              ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-            }),
+            github: cacheGithub(
+              githubRestApi({
+                token,
+                ...(options.githubApiBase === undefined ? {} : { baseUrl: options.githubApiBase }),
+                ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+              }),
+              createHash("sha256").update(token).digest("hex"),
+            ),
           }),
       ...(linear === undefined || localTracker ? {} : { linear }),
       clock,
@@ -823,11 +859,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         return { repos };
       }
       if (/^project-[a-f0-9]{48}$/u.test(request.repo)) {
-        if (request.action !== "list" && request.action !== "show")
+        if (request.action !== "list" && request.action !== "show" && request.action !== "project")
           throw new WorkRequestError("invalid", "Project tracker references are read-only");
         try {
           if (!projectReader) throw new Error("Project settings unavailable");
           const read = await projectReader.prepare(request.repo);
+          if (request.action === "project") {
+            const binding = await accountBinding(read.convention.backend);
+            const facts = await readProjectWork(read.path, read.convention, await deps(read.path, false));
+            await read.validate();
+            if ((await accountBinding(read.convention.backend)) !== binding)
+              throw new Error("Connected tracker account changed. Read the work again.");
+            return { repo: read.repo, ...facts };
+          }
           const { backend } = await tracker(read.path, false, true);
           await read.validate();
           if (request.action === "list") {
@@ -859,6 +903,22 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
       const entry = await locate(request.repo, local);
       switch (request.action) {
+        case "project": {
+          const { convention } = await tracker(entry.path, false, false, local);
+          const saved = JSON.stringify(await readConvention(entry.path));
+          const binding =
+            (convention.backend === "linear" && !options.mcpHost?.binding && !options.mcpHost?.account) ||
+            (convention.backend === "github" && local && !options.githubToken)
+              ? undefined
+              : await accountBinding(convention.backend);
+          const facts = await readProjectWork(entry.path, convention, await deps(entry.path, local));
+          if (
+            JSON.stringify(await readConvention(entry.path)) !== saved ||
+            (binding !== undefined && (await accountBinding(convention.backend)) !== binding)
+          )
+            throw new WorkRequestError("invalid", "Saved work tracker changed. Read the work again.");
+          return { repo: await describe(entry), ...facts };
+        }
         case "discover": {
           const discovery = await discoverConvention(entry.path, run);
           const recorded = await readConvention(entry.path);
@@ -874,46 +934,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "init": {
           if (!local) throw new WorkRequestError("invalid", "Only this machine records a convention");
           let convention: WorkConvention;
-          if (request.backend === undefined) {
-            const discovery = await discoverConvention(entry.path, run);
-            if (discovery.suggestion === undefined)
-              throw new WorkRequestError("needs_decision", discovery.question ?? "Choose a backend", {
-                ...(discovery.question === undefined ? {} : { question: discovery.question }),
-                signals: discovery.signals,
+          try {
+            const { action: _action, repo: _repo, ...inputs } = request;
+            convention = await initializeConvention(entry.path, inputs, { run, clock });
+          } catch (error) {
+            if (error instanceof WorkInitDecisionRequired)
+              throw new WorkRequestError("needs_decision", error.message, {
+                question: error.message,
+                signals: error.signals,
               });
-            convention = { ...discovery.suggestion, decidedAt: clock().toISOString() };
-          } else {
-            convention = WorkConventionSchema.parse({
-              schemaVersion: 1,
-              backend: request.backend,
-              ...(request.directory === undefined ? {} : { directory: request.directory }),
-              ...(request.githubRepo === undefined ? {} : { github: { repo: request.githubRepo } }),
-              ...(request.linearTeam === undefined
-                ? {}
-                : {
-                    linear: {
-                      team: request.linearTeam,
-                      ...(request.linearProject === undefined ? {} : { project: request.linearProject }),
-                    },
-                  }),
-              ...(request.decisions === undefined ? {} : { decisions: request.decisions }),
-              decidedBy: "owner",
-              decidedAt: clock().toISOString(),
-              ...(request.note === undefined ? {} : { note: request.note }),
-            });
+            if (error instanceof WorkInitInvalid) throw new WorkRequestError("invalid", error.message);
+            throw error;
           }
-          if (request.linearLabel !== undefined) {
-            if (convention.backend !== "linear" || convention.linear === undefined)
-              throw new WorkRequestError(
-                "invalid",
-                "A Linear board label requires a linear convention with a team",
-              );
-            convention = WorkConventionSchema.parse({
-              ...convention,
-              linear: { ...convention.linear, label: request.linearLabel },
-            });
-          }
-          await writeConvention(entry.path, convention);
+
           return { repo: await describe(entry), convention };
         }
         case "list": {

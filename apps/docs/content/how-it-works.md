@@ -167,12 +167,18 @@ requests reach the configured provider or runtime, so running Clankie locally
 does not automatically make every model request local. See [credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)
 for the exact stores and exceptions.
 
-GitHub and Linear account Connections use the body's credential broker too.
+GitHub, Linear and Google account Connections use the body's credential broker too.
 The app and account page show identity and granted permissions and can disconnect.
 The result reports confirmed provider revocation or a permission-review link.
 Hosted GitHub disconnect removes local access; Clankie's shared developer
 secret never enters a customer body. GitHub authorization starts with a user code; Linear uses a
-browser return and PKCE. Provider tokens remain on the body, while device
+browser return and PKCE. Google consent independently enables Gmail, Calendar
+or Drive reads. Gmail and Calendar use read-only scopes; Drive's file picker
+grants access to selected files. That grant permits edits, while Clankie's
+implemented tools only read. Its refresh and
+grouped revoke lifecycle stay on the body. The shared catalog shows each
+service's purpose, account, scopes and recovery status across app, dashboard
+and console. Provider tokens remain on the body, while device
 requests travel through the encrypted gateway. These flows require configured
 developer OAuth applications; hosted provisioning supplies their public client
 configuration. See [account connections](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0232-hosted-connections-use-the-body-broker.md).
@@ -197,6 +203,11 @@ expiry closes the read device, including streams. Shell windows use the hosted
 service's separate enforcement and cannot mint a paired device. The owner-facing
 [`support` command](/cli/) documents the controls; hosted availability depends on
 the coordinated service rollout.
+
+Pokémon play uses a game extension for its PokeAgents connector and session
+execution. Clankie keeps ownership, permissions, publishing destinations and
+evidence in his service. Minecraft and Rivals adoption of that shared extension
+contract remains follow-up work; their current play paths remain available.
 
 ## Go deeper
 

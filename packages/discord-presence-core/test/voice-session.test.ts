@@ -29,9 +29,11 @@ import {
 import { createVoiceRealtimePorts, parseVoiceRealtimeEnv } from "../src/voice-composition.ts";
 import type { VoiceFloorOptions } from "../src/voice-floor.ts";
 import { DiscordVoiceIngress } from "../src/voice-ingress.ts";
+import type { VoiceBodyAdmission } from "../src/body-voice-lease.ts";
 import {
   CAPTAIN_UNREACHABLE_TEXT,
   DiscordVoiceSession,
+  DEFAULT_VOICE_RECORDING_LIMIT_MS,
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
   SPEAKER_TRANSCRIPTION_IDLE_MS,
@@ -44,6 +46,7 @@ import {
   ENGAGED_OFFER_TURN_ITEM,
   UNPROMPTED_TURN_ITEM,
   type DiscordVoiceBriefingRequest,
+  type DiscordVoiceBriefing,
   type VoiceConversationOpenInput,
   type VoiceConversationPort,
   type VoiceTranscriptionHandlers,
@@ -420,6 +423,9 @@ function askClankie(callId: string, argumentsJson: string): RealtimeFunctionCall
 }
 
 interface HarnessOptions {
+  readonly bodyLease?: VoiceBodyAdmission;
+  readonly briefing?: (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing>;
+  readonly recordingLimitMs?: number;
   readonly onEvidence?: (event: DiscordVoiceEvidence) => void;
   readonly narrationMinIntervalMs?: number;
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
@@ -481,11 +487,13 @@ function buildHarness(options: HarnessOptions = {}) {
     { characterId: "clankie", credentialRef: "discord_bot", transportKind: "bot" },
   );
   const session = new DiscordVoiceSession({
+    ...(options.recordingLimitMs === undefined ? {} : { recordingLimitMs: options.recordingLimitMs }),
     vox,
     ingress,
     realtime: ports,
     briefing: (request) => {
       briefingCalls.push(request);
+      if (options.briefing !== undefined) return options.briefing(request);
       return Promise.resolve({
         instructions: "Be Clankie, in the social register.",
         briefing: "Right now: tending the garden.",
@@ -544,6 +552,7 @@ function buildHarness(options: HarnessOptions = {}) {
       evidence.filter((event): event is Extract<DiscordVoiceEvidence, { type: T }> => event.type === type),
     join: async () => {
       await session.join({
+        ...(options.bodyLease === undefined ? {} : { bodyLease: options.bodyLease }),
         guildId: GUILD,
         channelId: CHANNEL,
         invokingUserId: OWNER,
@@ -551,6 +560,10 @@ function buildHarness(options: HarnessOptions = {}) {
       // Most fixtures start after a quiet arrival and its conversation hold.
       // Arrival-specific tests call session.join directly and inspect that turn.
       await flush();
+      if (options.bodyLease !== undefined)
+        await expect
+          .poll(() => harness.ofType("model_response").some((event) => event.phase === "requested"))
+          .toBe(true);
       harness.conversation().input.onResponseDone(completedResponse("arrival"));
       timers.fire(ENGAGED_HOLD_MS);
       await flush();
@@ -977,6 +990,500 @@ describe("lifecycle", () => {
     await flush();
     expect(harness.session.status().active).toBe(false);
     expect(harness.ofType("left")).toHaveLength(1);
+  });
+});
+
+describe("body wake briefing refresh", () => {
+  it("does not open a provider with an initial briefing after its body admission is revoked", async () => {
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let current = true;
+    const h = buildHarness({
+      briefing: async () => {
+        await waiting;
+        return { instructions: "Revoked private persona", briefing: "Revoked private memory" };
+      },
+    });
+    await h.session.join({
+      guildId: GUILD,
+      channelId: CHANNEL,
+      invokingUserId: OWNER,
+      bodyLease: {
+        stay: {
+          stayId: "00000000-0000-4000-8000-000000000001",
+          generation: 1,
+          target: {
+            guildId: GUILD,
+            channelId: CHANNEL,
+            actorId: OWNER,
+            presenceSessionId: "presence-1",
+            transportKind: "bot",
+          },
+        },
+        guard: async () => {},
+        current: () => current,
+      },
+    });
+    await flush();
+    expect(h.briefingCalls).toHaveLength(1);
+    current = false;
+    release();
+    await flush();
+    expect(h.conversations).toEqual([]);
+    expect(h.vox.audio).toEqual([]);
+    await h.session.dispose();
+  });
+
+  it("closes a provider that opens after body revocation without seeding private context", async () => {
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let current = true;
+    const h = buildHarness();
+    const open = h.ports.openConversation;
+    h.ports.openConversation = async (input) => {
+      const port = await open(input);
+      await waiting;
+      return port;
+    };
+    await h.session.join({
+      guildId: GUILD,
+      channelId: CHANNEL,
+      invokingUserId: OWNER,
+      bodyLease: {
+        stay: {
+          stayId: "00000000-0000-4000-8000-000000000001",
+          generation: 1,
+          target: {
+            guildId: GUILD,
+            channelId: CHANNEL,
+            actorId: OWNER,
+            presenceSessionId: "presence-1",
+            transportKind: "bot",
+          },
+        },
+        guard: async () => {},
+        current: () => current,
+      },
+    });
+    await flush();
+    expect(h.conversations).toHaveLength(1);
+    current = false;
+    release();
+    await flush();
+    expect(h.conversation().isOpen).toBe(false);
+    expect(h.conversation().textItems).toEqual([]);
+    expect(h.vox.audio).toEqual([]);
+    await h.session.dispose();
+  });
+
+  it("updates the native realtime persona while correlated speech keeps playing", async () => {
+    let bodyReady = false;
+    const h = await joinedHarness({
+      briefing: async () => ({
+        instructions: bodyReady ? "Current private tenant persona" : "Safe warm worker persona",
+        briefing: bodyReady ? "The private body and memory are ready." : "The body is waking.",
+      }),
+    });
+    await h.consent(ALICE);
+    const socket = new VoiceRecoverySocket();
+    h.ports.openConversation = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: h.timers,
+      socketFactory: async () => socket,
+    }).openConversation;
+    h.vox.autoDrain = false;
+    await h.say(ALICE, "hey clankie say hello");
+    socket.emit({ type: "response.created", response: { id: "already-speaking" } });
+    socket.emit({
+      type: "response.output_audio.delta",
+      response_id: "already-speaking",
+      item_id: "current-audio",
+      delta: pcmDelta(480).toString("base64"),
+    });
+    await flush();
+    const playback = h.vox.activePlaybackId;
+    const creates = socket.sent.filter((frame) => frame.type === "response.create").length;
+    bodyReady = true;
+    await expect(h.session.refreshBriefing()).resolves.toBe(true);
+    expect(socket.sent.filter((frame) => frame.type === "session.update").at(-1)).toMatchObject({
+      session: { instructions: "Current private tenant persona" },
+    });
+    expect(h.vox.activePlaybackId).toBe(playback);
+    expect(h.vox.stops).toEqual([]);
+    expect(
+      socket.sent.filter(
+        (frame) => frame.type === "response.cancel" || frame.type === "conversation.item.truncate",
+      ),
+    ).toEqual([]);
+    expect(socket.sent.filter((frame) => frame.type === "response.create")).toHaveLength(creates);
+    expect(h.briefingCalls.at(-1)?.consentedUserIds).toEqual([OWNER, ALICE]);
+    await h.session.leave("fixture_done");
+  });
+
+  it("discards a private briefing that arrives after the voice stay ended", async () => {
+    let release: (() => void) | undefined;
+    let wait: Promise<void> | undefined;
+    const h = await joinedHarness({
+      briefing: async () => {
+        await wait;
+        return { instructions: "Late private persona", briefing: "Late private memory" };
+      },
+    });
+    await h.consent(ALICE);
+    const socket = new VoiceRecoverySocket();
+    h.ports.openConversation = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: h.timers,
+      socketFactory: async () => socket,
+    }).openConversation;
+    await h.say(ALICE, "hey clankie are you there");
+    const sentBefore = socket.sent.length;
+    wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const refresh = h.session.refreshBriefing();
+    await flush();
+    await h.session.leave("fixture_done");
+    release!();
+    await expect(refresh).resolves.toBe(false);
+    expect(
+      socket.sent
+        .slice(sentBefore)
+        .filter((frame) => frame.type === "session.update" || frame.type === "conversation.item.create"),
+    ).toEqual([]);
+  });
+});
+
+describe("awaited voice callback authority", () => {
+  function admission(
+    guard: (actorId?: string) => Promise<void>,
+    current: (actorId?: string) => boolean = () => true,
+  ): VoiceBodyAdmission {
+    return {
+      stay: {
+        stayId: "00000000-0000-4000-8000-000000000001",
+        generation: 1,
+        target: {
+          guildId: GUILD,
+          channelId: CHANNEL,
+          actorId: OWNER,
+          presenceSessionId: "presence-1",
+          transportKind: "bot",
+        },
+      },
+      guard,
+      current,
+    };
+  }
+
+  it.each(["current", "guard"])(
+    "discards an initial private briefing after %s revocation without opening the native provider",
+    async (boundary) => {
+      let authorized = true;
+      let entered!: () => void;
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let bodyCalls = 0;
+      const h = buildHarness({
+        bodyLease: admission(
+          async () => {
+            if (boundary === "guard" && !authorized) throw new Error("authority revoked");
+          },
+          () => boundary !== "current" || authorized,
+        ),
+        briefing: async () => {
+          bodyCalls++;
+          entered();
+          await wait;
+          return { instructions: "Revoked private persona", briefing: "Revoked private memory" };
+        },
+      });
+      const sockets: VoiceRecoverySocket[] = [];
+      h.ports.openConversation = createVoiceRealtimePorts({
+        apiKey: "fixture-realtime",
+        config: parseVoiceRealtimeEnv({}),
+        timers: h.timers,
+        socketFactory: async () => {
+          const socket = new VoiceRecoverySocket();
+          sockets.push(socket);
+          return socket;
+        },
+      }).openConversation;
+      await h.session.join({
+        guildId: GUILD,
+        channelId: CHANNEL,
+        invokingUserId: OWNER,
+        bodyLease: admission(
+          async () => {
+            if (boundary === "guard" && !authorized) throw new Error("authority revoked");
+          },
+          () => boundary !== "current" || authorized,
+        ),
+      });
+      await ready;
+      const stay = h.session.status().stayId;
+      authorized = false;
+      release();
+      await flush();
+      expect(h.session.status().stayId).toBe(stay);
+      expect(h.session.status().active).toBe(true);
+      expect(sockets).toEqual([]);
+      expect(bodyCalls).toBe(1);
+      await h.session.dispose();
+    },
+  );
+
+  it.each(["post_briefing_guard", "socket_connect"])(
+    "fences the original actor after paused %s before sending private native session configuration",
+    async (boundary) => {
+      let present = true;
+      let entered!: () => void;
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const sockets: VoiceRecoverySocket[] = [];
+      let actorChecks = 0;
+      const lease = admission(
+        async (actorId) => {
+          if (actorId !== OWNER) return;
+          actorChecks++;
+          if (boundary === "post_briefing_guard" && actorChecks === 2) {
+            entered();
+            await wait;
+          }
+          if (!present) throw new Error("initial actor departed");
+        },
+        (actorId) => actorId !== OWNER || present,
+      );
+      const h = buildHarness();
+      h.ports.openConversation = createVoiceRealtimePorts({
+        apiKey: "fixture-realtime",
+        config: parseVoiceRealtimeEnv({}),
+        timers: h.timers,
+        socketFactory: async () => {
+          const socket = new VoiceRecoverySocket();
+          sockets.push(socket);
+          if (boundary === "socket_connect") {
+            entered();
+            await wait;
+          }
+          return socket;
+        },
+      }).openConversation;
+      await h.session.join({ guildId: GUILD, channelId: CHANNEL, invokingUserId: OWNER, bodyLease: lease });
+      await ready;
+      const stay = h.session.status().stayId;
+      present = false;
+      release();
+      await expect.poll(() => h.ofType("failed").length).toBe(1);
+      expect(lease.current()).toBe(true);
+      expect(h.session.status().stayId).toBe(stay);
+      expect(h.session.status().active).toBe(true);
+      expect(h.briefingCalls).toHaveLength(1);
+      expect(h.briefingCalls[0]?.actorId).toBe(OWNER);
+      if (boundary === "post_briefing_guard") expect(sockets).toHaveLength(0);
+      else {
+        expect(sockets).toHaveLength(1);
+        expect(sockets[0]!.closed).toBe(true);
+        expect(sockets[0]!.sent).toEqual([]);
+      }
+      await h.session.dispose();
+    },
+  );
+
+  it.each(
+    ["handoff", "self_tool"].flatMap((action) =>
+      [false, true].flatMap((fails) =>
+        ["body_result", "guard_completion"].map((boundary) => ({ action, fails, boundary })),
+      ),
+    ),
+  )(
+    "discards a late $action result/fallback (fails=$fails, boundary=$boundary) after its participant departs while the tenant lease stays current, without replay",
+    async ({ action, fails, boundary }) => {
+      const occupants = [{ userId: ALICE, displayName: "Alice" }];
+      const checkedActors: Array<string | undefined> = [];
+      let revokeOnGuard = false;
+      let entered!: () => void;
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let calls = 0;
+      const callback = async () => {
+        calls++;
+        entered();
+        await wait;
+        if (fails) throw new Error("private body callback refused");
+      };
+      const h = await joinedHarness({
+        occupants,
+        bodyLease: admission(
+          async (actorId) => {
+            checkedActors.push(actorId);
+            if (actorId === ALICE && !occupants.some((occupant) => occupant.userId === actorId))
+              throw new Error("actor departed");
+            if (actorId === ALICE && revokeOnGuard) {
+              revokeOnGuard = false;
+              // The helper's current check sees valid authority; its caller's
+              // await resumes after the native actor observation changes.
+              queueMicrotask(() => queueMicrotask(() => occupants.pop()));
+            }
+          },
+          (actorId) => actorId !== ALICE || occupants.some((occupant) => occupant.userId === actorId),
+        ),
+        captain: async () => {
+          await callback();
+          return settledResult("private-result", "Revoked private result");
+        },
+        selfTool: async () => {
+          await callback();
+          return "Revoked private result";
+        },
+      });
+      await h.consent(ALICE);
+      const socket = new VoiceRecoverySocket();
+      h.ports.openConversation = createVoiceRealtimePorts({
+        apiKey: "fixture-realtime",
+        config: parseVoiceRealtimeEnv({}),
+        timers: h.timers,
+        socketFactory: async () => socket,
+      }).openConversation;
+      await h.say(ALICE, "hey clankie check my memory");
+      await expect.poll(() => socket.creates().length).toBe(1);
+      expect(h.briefingCalls.at(-1)?.actorId).toBe(ALICE);
+      const creates = socket.creates().length;
+      socket.emit({ type: "response.created", response: { id: "voice-callback" } });
+      socket.emit({
+        type: "response.output_item.done",
+        response_id: "voice-callback",
+        item: {
+          type: "function_call",
+          call_id: "callback-1",
+          name: action === "handoff" ? "ask_clankie" : "get_self_state",
+          arguments: action === "handoff" ? '{"request":"check my memory"}' : "{}",
+        },
+      });
+      expect(h.ofType("realtime_tool")).toContainEqual(
+        expect.objectContaining({
+          callId: "callback-1",
+          phase: "called",
+        }),
+      );
+      await expect.poll(() => calls).toBe(1);
+      await ready;
+      const actorChecksBefore = checkedActors.filter((actorId) => actorId === ALICE).length;
+      const frames = socket.sent.length;
+      const stay = h.session.status().stayId;
+      if (boundary === "body_result") occupants.pop();
+      else revokeOnGuard = true;
+      release();
+      await flush();
+      expect(h.session.status().stayId).toBe(stay);
+      expect(socket.closed).toBe(false);
+      expect(socket.sent.slice(frames)).toEqual([]);
+      expect(socket.creates()).toHaveLength(creates);
+      expect(calls).toBe(1);
+      expect(checkedActors.filter((actorId) => actorId === ALICE)).toHaveLength(actorChecksBefore + 1);
+      expect(h.ofType("realtime_tool")).toContainEqual(
+        expect.objectContaining({
+          callId: "callback-1",
+          phase: "dropped",
+          code: "stale_session",
+        }),
+      );
+      await h.session.dispose();
+    },
+  );
+
+  it("fences a membership self-tool's admitted owner without inventing a spoken speaker", async () => {
+    let present = true;
+    let entered!: () => void;
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requests: import("../src/voice-session.ts").VoiceSelfToolCall[] = [];
+    const checkedActors: Array<string | undefined> = [];
+    const lease = admission(
+      async (actorId) => {
+        checkedActors.push(actorId);
+        if (actorId === OWNER && !present) throw new Error("admitted owner departed");
+      },
+      (actorId) => actorId !== OWNER || present,
+    );
+    const h = buildHarness({
+      selfTool: async (request) => {
+        requests.push(request);
+        entered();
+        await wait;
+        return "Private membership result";
+      },
+    });
+    const socket = new VoiceRecoverySocket();
+    h.ports.openConversation = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: h.timers,
+      socketFactory: async () => socket,
+    }).openConversation;
+    await h.session.join({ guildId: GUILD, channelId: CHANNEL, invokingUserId: OWNER, bodyLease: lease });
+    await expect.poll(() => socket.creates().length).toBe(1);
+    socket.emit({ type: "response.created", response: { id: "membership-self" } });
+    socket.emit({
+      type: "response.output_item.done",
+      response_id: "membership-self",
+      item: {
+        type: "function_call",
+        call_id: "membership-tool",
+        name: "get_self_state",
+        arguments: "{}",
+      },
+    });
+    await ready;
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.speakerId).toBeUndefined();
+    const before = socket.sent.length;
+    present = false;
+    release();
+    await expect
+      .poll(() =>
+        h
+          .ofType("realtime_tool")
+          .some((event) => event.callId === "membership-tool" && event.phase === "dropped"),
+      )
+      .toBe(true);
+    expect(lease.current()).toBe(true);
+    expect(checkedActors.at(-1)).toBe(OWNER);
+    expect(socket.sent.slice(before)).toEqual([]);
+    expect(requests).toHaveLength(1);
+    expect(
+      h
+        .ofType("realtime_tool")
+        .filter((event) => event.callId === "membership-tool")
+        .every((event) => event.userId === undefined),
+    ).toBe(true);
+    await h.session.dispose();
   });
 });
 
@@ -1426,7 +1933,7 @@ describe("floor decisions", () => {
       { type: "floor", guildId: GUILD, channelId: CHANNEL, state: "engaged", reason: "addressed" },
     ]);
     expect(harness.briefingCalls).toEqual([
-      { guildId: GUILD, channelId: CHANNEL, consentedUserIds: [OWNER, ALICE] },
+      { guildId: GUILD, channelId: CHANNEL, actorId: ALICE, consentedUserIds: [OWNER, ALICE] },
     ]);
     const conversation = harness.conversation();
     expect(conversation.input.instructions).toBe("Be Clankie, in the social register.");
@@ -5071,4 +5578,173 @@ it("reports legitimate opening errors but ignores errors from the replaced conve
   old.input.onError("stale port error");
   expect(h.ofType("failed")).toHaveLength(failures);
   await h.session.leave("fixture_done");
+});
+
+describe("bounded host call ending", () => {
+  it("lets the admitted recording finish without requesting a new reply to its final transcript", async () => {
+    const h = await joinedHarness();
+    await h.consent(ALICE);
+    const capture = h.startCapture(ALICE);
+    capture.stream.write(monoPcm(480));
+    await flush();
+    const ending = h.session.endGracefully({ reason: "host_sleep", message: "The call is closing." });
+    await flush();
+    expect(h.session.status().activeCaptureCount).toBe(1);
+    expect(h.conversations).toEqual([]);
+    capture.stream.write(monoPcm(480));
+    capture.stream.end();
+    await flush();
+    expect(h.transcription().appended.reduce((bytes, chunk) => bytes + chunk.length, 0)).toBe(960);
+    h.transcribe(ALICE, "hey clankie one more task");
+    await flush();
+    expect(h.submitCalls).toEqual([]);
+    expect(h.conversations).toEqual([]);
+    h.timers.fire(100);
+    await flush();
+    const farewell = h.conversation();
+    expect(farewell.responseCreates).toBe(1);
+    farewell.input.onAudioDelta(pcmDelta(480), "farewell");
+    await flush();
+    farewell.input.onResponseDone(completedResponse("farewell"));
+    await flush();
+    h.timers.fire(100);
+    await expect(ending).resolves.toEqual({ outcome: "finished", announcement: "spoken" });
+  });
+
+  it("drains admitted speech, blocks new captures, then drains its own farewell before leaving", async () => {
+    const h = await joinedHarness();
+    await h.consent(ALICE);
+    await h.consent(BOB);
+    const socket = new VoiceRecoverySocket();
+    const production = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: h.timers,
+      socketFactory: async () => socket,
+    });
+    h.ports.openConversation = production.openConversation;
+    h.vox.autoDrain = false;
+    await h.say(ALICE, "hey clankie what are we doing tonight");
+    socket.emit({ type: "response.created", response: { id: "reply" } });
+    socket.emit({
+      type: "response.output_audio.delta",
+      response_id: "reply",
+      item_id: "reply-audio",
+      delta: pcmDelta(480).toString("base64"),
+    });
+    await flush();
+    const replyPlayback = h.vox.activePlaybackId!;
+    const ending = h.session.endGracefully({
+      reason: "voice_minutes_exhausted",
+      message: "The included voice minutes are used up. End this call politely; text remains available.",
+    });
+    expect(h.session.status().ending).toBe(true);
+    const captures = h.vox.subscriptions.length;
+    h.vox.emit({ type: "speaking_start", userId: BOB });
+    await flush();
+    expect(h.vox.subscriptions).toHaveLength(captures);
+    expect(h.vox.stops).toEqual([]);
+    expect(h.vox.leaves).toEqual([]);
+    socket.emit({ type: "response.done", response: { id: "reply", status: "completed" } });
+    await flush();
+    h.timers.fire(100);
+    await flush();
+    expect(socket.creates()).toHaveLength(1);
+    h.vox.emit({ type: "tts_playback_state", playbackId: replyPlayback, status: "drained" });
+    await flush();
+    h.timers.fire(100);
+    await flush();
+    expect(socket.creates()).toHaveLength(2);
+    expect(h.vox.leaves).toEqual([]);
+    socket.emit({ type: "response.created", response: { id: "farewell" } });
+    socket.emit({
+      type: "response.output_audio.delta",
+      response_id: "farewell",
+      item_id: "farewell-audio",
+      delta: pcmDelta(480).toString("base64"),
+    });
+    await flush();
+    const farewellPlayback = h.vox.activePlaybackId!;
+    socket.emit({ type: "response.done", response: { id: "farewell", status: "completed" } });
+    await flush();
+    expect(h.vox.leaves).toEqual([]);
+    h.vox.emit({ type: "tts_playback_state", playbackId: replyPlayback, status: "drained" });
+    await flush();
+    expect(h.vox.leaves).toEqual([]);
+    h.vox.emit({ type: "tts_playback_state", playbackId: farewellPlayback, status: "drained" });
+    await flush();
+    h.timers.fire(100);
+    await expect(ending).resolves.toEqual({ outcome: "finished", announcement: "spoken" });
+    expect(h.vox.leaves).toEqual(["voice_minutes_exhausted"]);
+    expect(h.session.status().active).toBe(false);
+  });
+
+  it("reports an incomplete ending and revokes late provider audio when its deadline expires", async () => {
+    const h = await engagedHarness();
+    const conversation = h.conversation();
+    const ending = h.session.endGracefully({
+      reason: "host_sleep",
+      message: "The call is closing.",
+      timeoutMs: 250,
+    });
+    await flush();
+    h.timers.fire(250);
+    await expect(ending).resolves.toEqual({ outcome: "incomplete", announcement: "incomplete" });
+    expect(h.ofType("failed")).toMatchObject([{ code: "voice_graceful_end_incomplete" }]);
+    const late = pcmDelta(480);
+    conversation.input.onAudioDelta(late, "late");
+    expect(late.every((value) => value === 0)).toBe(true);
+    expect(h.vox.audio).toEqual([]);
+    expect(h.vox.leaves).toEqual(["host_sleep"]);
+  });
+
+  it("does not count a provider's silent completed response as a spoken warning", async () => {
+    const h = await joinedHarness();
+    const warning = h.session.announce("About one minute remains.", { timeoutMs: 250 });
+    await flush();
+    const conversation = h.conversation();
+    expect(conversation.textItems.some((text) => text.includes("About one minute remains."))).toBe(true);
+    conversation.input.onResponseDone(completedResponse("silent-warning"));
+    await flush();
+    h.timers.fire(100);
+    await expect(warning).resolves.toEqual({ outcome: "incomplete" });
+    expect(h.vox.leaves).toEqual([]);
+    await h.session.leave("fixture_done");
+  });
+});
+
+describe("per-speaker recording limit", () => {
+  it("commits at the configured PCM duration, wipes excess audio and refuses late frames", async () => {
+    const h = await joinedHarness({ recordingLimitMs: 1_000 });
+    await h.consent(ALICE);
+    const capture = h.startCapture(ALICE);
+    const pcm = monoPcm(48_480);
+    capture.stream.write(pcm);
+    await flush();
+    const listener = h.transcription();
+    expect(listener.appended.reduce((bytes, chunk) => bytes + chunk.length, 0)).toBe(48_000);
+    expect(listener.commits).toBe(1);
+    expect(h.session.status().activeCaptureCount).toBe(0);
+    expect(pcm.every((value) => value === 0)).toBe(true);
+    const late = monoPcm(480);
+    h.vox.emitAudio(ALICE, capture.captureId()!, late);
+    expect(late.every((value) => value === 0)).toBe(true);
+    expect(listener.appended.reduce((bytes, chunk) => bytes + chunk.length, 0)).toBe(48_000);
+    expect(h.ofType("utterance")).toMatchObject([{ durationMs: 1_000 }]);
+    await h.session.leave("fixture_done");
+  });
+
+  it("ends an open mic after three minutes even when its transport supplies no final frame", async () => {
+    const h = await joinedHarness();
+    await h.consent(ALICE);
+    const capture = h.startCapture(ALICE);
+    capture.stream.write(monoPcm(480));
+    await flush();
+    h.timers.fire(DEFAULT_VOICE_RECORDING_LIMIT_MS);
+    await flush();
+    expect(h.session.status().activeCaptureCount).toBe(0);
+    expect(capture.stream.destroyed).toBe(true);
+    expect(h.transcription().commits).toBe(1);
+    await h.session.leave("fixture_done");
+  });
 });

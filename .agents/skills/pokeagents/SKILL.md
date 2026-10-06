@@ -11,6 +11,12 @@ An owner request to start the local world and play includes running its host
 through the machine tools available in that turn, including trusted Discord
 voice handoffs. Keep the existing room authority boundary.
 
+Pokémon's native connector and execution live in `integrations/pokemon`, using
+the shared game-extension lifecycle; its mind and journal remain in `packages/play`.
+Core retains the shared `play` lease and exact-session recovery. Extension
+`health: ready` describes local lifecycle state, not world reachability or
+visible frames; use the existing status/check/watch evidence below.
+
 ## Get the world running
 
 Use `command -v pokeagents` to find the installed host command. Its source
@@ -72,6 +78,20 @@ check its status, `pokeagent_observe` to see the game, and `pokeagent_recall` fo
 the play history. The driver chooses its own actions while you keep talking to
 the room. `pokeagent_stop` ends Clankie's sitting; it does not require stopping
 the shared world.
+
+Play defaults to 250,000 charged model tokens per sitting; `/games` or
+`clankie games budget max-tokens|max-cost-usd VALUE` changes the next sitting's
+defaults. Token accounting includes commentary and interrupted proposals;
+unknown usage reserves 16,000 tokens and stops a dollar-capped sitting. The last
+call can cross the threshold. `budget_exhausted`, `mind_unavailable` and
+`world_ended` are distinct terminal receipts. Five consecutive failed or invalid
+model decisions stop play after exponential backoff; a valid decision resets it.
+
+Notable stuck/looping states, two retired objectives, unavailable models and a
+departed world send bounded information to the original conversation. Decide
+whether to tell the room, use `pokeagent_guide` to suggest a different objective,
+or stop; these observations do not gate play or authorize new actions. The play
+mind keeps choosing. Voice can preempt twice per turn; later lines stay queued.
 
 The local host's default viewer is `http://127.0.0.1:7780/gallery`. Verify the
 configured viewer and actual frames before claiming the run is visible. A

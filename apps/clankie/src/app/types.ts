@@ -1,5 +1,6 @@
 import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
+import type { FleetHealthMetrics } from "../fleet-health-metrics.ts";
 import type { BodyTelemetry } from "@clankie/observability/body-telemetry";
 import type { IntegrationQueue } from "../integrate.ts";
 import type { DeployHolds } from "../deploy-holds.ts";
@@ -136,6 +137,7 @@ export interface ClankieAppDependencies {
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
+  runtimeCanary?: import("../runtime-canary.ts").RuntimeCanary;
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   discordIngress?: DiscordIngress;
@@ -168,6 +170,8 @@ export interface ClankieAppDependencies {
   /** Work items in each repo's own tracking convention (ADR 0191). */
   workItems?: WorkItemsService;
   workerMcp?: WorkerMcp;
+  fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
+  linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
   runtimes?: ExecutionConnections;
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
@@ -177,6 +181,7 @@ export interface ClankieAppDependencies {
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
   /** Whether this host may sleep, and when it last did, so the app can say why he went quiet. */
   hostPower?: () => HostPowerReport;
+  runtimeHealth?: () => import("@clankie/protocol").RuntimeHealthObservation;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
   /**
@@ -235,6 +240,10 @@ export interface ClankieAppDependencies {
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
   bodyPlaySessions?: BodyPlaySessions;
+  guidePokemonPlay?: (
+    text: string,
+    identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
+  ) => Promise<unknown>;
   minecraft?: MinecraftService;
   minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
   minecraftPrivateDelivery?: Pick<

@@ -16,6 +16,7 @@ import { runRivalsMenu } from "./rivals-menu.ts";
 import { onOff, runSettingsMenu } from "./settings-menu.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
+import { runWorkCommand } from "./command/work.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runAgentsCommand, splitQuotedArguments } from "./command/agents.ts";
 import { runAccountsCommand } from "./command/accounts.ts";
@@ -36,6 +37,7 @@ import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connecti
  */
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import type { BrowserSettings, GameplaySettings, SettingsStore } from "@clankie/settings";
+import { DEFAULT_POKEMON_PLAY_MAX_TOKENS } from "@clankie/protocol";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import { runShareCommand, shareConsoleCommand } from "./command/share.ts";
 import { hostedTransportFor } from "./command/hosted.ts";
@@ -75,7 +77,7 @@ import {
   type BrowserHarnessesResult,
 } from "./command/browser.ts";
 import { runSkillsCommand } from "./command/skills.ts";
-import { gamesSet, gamesStatus } from "./command/games.ts";
+import { gamesSet, gamesStatus, gamesBudgetSet } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runMinecraftCommand } from "./command/minecraft.ts";
 import { runMinecraftDriverMenu } from "./minecraft-driver-menu.ts";
@@ -83,6 +85,11 @@ import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 import type { AwakeCommandResult } from "./command/awake.ts";
+import {
+  formatRuntimeHealth,
+  parseRuntimeHealthArgs,
+  type runRuntimeHealthCommand,
+} from "./command/runtime-health.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
@@ -103,6 +110,7 @@ export interface ConsoleCommandContext {
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
   /** `clankie awake`: the launcher-supervised keep-awake, and the power state it answers to. */
   readonly commandAwake?: (args: readonly string[]) => Promise<AwakeCommandResult>;
+  readonly commandRuntimeHealth?: (args: readonly string[]) => ReturnType<typeof runRuntimeHealthCommand>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -191,7 +199,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     name: "update",
     aliases: [],
     description: "Stage a runtime update or read its durable result",
-    argumentHint: "[--ref REF | status]",
+    argumentHint: "[--ref REF | status | canary]",
     takesArgument: true,
     async run(argument, shell) {
       if (!context.commandUpdate) {
@@ -341,6 +349,24 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult(
           "/evaluator",
           result.ok ? formatEvaluatorStatus(result.evaluator) : result.error,
+          result.ok ? "success" : "error",
+        );
+      },
+    },
+    {
+      name: "work",
+      aliases: [],
+      description: "Read project work, releases and goals; set the repo tracker",
+      argumentHint: "[project|list|init --release-source tags|milestones|both --release-lane NAME]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const result = await runWorkCommand(
+          splitQuotedArguments(argument),
+          context.repoRoot ? { cwd: context.repoRoot } : {},
+        );
+        shell.insertCommandResult(
+          "/work",
+          JSON.stringify(result.body, null, 2),
           result.ok ? "success" : "error",
         );
       },
@@ -1599,6 +1625,15 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                   s.title("Launcher"),
                   s.line("status", launcher.status, launcher.ok ? "ok" : "bad"),
                   s.line(
+                    "runtime",
+                    launcher.runtimeHealth ? formatRuntimeHealth(launcher.runtimeHealth) : "unknown",
+                    launcher.runtimeHealth?.state === "alarm"
+                      ? "bad"
+                      : launcher.runtimeHealth
+                        ? "normal"
+                        : "warn",
+                  ),
+                  s.line(
                     "Clankie",
                     launcher.presence?.detail ?? "Unreachable",
                     launcher.presence === undefined ? "warn" : "ok",
@@ -1730,6 +1765,83 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             "error",
           );
         }
+      },
+    },
+    {
+      name: "runtime-health",
+      aliases: [],
+      description: "Runtime CPU and slow-health alarms, thresholds, and cooldown",
+      argumentHint: "[status|on|off|set --cpu-percent N …]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const command = context.commandRuntimeHealth;
+        if (!command) {
+          shell.insertCommandResult("/runtime-health", "Runtime health unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().split(/\s+/u).filter(Boolean);
+        if (words.length) {
+          try {
+            shell.insertCommandResult(
+              "/runtime-health",
+              formatRuntimeHealth((await command(words)).observation),
+              "success",
+            );
+          } catch (error) {
+            shell.insertCommandResult(
+              "/runtime-health",
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+          }
+          return;
+        }
+        await runSettingsMenu(shell, "/runtime-health", async () => {
+          const result = await command([]);
+          const fields = [
+            ["cpuPercent", "CPU threshold (%)", "--cpu-percent", 1],
+            ["healthLatencyMs", "Health latency threshold (ms)", "--health-ms", 1],
+            ["sustainedMs", "Sustained duration (seconds)", "--sustained-seconds", 1000],
+            ["sampleIntervalMs", "Sample interval (seconds)", "--sample-seconds", 1000],
+            ["cooldownMs", "Alert cooldown (seconds)", "--cooldown-seconds", 1000],
+          ] as const;
+          return {
+            title: `${formatRuntimeHealth(result.observation)} · alarms ${result.settings.enabled ? "on" : "off"}`,
+            actions: [
+              {
+                value: "toggle",
+                label: result.settings.enabled ? "Disable alarms" : "Enable alarms",
+                async run() {
+                  await command([result.settings.enabled ? "off" : "on"]);
+                  return "Runtime health setting saved; applies on the next sample.";
+                },
+              },
+              ...fields.map(([field, label, flag, multiplier]) => ({
+                value: field,
+                label,
+                hint: String(result.settings[field] / multiplier),
+                async run(flow: import("./shell/setup-flow.ts").SetupFlow) {
+                  const value = await flow.readText({
+                    message: label,
+                    defaultValue: String(result.settings[field] / multiplier),
+                    allowBack: true,
+                    validate: (value) => {
+                      try {
+                        parseRuntimeHealthArgs(["set", flag, value.trim()]);
+                        return undefined;
+                      } catch {
+                        return "Enter a value within the supported range.";
+                      }
+                    },
+                  });
+                  if (value === undefined) return undefined;
+                  await command(["set", flag, value.trim()]);
+                  return "Runtime health setting saved; applies on the next sample.";
+                },
+              })),
+            ],
+          };
+        });
       },
     },
     {
@@ -1928,10 +2040,46 @@ async function runGameplayWizard(shell: ClankieFaceShell, settings: SettingsStor
             hint: gameplay.pokeagentMmoEnabled ? "enabled" : "disabled",
             description: "FireRed or Emerald in the hosted multiplayer world.",
           },
+          {
+            value: "tokens",
+            label: "Pokémon token cap",
+            hint: String(gameplay.pokemonBudget?.maxTokens ?? DEFAULT_POKEMON_PLAY_MAX_TOKENS),
+          },
+          {
+            value: "cost",
+            label: "Pokémon cost cap (USD)",
+            hint: String(gameplay.pokemonBudget?.maxCostUsd ?? "off"),
+          },
         ],
         statusActions: [{ value: "done", label: "Done", hint: "restart Clankie to apply changes" }],
         initialValue: "mmo",
       });
+      if (selected === "tokens" || selected === "cost") {
+        const key = selected === "tokens" ? "maxTokens" : "maxCostUsd";
+        const value = await flow.readText({
+          message:
+            selected === "tokens"
+              ? "Tokens per Pokémon session (default restores 250000)"
+              : "USD per Pokémon session (default removes cost cap)",
+          defaultValue: String(
+            gameplay.pokemonBudget?.[key] ??
+              (selected === "tokens" ? DEFAULT_POKEMON_PLAY_MAX_TOKENS : "default"),
+          ),
+          allowBack: true,
+          validate: (text) =>
+            text === "default" ||
+            (Number.isFinite(Number(text)) &&
+              Number(text) > 0 &&
+              (selected === "cost" || Number.isSafeInteger(Number(text))))
+              ? undefined
+              : "Use a positive number or default.",
+        });
+        if (value !== undefined) {
+          await gamesBudgetSet(key, value === "default" ? undefined : Number(value), { settings });
+          flow.renderLine("Pokémon budget updated.", "success");
+        }
+        continue;
+      }
       if (selected !== "mmo") break;
       const enabled = !gameplay.pokeagentMmoEnabled;
       await gamesSet(enabled, { settings });

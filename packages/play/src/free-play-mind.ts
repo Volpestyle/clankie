@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import { streamObject } from "ai";
+import { pricedFreePlayUsage, type FreePlayPricing, type FreePlayUsageReporter } from "./free-play-usage.ts";
 
 /** Derived from the SDK signature so it tracks their type, not a guessed name. */
 type StreamProviderOptions = NonNullable<Parameters<typeof streamObject>[0]["providerOptions"]>;
@@ -338,6 +339,7 @@ export interface ModelFreePlayMindOptions {
   providerOptions?: StreamProviderOptions;
   /** Bounds one model stream so a lost provider response cannot freeze play. */
   requestTimeoutMs?: number;
+  pricing?: FreePlayPricing;
 }
 
 export function createModelFreePlayMind(options: ModelFreePlayMindOptions): FreePlayMind {
@@ -354,7 +356,12 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
     .join("\n\n");
 
   return {
-    async decide(view: FreePlayView, signal?: AbortSignal): Promise<unknown> {
+    metered: true,
+    async decide(
+      view: FreePlayView,
+      signal?: AbortSignal,
+      onUsage?: FreePlayUsageReporter,
+    ): Promise<unknown> {
       // Streamed on purpose. The Codex OAuth endpoint rejects a non-streaming
       // request outright with `{"detail":"Stream must be set to true"}`, and
       // streaming is accepted by every other configured provider, so this is
@@ -389,10 +396,11 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
                   ],
           },
         ],
-        maxRetries: options.maxRetries ?? 1,
+        maxRetries: options.maxRetries ?? 0,
         abortSignal: requestSignal,
         providerOptions: options.providerOptions ?? {},
         onError: failure.report,
+        onFinish: (event) => onUsage?.(pricedFreePlayUsage(event.usage, options.pricing)),
       });
 
       const settled = Promise.race([stream.object, failure.promise]);
@@ -639,7 +647,8 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
     .join("\n\n");
 
   return {
-    async decide(view: VoiceView): Promise<unknown> {
+    metered: true,
+    async decide(view: VoiceView, onUsage?: FreePlayUsageReporter): Promise<unknown> {
       const showFrame = options.showFrame ?? true;
       const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
       const failure = streamFailure();
@@ -659,10 +668,11 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
                   ],
           },
         ],
-        maxRetries: options.maxRetries ?? 1,
+        maxRetries: options.maxRetries ?? 0,
         abortSignal: deadline,
         providerOptions: options.providerOptions ?? {},
         onError: failure.report,
+        onFinish: (event) => onUsage?.(pricedFreePlayUsage(event.usage, options.pricing)),
       });
 
       const settled = Promise.race([stream.object, failure.promise]);

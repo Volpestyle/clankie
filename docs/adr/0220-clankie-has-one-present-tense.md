@@ -1,6 +1,6 @@
 # ADR 0220: Clankie has one present tense
 
-Status: accepted (James, 2026-10-04). Not yet implemented. Its first consumer is
+Status: accepted (James, 2026-10-04). Presence and desktop expressions are implemented; native desktop acceptance remains with the private app. Its first consumer is
 the desktop pet in the private app (clankie-app ADR 0059, "Clankie lives on the
 desktop"). The retired menu bar ([ADR 0125](0125-the-menu-bar-is-a-private-local-voice-room.md))
 stays retired under [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md).
@@ -29,7 +29,7 @@ in `packages/protocol`, shaped like `fleet`. It returns:
 - the active seat count
 - the pending owner item, if there is one
 
-The service derives it from the existing sources and adds no new state. It
+The service derives it from the existing sources and adds no persisted presence state. It
 joins the hosted operator allowlist, so device clients reach it through the
 relay with their device bearer. The TUI and `clankie status` read it too.
 "Unreachable" isn't a mood; a client infers it when the relay or service
@@ -40,6 +40,23 @@ client's own idle presentation of `idle`.
 line in a bubble on a desktop body when he decides to. It goes out through
 `presence` as a transient expression. Clients show bubbles without taking
 keyboard focus, let them fade, and respect owner quiet hours and macOS Focus.
+
+**Brief fleet beats are optional metadata (VUH-1680).** `includeBeats: true`
+adds at most two `{id, kind, at}` cues: the latest completed new hire and the
+latest confirmed delivered/read worker report accepted within ten seconds.
+Failed hires, resumed seats and uncertain reports do not cue the pet. Report
+content, worker pane IDs and conversation IDs remain outside this projection.
+The hire cue is process-local; restart creates no historical hire event.
+Quiet hours suppress these cues. Legacy reads omit them and retain their
+existing cursor; opted-in cursors change when a cue arrives or expires.
+
+The desktop consumes each ID once while visible. It also observes a new owner
+question, a crossing to four active seats and thirty seconds of uninterrupted
+visible thinking. Those select brief wait, conduct and wilt art. A five-second
+minimum gap and no queue keep bursts sparse. First reads and resurfacing
+establish a baseline, and Focus, Reduce Motion, hiding, locking, dragging and
+unreachable transport consume events without replay. Leading and waiting
+retain their screen expression after the body settles.
 
 **Hero art lives in `branding/pet/`.** The art is hand-authored pixel
 animation on the logo's grid: idle, blink, glances, walking, hop, the sleep

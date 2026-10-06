@@ -1,5 +1,6 @@
 import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
+import { WorkerReportBridgeStatusSchema } from "./worker-report-health.ts";
 import { FleetSeatToolCatalogHealthSchema } from "./tool-catalog.ts";
 import { z } from "zod";
 import { OperatorAgentRoleSchema } from "./agent-roles.ts";
@@ -588,6 +589,35 @@ export const OperatorAgentPoseSchema = z.enum([
 ]);
 export type OperatorAgentPose = z.infer<typeof OperatorAgentPoseSchema>;
 
+/** Host-stated work kind (VUH-1719); never inferred from a caption or shell text. */
+export const OperatorAgentActivityKindSchema = z.enum([
+  "reading",
+  "editing",
+  "testing",
+  "planning",
+  "waiting",
+]);
+export type OperatorAgentActivityKind = z.infer<typeof OperatorAgentActivityKindSchema>;
+export const OperatorAgentActivitySchema = z.discriminatedUnion("source", [
+  z
+    .object({
+      source: z.literal("native_tool"),
+      kind: OperatorAgentActivityKindSchema,
+      toolName: z.string().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+      startedAt: z.string().datetime(),
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal("stated"),
+      kind: OperatorAgentActivityKindSchema,
+      statedAt: z.string().datetime(),
+      expiresAt: z.string().datetime(),
+    })
+    .strict(),
+]);
+export type OperatorAgentActivity = z.infer<typeof OperatorAgentActivitySchema>;
+
 export const OPERATOR_AGENT_STANCE_NOTE_MAX = 120;
 /** A stance older than this is ignored however long it asked for. */
 export const OPERATOR_AGENT_STANCE_MAX_MS = 60 * 60 * 1000;
@@ -596,6 +626,7 @@ export const OPERATOR_AGENT_STANCE_DEFAULT_MS = 15 * 60 * 1000;
 export const OperatorAgentStanceSchema = z
   .object({
     pose: OperatorAgentPoseSchema,
+    activityKind: OperatorAgentActivityKindSchema.optional(),
     /** One short line in the agent's own voice; shown wherever the seat is listed. */
     note: z.string().trim().max(OPERATOR_AGENT_STANCE_NOTE_MAX).optional(),
     statedAt: z.string().datetime(),
@@ -613,6 +644,7 @@ export const StateOperatorAgentStanceSchema = z
   .object({
     herdrPaneId: z.string().trim().min(1).max(128),
     pose: OperatorAgentPoseSchema,
+    activityKind: OperatorAgentActivityKindSchema.optional(),
     note: z.string().trim().max(OPERATOR_AGENT_STANCE_NOTE_MAX).optional(),
     /** How long this statement stands. Clamped to the ceiling above. */
     ttlMs: z.number().int().positive().max(OPERATOR_AGENT_STANCE_MAX_MS).optional(),
@@ -755,6 +787,8 @@ export const OperatorFleetSeatSchema = z
     toolCatalog: FleetSeatToolCatalogHealthSchema.optional(),
     /** Authenticated bridge/catalog observations only; not proof that the harness loaded its tools. */
     workerTools: WorkerBridgeStatusSchema.optional(),
+    /** Sender receipt health is independent of the served tool catalog. */
+    workerReportBridge: WorkerReportBridgeStatusSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */
@@ -765,6 +799,8 @@ export const OperatorFleetSeatSchema = z
     harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     status: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+    /** Current work kind and its host evidence. Absent is unknown; no caption parsing. */
+    activity: OperatorAgentActivitySchema.optional(),
     /** Native goal and explicitly stated assignment for this exact session. */
     goal: OperatorGoalSchema.optional(),
     assignment: OperatorWorkAssignmentSchema.optional(),
@@ -998,6 +1034,20 @@ export const SpawnOperatorSeatSchema = z
     ...HireProfileSchema.shape,
     /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
     resume: z.string().trim().min(1).max(128).optional(),
+    /** Explicit new remote work after a settled native hire; both identities stay fenced. */
+    freshIntent: z
+      .object({
+        id: z
+          .string()
+          .uuid()
+          .refine((id) => id === id.toLowerCase(), "Use a canonical lowercase UUID"),
+        afterReceiptId: z
+          .string()
+          .uuid()
+          .refine((id) => id === id.toLowerCase(), "Use a canonical lowercase UUID"),
+      })
+      .strict()
+      .optional(),
     /** What the roster calls it; herdr's own agent name is derived from this. */
     title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */

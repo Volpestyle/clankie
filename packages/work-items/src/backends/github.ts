@@ -92,11 +92,13 @@ export function githubRestApi(options: {
       let url: string | undefined = `${base}/${path.replace(/^\/+/u, "")}`;
       for (let page = 0; url !== undefined && page < MAX_PAGES; page += 1) {
         const { response, value } = await call("GET", url);
-        if (Array.isArray(value)) items.push(...(value as unknown[]));
+        if (!Array.isArray(value)) throw new Error("GitHub returned an incomplete collection");
+        items.push(...(value as unknown[]));
         const next = /<([^>]+)>;\s*rel="next"/u.exec(response.headers.get("link") ?? "")?.[1];
         // The token follows a next link only to the API origin it was issued for.
         url = next !== undefined && new URL(next).origin === new URL(base).origin ? next : undefined;
       }
+      if (url !== undefined) throw new Error("GitHub collection exceeds the pagination limit");
       return items;
     },
   };
@@ -112,6 +114,7 @@ interface Issue {
   readonly html_url: string;
   readonly updated_at?: string;
   readonly labels: readonly (string | { readonly name?: string })[];
+  readonly milestone?: { readonly number: number; readonly title: string } | null;
   readonly pull_request?: unknown;
 }
 
@@ -121,6 +124,7 @@ interface ParentIssue {
 }
 
 const STATUS_LABELS: Partial<Record<WorkItemStatus, string>> = {
+  backlog: "status: backlog",
   in_progress: "status: in progress",
   in_review: "status: in review",
 };
@@ -146,8 +150,9 @@ function labelNames(issue: Issue): string[] {
     .filter((name) => name.length > 0);
 }
 
-function labelStatus(name: string): "in_review" | "in_progress" | undefined {
+function labelStatus(name: string): "backlog" | "in_review" | "in_progress" | undefined {
   const value = name.toLowerCase();
+  if (value === "status: backlog") return "backlog";
   if (/\bin[ -]?review\b/u.test(value)) return "in_review";
   if (/\bin[ -]?progress\b|\bdoing\b|\bwip\b/u.test(value)) return "in_progress";
 }
@@ -157,6 +162,7 @@ function statusOf(issue: Issue): WorkItemStatus {
   const statuses = labelNames(issue).map(labelStatus);
   if (statuses.includes("in_review")) return "in_review";
   if (statuses.includes("in_progress")) return "in_progress";
+  if (statuses.includes("backlog")) return "backlog";
   return "todo";
 }
 
@@ -189,6 +195,9 @@ export function createGithubBackend(
       id: `#${String(issue.number)}`,
       ...(parent === undefined ? {} : { parent }),
       title: issue.title.slice(0, 200),
+      ...(issue.milestone == null
+        ? {}
+        : { milestone: { id: String(issue.milestone.number), name: issue.milestone.title } }),
       status: statusOf(issue),
       priority: priorityOf(issue),
       ...(parsed.owner === undefined ? {} : { owner: parsed.owner }),

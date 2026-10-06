@@ -1,23 +1,26 @@
 # ADR 0201: Essentials start with read-only Google connections
 
-Status: proposed (2026-09-28). The catalog is a delivery sequence, not a claim
-that these connections ship. Extends [ADR 0181](0181-clankie-is-independent-of-his-connections.md)
+Status: implemented in code with local fixture proof (2026-10-05). Real Google
+consent, preview eligibility and native auth-sheet rehearsal remain release gates. Extends [ADR 0181](0181-clankie-is-independent-of-his-connections.md)
 and [ADR 0196](0196-account-connections-keep-tokens-on-the-body.md).
 
 ## Decision
 
 Offer three deliberately small capabilities: Gmail, Calendar and Drive, in that
 order. Group them under Google in Connections, with separate consent and status.
-Start with reading; no send, booking, file editing or broad write permission is
-part of this first slice. Existing DIY connections remain unchanged. A connector
-enters the customer catalog only after an authenticated test-account read,
-expiry/refresh, disconnect and tenant isolation are proven.
+Start with reading; no send, booking or file editing tool is part of this first
+slice. Drive uses selected-file permission, which itself includes editing; this
+is explicitly disclosed before consent and does not permit a Clankie write tool. Existing DIY connections remain unchanged. A connector
+becomes available to customers only after an authenticated test-account read,
+expiry/refresh, disconnect and tenant isolation are proven. Development catalog
+rows already describe the prepared capabilities; without a configured application
+and broker secret they remain unconfigured.
 
-| Capability | Why it earns a place                                                   | First scope (Google prefix `https://www.googleapis.com/auth/`)                                                     | Official HTTP MCP endpoint                  |
-| ---------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| Gmail      | Inbox triage and a daily briefing are frequent personal-assistant jobs | `gmail.readonly`                                                                                                   | `https://gmailmcp.googleapis.com/mcp/v1`    |
-| Calendar   | Makes the briefing useful for the owner's day and trip constraints     | `calendar.calendarlist.readonly`, `calendar.events.readonly`; add free/busy only when required                     | `https://calendarmcp.googleapis.com/mcp/v1` |
-| Drive      | Find the owner's receipts, itineraries and reference documents         | `drive.readonly` for broad search, explicitly disclosed; evaluate selected-file `drive.file` before broader access | `https://drivemcp.googleapis.com/mcp/v1`    |
+| Capability | Why it earns a place                                                   | First scope (Google prefix `https://www.googleapis.com/auth/`)                                                         | Official HTTP MCP endpoint                  |
+| ---------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Gmail      | Inbox triage and a daily briefing are frequent personal-assistant jobs | `gmail.readonly`                                                                                                       | `https://gmailmcp.googleapis.com/mcp/v1`    |
+| Calendar   | Makes the briefing useful for the owner's day and trip constraints     | `calendar.calendarlist.readonly`, `calendar.events.readonly`; add free/busy only when required                         | `https://calendarmcp.googleapis.com/mcp/v1` |
+| Drive      | Find the owner's receipts, itineraries and reference documents         | `drive.file` through the native Picker; selected IDs only, permission includes editing, tool policy permits only reads | `https://drivemcp.googleapis.com/mcp/v1`    |
 
 Google publishes and documents all three remote servers, currently in Developer
 Preview, requiring preview membership and a Cloud project with the corresponding
@@ -73,17 +76,17 @@ Provider definitions, capabilities and connection states have one machine-owned
 source. Each client renders that response, without a separate provider list or
 client-side inference that a stored credential means a healthy connection.
 
-| Surface                                    | Experience                                                                                                                          | Code ownership and existing integration points                                                                                                                                                      |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App: Settings → Connections                | Primary for hosted users. Tap **Connect** to open provider sign-in in a system auth sheet, then show the machine's resulting state. | Private `clankie-app`: `packages/command-center/src/settings/ConnectionsSettings.tsx`, wired by `apps/mobile/App.tsx`; device transport in `packages/device-session/apple/GatewayEncryption.swift`. |
-| Web account dashboard at `api.clankie.bot` | The same catalog and states; a convenient place for browser OAuth redirects.                                                        | Private `clankie-ops`: `apps/fleet/web/app.js` and `index.html`; pairing bootstrap in `apps/fleet/web/pairing.js`.                                                                                  |
-| TUI `/connect`                             | The same catalog in the existing DIY interaction style.                                                                             | Public `clankie`: `apps/tui/src/connect-commands.ts`; headless commands in `apps/tui/src/command/accounts.ts`.                                                                                      |
+| Surface                                    | Experience                                                                                                                         | Code ownership and existing integration points                                                                                                                                                             |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App: Settings → Connections                | Primary for hosted users. Tap **Connect** to open provider sign-in in the system browser, then show the machine's resulting state. | Private `clankie-app`: `packages/command-center/src/settings/AccountConnectionsSettings.tsx`, wired by `apps/mobile/App.tsx`; device transport in `packages/device-session/apple/GatewayEncryption.swift`. |
+| Web account dashboard at `api.clankie.bot` | The same catalog and states; a convenient place for browser OAuth redirects.                                                       | Private `clankie-ops`: `apps/fleet/web/app.js` and `index.html`; pairing bootstrap in `apps/fleet/web/pairing.js`.                                                                                         |
+| TUI `/connect`                             | The same catalog in the existing DIY interaction style.                                                                            | Public `clankie`: `apps/tui/src/connect-commands.ts`; headless commands in `apps/tui/src/command/accounts.ts`.                                                                                             |
 
 Machine code stays public in `clankie`: `apps/clankie/src/accounts.ts`,
 `apps/clankie/src/account-routes.ts`, `apps/clankie/src/mcp-host.ts`,
 `packages/credential-broker` and the `packages/protocol/src/accounts.ts` contract.
-Extend these account interfaces with the single catalog; the current APIs do
-not yet establish that all three surfaces share it. Hosting-only gateway,
+These account interfaces now serve the single catalog to all three surfaces.
+Hosting-only gateway,
 account and dashboard code stays in `clankie-ops`, under
 [ADR 0183](0183-the-harness-is-public-the-hosted-service-is-private.md).
 
@@ -96,7 +99,7 @@ access/refresh tokens in its own broker. Only redacted status returns to clients
 
 ```mermaid
 sequenceDiagram
-  participant UI as App auth sheet / dashboard browser
+  participant UI as App Connections / dashboard browser
   participant G as Gateway (encrypted relay)
   participant M as Tenant machine
   participant P as Provider
@@ -132,8 +135,9 @@ reconnect required with the known reason.
 Scope escalation is a new owner consent. Mail, calendar descriptions, documents,
 MCP tool descriptions and browser content are untrusted inputs. They cannot
 authorize tools, new recipients, payments or broader access. Keep personal
-connectors in the private operator lane; workers require explicit account-bound
-grants checked on every call. Tool discovery is not authorization.
+connectors in the private operator lane. This Google slice refuses worker
+delegation; a future worker grant requires explicit account-bound authority
+checked on every call. Tool discovery is not authorization.
 
 Disconnect immediately disables local calls and grants, serializes with refresh,
 and revokes at the provider. If provider revocation fails, display “disconnected
@@ -142,6 +146,36 @@ for a bounded retry. Never claim revocation from local deletion alone. Google
 supports token revocation; revoking one Google grant may affect other scopes in
 the same grant, so reconcile sibling capability states.
 [Google token lifecycle](https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke).
+
+## Selected-file Drive and verified identity
+
+Google's [native Picker](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker)
+returns `picked_file_ids` with the authorization code. It requires only
+`drive.file`, `prompt=consent` and `trigger_onepick=true`; it cannot combine
+`openid email`. The browser forwards the code, state and selected IDs over the
+same encrypted device channel. The body verifies the Drive user through
+[about.get](https://developers.google.com/workspace/drive/api/reference/rest/v3/about/get)
+and persists only validated selected IDs with the grant. The managed tool
+catalog restricts each `fileId` schema to those IDs and checks them again before
+provider dispatch. There is no broad Drive search or document editing tool.
+`drive.file` is not a read-only provider permission; its editing access is shown
+in the body catalog. The documented scope/tool contract supports this design;
+a real selected-file MCP read remains necessary before customer availability.
+
+Gmail and Calendar request `openid email` alongside their minimal read scopes.
+The body verifies signature, issuer, audience, expiry and nonce of the ID token;
+requested scopes are checked against the effective token response. Google may
+normalize email to its userinfo scope URI. Refresh-token omission preserves only
+a compatible existing grant; another account or client never supplies one.
+
+Google revocation can invalidate all grants to the project for that user,
+including other clients. Disconnect conservatively disables all Google
+capabilities on this body, invalidates pending consent and serializes with
+refresh across broker instances. Provider revocation failure retains only
+broker material for bounded retry, with an honest pending state. A durable
+broker epoch prevents a partial multi-entry Keychain write from restoring access.
+Other tenant brokers are unaffected. See the
+[Google revocation contract](https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke).
 
 ## Four original playbooks
 
@@ -158,17 +192,16 @@ skills add only their own directories and plugin links.
 
 ## First slice and release gate
 
-**Choose the app for the first end-to-end surface.** Its paired-device transport
-already reaches the machine through the gateway with E2E encryption. Adding the
-account call and auth-sheet callback reuses that authority. The dashboard is
-convenient for redirects but currently retrieves pairing offers; it needs a
-complete device client before it can perform this flow. A local TUI callback
-alone would not prove the remote tenant path. This is an implementation choice
-based on current code, not a claim that app Google auth already exists.
+**Choose the app for the first real-provider end-to-end surface.** Its paired-device transport
+already reaches the machine through the gateway with E2E encryption. The Google
+account calls and auth-sheet callback reuse that authority. The dashboard now
+has the same encrypted device client. A local TUI callback alone would not prove
+the remote tenant path. The native auth-sheet behavior still needs a real consent
+rehearsal on both iPhone and iPad. The current app uses `Linking.openURL` and a
+validated return link; an embedded native authentication session is not implemented.
 
-Build the machine API first, then wire only app Settings → Connections for the
-rehearsal. The dashboard and TUI will consume the same catalog; all three UIs
-are not a prerequisite for the first proof. On an isolated development tenant,
+The machine API, app Settings → Connections, dashboard and TUI now share the
+catalog and lifecycle. On an isolated development tenant,
 complete app consent through the gateway, verify app status and that tenant's
 broker entry, and perform the read-only MCP call there. Verify that no provider
 token appears in gateway/account-service handling or client responses. Check
@@ -178,9 +211,11 @@ The [development probe and evidence](../testing/2026-09-28-hosted-essentials/REA
 use the real credential broker and MCP host with a private Gmail configuration.
 They do not enable a production connector or prove remote E2E OAuth completion.
 Missing consent stops the live proof.
-The current provider refresher and verified worker-account schema are
-Linear-specific; Google OAuth begin/complete/refresh/revoke, verified identity,
-owner API/CLI/TUI states and portal controls remain implementation work.
+The body now implements Google begin/complete/check/refresh/revoke through
+`/v1/accounts`, with the same catalog served to app, dashboard and `/connect`
+accounts. Local tests exercise real HTTP fixtures, broker persistence and
+encrypted gateway transport. No real Google account has been read. Google stays
+in the private operator lane; these changes do not grant a worker Google access.
 
 Acceptance requires an authorized test mailbox with known fixture content:
 successful read-only MCP result, a correct triage/digest, no content leakage to

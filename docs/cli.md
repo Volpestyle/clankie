@@ -125,6 +125,40 @@ Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
 keep-awake ([`awake`](#awake)); it reads healthy and "off" until
 they opt in.
 
+`status` and `doctor --json` include `runtimeHealth` when the service exposes it:
+process CPU percentage, `/health` latency, fixed CPU/health reasons, alarm state,
+delivery state, and the last incident duration. `/status` and `/doctor` show the
+same observation. Missing observations remain unknown.
+
+### `runtime-health`
+
+`clankie runtime-health status` reads the live observation and settings from the
+owner API, `GET /v1/operator/runtime-health`. `on` and `off` enable or disable
+alarms. Change any subset with `set`:
+
+```sh
+clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300 \
+  --sample-seconds 15 --cooldown-seconds 1800
+```
+
+These are the defaults. `/runtime-health` opens the TUI menu for every setting.
+Changes use revision-guarded `POST /v1/operator/runtime-health` and apply on the
+next sample without a restart. CPU is this service process's consumed CPU time
+divided by elapsed wall time (100% is one fully busy core), rather than machine
+load. A failed or timed-out health response also counts as slow health.
+
+CPU above its threshold or slow health must persist for the sustained duration
+before one alert goes to the native `global-default` conversation. Recovery
+reports the incident duration. A persistent incident emits no repeated alert;
+the cooldown bounds alarms for subsequent incidents. An unavailable native
+delivery retries at most once a minute, and a retained uncertain native receipt
+counts as accepted so it is not replayed. These observations create no service
+model turn. Include incident and recovery evidence in the next Linear check-in.
+
+The public `/health` observation and consented hosted `body.runtime_health`
+events contain fixed numeric and enum metadata only. Conversation text, worker
+reports, credentials, and command output never enter this projection.
+
 ### `doctor`
 
 The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
@@ -280,7 +314,7 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 <a id="service-lifecycle"></a>
 
-### `update [--ref REF]` / `update status`
+### `update [--ref REF]` / `update status` / `update canary`
 
 `clankie update` fetches `origin/main` and stages its exact commit. Named branches
 (including `origin/BRANCH` and `refs/heads/BRANCH`) fetch that branch from origin;
@@ -308,6 +342,26 @@ healthy service running and report `harness-refresh-incomplete`; they do not
 roll back the service. `harnessRefresh` in update status links the complete
 per-profile receipt in `harness-refresh.json` beside the transaction record.
 
+After the new service responds with its exact boot identity, a persistent
+post-update canary observes it for five minutes. The default budgets are 10%
+captain-process CPU (100% means one core) and 250 ms `/health` p95, sampled every
+10 seconds. Health latency includes TCP setup and the complete response on a
+fresh loopback HTTP connection. Its deploy hold blocks further updates and integration landings
+during observation. A pass releases only that canary's hold. A regression or
+missing health signal records a failed canary, retains the hold, names the
+previous healthy commit, and attempts the runtime-health alert path. The new
+pin keeps running; rollback requires an explicit owner decision. Alert status
+distinguishes submitted, unavailable, and an uncertain claimed attempt.
+Submitted means the native notification path accepted the attempt; it does not
+claim a confirmed recipient receipt.
+
+`clankie update canary` reads the policy and last canary. Configure the next
+update with `--window-seconds N`, `--sample-seconds N`, `--cpu-percent N`, and
+`--health-ms N`; omitted fields retain their values. Policy changes do not
+change an in-flight observation. `/update` offers the same settings in the TUI.
+A restart of the observed service starts a fresh full window for its new boot
+identity; elapsed downtime never counts as healthy observation.
+
 The CLI and TUI `/update` return an accepted/pending operation, not a success
 claim. `clankie update status` and `/update status` read the durable old/new commit,
 phase, per-service receipts and exact service boot identity. `initiator` records
@@ -328,6 +382,21 @@ caller-supplied lane, actor and path claims confer no authority. Captain tools
 sessions and recheck their captured source before acceptance. Social sessions
 cannot gain the tool through a later permission change. Accepted host operations
 may finish or roll back after the original turn/service exits.
+Targets predating the canary coordinator are refused before installation or
+service shutdown (`target-runtime-canary-unsupported`); their health parser
+cannot complete the new observation. An owner choosing a legacy rollback must
+review it through the installer rather than bypassing the pending update record.
+
+`GET /v1/runtime-update/canary` returns `{policy, canary}`;
+`PUT /v1/runtime-update/canary` accepts a partial policy with `windowMs`,
+`sampleIntervalMs`, `cpuPercent`, and `healthLatencyMs` and applies it to the next
+canary. Both require current operator authority; policy publication rechecks it
+inside the lock and immediately before replacing the durable file. Revocation
+retains the previous policy. The local `/health` response
+also exposes `processHealth`: a boot UUID, PID, uptime and cumulative process
+CPU microseconds. Boot identity comes from the running updater's immutable
+identity; liveness probes do not reread update transaction files. The response
+carries no messages, prompts, tenant content or credentials.
 
 Deploy holds also block runtime-update admission. `update status` includes holds
 and holder presence. An operator may override explicitly with
@@ -399,6 +468,47 @@ The host OS and configured SSH principal are trusted; a compromised host cannot
 attest its own history. The journal covers service-authorized effects, not arbitrary
 programs launched outside Clankie's controlled hire path. It adds no fleet tool,
 worker authority, account setup or TUI setting.
+
+`clankie hire-receipt fresh --json-stdin` admits separately authorized new remote
+work after a retained settlement. Supply an existing hiring conversation, a new
+brief and `seat.freshIntent` through the public `spawn_seat` request:
+
+```json
+{
+  "conversationId": "conv-YOUR-HIRING-CONVERSATION",
+  "seat": {
+    "schemaVersion": 1,
+    "fleet": "pc",
+    "harness": "codex",
+    "title": "Ada",
+    "role": "tester",
+    "workingDirectory": "C:\\work\\approved-repo",
+    "freshIntent": {
+      "id": "f219ef86-91ba-4697-8e2e-91fc9416e72c",
+      "afterReceiptId": "9ef6657c-2d09-4b15-85b4-04608168a532"
+    }
+  },
+  "brief": "The owner authorized this independent new task. Complete its bounded acceptance check."
+}
+```
+
+Save the request before calling `clankie hire-receipt fresh --json-stdin < request.json`.
+Choose one new lowercase UUID for that intent and retain it. `afterReceiptId` is
+the exact **native hire** UUID of the settled original, including when delivery
+recovery used a `seat-…` message ID. Use the original fleet, harness and exact
+working-directory value; its configured host/session must still match. Resume,
+an unresolved sibling, changed authority or replay of any retained brief refuses.
+The service records the captured owner, resolved project/launch settings and
+brief fingerprint before any new effect. A reused UUID with different scope,
+owner or brief refuses. An exact retry only inspects the original native binding;
+it never launches or sends again. A completed fresh UUID stays fenced permanently:
+use its existing seat for follow-up. Both original settlement evidence and fresh
+receipts remain retained, including across restart and age pruning. Older service
+versions may refuse this journal; upgrade forward rather than editing its records.
+
+The native `hire_agent` tool accepts the same optional `freshIntent`. This adds
+no account change, fleet alias or TUI setting. Exit 0 from the fresh CLI means
+the service returned `spawned`; completion still needs the matching native event.
 
 ### `integrate`
 
@@ -664,6 +774,47 @@ the name and colored Clankie portrait from the fleet. Output includes the MCP
 result and `ok`; provider/tool rejection sets `ok: false` and exits nonzero.
 See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
 
+### `linear budget`
+
+`clankie linear budget` reads `/v1/linear/request-budget` without calling Linear.
+It reports each connected actor's actual HTTP attempts in the last hour across
+MCP, the API tracker, pagination, and worker publishing. The same workspace and
+actor share one budget across OAuth audiences. Counters reset on service restart;
+provider remaining/reset headers account for usage by other clients after the
+next provider response. No credentials or request bodies appear in the report.
+
+At 50% of the 5,000-request hourly budget, Clankie shows `warning` in `/doctor`
+and submits one warning through native runtime alerts. A refused, thrown or
+rejected admission remains pending and retries after 60 seconds, including when
+provider requests stop or the hard budget refuses them. Only one admission can
+be in flight per actor. Native acceptance stops retries even if its original
+receipt is unconfirmed; acceptance does not prove the recipient read the alert.
+Boot-time warnings await the native handler's result. At 80%, device Work refreshes
+and explicitly marked background reads
+share a one-minute minimum interval per actor; excess calls are refused before
+dispatch with a retry time. Existing issue-list caching continues to apply.
+Ordinary owner/lead reads, writes and webhook context reads retain priority. Every request remains subject
+to the hard budget, which leaves one request below the cap. Provider headers can
+lower the effective limit. The warning rearms after usage falls below 50%.
+`doctor --json` and `/doctor json` include `linearRequestBudget`; unavailable
+observations remain explicit. These fixed limits need no owner setup.
+
+### `linear read TOOL --json-stdin [--background]`
+
+Read through the connected Linear tool bank using JSON arguments on stdin.
+Use `--background` for automated polling; owner reads default to interactive
+priority. The fleet equivalent is `clankie_call({name, arguments, background: true})`.
+Background markers do not grant authority or downgrade writes. Each logical
+read gets its own admission and may finish its provider pages. For example:
+
+```sh
+printf '%s' '{"team":"VUH"}' | clankie linear read list_issues --json-stdin --background
+```
+
+Initial account setup and OAuth token endpoint calls are outside the connected
+Linear request counter; GraphQL identity verification during a connected app's
+credential refresh is counted.
+
 ### `linear status` / `linear follow on|off`
 
 A verified Linear webhook stores a compact **External activity** message in one
@@ -887,23 +1038,57 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
-### `accounts [list]` / `accounts connect github|linear` / `accounts disconnect PROVIDER` / `accounts apps`
+### `accounts [list]` / `accounts connect PROVIDER` / `accounts disconnect PROVIDER` / `accounts apps`
 
-The owner's own GitHub and Linear accounts, linked to this body
+The owner's own GitHub, Linear and Google accounts, linked to this body
 ([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)). The
 service runs each flow and keeps the token in the credential broker (`github`,
 `linear-api` for registered Linear API OAuth); nothing here prints a token. `accounts` lists each provider's
-`status` (`connected`, `not_connected`, `unconfigured`), account, scopes and
-where to manage it. `accounts connect github` prints the code to type at
+`status`, account, scopes and where to manage it. The body supplies the catalog's
+name, purpose, permission disclosure and read-only flag. App, account dashboard
+and `/connect accounts` (also `/connections` → Accounts) use that same catalog.
+Google rows can report `awaiting_consent`, `expired`, `reconnect_required`,
+`unavailable` or `disconnected`, together with the last check and pending revocation.
+An unconfigured row means an operator has not configured the developer OAuth client.
+`accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
 `accounts start github` and `accounts poll github --flow-id ID` expose the same
 flow as separate steps for interactive clients.
-`accounts disconnect github|linear` revokes at the provider when it can and
+`accounts disconnect PROVIDER` revokes at the provider when it can and
 always deletes the local token; `revoked: false` comes with the `manageUrl`
 to revoke by hand. Disconnecting Linear clears its API and legacy MCP/app lanes
 and pending flows. The app's Connections settings and the account page use the
 same encrypted lifecycle. `/connections` exposes account identity, granted
 scopes, connect and disconnect beside machines in the console.
+
+`accounts connect google-gmail|google-calendar|google-drive` (or `start` with the
+same provider) returns a browser consent URL, single-use state and expiry.
+`accounts complete google-gmail|google-calendar|google-drive --json-stdin`
+consumes `{state,code}` for Gmail/Calendar or `{state,code,pickedFileIds}` for
+Drive; the provider comes from the command selector. Google's file picker
+returns selected IDs in `picked_file_ids`; clients validate and forward them
+as the `pickedFileIds` array.
+`accounts check google-gmail|google-calendar|google-drive` verifies the selected
+authorized access. Google refresh, token exchange and revoke run on the body;
+the console accepts the `clankie://accounts/google/callback` link through a
+masked prompt. Gmail requests `gmail.readonly`; Calendar requests
+`calendar.calendarlist.readonly` and `calendar.events.readonly`; Drive requests
+only `drive.file` through Google's file picker, with no other scope combined.
+The body reads files selected in that flow. Google's selected-file permission
+also permits editing those files; Clankie's implemented Drive tools only read.
+Gmail and Calendar consent also request `openid email` to verify identity.
+Drive identity is verified through the Drive API. No mail-send or calendar-write
+scope is granted, and the shipped Google tools expose no writes. The
+[Google Picker guide](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker)
+describes the selected-file consent flow.
+
+Google grants share an application and account lifecycle. Disconnecting any
+Google row disables all three Google connections on this body. If the provider
+cannot confirm revocation, local access stays disabled and the catalog reports
+pending revocation; retry disconnect or review the grant at Google's management
+URL. A connection is never reported as revoked until Google confirms it.
+Real Google access requires developer client registration and the owner's
+browser consent; fixture checks do not establish a consented production read.
 
 `accounts connect linear` returns the registered app's authorize URL, single-use
 state and expiry. The body retains the S256 verifier and exchanges the callback
@@ -922,7 +1107,8 @@ Changing the active app identity requires new worker grants. Setup and scope:
 [worker posts](linear-worker-posts.md).
 
 `accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID]
-[--linear-redirect-uri URL]` reads or writes the public OAuth client settings
+[--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL]`
+reads or writes the public OAuth client settings
 (`oauthApps` in `settings.json`); they apply without a restart.
 `CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
 `CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
@@ -939,6 +1125,17 @@ Hosted public app
 IDs and the exact gateway `/account/connections/callback` arrive through body
 bootstrap; developer secrets are excluded. Provider app registration and terms
 acceptance remain owner actions.
+
+For a local development Google web OAuth client, set its public client ID and
+registered redirect URI through `accounts apps set`. The callback path is
+`/account/connections/google/callback`; HTTPS is required except for local
+loopback HTTP development. Store the matching developer secret with
+`accounts apps google-secret --client-id ID --secret-stdin`. This is a local
+operator command, writes broker entry `google-oauth-app` with its client ID,
+and refuses hosted bodies and remote transports. The secret never enters argv,
+environment variables, settings, output or device responses. Google public
+settings also support `CLANKIE_GOOGLE_OAUTH_CLIENT_ID` and
+`CLANKIE_GOOGLE_OAUTH_REDIRECT_URI` overrides; neither variable accepts a secret.
 
 ### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
 
@@ -987,7 +1184,8 @@ GitHub or Markdown adapter.
   than one tracker or only a single `TODO.md`. Answer it once with `work init`.
 - `clankie work init` records what discovery found; `work init --backend
 default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
-[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--note TEXT]` records the owner's
+[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL]
+[--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]` records the owner's
   choice. The answer is written to `.clankie/tracking.json` in the repo; nothing
   else is added to a repo that tracks work elsewhere.
   `--linear-label` saves an existing Linear label as `linear.label`, scoping
@@ -995,6 +1193,25 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   It requires a Linear convention with a team; blank, multiline or over-64-character
   labels are refused. Omit it to keep the team/project-wide board. The HTTP init
   parameter and the device write's init parameter are `linearLabel`.
+- `clankie work project` (also `/work project` in the TUI) returns planned
+  milestones, shipped `v*` versions and Linear initiative goals for the saved
+  tracker. `work init --release-source tags|milestones|both --release-lane NAME`
+  changes the release selection without changing an existing tracker. Source
+  defaults to `both`; lane defaults to `repository` until explicitly named.
+  Separate mobile/macOS repos can name their own lanes. Dates say whether they
+  came from a publication, annotated tag or lightweight tag's commit. Missing
+  store builds and release membership are not inferred. Markdown has no planned
+  milestone collection; GitHub and Markdown return no initiative goals.
+  Failed/unsupported sections carry explicit `unavailable` entries.
+- Work statuses are `backlog`, `todo`, `in_progress`, `in_review`, `done`, and
+  `canceled`. Linear backlog/triage, GitHub `status: backlog`, and Markdown
+  `status: backlog` stay distinct from todo. Items may carry a native milestone
+  id/name; Markdown uses both `milestone_id` and `milestone_name` front matter.
+  Device `work_items` requests opt into these facts with `statusVersion: 2`;
+  older requests receive backlog as todo and omit the new milestone field.
+  `work_project` uses the same registered repo ids and device authority as
+  `work_items`. Metadata reads share connected-account snapshots and pagination,
+  preserving the poller's provider budget.
 - `clankie work repos` lists the repos registered on this machine. A repo is
   registered the first time a local command names it; only registered repos are
   readable from a paired device.
@@ -1080,6 +1297,14 @@ Operator kill-switch (`POST /v1/embodiment/sessions/live/stop`). The play host
 winds down at the next turn boundary — this is not a process kill. A live
 session returns JSON. Idle is the sentence `Nothing is playing.` (exit 0, not
 JSON).
+
+### `play guide TEXT --conversation CONVERSATION_ID`
+
+Suggest an objective or approach to the live Pokémon mind. The authenticated
+`POST /v1/embodiment/sessions/live/guide` accepts `{text, conversationId}` and
+checks the selected conversation's play ownership again before queueing it.
+Clankie can use `pokeagent_guide` from that conversation; the mind still chooses
+its objective and actions. This does not start a sitting or affect another game.
 
 ### `rivals`
 
@@ -1418,12 +1643,31 @@ Quiet hours suppress them without changing the source-derived mood. Desktop
 clients also honor macOS Focus, discard expired expressions, and show them
 without taking keyboard focus. Publishing does not confirm a client displayed it.
 
-### `games [status]` / `games set on|off`
+### `games [status]` / `games set on|off` / `games budget`
 
 Read or set whether the PokeAgent MMO body is available. JSON contains the
-`games.pokeagentMmoEnabled` boolean, `settingsFile`, and
-`"restart": "clankie restart captain"`. The TUI `/games` command calls this
-same writer.
+`games.pokeagentMmoEnabled`, optional `games.pokemonBudget`, `settingsFile`, and
+`"restart": "clankie restart"`. The TUI `/games` exposes availability and token/cost
+caps using the same writer. Restart to apply defaults to subsequent sittings.
+
+```sh
+clankie games budget max-tokens 250000
+clankie games budget max-cost-usd 1
+clankie games budget max-cost-usd default
+```
+
+`max-turns` and `max-duration-ms` accept positive integers too. `default` removes
+an override. Pokémon defaults to 250,000 charged model tokens, including
+commentary and interrupted decisions; turn/duration and dollar caps are optional.
+The authenticated `GET`/`PUT /v1/games/configuration` reads/replaces this gameplay
+configuration. Embodiment start intents can override these defaults with `budget`.
+
+Journals record input/output tokens, charged tokens, model calls and estimated
+USD on each turn and the summary. A metered call without usage reserves 16,000
+charged tokens and marks cost unknown; a dollar-capped session then stops. Caps
+are checked between calls, so the last call can exceed a threshold. Cost is an
+estimate from registry prices, not an invoice. Terminal receipts name
+`budget_exhausted`, `mind_unavailable`, `world_ended` or `stopped`.
 
 ### `browser tools` / `browser call TOOL JSON`
 
@@ -1880,7 +2124,8 @@ live or not, through the existing fleet API.
 
 `clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]` assigns a current
 member's role in the selected project. Omit `--project` for the default project.
-The host verifies the agent's current native seat and confirmed hire membership;
+The host verifies the agent's current native seat and project membership through
+its original hire assignment or, for agents Clankie did not start, verified cwd;
 offline agents, unknown membership and members of a different project are refused.
 The assignment changes the project's semantic role, preserving the live harness
 and its launch profile
@@ -2286,6 +2531,13 @@ What crosses the link, and what cannot:
   agent's output, not the owner's instruction; he answers with `message_seat`,
   which reaches a session that loaded `--channels plugin:clankie-worker@clankie`.
   Its receipt reports `stored` only after durable conversation acceptance.
+  The roster exposes `workerReportBridge` separately from tool health: the last
+  `stored`, `uncertain`, `rejected` or `unavailable` outcome, observation time,
+  fixed safe reason, and last confirmed stored time when observed. `doctor` and
+  the console show it. A hired seat held idle or done for 15 minutes without a
+  stored report since its last brief carries `finished, unreported`. Three
+  distinct failed seats within ten minutes produce one native alert to their
+  owning lead, rearmed after recovery; raising it spends no service-model turn.
   Both `mcp --seat` and `mcp --fleet` preserve an uncertain original across
   bridge/service replacement. Calling again reconciles that exact ID through
   a read; it never resends it. A different follow-up during reconciliation
@@ -2500,6 +2752,17 @@ Notes stay until forgotten, without a retention flag or count quota.
 exposes the same controls in the console. See [Memory](memory.md) for lane
 privacy and migration behavior.
 
+### `metrics --fleet`
+
+Read operator-only `GET /v1/fleet/metrics` for proof attempts and refusals, worker
+report attempts and failures, and fixed native/transport reason counters. The
+five- and sixty-minute windows show failure fractions and failures per minute;
+counters contain no process IDs, paths, argv, report bodies or credentials.
+Doctor includes the same windows. A live seat with more than 1% terminal proof
+refusals in five minutes produces a native alert to its current owning lead,
+with a five-minute cooldown; native retries are counted separately from terminal
+refusals. Metrics restart with the service and state their coverage start.
+
 ### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
 
 Per-issue and per-worker measurements from the service's existing records,
@@ -2537,10 +2800,23 @@ The JSON `report` contains `issues`, `workers`, `window`, and explicit `coverage
   work on that issue.
 - Worker `seatSettlements` and `unresolvedHireReceipt` expose ledger edges and
   pending receipts. A passed/ship edge is never issue acceptance; missing
-  receipts do not establish historical delivery.
+  receipts do not establish historical delivery. Ledger edges match the preferred
+  retained seat ID. Older seat aliases have no saved association intervals, so
+  their ledger rows are excluded from that worker's settlement totals.
 
-Only retained exact local native bindings can be read. Missing, remote,
-unreadable, or over-64-MiB sources appear in `coverage.warnings`. Reads also have
+Retained exact local bindings come from conversation metadata, the persisted
+hire-owner journal, and archived pane-tidy entries. This includes workers whose
+conversation metadata predates `nativeSource` and panes that have been closed.
+Matching session IDs and transcript paths are combined before counting, so the
+same native history is counted once across these records. Retained labels, seat
+IDs, session IDs, and transcript paths can select that worker with `--worker`.
+These historical bindings provide attribution; they grant no current pane
+control or delivery authority and cannot establish issue approval.
+
+Missing, remote, malformed, conflicting, unreadable, or over-64-MiB sources
+appear in `coverage.warnings`. Unbound session directories are not searched for
+issue mentions. Separate files claiming the same native session are ambiguous
+and excluded, including when `--worker` selects only one of their aliases. Reads also have
 a 256-MiB total request budget, with skipped sources reported. There is no
 fuzzy pane attribution or new metrics ledger. Known totals are partial when
 other sources are unavailable. No transcript, command, tool output, or
@@ -3065,6 +3341,16 @@ returns the oldest unread reports with their original delivery IDs and exact tex
 Reading does not mark them read. After reviewing every offered report, run
 `clankie agents reports ack DELIVERY_ID... --conversation ID` (or
 `acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.
+You can pass the unmodified returned page on standard input with
+`clankie agents reports ack --json-stdin --conversation ID`; the page must name
+the same conversation. A page holds at most 100 IDs.
+For reviewed, retained history, the owner can run
+`clankie agents reports ack-history DELIVERY_ID... --conversation ID` to
+acknowledge up to 1,000 explicitly selected IDs, including migrated receipts
+that were never offered by the current runtime. This requires operator
+authentication; captain and paired-device credentials cannot use it. Unknown
+IDs or IDs from another conversation reject the entire operation. New reports
+and reports outside the selected IDs remain unread.
 The roster exposes per-worker unread receipts and the fleet retains report rows
 for disappeared panes. A finished worker with pending or uncertain output shows
 “done, report not delivered”; confirmed transport alone still shows “report unread”.
@@ -3076,7 +3362,8 @@ legacy receipts remain uncertain and readable; they are never blindly resent.
 A matching original thread may retain its output while requiring re-adoption;
 that retention grants no control or dispatch until the owner repairs the binding.
 The API uses authenticated operator dispatch operations `readopt_seat`,
-`worker_reports`, and `acknowledge_worker_reports`, each naming the exact owning
+`worker_reports`, `acknowledge_worker_reports`, and the owner-only
+`acknowledge_worker_report_history`, each naming the exact owning
 `conversationId`. Credential and conversation authority are checked again at
 admission.
 
@@ -3193,7 +3480,7 @@ preference answers do not authorize creation.
 
 The file requires `name` and `workspacePath`; `PROJECT` and `REVISION` are explicit
 arguments and cannot be supplied or overridden by the file. Optional `roles`,
-`workerCap`, `trackerRef` and `fleet` use the existing project policy vocabulary. Role and
+`workerCap`, `trackerRef`, `trackerSetup` and `fleet` use the existing project policy vocabulary. Role and
 project caps may be `null` to inherit; zero stays an explicit zero. Fleet size
 and model preferences do not imply numeric caps or new hiring guidance.
 
@@ -3207,10 +3494,27 @@ observations, not cross-process compare-and-swap or atomic authority checks.
 
 An optional tracker binding must be
 `{"workspaceId":"primary","path":".clankie/tracking.json"}` and the valid saved
-convention must already exist. This command does not initialize a tracker or
-choose an account. Missing/changed sources report a conflict. See the
-[creation boundary](testing/2026-10-04-project-create/README.md) for exact checks
-and the remaining conversational onboarding and station work.
+convention must already exist unless `trackerSetup` is supplied. For a workspace
+without a saved convention, `trackerSetup` includes an explicit `backend`
+(`default`, `markdown`, `github`, `linear`) and the existing work-init inputs:
+`directory`, `githubRepo`, `linearTeam`, `linearProject`, `linearLabel`,
+`decisions` and `note`. It requires that tracker binding and writes the same
+`.clankie/tracking.json` as `clankie work init`, within the reviewed CREATE.
+An existing convention or changed workspace, parent directory, owner authority
+or project revision refuses initialization. It chooses no account and creates
+no provider project or label.
+
+In an unassigned owner workspace conversation, Clankie receives the onboarding
+opportunity and can read the repo, ask about tracking, propose useful roles and
+ask about fleet size through the existing dialog questions. Answers are context;
+`propose_project_create` puts their complete configuration into the existing
+explicit CREATE review. Confirmation consumes that proposal once. Tracker and
+project settings are two file writes: a failure after tracker save can leave
+only the tracker. An uncertain confirmation stays uncertain and is checked
+with the original proposal target, never replayed. See the
+[closure evidence](testing/2026-10-05-project-onboarding/README.md) for source
+checks and the remaining live acceptance. Project village visuals belong to
+VUH-1710.
 
 ### `project list`, `project settings` and `project update`
 
@@ -3299,7 +3603,7 @@ retired. Use `fleet set --tools off` to disable standing fleet tools.
 `/access` exposes status, verification and revocation; issue from the terminal.
 See [worker access](worker-access.md) for restrictions and account bindings.
 
-### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
+### `stance <working|thinking|stuck|hauling|resting|celebrate> [--activity KIND] [--note TEXT] [--for SECONDS]`
 
 For agents, not for people ([ADR 0148](adr/0148-an-agent-moves-its-own-figure.md)).
 Say what you are doing with your own figure in the commons; the operator's app
@@ -3322,6 +3626,16 @@ goes back to being posed by what its pane is observed to be doing.
 
 `{"outcome":"unseated"}` means the pane holds no fleet seat — normal in a plain
 shell pane, and not an error.
+
+`--activity reading|editing|testing|planning|waiting` explicitly states the kind
+of work for the World activity bubble. For example, before a generic shell test
+run: `clankie stance working --activity testing --for 60`. The roster/fleet read
+returns `seat.activity` with its kind and `source: stated`, or `native_tool` when
+a fresh outstanding known native tool establishes it. Unknown kinds are refused;
+notes and shell arguments are never classified. Omitting `--activity` on the
+next stance clears it. The statement expires, belongs to this exact occupying
+session, and is absent for idle/offline seats. Unsupported native telemetry
+can still carry a live explicit statement; absence means unknown.
 
 ### `discord [status]`
 
@@ -4115,6 +4429,16 @@ The face and its expiry participate in the presence cursor. Reduce Motion
 holds a distinct static face, and an unreachable pet uses his offline art.
 Legacy reads omit the field. The desktop client retries without the opt-in
 when an older service rejects it, checking again after one minute.
+
+Desktop consumers may separately request `includeBeats: true`. Its optional
+`beats` array contains only an ID, `hire` or `worker_report` kind, and source
+timestamp; at most the latest completed hire and confirmed report accepted
+within ten seconds. Quiet hours suppress them. Expiry changes the opted-in
+cursor. Legacy requests omit the field and keep their existing cursor. A
+resumed seat, failed hire or uncertain report never creates a beat. The desktop
+client consumes IDs once and skips history and bursts; this metadata does not
+contain worker output or identify a private conversation. See
+[ADR 0220](adr/0220-clankie-has-one-present-tense.md).
 
 ## Computer body
 

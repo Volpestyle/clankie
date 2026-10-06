@@ -3,7 +3,7 @@ import {
   type ActivityObservationSnapshot,
 } from "@clankie/interactive-environment";
 
-export interface ActivityObservationWritePort {
+interface ActivityObservationWritePort {
   publish(candidate: ActivityObservationSnapshot): ActivityObservationSnapshot;
   clear(sessionId: string): void;
 }

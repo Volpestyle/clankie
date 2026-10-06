@@ -79,8 +79,11 @@ import { PresencePoller } from "./observation/presence.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { runAwakeCommand } from "./command/awake.ts";
+import { runRuntimeHealthCommand } from "./command/runtime-health.ts";
 import { runEvaluatorCommand } from "./command/evaluator.ts";
 import { doctorCommand } from "./command/doctor.ts";
+import { runAccountsCommand } from "./command/accounts.ts";
+import { Readable } from "node:stream";
 import { createServiceOptions, restartTarget } from "../bin/services.ts";
 import { clankieStateHome } from "./state-home.ts";
 
@@ -478,6 +481,8 @@ const connectServices = {
   runDiscordWizard,
   showDiscordInvite,
   runLinearOauth: () => runLinearBrowserLogin(),
+  accounts: (args: readonly string[], input?: string) =>
+    runAccountsCommand(args, input === undefined ? {} : { stdin: Readable.from([input]) }),
 };
 const commands = [
   ...buildHostedConnectionCommands(settingsStore, true),
@@ -496,6 +501,7 @@ const commands = [
     commandDoctor: () => doctorCommand({ repoRoot, env: process.env }),
     commandAwake: (args) =>
       runAwakeCommand(args, { repoRoot, env: process.env, stderr: { write: () => undefined } }),
+    commandRuntimeHealth: (args) => runRuntimeHealthCommand(args, { env: process.env }),
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,

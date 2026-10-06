@@ -147,6 +147,18 @@ export class ProjectHires {
     return this.change((state) => {
       const pending = state.allocations.find((a) => a.key === key && !a.gone && !a.confirmed);
       if (pending) {
+        if (pending.request.freshIntent || input.freshIntent) {
+          const requested = projectHireRequest(settings, projectId, input, defaults);
+          if (
+            !isDeepStrictEqual(
+              { ...pending.request, projectId: pending.projectId },
+              { ...requested, projectId },
+            )
+          )
+            throw new Error(
+              "An unresolved fresh hire has a different intent or launch scope; inspect its original, never substitute it",
+            );
+        }
         if (
           pending.projectId !== projectId ||
           operatorAgentRoleKey(pending.role ?? "") !== operatorAgentRoleKey(input.role ?? "") ||
@@ -300,7 +312,10 @@ export class ProjectHires {
         proof.pane === a.pane &&
         proof.fleet === (a.request.fleet ?? "default")
       ) {
-        const observed = ProofSchema.parse(proof);
+        // Native observers also report cwd/private-seat metadata. A hire's
+        // intentional assignment retains only its original process identity.
+        const { nativeOccupantId, fleet, pane, binding, processes, shell } = proof;
+        const observed = ProofSchema.parse({ nativeOccupantId, fleet, pane, binding, processes, shell });
         if (a.proof && !isDeepStrictEqual(a.proof, observed))
           throw new Error(
             "The original hire's native process has changed. Check the existing agent before retrying.",

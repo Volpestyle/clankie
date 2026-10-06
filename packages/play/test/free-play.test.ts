@@ -642,6 +642,35 @@ describe("stall visibility", () => {
     expect(result.turns.at(-1)?.objective).toBeNull();
   });
 
+  it("reports two retired objectives once even when the second loop continues", async () => {
+    let map = "PALLET_TOWN";
+    const body: GbaDriverIo = {
+      observe: (kind) => {
+        if (kind !== "overworld") throw Error("no observation");
+        return overworld(100, 5, map);
+      },
+      act: async () => completed(),
+      pause: async () => {},
+      resume: async () => {},
+    };
+    const events: { kind: string; count: number }[] = [];
+    const result = await runFreePlay({
+      io: body,
+      turns: 50,
+      mind: { decide: async () => ({ ...press("a", "look around"), objective: "leave this town" }) },
+      onTurn: (turn) => {
+        if (turn.objectiveRetired !== null) map = "VIRIDIAN_CITY";
+      },
+      onNotable: (event) => {
+        events.push(event);
+      },
+    });
+    expect(result.objectivesRetired).toBe(2);
+    expect(events.filter((event) => event.kind === "objectives_retired")).toEqual([
+      expect.objectContaining({ count: 2 }),
+    ]);
+  });
+
   it("does not retire a route objective while a battle repeats without a position", async () => {
     const battleIo: GbaDriverIo = {
       observe: (kind) => {

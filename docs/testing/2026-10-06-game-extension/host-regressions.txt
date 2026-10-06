@@ -1,0 +1,34 @@
+Command (wrapped in fleet bin/heavy): pnpm exec vitest run --config vitest.config.ts apps/clankie/test/minecraft-play.integration.test.ts apps/clankie/test/body-play-sessions.test.ts apps/clankie/test/pokemon-play-controls.test.ts apps/clankie/test/play-notifications.test.ts apps/clankie/test/play-host.test.ts
+
+ RUN  v4.1.10 [worktree]
+
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+(node:69276) Warning: AI SDK Warning (openrouter.chat / contract): The feature "responseFormat" is not supported. JSON response format schema is only supported with structuredOutputs
+
+ Test Files  5 passed (5)
+      Tests  36 passed (36)
+   Start at  01:21:07
+   Duration  6.16s (transform 1.27s, setup 28ms, import 3.31s, tests 2.52s, environment 0ms)
+
+Observed exit code: 0

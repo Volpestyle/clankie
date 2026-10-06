@@ -1378,7 +1378,10 @@ export class ConversationStore {
   }
 
   /** Retained reports survive event trimming, restart and a vanished worker pane. */
-  public inboundReports(conversationId?: string, options: { includeRead?: boolean } = {}): InboundReport[] {
+  public inboundReports(
+    conversationId?: string,
+    options: { includeRead?: boolean; acceptedAfterMs?: number } = {},
+  ): InboundReport[] {
     return inboundReports(this, conversationId, options);
   }
 
@@ -1393,6 +1396,11 @@ export class ConversationStore {
   /** An authenticated recipient explicitly acknowledges only reports it was offered. */
   public acknowledgeInboundReports(conversationId: string, deliveryIds: readonly string[]): boolean {
     return acknowledgeInboundReports(this, conversationId, deliveryIds);
+  }
+
+  /** The operator explicitly retires selected history; native receipts never call this. */
+  public acknowledgeInboundReportHistory(conversationId: string, deliveryIds: readonly string[]): boolean {
+    return acknowledgeInboundReports(this, conversationId, deliveryIds, { reviewedHistory: true });
   }
 
   /** A native transport receipt is progress, never an acknowledgment that the lead read it. */
@@ -2782,6 +2790,7 @@ export class ConversationStore {
     this.counts.delete(meta.conversationId);
     this.sequences.delete(meta.conversationId);
     this.journal.forget(meta.conversationId);
+    if (Object.keys(meta.inboundAcceptances ?? {}).length > 0) this.notifyInboundReportChange();
     this.onPrune?.(meta.conversationId, meta.scope);
   }
 

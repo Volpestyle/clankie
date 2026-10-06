@@ -809,8 +809,11 @@ static int prove(int argc, char **argv) {
   if (!socket_info(owner.process.pid, owner.fd, &final_socket) ||
       !matches(&final_socket, (uint16_t)client, (uint16_t)server) ||
       !same_socket(&owner, &final_socket) || observe(owner.process.pid, &final_owner) != 1 ||
-      !same_process(&owner.process, &final_owner) || !within_budget())
+      !same_process(&owner.process, &final_owner)) {
+    if (budget_expired) return refuse();
     return refuse_at("final_socket", "socket_mismatch", errno);
+  }
+  if (!within_budget()) return refuse();
 
   fprintf(proof_output, "{\"schemaVersion\":1,\"owner\":");
   print_identity(&owner.process, 1);

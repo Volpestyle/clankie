@@ -110,6 +110,29 @@ function parseServiceReceipt(input: unknown): RuntimeServiceReceipt {
   }
   return { ok: value.ok, services, ...(runtime === undefined ? {} : { runtime }) };
 }
+/** Durable metadata only; canary failure never changes the cutover health result. */
+export interface RuntimeCanaryResult {
+  readonly state: "pending" | "passed" | "failed";
+  readonly holdId?: string;
+  readonly holdEstablished?: boolean;
+  readonly holdReleased?: boolean;
+  readonly previousHealthyCommit?: string;
+  readonly instanceId?: string;
+  readonly pid?: number;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly samples?: number;
+  readonly cpuMeanPercent?: number;
+  readonly healthP95Ms?: number;
+  readonly error?: string;
+  readonly alertState?: "pending" | "claimed" | "submitted" | "unavailable";
+  readonly policy?: {
+    readonly windowMs: number;
+    readonly sampleIntervalMs: number;
+    readonly cpuPercent: number;
+    readonly healthLatencyMs: number;
+  };
+}
 export interface RuntimeUpdateResult {
   readonly id: string;
   readonly ref: string;
@@ -132,6 +155,7 @@ export interface RuntimeUpdateResult {
   readonly reason?: string;
   readonly serviceReceipts?: readonly RuntimeServiceReceipt[];
   readonly harnessRefresh?: { readonly ok: boolean; readonly result?: unknown; readonly error?: string };
+  readonly canary?: RuntimeCanaryResult;
   readonly resolvedRef?: string;
   readonly warning?: "older-than-current-pin" | "diverged-from-current-pin";
   readonly initiator?: RuntimeUpdateInitiator;
@@ -231,7 +255,68 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
     ...(value.harnessRefresh === undefined
       ? {}
       : { harnessRefresh: parseHarnessRefresh(value.harnessRefresh) }),
+    ...(value.canary === undefined ? {} : { canary: parseRuntimeCanary(value.canary) }),
   };
+}
+
+function parseRuntimeCanary(input: unknown): RuntimeCanaryResult {
+  const value = object(input);
+  const allowed = [
+    "state",
+    "holdId",
+    "holdEstablished",
+    "holdReleased",
+    "previousHealthyCommit",
+    "instanceId",
+    "pid",
+    "startedAt",
+    "completedAt",
+    "samples",
+    "cpuMeanPercent",
+    "healthP95Ms",
+    "error",
+    "alertState",
+    "policy",
+  ];
+  if (
+    Object.keys(value).some((key) => !allowed.includes(key)) ||
+    !["pending", "passed", "failed"].includes(String(value.state))
+  )
+    throw Error("Invalid runtime canary state");
+  for (const key of ["holdEstablished", "holdReleased"])
+    if (value[key] !== undefined && typeof value[key] !== "boolean")
+      throw Error("Invalid runtime canary hold");
+  for (const key of ["pid", "samples", "cpuMeanPercent", "healthP95Ms"])
+    if (
+      value[key] !== undefined &&
+      (typeof value[key] !== "number" || !Number.isFinite(value[key]) || Number(value[key]) < 0)
+    )
+      throw Error("Invalid runtime canary metric");
+  if (value.pid !== undefined && (!Number.isSafeInteger(value.pid) || Number(value.pid) < 1))
+    throw Error("Invalid runtime canary pid");
+  if (value.samples !== undefined && !Number.isSafeInteger(value.samples))
+    throw Error("Invalid runtime canary count");
+  for (const key of ["startedAt", "completedAt"])
+    if (value[key] !== undefined && !Number.isFinite(Date.parse(String(value[key]))))
+      throw Error("Invalid runtime canary time");
+  if (value.holdId !== undefined) operationId(value.holdId);
+  if (value.instanceId !== undefined) operationId(value.instanceId);
+  if (value.previousHealthyCommit !== undefined) commitString(value.previousHealthyCommit);
+  if (value.error !== undefined) boundedString(value.error, 1024);
+  if (
+    value.alertState !== undefined &&
+    !["pending", "claimed", "submitted", "unavailable"].includes(String(value.alertState))
+  )
+    throw Error("Invalid runtime canary alert");
+  if (value.policy !== undefined) {
+    const policy = object(value.policy);
+    if (
+      Object.keys(policy).sort().join(",") !== "cpuPercent,healthLatencyMs,sampleIntervalMs,windowMs" ||
+      Object.values(policy).some((item) => typeof item !== "number" || !Number.isFinite(item) || item <= 0)
+    )
+      throw Error("Invalid runtime canary policy");
+  }
+  return value as unknown as RuntimeCanaryResult;
 }
 
 function parseHarnessRefresh(input: unknown): NonNullable<RuntimeUpdateResult["harnessRefresh"]> {
@@ -314,6 +399,8 @@ export async function executeRuntimeUpdate(
     // Older targets cannot attest the restarted process; refuse before any service cutover.
     if (!existsSync(join(stage, "apps/tui/src/command/update.ts")))
       return persist("refused", { reason: "target-update-status-unsupported" });
+    if (!existsSync(join(stage, "apps/clankie/src/runtime-canary.ts")))
+      return persist("refused", { reason: "target-runtime-canary-unsupported" });
     installPinnedDependencies(stage, run);
     linkPinnedState(plan.checkout, stage, run);
     relocatePinnedDependencies(stage, plan.runtime, undefined, plan.checkout);
@@ -358,6 +445,7 @@ export async function executeRuntimeUpdate(
     }
     return persist("healthy", {
       healthy: true,
+      canary: { state: "pending" },
       ...(harnessRefresh
         ? { harnessRefresh, ...(harnessRefresh.ok ? {} : { reason: "harness-refresh-incomplete" }) }
         : {}),

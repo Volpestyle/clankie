@@ -39,7 +39,7 @@ const EntrySchema = ClosedWorkerPaneSchema.extend({
   closedBy: ConversationOwnerSchema,
 });
 const ReportSchema = z.object({ sessionKey: z.string(), reportPath: z.string() }).strict();
-const StateSchema = z
+export const PaneTidyStateSchema = z
   .object({ version: z.literal(1), entries: z.array(EntrySchema), reports: z.array(ReportSchema) })
   .strict();
 type Entry = z.infer<typeof EntrySchema>;
@@ -88,7 +88,7 @@ function publicEntry(entry: Entry): ClosedWorkerPane {
 
 /** Judgment is the lead's. This service checks only hard lines and technical admission. */
 export class PaneTidy {
-  private state: z.infer<typeof StateSchema>;
+  private state: z.infer<typeof PaneTidyStateSchema>;
   private readonly pending = new Set<string>();
   private readonly path: string;
   private readonly ports: {
@@ -107,7 +107,7 @@ export class PaneTidy {
     this.ports = ports;
     // Corrupt history blocks construction; it must never become an empty journal.
     this.state = existsSync(path)
-      ? StateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
+      ? PaneTidyStateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
       : { version: 1, entries: [], reports: [] };
   }
   history(): readonly ClosedWorkerPane[] {
@@ -125,7 +125,7 @@ export class PaneTidy {
     const temp = `${this.path}.${randomUUID()}.tmp`;
     const fd = openSync(temp, "wx", 0o600);
     try {
-      writeFileSync(fd, JSON.stringify(StateSchema.parse(this.state)));
+      writeFileSync(fd, JSON.stringify(PaneTidyStateSchema.parse(this.state)));
       fsyncSync(fd);
     } finally {
       closeSync(fd);

@@ -154,6 +154,10 @@ const ONSET_YIELD_PCM_BYTES = Math.round(REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE
 const VOICE_READY_TIMEOUT_MS = 20_000;
 const DAVE_READY_TIMEOUT_MS = 10_000;
 const PLAYBACK_TIMEOUT_MS = 2 * 60_000;
+/** A continuously open mic is one bounded recording, even when Discord never sends silence. */
+export const DEFAULT_VOICE_RECORDING_LIMIT_MS = 3 * 60_000;
+/** Enough time for an already audible reply and a short farewell; broken providers cannot hold a call. */
+export const DEFAULT_VOICE_GRACEFUL_END_TIMEOUT_MS = 60_000;
 // Synthesis can outrun speech. Keep at most one second ahead of real time,
 // in 100ms writes, instead of bursting an entire answer into Vox's 15s queue.
 const PLAYBACK_CHUNK_BYTES = (REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES) / 10;
@@ -318,6 +322,18 @@ export interface DiscordVoiceSessionStatus {
    * window, so `engaged` may be true while `floorState` is `"dormant"`.
    */
   readonly engaged: boolean;
+  /** Host cap/sleep shutdown has stopped admitting new captures and replies. */
+  readonly ending?: boolean;
+}
+
+export interface DiscordVoiceAnnouncementResult {
+  /** Spoken means correlated Vox playback drained; provider generation alone is insufficient. */
+  readonly outcome: "spoken" | "incomplete" | "inactive";
+}
+
+export interface DiscordVoiceGracefulEndResult {
+  readonly outcome: "finished" | "incomplete" | "inactive";
+  readonly announcement: DiscordVoiceAnnouncementResult["outcome"];
 }
 
 /** Exact final speech after consent and authenticated Discord attribution. */
@@ -354,6 +370,8 @@ export interface VoiceConversationPort {
   readonly isOpen: boolean;
   appendAudio(pcm: Buffer): void;
   createTextItem(text: string): void;
+  /** Replace trusted persona instructions while preserving an admitted response/playback. */
+  updateInstructions?(text: string): void;
   createImageItem(pngBase64: string, mimeType?: "image/png"): void;
   createResponse(context?: string, shouldStart?: () => boolean): void;
   /** Stops the provider generating (and an external mouth voicing) a reply nobody will hear. */
@@ -370,6 +388,10 @@ export interface VoiceTranscriptionHandlers {
 }
 
 export interface VoiceConversationOpenInput {
+  /** Trusted admission checked after socket acquisition, before private configuration. */
+  readonly guard?: () => Promise<void>;
+  /** Synchronous final fence before provider construction after the awaited guard. */
+  readonly current?: () => boolean;
   /** Private generated wording; separate from content-free receipts. */
   readonly onOutputTranscript?: (event: RealtimeTranscriptEvent, source: "native_audio" | "tts_text") => void;
   readonly instructions: string;
@@ -398,6 +420,8 @@ export interface DiscordVoiceRealtimePorts {
 export interface DiscordVoiceBriefingRequest {
   readonly guildId: string;
   readonly channelId: string;
+  /** Captured authenticated initiator; the host keeps tenant/persona owner separate. */
+  readonly actorId?: string;
   /** The current explicit consents; the service resolves person memory for exactly these ids. */
   readonly consentedUserIds: readonly string[];
 }
@@ -452,6 +476,8 @@ export interface DiscordVoiceSessionOptions {
    * {@link DEFAULT_NARRATION_MIN_INTERVAL_MS}.
    */
   readonly narrationMinIntervalMs?: number;
+  /** Bounds each consented per-speaker capture by both elapsed time and PCM duration. */
+  readonly recordingLimitMs?: number;
   readonly presenceSessionId: () => string;
   readonly emit: (evidence: DiscordVoiceEvidence) => Promise<void>;
   /**
@@ -541,6 +567,9 @@ interface PendingVoiceResponse {
   modelResponseEmitted?: boolean;
   /** Set synchronously when this response chose a function instead of speech. */
   toolCalled?: boolean;
+  /** Only this host-authored response may start during a graceful cap/sleep ending. */
+  hostNotice?: boolean;
+  playbackOutcome?: PlaybackJob["outcome"];
 }
 
 interface VoiceInputTiming {
@@ -607,6 +636,7 @@ interface ActiveCapture {
   /** Bounded, private lead-in; wiped on forwarding, filtering, or cancellation. */
   preroll: Buffer;
   forwarding: boolean;
+  limitTimer?: unknown;
 }
 
 const defaultTimers: RealtimeTimers = {
@@ -678,6 +708,9 @@ export class DiscordVoiceSession {
   /** Rate-limits play narration responses so play does not become a monologue. */
   private lastNarrationResponseAtMs = Number.NEGATIVE_INFINITY;
   private readonly narrationMinIntervalMs: number;
+  private readonly recordingLimitMs: number;
+  private ending = false;
+  private gracefulEnd: Promise<DiscordVoiceGracefulEndResult> | undefined;
   private stayId: string | undefined;
   private bodyLease: VoiceBodyAdmission | undefined;
   private stayInputTokens = 0;
@@ -717,7 +750,7 @@ export class DiscordVoiceSession {
   private readonly roomTextDeliveryIds = new Set<string>();
 
   private readonly onSpeakingStart = (userId: string): void => {
-    if (!this.voiceReady || this.guildId === undefined || this.channelId === undefined) return;
+    if (this.ending || !this.voiceReady || this.guildId === undefined || this.channelId === undefined) return;
     // The consent boundary (ADR 0045/0057, mission criterion 3): an
     // unconsented participant is never subscribed, so their audio can never
     // reach an input_audio_buffer.append.
@@ -741,6 +774,9 @@ export class DiscordVoiceSession {
     this.consent = new DiscordVoiceConsentRegistry(options.consentPolicy);
     this.floor = new VoiceFloor(options.floor);
     this.narrationMinIntervalMs = options.narrationMinIntervalMs ?? DEFAULT_NARRATION_MIN_INTERVAL_MS;
+    this.recordingLimitMs = options.recordingLimitMs ?? DEFAULT_VOICE_RECORDING_LIMIT_MS;
+    if (!Number.isSafeInteger(this.recordingLimitMs) || this.recordingLimitMs < 1)
+      throw new Error("voice_recording_limit_invalid");
     const traceMusic = (event: VoiceMusicTraceEvent): void => this.handleMusicTrace(event);
     this.music = new VoiceMusicQueue({
       sinkKind: "audio",
@@ -975,7 +1011,7 @@ export class DiscordVoiceSession {
 
   /** Offer observations without inventing a human request or choosing an action. */
   private queueMembershipResponse(): void {
-    if (this.membershipDeliveryId === undefined) return;
+    if (this.ending || this.membershipDeliveryId === undefined) return;
     const generation = this.sessionGeneration;
     const guildId = this.guildId;
     const channelId = this.channelId;
@@ -983,7 +1019,8 @@ export class DiscordVoiceSession {
     this.cancelHold();
     this.conversationOps = this.conversationOps
       .then(async () => {
-        if (generation !== this.sessionGeneration || this.membershipDeliveryId === undefined) return;
+        if (this.ending || generation !== this.sessionGeneration || this.membershipDeliveryId === undefined)
+          return;
         const wake = this.conversation === undefined ? "waking" : "continuing";
         if (this.conversation === undefined) await this.openConversationNow(guildId, channelId);
         if (generation !== this.sessionGeneration || this.conversation?.isOpen !== true) return;
@@ -1059,6 +1096,8 @@ export class DiscordVoiceSession {
     // local session inactive first so no failing cleanup command can preserve
     // stale authority, content, or media correlation.
     this.voiceReady = false;
+    this.ending = false;
+    this.gracefulEnd = undefined;
     this.outputMuted = false;
     this.outputControlUncertain = false;
     this.outputStops.clear();
@@ -1075,7 +1114,10 @@ export class DiscordVoiceSession {
     this.daveProtocolVersion = undefined;
     this.sessionGeneration += 1;
     this.consent.close();
-    for (const capture of this.captures.values()) capture.preroll.fill(0);
+    for (const capture of this.captures.values()) {
+      capture.preroll.fill(0);
+      if (capture.limitTimer !== undefined) this.timers.clearTimeout(capture.limitTimer);
+    }
     this.captures.clear();
     this.captureEpochs.clear();
     this.transcriptions.clear();
@@ -1192,6 +1234,231 @@ export class DiscordVoiceSession {
     }
   }
 
+  /** Host call limits are context for his own voice; they never supply a scripted utterance. */
+  public announce(
+    text: string,
+    options?: { readonly timeoutMs?: number },
+  ): Promise<DiscordVoiceAnnouncementResult> {
+    if (this.ending) return Promise.resolve({ outcome: "inactive" });
+    return this.announceNow(text, options?.timeoutMs ?? DEFAULT_VOICE_GRACEFUL_END_TIMEOUT_MS, false);
+  }
+
+  /** Refresh a warm conversation after its body wakes, without cancelling current speech. */
+  public refreshBriefing(): Promise<boolean> {
+    const conversation = this.conversation,
+      guildId = this.guildId,
+      channelId = this.channelId;
+    const generation = this.sessionGeneration;
+    const lease = this.bodyLease;
+    const actorId = this.lastRoomUserId ?? lease?.stay.target.actorId;
+    if (!conversation?.updateInstructions || guildId === undefined || channelId === undefined || this.ending)
+      return Promise.resolve(false);
+    const current = (): boolean =>
+      !this.ending &&
+      generation === this.sessionGeneration &&
+      this.conversation === conversation &&
+      conversation.isOpen &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false;
+    const refresh = this.conversationOps.then(async () => {
+      if (!current()) return false;
+      await lease?.guard(actorId);
+      if (!current()) return false;
+      const briefing = await this.options.briefing({
+        guildId,
+        channelId,
+        ...(actorId === undefined ? {} : { actorId }),
+        consentedUserIds: this.briefingUserIds(guildId, channelId),
+      });
+      await lease?.guard(actorId);
+      if (!current()) return false;
+      conversation.updateInstructions!(briefing.instructions);
+      const text = briefing.briefing.trim();
+      if (text.length > 0) {
+        const prefix = "Private body is ready; current briefing:\n";
+        conversation.createTextItem(
+          prefix + text.slice(0, MAX_REALTIME_TEXT_ITEM_CHARACTERS - prefix.length),
+        );
+      }
+      return true;
+    });
+    this.conversationOps = refresh.then(
+      () => undefined,
+      () => undefined,
+    );
+    return refresh;
+  }
+
+  /**
+   * Stop new work immediately, let admitted speech drain, then give the existing
+   * voice an opportunity to close politely. Timeout is reported as incomplete;
+   * the caller still needs the gateway's leave confirmation before releasing a stay.
+   */
+  public endGracefully(input: {
+    readonly reason: string;
+    readonly message: string;
+    readonly timeoutMs?: number;
+  }): Promise<DiscordVoiceGracefulEndResult> {
+    if (input.message.trim().length === 0) throw new Error("voice_announcement_empty");
+    const timeoutMs = input.timeoutMs ?? DEFAULT_VOICE_GRACEFUL_END_TIMEOUT_MS;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
+      throw new Error("voice_announcement_timeout_invalid");
+    if (this.gracefulEnd !== undefined) return this.gracefulEnd;
+    if (!this.voiceReady) return Promise.resolve({ outcome: "inactive", announcement: "inactive" });
+    const generation = this.sessionGeneration;
+    this.ending = true;
+    this.stopTick();
+    this.cancelHold();
+    this.dropDeferredOffer();
+    this.music.stop();
+    const ending = (async (): Promise<DiscordVoiceGracefulEndResult> => {
+      const announcement = await this.announceNow(input.message, timeoutMs, true);
+      if (generation !== this.sessionGeneration)
+        return { outcome: "inactive", announcement: announcement.outcome };
+      if (announcement.outcome !== "spoken" && this.guildId !== undefined && this.channelId !== undefined)
+        await this.emitSafely({
+          type: "failed",
+          guildId: this.guildId,
+          channelId: this.channelId,
+          stage: "playback",
+          code: "voice_graceful_end_incomplete",
+        });
+      await this.leave(input.reason);
+      return {
+        outcome: announcement.outcome === "spoken" ? "finished" : "incomplete",
+        announcement: announcement.outcome,
+      };
+    })();
+    this.gracefulEnd = ending;
+    return ending;
+  }
+
+  private async announceNow(
+    text: string,
+    timeoutMs: number,
+    allowEnding: boolean,
+  ): Promise<DiscordVoiceAnnouncementResult> {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) throw new Error("voice_announcement_empty");
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
+      throw new Error("voice_announcement_timeout_invalid");
+    if (!this.voiceReady) return { outcome: "inactive" };
+    const generation = this.sessionGeneration;
+    const guildId = this.guildId!;
+    const channelId = this.channelId!;
+    let active = true;
+    let pending: PendingVoiceResponse | undefined;
+    let polling: unknown;
+    let stopWaiting: (() => void) | undefined;
+    const current = () =>
+      active && generation === this.sessionGeneration && this.voiceReady && (allowEnding || !this.ending);
+    const waitUntil = (ready: () => boolean): Promise<boolean> =>
+      new Promise((resolve) => {
+        const poll = () => {
+          polling = undefined;
+          if (!current() || ready()) {
+            stopWaiting = undefined;
+            resolve(current());
+          } else polling = this.timers.setTimeout(poll, 100);
+        };
+        stopWaiting = () => resolve(false);
+        poll();
+      });
+    const idle = () =>
+      this.captures.size === 0 &&
+      this.pendingResponses.length === 0 &&
+      this.playingJob === undefined &&
+      this.openPlayback === undefined;
+    let timeout: unknown;
+    const expired = new Promise<DiscordVoiceAnnouncementResult>((resolve) => {
+      timeout = this.timers.setTimeout(() => {
+        active = false;
+        stopWaiting?.();
+        resolve({ outcome: "incomplete" });
+      }, timeoutMs);
+    });
+    const work = (async (): Promise<DiscordVoiceAnnouncementResult> => {
+      await this.conversationOps;
+      if (!(await waitUntil(idle))) return { outcome: "incomplete" };
+      const requested = this.conversationOps.then(async () => {
+        if (!current() || !idle() || this.outputMuted) return;
+        this.cancelHold();
+        const wake: DiscordVoiceWake = this.conversation === undefined ? "waking" : "continuing";
+        if (this.conversation === undefined) await this.openConversationNow(guildId, channelId);
+        if (!current() || this.conversation?.isOpen !== true) return;
+        pending = {
+          deliveryId: randomUUID(),
+          wake,
+          fastPath: true,
+          trigger: "narration",
+          state: "settled",
+          handoffMs: 0,
+          decidedAtMs: this.clock(),
+          done: false,
+          hostNotice: true,
+          isCurrent: current,
+        };
+        this.pendingResponses.push(pending);
+        const prefix = "Call status from the host (operational context, not participant speech):\n";
+        this.conversation.createTextItem(
+          prefix + trimmed.slice(0, MAX_REALTIME_TEXT_ITEM_CHARACTERS - prefix.length),
+        );
+        void this.emitSafely({
+          type: "model_response",
+          guildId,
+          channelId,
+          deliveryId: pending.deliveryId,
+          phase: "requested",
+        });
+        this.conversation.createResponse(
+          "Briefly tell the room this call status in your own words. Keep it polite and clear.",
+          this.responseGuard(pending),
+        );
+      });
+      this.conversationOps = requested.catch(() => undefined);
+      await requested;
+      if (pending === undefined) return { outcome: "incomplete" };
+      const notice = pending;
+      if (!(await waitUntil(() => !this.pendingResponses.includes(notice)))) return { outcome: "incomplete" };
+      return {
+        outcome:
+          notice.playbackOutcome === "drained" &&
+          notice.firstAudioAtMs !== undefined &&
+          !notice.audioLimitReached &&
+          !notice.invalidated &&
+          (notice.responseMeta === undefined || notice.responseMeta.status === "completed")
+            ? "spoken"
+            : "incomplete",
+      };
+    })().catch((): DiscordVoiceAnnouncementResult => ({ outcome: "incomplete" }));
+    try {
+      return await Promise.race([work, expired]);
+    } finally {
+      active = false;
+      this.timers.clearTimeout(timeout);
+      if (polling !== undefined) this.timers.clearTimeout(polling);
+      stopWaiting?.();
+      if (
+        generation === this.sessionGeneration &&
+        pending !== undefined &&
+        this.pendingResponses.includes(pending)
+      ) {
+        pending.invalidated = true;
+        this.cancelInFlight(pending);
+        for (const job of new Set([this.openPlayback, this.playingJob])) {
+          if (job?.pending !== pending || job.outcome !== undefined) continue;
+          this.failPlayback(job, "voice_announcement_incomplete");
+        }
+        // A provider without a correlated cancellation must not speak a late warning.
+        try {
+          this.conversation?.close();
+        } catch {
+          // The caller records the incomplete announcement and may still end the call.
+        }
+      }
+    }
+  }
+
   /**
    * A bounded play update from another body (ADR 0064 / ADR 0123).
    *
@@ -1210,6 +1477,7 @@ export class DiscordVoiceSession {
     text: string,
     options?: { readonly deliveryId?: string; readonly respond?: boolean },
   ): Promise<void> {
+    if (this.ending) throw new Error("voice_call_ending");
     const trimmed = text.trim();
     if (trimmed.length === 0) throw new Error("voice_narration_empty");
     const guildId = this.guildId;
@@ -1220,12 +1488,12 @@ export class DiscordVoiceSession {
     const generation = this.sessionGeneration;
     this.cancelHold();
     const queued = this.conversationOps.then(async () => {
-      if (generation !== this.sessionGeneration) return;
+      if (this.ending || generation !== this.sessionGeneration) return;
       let wake: DiscordVoiceWake = "continuing";
       if (this.conversation === undefined) {
         wake = "waking";
         await this.openConversationNow(guildId, channelId);
-        if (generation !== this.sessionGeneration || this.conversation === undefined) return;
+        if (this.ending || generation !== this.sessionGeneration || this.conversation === undefined) return;
       }
       const conversation = this.conversation;
       if (!conversation.isOpen) return;
@@ -1313,6 +1581,7 @@ export class DiscordVoiceSession {
    */
   public receiveRoomText(input: DiscordVoiceRoomTextInput): boolean {
     if (input.guildId !== this.guildId || input.channelId !== this.channelId) return false;
+    if (this.ending) return true;
     const text = input.text.trim().slice(0, DISCORD_ROOM_TEXT_MAX_CHARS);
     if (text.length === 0) return false;
     if (this.roomTextDeliveryIds.has(input.deliveryId)) return true;
@@ -1426,6 +1695,7 @@ export class DiscordVoiceSession {
   public status(): DiscordVoiceSessionStatus {
     return {
       active: this.voiceReady,
+      ending: this.ending,
       outputMuted: this.outputMuted,
       ...(this.voiceReady &&
       this.guildId !== undefined &&
@@ -1537,7 +1807,13 @@ export class DiscordVoiceSession {
   private async capture(userId: string): Promise<void> {
     const guildId = this.guildId;
     const channelId = this.channelId;
-    if (!this.voiceReady || guildId === undefined || channelId === undefined || this.captures.has(userId)) {
+    if (
+      this.ending ||
+      !this.voiceReady ||
+      guildId === undefined ||
+      channelId === undefined ||
+      this.captures.has(userId)
+    ) {
       return;
     }
     const generation = this.sessionGeneration;
@@ -1585,9 +1861,11 @@ export class DiscordVoiceSession {
       generation !== this.sessionGeneration ||
       epoch !== (this.captureEpochs.get(userId) ?? 0) ||
       this.captures.get(userId) !== capture ||
+      this.ending ||
       !this.voiceReady ||
       !this.consent.permits(guildId, channelId, userId)
     ) {
+      if (this.captures.get(userId) === capture) this.cancelCapture(userId);
       this.removeTranscriptTurn(turn);
       return;
     }
@@ -1596,6 +1874,10 @@ export class DiscordVoiceSession {
         sampleRate: REALTIME_AUDIO_SAMPLE_RATE,
         silenceDurationMs: CAPTURE_END_SILENCE_MS,
       });
+      capture.limitTimer = this.timers.setTimeout(() => {
+        capture.limitTimer = undefined;
+        void this.finishCapture(userId, capture.captureId);
+      }, this.recordingLimitMs);
     } catch {
       if (this.captures.get(userId) === capture) {
         this.captures.delete(userId);
@@ -1634,7 +1916,13 @@ export class DiscordVoiceSession {
       frame.pcm.fill(0);
       return;
     }
-    const pcm = Buffer.from(frame.pcm.buffer, frame.pcm.byteOffset, frame.pcm.byteLength);
+    const remainingBytes = Math.max(
+      0,
+      Math.floor((this.recordingLimitMs * REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES) / 1_000) -
+        capture.audioBytes,
+    );
+    const acceptedBytes = Math.floor(Math.min(frame.pcm.byteLength, remainingBytes) / 2) * 2;
+    const pcm = Buffer.from(frame.pcm.buffer, frame.pcm.byteOffset, acceptedBytes);
     capture.audioBytes += pcm.byteLength;
     if (capture.turn.inputTiming !== undefined) capture.turn.inputTiming.lastAudioAtMs = this.clock();
     const rms = pcmRms(pcm);
@@ -1670,6 +1958,8 @@ export class DiscordVoiceSession {
       this.forwardAudio(capture.transcription, pcm);
     }
     frame.pcm.fill(0);
+    if (acceptedBytes < frame.pcm.byteLength || acceptedBytes >= remainingBytes)
+      void this.finishCapture(frame.userId, frame.captureId);
   }
 
   private async finishCapture(userId: string, captureId: string): Promise<void> {
@@ -1677,6 +1967,7 @@ export class DiscordVoiceSession {
     const guildId = this.guildId;
     const channelId = this.channelId;
     if (capture === undefined || capture.captureId !== captureId) return;
+    if (capture.limitTimer !== undefined) this.timers.clearTimeout(capture.limitTimer);
     this.captures.delete(userId);
     this.captureEpochs.set(userId, capture.epoch + 1);
     if (capture.turn.inputTiming !== undefined) capture.turn.inputTiming.captureEndedAtMs = this.clock();
@@ -1741,6 +2032,7 @@ export class DiscordVoiceSession {
     this.captureEpochs.set(userId, (this.captureEpochs.get(userId) ?? 0) + 1);
     this.captures.delete(userId);
     if (capture !== undefined) {
+      if (capture.limitTimer !== undefined) this.timers.clearTimeout(capture.limitTimer);
       capture.preroll.fill(0);
       this.removeTranscriptTurn(capture.turn);
     }
@@ -1915,6 +2207,7 @@ export class DiscordVoiceSession {
   }
 
   private applyRoomUtterance(turn: RoomTurn, text: string, source: RoomInputSource): void {
+    if (this.ending) return;
     const guildId = this.guildId;
     const channelId = this.channelId;
     if (guildId === undefined || channelId === undefined) return;
@@ -2225,6 +2518,7 @@ export class DiscordVoiceSession {
     responseContext?: string,
     isCurrent?: () => boolean,
   ): void {
+    if (this.ending) return;
     const roomEpoch = this.roomResponseEpoch;
     const generation = this.sessionGeneration;
     const responseEpoch = this.speakerResponseEpochs.get(turn.userId) ?? 0;
@@ -2233,6 +2527,7 @@ export class DiscordVoiceSession {
     this.conversationOps = this.conversationOps
       .then(async () => {
         if (
+          this.ending ||
           generation !== this.sessionGeneration ||
           roomEpoch !== this.roomResponseEpoch ||
           isCurrent?.() === false ||
@@ -2251,6 +2546,7 @@ export class DiscordVoiceSession {
           }
         }
         if (
+          this.ending ||
           roomEpoch !== this.roomResponseEpoch ||
           responseEpoch !== (this.speakerResponseEpochs.get(turn.userId) ?? 0)
         )
@@ -2311,6 +2607,7 @@ export class DiscordVoiceSession {
     return () => {
       if (
         generation === this.sessionGeneration &&
+        (!this.ending || pending.hostNotice === true) &&
         !pending.superseded &&
         !pending.invalidated &&
         pending.isCurrent?.() !== false
@@ -2335,15 +2632,34 @@ export class DiscordVoiceSession {
     preferredSpeakerId?: string,
   ): Promise<void> {
     const generation = this.sessionGeneration;
+    const lease = this.bodyLease;
+    const actorId = preferredSpeakerId ?? lease?.stay.target.actorId;
+    const ending = this.ending;
+    const isCurrent = (): boolean =>
+      generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
+      this.guildId === guildId &&
+      this.channelId === channelId &&
+      this.ending === ending;
+    const guard = async (): Promise<void> => {
+      await lease?.guard(actorId);
+      if (!isCurrent()) throw new Error("voice_session_stale");
+    };
     let briefing: DiscordVoiceBriefing;
     try {
+      if (lease !== undefined) await guard();
+      if (!isCurrent()) return;
       briefing = await this.options.briefing({
         guildId,
         channelId,
+        ...(actorId === undefined ? {} : { actorId }),
         // Who may be heard, not who filled in a form: under the `presence`
         // policy those are different sets and only the first one is the room.
         consentedUserIds: this.briefingUserIds(guildId, channelId, preferredSpeakerId),
       });
+      if (lease !== undefined) await guard();
+      if (!isCurrent()) return;
     } catch {
       await this.emitSafely({
         type: "failed",
@@ -2354,11 +2670,12 @@ export class DiscordVoiceSession {
       });
       return;
     }
-    if (generation !== this.sessionGeneration) return;
     let port: VoiceConversationPort | undefined;
     let opening = true;
     try {
       port = await this.options.realtime.openConversation({
+        ...(lease === undefined ? {} : { guard }),
+        current: isCurrent,
         instructions: briefing.instructions,
         onOutputTranscript: (event, source) => {
           if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(event.itemId)) return;
@@ -2465,7 +2782,14 @@ export class DiscordVoiceSession {
     } finally {
       opening = false;
     }
-    if (generation !== this.sessionGeneration) {
+    let admitted = false;
+    try {
+      if (lease !== undefined) await guard();
+      admitted = isCurrent();
+    } catch {
+      // Provider startup may also span a revocation. Do not install or seed it.
+    }
+    if (!admitted) {
       try {
         port.close();
       } catch {
@@ -2636,6 +2960,11 @@ export class DiscordVoiceSession {
     const exchange = this.pendingResponses.find((candidate) => !candidate.done);
     if (exchange !== undefined) exchange.toolCalled = true;
     this.emitRealtimeTool(call, exchange, "called", guildId, channelId);
+    if (this.ending) {
+      this.submitFunctionResultSafely(call.callId, "The call is ending; no new actions can start.", false);
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "call_ending");
+      return;
+    }
     if (exchange?.superseded || exchange?.isCurrent?.() === false) {
       this.submitFunctionResultSafely(
         call.callId,
@@ -2754,6 +3083,28 @@ export class DiscordVoiceSession {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
+    const lease = this.bodyLease;
+    const conversation = this.conversation;
+    const actorId = exchange?.speakerId ?? lease?.stay.target.actorId;
+    const isCurrent = (): boolean =>
+      generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
+      this.conversation === conversation &&
+      conversation?.isOpen === true &&
+      !this.ending;
+    const guardCurrent = async (): Promise<boolean> => {
+      try {
+        await lease?.guard(actorId);
+        return isCurrent();
+      } catch {
+        return false;
+      }
+    };
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     let args: Record<string, unknown> | undefined;
     try {
       const parsed: unknown = JSON.parse(call.argumentsJson || "{}");
@@ -2786,7 +3137,7 @@ export class DiscordVoiceSession {
         code = "self_tool_failed";
       }
     }
-    if (generation !== this.sessionGeneration) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3002,10 +3353,27 @@ export class DiscordVoiceSession {
       return;
     }
     const conversation = this.conversation;
+    const lease = this.bodyLease;
+    const actorId = exchange?.speakerId;
     const isCurrent = (): boolean =>
       generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
       this.conversation === conversation &&
-      conversation?.isOpen === true;
+      conversation?.isOpen === true &&
+      !this.ending;
+    const guardCurrent = async (): Promise<boolean> => {
+      try {
+        await lease?.guard(actorId);
+        return isCurrent();
+      } catch {
+        return false;
+      }
+    };
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     const request = parseAskClankieRequest(call.argumentsJson);
     if (request === undefined) {
       this.submitLocalFunctionResult(call.callId, CAPTAIN_UNREACHABLE_TEXT, exchange, guildId, channelId);
@@ -3108,7 +3476,7 @@ export class DiscordVoiceSession {
     } catch {
       // The session must not hang on a captain failure: a short fixed
       // sentence goes back so the model can close the exchange.
-      if (!isCurrent()) {
+      if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
         this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
         return;
       }
@@ -3140,7 +3508,7 @@ export class DiscordVoiceSession {
       }
     }
     const handoffMs = this.clock() - startedAtMs;
-    if (!isCurrent()) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3828,6 +4196,7 @@ export class DiscordVoiceSession {
   private settlePlayback(job: PlaybackJob, outcome: "drained" | "stopped" | "failed" | "timeout"): void {
     if (job.outcome !== undefined) return;
     job.outcome = outcome;
+    job.pending.playbackOutcome = outcome;
     this.emitSpokenTranscript(
       job.pending,
       outcome === "failed" || outcome === "timeout"
@@ -4134,22 +4503,29 @@ export class DiscordVoiceSession {
     const channelId = this.channelId;
     if (conversation === undefined || guildId === undefined || channelId === undefined) return;
     const generation = this.sessionGeneration;
+    const lease = this.bodyLease;
+    const actorId = preferredSpeakerId ?? this.lastRoomUserId ?? lease?.stay.target.actorId;
+    const isCurrent = (): boolean =>
+      generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
+      this.conversation === conversation &&
+      conversation.isOpen &&
+      !this.ending;
     this.conversationOps = this.conversationOps
       .then(async () => {
-        if (
-          generation !== this.sessionGeneration ||
-          this.conversation !== conversation ||
-          !conversation.isOpen
-        ) {
-          return;
-        }
+        if (lease !== undefined) await lease.guard(actorId);
+        if (!isCurrent()) return;
         const briefing = await this.options.briefing({
           guildId,
           channelId,
+          ...(actorId === undefined ? {} : { actorId }),
           consentedUserIds: this.briefingUserIds(guildId, channelId, preferredSpeakerId),
         });
+        if (lease !== undefined) await lease.guard(actorId);
+        if (!isCurrent()) return;
         const text = briefing.briefing.trim();
-        if (text.length > 0 && this.conversation === conversation && conversation.isOpen) {
+        if (text.length > 0) {
           const prefix = "Room participant briefing refresh:\n";
           conversation.createTextItem(
             prefix + text.slice(0, MAX_REALTIME_TEXT_ITEM_CHARACTERS - prefix.length),

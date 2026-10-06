@@ -144,3 +144,34 @@ it("admits different speakers independently and rejects stale asks before dispat
   fail(new Error("gone"));
   await failed;
 });
+
+it("discards a revoked captain result without replaying the durably admitted action", async () => {
+  let authorized = true;
+  let entered!: () => void;
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const ingress = new DiscordVoiceIngress(
+    {
+      getHealth: async () => ({ profileHash: "p" }),
+      submitDiscordCaptainChannelTurn: async () => {
+        calls++;
+        entered();
+        await wait;
+        return { state: "settled", captainSessionId: "s", turnId: "t", response: "Private result" };
+      },
+    },
+    { characterId: "clankie", credentialRef: "discord_bot", transportKind: "bot" },
+  );
+  const result = ingress.handle({ ...turn, isCurrent: () => authorized });
+  await ready;
+  authorized = false;
+  release();
+  await expect(result).resolves.toEqual({ state: "failed", code: "voice_session_stale" });
+  expect(calls).toBe(1);
+});

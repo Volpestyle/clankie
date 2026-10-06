@@ -9,6 +9,7 @@ import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneToolBank } from "../src/captain/port.ts";
 import type { FleetSeatDelivery } from "../src/captain/fleet-seat.ts";
+import { DesktopExpressions } from "../src/captain/desktop.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -55,6 +56,7 @@ test.each(["pi", "claude", "codex"])(
     const { root, captain } = await fixture();
     const send = vi.spyOn(HerdrWatchStore.prototype, "deliverToSeat");
     const spawn = vi.spyOn(HerdrWatchStore.prototype, "spawnSeat");
+    const cue = vi.spyOn(DesktopExpressions.prototype, "recordHire");
     try {
       const bank = await captain.laneToolBank("operator", "global-default");
       expect(
@@ -71,6 +73,7 @@ test.each(["pi", "claude", "codex"])(
         control: { mode: "unavailable", reason: "adapter_unavailable" },
       });
       expect(send).not.toHaveBeenCalled();
+      expect(cue).not.toHaveBeenCalled();
       const brief = spawn.mock.calls[0]?.[2];
       expect(brief).toMatch(/^Implement SPEC.md and report the tests.\n\n/u);
       expect(
@@ -97,6 +100,7 @@ test.each([
   "message_seat preserves the structured $outcome receipt for every returned seat address",
   async (delivery) => {
     const { root, captain } = await fixture();
+    const cue = vi.spyOn(DesktopExpressions.prototype, "recordHire");
     vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(
       async (_seat, _subject, _brief, _resume, _authority, adopt) => {
         const result = {
@@ -133,6 +137,7 @@ test.each([
         brief: "Implement SPEC.md.",
       });
       expect(hired).toMatchObject({ outcome: "spawned", brief: { outcome: "delivered" } });
+      expect(cue).toHaveBeenCalledOnce();
       const seat = hired.seat as { seatId: string; personaId: string; conversationId: string };
       for (const target of [seat.seatId, seat.personaId, seat.conversationId]) {
         expect(await call(bank, "message_seat", { seat: target, message: "Follow up once." })).toMatchObject({

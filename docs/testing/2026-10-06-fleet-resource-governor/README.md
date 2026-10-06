@@ -11,17 +11,19 @@ and simulator leases share the same OS-account registry across worktrees.
 receipts, process exit proofs, policy, budgets, source hashes and cleanup.
 Raw local artifacts remain under `.local/verification/vuh1740` and the named
 `.local/vuh1740-*.json` paths, with their hashes in the committed summaries.
-The measurement used the candidate working tree based on `72c1571a`; its recorded
-source hashes identify the measured inputs independently of the eventual commit.
+The final candidate composes main `2e1c08be`, preserving runtime health, metrics,
+Linear budget and game wiring. Recorded source hashes identify measured inputs
+independently of the eventual evidence commit. Affected checks were rerun after
+composition; unchanged native-process cases retain their valid preceding proof.
 
 | Proof                                                 | Result                                                                                                                  |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Ten real command processes, private two-slot registry | Max active **2**, max permits **2**, max queued **8**                                                                   |
-| Service health p95, baseline / burst                  | **0.98 / 0.97 ms**, budget 250 ms                                                                                       |
-| Service CPU mean, baseline / burst                    | **0.51 / 1.51%** of one core, budget 10%                                                                                |
-| Owned job memory                                      | 16 MiB allocation, max observed RSS **31.75 MiB**                                                                       |
+| Service health p95, baseline / burst                  | **1.03 / 1.03 ms**, budget 250 ms                                                                                       |
+| Service CPU mean, baseline / burst                    | **0.54 / 1.35%** of one core, budget 10%                                                                                |
+| Owned job memory                                      | 16 MiB allocation, max observed RSS **31.80 MiB**                                                                       |
 | Cleanup                                               | Ten exact process births exited, zero leases/queue, owned service and drivers exited                                    |
-| Focused tests                                         | **130 pass**, zero failures; 14 files across coordinated runs                                                           |
+| Focused tests                                         | **131 pass**, zero failures; 14 files across coordinated runs                                                           |
 | Typechecks                                            | Protocol, governor, settings, service and TUI pass; multi-package checks serialized                                     |
 | Packaging                                             | Isolated bundled launcher help and native runner pass; child exit 17 preserved; both worker skills copied and validated |
 
@@ -48,11 +50,12 @@ The burst reuses VUH-1706's real Captain/service embedding and isolated Herdr
 server. It adds ten governed command processes without hiring agents. The fixture
 owner deliberately sets load/core 16 and minimum memory 0 to isolate admission
 and queueing; default pressure refusal is tested separately with controlled
-sensors. Discord, models and other body providers are absent. CPU is the service
+sensors. This uses the Captain/service embedding rather than full index startup.
+Discord, models and other body providers are absent. CPU is the service
 process and excludes helper/command CPU. This complements the existing release
 worker-bridge gate; it does not replace it.
 
-The run took **67.7 seconds** for ten two-second jobs, with the first command at
+The run took **67.1 seconds** for ten two-second jobs, with the first command at
 13.9 seconds. Those admission delays have not been profiled. No command startup
 latency budget is claimed. Linux failure branches have captured fixtures but no
 live Linux kernel/container proof; the Docker daemon was unavailable. Python 3

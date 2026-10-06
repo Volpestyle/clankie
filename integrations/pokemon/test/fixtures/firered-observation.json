@@ -1,0 +1,47 @@
+{
+  "sessionId": "session-clankie",
+  "bodyGeneration": 1,
+  "gameId": "firered",
+  "adapterVersion": 2,
+  "frame": 10,
+  "observedAt": "2026-08-16T00:00:00.000Z",
+  "scene": {
+    "mode": "overworld",
+    "inputReady": true,
+    "waitingForAdvance": false,
+    "decoded": true
+  },
+  "minimap": {
+    "topLeft": {
+      "mapId": "pallet-town/players-house-2f",
+      "x": 12,
+      "y": 12
+    },
+    "rows": ["...", ".@.", "..."],
+    "exits": []
+  },
+  "state": {
+    "overworld": {
+      "mapId": "pallet-town/players-house-2f",
+      "mapGroup": 4,
+      "mapNum": 1,
+      "x": 13,
+      "y": 13,
+      "facing": "north"
+    },
+    "party": [
+      {
+        "slot": 0,
+        "speciesId": 1,
+        "level": 5,
+        "currentHp": 20,
+        "maxHp": 20,
+        "moveIds": [33]
+      }
+    ],
+    "fieldInputReady": true,
+    "npcs": [],
+    "dialogLines": [],
+    "menu": null
+  }
+}

@@ -306,9 +306,11 @@ it at login; it does not keep the Mac awake.
 ### Connect your services
 
 Use `/connect` for available account integrations;
-[`clankie accounts`](/cli/#accounts-list-accounts-connect-github-linear-accounts-disconnect-provider-accounts-apps)
-inspects connected GitHub and Linear accounts. Secret entry stays in the console.
-GitHub, Linear, and mailbox connections have different setup and access rules. Clankie's mailbox connection
+[`clankie accounts`](/cli/#accounts-list-accounts-connect-provider-accounts-disconnect-provider-accounts-apps)
+inspects the body's GitHub, Linear and Google catalog. Google Gmail/Calendar
+consent is read-only; Drive uses a file picker and selected-file permissions,
+with reading tools. Secret entry stays in the console.
+Account and mailbox connections have different setup and access rules. Clankie's mailbox connection
 is his own address, not automatic access to your personal inbox. The
 [credential guide](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)
 owns account identities and secret storage.

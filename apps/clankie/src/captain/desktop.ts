@@ -8,6 +8,7 @@ import {
   DesktopAnimationSchema,
   DesktopExpressionSchema,
   type DesktopExpression,
+  type OperatorPresenceBeat,
 } from "@clankie/protocol/presence";
 
 const duration = z.number().int().min(1000).max(30000).default(5000);
@@ -29,6 +30,7 @@ const DesktopRequestSchema = z.discriminatedUnion("kind", [
 /** One bounded, process-local expression, independent of the source-derived mood. */
 export class DesktopExpressions {
   private expression: DesktopExpression | undefined;
+  private hire: OperatorPresenceBeat | undefined;
   private readonly settings: () => Promise<DesktopSettings>;
   private readonly now: () => number;
   constructor(settings: () => Promise<DesktopSettings>, now: () => number = Date.now) {
@@ -51,6 +53,20 @@ export class DesktopExpressions {
       expiresAt: new Date(now + durationMs).toISOString(),
     });
     return { outcome: "published" as const, expression: this.expression };
+  }
+
+  /** Only the completed hire path calls this; reconnects and resumes are not hires. */
+  recordHire(): void {
+    this.hire = { id: randomUUID(), kind: "hire", at: new Date(this.now()).toISOString() };
+  }
+
+  recentHire(): OperatorPresenceBeat | undefined {
+    const age = this.hire ? this.now() - Date.parse(this.hire.at) : Infinity;
+    return age >= 0 && age < 10_000 ? this.hire : undefined;
+  }
+
+  async beatsAreQuiet(): Promise<boolean> {
+    return desktopIsQuiet(await this.settings(), new Date(this.now()));
   }
 
   async current(): Promise<DesktopExpression | undefined> {

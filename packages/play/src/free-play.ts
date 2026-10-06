@@ -8,6 +8,15 @@ import {
 } from "@clankie/interactive-environment";
 import { EnvironmentAdapterActionError } from "./body-seam.ts";
 import { z } from "zod";
+import type { EmbodimentBudget } from "@clankie/protocol";
+import {
+  FreePlayUsageSchema,
+  emptyFreePlayUsage,
+  unreportedFreePlayUsage,
+  addFreePlayUsage,
+  type FreePlayUsage,
+  type FreePlayUsageReporter,
+} from "./free-play-usage.ts";
 import {
   FREE_PLAY_INTENT_MAX,
   FREE_PLAY_HARD_FAILURE_LIMIT,
@@ -189,6 +198,7 @@ export const FreePlayTurnEvidenceSchema = z
         objectiveRecovery: z.boolean().default(false),
         verifiedInteractions: z.array(z.string().max(700)).max(FREE_PLAY_HARD_FAILURE_LIMIT).default([]),
         decisionPreemptions: z.number().int().nonnegative().default(0),
+        stateRedecisions: z.number().int().nonnegative().default(0),
       })
       .strict(),
     timing: z
@@ -306,12 +316,14 @@ interface VerifiedInteraction {
  * emit anything, and rejecting it is part of what this loop must survive.
  */
 export interface FreePlayMind {
-  decide(view: FreePlayView, signal?: AbortSignal): Promise<unknown>;
+  readonly metered?: boolean;
+  decide(view: FreePlayView, signal?: AbortSignal, onUsage?: FreePlayUsageReporter): Promise<unknown>;
 }
 
 export const FreePlayTurnSchema = z
   .object({
     turn: z.number().int().nonnegative(),
+    usage: FreePlayUsageSchema.optional(),
     /** Digest of the decoded observations the decision was made from. */
     observationSha256: z.string().regex(/^[0-9a-f]{64}$/u),
     /** Frame the decision was made at, when the core rendered one. */
@@ -340,7 +352,15 @@ export const FreePlayTurnSchema = z
      */
     speakWanted: z.boolean().default(false),
     action: FreePlayActionSchema.nullable(),
-    outcome: z.enum(["accepted", "rejected_by_adapter", "invalid_decision", "mind_failed"]),
+    outcome: z.enum([
+      "accepted",
+      "rejected_by_adapter",
+      "invalid_decision",
+      "mind_failed",
+      "state_changed",
+      "budget_exhausted",
+      "stopped",
+    ]),
     /** Bounded reason when the turn did not produce an accepted action. */
     detail: z.string().max(400).nullable(),
     /**
@@ -416,7 +436,15 @@ interface FreePlayVolition {
   skipped: number;
 }
 
+export interface FreePlayNotable {
+  kind: "stuck" | "objectives_retired" | "mind_unavailable" | "world_ended" | "budget_exhausted";
+  turn: number;
+  count: number;
+}
+
 export interface FreePlayResult {
+  outcome?: "mind_unavailable" | "budget_exhausted";
+  usage?: FreePlayUsage;
   turns: FreePlayTurn[];
   progress: FreePlayProgress;
   volition: FreePlayVolition;
@@ -468,30 +496,38 @@ const OBSERVED_KINDS: GbaEmulatorObservationKind[] = [
  *
  * Injection is asynchronous. A message offered while the mind is deciding
  * aborts that proposal so the same turn can be decided again with the new words.
- * Only the most recent message survives: a backlog of stale questions answered
- * several turns late reads worse than the newest one answered now.
+ * Later lines wait in a bounded FIFO once the turn has used its two preemptions.
  */
 export class InterjectionQueue {
-  private pending: string | null = null;
+  private pending: string[] = [];
   private readonly listeners = new Set<() => void>();
+  private readonly capacity: number;
+  /** Existing consumers retain a latest-line slot; Pokémon uses a bounded FIFO. */
+  public constructor(capacity = 1) {
+    this.capacity = capacity;
+  }
 
   /** Called from outside the loop, whenever someone says something. */
   public offer(message: string): void {
     const trimmed = message.trim().slice(0, FREE_PLAY_INTERJECTION_MAX);
     if (trimmed.length === 0) return;
-    this.pending = trimmed;
+    // Merge overflow into the last slot, keeping memory and prompt size bounded.
+    if (this.capacity === 1) this.pending = [trimmed];
+    else if (this.pending.length < this.capacity) this.pending.push(trimmed);
+    else
+      this.pending[this.capacity - 1] = `${this.pending[this.capacity - 1]}\n${trimmed}`.slice(
+        -FREE_PLAY_INTERJECTION_MAX,
+      );
     for (const listener of this.listeners) listener();
   }
 
   /** Taken by the next proposal; a later offer preempts it with newer words. */
   public take(): string | null {
-    const message = this.pending;
-    this.pending = null;
-    return message;
+    return this.pending.shift() ?? null;
   }
 
   public hasPending(): boolean {
-    return this.pending !== null;
+    return this.pending.length > 0;
   }
 
   /** Wake an in-flight decision. The queued words remain available to {@link take}. */
@@ -570,6 +606,10 @@ export interface RunFreePlayInput {
    * without tearing down a turn mid-dispatch.
    */
   shouldStop?: () => boolean;
+  budget?: Pick<EmbodimentBudget, "maxTokens" | "maxCostUsd">;
+  onNotable?: (event: FreePlayNotable) => void;
+  /** Injected by fake-based checks; production uses an interruptible wait. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface FreePlaySettledTurn {
@@ -613,9 +653,30 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
   let repeat: { signature: string; turns: number } | null = null;
   let longestUnchangedRun = 0;
   let longestRecurringRun = 0;
+  let consecutiveFailures = 0;
+  let outcome: FreePlayResult["outcome"];
+  const usage = emptyFreePlayUsage();
+  const notableKinds = new Set<FreePlayNotable["kind"]>();
+  const notable = (kind: FreePlayNotable["kind"], turn: number, count: number): void => {
+    if (notableKinds.has(kind)) return;
+    notableKinds.add(kind);
+    try {
+      input.onNotable?.({ kind, turn, count });
+    } catch {
+      /* Information delivery never gates play. */
+    }
+  };
+  const budgetReached = (): boolean =>
+    (input.budget?.maxTokens !== undefined && usage.chargedTokens >= input.budget.maxTokens) ||
+    (input.budget?.maxCostUsd !== undefined &&
+      (usage.estimatedCostUsd === null || usage.estimatedCostUsd >= input.budget.maxCostUsd));
 
   for (let turn = 0; turn < input.turns; turn += 1) {
     if (input.shouldStop?.() === true) break;
+    if (budgetReached()) {
+      outcome = "budget_exhausted";
+      break;
+    }
     let observations = observe(input.io);
     const decisionFingerprint = semanticStateFingerprint(observations, input.framebufferSha256?.() ?? null);
     if (retiredLoopStates !== null && !retiredLoopStates.has(decisionFingerprint)) {
@@ -659,6 +720,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         objectiveRecovery,
         verifiedInteractions,
         decisionPreemptions: 0,
+        stateRedecisions: 0,
       },
       timing: {
         decisionStartedAt,
@@ -669,6 +731,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     };
     const record: FreePlayTurn = {
       turn,
+      usage: emptyFreePlayUsage(),
       observationSha256: sha256(canonicalJson(observations)),
       framebufferSha256: input.framebufferSha256?.() ?? null,
       monologue: null,
@@ -693,6 +756,30 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     let interjection = input.interjections?.take() ?? null;
     record.interjection = interjection;
 
+    const callUsage = (
+      metered: boolean | undefined,
+    ): { report: FreePlayUsageReporter; finish: () => void } => {
+      let reported = false;
+      let finished = false;
+      const report: FreePlayUsageReporter = (value) => {
+        if (finished || reported) return;
+        const validated = FreePlayUsageSchema.parse(value);
+        reported = true;
+        addFreePlayUsage(record.usage!, validated);
+        addFreePlayUsage(usage, validated);
+      };
+      return {
+        report,
+        finish: () => {
+          if (!reported && metered) report(unreportedFreePlayUsage());
+          finished = true;
+        },
+      };
+    };
+    if (stalledForTurns !== null || repeatingForTurns !== null || recurringForTurns !== null) {
+      notable("stuck", turn, Math.max(stalledForTurns ?? 0, repeatingForTurns ?? 0, recurringForTurns ?? 0));
+    }
+    let preActionObservations: GbaEmulatorObservation[] = [];
     let raw: unknown;
     let mindFailed = false;
     let mindFailure: unknown;
@@ -700,7 +787,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     const retiredForView = retiredObjective;
     while (true) {
       const interrupted = new AbortController();
-      const unsubscribe = input.interjections?.subscribe(() => interrupted.abort("room_interjection"));
+      const mayPreempt = evidence.signals.decisionPreemptions < 2;
+      const unsubscribe = mayPreempt
+        ? input.interjections?.subscribe(() => interrupted.abort("room_interjection"))
+        : undefined;
+      const accounting = callUsage(input.mind.metered);
       try {
         input.onPhase?.("thinking");
         objectiveWasStale =
@@ -734,6 +825,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
             history: [...history],
           },
           interrupted.signal,
+          accounting.report,
         );
         raw =
           input.interjections === undefined
@@ -744,12 +836,33 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         mindFailure = error;
       } finally {
         unsubscribe?.();
+        accounting.finish();
       }
-      if (interrupted.signal.aborted || input.interjections?.hasPending() === true) {
-        evidence.signals.decisionPreemptions += 1;
-        interjection = input.interjections?.take() ?? interjection;
+      if (budgetReached() || input.shouldStop?.() === true) {
+        outcome = budgetReached() ? "budget_exhausted" : undefined;
+        record.outcome = outcome ?? "stopped";
+        break;
+      }
+      const currentObservations = observe(input.io);
+      const stateChanged =
+        !mindFailed &&
+        !interrupted.signal.aborted &&
+        decisionStateFingerprint(currentObservations) !== decisionStateFingerprint(observations);
+      if (stateChanged && evidence.signals.stateRedecisions >= 2) {
+        record.outcome = "state_changed";
+        record.detail = "game changed repeatedly while deciding; no action dispatched";
+        break;
+      }
+      if (
+        stateChanged ||
+        (mayPreempt && (interrupted.signal.aborted || input.interjections?.hasPending() === true))
+      ) {
+        if (stateChanged) evidence.signals.stateRedecisions += 1;
+        else evidence.signals.decisionPreemptions += 1;
+        // After the voice bound, newer lines stay queued for the next turn.
+        if (mayPreempt) interjection = input.interjections?.take() ?? interjection;
         record.interjection = interjection;
-        observations = observe(input.io);
+        observations = currentObservations;
         provenance = input.provenance?.() ?? null;
         refusedHere = progress.refusedFrom(positionOf(observations));
         knownHardFailures = hardFailuresFor(hardFailures, observations, provenance);
@@ -764,14 +877,32 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         mindFailed = false;
         continue;
       }
+      preActionObservations = currentObservations;
       break;
     }
     evidence.timing.decisionSettledAt = clock().toISOString();
+    if (
+      record.outcome === "state_changed" ||
+      record.outcome === "budget_exhausted" ||
+      record.outcome === "stopped"
+    ) {
+      turns.push(finalize(record, evidence, input.onTurn));
+      if (record.outcome !== "state_changed") break;
+      continue;
+    }
     if (mindFailed) {
-      // A model that errors must not end the playthrough; the turn is lost and
-      // the loop continues so a long run survives a transient failure.
       record.detail = bounded(mindFailure);
       turns.push(finalize(record, evidence, input.onTurn));
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 5) {
+        outcome = "mind_unavailable";
+        notable("mind_unavailable", turn, consecutiveFailures);
+        break;
+      }
+      if (turn + 1 < input.turns)
+        await (input.sleep ?? ((ms) => waitForRetry(ms, input.shouldStop)))(
+          1000 * 2 ** (consecutiveFailures - 1),
+        );
       continue;
     }
     retiredObjective = null;
@@ -781,9 +912,20 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       record.outcome = "invalid_decision";
       record.detail = bounded(parsed.error.issues.map((issue) => issue.path.join(".")).join(","));
       turns.push(finalize(record, evidence, input.onTurn));
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 5) {
+        outcome = "mind_unavailable";
+        notable("mind_unavailable", turn, consecutiveFailures);
+        break;
+      }
+      if (turn + 1 < input.turns)
+        await (input.sleep ?? ((ms) => waitForRetry(ms, input.shouldStop)))(
+          1000 * 2 ** (consecutiveFailures - 1),
+        );
       continue;
     }
 
+    consecutiveFailures = 0;
     record.monologue = parsed.data.monologue;
     record.intent = parsed.data.intent;
     // He keeps his notes unless he rewrites them, so silence is not amnesia.
@@ -810,6 +952,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
         retiredLoopStates = new Set(semanticStates);
         record.objectiveRetired = priorObjective;
         objectivesRetired += 1;
+        if (objectivesRetired >= 2) notable("objectives_retired", turn, objectivesRetired);
       } else {
         staleObjectiveWarned = true;
       }
@@ -822,7 +965,6 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     record.action = parsed.data.action;
     const chosen = parsed.data.action;
     input.onPhase?.("acting");
-    const preActionObservations = observe(input.io);
     evidence.immediatePreAction = stateEvidence(preActionObservations, input.provenance);
     evidence.timing.actionStartedAt = clock().toISOString();
 
@@ -1023,7 +1165,7 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     } else if (input.voice !== undefined && interjection === null && !ready) {
       // Not consulted at all: nobody spoke, and the gate could not open.
       volition.skipped += 1;
-    } else if (input.voice !== undefined) {
+    } else if (input.voice !== undefined && !budgetReached() && input.shouldStop?.() !== true) {
       const voiceView: VoiceView = {
         turn,
         framePng: input.framePng?.() ?? null,
@@ -1039,7 +1181,14 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
       if (voiceHasSomethingToConsider(voiceView)) {
         try {
           input.onPhase?.("thinking");
-          const spoken = VoiceDecisionSchema.safeParse(await input.voice.decide(voiceView));
+          const accounting = callUsage(input.voice.metered);
+          let voiceRaw: unknown;
+          try {
+            voiceRaw = await input.voice.decide(voiceView, accounting.report);
+          } finally {
+            accounting.finish();
+          }
+          const spoken = VoiceDecisionSchema.safeParse(voiceRaw);
           if (spoken.success) {
             wants = spoken.data.speak ?? null;
             if (spoken.data.reply !== null && spoken.data.reply !== undefined) {
@@ -1091,7 +1240,11 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     });
   }
 
+  if (outcome === undefined && budgetReached()) outcome = "budget_exhausted";
+  if (outcome === "budget_exhausted") notable("budget_exhausted", turns.length, usage.chargedTokens);
   return {
+    ...(outcome === undefined ? {} : { outcome }),
+    usage,
     turns,
     accepted: turns.filter((t) => t.outcome === "accepted").length,
     progress: progress.snapshot(),
@@ -1101,6 +1254,33 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     objectivesRetired,
     ...coherence(turns),
   };
+}
+
+async function waitForRetry(ms: number, shouldStop: RunFreePlayInput["shouldStop"]): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until && shouldStop?.() !== true) {
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(100, until - Date.now())));
+  }
+}
+
+function decisionStateFingerprint(observations: readonly GbaEmulatorObservation[]): string {
+  const data = (kind: GbaEmulatorObservationKind): unknown =>
+    (observations.find((observation) => observation.kind === kind) as { data?: unknown } | undefined)?.data ??
+    null;
+  const scene = data("scene") as {
+    mode?: string;
+    inputReady?: boolean;
+    waitingForDialogAdvance?: boolean;
+  } | null;
+  return canonicalJson({
+    mapId: positionOf(observations)?.mapId ?? null,
+    mode: scene?.mode ?? null,
+    inputReady: scene?.inputReady ?? null,
+    waitingForDialogAdvance: scene?.waitingForDialogAdvance ?? null,
+    battle: data("battle"),
+    menu: data("menu"),
+    dialog: data("dialog"),
+  });
 }
 
 function hardFailuresFor(

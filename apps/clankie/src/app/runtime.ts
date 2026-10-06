@@ -1,6 +1,8 @@
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
+import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
+import { RuntimeHealthObservationSchema } from "@clankie/protocol";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { SupportGrantStore } from "../support-access.ts";
@@ -36,6 +38,7 @@ import {
   MEDIA_IMAGE_GENERATION_PATH,
   MEDIA_VIDEO_GENERATION_PATH,
   RivalsCommandSchema,
+  ProcessHealthSnapshotSchema,
   eventStreamKindForId,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
@@ -48,7 +51,7 @@ import {
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/public-gateway";
-import { PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
+import { GameplaySettingsSchema, PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
@@ -98,6 +101,7 @@ import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
+import { registerFleetHealthMetricsRoutes } from "./fleet-health-metrics-routes.ts";
 import {
   type ClankieApp,
   type ClankieAppDependencies,
@@ -410,6 +414,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  registerFleetHealthMetricsRoutes(app, dependencies);
   const supportAuditedRequests = new WeakSet<Request>();
   let managedDiscordClosed = false;
   let managedDiscordSyncRunning = false;
@@ -853,6 +858,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createRuntimeUpdateRoutes({
       updater: dependencies.runtimeUpdater,
+      canary: dependencies.runtimeCanary,
       refreshHarnesses: dependencies.refreshHarnesses,
       settings: settingsSource,
       setup: { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },
@@ -930,6 +936,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       runtimes: dependencies.runtimes,
       herdrBinding: dependencies.herdrBinding,
     }),
+  );
+  app.route(
+    "/",
+    createRuntimeHealthRoutes(
+      authorizeOwnerSecrets,
+      settingsSource,
+      () =>
+        dependencies.runtimeHealth?.() ?? { state: "starting", durationMs: 0, reasons: [], delivery: "none" },
+    ),
   );
   /**
    * Owner operator or any active paired device: account data that is not a
@@ -1453,7 +1468,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           root: z.string().min(1).max(4096),
           instanceId: z.string().uuid(),
         })
-        .safeParse(dependencies.runtimeUpdater?.status().runtime);
+        .safeParse(dependencies.runtimeUpdater?.runtime);
       if (identity.success) runtime = identity.data;
     } catch {
       // Optional boot identity must not turn updater diagnostics into liveness failure.
@@ -1461,10 +1476,30 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({
       ok: true,
       service: "clankie",
+      processHealth: ProcessHealthSnapshotSchema.parse(
+        (() => {
+          const cpu = process.cpuUsage();
+          return {
+            schemaVersion: 1,
+            instanceId,
+            pid: process.pid,
+            uptimeMs: process.uptime() * 1000,
+            cpu: { userMicros: cpu.user, systemMicros: cpu.system },
+          };
+        })(),
+      ),
       ...(herdr === undefined ? {} : { herdr }),
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
       ...(runtime === undefined ? {} : { runtime }),
+      ...(() => {
+        try {
+          const observation = RuntimeHealthObservationSchema.safeParse(dependencies.runtimeHealth?.());
+          return observation.success ? { runtimeHealth: observation.data } : {};
+        } catch {
+          return {};
+        }
+      })(),
     });
   });
   const { laneMcp } = registerSeatRoutes({
@@ -1587,6 +1622,43 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ error: "captain_lease_conflict" }, 409);
       }
       throw error;
+    }
+  });
+
+  app.get("/v1/games/configuration", async (context) => {
+    const authorization = await authenticateCaptainOrOperator(context);
+    if ("denial" in authorization) return authorization.denial;
+    return context.json({ games: (await settingsSource.load()).gameplay, restart: "clankie restart" });
+  });
+
+  app.put("/v1/games/configuration", async (context) => {
+    const authorization = await authorizeOwnerSecrets(context.req.raw);
+    if (authorization !== true)
+      return context.json({ error: authorization }, authorization === "forbidden" ? 403 : 401);
+    const parsed = GameplaySettingsSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_game_configuration" }, 400);
+    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+    const updated = await settingsSource.update((current) => ({ ...current, gameplay: parsed.data }));
+    return context.json({ games: updated.gameplay, restart: "clankie restart" });
+  });
+
+  app.post("/v1/embodiment/sessions/live/guide", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = z
+      .strictObject({ text: z.string().trim().min(1).max(400), conversationId: z.string().min(1).max(256) })
+      .safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_play_direction" }, 400);
+    if (dependencies.guidePokemonPlay === undefined)
+      return context.json({ error: "play_direction_unavailable" }, 503);
+    const identity = operatorBodyIdentity(parsed.data.conversationId, context.req.raw);
+    if (identity === undefined) return context.json({ error: "conversation_authority_required" }, 403);
+    try {
+      return context.json(await dependencies.guidePokemonPlay(parsed.data.text, identity));
+    } catch {
+      return context.json({ error: "play_direction_not_authorized" }, 409);
     }
   });
 

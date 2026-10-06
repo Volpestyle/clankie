@@ -28,7 +28,12 @@ import {
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
 import { isLinearWorkerTool } from "./linear-publishing.ts";
-import { MinecraftActionSchema, type WorkerBridgeStatus } from "@clankie/protocol";
+import {
+  MinecraftActionSchema,
+  WorkerReportBridgeStatusSchema,
+  type WorkerBridgeStatus,
+  type WorkerReportBridgeStatus,
+} from "@clankie/protocol";
 import type { MinecraftService } from "./minecraft.ts";
 import { DurableReceiptStore } from "./durable-receipt-store.ts";
 import { canonicalJson } from "@clankie/play";
@@ -108,6 +113,7 @@ const FleetCallSchema = z.union([
   z.strictObject({
     name: z.string().min(1).max(256),
     arguments: z.record(z.string(), z.json()),
+    background: z.boolean().optional(),
   }),
   z.strictObject({ receiptId: z.string().uuid() }),
 ]);
@@ -153,7 +159,7 @@ const FLEET_TOOLS = [
   {
     name: "clankie_call",
     description:
-      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account. Calls return a receiptId. An uncertain call may have applied: reconcile with only {receiptId}, never retry its name and arguments. Receipt lookup is read-only and rechecks current access.",
+      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account. Set background:true for automated polling so reads yield under Linear budget pressure; ordinary owner/lead reads and writes retain priority. Calls return a receiptId. An uncertain call may have applied: reconcile with only {receiptId}, never retry its name and arguments. Receipt lookup is read-only and rechecks current access.",
     inputSchema: { ...z.toJSONSchema(FleetCallSchema), type: "object" as const },
   },
 ];
@@ -188,6 +194,7 @@ const BridgeNotificationSchema = z.object({
     status: z.enum(["ready", "missing", "stalled"]),
     reason: z.string().max(500),
     tools: z.array(z.string().min(1).max(256)).max(128).optional(),
+    report: WorkerReportBridgeStatusSchema.optional(),
   }),
 });
 
@@ -203,6 +210,7 @@ export class WorkerMcp {
     fleetPeerMessages?(): Promise<FleetSettings["peerMessages"]>;
     /** The entire worker operation, including admission and provider discovery. */
     requestTimeoutMs?: number;
+    reportBridgeObserved?(fleet: string, pane: string, report: WorkerReportBridgeStatus): void;
     /** Canonical settings generation, checked without yielding at provider dispatch. */
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
     minecraft?: Pick<MinecraftService, "workerCommand">;
@@ -242,6 +250,7 @@ export class WorkerMcp {
     {
       generation: string | undefined;
       last?: WorkerBridgeStatus;
+      lastReport?: WorkerReportBridgeStatus;
       active: Map<symbol, { since: number; operation: string }>;
     }
   >();
@@ -277,6 +286,40 @@ export class WorkerMcp {
     return state?.last ?? { status: "not-observed", reason: "Worker bridge catalog has not been observed" };
   }
 
+  reportBridgeStatus(fleet: string, pane: string): WorkerReportBridgeStatus | undefined {
+    return this.bridges.get(JSON.stringify([fleet, pane]))?.lastReport;
+  }
+
+  /** The caller has freshly admitted the pane; this observation grants no authority. */
+  reportBridgeObserved(fleet: string, pane: string, report: WorkerReportBridgeStatus): void {
+    if (this.closed) return;
+    const key = JSON.stringify([fleet, pane]);
+    let state = this.bridges.get(key);
+    if (!state) {
+      state = { generation: undefined, active: new Map() };
+      this.bridges.set(key, state);
+    }
+    const checked = WorkerReportBridgeStatusSchema.parse(report);
+    if (state.lastReport && Date.parse(state.lastReport.observedAt) > Date.parse(checked.observedAt)) return;
+    const lastStoredAt = [
+      state.lastReport?.lastStoredAt,
+      checked.lastStoredAt,
+      ...(checked.outcome === "stored" ? [checked.observedAt] : []),
+    ]
+      .filter((value): value is string => value !== undefined)
+      .sort((left, right) => Date.parse(left) - Date.parse(right))
+      .at(-1);
+    state.lastReport = {
+      ...checked,
+      ...(lastStoredAt === undefined ? {} : { lastStoredAt }),
+    };
+    try {
+      this.options.reportBridgeObserved?.(fleet, pane, state.lastReport);
+    } catch {
+      /* Diagnostic failure cannot change receipt delivery. */
+    }
+  }
+
   private catalogServed(authority: WorkerAuthorization, tools: string[], connected: boolean): void {
     const state = this.bridge(authority);
     if (
@@ -307,6 +350,8 @@ export class WorkerMcp {
     );
     signal.throwIfAborted();
     if (this.bridge(authority) !== state || authority.currentFleet?.() === false) return;
+    if (reported.report && authority.fleet !== undefined && authority.pane !== undefined)
+      this.reportBridgeObserved(authority.fleet, authority.pane, reported.report);
     const missing = expected.filter((name) => !reported.tools?.includes(name));
     if (state.last?.status === "stalled" && reported.status === "ready") return;
     state.last = {
@@ -1023,7 +1068,10 @@ export class WorkerMcp {
       let admitted = false;
       let repeatedReceipt: WorkerCallReceipt | undefined;
       let unadmittedSettlement = false;
+      let background = call.params._meta?.clankieRequestPriority === "background";
       try {
+        if (call.params._meta?.clankieRequestPriority !== undefined && !background)
+          throw new Error("Invalid request priority");
         return await this.operation(
           authority,
           extra.authInfo?.token ?? "",
@@ -1097,6 +1145,7 @@ export class WorkerMcp {
                 );
               name = invocation.name;
               args = invocation.arguments;
+              background ||= invocation.background === true;
             }
             if (Object.hasOwn(minecraftWorkerSchemas, name)) {
               if (authorityNow.fleet === undefined || this.options.minecraft === undefined)
@@ -1168,6 +1217,7 @@ export class WorkerMcp {
               return workerCallResponse(await this.reconcileCallReceipt(id, authorityNow, signal));
             }
             const result = await this.options.host.call({
+              ...(background ? { requestPriority: "background" as const } : {}),
               timeoutMs: remaining(),
               onDispatch: () => {
                 signal.throwIfAborted();

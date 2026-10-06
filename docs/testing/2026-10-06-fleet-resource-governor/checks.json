@@ -10,25 +10,27 @@
     "automaticHeavySlots": 2
   },
   "focusedTests": {
-    "passed": 130,
+    "passed": 131,
     "failed": 0,
     "files": 14,
     "reports": [
       {
-        "artifact": ".local/verification/vuh1740/focused-regressions.json",
-        "sha256": "1c9b8edb9150ae3078cc41d044e0dd6726760622aa8769eb87f1b8ada698fc9f",
-        "passed": 96,
+        "artifact": ".local/verification/vuh1740/focused-composed.json",
+        "sha256": "64647f6e903c19973e306ae9ac77eb7ebe0431be8b39dc01b5cc466916a42c4d",
+        "passed": 115,
         "failed": 0,
         "skipped": 0,
         "files": [
+          "packages/fleet-resources/test/simulators.integration.test.ts",
           "apps/tui/test/doctor-fleet-link.integration.test.ts",
           "apps/tui/test/fleet-autonomy-cli.test.ts",
           "apps/tui/test/fleet-commands.test.ts",
+          "apps/tui/test/fleet-resources-cli.integration.test.ts",
           "apps/tui/test/headless-captain.test.ts",
           "apps/tui/test/herdr-roster.test.ts",
           "apps/tui/test/install-doctor.test.ts",
-          "packages/fleet-resources/test/simulators.integration.test.ts",
           "apps/clankie/test/fleet-resource-hire.integration.test.ts",
+          "apps/clankie/test/fleet-resource-routes.integration.test.ts",
           "apps/clankie/test/fleet-settings.integration.test.ts"
         ]
       },
@@ -44,30 +46,15 @@
         ]
       },
       {
-        "artifact": ".local/vuh1740-doctor-cli-tests.json",
-        "sha256": "fb384067c8325619fe270003b0494afe4d67f8b0d507426110d00fa2690c3195",
-        "passed": 9,
+        "artifact": ".local/verification/vuh1740/skill-release-composed.json",
+        "sha256": "842d30c0d5207d5edd341efdea416676b63fe4245d6f626bb022625400b74e86",
+        "passed": 2,
         "failed": 0,
         "skipped": 0,
-        "files": ["apps/tui/test/fleet-resources-cli.integration.test.ts"]
+        "files": ["apps/clankie/test/skill-release.test.ts"]
       }
     ],
-    "additional": [
-      {
-        "file": "apps/clankie/test/fleet-resource-routes.integration.test.ts",
-        "passed": 10,
-        "failed": 0,
-        "proof": "Native worker final real-TCP run, exec session60076, exit0"
-      },
-      {
-        "file": "apps/clankie/test/skill-release.test.ts",
-        "selector": "assembles only selected skills",
-        "passed": 1,
-        "failed": 0,
-        "deselected": 1,
-        "proof": "Native worker focused standalone assembly run, exec session80096, exit0"
-      }
-    ]
+    "note": "Composed tree rechecks all affected service/CLI/simulator cases and both skill release projections; unchanged native process/availability inputs reuse their last14 passing checks."
   },
   "typecheck": {
     "passed": true,
@@ -79,13 +66,13 @@
       "@clankie/tui"
     ],
     "workspaceConcurrency": 1,
-    "logs": [".local/verification/vuh1740/typecheck.log", ".local/verification/vuh1740/typecheck-final.log"],
-    "note": "Initial TUI optional-field error corrected; final core+TUI rerun passes. Protocol/settings unchanged combined checks and governor final PID 1 availability package rerun pass."
+    "logs": [".local/verification/vuh1740/typecheck-composed.log"],
+    "note": "All five packages pass after composing main2e1c08be; multi-package tsc execution is serialized."
   },
   "lint": {
     "passed": true,
     "scopedFiles": 52,
-    "log": ".local/verification/vuh1740/scoped-lint-final.log"
+    "log": ".local/verification/vuh1740/scoped-lint-composed.log"
   },
   "packageSmoke": {
     "passed": true,
@@ -96,12 +83,13 @@
       "queue": 0
     },
     "helperExactCopy": true,
-    "fullReleaseBuild": false
+    "fullReleaseBuild": false,
+    "log": ".local/verification/vuh1740/package-smoke-composed.log"
   },
   "burst": {
     "passed": true,
-    "rawArtifact": ".local/verification/vuh1740/fleet-resource-burst-final.json",
-    "rawArtifactSha256": "756e9d62c0c0b27c176e8b4a8cbf912175ec3e7f100ac8680e86138704d4d164",
+    "rawArtifact": ".local/verification/vuh1740/fleet-resource-burst-composed.json",
+    "rawArtifactSha256": "50403a0726eedf486280e1d917f573788e230711bd5a658e3d15d2ece7a59586",
     "committedSourceDigestsMatchFinalRawArtifact": true
   },
   "nativeReview": {
@@ -124,9 +112,10 @@
     "Burst uses an isolated registry with owner load16/memory0; default pressure refusal is verified separately with controlled sensors",
     "Burst is an actual Captain/service embedding; Discord, models and other body providers are absent",
     "Service CPU excludes native helper/command CPU",
-    "Burst admission waits total67.744s for ten2s jobs; first start13.919s, cause not profiled",
+    "Burst admission waits total67.121s for ten2s jobs; first start13.861s, cause not profiled",
     "Existing worker/plugin caches were not refreshed; full artifact refresh is required",
-    "No full pnpm check, release build, AWS deploy or app changes"
+    "No full pnpm check, release build, AWS deploy or app changes",
+    "The burst uses the actual Captain/service embedding, not the full index startup"
   ],
   "format": {
     "passed": true,
@@ -134,7 +123,7 @@
   },
   "docLinks": {
     "passed": true,
-    "markdownFiles": 428
+    "markdownFiles": 441
   },
   "pythonSyntax": {
     "passed": true,
@@ -144,5 +133,22 @@
     "python3IncludedInRuntimeStage": true,
     "imageBuilt": false,
     "reason": "Docker daemon unavailable"
+  },
+  "install": {
+    "passed": true,
+    "frozenLockfile": true,
+    "realOwnWorktreeInstall": true,
+    "log": ".local/verification/vuh1740/install-composed.log"
+  },
+  "composition": {
+    "main": "2e1c08be6506b0c7d5ed6d18bda34a9b10c0affe",
+    "conflictsResolved": 8,
+    "preserved": [
+      "runtime health observer/sampler/canary",
+      "fleet counters/report metrics",
+      "Linear request budget",
+      "game extension and remote hire admission"
+    ],
+    "scopedRerun": true
   }
 }

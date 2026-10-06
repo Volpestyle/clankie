@@ -36,6 +36,9 @@ FACE_BODY_OFFSETS = {
     "lead": [1, 0, 1, 0],
     "alert": [1, -2, -1],
     "hop": [2, -3, -6, 2],
+    "conduct": [1, 0, 1, 0],
+    "wilt": [0, 0, 0],
+    "wait": [0, 0, 0, 0, 0],
 }
 
 # Sheet layout: tag order is frame order in the PNG and JSON.
@@ -49,6 +52,7 @@ SHEETS = {
             "hop", "fall_asleep", "sleep", "wake", "think", "talk", "play",
             "alert", "happy", "catch", "offline", "rustle", "tap", "lead", "lift", "drop",
             *FACE_TAGS,
+            "run_left", "run_right", "seed", "conduct", "read_message", "wilt", "wait",
         ],
     },
     "clankie-mini": {

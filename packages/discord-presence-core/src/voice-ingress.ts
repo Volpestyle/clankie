@@ -95,6 +95,8 @@ export class DiscordVoiceIngress {
       contextMessages: [],
     });
     const result = await this.port.submitDiscordCaptainChannelTurn(request);
+    // Service admission is durable; only the late local result is revoked.
+    if (turn.isCurrent?.() === false) return { state: "failed", code: "voice_session_stale" };
     if (result.state === "failed") {
       return {
         state: "failed",

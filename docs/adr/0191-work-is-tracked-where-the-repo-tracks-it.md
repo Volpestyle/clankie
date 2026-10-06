@@ -146,10 +146,62 @@ districts by the directory a seat works in, and the root lets it hang a repo's
 work in the right district without guessing from the name. Showing the path
 changes nothing above: a device still names a repo only by its `id`.
 
+## World reads amendment (VUH-1712, VUH-1713, VUH-1714)
+
+Accepted assignment direction, 2026-10-05: the release source defaults to **both**,
+with an owner setting for `tags`, `milestones`, or `both`. Planned milestones and
+published version tags are separate facts. Completing work or a milestone does
+not imply shipment. This records the implementation direction James gave Ivy;
+the app's design and release presentation remain separate work.
+
+- Work status adds `backlog`: Linear backlog and triage state types, GitHub's
+  explicit `status: backlog` label, and Markdown `status: backlog` front matter.
+  Open GitHub issues without a status label and Markdown without a status stay
+  `todo`. Setting backlog writes the provider's backlog state or that explicit
+  label/front matter. `priority` remains the shared optional Linear 0–4 scale;
+  GitHub reads priority labels and Markdown reads scalar front matter.
+- `milestone` states a native id and name: Linear project milestone, GitHub
+  milestone number/title, or Markdown `milestone_id` and `milestone_name`.
+  It adds no milestone-assignment write API.
+- A device requests `work_items` with `statusVersion: 2` to receive backlog and
+  milestones. Requests omitting this opt-in receive backlog as `todo` and omit
+  milestone, so pre-amendment status enums continue to parse. This compatibility
+  projection is on the host, not a guessed app state.
+- `work_project` (device) and `clankie work project` / `/work project` (operator)
+  return planned milestone names/dates/item ids, shipped versions, and goals.
+  The saved `releases.source` and `releases.lane` are shared host settings;
+  `work init --release-source both --release-lane macos` updates them without
+  changing an existing tracker. The default lane `repository` states that no
+  platform-specific lane was recorded. Bind separate mobile and macOS repos
+  with their own explicit lanes; the core never guesses a platform from a tag.
+- Linear plans use project milestones; GitHub plans use open milestones.
+  Membership comes from the complete provider issue collection, intersected
+  with a saved Linear board label. Markdown has no native milestone collection
+  or target dates, so it reports planned releases unavailable even when items
+  carry authored milestone names.
+- Shipped versions are the host's existing `v*` git tags and, for GitHub trackers,
+  published GitHub releases with `v*` tags. GitHub publication wins when both
+  name the same tag. `dateKind` distinguishes publication, annotated-tag and
+  lightweight-tag commit dates. No remote fetch occurs on a device read. Item
+  ids remain empty where no explicit release association exists. Store builds,
+  release-item membership and platform dates are not inferred.
+- Goals are Linear initiatives and their native project progress fractions
+  ([Linear schema](https://github.com/linear/linear/blob/master/packages/sdk/src/schema.graphql)).
+  Progress retains Linear's estimate weighting. Trackers without initiatives
+  return an empty goals list. Unsupported or failed facts carry `unavailable`
+  entries, and omitted target dates/progress never become fabricated values.
+- Metadata lists reuse the connected host's coalesced snapshot reader, account
+  and configuration binding, failure cooldown, per-waiter authority checks,
+  and write/webhook invalidation from VUH-1697. Goal member pagination runs once
+  inside that shared read. Planned membership uses the work poller's identical
+  issue fields and filters, so it reuses that scan. Device renders do not create
+  provider scans. GitHub account collection pages also coalesce for 60 seconds,
+  with a 30-second failure cooldown and mutation invalidation.
+
 ## Negative space
 
-- Not a project-management tool: status, criteria, ownership and evidence only.
-  No sprints, estimates, priorities or custom workflows.
+- The app projects tracker facts; it does not invent a second planning store.
+  No automatic sync, inferred shipment, or custom workflow is added here.
 - Not a user-facing tracker by default. The app view stays behind an
   experimental Settings switch; the owner's own tracker remains where people
   plan and read work.

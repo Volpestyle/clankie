@@ -92,13 +92,20 @@ export interface CreateOperatorServiceContext {
     | { objective: string; updatedAt: string; issue?: { repoId: string; itemId: string } | undefined }
     | undefined;
   readonly validateConversationOwner: (owner: ConversationOwner) => Promise<boolean>;
-  readonly reportSummaries: (conversationId?: string, native?: HerdrAgentSnapshot) => WorkerReportSummary[];
+  readonly reportSummaries: (
+    conversationId?: string,
+    native?: HerdrAgentSnapshot,
+    includeRead?: boolean,
+    acceptedAfterMs?: number,
+  ) => WorkerReportSummary[];
   readonly goalExecutionReason: (conversationId: string) => string | undefined;
 }
 
 export function createOperatorService(
   ctx: CreateOperatorServiceContext,
 ): CaptainPort["serveOperatorConversation"] {
+  let reportCursor: string | undefined;
+  let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
   return async function serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
@@ -209,7 +216,8 @@ export function createOperatorService(
     if (
       request.op === "readopt_seat" ||
       request.op === "worker_reports" ||
-      request.op === "acknowledge_worker_reports"
+      request.op === "acknowledge_worker_reports" ||
+      request.op === "acknowledge_worker_report_history"
     ) {
       if (authority) await authorizeQuestion(authority);
       const owner: ConversationOwner = { conversationId: request.conversationId };
@@ -237,6 +245,19 @@ export function createOperatorService(
             request.conversationId,
             request.limit === undefined ? {} : { limit: request.limit },
           ),
+        };
+      }
+      if (request.op === "acknowledge_worker_report_history") {
+        if (!authority || authority.principal.kind !== "operator")
+          throw new ConversationRefusedError("Worker report history requires the operator owner");
+        await authorizeQuestion(authority);
+        if (!ctx.conversations.acknowledgeInboundReportHistory(request.conversationId, request.deliveryIds))
+          throw new ConversationRefusedError("Worker report history IDs must belong to this conversation");
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          conversationId: request.conversationId,
+          acknowledged: new Set(request.deliveryIds).size,
         };
       }
       if (!ctx.conversations.acknowledgeInboundReports(request.conversationId, request.deliveryIds))
@@ -282,6 +303,31 @@ export function createOperatorService(
           const inVoice = voice.some(
             (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
           );
+          const beatsEnabled = request.includeBeats === true && !(await ctx.desktop.beatsAreQuiet());
+          const hire = beatsEnabled ? ctx.desktop.recentHire() : undefined;
+          const now = Date.now();
+          const currentReportCursor = ctx.fleetChanges.current();
+          if (beatsEnabled && reportCursor !== currentReportCursor) {
+            recentReport = undefined;
+            for (const item of ctx.reportSummaries(undefined, undefined, true, now - 10_000)) {
+              const acceptedAt = Date.parse(item.acceptedAt);
+              const age = now - acceptedAt;
+              if (
+                (item.state === "delivered" || item.state === "read") &&
+                age >= 0 &&
+                age < 10_000 &&
+                (recentReport === undefined || acceptedAt > Date.parse(recentReport.acceptedAt))
+              )
+                recentReport = { deliveryId: item.deliveryId, acceptedAt: item.acceptedAt };
+            }
+            reportCursor = currentReportCursor;
+          }
+          const reportAge =
+            recentReport === undefined ? undefined : now - Date.parse(recentReport.acceptedAt);
+          const report =
+            beatsEnabled && reportAge !== undefined && reportAge >= 0 && reportAge < 10_000
+              ? recentReport
+              : undefined;
           return projectPresence(
             {
               expression: await ctx.desktop.current(),
@@ -296,8 +342,21 @@ export function createOperatorService(
               ...(nativeSubagents === undefined ? {} : { nativeSubagents }),
               pendingOwnerItem: ctx.conversations.pendingPresenceOwnerItem(),
               ...ctx.conversations.recentPresenceActivity(),
+              beats: [
+                ...(hire ? [hire] : []),
+                ...(report
+                  ? [
+                      {
+                        id: report.deliveryId,
+                        kind: "worker_report" as const,
+                        at: new Date(report.acceptedAt).toISOString(),
+                      },
+                    ]
+                  : []),
+              ],
             },
             request.includeFace === true,
+            request.includeBeats === true,
           );
         },
         request.cursor,
@@ -375,8 +434,8 @@ export function createOperatorService(
           result: { outcome: "unseated", herdrPaneId: request.stance.herdrPaneId },
         };
       }
-      const standing = ctx.stances.read(seat.seatId);
-      const stance = ctx.stances.state(seat.seatId, request.stance);
+      const standing = ctx.stances.read(seat.seatId, seat.occupantId);
+      const stance = ctx.stances.state(seat.seatId, request.stance, seat.occupantId);
       // The ship is the moment it says it landed something, not the whole
       // time the statement stands: restating a standing celebration is the
       // same landing, and counting it twice would be the host inflating it.
@@ -454,7 +513,7 @@ export function createOperatorService(
             schemaVersion: 1,
             seats: [
               {
-                seatId: qualified?.id ?? seat.seatId,
+                seatId: seat.seatId,
                 occupantId: seat.occupantId,
                 fleet: qualified?.fleet ?? "default",
               },
@@ -472,7 +531,7 @@ export function createOperatorService(
         });
       const observed = snapshot.seats[0];
       if (
-        observed?.seatId !== (qualified?.id ?? seat.seatId) ||
+        observed?.seatId !== seat.seatId ||
         observed.occupantId !== seat.occupantId ||
         observed.membership.outcome !== "member" ||
         observed.membership.projectId !== projectId
@@ -602,7 +661,7 @@ export function createOperatorService(
           result: { outcome: "failed", reason: "harness_unavailable", detail: seat.harness },
         };
       }
-      const standing = ctx.stances.read(seat.seatId);
+      const standing = ctx.stances.read(seat.seatId, seat.occupantId);
       const remainingMs = standing === undefined ? 0 : Date.parse(standing.expiresAt) - Date.now();
       const role = ctx.personas
         .all(ctx.liveSeats, () => undefined)
@@ -632,12 +691,16 @@ export function createOperatorService(
       ctx.herdrWatches.trackSeat(rehired.seatId);
       rehired.conversationId = ctx.conversations.conversationIdForPersona(rehired.personaId);
       if (standing !== undefined && remainingMs > 0) {
-        ctx.stances.state(rehired.seatId, {
-          herdrPaneId: moved.seat.paneId,
-          pose: standing.pose,
-          ...(standing.note === undefined ? {} : { note: standing.note }),
-          ttlMs: remainingMs,
-        });
+        ctx.stances.state(
+          rehired.seatId,
+          {
+            herdrPaneId: moved.seat.paneId,
+            pose: standing.pose,
+            ...(standing.note === undefined ? {} : { note: standing.note }),
+            ttlMs: remainingMs,
+          },
+          rehired.occupantId,
+        );
       }
       ctx.fleetChanges.touch();
       return { op: "move_seat", schemaVersion: 1, result: { outcome: "moved", seat: rehired } };
@@ -646,6 +709,7 @@ export function createOperatorService(
       throw new Error("Connections are served by the authenticated app boundary");
     if (
       request.op === "work_repos" ||
+      request.op === "work_project" ||
       request.op === "work_items" ||
       request.op === "work_item_write" ||
       request.op === "work_item_write_receipt"

@@ -243,12 +243,22 @@ to stderr; its successful stdout schema and generic failure stderr remain the
 default contract. No PID, endpoint, command, path, environment or credentials
 enter diagnostic events. Diagnostic callbacks cannot change admission.
 
+The body also forwards opt-in shell/foreground process diagnostics into its
+fleet counters. Missing panes retain Herdr's fixed `pane_not_found` classification
+at the initial or final proof phase. See [reason coverage](REASON-COVERAGE.md) for
+the real-boundary evidence, complete vocabulary contract and explicit OS coverage
+limits.
+
 A process can replace a listed socket FD with a non-socket before the kernel
 socket query. macOS returns `ENOTSOCK`; like `EBADF`, this requires a complete
 fresh census, rather than skipping the descriptor or treating it as permanent
 owner rejection. Sustained churn can exhaust the bounded attempts and refuse
-access. The integration exercises actual unrelated descriptor churn, refusal
-without forwarding, and recovery with the same socket after churn stops. The
+access. A complete census may also succeed during unrelated descriptor churn;
+churn alone never implies a mandatory refusal. The HTTP integration retains
+either outcome and checks exactly one forwarding effect for verified admission,
+zero for refusal, unchanged owner/socket identity, and recovery after churn stops.
+A second real PID sharing the client FD still refuses all requests during churn
+with zero forwarding. The
 opt-in `apps/clankie/test/native-proof-churn.integration.test.ts` also observes
 real unrelated process births/exits, distinct PIDs sharing a connected FD during
 descriptor churn, stale owner/socket pins, and a live owner's changed ancestry

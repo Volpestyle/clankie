@@ -103,7 +103,7 @@ function serializeFile(fields: ReadonlyMap<string, string>, body: string): strin
 function statusOf(raw: string | undefined): WorkItemStatus {
   const value = (raw ?? "todo").toLowerCase().replace(/[\s-]+/gu, "_");
   if (isWorkItemStatus(value)) return value;
-  if (["open", "backlog", "planned"].includes(value)) return "todo";
+  if (["open", "planned"].includes(value)) return "todo";
   if (["doing", "active", "started", "wip"].includes(value)) return "in_progress";
   if (["review", "reviewing"].includes(value)) return "in_review";
   if (["closed", "complete", "completed", "finished"].includes(value)) return "done";
@@ -162,6 +162,11 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       id,
       ...(parent === undefined || parent.trim() === "" ? {} : { parent }),
       title: title.slice(0, 200),
+      ...(file.fields.get("milestone_id") && file.fields.get("milestone_name")
+        ? {
+            milestone: { id: file.fields.get("milestone_id"), name: file.fields.get("milestone_name") },
+          }
+        : {}),
       status: statusOf(file.fields.get("status")),
       // Authored Markdown can contain a typo; one malformed priority must not hide the repo's work.
       priority: WorkItemPrioritySchema.safeParse(Number(file.fields.get("priority") ?? "0")).data ?? 0,

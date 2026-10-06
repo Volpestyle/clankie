@@ -55,6 +55,15 @@ export const DesktopExpressionSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 export type DesktopExpression = z.infer<typeof DesktopExpressionSchema>;
+/** A bounded visual cue from an actual hire or delivered worker report; no content. */
+export const OperatorPresenceBeatSchema = z
+  .object({
+    id: z.string().uuid(),
+    kind: z.enum(["hire", "worker_report"]),
+    at: z.string().datetime(),
+  })
+  .strict();
+export type OperatorPresenceBeat = z.infer<typeof OperatorPresenceBeatSchema>;
 export const OperatorPresenceSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -71,6 +80,7 @@ export const OperatorPresenceSnapshotSchema = z
     nativeSubagents: z.number().int().nonnegative().optional(),
     pendingOwnerItem: OperatorPresenceOwnerItemSchema.optional(),
     expression: DesktopExpressionSchema.optional(),
+    beats: z.array(OperatorPresenceBeatSchema).max(2).optional(),
   })
   .strict();
 export type OperatorPresenceSnapshot = z.infer<typeof OperatorPresenceSnapshotSchema>;
@@ -81,6 +91,8 @@ export const OperatorPresenceRequestSchema = z
     cursor: z.string().trim().min(1).max(512).optional(),
     /** Opt in to additive desktop face fields; strict legacy clients keep the old snapshot. */
     includeFace: z.boolean().optional(),
+    /** Opt in to brief fleet-event cues; legacy strict clients never receive them. */
+    includeBeats: z.boolean().optional(),
     waitMs: z.number().int().min(0).max(OPERATOR_PRESENCE_WAIT_MS_MAX).optional(),
   })
   .strict();

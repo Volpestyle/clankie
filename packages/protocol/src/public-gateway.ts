@@ -2,6 +2,9 @@ import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
 import { CAPTAIN_READINESS_PATH } from "./captain-readiness.ts";
 import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
 import {
+  ACCOUNT_GOOGLE_START_PATH,
+  ACCOUNT_GOOGLE_COMPLETE_PATH,
+  ACCOUNT_GOOGLE_CHECK_PATH,
   ACCOUNTS_PATH,
   ACCOUNT_DISCONNECT_PATH,
   ACCOUNT_GITHUB_POLL_PATH,
@@ -99,6 +102,9 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: ACCOUNT_LINEAR_COMPLETE_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_LINEAR_APP_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_DISCONNECT_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_GOOGLE_START_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_GOOGLE_COMPLETE_PATH, target: "control" },
+  { method: "POST", path: ACCOUNT_GOOGLE_CHECK_PATH, target: "control" },
   { method: "GET", path: "/v1/gateway/challenge", target: "control" },
   { method: "POST", path: "/v1/gateway/encrypted", target: "control" },
   { method: "POST", path: "/v1/gateway/push-authorize", target: "control" },

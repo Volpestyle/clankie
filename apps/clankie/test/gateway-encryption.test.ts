@@ -408,6 +408,9 @@ it("carries account-connection codes only in the encrypted envelope and never re
     completeLinear.getMockImplementation()!("", "", guard),
   );
   const accounts: AccountsPort = {
+    startGoogle: async () => ({ ok: false, error: "unconfigured" }),
+    completeGoogle: async () => ({ ok: false, error: "unknown_flow" }),
+    checkGoogle: async () => ({ ok: false, error: "unconfigured" }),
     list: async () => ({
       connections: [{ provider: "github", status: "connected", account: "octo-owner", scopes: ["repo"] }],
     }),

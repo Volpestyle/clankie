@@ -8,6 +8,7 @@ export {
   type EffectiveHireProfile,
 } from "./hire-profile.ts";
 export * from "./presence.ts";
+export * from "./runtime-health.ts";
 export * from "./support-access.ts";
 export * from "./response.ts";
 export * from "./discord-settings.ts";
@@ -178,6 +179,10 @@ export {
   type OperatorConversationReaction,
   OperatorAgentPoseSchema,
   type OperatorAgentPose,
+  OperatorAgentActivityKindSchema,
+  type OperatorAgentActivityKind,
+  OperatorAgentActivitySchema,
+  type OperatorAgentActivity,
   OPERATOR_AGENT_STANCE_NOTE_MAX,
   OPERATOR_AGENT_STANCE_MAX_MS,
   OPERATOR_AGENT_STANCE_DEFAULT_MS,
@@ -334,6 +339,7 @@ export {
   OperatorConversationServiceRequestSchema,
   type OperatorConversationServiceRequest,
   type OperatorWorkItemsOutcome,
+  type OperatorWorkProjectOutcome,
   OperatorConversationServiceResultSchema,
   type OperatorConversationServiceResult,
   type OperatorConversationServiceDispatch,
@@ -538,6 +544,7 @@ export {
   EmbodimentIntentIdSchema,
   type EmbodimentIntentId,
   EmbodimentBudgetSchema,
+  DEFAULT_POKEMON_PLAY_MAX_TOKENS,
   type EmbodimentBudget,
   EmbodimentIntentSchema,
   type EmbodimentIntent,
@@ -708,3 +715,13 @@ export {
   type FleetResourceSnapshot,
   type FleetSimulatorRequest,
 } from "./fleet-resources.ts";
+
+export * from "./work-items.ts";
+export {
+  WorkerReportBridgeReasonSchema,
+  WorkerReportBridgeStatusSchema,
+  type WorkerReportBridgeStatus,
+} from "./worker-report-health.ts";
+
+export * from "./fleet-health-metrics.ts";
+export * from "./runtime-health.ts";

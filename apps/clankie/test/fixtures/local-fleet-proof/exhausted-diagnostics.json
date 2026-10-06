@@ -1,0 +1,37 @@
+{
+  "provenance": {
+    "baseCommit": "8fcf47a54b578629386bdbc306db3ae2205d57f4",
+    "productionChanged": false,
+    "test": "apps/clankie/test/local-fleet-proof.integration.test.ts",
+    "phase": "fd-churn",
+    "status": 403,
+    "effectDelta": 0,
+    "capture": "requests.json; only the fixed diagnostic event and checkpoint are retained"
+  },
+  "samples": [
+    {
+      "run": "lifetime-1791257391564",
+      "checkpoint": "initial",
+      "event": {
+        "schemaVersion": 1,
+        "stage": "completion",
+        "reason": "budget_exhausted",
+        "errno": 0,
+        "attempt": 22,
+        "retry": false
+      }
+    },
+    {
+      "run": "lifetime-1791257420301",
+      "checkpoint": "final",
+      "event": {
+        "schemaVersion": 1,
+        "stage": "completion",
+        "reason": "attempts_exhausted",
+        "errno": 0,
+        "attempt": 32,
+        "retry": false
+      }
+    }
+  ]
+}

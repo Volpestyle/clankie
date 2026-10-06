@@ -48,8 +48,13 @@ effective UID), outside the proof hot path, and never reads argv/environment.
 
 An unrelated owned `fd-churn.c` process repeatedly replaces real socket descriptors
 with `/dev/null`; it stops on stdin and has its own five-second ceiling. One
-request during churn must receive HTTP403 without forwarding, with native
-socket-unavailable diagnostics. After stopping the churn, a distinct fresh
+request during churn may succeed after two fresh complete proofs, forwarding
+exactly once, or receive HTTP403 with zero forwarding when the bounded proof is
+unavailable. Every response and transient diagnostic is retained; observed stale
+descriptor errors must request a complete retry within the 32-attempt cap.
+A second real PID holding the same connected FD must still receive HTTP403
+with zero forwarding on all three distinct requests while unrelated churn runs.
+After stopping the churn, a distinct fresh
 request on the unchanged member PID/birth/socket must be admitted. That controlled
 recovery does not retry or hide the refused request.
 

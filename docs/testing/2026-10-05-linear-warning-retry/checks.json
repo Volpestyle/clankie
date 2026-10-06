@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "ticket": "VUH-1705",
+  "reviewBase": "93bbc0795f68eb152a088524116536627f7aebfd",
+  "proofCommit": "3302e187f67870a6f129d78d307d76fd87afaf07",
+  "sourceDigests": {
+    "apps/clankie/src/index.ts": "ff47a3800929c6de55bdfdc737723e07490b0dad9e16ecf3d901d51c02a6b5a6",
+    "apps/clankie/src/linear-request-budget.ts": "ea2e8693628fbe01e638d2baba409d3577a9df86cab679c587538bb4777e51af",
+    "apps/clankie/test/linear-request-budget.integration.test.ts": "5cfc153f723e94e17aa9b51763b3c3cc4484320898e983142aed3b89761a8da1",
+    "apps/clankie/test/linear-request-budget-autonomous.integration.test.ts": "68f85fef2bde4908663bb58692d6c449194b8728595652979116c913e79eab1b"
+  },
+  "checks": [
+    {
+      "name": "tests",
+      "inputCommit": "3afd0e00a9c411b384261aedff49b3a459e3697d",
+      "receiptSha256": "416919fb50738c9bce8709aa1dcd39b11c9493d64e64f4f60524935b2bbccdb9",
+      "passed": 20,
+      "pending": 1,
+      "failed": 0,
+      "assertions": [
+        {
+          "test": "retries native warning admission autonomously after 60 real seconds without another provider request",
+          "status": "skipped",
+          "durationMs": null
+        },
+        {
+          "test": "slows a once-per-second poller before the 5000/hour cap, warns once, and preserves priority writes",
+          "status": "passed",
+          "durationMs": 5339.117791
+        },
+        {
+          "test": "uses provider remaining/reset to refuse an unsent mutation before its receipt dispatch",
+          "status": "passed",
+          "durationMs": 57.079916000000594
+        },
+        {
+          "test": "lets an admitted background read finish its provider pages while deferring the next read",
+          "status": "passed",
+          "durationMs": 61.503208000000086
+        },
+        {
+          "test": "counts real MCP initialization, catalog, and tool HTTP sends in the same actor bucket as API calls",
+          "status": "passed",
+          "durationMs": 2742.1318330000013
+        },
+        {
+          "test": "gives each tool call a fresh polling admission inside one long-lived background scope",
+          "status": "passed",
+          "durationMs": 71.89079099999981
+        },
+        {
+          "test": "throttles the device Work refresh, preserves a cached backlog, and admits the owner CLI read",
+          "status": "passed",
+          "durationMs": 74.90845900000022
+        },
+        {
+          "test": "admits all native MCP Work pages as one device refresh and defers the following refresh",
+          "status": "passed",
+          "durationMs": 2423.1525
+        },
+        {
+          "test": "carries native fleet background:true through the real two-tool MCP bridge while prioritizing reads and writes",
+          "status": "passed",
+          "durationMs": 93.3932079999995
+        },
+        {
+          "test": "counts the GraphQL identity request made when a connected app credential refreshes",
+          "status": "passed",
+          "durationMs": 51.15870800000084
+        },
+        {
+          "test": "excludes the registered API OAuth token refresh and counts its subsequent provider read",
+          "status": "passed",
+          "durationMs": 65.88966699999946
+        },
+        {
+          "test": "does not restore headroom when an older HTTP response arrives after a newer reset observation",
+          "status": "passed",
+          "durationMs": 46.951999999999316
+        },
+        {
+          "test": "retries a warning refused by false at 60 seconds and stops after native acceptance",
+          "status": "passed",
+          "durationMs": 41.53345799999988
+        },
+        {
+          "test": "retries a warning refused by throw at 60 seconds and stops after native acceptance",
+          "status": "passed",
+          "durationMs": 42.53629100000035
+        },
+        {
+          "test": "retries a warning refused by reject at 60 seconds and stops after native acceptance",
+          "status": "passed",
+          "durationMs": 41.33479199999965
+        },
+        {
+          "test": "serializes pending warning admission and handles its true result from settlement time",
+          "status": "passed",
+          "durationMs": 47.823458999999275
+        },
+        {
+          "test": "serializes pending warning admission and handles its false result from settlement time",
+          "status": "passed",
+          "durationMs": 42.46904199999881
+        },
+        {
+          "test": "keeps a late accepted warning scoped to the old threshold crossing",
+          "status": "passed",
+          "durationMs": 41.54029199999968
+        },
+        {
+          "test": "retries before exhausted-budget admission without a provider send or mutation receipt",
+          "status": "passed",
+          "durationMs": 40.91812499999833
+        },
+        {
+          "test": "does not restart warning admission when a pending result settles after service close",
+          "status": "passed",
+          "durationMs": 39.4234579999993
+        },
+        {
+          "test": "projects the warning through authenticated HTTP, CLI, and doctor without spending provider requests",
+          "status": "passed",
+          "durationMs": 51.64550000000054
+        }
+      ]
+    },
+    {
+      "name": "autonomous",
+      "inputCommit": "3302e187f67870a6f129d78d307d76fd87afaf07",
+      "receiptSha256": "40e6c22d6908e3a5124839fc4f1af244ec35c97a8b36b7863d7366709b99fb3e",
+      "passed": 1,
+      "pending": 0,
+      "failed": 0,
+      "assertions": [
+        {
+          "test": "retries native warning admission autonomously after 60 real seconds without another provider request",
+          "status": "passed",
+          "durationMs": 60072.07975
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "Notification admission is controlled at its callback boundary; real native alert receipt is not proved.",
+    "First combined run skipped the manual timer because test isolation removes CLANKIE_* flags; the separate enabled run used LINEAR_WARNING_TIMER_TEST=1.",
+    "No production settings, runtime, credentials, release or AWS deployment were changed."
+  ]
+}

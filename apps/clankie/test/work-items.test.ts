@@ -2,7 +2,10 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
+import {
+  OperatorConversationServiceResultSchema,
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
+} from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -88,6 +91,50 @@ describe("the work-items service", () => {
     );
     expect(created).toMatchObject({ item: { location: expect.stringMatching(/^docs\/work\//u) } });
     expect(existsSync(join(ambiguous.repo, ".clankie/work"))).toBe(false);
+  });
+
+  it("keeps explicit owner work init able to replace a saved tracking choice", async () => {
+    const { service, repo } = await fixture();
+    await service.handle({ action: "init", repo, backend: "default" }, true);
+    const before = await readFile(join(repo, ".clankie/tracking.json"), "utf8");
+    await service.handle({ action: "init", repo, backend: "markdown", directory: "docs/work" }, true);
+    const saved = await readFile(join(repo, ".clankie/tracking.json"), "utf8");
+    expect(saved).not.toBe(before);
+    expect(JSON.parse(saved)).toMatchObject({
+      backend: "markdown",
+      directory: "docs/work",
+      decidedBy: "owner",
+    });
+  });
+
+  it("updates release settings through shared work init without replacing the saved tracker", async () => {
+    const { service, repo } = await fixture();
+    await service.handle(
+      {
+        action: "init",
+        repo,
+        backend: "linear",
+        linearTeam: "VUH",
+        linearProject: "Clankie",
+        linearLabel: "repo-board",
+        releaseSource: "both",
+        releaseLane: "mobile",
+        note: "Keep the owner's tracker",
+      },
+      true,
+    );
+    const path = join(repo, ".clankie/tracking.json");
+    const before = JSON.parse(await readFile(path, "utf8"));
+    await service.handle({ action: "init", repo, releaseSource: "tags" }, true);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      ...before,
+      releases: { source: "tags", lane: "mobile" },
+    });
+    await service.handle({ action: "init", repo, releaseLane: "macos" }, true);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      ...before,
+      releases: { source: "tags", lane: "macos" },
+    });
   });
 
   it("persists a Linear-shaped local fallback in the saved repo scope when Linear is disconnected", async () => {
@@ -194,5 +241,60 @@ describe("the work routes", () => {
       await post("/v1/work", { action: "list", repo: workspace, label: "DESIGNER" })
     ).json()) as { items: unknown[] };
     expect(cli.items).toHaveLength(1);
+  });
+});
+
+it("negotiates backlog at the device boundary and exposes project facts over the authenticated API", async () => {
+  const { service, workspace } = await fixture();
+  await service.handle(
+    {
+      action: "init",
+      repo: "workspace",
+      backend: "default",
+      releaseSource: "milestones",
+      releaseLane: "mobile",
+    },
+    true,
+  );
+  await service.handle(
+    { action: "create", repo: "workspace", title: "Later work", status: "backlog", priority: 2 },
+    true,
+  );
+  const { app } = await createClankieApp({
+    captain: createStubCaptain(),
+    workItems: service,
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+    authenticateCaptain: async () => ({ captainId: "operator", steerSourceLane: "api" }),
+  });
+  const dispatch = async (body: unknown) => {
+    const response = await app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(200);
+    return OperatorConversationServiceResultSchema.parse(await response.json());
+  };
+  expect(await dispatch({ op: "work_items", schemaVersion: 1, repoId: "workspace" })).toMatchObject({
+    result: { items: [{ status: "todo" }] },
+  });
+  expect(
+    await dispatch({ op: "work_items", schemaVersion: 1, repoId: "workspace", statusVersion: 2 }),
+  ).toMatchObject({ result: { items: [{ status: "backlog", priority: 2 }] } });
+  expect(await dispatch({ op: "work_project", schemaVersion: 1, repoId: "workspace" })).toMatchObject({
+    result: {
+      outcome: "ready",
+      releaseSource: "milestones",
+      planned: [],
+      shipped: [],
+      goals: [],
+      unavailable: [{ read: "planned" }],
+    },
+  });
+  expect(await dispatch({ op: "work_project", schemaVersion: 1, repoId: "unknown" })).toMatchObject({
+    result: { outcome: "unavailable" },
+  });
+  await expect(service.handle({ action: "project", repo: workspace }, false)).rejects.toMatchObject({
+    code: "unknown_repo",
   });
 });

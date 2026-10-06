@@ -536,6 +536,13 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   objectives, fresh observations, and read-only sharing; the existing Go Live
   PNG publisher carries its video. The Pokémon seam remains unchanged in scope.
   See [ADR 0175](adr/0175-rivals-agent-is-a-gameplay-skill.md) and [setup](rivals.md).
+- **Game extensions.** [ADR 0234](adr/0234-games-share-one-extension-contract.md)
+  defines typed connector, skill, settings, Activity and lifecycle composition.
+  `integrations/pokemon` implements it; core retains play leases, authority and
+  recovery, persona/model selection, Discord/Activity destinations and evidence
+  projections. Pokémon's existing API/CLI/TUI enter that extension through a
+  compatibility composition point. Minecraft and Rivals adoption, and
+  installed-extension discovery without core edits, remain follow-ups.
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
   the MCP projection derived from that catalog. MCP carries calls; the world
@@ -547,7 +554,12 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   unclassified names stay off `pokeagent_world` until classified. The play loop
   owns BODY (`world.join`, `world.leave`, `play.observe`, `play.act`,
   `play.frame`, `play.watch`); the mind owns session, who, regions, travel, and
-  challenges.
+  challenges. Pokémon usage caps, failure backoff, bounded voice preemption and
+  pre-action state rechecks live above this body seam in `packages/play`.
+  The service sends each notable kind once to the original conversation under
+  its existing grant, including terminal events after the initiating turn ends.
+  `pokeagent_guide` offers context to that conversation's play mind; it never
+  forces an action or replaces the mind's choice. See [play](../packages/play/README.md).
 - **Auth.** Provider keys and OAuth tokens live in the credential broker
   (Keychain), written by the TUI `/auth` flow and read by pi through a
   credential-store bridge. Compatibility model/media provider keys may fall
@@ -668,6 +680,14 @@ body's broker; the portals exchange only sealed lifecycle requests and public
 connection metadata. Registered Linear API OAuth uses a separate `linear-api`
 credential and in-process tracker, preserving the existing MCP audience and
 grant fences ([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)).
+Both Linear audiences share a service-owned [request budget](../apps/clankie/src/linear-request-budget.ts)
+per verified workspace and actor. Actual HTTP attempts are counted over a rolling
+hour, provider rate-limit headers tighten headroom, and background reads slow
+at 80%. Device Work refreshes and explicit CLI/fleet poll markers select background
+priority; owner/lead reads, writes and webhook context remain interactive. One
+logical read retains admission across provider pagination while every HTTP attempt
+obeys the hard cap. `clankie linear budget` and `/doctor` expose
+the observation; the 50% warning uses native alerts without starting a model turn.
 Herdr contains the native
 interactive workers; Clankie uses their supported channels or session APIs for
 delivery. Linked independent agents can write first with `message_clankie`. Untrusted input stays fenced, secrets stay in the credential

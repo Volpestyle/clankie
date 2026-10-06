@@ -45,18 +45,39 @@ import {
   linearOauthNeedsRefresh,
   providerCredentialBearer,
   resolveProviderBearer,
+  GOOGLE_ACCOUNT_DEFINITIONS,
+  GOOGLE_PROVIDER_IDS,
+  googleCredentialMetadata,
+  googleCredentialUsable,
+  googlePickedFileIds,
+  googleIdentityEpoch,
+  googleAppSecret,
+  normalizeProviderId,
+  GOOGLE_OAUTH_APP_PROVIDER_ID,
+  resolveGoogleBearer,
+  type GoogleOAuthApp,
+  type GoogleOAuthEndpoints,
   type CredentialStore,
   type ProviderCredential,
   type ProviderAccount,
 } from "@clankie/credential-broker";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
+import { GoogleAccountProviderSchema, type GoogleAccountProvider } from "@clankie/protocol/accounts";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
 import { compactLinearWrite } from "./linear-write-receipt.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
-import { createPrioritySortedLinearIssueReader } from "./tracker-tool-router.ts";
+import { createPrioritySortedLinearIssueReader, callCachedLinearCollection } from "./tracker-tool-router.ts";
+import {
+  currentLinearRequestPriority,
+  LinearRequestBudgetRefused,
+  withLinearRequestPriority,
+  withinLinearRequestInvocation,
+  type LinearRequestBudget,
+  type LinearRequestPriority,
+} from "./linear-request-budget.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -82,6 +103,35 @@ class DispatchRefused extends Error {}
 const FAILURE_COOLDOWN_MS = 60_000;
 const LOCAL_TRACKER_COMMAND = "clankie:local-tracker";
 const API_TRACKER_COMMAND = "clankie:linear-api-tracker";
+/** A server alias cannot widen the policy attached to its managed broker grant. */
+const googleProvider = (
+  server: Pick<McpServerSettings, "id" | "credential">,
+): GoogleAccountProvider | undefined => {
+  let providerId: string | undefined;
+  try {
+    providerId = server.credential === undefined ? undefined : normalizeProviderId(server.credential);
+  } catch {
+    // An invalid authored reference fails in its own credential admission;
+    // classification must not hide unrelated connected servers.
+  }
+  const binding = GoogleAccountProviderSchema.safeParse(providerId);
+  if (binding.success) return binding.data;
+  const named = GoogleAccountProviderSchema.safeParse(server.id);
+  return named.success ? named.data : undefined;
+};
+function assertGoogleCredentialBinding(
+  server: Pick<McpServerSettings, "id" | "credential">,
+  credential: ProviderCredential | undefined,
+): GoogleAccountProvider | undefined {
+  const google = googleProvider(server);
+  if (
+    (credential?.type === "oauth" && credential.googleAuth === "user" && google === undefined) ||
+    (google !== undefined &&
+      (server.credential === undefined || normalizeProviderId(server.credential) !== google))
+  )
+    throw new Error("Google access requires an unambiguous managed provider credential binding");
+  return google;
+}
 
 interface TrackerBackendStatus {
   readonly backend: "linear" | "local";
@@ -112,6 +162,7 @@ type McpRefusalReason =
   | "lane_denied"
   | "server_unavailable"
   | "result_too_large"
+  | "linear_request_budget"
   | "body_owned";
 
 /** In-process service capability; HTTP/model arguments can never construct this symbol. */
@@ -124,6 +175,7 @@ type McpCallResult =
       readonly reason: McpRefusalReason;
       readonly detail: string;
       readonly possiblyDispatched?: boolean;
+      readonly retryAt?: number;
     };
 
 export interface McpHost {
@@ -155,6 +207,8 @@ export interface McpHost {
     readonly arguments: Record<string, unknown>;
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
+    /** Internal scheduling only. Background reads yield once the account reaches 80%. */
+    readonly requestPriority?: LinearRequestPriority;
     /** Total caller budget, including setup; never a model tool argument. */
     readonly timeoutMs?: number;
     /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
@@ -209,13 +263,30 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
     ],
     enabled: true,
   },
+  ...GOOGLE_PROVIDER_IDS.map(
+    (provider): McpServerSettings => ({
+      id: provider,
+      transport: "http",
+      url: GOOGLE_ACCOUNT_DEFINITIONS[provider].url,
+      args: [],
+      lane: "operator",
+      credential: provider,
+      initialTools: [...GOOGLE_ACCOUNT_DEFINITIONS[provider].tools],
+      enabled: true,
+    }),
+  ),
 ];
 
 export interface McpHostOptions {
+  /** The same body-owned developer app as /v1/accounts; no secret leaves the broker. */
+  readonly googleApps?: () => Promise<GoogleOAuthApp>;
+  readonly googleFetch?: typeof fetch;
+  readonly googleEndpoints?: GoogleOAuthEndpoints;
   /** The durable fallback. Connected transport failures never select this backend. */
   readonly localTracker?: TrackerToolBackend;
   /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
   readonly linearApiTracker?: TrackerToolBackend;
+  readonly linearRequestBudget?: LinearRequestBudget;
   readonly trackerIdentity?: string;
   /** Internal clock for list freshness; never a caller/model argument. */
   readonly trackerReadClock?: () => number;
@@ -305,7 +376,13 @@ function credentialDigest(credential: ProviderCredential): string {
 }
 
 export function createMcpHost(options: McpHostOptions): McpHost {
-  const connectImpl = options.connect ?? connectServer;
+  const googleApps =
+    options.googleApps ?? (async () => (await options.settings.load()).oauthApps?.google ?? {});
+  const connectImpl =
+    options.connect ??
+    ((server: McpServerSettings, credentials: Pick<CredentialStore, "get">, expectedCredential: string) =>
+      connectServer(server, credentials, expectedCredential, options.linearRequestBudget));
+
   const curated = options.curated ?? CURATED_MCP_SERVERS;
   const states = new Map<string, ServerState>();
   const retired = new Set<ServerState>();
@@ -375,7 +452,11 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               enabled: true,
             },
           ]),
-    ].filter((server) => server.enabled);
+    ]
+      .filter((server) => server.enabled)
+      .map((server) =>
+        googleProvider(server) === undefined ? server : { ...server, lane: "operator" as const },
+      );
     const linear = servers.find((server) => server.id === "linear");
     if (linear && options.linearApiTracker && (await options.credentials.get(LINEAR_API_PROVIDER_ID))) {
       servers = servers.map((server) =>
@@ -443,15 +524,36 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   async function credentialFingerprint(server: McpServerSettings, refresh = false): Promise<string> {
     if (server.credential === undefined) return "none";
     let stored = await options.credentials.get(server.credential);
+    const google = assertGoogleCredentialBinding(server, stored);
+    if (google !== undefined) {
+      const apps = await googleApps();
+      if (refresh) {
+        await resolveGoogleBearer({
+          store: options.credentials,
+          provider: google,
+          apps: () => Promise.resolve(apps),
+          ...(options.googleFetch === undefined ? {} : { fetchImpl: options.googleFetch }),
+          ...(options.googleEndpoints === undefined ? {} : { endpoints: options.googleEndpoints }),
+        });
+        stored = await options.credentials.get(server.credential);
+      }
+      if (!apps.clientId || !googleCredentialUsable(stored, google, apps.clientId))
+        throw new Error("Google access requires reconnecting");
+    }
     if (stored?.type === "oauth" && stored.linearAuth === "api" && !isApiTracker(server))
       throw new Error("Registered Linear API credentials cannot authenticate MCP");
     if (refresh && stored?.type === "oauth" && linearOauthNeedsRefresh(stored)) {
-      await resolveProviderBearer(
-        server.credential,
-        options.credentials,
-        Date.now(),
-        options.linearFetch ? { fetch: options.linearFetch } : {},
-      );
+      const selected = stored;
+      const request = options.linearFetch ?? fetch;
+      const refreshFetch: typeof fetch = (input, init) =>
+        server.id === "linear" &&
+        options.linearRequestBudget &&
+        String(input instanceof Request ? input.url : input) === "https://api.linear.app/graphql"
+          ? options.linearRequestBudget.fetch(selected, request, input, init)
+          : request(input, init);
+      await resolveProviderBearer(server.credential, options.credentials, Date.now(), {
+        fetch: refreshFetch,
+      });
       stored = await options.credentials.get(server.credential);
     }
     if (stored === undefined) {
@@ -586,6 +688,10 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       return state.tools;
     }
     const client = await connection(server, state, now);
+    const pickedFiles =
+      googleProvider(server) === "google-drive"
+        ? googlePickedFileIds(await options.credentials.get(server.credential!))
+        : undefined;
     const initial = new Set(server.initialTools);
     const listed = await client.listTools();
     await assertCurrent(server, state);
@@ -598,6 +704,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         ? [...listed.filter((tool) => !trackerNames.has(tool.name)), ...trackerCatalog]
         : listed;
     const projected = exposed
+      .filter((tool) => {
+        const google = googleProvider(server);
+        return (
+          google === undefined ||
+          (GOOGLE_ACCOUNT_DEFINITIONS[google].tools as readonly string[]).includes(tool.name)
+        );
+      })
       .filter((tool) => {
         const reason = mcpToolSchemaError(tool);
         if (reason === undefined) return true;
@@ -617,19 +730,35 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             : tool.name,
         inputSchema:
           tool.inputSchema !== null && typeof tool.inputSchema === "object"
-            ? server.id === "linear" && trackerNames.has(tool.name)
+            ? pickedFiles !== undefined
               ? {
                   ...(tool.inputSchema as Record<string, unknown>),
                   properties: {
                     ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
-                    repo: {
-                      type: "string",
-                      description:
-                        "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
-                    },
+                    fileId: { type: "string", enum: pickedFiles },
                   },
+                  required: [
+                    ...new Set([
+                      ...(Array.isArray((tool.inputSchema as { required?: unknown }).required)
+                        ? (tool.inputSchema as { required: string[] }).required
+                        : []),
+                      "fileId",
+                    ]),
+                  ],
                 }
-              : (tool.inputSchema as Record<string, unknown>)
+              : server.id === "linear" && trackerNames.has(tool.name)
+                ? {
+                    ...(tool.inputSchema as Record<string, unknown>),
+                    properties: {
+                      ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
+                      repo: {
+                        type: "string",
+                        description:
+                          "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
+                      },
+                    },
+                  }
+                : (tool.inputSchema as Record<string, unknown>)
             : { type: "object" },
         // No `initialTools` means all of them: right for a small server, and
         // the reason a large one should name the handful worth carrying.
@@ -863,6 +992,19 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             detail: `${server.id} stays at the console. Ask from the operator TUI, not from this room.`,
           };
         }
+        const google = googleProvider(server);
+        if (
+          google !== undefined &&
+          (input.delegation !== undefined ||
+            !(GOOGLE_ACCOUNT_DEFINITIONS[google].tools as readonly string[]).includes(input.tool))
+        ) {
+          return {
+            outcome: "refused",
+            reason: "lane_denied",
+            possiblyDispatched: false,
+            detail: "This Google connection permits only its owner's read-only tools.",
+          };
+        }
         let trackerRepo = input.arguments.repo;
         let inferredRepo = false;
         if (
@@ -901,6 +1043,22 @@ export function createMcpHost(options: McpHostOptions): McpHost {
 
         try {
           state = await stateFor(server);
+          if (google === "google-drive") {
+            const credential = await options.credentials.get(server.credential!);
+            if (
+              credential === undefined ||
+              credentialDigest(credential) !== state.credential ||
+              typeof input.arguments.fileId !== "string" ||
+              !googlePickedFileIds(credential).includes(input.arguments.fileId)
+            ) {
+              return {
+                outcome: "refused",
+                reason: "lane_denied",
+                possiblyDispatched: false,
+                detail: "Choose this file in the Google Drive connection before reading it.",
+              };
+            }
+          }
           const client = repositoryCall ? undefined : await connection(server, state, now);
           const connectedAccount =
             input.delegation !== undefined || options.observeCall !== undefined
@@ -1018,10 +1176,18 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               ? (aliases[input.tool] ?? input.tool)
               : input.tool;
           const selected = state;
+          const collection = (
+            {
+              list_issues: "issues",
+              list_milestones: "milestones",
+              list_initiatives: "initiatives",
+              list_projects: "projects",
+            } as Record<string, string>
+          )[upstreamTool];
           const priorityRead =
             !repositoryCall &&
             server.id === "linear" &&
-            upstreamTool === "list_issues" &&
+            collection !== undefined &&
             (isApiTracker(server) || (!isLocalTracker(server) && options.localTracker !== undefined));
           let providerPages = 0;
           selected.activeCalls += 1;
@@ -1044,8 +1210,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                   isError: false,
                 }
               : isApiTracker(server) && !workerPost
-                ? upstreamTool === "list_issues"
-                  ? await trackerReads.call(
+                ? collection !== undefined
+                  ? await callCachedLinearCollection(
+                      trackerReads,
                       input.arguments,
                       async (args) => {
                         await assertCurrent(server, state!);
@@ -1053,12 +1220,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                         providerPages += 1;
                         return {
                           content: JSON.stringify(
-                            await options.linearApiTracker!.call("list_issues", args, publication),
+                            await options.linearApiTracker!.call(upstreamTool, args, publication),
                           ),
                           isError: false,
                         };
                       },
                       JSON.stringify([connectedAccount?.binding, state!.configuration, state!.credential]),
+                      collection,
                     )
                   : {
                       content: JSON.stringify(
@@ -1088,6 +1256,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                           assertDispatch();
                         },
                         ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                        ...(options.linearRequestBudget
+                          ? { requestBudget: options.linearRequestBudget }
+                          : {}),
                       })
                     : await dispatchFence.run(notifyDispatch, () => {
                         const callUpstream = async (args: Record<string, unknown>) => {
@@ -1099,10 +1270,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                           // provider cap, even after the caller's shorter deadline.
                           return client!.callTool(upstreamTool, args, REQUEST_TIMEOUT_MS);
                         };
-                        return options.localTracker &&
-                          server.id === "linear" &&
-                          upstreamTool === "list_issues"
-                          ? trackerReads.call(
+                        return options.localTracker && server.id === "linear" && collection !== undefined
+                          ? callCachedLinearCollection(
+                              trackerReads,
                               input.arguments,
                               callUpstream,
                               JSON.stringify([
@@ -1110,6 +1280,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                                 state!.configuration,
                                 state!.credential,
                               ]),
+                              collection,
                             )
                           : callUpstream(input.arguments);
                       });
@@ -1210,14 +1381,17 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             dispatched &&
             !confirmed &&
             !(error instanceof DispatchRefused) &&
+            !(error instanceof LinearRequestBudgetRefused) &&
             state !== undefined &&
             state.failure === undefined
           )
             await retire(server.id, state);
           return {
             outcome: "refused",
-            reason: "server_unavailable",
+            reason:
+              error instanceof LinearRequestBudgetRefused ? "linear_request_budget" : "server_unavailable",
             possiblyDispatched: dispatched,
+            ...(error instanceof LinearRequestBudgetRefused ? { retryAt: error.retryAt } : {}),
             detail: error instanceof Error ? error.message.slice(0, 500) : "mcp_call_failed",
           };
         }
@@ -1232,7 +1406,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             detail: `MCP ${input.server}/${input.tool} timed out after ${timeoutMs}ms`,
           });
         signal.addEventListener("abort", timedOut, { once: true });
-        void perform().then(
+        void withinLinearRequestInvocation(
+          /^(?:get|list|search|check|fetch|read)_/u.test(input.tool)
+            ? (input.requestPriority ?? currentLinearRequestPriority("interactive"))
+            : "interactive",
+          perform,
+        ).then(
           (result) => {
             signal.removeEventListener("abort", timedOut);
             resolve(result);
@@ -1309,15 +1488,23 @@ async function connectServer(
   server: McpServerSettings,
   credentials: Pick<CredentialStore, "get">,
   expectedCredential: string,
+  requestBudget?: LinearRequestBudget,
 ): Promise<McpConnection> {
   const client = new Client({ name: "clankie", version: "1" }, { capabilities: {} });
   // The SDK's own transports do not satisfy its `Transport` interface under
   // `exactOptionalPropertyTypes` — their `onmessage` drops the generic and the
   // `extra` parameter the interface declares. The cast is at this one boundary
   // rather than loosening the repo's strictness for everyone.
-  const transport = (await createTransport(server, credentials, expectedCredential)) as unknown as Transport;
+  const transport = (await createTransport(
+    server,
+    credentials,
+    expectedCredential,
+    requestBudget,
+  )) as unknown as Transport;
   try {
-    await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+    await withLinearRequestPriority("interactive", () =>
+      client.connect(transport, { timeout: CONNECT_TIMEOUT_MS }),
+    );
   } catch (error) {
     await client.close().catch(() => undefined);
     throw error;
@@ -1380,10 +1567,11 @@ async function connectServer(
 
 async function createTransport(
   server: McpServerSettings,
-  credentials: Pick<CredentialStore, "get">,
+  credentials: Pick<CredentialStore, "get"> & Partial<Pick<CredentialStore, "updateMany">>,
   expectedCredential: string,
+  requestBudget?: LinearRequestBudget,
 ): Promise<StdioClientTransport | StreamableHTTPClientTransport> {
-  const selectedBearer = async (): Promise<string> => {
+  const selectedCredential = async (): Promise<ProviderCredential> => {
     const stored = server.credential === undefined ? undefined : await credentials.get(server.credential);
     if (stored === undefined || credentialDigest(stored) !== expectedCredential) {
       throw new Error(`${server.id} credential changed; reconnect before calling tools`);
@@ -1393,10 +1581,43 @@ async function createTransport(
     }
     if (stored?.type === "oauth" && stored.linearAuth === "api")
       throw new Error("Registered Linear API credentials cannot authenticate MCP");
+    assertGoogleCredentialBinding(server, stored);
     const bearer = providerCredentialBearer(stored);
     if (bearer === undefined) throw new Error(`${server.id} has no usable stored credential`);
-    return bearer;
+    return stored;
   };
+  const selectedBearer = async (): Promise<string> => {
+    const google = googleProvider(server);
+    if (google !== undefined) {
+      if (!credentials.updateMany || !server.credential || normalizeProviderId(server.credential) !== google)
+        throw new Error("Google access requires a locked managed provider credential binding");
+      let bearer: string | undefined;
+      // Read the grant and durable disable epoch in one existing broker lock.
+      // A partial Keychain publication or replacement account cannot combine
+      // an old grant with a separately awaited marker. This projection writes nothing.
+      await credentials.updateMany([GOOGLE_OAUTH_APP_PROVIDER_ID, google], async (group) => {
+        const stored = group[google];
+        assertGoogleCredentialBinding(server, stored);
+        if (stored === undefined || credentialDigest(stored) !== expectedCredential)
+          throw new Error(server.id + " credential changed; reconnect before calling tools");
+        const metadata = googleCredentialMetadata(stored);
+        const app = group[GOOGLE_OAUTH_APP_PROVIDER_ID];
+        if (
+          metadata?.status !== "connected" ||
+          !googleCredentialUsable(stored, google) ||
+          googleAppSecret(app, metadata.clientId) === undefined ||
+          (metadata.identityEpoch ?? "0") !== googleIdentityEpoch(app, metadata)
+        )
+          throw new Error("Google connection is disabled or requires reconnecting");
+        bearer = providerCredentialBearer(stored);
+        return group;
+      });
+      if (!bearer) throw new Error(server.id + " has no usable stored credential");
+      return bearer;
+    }
+    return providerCredentialBearer(await selectedCredential())!;
+  };
+
   if (server.transport === "http") {
     if (server.url === undefined) throw new Error(`mcp server ${server.id} has no url`);
     const providerId = server.credential;
@@ -1407,9 +1628,15 @@ async function createTransport(
       // establish a fresh transport, without replaying an uncertain tool call.
       fetch: async (url, init) => {
         const headers = new Headers(init?.headers);
+        let credential: ProviderCredential | undefined;
         if (providerId !== undefined) {
           try {
-            headers.set("authorization", `Bearer ${await selectedBearer()}`);
+            if (googleProvider(server) !== undefined) {
+              headers.set("authorization", `Bearer ${await selectedBearer()}`);
+            } else {
+              credential = await selectedCredential();
+              headers.set("authorization", `Bearer ${providerCredentialBearer(credential)}`);
+            }
           } catch (error) {
             if (dispatchFence.getStore())
               throw new DispatchRefused(
@@ -1418,6 +1645,8 @@ async function createTransport(
             throw error;
           }
         }
+        if (server.id === "linear" && requestBudget && credential)
+          return requestBudget.fetch(credential, fetch, url, { ...init, headers }, dispatchFence.getStore());
         dispatchFence.getStore()?.();
         return fetch(url, { ...init, headers });
       },
@@ -1444,7 +1673,17 @@ async function createTransport(
     stderr: "ignore",
   });
   const send = transport.send.bind(transport);
-  transport.send = (message) => {
+  transport.send = async (message) => {
+    if (googleProvider(server) !== undefined) {
+      try {
+        // Validate the captured process credential; never replace its environment token.
+        await selectedBearer();
+      } catch (error) {
+        if (dispatchFence.getStore())
+          throw new DispatchRefused(error instanceof Error ? error.message : "Connected credential changed");
+        throw error;
+      }
+    }
     dispatchFence.getStore()?.();
     return send(message);
   };

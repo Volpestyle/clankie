@@ -1,0 +1,3 @@
+Command (wrapped in fleet bin/heavy): pnpm exec oxlint --deny-warnings packages/game-extension/src integrations/pokemon/src integrations/pokemon/test apps/clankie/src/play-mind.ts apps/clankie/src/play-execution-world.ts apps/clankie/src/play-execution-shared.ts apps/clankie/src/world apps/clankie/test/world-parity.test.ts
+
+Observed exit code: 0

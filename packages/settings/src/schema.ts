@@ -1,6 +1,7 @@
 import { DesktopSettingsSchema } from "./desktop.ts";
 import {
   AutonomySettingsSchema,
+  EmbodimentBudgetSchema,
   FLEET_WORKING_PREFERENCE_FIELDS,
   HireProfileSchema,
   FleetResourcePolicySchema,
@@ -25,6 +26,7 @@ import { isIP } from "node:net";
 export const SETTINGS_SCHEMA_VERSION = 1 as const;
 
 import { DiscordSettingsSchema } from "@clankie/protocol/discord-settings";
+import { RuntimeHealthSettingsSchema } from "@clankie/protocol";
 export { DiscordSettingsSchema, type DiscordSettings } from "@clankie/protocol/discord-settings";
 
 /**
@@ -340,6 +342,8 @@ export const GameplaySettingsSchema = z
   .object({
     /** FireRed/Emerald in the hosted PokeAgent MMO. */
     pokeagentMmoEnabled: z.boolean().default(false),
+    /** Per-session Pokémon limits; omitted token cap uses 250,000 tokens. */
+    pokemonBudget: EmbodimentBudgetSchema.optional(),
     /** Rivals Agent session API; its bearer lives under rivals-agent in the broker. */
     rivalsUrl: z
       .url()
@@ -642,6 +646,16 @@ export type LinearWebhookSettings = z.infer<typeof LinearWebhookSettingsSchema>;
  */
 export const OauthAppsSettingsSchema = z
   .object({
+    google: z
+      .object({
+        clientId: z
+          .string()
+          .regex(/^[A-Za-z0-9._-]{1,256}$/u)
+          .optional(),
+        redirectUri: z.url().max(512).optional(),
+      })
+      .strict()
+      .default(() => ({})),
     github: z
       .object({
         clientId: z
@@ -711,6 +725,7 @@ export const ClankieSettingsSchema = z
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
+    runtimeHealth: RuntimeHealthSettingsSchema.default(() => RuntimeHealthSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
     claudeAccounts: z
       .array(

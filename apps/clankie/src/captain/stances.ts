@@ -16,39 +16,44 @@ import {
 
 export interface StanceStore {
   /** Record one agent's statement about its own seat and hand back what stands. */
-  state(seatId: string, input: StateOperatorAgentStance): OperatorAgentStance;
+  state(seatId: string, input: StateOperatorAgentStance, occupantId?: string): OperatorAgentStance;
   /** What this seat is saying right now, or undefined once it has lapsed. */
-  read(seatId: string): OperatorAgentStance | undefined;
+  read(seatId: string, occupantId?: string): OperatorAgentStance | undefined;
 }
 
 export function createStanceStore(now: () => number = Date.now): StanceStore {
-  const stances = new Map<string, OperatorAgentStance>();
+  const stances = new Map<string, { stance: OperatorAgentStance; occupantId?: string }>();
 
-  const live = (seatId: string): OperatorAgentStance | undefined => {
-    const stance = stances.get(seatId);
-    if (stance === undefined) return undefined;
-    if (Date.parse(stance.expiresAt) > now()) return stance;
+  const live = (seatId: string, occupantId?: string): OperatorAgentStance | undefined => {
+    const standing = stances.get(seatId);
+    if (standing === undefined) return undefined;
+    if (
+      (occupantId === undefined || standing.occupantId === occupantId) &&
+      Date.parse(standing.stance.expiresAt) > now()
+    )
+      return standing.stance;
     stances.delete(seatId);
     return undefined;
   };
 
   return {
-    state(seatId, input) {
+    state(seatId, input, occupantId) {
       // Every read prunes its own key, and every write sweeps the whole map, so
       // a stance whose seat left the roster goes with its expiry instead of
       // accumulating. The map is bounded by live statements either way.
       const at = now();
       for (const [key, standing] of stances) {
-        if (Date.parse(standing.expiresAt) <= at) stances.delete(key);
+        if (Date.parse(standing.stance.expiresAt) <= at) stances.delete(key);
       }
       const ttl = Math.min(input.ttlMs ?? OPERATOR_AGENT_STANCE_DEFAULT_MS, OPERATOR_AGENT_STANCE_MAX_MS);
       const stance: OperatorAgentStance = {
         pose: input.pose,
+        ...(input.activityKind === undefined ? {} : { activityKind: input.activityKind }),
         ...(input.note === undefined || input.note.length === 0 ? {} : { note: input.note }),
         statedAt: new Date(at).toISOString(),
         expiresAt: new Date(at + ttl).toISOString(),
       };
-      stances.set(seatId, stance);
+      stances.set(seatId, { stance, ...(occupantId === undefined ? {} : { occupantId }) });
       return stance;
     },
     read: live,

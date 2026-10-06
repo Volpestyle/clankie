@@ -305,8 +305,9 @@ it("records preaccept native MCP report failures once and keeps acknowledged rep
   expect(store.observe(input)).toMatchObject({
     flags: ["reports failing", "context 82%"],
     reportFailures: 1,
-    lastProgressAt: "2026-10-05T12:10:01.000Z",
   });
+  expect(telemetry).not.toHaveProperty("lastReportAt");
+  expect(store.observe(input)).not.toHaveProperty("lastProgressAt");
   expect(store.observe(input).reportFailures).toBe(1);
   expect(
     store.observe({ ...input, reports: [report("read", "2026-10-05T12:12:00.000Z")] }).flags,
@@ -315,6 +316,41 @@ it("records preaccept native MCP report failures once and keeps acknowledged rep
   expect(store.observe({ occupantId: "session-worker-1", seatId: "seat-1", owner }).flags).not.toContain(
     "no progress in 2h",
   );
+});
+
+it("requires fifteen minutes of inactivity and a stored report after the latest brief", async () => {
+  const dir = await directory();
+  const store = new SeatEfficiencyStore(join(dir, "efficiency.json"), { now: () => now });
+  store.assign("session-worker-1", { owner, deliverable: "VUH-1703" });
+  const input = {
+    occupantId: "session-worker-1",
+    seatId: "seat-1",
+    owner,
+    status: "idle",
+    reportBridge: {
+      outcome: "unavailable" as const,
+      reason: "binding_timeout" as const,
+      observedAt: startedAt,
+    },
+  };
+  expect(store.observe(input).flags).not.toContain("finished, unreported");
+  now += 15 * 60_000 - 1;
+  expect(store.observe(input).flags).not.toContain("finished, unreported");
+  now++;
+  expect(store.observe(input).flags).toContain("finished, unreported");
+  expect(store.observe(input)).not.toHaveProperty("lastReportAt");
+  const stored = new Date(now).toISOString();
+  expect(
+    store.observe({ ...input, reportBridge: { outcome: "stored", reason: "stored", observedAt: stored } })
+      .flags,
+  ).not.toContain("finished, unreported");
+  now++;
+  store.assign("session-worker-1", { owner, deliverable: "VUH-1704" });
+  store.observe(input);
+  now += 15 * 60_000;
+  expect(store.observe(input).flags).toContain("finished, unreported");
+  expect(store.observe({ ...input, status: "working" }).flags).not.toContain("finished, unreported");
+  expect(store.observe({ ...input, status: "done" }).flags).not.toContain("finished, unreported");
 });
 
 it("flags undelivered reports and refused routes while preserving owner isolation", async () => {

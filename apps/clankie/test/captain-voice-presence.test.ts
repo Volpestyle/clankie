@@ -20,6 +20,7 @@ describe("captain voice presence tools", () => {
     const family = [
       "pokeagent_join_mmo",
       "pokeagent_world",
+      "pokeagent_guide",
       "pokeagent_stop",
       "pokeagent_observe",
       "pokeagent_recall",

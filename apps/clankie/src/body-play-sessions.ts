@@ -50,6 +50,7 @@ class PlayLeaseDenied extends Error {
 export class BodyPlaySessions {
   private state: z.infer<typeof StateSchema> = { sessions: {} };
   private unavailable = false;
+  private readonly owners = new Map<string, BodyConversationIdentity>();
   private readonly authority = new Map<string, BodyConversationIdentity["authorize"]>();
   private readonly restartClaims = new Map<string, Ref>();
   private readonly store: BodyLeaseStore;
@@ -102,6 +103,7 @@ export class BodyPlaySessions {
           };
           this.save(); // Before the durable requested session becomes claimable.
           this.authority.set(sessionId, owner.authorize);
+          this.owners.set(sessionId, owner);
           try {
             await this.admit(owner);
           } catch (error) {
@@ -119,6 +121,10 @@ export class BodyPlaySessions {
         bodyLease: error.result,
       };
     }
+  }
+
+  public owner(sessionId: string): BodyConversationIdentity | undefined {
+    return this.owners.get(sessionId);
   }
 
   /** Ongoing execution retains the original grant, independent of the next turn's capture. */
@@ -176,6 +182,7 @@ export class BodyPlaySessions {
     if (current.token === record.reference.token) this.store.finish(current, record.operationId, "settled");
     this.store.reconcileStopped(current); // An enclosing recovery pin may still hold it.
     this.authority.delete(sessionId);
+    this.owners.delete(sessionId);
   }
 
   public uncertain(sessionId: string): void {

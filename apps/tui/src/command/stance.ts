@@ -18,6 +18,7 @@ import {
   HERDR_SOCKET_HEADER,
   OPERATOR_AGENT_STANCE_NOTE_MAX,
   OperatorAgentPoseSchema,
+  OperatorAgentActivityKindSchema,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   type StateOperatorAgentStance,
 } from "@clankie/protocol";
@@ -26,7 +27,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 const POSES = OperatorAgentPoseSchema.options;
 
 const STANCE_USAGE = [
-  `Usage: clankie stance <${POSES.join("|")}> [--note TEXT] [--for SECONDS]`,
+  `Usage: clankie stance <${POSES.join("|")}> [--activity ${OperatorAgentActivityKindSchema.options.join("|")}] [--note TEXT] [--for SECONDS]`,
   "",
   "Says what you are doing with your own figure in the commons. The seat comes",
   "from HERDR_PANE_ID, so this only ever moves the figure you are sitting in.",
@@ -46,10 +47,18 @@ export function parseStanceArgs(args: readonly string[], herdrPaneId: string): S
   if (!pose.success) throw new Error(STANCE_USAGE);
   let note: string | undefined;
   let ttlMs: number | undefined;
+  let activityKind: StateOperatorAgentStance["activityKind"];
   for (let index = 1; index < args.length; index += 2) {
     const flag = args[index];
     const value = args[index + 1];
     if (value === undefined) throw new Error(STANCE_USAGE);
+    if (flag === "--activity") {
+      const parsed = OperatorAgentActivityKindSchema.safeParse(value);
+      if (!parsed.success)
+        throw new Error(`--activity takes ${OperatorAgentActivityKindSchema.options.join("|")}`);
+      activityKind = parsed.data;
+      continue;
+    }
     if (flag === "--note") {
       if (value.length > OPERATOR_AGENT_STANCE_NOTE_MAX) {
         throw new Error(`--note is at most ${String(OPERATOR_AGENT_STANCE_NOTE_MAX)} characters`);
@@ -68,6 +77,7 @@ export function parseStanceArgs(args: readonly string[], herdrPaneId: string): S
   return {
     herdrPaneId,
     pose: pose.data,
+    ...(activityKind === undefined ? {} : { activityKind }),
     ...(note === undefined ? {} : { note }),
     ...(ttlMs === undefined ? {} : { ttlMs }),
   };

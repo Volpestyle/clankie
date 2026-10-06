@@ -74,7 +74,8 @@ agent at that station and reads its backlog from work items labelled with the
 role. Prefer a role already in use (`clankie agents roles`) over a near-duplicate.
 `clankie agents role NAME "ROLE"|none [--project PROJECT]` changes a current
 member's saved role in that project; omission selects `default`. The host checks
-the exact native seat and confirmed hire membership, refusing offline, unknown
+the exact native seat and original hire assignment or verified workspace
+membership for agents Clankie did not start, refusing offline, unknown
 or other-project agents. This changes the semantic station role without changing
 the live harness's launch profile. With one positional role,
 `clankie agents role ROLE --project PROJECT [profile flags]` still edits the
@@ -135,6 +136,18 @@ limit prevents new hires. An existing exact live session can be reused at its
 limit, but a resume cannot change its recorded role settings or launch a second
 agent after losing the original. Inspect an uncertain hire instead of changing
 its model, harness or project to retry.
+
+After authenticated settlement, separately authorized new remote work can use
+`hire_agent` with `freshIntent: {id, afterReceiptId}` or
+`clankie hire-receipt fresh --json-stdin` with the public `spawn_seat` body.
+Choose one new lowercase UUID, save it with the new brief, and name the exact
+settled native hire UUID at the same fleet/harness/cwd. Keep that ID across
+uncertainty; an exact retry only inspects its native binding. An unresolved
+sibling or a changed owner, project/launch scope or configured host refuses.
+Never reuse a retained brief, resume an abandoned allocation, change aliases to
+bypass the fence, or delete receipts. Completed fresh IDs and original evidence
+stay retained permanently; follow-up uses the admitted seat. Details and a JSON
+example are in `docs/cli.md` under `hire-receipt` recovery.
 
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion

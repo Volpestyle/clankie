@@ -226,35 +226,44 @@ nativeIt(
       let churnResponse;
       try {
         churnResponse = await herdr.request("member");
-        expect(churnResponse.status).toBe(403);
-        expect(churnResponse.error).toBe("local_process_membership_required");
+        // A complete fresh census can succeed amid unrelated FD churn. Its
+        // presence does not imply an unavailable observation on every attempt.
+        expect([200, 403]).toContain(churnResponse.status);
+        if (churnResponse.status === 403)
+          expect(churnResponse.error).toBe("local_process_membership_required");
+        else expect(churnResponse.error).toBeUndefined();
         expect(churnResponse.port).toBe(cold.port);
-        expect(churnResponse.effects).toBe(churnEffectsBefore);
-        expect(effects).toBe(churnEffectsBefore);
+        const admittedEffects = churnResponse.status === 200 ? 1 : 0;
+        expect(churnResponse.effects).toBe(churnEffectsBefore + admittedEffects);
+        expect(effects).toBe(churnEffectsBefore + admittedEffects);
       } finally {
         await churn.stop();
       }
       const churnDiagnostics = trace.slice(diagnosticsStart);
-      expect(
-        churnDiagnostics.some((entry) => {
-          const row = entry as {
-            diagnostic?: { source?: string; event?: { stage?: string; reason?: string; errno?: number } };
+      for (const entry of churnDiagnostics) {
+        const row = entry as {
+          diagnostic?: {
+            source?: string;
+            event?: { stage?: string; reason?: string; errno?: number; attempt?: number; retry?: boolean };
           };
-          return (
-            row.diagnostic?.source === "native" &&
-            row.diagnostic.event?.stage === "fd_socket" &&
-            row.diagnostic.event.reason === "socket_unavailable" &&
-            [9, 38].includes(row.diagnostic.event.errno!)
-          );
-        }),
-      ).toBe(true);
+        };
+        const diagnostic = row.diagnostic;
+        if (diagnostic?.source !== "native" || !diagnostic.event) continue;
+        expect(diagnostic.event.attempt).toBeLessThanOrEqual(32);
+        if (
+          diagnostic.event.stage === "fd_socket" &&
+          diagnostic.event.reason === "socket_unavailable" &&
+          [2, 3, 9, 38].includes(diagnostic.event.errno!)
+        )
+          expect(diagnostic.event.retry).toBe(true);
+      }
       phase = "fd-churn-recovery";
       const afterChurnOwner = await observeSocketProcess(sockets.get(cold.port)!, helper);
       expect(afterChurnOwner?.owner).toEqual(stableOwner!.owner);
       const recovered = await herdr.request("member");
       expect(recovered.status).toBe(200);
       expect(recovered.port).toBe(cold.port);
-      expect(recovered.effects).toBe(churnEffectsBefore + 1);
+      expect(recovered.effects).toBe(churnEffectsBefore + (churnResponse.status === 200 ? 1 : 0) + 1);
       await writeFile(
         join(logDirectory, "fd-churn.json"),
         JSON.stringify(
@@ -276,6 +285,36 @@ nativeIt(
       expect(shared.coOwnerPid).toBeGreaterThan(1);
       expect(shared.coOwnerPid).not.toBe(memberPid);
       expect((await herdr.request("member")).status).toBe(403);
+      const sharedEffectsBefore = effects;
+      phase = "shared-owner-fd-churn";
+      const sharedChurn = await herdr.startFdChurn();
+      const sharedChurnResponses = [];
+      try {
+        for (let index = 0; index < 3; index++) {
+          const response = await herdr.request("member");
+          sharedChurnResponses.push(response);
+          expect(response.status).toBe(403);
+          expect(response.error).toBe("local_process_membership_required");
+          expect(response.port).toBe(cold.port);
+          expect(response.effects).toBe(sharedEffectsBefore);
+          expect(effects).toBe(sharedEffectsBefore);
+        }
+      } finally {
+        await sharedChurn.stop();
+        await writeFile(
+          join(logDirectory, "shared-fd-churn.json"),
+          JSON.stringify(
+            {
+              coOwnerPid: shared.coOwnerPid,
+              responses: sharedChurnResponses,
+              effectsBefore: sharedEffectsBefore,
+              effectsAfter: effects,
+            },
+            null,
+            2,
+          ) + "\n",
+        );
+      }
       phase = "shared-owner-released";
       await herdr.request("member", herdr.pane, "release");
       expect((await herdr.request("member")).status).toBe(200);

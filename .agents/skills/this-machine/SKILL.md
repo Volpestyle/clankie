@@ -70,7 +70,14 @@ its own authorized intent, never an automatic retry. See `docs/cli.md` under
 
 For accepted-issue cost evidence, use `clankie metrics --issue ISSUE --since ISO
 --until ISO` or `clankie metrics --issues --worker LABEL`. The operator route
-projects retained native history and existing ledgers. Report its `coverage`
+projects retained native history and existing ledgers. Exact local bindings in
+conversation metadata, hire-owner records, and archived pane-tidy entries also
+cover older workers and closed panes. A session retained in several records or
+as both an ID and transcript path is counted once; `--worker` accepts its
+retained label, seat ID, session ID, or transcript path. Missing, remote,
+malformed, conflicting, or ambiguous bindings remain explicit coverage gaps. This read
+does not search unbound histories, alter ownership, or grant delivery authority.
+Report its `coverage`
 alongside token, wall-time, check and rework totals: parent native usage is
 partial, elapsed time includes waits, and a passed seat edge is not approval.
 Unknowns remain null; never turn missing history into a zero-cost claim. See
@@ -148,6 +155,17 @@ records return a JSON reconciliation error without changing the journal or lock.
 `/update status`. Never repeat an uncertain update; inspect its existing operation.
 A dirty pin or failed install leaves the old runtime untouched.
 
+New service liveness starts a five-minute CPU and `/health` latency canary;
+`healthy: true` alone does not mean it passed. Read `latest.canary` and deploy
+holds in update status. A pending canary holds further landings. A failed canary
+keeps the new pin running, retains its hold, names `previousHealthyCommit`, and
+records alert delivery state; do not claim a rollback or successful delivery
+from a claimed receipt. Rollback is the owner's decision. A pass clears only
+its own hold. `clankie update canary` reads its policy; configure the next
+observation with `--window-seconds`, `--sample-seconds`, `--cpu-percent`, and
+`--health-ms`, or use `/update` → Canary settings. A restart begins a full new
+window. CPU is the captain process, with 100% meaning one core.
+
 Social turns cannot update the machine. Older already-loaded MCP bridges may
 need their MCP process refreshed to understand newer protocols; repinning files
 cannot change running bridge code. A lost tool result is not permission to resend
@@ -169,53 +187,65 @@ layer. Do not write Keychain entries, `~/.config/clankie/clankie.json`, or
 contract is `{repoRoot}/docs/cli.md` (every install) and `clankie help` (same
 index). Configure through the headless CLI:
 
-| Job                                   | Command                                                                                                                                                              |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| This install                          | `clankie doctor --json` (JSON; exit 0; `ok` means the card was produced)                                                                                             |
-| GitHub / Linear account connections   | `clankie accounts list`, `clankie accounts connect github`, `clankie accounts connect linear`, `clankie accounts disconnect PROVIDER`; `/connections` in the console |
-| Can he take a turn                    | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                                                                                       |
-| Start at login                        | `clankie autostart status`, `clankie autostart enable`                                                                                                               |
-| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                                                                                                |
-| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                            |
-| Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                                                                                              |
-| Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                                                                                       |
-| Service model + local providers       | `clankie model status`                                                                                                                                               |
-| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                                                                                            |
-| Switch service model                  | `clankie model set provider/model`                                                                                                                                   |
-| Service effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                                                                                           |
-| Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`                                                                                 |
-| When long sessions compact            | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                                                                                       |
-| ElevenLabs voice model                | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear`                                                                       |
-| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`                                                                                   |
-| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                                                                                             |
-| Persona images                        | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                                                                                           |
-| Linear wake rules                     | `linear_wake` (operator only); `clankie linear wake show`, `… set --owner-user-emails EMAIL`                                                                         |
-| Linear wake chat                      | `clankie linear target show`, `clankie linear target set global-default`                                                                                             |
-| Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                                                                                     |
-| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                                                                              |
-| Discord picker directory              | `clankie discord directory [servers                                                                                                                                  | channels                      | roles                                              | people] --server ID` (omit server for servers; inspect state/reason before claiming coverage) |
-| Shared Discord settings definition    | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)                                                                     |
-| Discord server setup                  | `clankie discord setup`, `… connect --server NAME --role participant                                                                                                 | admin`, `… fleet --enabled on | off`, `… tracking --level LEVEL`(see`docs/cli.md`) |
-| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                                                                                                  |
-| Explicit Discord test post            | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe                                                                |
-| Desktop expressions / quiet hours     | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`                                                                  |
-| Minecraft profiles and play           | `clankie minecraft configure`, `profiles`, `status`, `join PROFILE`, `leave`; load `minecraft`                                                                       |
-| Fleet responsibility defaults         | `clankie fleet set --closure lead\|owner --machine-setup lead\|owner`; both default to lead                                                                          |
-| Project responsibility overrides      | `clankie project settings PROJECT --closure lead\|owner\|inherit --machine-setup lead\|owner\|inherit`                                                               |
-| Fleet connected tools / peer messages | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`                                                                     |
-| Native conversation seats             | `clankie claude`, `codex`, `opencode`, `grok` with `--conversation ID`; inspect with `--dry-run`                                                                     |
-| Herdr session                         | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                                                                                      |
-| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                                                                                        |
-| State your assignment (for agents)    | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`                                                                             |
-| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                                                                                      |
-| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                                                                               |
-| Pick up model/provider config         | `clankie restart`                                                                                                                                                    |
-| Machines / discovery / sessions       | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                               |
-| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                                                                                |
-| Rotate operator credential            | `clankie operator-credential rotate --json`                                                                                                                          |
-| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                                                                                                |
-| Play session                          | `clankie play status` / `clankie play stop`                                                                                                                          |
-| Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                                 |
+| Job                                    | Command                                                                                                                                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| This install                           | `clankie doctor --json` (JSON; exit 0; `ok` means the card was produced)                                                                                           |
+| Account connections and Google consent | [Consent and CLI commands](reference/accounts-and-connections.md); `/connect accounts` or `/connections` in the console                                            |
+| Can he take a turn                     | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                                                                                     |
+| Start at login                         | `clankie autostart status`, `clankie autostart enable`                                                                                                             |
+| Are processes up                       | `clankie status` (JSON; `clankie health` is an alias)                                                                                                              |
+| Sustained CPU or slow health           | `clankie runtime-health status`; `clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300`; `/runtime-health` opens the settings menu |
+| Bundled skill classes and selection    | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                          |
+| Turn opinionated guidance off/on       | `clankie skills opinionated off` / `on`                                                                                                                            |
+| Exclude/restore an opinionated skill   | `clankie skills exclude NAME` / `include NAME`                                                                                                                     |
+| Service model + local providers        | `clankie model status`                                                                                                                                             |
+| Add a local OpenAI-compatible runtime  | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                                                                                          |
+| Switch service model                   | `clankie model set provider/model`                                                                                                                                 |
+| Service effort                         | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                                                                                         |
+| Cheaper model for everyday turns       | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`                                                                               |
+| When long sessions compact             | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                                                                                     |
+| ElevenLabs voice model                 | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear`                                                                     |
+| Image / video models                   | `clankie image-model set provider/model`, `clankie video-model set provider/model`                                                                                 |
+| Persona                                | `clankie persona status`, `clankie persona set --display-name Clankie …`                                                                                           |
+| Persona images                         | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                                                                                         |
+| Linear wake rules                      | `linear_wake` (operator only); `clankie linear wake show`, `… set --owner-user-emails EMAIL`                                                                       |
+| Linear wake chat                       | `clankie linear target show`, `clankie linear target set global-default`                                                                                           |
+| Live Linear awareness                  | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                                                                                   |
+| Gameplay availability                  | `clankie games status`, `clankie games set on`, `clankie games set off`                                                                                            |
+| Discord picker directory               | `clankie discord directory [servers                                                                                                                                | channels                      | roles                                              | people] --server ID` (omit server for servers; inspect state/reason before claiming coverage) |
+| Shared Discord settings definition     | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)                                                                   |
+| Discord server setup                   | `clankie discord setup`, `… connect --server NAME --role participant                                                                                               | admin`, `… fleet --enabled on | off`, `… tracking --level LEVEL`(see`docs/cli.md`) |
+| Non-secret Discord setup               | `clankie discord status`, `clankie discord set --active-body bot …`                                                                                                |
+| Explicit Discord test post             | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe                                                              |
+| Desktop expressions / quiet hours      | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`                                                                |
+| Minecraft profiles and play            | `clankie minecraft configure`, `profiles`, `status`, `join PROFILE`, `leave`; load `minecraft`                                                                     |
+| Fleet responsibility defaults          | `clankie fleet set --closure lead\|owner --machine-setup lead\|owner`; both default to lead                                                                        |
+| Project responsibility overrides       | `clankie project settings PROJECT --closure lead\|owner\|inherit --machine-setup lead\|owner\|inherit`                                                             |
+| Fleet connected tools / peer messages  | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`                                                                   |
+| Native conversation seats              | `clankie claude`, `codex`, `opencode`, `grok` with `--conversation ID`; inspect with `--dry-run`                                                                   |
+| Herdr session                          | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                                                                                    |
+| His working directory                  | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                                                                                      |
+| State your assignment (for agents)     | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`                                                                           |
+| Say what you are doing (for agents)    | `clankie stance working --activity testing --for 60` (`reading`, `editing`, `testing`, `planning`, `waiting`; optional note)                                       |
+| Public doorway                         | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                                                                             |
+| Pick up model/provider config          | `clankie restart`                                                                                                                                                  |
+| Machines / discovery / sessions        | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                             |
+| Pair a device / list / revoke          | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                                                                              |
+| Rotate operator credential             | `clankie operator-credential rotate --json`                                                                                                                        |
+| Restart / stop a service               | `clankie restart [service]`, `clankie down [service]`                                                                                                              |
+| Play session                           | `clankie play status` / `clankie play stop`                                                                                                                        |
+| Spider-Man gameplay skill              | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                               |
+
+`clankie linear budget` and `clankie doctor --json` show account request usage.
+At 50%, a native warning remains pending until admission succeeds; refused or
+failed admission retries after 60 seconds without spending a provider request.
+An accepted but unconfirmed native receipt stops retries; it is not proof of
+alert receipt or model awareness. Usage below 50% rearms the warning.
+At 80%, the app's Work refresh and reads explicitly marked as background share
+a one-minute interval; honor refusal retry times. Automated operator scripts use
+`clankie linear read TOOL --json-stdin --background`; fleet polls use
+`clankie_call({name, arguments, background: true})`. Ordinary owner and lead reads,
+writes and webhook context retain priority within the hard cap.
 
 Everything else about the launcher (Linear activity, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
@@ -234,6 +264,12 @@ bound server/current installation. Inspect `managedPolicy` before claiming a
 saved policy reached the edge; pending or unavailable is not an acknowledgement.
 The account dashboard uses a Discord-only owner permit. Disconnect/reinstall
 revokes that connection grant; it does not create a terminal or paired-device grant.
+For a managed Discord call, inspect the current connection and voice status;
+the managed connection owns media and credentials. The tenant body receives only
+sealed briefing, attributed captain handoff and voice self-tool callbacks.
+Use the existing server/role and voice settings; a hosted customer supplies no
+bot token or provider key. Report a pending wake or unavailable call as observed,
+and keep live voice verification separate from a successful policy save.
 
 ## Authority
 
@@ -390,6 +426,11 @@ After an owner-authorized same-thread reattach, `clankie agents readopt SEAT
 --conversation ID` repairs the existing owning conversation's occupant binding.
 Unread worker output is available through `clankie agents reports --conversation ID`;
 reading leaves it unread until the lead acknowledges the fully offered IDs.
+Use `clankie agents reports ack --json-stdin --conversation ID` with the exact
+returned page, or pass its `ackDeliveryIds` as positional arguments. For an
+owner-authorized history cleanup, `reports ack-history DELIVERY_ID...` accepts
+up to 1,000 explicitly selected retained IDs and requires operator credentials.
+Never clear new unread reports as part of a migration cleanup.
 
 The roster's `harnessBridge` flags the same process facts; `Ctrl+G` in the
 console reveals the selected pane's full fix. `live-process` verifies process
@@ -420,6 +461,13 @@ skill are independent facts. Static installation is not live native membership.
 Doctor and roster `workerTools` separately report observed worker catalogs,
 pending requests, missing tools and stalled reads with their reasons. An unknown
 catalog remains `not-observed`; those observations grant no tool authority.
+Roster `workerReportBridge` separately records the last report outcome, time and
+fixed safe reason. Done/idle hires held for fifteen minutes without a stored
+report since their latest brief carry `finished, unreported`. Three failed seats
+within ten minutes produce one native alert to their owning lead. Inspect
+`clankie metrics --fleet` for five- and sixty-minute proof/refusal and report
+failure rates. Preserve and reconcile uncertain originals; health observations
+never authorize deleting receipts or replaying reports.
 Remote reports also include `linkState`: an `unreachable` link's `error` is the
 decoded remote reason, independently of harness installation health. Fleet
 control connections and resident relays refresh at ten minutes; renewal keeps
@@ -477,6 +525,27 @@ and asks the owner to disable it in that Grok profile, then start a fresh seat.
 Do not change the account/configuration or use a headless/terminal-input fallback
 to repair that refusal. See the Grok section of `{repoRoot}/docs/cli.md`.
 
+## Project onboarding and membership
+
+For an unassigned owner workspace conversation, read the repo and its existing
+work convention, then use dialog questions for tracking, useful project roles
+and fleet size (`solo`, `small`, `large`, `max`). `propose_project_create` offers
+the existing explicit CREATE review; preference answers alone authorize no
+write. A missing convention can be proposed as `trackerSetup` using work-init
+inputs and `trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" }`.
+It initializes tracking only on explicit CREATE. After uncertainty, read that
+same proposal target; do not repeat CREATE. The tracker may have saved before
+the project settings failed. No provider project, label or account is created.
+
+Hires keep their recorded project/role assignment independent of cwd. Agents
+Clankie did not start use verified native cwd in an enrolled project workspace
+or a verified linked worktree; roster cwd and persona identity are not authority.
+The owner membership API observes local and registered Windows fleet seats,
+rechecks native identity before publication and leaves missing or ambiguous
+proof unscoped. An unconfirmed hire never falls back to cwd assignment.
+Project membership does not restrict connected tools: every admitted pane in a
+Clankie-linked session uses the connected catalog under ADR 0217.
+
 ## Repository-bound worktree roots
 
 An owner may enroll a dedicated root for a repo's future linked worktrees:
@@ -531,3 +600,10 @@ FLEET_ID`. Hiring does not rewrite the remote profile. The first brief waits for
 plus `message_clankie`. Changed native project/admission state still prevents hire
 dispatch; account checks apply when a provider tool is called. An unbound server
 confers no native hire or mailbox authority. An uncertain hire is not permission to retry or type into its pane.
+
+For the World work-kind bubble, read `seat.activity.kind` from roster/fleet;
+`source` distinguishes a native tool observation from an expiring agent statement.
+Never derive it from `doing`, a note or shell command text. Use `clankie stance
+working --activity testing --for 60` to state work a generic shell cannot describe.
+A replacement stance without `--activity` clears it; an idle/offline seat or a
+changed occupying session has no activity. Unknown means no bubble.

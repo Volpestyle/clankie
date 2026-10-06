@@ -12,9 +12,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createBodyDiagnostics } from "./account-diagnostics.ts";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
-import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
+import { fleetMembershipNative, remoteFleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
+import { RuntimeCanary } from "./runtime-canary.ts";
+import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
 import { DeployHolds } from "./deploy-holds.ts";
 import { deployHoldPresence } from "./deploy-hold-presence.ts";
@@ -24,6 +26,7 @@ import { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyPlaySessions } from "./body-play-sessions.ts";
+import { notifyPokemonPlay } from "./play-notifications.ts";
 import { MinecraftMcpPort } from "./minecraft-mcp.ts";
 import { MinecraftService } from "./minecraft.ts";
 import { MinecraftPlayHost } from "./minecraft-play-host.ts";
@@ -38,7 +41,7 @@ import { createPersonaImageSource } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
 import { createFleetResourceRuntime } from "./fleet-resource-runtime.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
-import { createHostedDiscordIngress } from "./discord-ingress.ts";
+import { createHostedDiscordIngress, createHostedDiscordVoiceCallback } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
@@ -97,10 +100,11 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
-import { HostedWorldSession } from "./world/session.ts";
+import { HostedWorldSession } from "@clankie/pokemon/world/session";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
@@ -132,6 +136,7 @@ import {
   createRemoteWorktreeRootObserver,
 } from "./remote-project-proof.ts";
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
+import { FleetHealthMetrics } from "./fleet-health-metrics.ts";
 import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
 import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
@@ -144,6 +149,7 @@ import { retireLinearNotifications } from "./linear-notifications.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
+import { LinearRequestBudget } from "./linear-request-budget.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -604,8 +610,27 @@ const boundApp = (): ClankieApp => {
 // Durable revision receipts distinguish captain echoes from delegated worker
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
+let bindLinearBudgetWarning!: (notify: (text: string) => Promise<boolean>) => void;
+const linearBudgetWarningReady = new Promise<(text: string) => Promise<boolean>>((resolve) => {
+  bindLinearBudgetWarning = resolve;
+});
+const linearRequestBudget = new LinearRequestBudget({
+  onAlert: (account) => {
+    const text = `Linear request budget reached ${Math.round(account.utilization * 100)}% (${account.used}/${account.limit} requests in an hour) at ${new Date().toISOString()}. Background reads slow at 80%; writes retain priority. Inspect clankie linear budget.`;
+    logger.warn({ event: "linear.request_budget.warning", ...account }, text);
+    // Keep boot-time warnings tied to the original admission result. A text-only
+    // queue loses false/rejected results and cannot safely retry the incident.
+    return linearBudgetWarningReady.then((notify) => notify(text));
+  },
+});
 const mcpHost = createMcpHost({
-  linearApiTracker: createLinearApiTracker({ credentials: operatorCredentialStore }),
+  googleApps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env).google ?? {},
+  linearApiTracker: createLinearApiTracker({
+    credentials: operatorCredentialStore,
+    requestBudget: linearRequestBudget,
+  }),
+  linearRequestBudget,
+
   localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
@@ -952,6 +977,15 @@ const fleetResources = await createFleetResourceRuntime({
   onError: (error) =>
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
 });
+const fleetHealthMetrics = new FleetHealthMetrics({
+  onProofAlert: (pane, window) =>
+    captain
+      .notifyFleetHealthAlert(
+        pane,
+        `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
+      )
+      .then(() => undefined),
+});
 const captain = createCaptain(
   {
     activitySharing,
@@ -960,6 +994,7 @@ const captain = createCaptain(
       ? {}
       : {
           runtimeUpdater: {
+            runtime: runtimeUpdater.runtime,
             status: runtimeUpdater.status,
             request: (ref: string, authority: import("../../tui/bin/runtime-updater.ts").UpdateAuthority) =>
               deployHolds.landing(`runtime-tool:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
@@ -1050,6 +1085,7 @@ const captain = createCaptain(
       },
     },
     hostedWorld: {
+      guide: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
       inspect: () => hostedWorld.inspect(),
       invoke: (name, input, identity) =>
         hostedWorld.invoke(name, input, () => bodyPlaySessions.guardOwner(identity)),
@@ -1085,6 +1121,7 @@ const captain = createCaptain(
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
     fleetHireTools: () => workerMcp.expectedFleetToolNames(),
     workerBridgeStatus: (fleet, pane) => workerMcp.bridgeStatus(fleet, pane),
+    workerReportBridgeStatus: (fleet, pane) => workerMcp.reportBridgeStatus(fleet, pane),
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,
@@ -1136,6 +1173,10 @@ const hostedDiscord =
         statePath: join(stateRoot, "discord-ingress.json"),
         captain,
         onWork: () => runtimeProvider.heartbeat?.interactive(),
+        voice: createHostedDiscordVoiceCallback(
+          (request) => boundApp().app.fetch(request),
+          discordVoiceBridgeToken,
+        ),
       });
 async function linearFollowing(): Promise<boolean> {
   const current = await settingsStore.load();
@@ -1153,7 +1194,22 @@ fleetProjectMembership = new FleetProjectMembership({
   settings: async () => (await settingsStore.load()).projects,
   binding: localFleetBinding,
   hires: captain,
-  ...fleetMembershipNative(localFleetBinding),
+  ...fleetMembershipNative(localFleetBinding, async () => (await settingsStore.load()).projects),
+  remoteOptions: async (id) => {
+    const current = async () => (await runtimes.fleets()).find((fleet) => fleet.id === id);
+    const fleet = await current();
+    if (!fleet || fleet.ssh.shell !== "powershell") return undefined;
+    return {
+      settings: async () => (await settingsStore.load()).projects,
+      hires: captain,
+      ...remoteFleetMembershipNative(
+        fleet,
+        current,
+        async () => (await settingsStore.load()).projects,
+        join(stateRoot, "ssh"),
+      ),
+    };
+  },
 });
 const fleetLinks = new FleetLinks({
   shell: (fleet) => runtimes.fleetShell(fleet),
@@ -1167,7 +1223,7 @@ const localFleet = new LocalFleetLink({
   directory: join(stateRoot, "links"),
   binding: localFleetBinding,
   projectProof: localProjectProof({
-    diagnostics: localProofDiagnostics(logger, "project"),
+    diagnostics: localProofDiagnostics(logger, "project", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding, signal) => {
@@ -1182,7 +1238,7 @@ const localFleet = new LocalFleetLink({
     },
   }),
   prove: localFleetProof({
-    diagnostics: localProofDiagnostics(logger, "fleet"),
+    diagnostics: localProofDiagnostics(logger, "fleet", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding, signal) => {
@@ -1205,11 +1261,47 @@ const workerPluginNotices = new WorkerPluginNotices({
     return runtimes.fleetRun(fleet)(metadata);
   },
 });
+const runtimeCanary =
+  runtimeUpdater === undefined
+    ? undefined
+    : new RuntimeCanary({
+        updatesDirectory: join(process.env.HOME || homedir(), ".clankie", "updates"),
+        runtime: runtimeUpdater.runtime,
+        holds: deployHolds,
+        sample: createRuntimeHealthSampler({ healthUrl: `http://127.0.0.1:${port}/health` }),
+        alert: async (text) => {
+          const alerts = captain as typeof captain & {
+            notifyRuntimeHealthAlert?: (text: string) => Promise<boolean>;
+          };
+          if (!alerts.notifyRuntimeHealthAlert) {
+            logger.warn(
+              { event: "runtime.canary.alert_unavailable" },
+              "Runtime canary alert delivery is unavailable",
+            );
+            return false;
+          }
+          return alerts.notifyRuntimeHealthAlert(text);
+        },
+        onError: (error) =>
+          logger.warn(
+            { event: "runtime.canary.unavailable", error },
+            "Runtime canary requires reconciliation",
+          ),
+      });
+await runtimeCanary
+  ?.recover()
+  .catch((error) =>
+    logger.error(
+      { event: "runtime.canary.recovery_failed", error },
+      "Runtime canary recovery failed; update remains unresolved",
+    ),
+  );
 const workerMcp = new WorkerMcp({
   directory: join(stateRoot, "worker-grants"),
   credentials: operatorCredentialStore,
   host: mcpHost,
   minecraft,
+  reportBridgeObserved: (fleet, pane, report) => fleetHealthMetrics.observeReport(fleet, pane, report),
   pluginVersionObserved: (identity, version) => workerPluginNotices.observe(identity, version),
   pluginExpectedVersion: () => workerPluginNotices.expected(),
   projects: async () => (await settingsStore.load()).projects,
@@ -1221,8 +1313,31 @@ const workerMcp = new WorkerMcp({
   },
 });
 
+bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
+const runtimeHealth = new RuntimeHealthObserver({
+  settings: async () => (await settingsStore.load()).runtimeHealth,
+  healthUrl: `http://127.0.0.1:${port}/health`,
+  notify: (text) => captain.notifyRuntimeHealthAlert(text),
+  observed: (observation) =>
+    bodyTelemetry?.emit({
+      event: "body.runtime_health",
+      state: observation.state,
+      durationMs: observation.durationMs,
+      reasons: observation.reasons,
+      ...(observation.cpuPercent === undefined ? {} : { cpuPercent: observation.cpuPercent }),
+      ...(observation.healthLatencyMs === undefined ? {} : { healthLatencyMs: observation.healthLatencyMs }),
+    }),
+  unavailable: () =>
+    logger.warn(
+      { event: "runtime.health.observation_unavailable" },
+      "Runtime health observation unavailable",
+    ),
+});
 const clankie = await createClankieApp({
   fleetResources,
+  runtimeHealth: () => runtimeHealth.snapshot(),
+  fleetHealthMetrics,
+  linearRequestBudget,
   discordPermissions: (query, body) =>
     managedDiscord
       ? managedDiscord.permissions(query, body)
@@ -1253,6 +1368,7 @@ const clankie = await createClankieApp({
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
+  ...(runtimeCanary === undefined ? {} : { runtimeCanary }),
   refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({
       repoRoot,
@@ -1268,6 +1384,7 @@ const clankie = await createClankieApp({
   bodyVoiceStays,
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
   bodyPlaySessions,
+  guidePokemonPlay: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
   minecraft,
   minecraftHost,
   minecraftPrivateDelivery,
@@ -1561,6 +1678,9 @@ const server = serve({
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
 });
+if (server.listening) runtimeHealth.start();
+else server.once("listening", () => runtimeHealth.start());
+runtimeCanary?.start();
 // ADR 0204: opt-in LAN door for a self-hosted phone, device routes only.
 const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
 const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
@@ -1612,6 +1732,7 @@ let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
+  linearRequestBudget.close();
   const exitCode = signal === "SIGINT" ? 130 : 143;
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
@@ -1622,6 +1743,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     .catch(() =>
       logger.warn({ event: "fleet_resources.close_failed" }, "Fleet resource observation cleanup failed"),
     );
+  runtimeHealth.stop();
   void closeRuntimeProvider().catch(() =>
     logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
   );
@@ -1642,6 +1764,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await discordTracking.close();
+    await runtimeCanary?.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
@@ -1681,6 +1804,9 @@ function createConfiguredPlayExecution(): PlayExecution {
     playSight,
     hostedWorld,
     gameplay: startupSettings.gameplay,
+    onNotable: async (event, sessionId) => {
+      await notifyPokemonPlay(captain, bodyPlaySessions, event, sessionId);
+    },
     createActivitySink: async () =>
       activityPlay.createSink(
         "Clankie's live play",

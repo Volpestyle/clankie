@@ -153,6 +153,161 @@ it("proposal tool persists one immutable artifact; explicit create preserves cap
     models: "efficient",
   });
 });
+
+it.each([
+  { backend: "default" as const },
+  { backend: "markdown" as const, directory: "tasks", decisions: "docs/adr" },
+  {
+    backend: "github" as const,
+    githubRepo: "fixture/project",
+    releaseSource: "both" as const,
+    releaseLane: "mobile",
+  },
+  { backend: "linear" as const, linearTeam: "FIX", linearProject: "Fixture", linearLabel: "app" },
+])(
+  "explicit CREATE records the reviewed $backend work-init choice and roles exactly once",
+  async (trackerSetup) => {
+    const f = await fixture({
+      trackerSetup,
+      trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+      roles: [{ role: "researcher", concurrencyCap: 0 }],
+      fleet: { size: "solo" },
+    });
+    const path = join(f.workspace, ".clankie/tracking.json");
+    expect(fs.existsSync(path)).toBe(false);
+    expect(f.initial.proposal!.command.trackerSetup).toEqual(trackerSetup);
+    const result = await f.confirm();
+    expect(result.status).toBe("created");
+    const saved = fs.readFileSync(path, "utf8");
+    const convention = JSON.parse(saved);
+    expect(convention).toMatchObject({ schemaVersion: 1, backend: trackerSetup.backend, decidedBy: "owner" });
+    if (trackerSetup.backend === "linear")
+      expect(convention.linear).toEqual({ team: "FIX", project: "Fixture", label: "app" });
+    if (trackerSetup.backend === "github") {
+      expect(convention.github).toEqual({ repo: "fixture/project" });
+      expect(convention.releases).toEqual({ source: "both", lane: "mobile" });
+    }
+    const project = (await f.settings.load()).projects.projects[0]!;
+    expect(project).toMatchObject({
+      trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+      roles: [{ role: "researcher", concurrencyCap: 0 }],
+      fleet: { size: "solo" },
+    });
+    expect((await f.confirm()).status).toBe("created");
+    expect(fs.readFileSync(path, "utf8")).toBe(saved);
+    expect(f.update).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(["revoked", "saved-elsewhere", "parent-alias"])(
+  "does not initialize a tracker after %s changes during review",
+  async (kind) => {
+    const f = await fixture({
+      trackerSetup: { backend: "default" },
+      trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+    });
+    const path = join(f.workspace, ".clankie/tracking.json");
+    if (kind === "revoked") f.revoke();
+    if (kind === "saved-elsewhere") {
+      fs.mkdirSync(join(f.workspace, ".clankie"));
+      fs.writeFileSync(path, '"another owner choice"');
+    }
+    if (kind === "parent-alias") {
+      fs.mkdirSync(join(f.root, "elsewhere"));
+      fs.symlinkSync(join(f.root, "elsewhere"), join(f.workspace, ".clankie"));
+    }
+    if (kind === "revoked") await expect(f.confirm()).rejects.toThrow("question_owner_unavailable");
+    else expect((await f.confirm()).status).not.toBe("created");
+    expect((await f.settings.load()).projects.projects).toEqual([]);
+    if (kind === "saved-elsewhere") expect(fs.readFileSync(path, "utf8")).toBe('"another owner choice"');
+    else expect(fs.existsSync(path)).toBe(false);
+  },
+);
+it("refuses replacement of the newly created tracker parent before its final rename", async () => {
+  const f = await fixture({
+    trackerSetup: { backend: "default" },
+    trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+  });
+  const parent = join(f.workspace, ".clankie");
+  let replaced = false;
+  vi.spyOn(f.owner, "authorize").mockImplementation(async () => {
+    if (!replaced && fs.existsSync(parent) && fs.readdirSync(parent).some((name) => name.endsWith(".tmp"))) {
+      replaced = true;
+      fs.renameSync(parent, join(f.workspace, "previous-tracker-parent"));
+      fs.mkdirSync(parent);
+    }
+    return true;
+  });
+  expect((await f.confirm()).status).toBe("uncertain");
+  expect(replaced).toBe(true);
+  expect(fs.existsSync(join(parent, "tracking.json"))).toBe(false);
+  expect((await f.settings.load()).projects.projects).toEqual([]);
+  expect(f.update).not.toHaveBeenCalled();
+});
+
+it("retains a tracker saved during final owner authorization and never replays its consumed CREATE", async () => {
+  const f = await fixture({
+    trackerSetup: { backend: "default" },
+    trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+  });
+  const parent = join(f.workspace, ".clankie");
+  const path = join(parent, "tracking.json");
+  const sentinel =
+    JSON.stringify({
+      schemaVersion: 1,
+      backend: "github",
+      github: { repo: "fixture/concurrent-owner" },
+      decidedBy: "owner",
+      decidedAt: "2026-10-06T00:00:00Z",
+    }) + "\n";
+  let authorizationsAfterTemporary = 0;
+  let saved = false;
+  vi.spyOn(f.owner, "authorize").mockImplementation(async () => {
+    if (fs.existsSync(parent) && fs.readdirSync(parent).some((name) => name.endsWith(".tmp"))) {
+      // The final guard authorizes issuer and owner before and after its absence checks.
+      if (++authorizationsAfterTemporary === 4) {
+        fs.writeFileSync(path, sentinel, { flag: "wx" });
+        saved = true;
+      }
+    }
+    return true;
+  });
+  const result = await f.confirm();
+  expect(saved).toBe(true);
+  expect(result.status).toBe("uncertain");
+  expect(fs.readFileSync(path, "utf8")).toBe(sentinel);
+  expect((await f.settings.load()).projects.projects).toEqual([]);
+  expect(f.update).not.toHaveBeenCalled();
+  for (const observed of [await f.confirm(), await f.read()]) {
+    expect(observed.status).toBe("uncertain");
+    expect(observed.proposal).toEqual(result.proposal);
+    expect(observed.receipt).toBeUndefined();
+  }
+  expect(fs.readFileSync(path, "utf8")).toBe(sentinel);
+  expect(f.update).not.toHaveBeenCalled();
+});
+
+it("a saved tracker followed by settings failure stays uncertain without replaying setup", async () => {
+  const f = await fixture({
+    trackerSetup: { backend: "default" },
+    trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+  });
+  f.update.mockRejectedValueOnce(new Error("settings write unavailable"));
+  const result = await f.confirm();
+  expect(result.status).toBe("uncertain");
+  const path = join(f.workspace, ".clankie/tracking.json");
+  const saved = fs.readFileSync(path, "utf8");
+  expect(JSON.parse(saved).backend).toBe("default");
+  expect((await f.settings.load()).projects.projects).toEqual([]);
+  for (const observed of [await f.confirm(), await f.read()]) {
+    expect(observed.status).toBe("uncertain");
+    expect(observed.proposal).toEqual(result.proposal);
+    expect(observed.receipt).toBeUndefined();
+  }
+  expect(f.update).toHaveBeenCalledTimes(1);
+  expect(fs.readFileSync(path, "utf8")).toBe(saved);
+});
+
 it("generic yes is context only and consumes eligibility without writing settings", async () => {
   const f = await fixture();
   const r = await f.store.serve(

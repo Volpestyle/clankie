@@ -4,7 +4,14 @@ import { z } from "zod";
  * The work-item contract (ADR 0191): one shape for an item whichever backend
  * the repo records, so the CLI, the captain's tools and the app agree.
  */
-export const WORK_ITEM_STATUSES = ["todo", "in_progress", "in_review", "done", "canceled"] as const;
+export const WORK_ITEM_STATUSES = [
+  "backlog",
+  "todo",
+  "in_progress",
+  "in_review",
+  "done",
+  "canceled",
+] as const;
 export const WorkItemStatusSchema = z.enum(WORK_ITEM_STATUSES);
 export type WorkItemStatus = z.infer<typeof WorkItemStatusSchema>;
 
@@ -57,6 +64,25 @@ export const WORK_ITEM_LABEL_MAX = 64;
 export const WORK_ITEM_LABELS_MAX = 20;
 export const WorkItemLabelSchema = z.string().max(WORK_ITEM_LABEL_MAX);
 export const WorkLinearLabelSchema = TextSchema(WORK_ITEM_LABEL_MAX);
+export const WorkReleaseSourceSchema = z.enum(["tags", "milestones", "both"]);
+export type WorkReleaseSource = z.infer<typeof WorkReleaseSourceSchema>;
+
+/** Owner-reviewed inputs shared by work init and a project's explicit CREATE. */
+export const WorkInitSettingsSchema = z
+  .object({
+    backend: WorkBackendKindSchema.optional(),
+    directory: z.string().min(1).max(256).optional(),
+    githubRepo: z.string().min(1).max(200).optional(),
+    linearTeam: z.string().min(1).max(64).optional(),
+    linearProject: z.string().min(1).max(200).optional(),
+    linearLabel: WorkLinearLabelSchema.optional(),
+    releaseSource: WorkReleaseSourceSchema.optional(),
+    releaseLane: z.string().trim().min(1).max(64).optional(),
+    decisions: z.string().min(1).max(256).optional(),
+    note: z.string().max(1000).optional(),
+  })
+  .strict();
+export type WorkInitSettings = z.infer<typeof WorkInitSettingsSchema>;
 
 export const WorkItemSchema = z
   .object({
@@ -68,6 +94,10 @@ export const WorkItemSchema = z
     status: WorkItemStatusSchema,
     /** 0 none, 1 Urgent, 2 High, 3 Medium, 4 Low; optional for older bodies. */
     priority: WorkItemPrioritySchema.optional(),
+    milestone: z
+      .object({ id: TextSchema(256), name: TextSchema(200) })
+      .strict()
+      .optional(),
     owner: z.string().trim().min(1).max(128).optional(),
     dependsOn: z.array(z.string().trim().min(1).max(64)).max(50),
     summary: z.string().max(20_000),
@@ -104,6 +134,15 @@ const WorkConventionFieldsSchema = z
         team: z.string().trim().min(1).max(64),
         project: z.string().trim().min(1).max(200).optional(),
         label: WorkLinearLabelSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** Release selection is a host setting, shared by every device. */
+    releases: z
+      .object({
+        source: z.enum(["tags", "milestones", "both"]).default("both"),
+        /** Owner-authored lane; repository means no platform claim was recorded. */
+        lane: TextSchema(64).default("repository"),
       })
       .strict()
       .optional(),
@@ -171,3 +210,72 @@ export const WorkItemsResultSchema = z
   })
   .strict();
 export type WorkItemsResult = z.infer<typeof WorkItemsResultSchema>;
+
+export const WorkPlannedReleaseSchema = z
+  .object({
+    id: TextSchema(256),
+    name: TextSchema(200),
+    targetDate: z.string().max(64).optional(),
+    itemIds: z.array(TextSchema(64)).max(25_000),
+  })
+  .strict();
+export const WorkShippedVersionSchema = z
+  .object({
+    version: TextSchema(200),
+    lane: TextSchema(64),
+    date: z.string().max(64),
+    /** Lightweight tags state a commit date, not a publication date. */
+    dateKind: z.enum(["tag", "commit", "published"]),
+    itemIds: z.array(TextSchema(64)).max(25_000),
+    location: z.string().max(2048).optional(),
+  })
+  .strict();
+export const WorkGoalSchema = z
+  .object({
+    id: TextSchema(256),
+    name: TextSchema(200),
+    status: TextSchema(64),
+    targetDate: z.string().max(64).optional(),
+    projects: z
+      .array(
+        z
+          .object({
+            id: TextSchema(256),
+            name: TextSchema(200),
+            status: TextSchema(64).optional(),
+            /** Linear's native progress fraction, including its estimate weighting. */
+            progress: z.number().finite().min(0).max(1).optional(),
+          })
+          .strict(),
+      )
+      .max(25_000),
+  })
+  .strict();
+export const WorkProjectFactsSchema = z
+  .object({
+    releaseSource: WorkReleaseSourceSchema,
+    planned: z.array(WorkPlannedReleaseSchema).max(25_000),
+    shipped: z.array(WorkShippedVersionSchema).max(25_000),
+    goals: z.array(WorkGoalSchema).max(25_000),
+    /** Unsupported or failed reads stay distinct from a successful empty collection. */
+    unavailable: z
+      .array(
+        z
+          .object({
+            read: z.enum(["planned", "shipped", "goals"]),
+            message: z.string().max(500),
+          })
+          .strict(),
+      )
+      .max(3),
+  })
+  .strict();
+export type WorkProjectFacts = z.infer<typeof WorkProjectFactsSchema>;
+export const WorkProjectResultSchema = WorkProjectFactsSchema.extend({ repo: WorkRepoSchema }).strict();
+export type WorkProjectResult = z.infer<typeof WorkProjectResultSchema>;
+
+/** A legacy device has not opted into backlog/milestones yet. */
+export function legacyWorkItem(item: WorkItem): WorkItem {
+  const { milestone: _milestone, ...legacy } = item;
+  return { ...legacy, status: item.status === "backlog" ? "todo" : item.status };
+}

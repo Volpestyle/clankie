@@ -412,12 +412,14 @@ paths:
     post:
       tags: [Discord]
       operationId: discordIngress
-      summary: Admit an encrypted, fleet-permitted addressed Discord turn
+      summary: Admit an encrypted Discord turn or scoped voice callback
       description: >-
         Remote connection API, not an operator bearer. P-256 ECDH and AES-GCM
         protect request and response; a 60-second Ed25519 fleet permit binds the
         tenant, installation, event digest and ephemeral response recipient.
-        Durable delivery dedupe prevents repeated captain effects. See docs/discord-ingress.md.
+        Durable delivery dedupe prevents repeated captain effects. Voice callbacks use
+        the existing briefing, attributed captain handoff and three voice self-tools.
+        See docs/discord-ingress.md.
       requestBody:
         required: true
         content:
@@ -434,7 +436,7 @@ paths:
                 sealed: { type: string, maxLength: 100000 }
       responses:
         "200":
-          description: Sealed pending, reply, silent or failed result
+          description: Sealed pending, reply, voice operation, silent or failed result
         "401":
           description: Invalid, expired, unsealed or wrongly scoped event
         "409":
@@ -885,11 +887,14 @@ paths:
     get:
       tags: [Operator]
       operationId: listAccounts
-      summary: List GitHub and Linear account connections
+      summary: Read the body-owned GitHub, Linear and Google account catalog
       description: |
         Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
+        Includes service purpose, permission disclosure, account identity, granted scopes,
+        recovery status and selected Drive file IDs. An unconfigured Google row needs
+        operator OAuth client setup; it does not request a customer credential.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
@@ -1069,6 +1074,158 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
+  /v1/accounts/google/start:
+    post:
+      tags: [Operator]
+      operationId: startGoogleAccount
+      summary: Start body-owned Google consent with state and S256 PKCE
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public gateway
+        calls require the encrypted envelope. The body retains the verifier and keeps
+        all client secrets and tokens in its broker. Cache-Control no-store.
+        Gmail requests gmail.readonly plus openid email. Calendar requests
+        calendar.calendarlist.readonly and calendar.events.readonly plus openid email.
+        Drive requests only drive.file and opens Google Picker with prompt consent,
+        trigger_onepick true and include_granted_scopes false. Google's selected-file
+        grant permits editing; Clankie's implemented tools only read selected files.
+        All flows request offline access. Client setup and browser consent are required.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountGoogleStartRequest" }
+      responses:
+        "200":
+          description: One-time state, registered redirect, consent URL and expiry; no token or verifier
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountGoogleStartSuccess" }
+        "400":
+          description: Closed failure code, including malformed, unconfigured or unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "401":
+          description: authentication_required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "403":
+          description: forbidden — terminalControl required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "413":
+          description: malformed — body exceeds 16 KiB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "503":
+          description: unavailable — body, broker or current owner authority could not be verified
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+  /v1/accounts/google/complete:
+    post:
+      tags: [Operator]
+      operationId: completeGoogleAccount
+      summary: Exchange the one-time Google code on the tenant body
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public gateway
+        calls require the encrypted envelope. State is single use, bound to this body's
+        pending provider, OAuth application and expiry. The body verifies provider identity
+        and granted scopes before storing credentials; no tokens or provider errors escape.
+        Gmail and Calendar accept provider, state and code only. Drive also requires a
+        nonempty unique pickedFileIds array, validated from Google Picker's picked_file_ids
+        callback. These IDs bound the files the implemented Drive read tools can access.
+        Cache-Control no-store. Authorization codes belong in the JSON body, never API request URLs or logs.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountGoogleCompleteRequest" }
+      responses:
+        "200":
+          description: Verified account connection and granted permissions; no credential
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountGoogleCompleteSuccess" }
+        "400":
+          description: Closed failure code, including malformed, unknown_flow, expired, unconfigured, provider_rejected or unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "401":
+          description: authentication_required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "403":
+          description: forbidden — terminalControl required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "413":
+          description: malformed — body exceeds 32 KiB (including selected file IDs)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "503":
+          description: unavailable — body, broker or current owner authority could not be verified
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+  /v1/accounts/google/check:
+    post:
+      tags: [Operator]
+      operationId: checkGoogleAccount
+      summary: Refresh and verify the selected Google account's authorized access
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public gateway
+        calls require the encrypted envelope. The body refreshes the selected grant under
+        the credential-store lock and verifies its identity, scopes and disconnect epoch.
+        Returns catalog metadata and last-check status without exposing credentials.
+        Invalid grants require renewed consent; provider outages do not imply revocation.
+        Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountGoogleStartRequest" }
+      responses:
+        "200":
+          description: Current verified account connection and check metadata; no credential
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountGoogleCompleteSuccess" }
+        "400":
+          description: Closed failure code, including malformed, unconfigured, denied, provider_rejected or unavailable; list accounts for recovery status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "401":
+          description: authentication_required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "403":
+          description: forbidden — terminalControl required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "413":
+          description: malformed — body exceeds 16 KiB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
+        "503":
+          description: unavailable — body, broker or current owner authority could not be verified
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountFailure" }
   /v1/accounts/disconnect:
     post:
       tags: [Operator]
@@ -1078,8 +1235,11 @@ paths:
         Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
-        revoked is false when the provider could not revoke; the token is deleted either way
-        and manageUrl names where to revoke it by hand.
+        revoked is false when the provider could not confirm revocation; local access is
+        disabled either way and manageUrl names where to review the grant.
+        Disconnecting any Google provider disables all three Google connections on this
+        body. Its broker may retain a refresh credential solely for bounded revocation
+        retries; catalog revocationPending remains true until Google confirms revocation.
         Hosted GitHub disconnect never uses a developer app secret and reports revoked false.
         Owner-run self-hosted GitHub revocation deletes only the stored token, never an app grant.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
@@ -1092,7 +1252,7 @@ paths:
                 type: object,
                 required: [provider],
                 additionalProperties: false,
-                properties: { provider: { type: string, enum: [github, linear] } },
+                properties: { provider: { $ref: "#/components/schemas/AccountProvider" } },
               }
       responses:
         "200":
@@ -1239,13 +1399,18 @@ paths:
       summary: Read and write work items in the repo's own tracking convention
       description: >-
         One contract over Linear, GitHub issues, the repo's own Markdown directory, or
-        .clankie/work/ (ADR 0191). `action` is repos, discover, init, list, show, create,
+        .clankie/work/ (ADR 0191). `action` is repos, discover, init, list, show, project, create,
         update, attach, write or write_receipt. The two narrow owner operations take
         request {repoId,itemId,requestId,command}; receipt reads omit command. The
         command assigns work-metadata owner, adds/removes a role label or appends a
         blocker. Their applied/refused/uncertain receipt always carries the UUID;
         repeated IDs and receipt reads never replay a write. A path names and registers a local repo; registered repos are
-        readable from paired devices through the work_repos and work_items operator ops.
+        readable from paired devices through the work_repos, work_items and work_project operator ops.
+        work_items statusVersion=2 opts into backlog and native milestone metadata;
+        older requests receive backlog as todo. project reads planned milestones,
+        shipped v* tags/published versions and Linear initiative goals. init accepts
+        releaseSource (tags, milestones, both; default both) and releaseLane
+        (default repository). Unavailable facts are explicit; store builds are not inferred.
         list takes optional status, owner and label (case-insensitive) filters; items carry
         the backend's labels (ADR 0208).
       security: [{ operatorBearer: [] }]
@@ -1311,6 +1476,46 @@ paths:
         "401": { description: Operator authentication required }
         "409": { description: Target is not an available ordinary global chat }
         "503": { description: Settings or operator authentication unavailable }
+  /v1/linear/request-budget:
+    get:
+      tags: [Operator]
+      operationId: inspectLinearRequestBudget
+      summary: Read rolling provider request usage and background read throttling
+      description: Counts actual HTTP attempts across MCP and the API tracker per workspace and actor. The default 5000/hour cap reserves one request; provider remaining/reset headers can lower available headroom. At 50% a native runtime warning is emitted once until usage recovers; at 80% background reads share a one-minute minimum interval. Writes and webhook context retain priority within the hard cap. This diagnostic makes no provider calls.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Service-local rolling counts and available provider rate-limit observations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, windowMs, observedAt, accounts]
+                properties:
+                  schemaVersion: { const: 1 }
+                  windowMs: { const: 3600000 }
+                  observedAt: { type: integer, minimum: 0 }
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        [accountId, requests, limit, used, utilization, status, backgroundMinIntervalMs]
+                      properties:
+                        accountId: { type: string }
+                        workspaceId: { type: string }
+                        userId: { type: string }
+                        requests: { type: integer, minimum: 0 }
+                        limit: { type: integer, minimum: 1 }
+                        used: { type: integer, minimum: 0 }
+                        utilization: { type: number, minimum: 0 }
+                        status: { type: string, enum: [normal, warning, throttled, limited] }
+                        backgroundMinIntervalMs: { type: integer, minimum: 0 }
+                        backgroundRetryAt: { type: integer, minimum: 0 }
+                        requestsRemaining: { type: integer, minimum: 0 }
+                        resetAt: { type: integer, minimum: 0, description: UTC epoch milliseconds }
+        "401": { description: Operator authentication required }
+        "503": { description: Budget or operator authentication unavailable }
   /v1/linear/wake:
     get:
       tags: [Operator]
@@ -1848,15 +2053,18 @@ paths:
       summary: Create a reviewed project with one canonical local workspace
       description: >-
         Owner only. Strict fields are projectId, name, workspacePath, expectedRevision,
-        roles, workerCap, trackerRef and fleet. The service supplies primary/local
+        roles, workerCap, trackerRef, trackerSetup and fleet. The service supplies primary/local
         workspace identity and its platform. Nullable caps inherit; zero is preserved.
         Fleet preferences are not numeric caps. Optional trackerRef must name primary
-        and .clankie/tracking.json, an existing valid canonical convention. No tracker
-        initialization, remote enrollment, assignments, hires or grants. Rechecks
+        and .clankie/tracking.json, an existing valid canonical convention unless
+        trackerSetup supplies reviewed work-init inputs for a missing convention.
+        Tracker save precedes settings save; a partial failure can leave only the
+        convention. No automatic retry, account choice, provider project/label
+        creation, remote enrollment, assignments, hires or grants. Rechecks
         canonical directory/tracker identity, settings revision and owner authority
         before the existing SettingsStore rename. These asynchronous observations
         are not cross-process compare-and-swap or atomic authority/filesystem checks.
-        This documents landed source, not an installed CLI or running-service update.
+        This documents the source contract, not an installed CLI or running-service update.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1930,6 +2138,20 @@ paths:
                   properties:
                     workspaceId: { type: string, enum: [primary] }
                     path: { type: string, enum: [.clankie/tracking.json] }
+                trackerSetup:
+                  type: object
+                  additionalProperties: false
+                  required: [backend]
+                  description: Existing work-init inputs for a missing convention; requires trackerRef
+                  properties:
+                    backend: { type: string, enum: [default, markdown, github, linear] }
+                    directory: { type: string, minLength: 1, maxLength: 256 }
+                    githubRepo: { type: string, minLength: 1, maxLength: 200 }
+                    linearTeam: { type: string, minLength: 1, maxLength: 64 }
+                    linearProject: { type: string, minLength: 1, maxLength: 200 }
+                    linearLabel: { type: string, minLength: 1, maxLength: 64 }
+                    decisions: { type: string, minLength: 1, maxLength: 256 }
+                    note: { type: string, maxLength: 1000 }
                 fleet:
                   type: [object, "null"]
                   additionalProperties: false
@@ -1941,7 +2163,7 @@ paths:
         "400": { description: Malformed or unsupported creation fields }
         "401": { description: Owner authentication required }
         "403": { description: Caller is not the owner }
-        "409": { description: project_create_conflict or project_tracker_unavailable; no retry or setup }
+        "409": { description: project_create_conflict or project_tracker_unavailable; no automatic retry }
         "413": { description: Request exceeds 16 KiB }
         "503": { description: Settings writes unavailable }
   /v1/operator/projects/remove-workspace:
@@ -2115,12 +2337,55 @@ paths:
         "400": { description: Invalid persona patch }
         "401": { description: Operator authentication required }
         "503": { description: Settings persistence unavailable }
+  /v1/operator/runtime-health:
+    get:
+      tags: [Operator]
+      operationId: getRuntimeHealth
+      summary: Read runtime CPU and health alarm settings and metadata
+      description: |
+        Owner or Take Control device authority. Returns schemaVersion=1, a SHA-256
+        settings revision, settings, and the fixed RuntimeHealthObservation from
+        packages/protocol/src/runtime-health.ts. Process CPU is wall-time-normalized
+        process.cpuUsage; 100% is one fully busy core. No conversation content.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200": { description: Current settings revision and live observation }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+    post:
+      tags: [Operator]
+      operationId: updateRuntimeHealth
+      summary: Change runtime health alarm thresholds without restarting
+      description: |
+        Accepts schemaVersion=1, expectedRevision and a strict partial changes
+        object. Defaults are enabled=true, cpuPercent=50, healthLatencyMs=1000,
+        sustainedMs=300000, sampleIntervalMs=15000 and cooldownMs=1800000.
+        Settings apply on the next sample. Native global-default delivery emits
+        one alarm and one recovery with incident duration; it creates no service
+        model turn. The schema and bounded ranges live in @clankie/protocol.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              expectedRevision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              changes: { cpuPercent: 50, healthLatencyMs: 1000, sustainedMs: 300000 }
+      responses:
+        "200": { description: Saved revision and live observation }
+        "400": { description: Malformed or out-of-range settings }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Settings revision or owner authority changed }
+        "503": { description: Settings unavailable }
+
   /health:
     get:
       tags: [Health]
       operationId: getHealth
       summary: Public liveness
-      description: Optional Herdr, gateway, host-power and runtime identity findings do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md). When available, `runtime` exposes only this service boot's pid, commit, root and instanceId; update transaction details are omitted.
+      description: Optional Herdr, gateway, host-power, runtime identity and runtimeHealth findings do not change service liveness. `runtimeHealth` contains fixed CPU percentage, health latency, duration, reason/alarm/delivery enums and incident timestamps; no conversation content. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md). When available, `runtime` exposes only this service boot's pid, commit, root and instanceId; update transaction details are omitted.
       security: []
       responses:
         "200":
@@ -3162,6 +3427,79 @@ paths:
         "404":
           description: Nothing is waiting on that event
 
+  /v1/fleet/metrics:
+    get:
+      tags: [Operator]
+      operationId: getFleetHealthMetrics
+      summary: Read fixed-reason fleet proof and report counters
+      description: |
+        Operator-only, content-free counts since service start and five/sixty-minute
+        rates. Proof terminal admissions/refusals, receipt observations, native
+        retries and transport failures are separate. No PIDs, paths, argv, pane
+        IDs or report bodies. Contract: FleetHealthMetricsSnapshotSchema in
+        packages/protocol/src/fleet-health-metrics.ts.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Current no-store metrics snapshot
+        "401":
+          description: Operator authentication required
+        "503":
+          description: Authentication or fleet metrics unavailable
+
+  /v1/fleet/seats/{paneId}/messages/health:
+    post:
+      tags: [Operator]
+      operationId: recordWorkerReportHealth
+      summary: Record a native worker's content-free receipt health
+      description: |
+        Requires the current admitted native session. This observation does not
+        send or replay a report and does not grant tool authority. Unknown panes,
+        changing native bindings and fields beyond the strict status are refused.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - name: paneId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [outcome, reason, observedAt]
+              properties:
+                outcome: { type: string, enum: [stored, uncertain, rejected, unavailable] }
+                reason:
+                  type: string
+                  enum:
+                    [
+                      stored,
+                      binding_timeout,
+                      binding_unavailable,
+                      binding_rejected,
+                      receipt_unresolved,
+                      receipt_timeout,
+                      receipt_invalid,
+                      connection_refused,
+                      local_receipt_unavailable,
+                    ]
+                observedAt: { type: string, format: date-time }
+                lastStoredAt: { type: string, format: date-time }
+      responses:
+        "202":
+          description: Observation recorded independently of tool readiness
+        "400":
+          description: Invalid strict status
+        "401":
+          description: Authentication required
+        "403":
+          description: Current native session required
+        "503":
+          description: Worker health observation unavailable
+
   /v1/fleet/efficiency:
     post:
       tags: [Operator]
@@ -3964,12 +4302,54 @@ paths:
         "403": { description: Operator authority required }
         "503": { description: Settings unavailable }
 
+  /v1/games/configuration:
+    get:
+      tags: [Embodiment]
+      operationId: getGamesConfiguration
+      summary: Pokémon play defaults
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      responses:
+        "200":
+          {
+            description: Gameplay settings and restart instruction. An absent token override defaults to 250000 charged tokens.,
+          }
+    put:
+      tags: [Embodiment, Operator]
+      operationId: putGamesConfiguration
+      summary: Replace gameplay configuration for subsequent sittings
+      description: Owner operator or a device with Take Control. Restart Clankie to apply defaults. Usage caps include mind, commentary and interrupted decisions; the last call can cross a threshold. Missing usage reserves 16000 tokens and makes estimated cost unknown, which stops a dollar-capped session.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                pokeagentMmoEnabled: { type: boolean, default: false }
+                rivalsUrl: { type: string, format: uri }
+                pokemonBudget:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    maxTokens: { type: integer, minimum: 1, default: 250000 }
+                    maxCostUsd: { type: number, exclusiveMinimum: 0 }
+                    maxTurns: { type: integer, minimum: 1 }
+                    maxDurationMs: { type: integer, minimum: 1 }
+      responses:
+        "200": { description: Updated gameplay configuration and restart instruction }
+        "400": { description: Invalid configuration }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "503": { description: Settings unavailable }
+
   /v1/embodiment/intents:
     post:
       tags: [Embodiment]
       operationId: postEmbodimentIntent
       summary: Ask to start or stop play
-      description: Select an existing writable captain conversation with conversationId. The operator identity is authenticated separately; originLane and requestedBy are host-stamped. A competing body lease returns a typed refusal. In-process captain tools carry their own admitted conversation identity.
+      description: Select an existing writable captain conversation with conversationId. The operator identity is authenticated separately; originLane and requestedBy are host-stamped. A competing body lease returns a typed refusal. In-process captain tools carry their own admitted conversation identity. Budget accepts maxTokens (default 250000), maxCostUsd, maxTurns and maxDurationMs. Terminal receipts distinguish stopped, budget_exhausted, mind_unavailable and world_ended.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -3986,7 +4366,7 @@ paths:
                   requestedBy: local-operator
                   requestedAt: "2026-08-15T20:00:00.000Z"
                   environmentId: pokemon-firered
-                  budget: {}
+                  budget: { maxTokens: 250000, maxCostUsd: 1 }
               stop:
                 value:
                   kind: stop
@@ -4025,6 +4405,32 @@ paths:
           description: Stop submitted
         "404":
           description: Not playing
+
+  /v1/embodiment/sessions/live/guide:
+    post:
+      tags: [Embodiment, Operator]
+      operationId: guideLivePokemonPlay
+      summary: Suggest an objective or approach to the owning Pokémon mind
+      description: Requires the selected conversation's live play ownership and current authority. Direction is bounded context; the play mind chooses its own objective and action. Does not start play.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [text, conversationId]
+              properties:
+                text: { type: string, minLength: 1, maxLength: 400 }
+                conversationId: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200": { description: Queued direction or not_playing refusal }
+        "400": { description: Invalid direction }
+        "401": { description: Operator authentication required }
+        "403": { description: Selected conversation authority required }
+        "409": { description: Play ownership or authority changed }
+        "503": { description: Play direction unavailable }
 
   /v1/embodiment/sessions/live/activity:
     get:
@@ -5055,17 +5461,140 @@ components:
       required: [providerId]
       properties:
         providerId: { type: string, pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }
+    AccountProvider:
+      type: string
+      enum: [github, linear, google-gmail, google-calendar, google-drive]
+    GoogleAccountProvider:
+      type: string
+      enum: [google-gmail, google-calendar, google-drive]
+    AccountFlowId:
+      type: string
+      pattern: "^[A-Za-z0-9_-]{16,128}$"
+    AccountAuthorizationCode:
+      type: string
+      minLength: 1
+      maxLength: 2048
+      pattern: '^[\x21-\x7e]+$'
+      writeOnly: true
+      description: One-time provider code; send in the authenticated JSON body, never argv, API request URLs or logs.
+    AccountGoogleFileId:
+      type: string
+      pattern: "^[A-Za-z0-9_-]{1,256}$"
+    AccountGoogleStartRequest:
+      type: object
+      additionalProperties: false
+      required: [provider]
+      properties:
+        provider: { $ref: "#/components/schemas/GoogleAccountProvider" }
+    AccountGoogleCompleteRequest:
+      description: Drive requires unique Google Picker file IDs; Gmail and Calendar forbid that field.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [provider, state, code]
+          properties:
+            provider: { type: string, enum: [google-gmail, google-calendar] }
+            state: { $ref: "#/components/schemas/AccountFlowId" }
+            code: { $ref: "#/components/schemas/AccountAuthorizationCode" }
+        - type: object
+          additionalProperties: false
+          required: [provider, state, code, pickedFileIds]
+          properties:
+            provider: { type: string, enum: [google-drive] }
+            state: { $ref: "#/components/schemas/AccountFlowId" }
+            code: { $ref: "#/components/schemas/AccountAuthorizationCode" }
+            pickedFileIds:
+              type: array
+              minItems: 1
+              maxItems: 100
+              uniqueItems: true
+              items: { $ref: "#/components/schemas/AccountGoogleFileId" }
+              description: Selected IDs from Google Picker's comma-separated picked_file_ids callback.
+    AccountFailure:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error:
+          type: string
+          enum:
+            [
+              authentication_required,
+              forbidden,
+              malformed,
+              unconfigured,
+              unknown_flow,
+              expired,
+              denied,
+              provider_rejected,
+              unavailable,
+            ]
+    AccountGoogleStartSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, flowId, authorizeUrl, redirectUri, expiresAt]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        flowId:
+          allOf: [{ $ref: "#/components/schemas/AccountFlowId" }]
+          description: Single-use OAuth state; the PKCE verifier remains on the body.
+        authorizeUrl: { type: string, format: uri }
+        redirectUri: { type: string, minLength: 1, maxLength: 512 }
+        expiresAt: { type: string, format: date-time }
+    AccountGoogleCompleteSuccess:
+      type: object
+      additionalProperties: false
+      required: [ok, connection]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        connection: { $ref: "#/components/schemas/AccountConnection" }
     AccountConnection:
       type: object
       additionalProperties: false
       required: [provider, status, scopes]
       properties:
-        provider: { type: string, enum: [github, linear] }
-        status: { type: string, enum: [connected, not_connected, unconfigured] }
-        account: { type: string }
+        provider: { $ref: "#/components/schemas/AccountProvider" }
+        status:
+          type: string
+          enum:
+            [
+              connected,
+              not_connected,
+              unconfigured,
+              awaiting_consent,
+              expired,
+              reconnect_required,
+              unavailable,
+              disconnected,
+            ]
+          description: unconfigured needs operator OAuth client setup; reconnect_required needs new owner consent; unavailable is a provider failure.
+        name: { type: string, maxLength: 128, description: Body-owned catalog name. }
+        group: { type: string, maxLength: 64, description: Body-owned catalog group. }
+        description: { type: string, maxLength: 512, description: Service purpose supplied by the body. }
+        access:
+          { type: string, maxLength: 512, description: Provider permission disclosure supplied by the body. }
+        readOnly:
+          type: boolean
+          description: Whether the provider grant is read-only. Drive's selected-file grant permits editing, while the implemented tools only read.
+        lastCheckedAt: { type: string, format: date-time }
+        revocationPending:
+          {
+            type: boolean,
+            description: Local Google access is disabled while provider revocation remains unconfirmed.,
+          }
+        selectedFileIds:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AccountGoogleFileId" }
+          description: Selected file IDs recorded for this body's Drive connection; connection status governs whether access is usable.
+        reason:
+          type: string
+          enum: [invalid_grant, scope_required, provider_unavailable, revocation_pending]
+        account: { type: string, maxLength: 320 }
         actor: { type: string, enum: [user, app] }
-        workspace: { type: string }
-        scopes: { type: array, items: { type: string } }
+        workspace: { type: string, maxLength: 320 }
+        scopes: { type: array, maxItems: 64, items: { type: string, maxLength: 128 } }
         connectedAt: { type: string, format: date-time }
         manageUrl: { type: string, format: uri }
     AccountsResponse:
@@ -5073,7 +5602,7 @@ components:
       additionalProperties: false
       required: [connections]
       properties:
-        connections: { type: array, items: { $ref: "#/components/schemas/AccountConnection" } }
+        connections: { type: array, maxItems: 16, items: { $ref: "#/components/schemas/AccountConnection" } }
     AccountResult:
       type: object
       description: |

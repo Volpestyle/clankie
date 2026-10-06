@@ -1,3 +1,4 @@
+import { legacyWorkItem } from "@clankie/protocol/work-items";
 import {
   CAPTAIN_LANE_OBSERVATION_PATH,
   CAPTAIN_TURN_METRICS_PATH,
@@ -19,6 +20,7 @@ import type {
   WorkItemWriteRequest,
 } from "@clankie/protocol/work-item-write";
 import { Hono } from "hono";
+import { withLinearRequestInvocation } from "../linear-request-budget.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { QuestionAuthority } from "../captain/conversation-questions.ts";
 import { ConversationRefusedError, ConversationResetError } from "../captain/conversations.ts";
@@ -277,11 +279,14 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         captain === "unavailable" ? 503 : 401,
       );
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (parsed.data.op === "acknowledge_worker_report_history" && owner?.principal.kind !== "operator")
+      return context.json({ error: "operator_authority_required" }, 403);
     const workerOwnerOp =
       parsed.data.op === "settle_hire_receipt" ||
       parsed.data.op === "readopt_seat" ||
       parsed.data.op === "worker_reports" ||
-      parsed.data.op === "acknowledge_worker_reports";
+      parsed.data.op === "acknowledge_worker_reports" ||
+      parsed.data.op === "acknowledge_worker_report_history";
     if (
       workerOwnerOp &&
       !owner &&
@@ -363,6 +368,30 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         repos: "repos" in result ? result.repos : [],
       });
     }
+    if (parsed.data.op === "work_project") {
+      try {
+        if (!ctx.dependencies.workItems) throw new Error("Work tracking is not running on this host");
+        const result = await ctx.dependencies.workItems.handle(
+          { action: "project", repo: parsed.data.repoId },
+          false,
+        );
+        if (!("releaseSource" in result)) throw new Error("Unexpected project work result");
+        return context.json({
+          op: "work_project",
+          schemaVersion: 1,
+          result: { outcome: "ready", ...result },
+        });
+      } catch {
+        return context.json({
+          op: "work_project",
+          schemaVersion: 1,
+          result: {
+            outcome: "unavailable",
+            message: "This project’s saved work tracker can’t be read here. Read the work again.",
+          },
+        });
+      }
+    }
     if (parsed.data.op === "work_items") {
       const repoId = parsed.data.repoId;
       if (ctx.dependencies.workItems === undefined)
@@ -373,15 +402,21 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       try {
         const label = parsed.data.label?.trim();
-        const result = await ctx.dependencies.workItems.handle(
-          { action: "list", repo: repoId, ...(label ? { label } : {}) },
-          false,
+        const result = await withLinearRequestInvocation("background", () =>
+          ctx.dependencies.workItems!.handle(
+            { action: "list", repo: repoId, ...(label ? { label } : {}) },
+            false,
+          ),
         );
         if (!("items" in result)) throw new Error("unexpected work result");
         return context.json({
           op: "work_items",
           schemaVersion: 1,
-          result: { outcome: "ready", repo: result.repo, items: result.items },
+          result: {
+            outcome: "ready",
+            repo: result.repo,
+            items: parsed.data.statusVersion === 2 ? result.items : result.items.map(legacyWorkItem),
+          },
         });
       } catch (error) {
         if (error instanceof WorkRequestError && error.code === "needs_decision") {

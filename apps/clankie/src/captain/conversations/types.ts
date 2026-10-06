@@ -38,6 +38,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "connections" }
   | { op: "work_repos" }
   | { op: "work_items" }
+  | { op: "work_project" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
@@ -46,6 +47,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }
+  | { op: "acknowledge_worker_report_history" }
   | { op: "presence" }
   | { op: "subagent_replay" }
   | { op: "composer_catalog" }
@@ -70,6 +72,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "connections" }
   | { op: "work_repos" }
   | { op: "work_items" }
+  | { op: "work_project" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
@@ -78,6 +81,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }
+  | { op: "acknowledge_worker_report_history" }
   | { op: "presence" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }

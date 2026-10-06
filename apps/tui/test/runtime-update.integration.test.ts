@@ -131,6 +131,43 @@ it("reports an explicit older SHA and preserves the warning in failed status", a
     phase: "failed",
   });
 });
+it("retains the canary-held operation with newer result evidence while rejecting malformed known canary metadata", async () => {
+  const f = fixture();
+  const accepted = await f.updater.request("main", authority);
+  const path = join(f.home, ".clankie/updates", accepted.pending!, "result.json");
+  const evidence = {
+    ...accepted.latest,
+    phase: "healthy",
+    healthy: true,
+    newerEvidence: { ok: true },
+    canary: { state: "pending", holdId: accepted.pending, holdEstablished: true },
+  };
+  writeFileSync(path, JSON.stringify(evidence), { mode: 0o600 });
+  expect(f.updater.status()).toMatchObject({
+    runtime: { commit: f.old },
+    pending: accepted.pending,
+    latest: {
+      resolvedRef: "refs/remotes/origin/main",
+      initiator: authority.initiator,
+      canary: evidence.canary,
+    },
+  });
+  expect(await f.updater.request("main", authority)).toMatchObject({
+    accepted: false,
+    pending: accepted.pending,
+    latest: { canary: evidence.canary },
+  });
+  expect(f.launches).toHaveLength(1);
+  writeFileSync(
+    path,
+    JSON.stringify({ ...evidence, canary: { ...evidence.canary, holdEstablished: "yes" } }),
+    { mode: 0o600 },
+  );
+  expect(f.updater.status()).toMatchObject({ error: "update_record_unreadable", needsReconciliation: true });
+  expect(existsSync(join(f.home, ".clankie/updates/active"))).toBe(true);
+  await expect(f.updater.request("main", authority)).rejects.toThrow("Invalid runtime canary hold");
+  expect(f.launches).toHaveLength(1);
+});
 it("CLI status stays JSON across newer evidence, damaged records and a non-JSON legacy server error", async () => {
   const f = fixture();
   const accepted = await f.updater.request("main", authority);

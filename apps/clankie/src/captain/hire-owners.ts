@@ -24,18 +24,20 @@ const RecordSchema = z
     owner: ConversationOwnerSchema,
   })
   .strict();
-const StateSchema = z.object({ schemaVersion: z.literal(1), hires: z.array(RecordSchema) }).strict();
+export const HireOwnersStateSchema = z
+  .object({ schemaVersion: z.literal(1), hires: z.array(RecordSchema) })
+  .strict();
 type HireOwnerRecord = z.infer<typeof RecordSchema>;
 
 /** Ownership survives watch consumption and service replacement; it is never inferred from persona. */
 export class HireOwners {
-  private state: z.infer<typeof StateSchema>;
+  private state: z.infer<typeof HireOwnersStateSchema>;
   private readonly path: string;
   public constructor(path: string) {
     this.path = path;
     // Corrupt ownership cannot be replaced with a fresh empty journal.
     this.state = existsSync(path)
-      ? StateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
+      ? HireOwnersStateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
       : { schemaVersion: 1, hires: [] };
   }
   public hasClaim(paneId: string, seatId: string): boolean {
@@ -197,7 +199,7 @@ export class HireOwners {
           sessionClaim.occupantId !== occupantId))
     )
       throw new Error("This worker has a different persisted conversation or native occupant");
-    const next = StateSchema.parse({
+    const next = HireOwnersStateSchema.parse({
       schemaVersion: 1,
       hires: [
         ...this.state.hires.filter(
@@ -220,8 +222,8 @@ export class HireOwners {
     });
     this.save(next);
   }
-  private save(input: z.infer<typeof StateSchema>): void {
-    const next = StateSchema.parse(input);
+  private save(input: z.infer<typeof HireOwnersStateSchema>): void {
+    const next = HireOwnersStateSchema.parse(input);
     mkdirSync(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${String(process.pid)}.tmp`;
     const file = openSync(temporary, "w", 0o600);
