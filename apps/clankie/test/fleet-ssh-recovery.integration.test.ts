@@ -453,3 +453,30 @@ it("keeps the working link through a failed renewal, then recovers a real promot
     links.observer(fleet)!(powershellScriptCommand("Write-Output 'proof-complete'")),
   ).resolves.toBe("proof-complete");
 });
+
+it("fresh census commands reuse the resident relay and never replay a failed observation over SSH", async () => {
+  const f = await fixture();
+  await f.install(f.oldBin);
+  await f.login(f.oldBin, "relay-success");
+  const links = new FleetLinks({
+    shell: () => createFleetShellRun(fleet, { controlDirectory: f.controlDirectory }),
+    stream: () => createFleetShellStream(fleet, { controlDirectory: f.controlDirectory }),
+  });
+  linksToClose.push(links);
+  links.start([fleet], 4567);
+  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "ready" }), { timeout: 4000 });
+  const relay = links.observer(fleet)!;
+  const before = (await f.ssh()).filter((call) => call.kind === "command").length;
+  const run = createHerdrFleetRun(fleet, { controlDirectory: f.controlDirectory, observer: () => relay });
+  await expect(run(["api", "snapshot"])).resolves.toBe("proof-complete");
+  await expect(run(["agent", "list"])).resolves.toBe("proof-complete");
+  expect((await f.ssh()).filter((call) => call.kind === "command")).toHaveLength(before);
+  expect((await f.relays()).filter((call) => call.kind === "execute-result")).toHaveLength(2);
+  // Extra argv and writes continue through the command transport.
+  await expect(run(["pane", "get", "w8:p1"])).resolves.toContain('"accepted":true');
+  const after = (await f.ssh()).filter((call) => call.kind === "command").length;
+  expect(after).toBe(before + 1);
+  links.close();
+  await expect(run(["api", "snapshot"])).rejects.toThrow("unavailable");
+  expect((await f.ssh()).filter((call) => call.kind === "command")).toHaveLength(after);
+});
