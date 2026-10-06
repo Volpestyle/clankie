@@ -123,9 +123,13 @@ replay an uncertain tool call. Controller-owned hires need controller recovery.
 
 Runtime and on-disk plugin updates do not replace an already-imported worker
 receipt parser. An older 0.6.2 bridge cannot consume an exact negative
-`definitive: not_sent` receipt. Keep its claim and have the original controller
-refresh that MCP connection on the same thread. A refreshed bridge reads the
-retained original once after active calls settle; it sends no replacement.
+`definitive: not_sent` receipt. Keep its claim. Supported current local
+controllers refresh that MCP connection on the same thread; pre-0.6.5 local
+seats instead show `restart needed` and retire naturally. Automatic legacy
+restart is disabled. The lead can close an idle seat after retaining its handoff
+and settling original receipts, then hire a fresh worker; original thread
+evidence stays on disk. A refreshed supported bridge reads the retained original
+once after active calls settle; it sends no replacement.
 An unresolved original stays held. A separate deliberate call after settlement
 sends the later report. Remote Codex controller/config recovery and replacing
 old imported Claude bridge code remain explicit verification gaps. Never
