@@ -7,7 +7,12 @@ import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { closeNativeProcessObservers } from "../src/native-process-transport.ts";
-import { fleetProcessHelper, observeNativeBirth } from "../src/local-fleet-process.ts";
+import {
+  fleetProcessHelper,
+  observeNativeBirth,
+  NativeProcessDiagnosticSchema,
+} from "../src/local-fleet-process.ts";
+import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
 
 const exec = promisify(execFile);
 const enabled = process.platform === "darwin" && process.env.FLEET_PROOF_NATIVE_TEST === "1";
@@ -33,6 +38,7 @@ class Native {
   private readonly lines: AsyncIterator<string>;
   private id = 0;
   readonly evidence: Reply[] = [];
+  readonly metrics = new FleetHealthMetrics();
   constructor() {
     this.child = spawn(fleetProcessHelper(), ["--serve"], { stdio: "pipe" });
     this.lines = createInterface({ input: this.child.stdout })[Symbol.asyncIterator]();
@@ -48,6 +54,15 @@ class Native {
     expect(reply.ok).toBe(reply.result !== null);
     expect(reply.elapsedMs).toBeLessThan(1_000);
     this.evidence.push(reply);
+    for (const line of reply.stderr.split("\n")) {
+      const prefix = "Native process proof diagnostic: ";
+      if (line.startsWith(prefix))
+        this.metrics.observeProof("fleet", {
+          source: "native",
+          checkpoint: "initial",
+          event: NativeProcessDiagnosticSchema.parse(JSON.parse(line.slice(prefix.length))),
+        });
+    }
     return reply;
   }
   async close() {
@@ -214,6 +229,12 @@ describe.skipIf(!enabled)("native socket proof under unrelated churn", () => {
         (reply) => !reply.ok && reply.stderr.includes('"reason":"socket_mismatch"'),
       );
       expect(socketMismatch.result).toBeNull();
+      const counters = native.metrics.snapshot().totals;
+      expect(counters.nativeDiagnostics.multiple_owners).toBeGreaterThan(0);
+      expect(counters.nativeDiagnostics.owner_mismatch).toBeGreaterThan(0);
+      expect(counters.nativeDiagnostics.socket_mismatch).toBeGreaterThan(0);
+      // Retry diagnostics remain separate from the terminal fleet proof denominator.
+      expect(counters.proof).toEqual({ attempts: 0, refusals: 0, byReason: {} });
     } finally {
       if (churn) await stop(churn);
       await stop(sharer);

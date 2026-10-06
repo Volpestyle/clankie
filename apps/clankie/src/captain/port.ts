@@ -167,6 +167,9 @@ export interface CaptainPort {
     headConversationId: string | null,
   ): Promise<OperatorConversation>;
   validateConversationOwner(owner: ConversationOwner, mode?: "machine" | "social"): Promise<boolean>;
+  /** Freshly owned native lead only; never starts a service model turn. */
+  notifyFleetHealthAlert(pane: string, text: string): Promise<boolean>;
+  notifyRuntimeHealthAlert(text: string): Promise<boolean>;
   wakeConversation(
     owner: ConversationOwner,
     text: string,
@@ -396,6 +399,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     },
     validateConversationOwner: async () => false,
     wakeConversation: async () => false,
+    notifyFleetHealthAlert: async () => false,
+    notifyRuntimeHealthAlert: async () => false,
     laneMemoryCard: async () => "",
     acknowledgeSeatEvent: async () => false,
     acknowledgeFleetSeatEvent: async () => false,

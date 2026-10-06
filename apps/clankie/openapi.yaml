@@ -3162,6 +3162,79 @@ paths:
         "404":
           description: Nothing is waiting on that event
 
+  /v1/fleet/metrics:
+    get:
+      tags: [Operator]
+      operationId: getFleetHealthMetrics
+      summary: Read fixed-reason fleet proof and report counters
+      description: |
+        Operator-only, content-free counts since service start and five/sixty-minute
+        rates. Proof terminal admissions/refusals, receipt observations, native
+        retries and transport failures are separate. No PIDs, paths, argv, pane
+        IDs or report bodies. Contract: FleetHealthMetricsSnapshotSchema in
+        packages/protocol/src/fleet-health-metrics.ts.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Current no-store metrics snapshot
+        "401":
+          description: Operator authentication required
+        "503":
+          description: Authentication or fleet metrics unavailable
+
+  /v1/fleet/seats/{paneId}/messages/health:
+    post:
+      tags: [Operator]
+      operationId: recordWorkerReportHealth
+      summary: Record a native worker's content-free receipt health
+      description: |
+        Requires the current admitted native session. This observation does not
+        send or replay a report and does not grant tool authority. Unknown panes,
+        changing native bindings and fields beyond the strict status are refused.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - name: paneId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [outcome, reason, observedAt]
+              properties:
+                outcome: { type: string, enum: [stored, uncertain, rejected, unavailable] }
+                reason:
+                  type: string
+                  enum:
+                    [
+                      stored,
+                      binding_timeout,
+                      binding_unavailable,
+                      binding_rejected,
+                      receipt_unresolved,
+                      receipt_timeout,
+                      receipt_invalid,
+                      connection_refused,
+                      local_receipt_unavailable,
+                    ]
+                observedAt: { type: string, format: date-time }
+                lastStoredAt: { type: string, format: date-time }
+      responses:
+        "202":
+          description: Observation recorded independently of tool readiness
+        "400":
+          description: Invalid strict status
+        "401":
+          description: Authentication required
+        "403":
+          description: Current native session required
+        "503":
+          description: Worker health observation unavailable
+
   /v1/fleet/efficiency:
     post:
       tags: [Operator]

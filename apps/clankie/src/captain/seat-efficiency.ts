@@ -31,6 +31,8 @@ const RecordSchema = z
     reviewedProgressAt: Timestamp.optional(),
     attributedCommitAt: Timestamp.optional(),
     lastReportAt: Timestamp.optional(),
+    lastStoredReportAt: Timestamp.optional(),
+    inactiveSince: Timestamp.optional(),
     reportFailedAt: Timestamp.optional(),
     reportFailures: z.number().int().nonnegative().optional(),
     reportFailureIds: z.array(z.string().min(1).max(256)).max(2000).optional(),
@@ -74,6 +76,7 @@ export interface SeatEfficiencyObservation {
   telemetry?: SeatTelemetry | undefined;
   reports?: WorkerReportSummary[] | undefined;
   reportRoute?: OperatorFleetSeat["workerReportRouting"];
+  reportBridge?: OperatorFleetSeat["workerReportBridge"];
   lastCommitAt?: string | undefined;
 }
 
@@ -98,11 +101,7 @@ export class SeatEfficiencyStore {
             // separately timestamped reports/reviews; never infer their source.
             record.reviewedProgressAt = latest(record.reviewedProgressAt, progressAt);
             delete record.attributedCommitAt;
-            record.lastProgressAt = latest(
-              record.reviewedProgressAt,
-              record.lastReportAt,
-              record.reportFailedAt,
-            );
+            record.lastProgressAt = latest(record.reviewedProgressAt, record.lastReportAt);
             record.progressEvidenceVersion = 1;
           }
           if (observed) {
@@ -156,6 +155,7 @@ export class SeatEfficiencyStore {
       ...(assignment.effort === undefined ? {} : { effort: assignment.effort }),
       ...(assignment.commitBaseline === undefined ? {} : { commitBaseline: assignment.commitBaseline }),
     });
+    delete this.records[occupantId]!.inactiveSince;
     this.save();
   }
 
@@ -181,11 +181,19 @@ export class SeatEfficiencyStore {
     const reports = (input.reports ?? []).filter(
       (report) => report.conversationId === record.owner.conversationId,
     );
-    const lastReportAt = latest(
-      record.lastReportAt,
-      input.telemetry?.lastReportAt,
-      input.telemetry?.reportFailedAt,
+    const storedAt = latest(
+      record.lastStoredReportAt,
+      input.reportBridge?.lastStoredAt,
+      input.reportBridge?.outcome === "stored" ? input.reportBridge.observedAt : undefined,
       ...reports.map((report) => report.acceptedAt),
+    );
+    if (storedAt !== undefined) record.lastStoredReportAt = storedAt;
+    const lastReportAt = latest(
+      record.lastReportAt === record.reportFailedAt ? undefined : record.lastReportAt,
+      input.telemetry?.lastReportAt === input.telemetry?.reportFailedAt
+        ? undefined
+        : input.telemetry?.lastReportAt,
+      storedAt,
     );
     const progress = latest(record.reviewedProgressAt, record.attributedCommitAt, lastReportAt);
     const commitAt = latest(input.lastCommitAt, input.telemetry?.lastCommitAt);
@@ -196,9 +204,15 @@ export class SeatEfficiencyStore {
       record.reviewedProgressAt = latest(record.reviewedProgressAt, explicitProgress);
     const provenProgress = latest(progress, record.attributedCommitAt, record.reviewedProgressAt);
     if (lastReportAt !== undefined) record.lastReportAt = lastReportAt;
+    else delete record.lastReportAt;
     if (provenProgress !== undefined) record.lastProgressAt = provenProgress;
     else delete record.lastProgressAt;
-    const failureAt = input.telemetry?.reportFailedAt;
+    const failureAt = latest(
+      input.telemetry?.reportFailedAt,
+      input.reportBridge && input.reportBridge.outcome !== "stored"
+        ? input.reportBridge.observedAt
+        : undefined,
+    );
     if (
       failureAt !== undefined &&
       Timestamp.safeParse(failureAt).success &&
@@ -229,7 +243,7 @@ export class SeatEfficiencyStore {
       flags.push("off-scope");
     const nativeFailure =
       record.reportFailedAt !== undefined &&
-      !(record.lastReportAt !== undefined && record.lastReportAt > record.reportFailedAt) &&
+      !(storedAt !== undefined && storedAt >= record.reportFailedAt) &&
       !reports.some(
         (report) =>
           ["read", "delivered"].includes(report.state) && report.acceptedAt > record.reportFailedAt!,
@@ -256,6 +270,15 @@ export class SeatEfficiencyStore {
       flags.push("done");
     else if (input.status === "idle" || (input.goal?.status === "paused" && input.status !== "working"))
       flags.push("idle");
+    if (input.status === "idle" || input.status === "done") {
+      record.inactiveSince ??= checkedAt;
+      const briefAt = record.assignedAt ?? record.firstObservedAt;
+      if (
+        this.now() - Date.parse(record.inactiveSince) >= 15 * 60_000 &&
+        !(storedAt !== undefined && storedAt >= briefAt)
+      )
+        flags.push("finished, unreported");
+    } else delete record.inactiveSince;
     // A requested launch value is not proof of the effective native turn setting.
     const model = input.telemetry?.model;
     const effort = input.telemetry?.effort;

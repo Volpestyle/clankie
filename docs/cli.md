@@ -2177,6 +2177,13 @@ What crosses the link, and what cannot:
   agent's output, not the owner's instruction; he answers with `message_seat`,
   which reaches a session that loaded `--channels plugin:clankie-worker@clankie`.
   Its receipt reports `stored` only after durable conversation acceptance.
+  The roster exposes `workerReportBridge` separately from tool health: the last
+  `stored`, `uncertain`, `rejected` or `unavailable` outcome, observation time,
+  fixed safe reason, and last confirmed stored time when observed. `doctor` and
+  the console show it. A hired seat held idle or done for 15 minutes without a
+  stored report since its last brief carries `finished, unreported`. Three
+  distinct failed seats within ten minutes produce one native alert to their
+  owning lead, rearmed after recovery; raising it spends no service-model turn.
   Both `mcp --seat` and `mcp --fleet` preserve an uncertain original across
   bridge/service replacement. Calling again reconciles that exact ID through
   a read; it never resends it. A different follow-up during reconciliation
@@ -2390,6 +2397,17 @@ Notes stay until forgotten, without a retention flag or count quota.
 `forget` deletes the note. `/memory`
 exposes the same controls in the console. See [Memory](memory.md) for lane
 privacy and migration behavior.
+
+### `metrics --fleet`
+
+Read operator-only `GET /v1/fleet/metrics` for proof attempts and refusals, worker
+report attempts and failures, and fixed native/transport reason counters. The
+five- and sixty-minute windows show failure fractions and failures per minute;
+counters contain no process IDs, paths, argv, report bodies or credentials.
+Doctor includes the same windows. A live seat with more than 1% terminal proof
+refusals in five minutes produces a native alert to its current owning lead,
+with a five-minute cooldown; native retries are counted separately from terminal
+refusals. Metrics restart with the service and state their coverage start.
 
 ### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
 

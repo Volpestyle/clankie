@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { Socket } from "node:net";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import type { HerdrBinding } from "@clankie/protocol";
+import type { FleetProofRefusalReason } from "@clankie/protocol";
 import { nativeRequest } from "./herdr-native-request.ts";
 import type { NativeTransportReason } from "./native-process-transport.ts";
 import { createProjectProcessObserver, type ProjectProcessProof } from "./project-process-proof.ts";
@@ -71,33 +72,21 @@ export interface LocalFleetProofOptions extends Pick<
   /** Server-owned additional lifetime pin. It can refuse, never grant admission. */
   expectedOwner?(socket: Socket): NativeSocketOwner | undefined;
   /** Server-owned opt-in diagnostics; fixed stages only, never caller authority. */
-  diagnostics?(event: LocalFleetProofDiagnostic): void;
+  diagnostics?(event: LocalFleetProofDiagnostic, pane?: string): void;
 }
 
 export type LocalFleetProofDiagnostic =
+  | { source: "proof_success" }
   | { source: "native"; checkpoint: "initial" | "final"; event: NativeProcessDiagnostic }
   | { source: "transport"; reason: NativeTransportReason }
   | {
       source: "proof";
-      reason:
-        | "unsupported_platform"
-        | "invalid_pane"
-        | "closed_socket"
-        | "missing_binding"
-        | "native_initial_unavailable"
-        | "native_final_unavailable"
-        | "pane_unavailable"
-        | "not_member"
-        | "snapshot_changed"
-        | "pane_changed"
-        | "private_seat_expired"
-        | "binding_changed"
-        | "observation_failed";
+      reason: FleetProofRefusalReason;
     };
 
-function diagnostic(options: LocalFleetProofOptions, event: LocalFleetProofDiagnostic) {
+function diagnostic(options: LocalFleetProofOptions, event: LocalFleetProofDiagnostic, pane?: string) {
   try {
-    void Promise.resolve(options.diagnostics?.(event)).catch(() => {});
+    void Promise.resolve(options.diagnostics?.(event, pane)).catch(() => {});
   } catch {
     /* Observation never changes admission. */
   }
@@ -110,7 +99,7 @@ export function localFleetProof(options: LocalFleetProofOptions) {
   const owners = new WeakMap<Socket, NativeSocketOwner>();
   return async (socket: Socket, pane: string): Promise<boolean> => {
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
-      diagnostic(options, { source: "proof", reason });
+      diagnostic(options, { source: "proof", reason }, pane);
       return false;
     };
     const snapshot = (checkpoint: "initial" | "final", expected?: NativeSocketOwner) =>
@@ -178,6 +167,7 @@ export function localFleetProof(options: LocalFleetProofOptions) {
       // Pin only an admitted connection's identity. Every later check still
       // observes OS ownership, ancestry, the linked pane and registry afresh.
       owners.set(socket, initial.owner);
+      diagnostic(options, { source: "proof_success" }, pane);
       return true;
     } catch {
       return refuse("observation_failed");
@@ -203,7 +193,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
   const owners = new WeakMap<Socket, NativeSocketOwner>();
   return async (socket: Socket, pane: string): Promise<ProjectProcessProof | undefined> => {
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
-      diagnostic(options, { source: "proof", reason });
+      diagnostic(options, { source: "proof", reason }, pane);
       return undefined;
     };
     if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
@@ -288,6 +278,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       if (!alive() || current?.socketPath !== binding.socketPath || current?.session !== binding.session)
         return refuse("binding_changed");
       owners.set(socket, initial.owner);
+      diagnostic(options, { source: "proof_success" }, pane);
       return privateSeat ? { ...proof, privateSeat: true } : proof;
     } catch {
       return refuse("observation_failed");

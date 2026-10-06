@@ -39,6 +39,13 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
   });
   if (report.workerTools?.error)
     workerTools.push(`  ○ Worker tools · unknown · ${clean(report.workerTools.error)}`);
+  const workerReports = (report.workerReports?.workers ?? []).map((worker) => {
+    const health = worker.report;
+    const marker = health?.outcome === "stored" ? "✓" : health ? "✗" : "○";
+    return `  ${marker} Worker ${clean(worker.seatId)} report · ${health ? `${health.outcome} at ${health.observedAt} · ${health.reason}` : "unknown"}${worker.flags.length ? ` · ${worker.flags.join(", ")}` : ""}`;
+  });
+  if (report.workerReports?.error)
+    workerReports.push(`  ○ Worker reports · unknown · ${clean(report.workerReports.error)}`);
   const lines = [
     `Clankie ${report.version} · ${report.kind} · ${report.persona.displayName}`,
     "",
@@ -58,6 +65,11 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     }`,
     ...fleetLinks,
     ...workerTools,
+    ...workerReports,
+    ...(report.fleetHealthMetrics?.windows.map(
+      (window) =>
+        `  Fleet failures ${window.minutes}m · proof ${(window.proofRefusalRate * 100).toFixed(2)}% (${window.proof.refusals}/${window.proof.attempts}, ${window.proofRefusalsPerMinute.toFixed(2)}/min) · reports ${(window.reportFailureRate * 100).toFixed(2)}% (${window.reports.failures}/${window.reports.attempts}, ${window.reportFailuresPerMinute.toFixed(2)}/min)`,
+    ) ?? []),
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
     ...(report.tracker
       ? [

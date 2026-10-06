@@ -370,6 +370,13 @@ skill are independent facts. Static installation is not live native membership.
 Doctor and roster `workerTools` separately report observed worker catalogs,
 pending requests, missing tools and stalled reads with their reasons. An unknown
 catalog remains `not-observed`; those observations grant no tool authority.
+Roster `workerReportBridge` separately records the last report outcome, time and
+fixed safe reason. Done/idle hires held for fifteen minutes without a stored
+report since their latest brief carry `finished, unreported`. Three failed seats
+within ten minutes produce one native alert to their owning lead. Inspect
+`clankie metrics --fleet` for five- and sixty-minute proof/refusal and report
+failure rates. Preserve and reconcile uncertain originals; health observations
+never authorize deleting receipts or replaying reports.
 Remote reports also include `linkState`: an `unreachable` link's `error` is the
 decoded remote reason, independently of harness installation health. Fleet
 control connections and resident relays refresh at ten minutes; renewal keeps

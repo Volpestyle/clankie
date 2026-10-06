@@ -97,6 +97,7 @@ import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
+import { registerFleetHealthMetricsRoutes } from "./fleet-health-metrics-routes.ts";
 import {
   type ClankieApp,
   type ClankieAppDependencies,
@@ -409,6 +410,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  registerFleetHealthMetricsRoutes(app, dependencies);
   const supportAuditedRequests = new WeakSet<Request>();
   let managedDiscordClosed = false;
   let managedDiscordSyncRunning = false;

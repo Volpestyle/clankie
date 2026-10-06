@@ -1,5 +1,6 @@
 import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
+import { WorkerReportBridgeStatusSchema } from "./worker-report-health.ts";
 import { FleetSeatToolCatalogHealthSchema } from "./tool-catalog.ts";
 import { z } from "zod";
 import { OperatorAgentRoleSchema } from "./agent-roles.ts";
@@ -754,6 +755,8 @@ export const OperatorFleetSeatSchema = z
     toolCatalog: FleetSeatToolCatalogHealthSchema.optional(),
     /** Authenticated bridge/catalog observations only; not proof that the harness loaded its tools. */
     workerTools: WorkerBridgeStatusSchema.optional(),
+    /** Sender receipt health is independent of the served tool catalog. */
+    workerReportBridge: WorkerReportBridgeStatusSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */
