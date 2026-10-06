@@ -862,6 +862,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         if (!identity || identity === "unavailable") return undefined;
         let current = true;
         return {
+          initiator: {
+            kind: request.headers.get("x-clankie-client") === "cli" ? "cli" : "operator",
+            operatorId: identity.operatorId,
+            ...(request.headers.get("x-clankie-update-conversation")
+              ? { claimedConversationId: request.headers.get("x-clankie-update-conversation")! }
+              : {}),
+            ...(request.headers.get("x-clankie-update-seat-session")
+              ? { claimedSeatSessionId: request.headers.get("x-clankie-update-seat-session")! }
+              : {}),
+          },
           current: () => current,
           guard: async () => {
             const fresh = await authenticateOperator(request, dependencies);

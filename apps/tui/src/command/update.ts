@@ -38,13 +38,32 @@ export async function runUpdateCommand(
   });
   if (!credential?.token) throw Error("No operator credential is available");
   // No retry: a lost response may have accepted the durable operation. Read status instead.
-  const response = await (options.fetchImpl ?? fetch)(new URL("/v1/runtime-update", commandHost(options)), {
-    method: status ? "GET" : "POST",
-    headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-    ...(status ? {} : { body: JSON.stringify({ ref, ...(overrides.length ? { overrides } : {}) }) }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const result: unknown = await response.json();
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${credential.token}`,
+    "content-type": "application/json",
+    "x-clankie-client": "cli",
+  };
+  if (env.CLANKIE_CONVERSATION_ID) headers["x-clankie-update-conversation"] = env.CLANKIE_CONVERSATION_ID;
+  if (env.CLANKIE_SEAT_SESSION_ID) headers["x-clankie-update-seat-session"] = env.CLANKIE_SEAT_SESSION_ID;
+  let response: Response;
+  try {
+    response = await (options.fetchImpl ?? fetch)(new URL("/v1/runtime-update", commandHost(options)), {
+      method: status ? "GET" : "POST",
+      headers,
+      ...(status ? {} : { body: JSON.stringify({ ref, ...(overrides.length ? { overrides } : {}) }) }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    if (status) return { error: "update_status_unavailable", needsReconciliation: true };
+    throw error;
+  }
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch {
+    return { error: "update_response_unreadable", status: response.status, needsReconciliation: true };
+  }
+  if (status && !response.ok) return { error: "update_status_unavailable", status: response.status, result };
   if (!response.ok && response.status !== 409)
     throw Error(`Runtime update unavailable (${response.status}): ${JSON.stringify(result)}`);
   return result;
