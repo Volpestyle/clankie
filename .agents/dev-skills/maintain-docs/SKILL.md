@@ -64,6 +64,18 @@ that spans repos, and list it in that table.
   room of agent sprites; either name is fine.
 - Say what ships. Mark a gated or planned capability as such; do not describe
   an unmerged or undeployed change as available.
+- Public pages never name James or his accounts. Describe a setting, not its
+  author's value; a personal default in code is a bug to report.
+
+## Weight
+
+A guide page (`apps/docs/content`, the README) says what a person can do and
+links to the mechanics. Flags, limits, error codes, receipt states and file
+paths belong in `docs/cli.md`, OpenAPI, or the subsystem reference; the guide
+gets at most a sentence and a link. When a change touches a guide, edit the
+paragraph that already covers the topic rather than appending a new one, and
+cut what the change made redundant. `docs/architecture.md` is the only home for
+many flow details, so trim it only after confirming the detail lives elsewhere.
 
 ## With a change
 
@@ -76,23 +88,33 @@ rg -n -i '<old name>|<new name>' README.md docs apps/*/README.md packages/*/READ
   apps/docs/site apps/docs/content ~/dev/clankie-landing/*.html ~/dev/clankie-app/README.md
 ```
 
-Update the owning text in the same change when it is in this repo. A fact that
+Update the owning text in the same change when it is in this repo, following
+[Weight](#weight). A fact that
 lives in a neighbor repo is that repo's change: make it there with its own
 checks, or tell the owner what now reads wrong. Landing copy and visuals are
 marketing and taste; propose them to James rather than rewriting them.
 
 ## Drift audit
 
-Run before each release (`release-clankie`) and when asked:
+Run before each release (`release-clankie`) and when asked. Audit current
+`origin/main`: fetch first, and if the checkout is behind or holds someone
+else's uncommitted work, add a worktree from `origin/main` rather than pulling
+over it.
 
 1. List what changed since the last release:
    `git log --oneline $(git describe --tags --abbrev=0)..HEAD`, plus user-visible
    commits in `clankie-app` and `clankie-landing` over the same window.
 2. For each user-visible change, check the surfaces above say it correctly.
-3. Search the public surfaces for retired vocabulary and read each hit in
-   context; identifiers and history are fine:
-   `rg -n -i -w 'captain|mission|doctrine|emulator|mgba' apps/docs/site apps/docs/content README.md ~/dev/clankie-landing/index.html`
-4. Diff `docs/architecture.md` against `apps/docs/content/how-it-works.md`.
-5. Run `pnpm docs:check`, then build and open the site
-   (`pnpm docs:public:build && open apps/docs/dist/index.html`).
+3. Run `node scripts/check-retired-claims.mjs` (claims registered in
+   `docs/adr/retired-claims.json`), then search the public surfaces for retired
+   vocabulary and read each hit in context; identifiers and history are fine:
+   `rg -n -i -w 'captain|mission|doctrine|swarm|emulator|mgba' apps/docs/site apps/docs/content README.md ~/dev/clankie-landing/index.html`.
+   App views retire in `~/dev/clankie-app/docs/adr`; check named app views
+   (Messages, Commons, Terminal) still exist there.
+4. Read `docs/architecture.md` and `apps/docs/content/how-it-works.md` side by
+   side: every how-it-works section should summarize an architecture section,
+   and neither should state a fact the other contradicts.
+5. Run `pnpm docs:check`, then build and serve the site over HTTP (root-relative
+   assets do not load from `file:`):
+   `pnpm docs:public:build && python3 -m http.server 8767 --directory apps/docs/dist`.
 6. Fix what this repo owns; report the rest with file and line to its owner.
