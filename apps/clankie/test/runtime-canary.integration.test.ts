@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import type { DeployHold } from "@clankie/protocol/integrate";
 import { DeployHolds, durableJson } from "../src/deploy-holds.ts";
-import type { RuntimeCanaryPolicy } from "../src/runtime-canary.ts";
+import type { RuntimeCanaryCpu, RuntimeCanaryPolicy } from "../src/runtime-canary.ts";
 import type { RuntimeHealthSample } from "../src/runtime-health-sample.ts";
 import { writePrivateJson } from "../../tui/bin/update-files.ts";
 import {
@@ -206,10 +206,42 @@ it("samples a real candidate process and loopback health for a full window befor
   await expect(service.call("landing")).rejects.toThrow("Independent live check");
 });
 
-it.each([
-  ["cpu", cpuPolicy, "runtime-canary-cpu-budget-exceeded"],
-  ["latency", { healthLatencyMs: 5 }, "runtime-canary-latency-budget-exceeded"],
-] as const)(
+it("records a real CPU burn beside the previous runtime's mean without holding deploys", async () => {
+  const f = await fixture({ policy: cpuPolicy });
+  const previousId = randomUUID();
+  await mkdir(join(f.updates, previousId), { mode: 0o700 });
+  writeRuntimeUpdate(join(f.updates, previousId), {
+    id: previousId,
+    ref: "main",
+    oldCommit: "9".repeat(40),
+    newCommit: "a".repeat(40),
+    phase: "healthy",
+    healthy: true,
+    canary: { state: "passed", cpuMeanPercent: 1, holdReleased: true },
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+  });
+  const service = await start(f.root, "cpu");
+  const passed = await waitFor(service, "passed");
+  expect(passed.result.canary).toMatchObject({ state: "passed", holdReleased: true });
+  expect(passed.result.canary!.cpuMeanPercent).toBeGreaterThan(cpuPolicy.cpuPercent);
+  expect(
+    Date.parse(passed.result.canary!.completedAt!) - Date.parse(passed.result.canary!.startedAt!),
+  ).toBeGreaterThanOrEqual(cpuPolicy.windowMs);
+  expect(passed.holds).toEqual([]);
+  expect(passed.checkpoint).toEqual({ commit: "b".repeat(40) });
+  const cpu = (await service.call("cpu")) as RuntimeCanaryCpu;
+  expect(cpu).toMatchObject({
+    commit: "b".repeat(40),
+    advisoryPercent: cpuPolicy.cpuPercent,
+    aboveAdvisory: true,
+    previous: { commit: "a".repeat(40), cpuMeanPercent: 1, updateId: previousId },
+  });
+  expect(cpu.ratioToPrevious).toBeGreaterThan(1);
+  expect(await alerts(f.root)).toEqual([]);
+  expect(await service.call("landing")).toEqual({ accepted: true });
+});
+
+it.each([["latency", { healthLatencyMs: 5 }, "runtime-canary-latency-budget-exceeded"]] as const)(
   "holds a real %s regression, retains new health and the previous checkpoint, and alerts once across restart",
   async (mode, budget, error) => {
     const f = await fixture({ policy: budget });
@@ -229,12 +261,6 @@ it.each([
     });
     expect(failed.holds.map((hold) => hold.id)).toContain(f.id);
     expect(failed.checkpoint).toEqual({ commit: "a".repeat(40) });
-    if (mode === "cpu") {
-      expect(failed.result.canary!.cpuMeanPercent).toBeGreaterThan(cpuPolicy.cpuPercent);
-      expect(
-        Date.parse(failed.result.canary!.completedAt!) - Date.parse(failed.result.canary!.startedAt!),
-      ).toBeGreaterThanOrEqual(cpuPolicy.windowMs);
-    }
     await expect(service.call("landing")).rejects.toThrow("Deploy held");
     await stop(service.child);
     const restarted = await start(f.root);
@@ -323,9 +349,11 @@ it("rejects an unsafe policy and exposes a claimed notification's delivery uncer
 });
 
 it("retains the last passed checkpoint when an owner advances past a failed candidate and the next candidate fails", async () => {
-  const f = await fixture({ policy: cpuPolicy });
-  const first = await start(f.root, "cpu");
-  expect((await waitFor(first, "failed")).result.canary?.error).toBe("runtime-canary-cpu-budget-exceeded");
+  const f = await fixture({ policy: { healthLatencyMs: 5 } });
+  const first = await start(f.root, "latency");
+  expect((await waitFor(first, "failed")).result.canary?.error).toBe(
+    "runtime-canary-latency-budget-exceeded",
+  );
   await stop(first.child);
   const holds = new DeployHolds(join(f.root, "integration"));
   await holds.release(f.id, "Owner", "Reviewed advance to the next candidate");
@@ -342,9 +370,9 @@ it("retains the last passed checkpoint when an owner advances past a failed cand
     updatedAt: new Date().toISOString(),
   });
   writePrivateJson(join(f.updates, "latest.json"), { id: nextId });
-  const second = await start(f.root, "cpu", "c".repeat(40));
+  const second = await start(f.root, "latency", "c".repeat(40));
   const failed = await waitFor(second, "failed");
-  expect(failed.result.canary?.error).toBe("runtime-canary-cpu-budget-exceeded");
+  expect(failed.result.canary?.error).toBe("runtime-canary-latency-budget-exceeded");
   expect(failed.result.canary?.previousHealthyCommit).toBe("a".repeat(40));
   expect(failed.checkpoint).toEqual({ commit: "a".repeat(40) });
   expect(failed.holds.map((hold) => hold.id)).toEqual([nextId]);

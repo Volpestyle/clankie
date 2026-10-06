@@ -75,7 +75,7 @@ records return a JSON reconciliation error without changing the journal or lock.
 `/update status`. Never repeat an uncertain update; inspect its existing operation.
 A dirty pin or failed install leaves the old runtime untouched.
 
-New service liveness starts a five-minute CPU and `/health` latency canary;
+New service liveness starts a five-minute `/health` canary;
 `healthy: true` alone does not mean it passed. Read `latest.canary` and deploy
 holds in update status. A pending canary holds further landings. A failed canary
 keeps the new pin running, retains its hold, names `previousHealthyCommit`, and
@@ -84,7 +84,11 @@ from a claimed receipt. Rollback is the owner's decision. A pass clears only
 its own hold. `clankie update canary` reads its policy; configure the next
 observation with `--window-seconds`, `--sample-seconds`, `--cpu-percent`, and
 `--health-ms`, or use `/update` → Canary settings. A restart begins a full new
-window. CPU is the captain process, with 100% meaning one core.
+window. Only unhealthy, stale or slow `/health` holds; captain CPU (100% is one
+core) is report-only. Compare `canaryCpu` with its `previous` runtime's mean on
+this machine instead of judging the absolute advisory `cpuPercent`. Older
+`runtime-canary-cpu-budget-exceeded` holds are released with `clankie integrate
+release UUID --actor NAME --reason TEXT`.
 
 Social turns cannot update the machine. Older already-loaded MCP bridges may
 need their MCP process refreshed to understand newer protocols; repinning files

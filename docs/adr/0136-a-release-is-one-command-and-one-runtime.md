@@ -111,6 +111,19 @@ the [passive investigation](../testing/2026-10-05-health-latency/README.md)
 records that measurement fault. The 250 ms budget remains unchanged, and no
 global dispatcher or background wakeup is added.
 
+## CPU is report-only (2026-10-06)
+
+The 10% absolute CPU budget failed every canary on the owner's machine from
+`72c1571a` to `c72c3d02` (13–21% mean, health p95 under 30 ms), so seven CPU-only
+holds accumulated and each deploy overrode them. An absolute figure describes one
+machine's fleet and workload, not the runtime. The canary now holds only when the
+new service is not healthy: missing, stale or wrong-identity health, a sampling
+gap, or health p95 over budget. CPU is still sampled and recorded; status reports
+it beside the previous runtime's recorded mean on the same machine, their ratio,
+and the advisory `cpuPercent`, which stays in the policy schema so existing policy
+files and older runtimes still parse. No pre-cutover baseline sampler or CPU alert
+was added. Legacy CPU-only holds are released explicitly by the owner.
+
 ## Source update repair (VUH-1737, 2026-10-06)
 
 The source updater previously resolved bare `main` from the owner's checkout.

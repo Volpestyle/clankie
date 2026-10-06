@@ -100,6 +100,7 @@ process.on("message", (message: unknown) => {
         });
         value = { ok: true };
       } else if (input.action === "sample") value = await sample(runtime);
+      else if (input.action === "cpu") value = canary.cpu();
       else if (input.action === "prehealthy-outcome") {
         const phase = String(input.value);
         if (!["rolled-back", "failed", "stop-unconfirmed"].includes(phase))

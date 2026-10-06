@@ -45,7 +45,11 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
           hint: pending ? "an update is already in flight" : "installs, restarts, observes health",
         },
         { value: "ref", label: "Update to a ref…", hint: "branch, tag or commit" },
-        { value: "canary", label: "Canary settings…", hint: "observation window, CPU and health budgets" },
+        {
+          value: "canary",
+          label: "Canary settings…",
+          hint: "observation window, health budget, CPU advisory",
+        },
       ],
       allowBack: true,
     });
@@ -60,7 +64,12 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
           scale: 1000,
           label: "Sample interval (seconds)",
         },
-        { key: "cpuPercent", flag: "--cpu-percent", scale: 1, label: "CPU budget (% of one core)" },
+        {
+          key: "cpuPercent",
+          flag: "--cpu-percent",
+          scale: 1,
+          label: "CPU advisory (% of one core; never holds)",
+        },
         { key: "healthLatencyMs", flag: "--health-ms", scale: 1, label: "Health p95 budget (milliseconds)" },
       ];
       const args = ["canary"];

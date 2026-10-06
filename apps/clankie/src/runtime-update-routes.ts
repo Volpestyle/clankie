@@ -61,9 +61,15 @@ export function createRuntimeUpdateRoutes(options: {
       return context.json({ error: "operator_revoked" }, 403);
     }
     if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
-    return context.json({ policy: options.canary.policy(), canary: options.canary.status() ?? null }, 200, {
-      "Cache-Control": "no-store",
-    });
+    return context.json(
+      {
+        policy: options.canary.policy(),
+        canary: options.canary.status() ?? null,
+        cpu: options.canary.cpu() ?? null,
+      },
+      200,
+      { "Cache-Control": "no-store" },
+    );
   });
   app.put("/v1/runtime-update/canary", async (context) => {
     const authority = await options.authorize(context.req.raw);
@@ -255,7 +261,9 @@ export function createRuntimeUpdateRoutes(options: {
       return context.json({
         ...result,
         ...(holds === undefined ? {} : { holds }),
-        ...(options.canary ? { canaryPolicy: options.canary.policy() } : {}),
+        ...(options.canary
+          ? { canaryPolicy: options.canary.policy(), canaryCpu: options.canary.cpu() ?? null }
+          : {}),
       });
     } catch {
       return context.json(

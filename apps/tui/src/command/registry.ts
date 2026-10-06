@@ -43,7 +43,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["update"],
     lines: [
       "  update [--ref REF] | status  Stage local main, detach safe restart, or read durable result (JSON)",
-      "  update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets",
+      "  update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets (CPU is advisory)",
     ],
   },
   {

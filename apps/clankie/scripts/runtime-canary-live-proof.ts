@@ -276,6 +276,7 @@ interface Status {
   latest?: RuntimeUpdateResult;
   holds?: DeployHold[];
   canaryPolicy?: typeof policy;
+  canaryCpu?: unknown;
 }
 interface Health {
   ok: true;
@@ -590,20 +591,15 @@ try {
   assert.equal(final.latest?.phase, "healthy");
   assert.equal(final.latest?.healthy, true);
   assert.equal(final.latest?.canary?.previousHealthyCommit, previous);
-  if (healthy) {
-    assert.equal(final.latest?.canary?.state, "passed");
-    assert.equal(final.latest?.canary?.holdReleased, true);
-    assert((final.latest!.canary!.cpuMeanPercent ?? Infinity) <= policy.cpuPercent);
-    assert.deepEqual(
-      final.holds?.map((hold) => hold.id),
-      [independentHoldId],
-    );
-  } else {
-    assert.equal(final.latest?.canary?.error, "runtime-canary-cpu-budget-exceeded");
-    assert.equal(final.latest?.canary?.holdEstablished, true);
-    assert((final.latest!.canary!.cpuMeanPercent ?? 0) > policy.cpuPercent);
-    assert(final.holds?.some((hold) => hold.id === id));
-  }
+  // CPU is report-only: a burn is recorded above the advisory figure and still releases its hold.
+  assert.equal(final.latest?.canary?.state, "passed");
+  assert.equal(final.latest?.canary?.holdReleased, true);
+  assert.deepEqual(
+    final.holds?.map((hold) => hold.id),
+    [independentHoldId],
+  );
+  if (!healthy) assert((final.latest!.canary!.cpuMeanPercent ?? 0) > policy.cpuPercent);
+  receipt.canaryCpu = final.canaryCpu;
   assert((final.latest!.canary!.healthP95Ms ?? Infinity) <= policy.healthLatencyMs);
   assert(
     Date.parse(final.latest!.canary!.completedAt!) - Date.parse(final.latest!.canary!.startedAt!) >=
@@ -617,21 +613,7 @@ try {
     lastCounters.cpu.userMicros + lastCounters.cpu.systemMicros >
       firstCounters.cpu.userMicros + firstCounters.cpu.systemMicros,
   );
-  if (!healthy) {
-    const response = await api<{ error: string; detail: string }>(
-      "/v1/runtime-update",
-      "POST",
-      { ref: "HEAD" },
-      5000,
-    );
-    const refusal = response.body;
-    assert.equal(response.status, 409);
-    assert.equal(refusal.error, "update_refused");
-    assert.match(refusal.detail, /Deploy held/u);
-    assert(refusal.detail.includes(id));
-    receipt.nextUpdate = { status: response.status, ...refusal, helperScheduled: false };
-  }
-  assert.equal(existsSync(join(updates, "active")), false, "Held POST must not schedule a helper");
+  assert.equal(existsSync(join(updates, "active")), false, "The proof must not schedule a helper");
   assert.deepEqual(
     (await readdir(updates)).filter((name) => /^[a-f0-9-]{36}$/u.test(name)),
     [id],
@@ -639,7 +621,7 @@ try {
   const checkpoint = JSON.parse(await readFile(join(updates, "healthy-canary.json"), "utf8")) as {
     commit: string;
   };
-  assert.equal(checkpoint.commit, healthy ? head : previous);
+  assert.equal(checkpoint.commit, head);
   receipt.finalStatus = final;
   receipt.finalHealth = after;
   receipt.retainedCheckpoint = checkpoint;

@@ -162,7 +162,9 @@ it("failed install leaves old pin and all services untouched", async () => {
   expect(await executeRuntimeUpdate(f.plan, f)).toMatchObject({
     phase: "failed",
     reason: "pre-cutover-failed",
+    error: "install fixture failure",
   });
+  expect(readRuntimeUpdate(f.plan.directory).error).toBe("install fixture failure");
   expect(f.calls).toEqual(["stage", "install"]);
   expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
 });
@@ -235,6 +237,7 @@ it("a lost shutdown result remains uncertain and never reports untouched service
   expect(await executeRuntimeUpdate(f.plan, f)).toMatchObject({
     phase: "stop-unconfirmed",
     reason: "old-services-stop-unconfirmed",
+    error: "lost response",
   });
   expect(f.calls).toEqual(["stage", "install", "down:old"]);
 });
@@ -247,6 +250,8 @@ it("owner changes during awaited old shutdown cannot be executed as rollback", a
   expect(await executeRuntimeUpdate(f.plan, f)).toMatchObject({
     phase: "failed",
     reason: "rollback-unconfirmed",
+    error: "Pinned runtime has local changes; leaving it and the service untouched",
+    rollbackError: "Pinned runtime has local changes; leaving it and the service untouched",
   });
   expect(f.calls).toEqual(["stage", "install", "down:old"]);
 });
