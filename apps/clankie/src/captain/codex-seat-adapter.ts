@@ -83,6 +83,7 @@ export function createCodexSeatAdapter(
       let nativeInputWaiting = false;
       let activeTurn: string | undefined;
       const terminalTurns = new Set<string>();
+      const completedTurns = new Map<string, SeatEvent>();
       const questions = new Map<string | number, { threadId: string; question: SeatQuestion }>();
       const forwarded = new Set<string | number>();
       const retiredQuestions = new Set<string | number>();
@@ -258,8 +259,11 @@ export function createCodexSeatAdapter(
         report();
         if (settlement) {
           latest = settlement;
+          if (settlement.type === "turn_completed" && settlement.messageId) {
+            completedTurns.set(settlement.messageId, settlement);
+            if (completedTurns.size > 64) completedTurns.delete(completedTurns.keys().next().value!);
+          }
           for (const resolve of waiters) resolve(settlement);
-          waiters.clear();
         }
       };
       const startupAbort = new AbortController();
@@ -506,11 +510,23 @@ export function createCodexSeatAdapter(
                 };
               return seat.answerQuestion(answer, guard);
             },
-            settled(abort) {
+            settled(abort, messageId) {
               if (abort?.aborted) return Promise.reject(abort.reason);
-              if (state !== "working" && !nativeInputWaiting) return Promise.resolve(latest);
+              const completed = messageId === undefined ? undefined : completedTurns.get(messageId);
+              if (completed) return Promise.resolve(completed);
+              if (
+                state === "offline" ||
+                (messageId === undefined && state !== "working" && !nativeInputWaiting)
+              )
+                return Promise.resolve(latest);
               return new Promise((resolve, reject) => {
                 const done = (event: SeatEvent) => {
+                  if (
+                    messageId !== undefined &&
+                    event.type === "turn_completed" &&
+                    event.messageId !== messageId
+                  )
+                    return;
                   abort?.removeEventListener("abort", cancel);
                   waiters.delete(done);
                   resolve(event);

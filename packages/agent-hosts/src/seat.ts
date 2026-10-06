@@ -238,12 +238,13 @@ export interface SeatControl {
    * The next settlement at or after now: `turn_completed`, `blocked`,
    * `released`, `exited`, or an explicitly unconfirmed observation. Resolves
    * at once with the latest eligible observation when the seat is not working.
-   * Settlement is not per-message completion; adapters must preserve missing
-   * native correlation. Rejects only when `signal` aborts.
+   * With a native messageId, ignore completions of other turns; adapters must
+   * preserve missing correlation as an unconfirmed observation. Without it,
+   * settlement is not per-message completion. Rejects only when `signal` aborts.
    * Codex user-input questions use SeatView.question and keep this wait armed;
    * owner-only approval prompts still settle as blocked.
    */
-  settled(signal?: AbortSignal): Promise<SeatEvent>;
+  settled(signal?: AbortSignal, messageId?: string): Promise<SeatEvent>;
   /** Interrupt the running turn. False when there is nothing to interrupt or no control. */
   interrupt(): Promise<boolean>;
   /** Request this original native TUI's own exit. The caller confirms pane

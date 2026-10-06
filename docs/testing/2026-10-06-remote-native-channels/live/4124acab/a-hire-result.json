@@ -1,0 +1,35 @@
+{
+  "op": "spawn_seat",
+  "schemaVersion": 1,
+  "result": {
+    "outcome": "spawned",
+    "deliveryStage": "consumed",
+    "seat": {
+      "seatId": "pc/term_65d28d44cce3f15",
+      "occupantId": "session-a1070e763c06ba2ddfc2c009c7ec533ef758f796668a04463bebc5f93089c8c0",
+      "personaId": "agent-65c52411-a303-4275-ae42-83594588eea0",
+      "harness": "codex",
+      "status": "working",
+      "title": "Ada",
+      "conversationId": "conv-dca89893-d4c3-43cc-94c8-c186f086156b",
+      "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer"
+    },
+    "control": {
+      "mode": "adapter"
+    },
+    "profile": {
+      "harness": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "delegation": "panes",
+      "placement": "new-tab"
+    },
+    "skills": {
+      "mode": "bundled",
+      "source": "setting",
+      "applied": false,
+      "included": [],
+      "excluded": []
+    }
+  }
+}

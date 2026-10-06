@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "status": "seat_offline",
+  "deliveryStage": "unavailable",
+  "conversationId": "conv-dca89893-d4c3-43cc-94c8-c186f086156b",
+  "personaId": "agent-65c52411-a303-4275-ae42-83594588eea0",
+  "currentRevision": 0,
+  "safeCursor": "000000000000"
+}

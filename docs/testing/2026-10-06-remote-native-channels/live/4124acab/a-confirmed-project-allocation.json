@@ -1,0 +1,50 @@
+[
+  {
+    "id": "5a4a3c85-e672-4580-a7e9-dca557859e87",
+    "key": "[\"pc\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\"]",
+    "projectId": "clankie",
+    "role": "tester",
+    "policy": "[null,null,null]",
+    "request": {
+      "schemaVersion": 1,
+      "harness": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "delegation": "panes",
+      "placement": "new-tab",
+      "freshIntent": {
+        "id": "293c21f9-2602-4c20-a6b5-c9ad686a65b1",
+        "afterReceiptId": "719dd6b1-2814-4c2b-9eb6-118fb785427c"
+      },
+      "title": "Ada",
+      "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+      "fleet": "pc",
+      "role": "tester"
+    },
+    "started": true,
+    "pane": "pc/wD:p2",
+    "seat": "pc/term_65d28d44cce3f15",
+    "occupantId": "session-a1070e763c06ba2ddfc2c009c7ec533ef758f796668a04463bebc5f93089c8c0",
+    "proof": {
+      "nativeOccupantId": "session-a1070e763c06ba2ddfc2c009c7ec533ef758f796668a04463bebc5f93089c8c0",
+      "fleet": "pc",
+      "pane": "pc/wD:p2",
+      "binding": {
+        "socketPath": "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
+        "session": "default"
+      },
+      "processes": [
+        {
+          "pid": 647176,
+          "startTime": "2026-10-06T09:43:36.0331068Z"
+        }
+      ],
+      "shell": {
+        "pid": 478296,
+        "startTime": "2026-10-06T09:43:22.1397636Z"
+      }
+    },
+    "confirmed": true,
+    "gone": false
+  }
+]

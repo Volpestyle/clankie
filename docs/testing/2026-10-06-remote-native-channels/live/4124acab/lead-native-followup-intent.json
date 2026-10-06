@@ -1,0 +1,6 @@
+{
+  "utc": "2026-10-06T09:52:03.165Z",
+  "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+  "revision": 1,
+  "message": "Tess is running James's authorized VUH-1527 PC acceptance in this test conversation. This is acceptance only: no code/account/config changes, no tracker writes, no other panes, no additional hires. The original public child-conversation follow-up returned seat_offline / unavailable with revision 0, so it was not delivered. Test the normal native lead channel now with ONE message_seat call to the exact owned hire pc/term_65d28d44cce3f15. Send this new follow-up intent: \"TESS1527_412_a_NATIVE_FOLLOWUP_INPUT. Read-only PC acceptance: reply exactly TESS1527_412_a_NATIVE_FOLLOWUP_OK. Use message_clankie once to report that new marker. Invoke list_fleet_seats once and report its exact receipt/outcome; do not message any peer yet. No changes. Finish promptly; keep this session open.\" Never resend an uncertain dispatch, fall back to typing, adopt another worker, or attempt repairs. Report the exact native message_seat outcome and stop. I will clean up my panes after evidence collection."
+}

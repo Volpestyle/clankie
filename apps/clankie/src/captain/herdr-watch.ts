@@ -76,6 +76,7 @@ import { z } from "zod";
 import { parseHerdrForegroundProcesses, type HerdrForegroundProcess } from "./codex-seat.ts";
 import {
   occupantIdForHerdrSession,
+  subjectForHerdrName,
   recoverLocalCodexSession,
   type HerdrCensusRunner,
   type ObservedFleetSeat,
@@ -114,6 +115,8 @@ const HerdrWatchRecordSchema = z
     occupantId: z.string().min(1).optional(),
     /** Only a host-created hire harvest follows adoption; explicit watches keep their arming source. */
     hired: z.literal(true).optional(),
+    /** Native accepted turn identity; never infer its completion from another idle turn. */
+    messageId: z.string().min(1).max(512).optional(),
     reason: z.string().min(1),
     createdAt: z.string().min(1),
     discord: DiscordWatchOriginSchema.optional(),
@@ -124,6 +127,19 @@ const PersistedHerdrWatchesSchema = z
   .object({
     schemaVersion: z.literal(1),
     watches: z.array(HerdrWatchRecordSchema),
+    /** Deny-only native harvest claims, retained after a watch settles or restarts. */
+    harvestedTurns: z
+      .array(
+        z
+          .object({
+            terminalId: z.string().min(1),
+            occupantId: z.string().min(1),
+            messageId: z.string().min(1).max(512),
+            watchId: z.string().min(1),
+          })
+          .strict(),
+      )
+      .optional(),
     /** Deny-only history of prepared allocations; never ownership or admission. */
     preparedPanes: z
       .array(z.object({ paneId: z.string().min(1), terminalId: z.string().min(1).optional() }).strict())
@@ -1075,9 +1091,40 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return { outcome: "offline", deliveryStage: "unavailable", detail: "Native seat delivery is closed." };
     if (this.closed)
       return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
-    return options === undefined
+    const before = options?.fence
+      ? undefined
+      : await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    const owner = before?.session ? this.nativeOwner(before) : undefined;
+    const delivered = await (options === undefined
       ? this.seatControl.deliverToSeat(seatId, text, uncontrolled)
-      : this.seatControl.deliverToSeat(seatId, text, uncontrolled, options);
+      : this.seatControl.deliverToSeat(seatId, text, uncontrolled, options));
+    // Follow-ups need their own completion harvest. Peer output creates no
+    // owner wake, and queued/no-turn receipts cannot claim native completion.
+    if (
+      owner &&
+      before?.agent === "codex" &&
+      before.session &&
+      delivered.outcome === "delivered" &&
+      delivered.messageId &&
+      (delivered.state === "started" || delivered.state === "steered")
+    ) {
+      try {
+        // Arming is synchronous after native acceptance. The watcher proves
+        // the original occupant and current owner again before harvesting.
+        this.watchHiredSeat(
+          seatId,
+          occupantIdForHerdrSession(before.session),
+          owner,
+          true,
+          delivered.messageId,
+        );
+      } catch {
+        // A watcher failure cannot erase confirmed native acceptance or permit
+        // redispatch. The retained delivery receipt remains authoritative.
+        console.warn("Native follow-up completion watch unavailable:", seatId);
+      }
+    }
+    return delivered;
   }
 
   public async answerSeatQuestion(
@@ -3377,12 +3424,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
     occupantId: string,
     owner: ConversationOwner,
     start = true,
-  ): HerdrWatchRecord {
+    messageId?: string,
+  ): HerdrWatchRecord | undefined {
     if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
     const existing = this.state.watches.find(
-      (watch) => watch.hired === true && watch.terminalId === seatId && watch.occupantId === occupantId,
+      (watch) =>
+        watch.hired === true &&
+        watch.terminalId === seatId &&
+        watch.occupantId === occupantId &&
+        watch.messageId === messageId,
     );
     if (existing) return existing;
+    if (messageId && this.harvestClaim(seatId, occupantId, messageId)) return undefined;
     const record: HerdrWatchRecord = {
       id: randomUUID(),
       conversationId: owner.conversationId,
@@ -3390,6 +3443,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       terminalId: seatId,
       occupantId,
       hired: true,
+      ...(messageId === undefined ? {} : { messageId }),
       reason: "Harvest the worker hired by this conversation; report completion or escalation here.",
       createdAt: new Date().toISOString(),
       ...(owner.discord === undefined ? {} : { discord: { ...owner.discord } }),
@@ -3709,6 +3763,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   private async run(record: HerdrWatchRecord, signal: AbortSignal): Promise<void> {
     let prompt: string;
+    let harvestMessageId = record.messageId;
     try {
       const current = await this.runner.resolveTerminal(record.terminalId);
       // A missing/rebound native occupant never contributes another worker's output.
@@ -3727,7 +3782,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const held = control === undefined ? undefined : await control.status();
         if (control !== undefined && held !== "released" && held !== "offline") {
           // The harness's own completion, not a status read off the terminal.
-          const event = await control.settled(signal);
+          const event = await control.settled(signal, record.messageId);
+          if (event.type === "turn_completed") harvestMessageId ??= event.messageId;
           const after = await this.runner.resolveTerminal(record.terminalId).catch(() => undefined);
           if (
             after !== undefined &&
@@ -3737,6 +3793,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
             return;
           }
           prompt = watchPrompt(record, after ?? current, undefined, event);
+        } else if (record.messageId !== undefined) {
+          prompt = watchPrompt(
+            record,
+            current,
+            "The original native completion controller is unavailable; completion of this message is unverified.",
+          );
         } else {
           const settled = SETTLED_STATUSES.has(current.status)
             ? current
@@ -3769,13 +3831,46 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return;
       }
       const guard = async () => {
+        const live = await this.runner.resolveTerminal(record.terminalId);
+        const nativeChanged =
+          live !== undefined &&
+          (live.session === undefined || occupantIdForHerdrSession(live.session) !== record.occupantId);
+        if (nativeChanged) this.remove(record.id);
         if (
           signal.aborted ||
           this.closed ||
           !this.state.watches.some((watch) => watch.id === record.id) ||
-          !isDeepStrictEqual(this.watchOwner(record), owner)
+          !isDeepStrictEqual(this.watchOwner(record), owner) ||
+          nativeChanged
         )
           throw new Error("The watched worker changed its leading conversation before acceptance");
+        if (record.hired && harvestMessageId && record.occupantId) {
+          const claim = this.harvestClaim(record.terminalId, record.occupantId, harvestMessageId);
+          const superseded =
+            record.messageId === undefined &&
+            this.state.watches.some(
+              (watch) =>
+                watch.hired &&
+                watch.terminalId === record.terminalId &&
+                watch.occupantId === record.occupantId &&
+                watch.messageId === harvestMessageId,
+            );
+          if (superseded || (claim && claim.watchId !== record.id)) {
+            this.remove(record.id);
+            throw new Error("This native turn already has its original completion harvest");
+          }
+          if (!claim) {
+            (this.state.harvestedTurns ??= []).push({
+              terminalId: record.terminalId,
+              occupantId: record.occupantId,
+              messageId: harvestMessageId,
+              watchId: record.id,
+            });
+            // Claim before asynchronous acceptance. A restart or reconciled
+            // receipt cannot create a second watch for this native turn.
+            this.save();
+          }
+        }
       };
       // Explicit watches retain their existing wake shape. Automatic harvests refresh
       // persisted adoption and fence it again at the asynchronous host boundary.
@@ -3798,6 +3893,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }, RETRY_ADMISSION_MS);
     timer.unref?.();
     this.retryTimers.add(timer);
+  }
+
+  private harvestClaim(terminalId: string, occupantId: string, messageId: string) {
+    return this.state.harvestedTurns?.find(
+      (claim) =>
+        claim.terminalId === terminalId && claim.occupantId === occupantId && claim.messageId === messageId,
+    );
   }
 
   private remove(id: string): void {
@@ -3921,7 +4023,7 @@ function spawnedSeat(
       ...(account ? { account } : {}),
       seatId: agent.terminalId,
       paneId,
-      subject,
+      subject: subjectForHerdrName(subject, splitFleetQualified(paneId)?.fleet)!,
       occupantId: occupantIdForHerdrSession(agent.session!),
       harness: agent.agent,
       status: agent.status,

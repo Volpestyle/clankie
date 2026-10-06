@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -7,14 +7,17 @@ import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
 import { HerdrWatchStore, parseHerdrAgentResult } from "../src/captain/herdr-watch.ts";
 import { readFleet } from "../src/captain/herdr-census.ts";
+import { PersonaStore } from "../src/captain/personas.ts";
+import { ConversationStore } from "../src/captain/conversations.ts";
 import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
 
-async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {}) {
+async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {}, fleetProjection = false) {
   const directory = await mkdtemp(join(tmpdir(), "codex-hire-protocol-"));
   const native = await codex0160Protocol(directory, options);
   const pane = {
-    pane_id: "w1:p1",
-    terminal_id: "term_protocol",
+    pane_id: fleetProjection ? "pc/w1:p1" : "w1:p1",
+    terminal_id: fleetProjection ? "pc/term_protocol" : "term_protocol",
+    name: "protocol-ab12",
     agent: "codex",
     agent_status: "idle",
     terminal_title: "Protocol hire",
@@ -40,8 +43,11 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
     authorize: async () => true,
   };
   const wakes: { conversationId: string; text: string }[] = [];
-  const store = new HerdrWatchStore(join(directory, "watches.json"), {
+  let nextWake: { entered: () => void; release: Promise<void> } | undefined;
+  const watchPath = join(directory, "watches.json");
+  const storeOptions = {
     seatAdapters: [adapter],
+    remoteSeatAdapters: () => [adapter],
     summariesPath: join(directory, "summaries.json"),
     // Host-provided fixture preallocation skips account subprocess probes;
     // it neither signs in nor replaces the actual adapter/client transport.
@@ -55,7 +61,8 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
     },
     runner: {
       createTab: async () => pane.pane_id,
-      startAgent: async ({ args }) => {
+      startAgent: async ({ args, name }) => {
+        pane.name = name;
         expect(args).toContain(native.endpoint);
         native.startView();
       },
@@ -66,14 +73,48 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
       codexQueue: fallback,
       closePane: async () => {},
     },
-  });
-  store.start(async (conversationId, text, _discord, guard) => {
+  } satisfies NonNullable<ConstructorParameters<typeof HerdrWatchStore>[1]>;
+  const store = new HerdrWatchStore(watchPath, storeOptions);
+  const wake: Parameters<HerdrWatchStore["start"]>[0] = async (conversationId, text, _discord, guard) => {
+    if (nextWake) {
+      const held = nextWake;
+      nextWake = undefined;
+      held.entered();
+      await held.release;
+    }
     await guard?.();
     wakes.push({ conversationId, text });
-  });
+  };
+  store.start(wake);
   const census = () =>
     readFleet({
       summaries: {},
+      ...(fleetProjection
+        ? {
+            localAvailable: false,
+            fleets: [
+              {
+                id: "pc",
+                session: "default",
+                host: "protocol-host",
+                run: async (args: readonly string[]) =>
+                  args[0] === "agent"
+                    ? JSON.stringify({
+                        result: {
+                          agents: [
+                            {
+                              ...pane,
+                              pane_id: pane.pane_id.slice(3),
+                              terminal_id: pane.terminal_id.slice(3),
+                            },
+                          ],
+                        },
+                      })
+                    : JSON.stringify({ result: { snapshot: {} } }),
+              },
+            ],
+          }
+        : {}),
       runCommand: async (_command, args) => ({
         stdout:
           args[0] === "agent"
@@ -91,15 +132,15 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
     await rm(directory, { recursive: true, force: true });
   };
   try {
-    expect(
-      await store.spawnSeat(
-        { schemaVersion: 1, harness: "codex", title: "Protocol hire", workingDirectory: directory },
-        undefined,
-        "Initial brief",
-        undefined,
-        owner,
-      ),
-    ).toMatchObject({ outcome: "spawned", control: { mode: "adapter" } });
+    const hire = await store.spawnSeat(
+      { schemaVersion: 1, harness: "codex", title: "Protocol hire", workingDirectory: directory },
+      undefined,
+      "Initial brief",
+      undefined,
+      owner,
+    );
+    expect(hire).toMatchObject({ outcome: "spawned", control: { mode: "adapter" } });
+    if (hire.outcome !== "spawned") throw new Error("Native protocol hire did not start");
     const control = await adapter.attach({
       harness: "codex",
       paneId: pane.pane_id,
@@ -108,7 +149,38 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
     expect(control).toBeDefined();
     expect(native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(1);
     expect(reports.some((args) => args.includes(native.threadId))).toBe(true);
-    return { native, pane, adapter, control: control!, store, owner, wakes, fallback, census, close };
+    const holdNextWake = () => {
+      let entered!: () => void;
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      nextWake = {
+        entered,
+        release: new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      };
+      return { pending, release };
+    };
+    return {
+      native,
+      pane,
+      adapter,
+      control: control!,
+      store,
+      owner,
+      wakes,
+      fallback,
+      census,
+      close,
+      directory,
+      hire,
+      watchPath,
+      storeOptions,
+      wake,
+      holdNextWake,
+    };
   } catch (error) {
     await close();
     throw error;
@@ -423,6 +495,193 @@ it("cold native hydration skips an older completed question while keeping the la
     expect(fallback).not.toHaveBeenCalled();
     expect(native.errors).toEqual([]);
   } finally {
+    await close();
+  }
+});
+
+it("automatically harvests the accepted follow-up turn once, retaining its claim across receipt reconciliation and restart", async () => {
+  const fixture = await hiredFixture();
+  const { native, pane, control, store, wakes, watchPath, storeOptions, wake, close } = fixture;
+  let restarted: HerdrWatchStore | undefined;
+  try {
+    native.finish("completed", "Initial brief complete");
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    const options = { stableReceiptKey: "host-original-follow-up", delivery: "steer" as const };
+    expect(await store.deliverToSeat(pane.terminal_id, "Native follow-up", undefined, options)).toMatchObject(
+      {
+        outcome: "delivered",
+        state: "started",
+        messageId: "turn-2",
+      },
+    );
+    // A completion from turn-1 cannot stand in for the newly accepted turn.
+    expect(await control.status()).toBe("working");
+    expect(wakes).toHaveLength(1);
+    native.finish("completed", "Native follow-up complete");
+    await vi.waitFor(() => expect(wakes).toHaveLength(2));
+    expect(wakes[1]?.text).toContain("Native follow-up complete");
+    expect(wakes.every(({ conversationId }) => conversationId === fixture.owner.owner.conversationId)).toBe(
+      true,
+    );
+    await vi.waitFor(async () => expect(JSON.parse(await readFile(watchPath, "utf8")).watches).toEqual([]));
+    store.close();
+    restarted = new HerdrWatchStore(watchPath, storeOptions);
+    restarted.start(wake);
+    expect(
+      await restarted.deliverToSeat(pane.terminal_id, "Native follow-up", undefined, options),
+    ).toMatchObject({
+      outcome: "delivered",
+      messageId: "turn-2",
+    });
+    expect(JSON.parse(await readFile(watchPath, "utf8")).watches).toEqual([]);
+    expect(wakes).toHaveLength(2);
+    expect(native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(2);
+    expect(native.requests.filter(({ method }) => method === "turn/steer")).toHaveLength(0);
+    expect(fixture.fallback).not.toHaveBeenCalled();
+    expect(native.errors).toEqual([]);
+  } finally {
+    restarted?.close();
+    await close();
+  }
+});
+
+it("fences a generic hire wake that began before the same-turn steer acknowledgment and exact harvest", async () => {
+  const { native, pane, store, wakes, watchPath, holdNextWake, close } = await hiredFixture();
+  try {
+    const heldWake = holdNextWake();
+    const ack = native.holdNextMutationReply();
+    const send = store.deliverToSeat(pane.terminal_id, "Steer original turn");
+    await ack.pending;
+    native.finish("completed", "Original turn including steer complete");
+    await heldWake.pending;
+    ack.release();
+    expect(await send).toMatchObject({ outcome: "delivered", state: "steered", messageId: "turn-1" });
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    heldWake.release();
+    await vi.waitFor(async () => expect(JSON.parse(await readFile(watchPath, "utf8")).watches).toEqual([]));
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]?.text).toContain("Original turn including steer complete");
+    expect(native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(1);
+    expect(native.requests.filter(({ method }) => method === "turn/steer")).toHaveLength(1);
+    expect(native.errors).toEqual([]);
+  } finally {
+    await close();
+  }
+});
+
+it("restores an exact follow-up watch without claiming completion from an unavailable controller or old reply", async () => {
+  const { native, pane, store, wakes, watchPath, storeOptions, wake, fallback, close } = await hiredFixture();
+  let restored: HerdrWatchStore | undefined;
+  const lastReply = vi.fn(async () => "Earlier completed answer");
+  try {
+    native.finish("completed", "Initial brief complete");
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    expect(await store.deliverToSeat(pane.terminal_id, "Still-running follow-up")).toMatchObject({
+      outcome: "delivered",
+      messageId: "turn-2",
+    });
+    store.close();
+    restored = new HerdrWatchStore(watchPath, {
+      ...storeOptions,
+      seatAdapters: [],
+      remoteSeatAdapters: () => [],
+      lastReply,
+    });
+    restored.start(wake);
+    await vi.waitFor(() => expect(wakes).toHaveLength(2));
+    expect(wakes[1]?.text).toContain("completion of this message is unverified");
+    expect(wakes[1]?.text).not.toContain("Earlier completed answer");
+    expect(lastReply).not.toHaveBeenCalled();
+    expect(fallback).not.toHaveBeenCalled();
+    expect(native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(2);
+  } finally {
+    restored?.close();
+    await close();
+  }
+});
+
+it("creates no owner completion wake for peer output and refuses a changed occupant at final wake acceptance", async () => {
+  const { native, pane, control, store, wakes, watchPath, holdNextWake, close } = await hiredFixture();
+  try {
+    native.finish("completed", "Initial brief complete");
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    expect(
+      await store.deliverToSeat(pane.terminal_id, "Untrusted peer context", undefined, {
+        fence: async () => true,
+      }),
+    ).toMatchObject({ outcome: "delivered", state: "started" });
+    native.finish("completed", "Peer context complete");
+    await vi.waitFor(async () => expect(await control.status()).toBe("idle"));
+    expect(JSON.parse(await readFile(watchPath, "utf8")).watches).toEqual([]);
+    expect(wakes).toHaveLength(1);
+    const held = holdNextWake();
+    expect(await store.deliverToSeat(pane.terminal_id, "Original-occupant follow-up")).toMatchObject({
+      outcome: "delivered",
+      state: "started",
+    });
+    native.finish("completed", "Original occupant answer");
+    await held.pending;
+    pane.agent_session = { ...pane.agent_session, value: "replacement-native-session" };
+    held.release();
+    await vi.waitFor(async () => {
+      expect(wakes).toHaveLength(1);
+      expect(JSON.parse(await readFile(watchPath, "utf8")).harvestedTurns).toHaveLength(1);
+      expect(JSON.parse(await readFile(watchPath, "utf8")).watches).toEqual([]);
+    });
+  } finally {
+    await close();
+  }
+});
+
+it("keeps a fleet-qualified hire's persona through raw fleet census and child-conversation delivery over native RPC", async () => {
+  // The host allocation is preallocated by the protocol fixture. This tests
+  // hire/census/persona/conversation boundaries, not SSH or live PC admission.
+  const { native, pane, store, directory, hire, census, wakes, close } = await hiredFixture({}, true);
+  const personas = new PersonaStore(join(directory, "personas"));
+  let roster = personas.reconcile([]);
+  const conversations = new ConversationStore(
+    join(directory, "conversations"),
+    async () => {},
+    undefined,
+    (seatId, text) => store.deliverToSeat(seatId, text),
+    undefined,
+    undefined,
+    undefined,
+    (personaId) => roster.find((seat) => seat.personaId === personaId)?.seatId,
+  );
+  try {
+    const adopted = personas.adoptSpawn(hire.seat, "Protocol worker");
+    expect(hire.seat.subject).toBe(`pc-${pane.name}`);
+    const created = await conversations.serve({
+      schemaVersion: 1,
+      op: "create",
+      scope: { kind: "persona", personaId: adopted.personaId },
+      title: "Protocol worker",
+    });
+    if (created.op !== "create") throw new Error("Expected child conversation");
+    roster = personas.reconcile((await census()).seats);
+    expect(roster).toHaveLength(1);
+    expect(roster[0]).toMatchObject({ personaId: adopted.personaId, seatId: pane.terminal_id });
+    const sent = await conversations.serve({
+      schemaVersion: 1,
+      op: "send",
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId: created.conversation.conversationId,
+        surfaceClientId: "protocol-owner",
+        expectedRevision: 0,
+        message: "Child conversation follow-up",
+      },
+    });
+    expect(sent.op === "send" ? sent.result : undefined).toMatchObject({ status: "accepted", revision: 1 });
+    expect(native.requests.filter(({ method }) => method === "turn/steer")).toHaveLength(1);
+    native.finish("completed", "Child follow-up complete");
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    expect(wakes[0]?.text).toContain("Child follow-up complete");
+    expect(native.errors).toEqual([]);
+  } finally {
+    await conversations.close();
     await close();
   }
 });

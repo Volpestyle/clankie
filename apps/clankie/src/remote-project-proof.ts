@@ -466,9 +466,12 @@ export function createRemoteProjectObserver(options: Options) {
         if (!privateServer || !options.privateSeats) return undefined;
         const view = select(snapshot, fleet, pane);
         const server = snapshot.privateServer;
+        const tui = snapshot.nativeProcesses.find((native) => native.pid === view?.proof.processes[0]?.pid);
         if (
           !view ||
           !server ||
+          tui?.role !== "tui" ||
+          loopbackPort(tui.endpoint) !== privateServer.port ||
           !snapshot.installed.includes(server.executable) ||
           view.proof.nativeSessionPending ||
           snapshot.owners.length !== 1 ||

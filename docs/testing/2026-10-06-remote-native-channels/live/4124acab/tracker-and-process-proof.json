@@ -1,0 +1,101 @@
+{
+  "observedAt": "2026-10-06T09:44:36.3573351Z",
+  "owned": [
+    {
+      "pane": "wD:p2",
+      "terminal": "term_65d28d44cce3f15",
+      "processes": [
+        {
+          "pid": 478296,
+          "parentPid": 402600,
+          "name": "powershell.exe",
+          "created": "2026-10-06T09:43:22.1397630Z",
+          "remoteTui": false,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": false
+        },
+        {
+          "pid": 748452,
+          "parentPid": 478296,
+          "name": "cmd.exe",
+          "created": "2026-10-06T09:43:35.8627890Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        },
+        {
+          "pid": 200828,
+          "parentPid": 748452,
+          "name": "python.exe",
+          "created": "2026-10-06T09:43:35.8901260Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        },
+        {
+          "pid": 627732,
+          "parentPid": 200828,
+          "name": "node.exe",
+          "created": "2026-10-06T09:43:35.9837910Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        },
+        {
+          "pid": 647176,
+          "parentPid": 627732,
+          "name": "codex.exe",
+          "created": "2026-10-06T09:43:36.0331060Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        }
+      ]
+    }
+  ],
+  "ownedAppServers": [
+    {
+      "pid": 309948,
+      "created": "2026-10-06T09:43:27.7755030Z",
+      "linearDisabled": true,
+      "paneBridgeBound": true
+    }
+  ],
+  "defaultMcpServers": [
+    {
+      "name": "clankie",
+      "enabled": true
+    },
+    {
+      "name": "code-review",
+      "enabled": false
+    },
+    {
+      "name": "codex_app",
+      "enabled": false
+    },
+    {
+      "name": "cua_repl",
+      "enabled": true
+    },
+    {
+      "name": "linear",
+      "enabled": true
+    },
+    {
+      "name": "node_repl",
+      "enabled": true
+    },
+    {
+      "name": "swarm",
+      "enabled": false
+    }
+  ],
+  "codexConfigSource": ["C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml"],
+  "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+}

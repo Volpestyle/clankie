@@ -291,6 +291,10 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     };
     if (!(await validateConversationOwner(owner, mode))) return false;
     await guard?.();
+    let accept!: () => void;
+    const admitted = new Promise<void>((resolve) => {
+      accept = resolve;
+    });
     const finished = finishDiscordWatchTurn(
       plan.systemTools,
       normalized,
@@ -298,9 +302,15 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       mode,
       guard,
       nativeEventKind,
+      accept,
     );
     if (waitForCompletion) await finished;
-    else void finished.catch((error) => console.error("Conversation wake failed:", error));
+    else {
+      // Keep the original watch and its final census/owner guard until native
+      // acceptance. Admission does not wait for the room's answer or Pi turn.
+      await Promise.race([admitted, finished]);
+      void finished.catch((error) => console.error("Conversation wake failed:", error));
+    }
     return true;
   }
 
@@ -311,6 +321,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     mode: "machine" | "social" = "machine",
     guard?: () => Promise<void>,
     nativeEventKind: "escalation" | "message" = "escalation",
+    onAdmitted?: () => void,
   ): Promise<void> {
     const origin = owner.discord!;
     const result = await dispatchDiscordTurn(
@@ -323,8 +334,12 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         if (!(await validateConversationOwner(owner, mode)))
           throw new Error("Conversation wake authority was revoked");
         await guard?.();
+        if (!(await validateConversationOwner(owner, mode)))
+          throw new Error("Conversation wake authority was revoked");
       },
       nativeEventKind,
+      false,
+      onAdmitted,
     );
     if (
       result.state !== "settled" ||
@@ -359,6 +374,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     guard?: () => Promise<void>,
     nativeEventKind: "escalation" | "message" = "escalation",
     preferPi = false,
+    onAdmitted?: () => void,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = ctx.conversations.roomConversation(normalized.lane, normalized.targetId);
     return ctx.conversations.runWithConversationDriver<CaptainChannelTurnResult>(
@@ -403,6 +419,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
               content: normalized.prompt,
               wantsReply: true,
               signal: ctx.shutdown.signal,
+              ...(onAdmitted === undefined ? {} : { onAdmitted }),
             });
             const result = roomSeatTurnResult(delivery, normalized.sessionKey, `seat-${deliveryId}`);
             return result === undefined ? { handled: false as const } : { handled: true as const, result };
@@ -421,7 +438,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         const unsubscribe = lane.session.subscribe((event) => run.observe(event));
         try {
           return await waitForConversationRun(
-            runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin, run),
+            runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin, run, onAdmitted),
             run.signal,
           );
         } finally {
@@ -440,6 +457,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     toolProgressEnabled: boolean,
     origin: DiscordWatchOrigin,
     serviceRun: ConversationServiceRun,
+    onAdmitted?: () => void,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = ctx.conversations.roomConversation(normalized.lane, normalized.targetId);
     const executionConversationId = normalized.handoffConversationId ?? conversationId;
@@ -618,6 +636,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
               preparePrompt: guidancePrompt,
               signal: AbortSignal.any([signal, serviceRun.signal]),
               deliveryId,
+              ...(onAdmitted === undefined ? {} : { onAdmitted }),
               onAbsorbed: (id) => {
                 replyDeliveryId = id;
               },

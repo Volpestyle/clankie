@@ -1,0 +1,29 @@
+{
+  "state": "abandoned",
+  "receiptId": "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+  "evidence": {
+    "receiptId": "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+    "receiptKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\",\"new\"]",
+    "fingerprint": "0f48da6277ef4186a6c2c781fc0abe097e242b6b0ad2927eff34f2f2f17f30cb",
+    "target": {
+      "fleet": "pc",
+      "host": "volpe@supedupsilly",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "hostIdentity": "33f0512ba73f037faf1b7683c5be31b50d4a224ed51d44158a0efc16930a9bda",
+    "census": {
+      "observedAt": 1791267170553,
+      "panes": 5,
+      "processes": 548,
+      "sessions": 4,
+      "sha256": "8dc9c37caff3925f605aaebb5ca60829dbae9456558ae0eb848d9e55411b7bfe"
+    },
+    "disposition": "abandoned",
+    "journal": "authenticated-recovery",
+    "allocation": {
+      "paneId": "pc/wB:p2",
+      "present": false
+    }
+  }
+}

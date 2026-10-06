@@ -101,6 +101,33 @@ it("rechecks allocation and link after the protocol observation", async () => {
   expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(false);
 });
 
+it("denies an unavailable native read without erasing the original launch, and checks it afresh", async () => {
+  const f = fixture();
+  f.registration.bindThread("thread", f.check);
+  f.check.mockRejectedValueOnce(new Error("Native inventory read timed out"));
+  expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(false);
+  expect(f.seats.server(f.launch.fleet, f.launch.pane)).toEqual(f.launch.server);
+  expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(true);
+  expect(f.check).toHaveBeenCalledTimes(2);
+  f.check.mockResolvedValueOnce(false);
+  expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(false);
+  expect(f.seats.server(f.launch.fleet, f.launch.pane)).toBeUndefined();
+  expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(false);
+  expect(f.check).toHaveBeenCalledTimes(3);
+});
+
+it("an unavailable read cannot restore a replaced registration or lost link", async () => {
+  const f = fixture();
+  let reject!: (error: Error) => void;
+  f.registration.bindThread("thread", () => new Promise((_resolve, denied) => (reject = denied)));
+  const pending = f.seats.allows(f.launch.fleet, f.view, f.launch.server);
+  f.stop();
+  reject(new Error("Link dropped during read"));
+  expect(await pending).toBe(false);
+  expect(f.seats.server(f.launch.fleet, f.launch.pane)).toBeUndefined();
+  expect(await f.seats.allows(f.launch.fleet, f.view, f.launch.server)).toBe(false);
+});
+
 it("reports the remote refresh boundary without borrowing config authority or consuming the original thread proof", async () => {
   const f = fixture();
   const request = { revision: "runtime:f6260751" };

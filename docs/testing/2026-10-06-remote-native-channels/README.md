@@ -1,15 +1,24 @@
 # Remote native channels and authenticated receipt recovery (VUH-1527)
 
-Current live result on runtime `2e1c08be`: explicit fresh admission allocated an
-owned PC Codex pane, but its project/native process binding refused before brief
-delivery. The failed fresh receipt is retained as abandoned after cleanup.
-VUH-1527 remains open; see the [current live blocker](#deployed-2e1c08be-pc-acceptance-process-proof-refusal).
+The [sender and completion repair candidate](sender-completion/CHECKS.md) fixes
+permanent original-registration loss after unavailable native inventory reads,
+requires the visible remote TUI to use its original backend, preserves the hired
+persona through fleet census, and automatically harvests accepted Codex follow-up
+turns once. Source checks and security review are recorded there; deployment and
+a fresh owned-pane PC acceptance remain required before closure.
+
+Current live result on runtime `4124acab`: the pane-address repair passed; a new
+owned Codex hire received its brief and native lead follow-up, completed both
+turns, and read Linear through Clankie's isolated bridge. Worker reports and peer
+discovery still refuse native sender binding. VUH-1527 remains open; see the
+[current acceptance and gaps](#deployed-4124acab-pc-acceptance-native-sender-refusal).
 
 The [pane-address repair](pane-address/CHECKS.md) now accepts the same-fleet bare
 or qualified address, keeps kernel/private-seat queries host-local, and resolves
 native membership against the original qualified hire allocation. Its
 [native security review](pane-address/SECURITY-REVIEW.md) is approved. Source
-verification passed; deployment and a new-intent PC acceptance remain required.
+verification passed. The deployed owned-pane acceptance below proves the repair
+and records the remaining native sender and conversation gaps.
 
 Audit base: `origin/main` `8fcf47a5`, 2026-10-06. Linear issue and its five newest
 comments were read, including the 2026-10-05 PC live acceptance and added peer
@@ -345,3 +354,52 @@ documentation links and `git diff --check` passed. The source candidate's prior
 focused checks and security review remain source evidence; they do not certify
 this live failure. No new heavy suite, full check, eval, account/config change,
 desktop action or unrelated pane mutation ran. Leave VUH-1527 In Progress.
+
+## Deployed 4124acab PC acceptance: native sender refusal
+
+Runtime `4124acabe87da6fb225ecfc53f77101a17ff5a9c`, 2026-10-06.
+The [new intent](live/4124acab/a-hire-intent.json) is
+`293c21f9-2602-4c20-a6b5-c9ad686a65b1`, after the unchanged authenticated
+[719dd6b1 settlement](live/4124acab/original-settlement-recheck.json). No earlier
+intent was resent. Owned lead: `conv-0da6937a-0e21-413e-b0c3-2261da81df5e`.
+Owned Codex pane: `pc/wD:p2`, terminal `term_65d28d44cce3f15`, native session
+`01a11098-decc-7603-9a31-998a3048e17f`.
+
+| Check                                  | Live result                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fresh hire and pane-address proof      | [Spawned, brief consumed](live/4124acab/a-hire-result.json); [original qualified process allocation confirmed](live/4124acab/a-confirmed-project-allocation.json); [doctor assigned/eligible](live/4124acab/doctor-owned-membership.json).                                                                                                                               |
+| Brief, worker tools and tracker access | Worker returned `TESS1527_412_a_BRIEF_OK`, exposed all five expected Clankie tools, and successfully read VUH-1527 through `clankie_call`. Independent Linear tools were absent from its native catalog. [Owned native UI](live/4124acab/owned-native-worker-ui.txt).                                                                                                    |
+| Launch isolation                       | [Backend and visible launcher/native TUI](live/4124acab/tracker-and-process-proof.json) carried `mcp_servers.linear.enabled=false`. Default PC Linear remained enabled; config source/hash remained unchanged.                                                                                                                                                           |
+| Native lead follow-up                  | Clankie called `message_seat` once for a separate new intent: delivered/consumed, message ID `01a110a0-e3d7-7fc3-92df-82e9693afc69`. Worker returned `TESS1527_412_a_NATIVE_FOLLOWUP_OK`. [Native lead events](live/4124acab/native-lead-events.json).                                                                                                                   |
+| Native completion                      | [Both native turns completed](live/4124acab/a-native-completion.json); follow-up receipt ID exactly matches the completed native turn. The original hire completion was harvested by its owning lead, which woke at 09:44:46Z after native completion at 09:44:43Z.                                                                                                      |
+| Worker reporting and peer exchange     | Both worker `message_clankie` calls rejected: “No durable native binding is available; nothing was sent.” Model `list_fleet_seats` returned `403 native_peer_sender_required`, without a receipt. No peer message or second test hire was attempted after that sender refusal.                                                                                           |
+| Public child-conversation follow-up    | [Refused `seat_offline` / unavailable](live/4124acab/a-followup-result.json) despite the live native pane. The hire result and [roster](live/4124acab/owned-roster.json) carry different persona IDs for the same seat/occupant; this is mapping evidence, not proof of the cause. The subsequent native lead request was a distinct message, never an uncertain resend. |
+
+Remaining gaps: native sender binding for worker reports/peer discovery and a
+real owned-PC peer exchange; public child-conversation mapping; follow-up
+completion wake (no later owning-lead wake appears through 09:59:50Z after its
+09:52:37Z native completion). The original completion harvest does not prove
+that later wake. Hand-started replies, hired-worker service-path SSH-loss outcomes,
+and Claude channel/Stop completion remain unproven; Claude still needs James's
+login and did not block this Codex attempt. No TUI reconnect failure or startup
+trust input was observed, so no new VUH-1738 observation is claimed.
+
+[Cleanup](live/4124acab/cleanup.json) closed only the native owned worker and its
+owned empty workspace root `wD:p1`. The captured backend/TUI/wrapper/root PIDs
+are gone, all five [baseline pane identities](live/4124acab/pc-baseline.json)
+are preserved, and the Codex config target/hash match. One SSH handshake reset
+occurred before the root-cleanup script could start; the checked cleanup then
+succeeded. The [successful hire receipt](live/4124acab/a-retained-native-receipt.json)
+remains retained as completed. No receipt, account or configuration was erased.
+
+Tess's own Mac [report bridge now stores messages](live/4124acab/tess-report-receipt.json).
+Her targeted refresh returned `skipped-busy`; that sender's working report does
+not establish the PC worker's binding. Native peer tools are now exposed to Tess,
+but Pell was absent from her admitted recipient list, so the handoff still goes
+through Clankie.
+
+This is an evidence-only checkpoint: 16 JSON artifacts, exact cleanup/identity,
+native turn/receipt and original-settlement assertions, scoped formatting,
+documentation links and diff checks. No new source suite, full `pnpm check`, eval,
+simulator, account/config change, desktop action or unrelated pane mutation ran.
+Leave VUH-1527 In Progress.

@@ -168,9 +168,18 @@ export class RemoteCodexSeats {
         occupantIdForHerdrSession({ source: "herdr:codex", kind: "id", value: entry.threadId });
     if (!valid() || !entry?.soleThread) return false;
     // Only overlapping reads share work. Completed answers are never cached.
-    const checking = (entry.checking ??= entry.soleThread().catch(() => false));
-    const sole = await checking;
-    if (entry.checking === checking) delete entry.checking;
+    const checking = (entry.checking ??= entry.soleThread());
+    let sole: boolean;
+    try {
+      sole = await checking;
+    } catch {
+      // An unavailable observation grants nothing, but is not evidence that
+      // this original controller loaded a different thread. Keep its launch
+      // registration; the next request must repeat every fresh proof.
+      return false;
+    } finally {
+      if (entry.checking === checking) delete entry.checking;
+    }
     if (!sole) {
       if (this.entries.get(key) === entry) this.entries.delete(key);
       return false;
