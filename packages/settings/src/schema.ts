@@ -620,6 +620,8 @@ export const LinearWakeSettingsSchema = z
         "issueNewComment",
         "issueCommentMention",
         "issueMention",
+        "issueAssignedToYou",
+        "issueCommentReaction",
         "projectUpdateNewComment",
         "projectUpdateMention",
         "initiativeUpdateNewComment",

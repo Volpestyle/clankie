@@ -83,9 +83,10 @@ provider revoked access. See [account setup](/cli/#account-setup).
 
 Connecting Linear and following its activity are separate. `/connect linear`
 does both; bare `/linear` opens **Follow Linear** with its **Wake rules** and
-destination chat (default `global-default`). By default only signed comments and
-mentions from the owner emails in those rules start a turn; other activity is
-visible without waking him. He can adjust the rules himself (`linear_wake`,
+destination chat (default `global-default`). Default rules wake for signed
+comments and mentions from the owner emails in those rules, assignments or
+delegations to Clankie, and reactions on his comments. Other activity is visible
+without waking him. He can adjust the rules himself (`linear_wake`,
 `clankie linear wake set`). The [Linear reference](/cli/#linear-status-linear-follow-on-off)
 covers webhooks, status, and recovery.
 
