@@ -31,7 +31,7 @@ following `origin/main`; this decision changes only release installs.
    installed provider cannot serve, so an update never silently drops managed
    model, quota or credit policy.
 4. **One fleet-wide brake.** A managed body asks the fleet for its approved
-   release (`GET /fleet/v1/body/release`, signed like other body routes) and
+   release (a signed `POST /fleet/v1/body/release`, like every body route) and
    installs nothing newer. `null` holds every body in place; an unreachable or
    refused answer installs nothing. A self-run body (no hosted bootstrap) follows
    the latest official release.

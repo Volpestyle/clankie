@@ -953,19 +953,19 @@ minecraftCapture = new MinecraftCapture({
 // follows official releases. A release run from elsewhere, like an image's seed
 // tree, is replaced by its deployment instead.
 const runtimeUpdater =
-  hostedBody !== undefined
-    ? undefined
-    : existsSync(join(repoRoot, ".git"))
-      ? createRuntimeUpdater({ repoRoot })
-      : existsSync(join(repoRoot, "release.json")) && basename(dirname(realpathSync(repoRoot))) === "releases"
-        ? releaseUpdaterOrNone()
-        : undefined;
+  hostedBody === undefined && existsSync(join(repoRoot, ".git"))
+    ? createRuntimeUpdater({ repoRoot })
+    : existsSync(join(repoRoot, "release.json")) && basename(dirname(realpathSync(repoRoot))) === "releases"
+      ? releaseUpdaterOrNone()
+      : undefined;
 /** A release that cannot update (say, a local image built without a revision) still runs. */
 function releaseUpdaterOrNone() {
   try {
     return createReleaseUpdater({
       releaseRoot: repoRoot,
       ...(runtimeProvider.apis === undefined ? {} : { providerApis: runtimeProvider.apis }),
+      // A managed body installs only what its fleet approves (ADR 0237).
+      ...(hostedBody === undefined ? {} : { approvedRelease: () => hostedBody.approvedRelease() }),
     });
   } catch (error) {
     logger.warn({ event: "runtime.update.unavailable", error }, "Release updates are unavailable");
