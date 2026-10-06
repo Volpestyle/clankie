@@ -1,9 +1,14 @@
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import {
   CAPTAIN_SILENT_REPLY_SENTINEL,
+  CaptainTurnMediaSchema,
+  deliveredFileRefConversationKey,
+  isDeliveredFileRef,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
+  type CaptainTurnMedia,
 } from "@clankie/protocol";
+import { conversationStorageKey } from "../delivered-files.ts";
 import { resolveDiscordSettings, type ClankieSettings } from "@clankie/settings";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
@@ -856,14 +861,45 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     });
     await toolProgress?.complete();
     tryAppendTurnSettled(ctx.turnSettled, metrics, "completed", new Date(), tokensEnd);
+    const attached = roomTurnMedia(lane.capture.media, lane.capture.room);
     return {
       state: "settled",
       captainSessionId: normalized.sessionKey,
       turnId,
-      response: message,
-      ...(lane.capture.media === undefined ? {} : { media: lane.capture.media }),
+      response: attached.note === undefined ? message : withMediaNote(message, attached.note),
+      ...(attached.media === undefined ? {} : { media: attached.media }),
     };
   }
 
   return { validateConversationOwner, wakeConversation, runDiscordWatchTurn, dispatchDiscordTurn };
+}
+
+/** Said in the room when a file he made this turn cannot ride the reply. */
+export const ROOM_MEDIA_DROPPED_NOTE = "(I couldn't attach the file I made for this one.)";
+
+/**
+ * Media never costs him the reply. A ref the schema refuses, or a delivered
+ * file minted for a different room, is dropped and the words go out with a
+ * short note instead of the whole turn failing (ADR 0088, 2026-10-06).
+ */
+export function roomTurnMedia(
+  media: CaptainTurnMedia | undefined,
+  room: string | undefined,
+): { readonly media?: CaptainTurnMedia; readonly note?: string } {
+  if (media === undefined) return {};
+  const parsed = CaptainTurnMediaSchema.safeParse(media);
+  if (!parsed.success) return { note: ROOM_MEDIA_DROPPED_NOTE };
+  if (
+    isDeliveredFileRef(parsed.data.artifactRef) &&
+    (room === undefined ||
+      deliveredFileRefConversationKey(parsed.data.artifactRef) !== conversationStorageKey(room))
+  )
+    return { note: ROOM_MEDIA_DROPPED_NOTE };
+  return { media: parsed.data };
+}
+
+/** Appends the note within the settled response bound. */
+export function withMediaNote(message: string, note: string): string {
+  const suffix = `\n\n${note}`;
+  return `${message.slice(0, 16_384 - suffix.length)}${suffix}`;
 }

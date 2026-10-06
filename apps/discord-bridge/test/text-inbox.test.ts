@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DISCORD_TURN_FAILED_NOTICE,
   DiscordTextIngress,
   type DiscordTextIngressConfig,
   type DiscordTextIngressPort,
@@ -136,11 +137,11 @@ it("delivers a saved answer after a restart without running its tools again", as
   }
 });
 
-it("retries a failed model turn in the same process using the original accepted request", async () => {
+it("retries an unreachable service in the same process using the original accepted request", async () => {
   const inbox = new DiscordTextInbox(":memory:", "0");
   const submit = vi
     .fn<DiscordTextIngressPort["submitDiscordCaptainChannelTurn"]>()
-    .mockResolvedValueOnce({ state: "failed", code: "offline" })
+    .mockRejectedValueOnce(new Error("Clankie API 503: offline"))
     .mockResolvedValue({ state: "silent", captainSessionId: "session", turnId: "turn" });
   const ingress = new DiscordTextIngress(
     inbox.port({
@@ -164,6 +165,73 @@ it("retries a failed model turn in the same process using the original accepted 
     ).toBe("declined");
     expect(submit).toHaveBeenCalledTimes(2);
     expect(submit.mock.calls[1]?.[0]).toEqual(submit.mock.calls[0]?.[0]);
+  } finally {
+    inbox.close();
+  }
+});
+
+it("stops on a settled failure, tells the asker once, and never resubmits", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "clankie-inbox-failed-"));
+  const path = join(directory, "inbox.sqlite");
+  const submit = vi.fn<DiscordTextIngressPort["submitDiscordCaptainChannelTurn"]>(async () => ({
+    state: "failed",
+    deliveryStage: "uncertain",
+    turnId: "handoff-1",
+    code: "captain_session_failed",
+  }));
+  const writes: string[] = [];
+  const delegate: DiscordTextIngressPort = {
+    getHealth: async () => ({ profileHash: "profile" }),
+    submitDiscordCaptainChannelTurn: submit,
+    executeDiscordPresenceAction: async (write) => {
+      if (write.payload.kind !== "typing_start") writes.push(write.content ?? "");
+      return {
+        id: write.idempotencyKey,
+        action: write.action,
+        transportKind: "bot",
+        channelId: "room",
+        ...(write.payload.kind === "reply" ? { messageId: "notice-1" } : {}),
+      };
+    },
+  };
+  let inbox = new DiscordTextInbox(path, "0");
+  try {
+    let ingress = new DiscordTextIngress(inbox.port(delegate), config);
+    expect((await ingress.handle(message)).state).toBe("failed");
+    expect(inbox.pending()).toEqual([]);
+    expect(writes).toEqual([DISCORD_TURN_FAILED_NOTICE]);
+    // Recovery after a restart neither resubmits nor repeats the notice.
+    inbox.close();
+    inbox = new DiscordTextInbox(path, "0");
+    ingress = new DiscordTextIngress(inbox.port(delegate), config);
+    await inbox.handle("100", async () => {
+      await ingress.handle(message);
+    });
+    expect(inbox.pending()).toEqual([]);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(writes).toEqual([DISCORD_TURN_FAILED_NOTICE]);
+  } finally {
+    inbox.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("keeps chatter quiet when its settled turn fails", async () => {
+  const inbox = new DiscordTextInbox(":memory:", "0");
+  const execute = vi.fn<DiscordTextIngressPort["executeDiscordPresenceAction"]>();
+  const ingress = new DiscordTextIngress(
+    inbox.port({
+      getHealth: async () => ({ profileHash: "profile" }),
+      submitDiscordCaptainChannelTurn: async () => ({ state: "failed", code: "captain_turn_failed" }),
+      executeDiscordPresenceAction: execute,
+    }),
+    { ...config, guildIds: new Set(["guild"]) },
+  );
+  try {
+    const outcome = await ingress.handle({ ...message, guildId: "guild", mentionsBot: false });
+    expect(outcome.state).toBe("failed");
+    expect(execute.mock.calls.filter(([write]) => write.payload.kind !== "typing_start")).toEqual([]);
+    expect(inbox.pending()).toEqual([]);
   } finally {
     inbox.close();
   }
@@ -289,7 +357,8 @@ it.each([true, false])(
       let ingress = new DiscordTextIngress(inbox.port(delegate), config);
       await ingress.handle(message);
       await ingress.handle({ ...message, id: "101", body: "and Bartlett?" });
-      expect(inbox.pending().map((row) => row.id)).toEqual(["100", "101"]);
+      // A settled failure is final for its own message, never for one folded into it.
+      expect(inbox.pending().map((row) => row.id)).toEqual(savedAnswer ? ["100", "101"] : ["101"]);
       inbox.close();
       inbox = new DiscordTextInbox(path, "0");
       ingress = new DiscordTextIngress(inbox.port(delegate), config);

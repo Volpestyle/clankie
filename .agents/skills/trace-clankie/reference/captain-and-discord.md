@@ -16,7 +16,11 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   messages-since-reply counter; history catch-up uses live admission, including
   unaddressed follow-ups there. On upgrade, one prior history page can establish
   participation, but an already-advanced cursor does not rewind. A saved result
-  can await posting after the model finished.
+  can await posting after the model finished. A returned `failed` result is the
+  service's settled receipt: the inbox stores it and stops (directly asked
+  messages get one failure reply; the owner gets one runtime alert). Only
+  transport errors stay pending. For why a room turn failed, read
+  `roomHandoff.result` in `captain/conversations/handoff-*/meta.json`.
 
 - **A reconnect is not proof of Discord-side failure.** Match `gateway_reconnecting`
   and READY/RESUMED timestamps with macOS `pmset -g log` sleep/DarkWake entries.

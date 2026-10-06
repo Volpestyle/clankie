@@ -261,7 +261,11 @@ export class DiscordTextInbox {
         const saved =
           row.result === null ? undefined : CaptainChannelTurnResultSchema.parse(JSON.parse(row.result));
         if (saved !== undefined && saved.state !== "absorbed") return saved;
-        if (saved?.state === "absorbed" && saved.replyDeliveryId !== undefined) {
+        if (
+          saved?.state === "absorbed" &&
+          saved.replyDeliveryId !== undefined &&
+          !this.ownerFailed(saved.replyDeliveryId)
+        ) {
           const owner = this.row(saved.replyDeliveryId);
           if (owner?.done === 1) {
             this.finish(incoming.deliveryId);
@@ -282,13 +286,18 @@ export class DiscordTextInbox {
           .prepare("UPDATE deliveries SET request = ? WHERE id = ?")
           .run(JSON.stringify(request), incoming.deliveryId);
         const result = await delegate.submitDiscordCaptainChannelTurn(request);
-        if (result.state !== "failed")
-          this.db
-            .prepare("UPDATE deliveries SET result = ? WHERE id = ?")
-            .run(JSON.stringify(result), incoming.deliveryId);
+        this.db
+          .prepare("UPDATE deliveries SET result = ? WHERE id = ?")
+          .run(JSON.stringify(result), incoming.deliveryId);
+        // A returned failure is the service's settled receipt, so asking again
+        // only replays it. Transport errors throw instead and stay pending.
+        // Messages folded into the failed run are still owed their own answer.
+        if (result.state === "failed")
+          this.db.prepare("UPDATE deliveries SET done = 1 WHERE id = ?").run(incoming.deliveryId);
         if (
           result.state === "absorbed" &&
           result.replyDeliveryId !== undefined &&
+          !this.ownerFailed(result.replyDeliveryId) &&
           this.row(result.replyDeliveryId)?.done === 1
         )
           this.finish(incoming.deliveryId);
@@ -314,6 +323,12 @@ export class DiscordTextInbox {
 
   close(): void {
     this.db.close();
+  }
+
+  /** The run a message was folded into settled as failed, so it answered nothing. */
+  private ownerFailed(id: string): boolean {
+    const result = this.row(id)?.result;
+    return result != null && CaptainChannelTurnResultSchema.parse(JSON.parse(result)).state === "failed";
   }
 
   private row(id: string): Delivery | undefined {
