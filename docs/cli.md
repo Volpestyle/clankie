@@ -2871,7 +2871,7 @@ path on the Mac. Files share the conversation's retention and are removed when
 that conversation resets, closes, or ages out. See
 [ADR 0174](adr/0174-finished-files-belong-to-conversations.md).
 
-### `prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model] [--conversation ID] [--harness claude]`
+### `prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model,conversation] [--conversation ID] [--harness claude]`
 
 The system prompt that lane's session starts from, printed verbatim as plain
 text. The intended consumer is a seat launcher in another harness, which reads
@@ -2883,14 +2883,15 @@ comes from the credential broker, so this reads the operator lane.
 
 Sections default to the five a session is built with, joined by one blank line:
 
-| Section    | What it is                                                                                                                                                                                                 |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity` | `instructions.md` — who he is, his trust boundaries and where things live                                                                                                                                  |
-| `persona`  | The owner-authored character configuration                                                                                                                                                                 |
-| `reach`    | The machine-access or this-room paragraph for that lane; with machine access, the ready computer-use harnesses (`browser harnesses`) unless delegation is off; in Discord lanes, how a reply carries media |
-| `fleet`    | Current fleet budget, effective project closure and machine setup responsibility, and optional routing notes; machine-holding lanes                                                                        |
-| `address`  | His own mailbox, when one is connected                                                                                                                                                                     |
-| `model`    | The card naming the model the service lanes run on (ask for it by name)                                                                                                                                    |
+| Section        | What it is                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`     | `instructions.md` — who he is, his trust boundaries and where things live                                                                                                                                                                                                                                                                                                                                                           |
+| `persona`      | The owner-authored character configuration                                                                                                                                                                                                                                                                                                                                                                                          |
+| `reach`        | The machine-access or this-room paragraph for that lane; with machine access, the ready computer-use harnesses (`browser harnesses`) unless delegation is off; in Discord lanes, how a reply carries media                                                                                                                                                                                                                          |
+| `fleet`        | Current fleet budget, effective project closure and machine setup responsibility, and optional routing notes; machine-holding lanes                                                                                                                                                                                                                                                                                                 |
+| `address`      | His own mailbox, when one is connected                                                                                                                                                                                                                                                                                                                                                                                              |
+| `model`        | The card naming the model the service lanes run on (ask for it by name)                                                                                                                                                                                                                                                                                                                                                             |
+| `conversation` | Operator lane only, by name: a bounded projection (about 24k characters, newest first, printed oldest first) of the selected conversation's log — messages and finished tool actions from every harness and the service lane. Reading it records the projected cursor, so a later reconnect handoff starts after it ([ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md#the-log-is-the-conversation-2026-10-06)) |
 
 A seat that carries the identity some other way asks for the rest:
 `clankie prompt --sections persona,reach,address`.
@@ -3349,8 +3350,17 @@ harness MCP seats refuse `create_goal` with `native_goal_unsupported`; owner
 activation or resume also refuses while a native head owns the conversation.
 Queued or restored service goals pause on finding a native head, so they cannot
 start another Pi lead alongside the seat. Internal self-wakes, watch notifications
-and worker messages also keep the native receiver while its polling channel is
-offline; they do not start a Pi lead. Failed self-wakes remain scheduled and
+and worker messages run on the service lane whenever no seat is live, whichever
+harness last held it; only signed Linear activity still waits for the attached
+receiver. The service lane is a bounded view of the conversation log: after a
+harness has driven the chat it starts a fresh Pi session seeded from the recent
+log (the older session file stays on disk). When the seat polls again, it first
+receives one `service-handoff` turn with the service's actual turns since its
+last synced turn — never the original inputs again — and a fresh harness session
+gets the same projection at SessionStart (`clankie prompt --sections conversation`).
+An uncertain handoff is never resent; the chat records that it may not have
+arrived. See [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md#the-log-is-the-conversation-2026-10-06).
+Failed self-wakes remain scheduled and
 retry after 5 seconds, doubling to a maximum interval of 5 minutes. Each chat
 has its own retry delay, and a replacement wake starts with a fresh delay.
 `/autonomy clear` cancels the selected chat's scheduled wake; it does not cancel
