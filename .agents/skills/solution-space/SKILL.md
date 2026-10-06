@@ -10,7 +10,7 @@ mechanism and then optimizing inside it, having never checked the platform alrea
 models the thing you're about to hand-build.
 
 That failure ships as confident, working, tested code. Implementation will not catch it —
-the design *works*. Only reading the platform's own model catches it.
+the design _works_. Only reading the platform's own model catches it.
 
 ## Triggers
 
@@ -34,9 +34,9 @@ Minutes, not hours. Stop when one of these lands:
 1. **Enumerate the platform's primitives — all of them, not the one you know.** States,
    statuses, lifecycle hooks, message actions, modes. If a system has five states and your
    design engages two, read the other three before committing.
-2. **Read the docs for the *adjacent* feature.** The answer is routinely in a section about
+2. **Read the docs for the _adjacent_ feature.** The answer is routinely in a section about
    a different use case that happens to have the same shape as yours. Search the platform's
-   docs for the *property* you want ("self-service recoverable", "idempotent", "replayable"),
+   docs for the _property_ you want ("self-service recoverable", "idempotent", "replayable"),
    not the feature name you started with.
 3. **Grep your own repo before writing the method.** The helper may already exist. Cost
    estimates made without opening the file are guesses.

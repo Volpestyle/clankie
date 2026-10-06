@@ -215,14 +215,17 @@ paths, function names, code) and no time or point estimates.
 <summary of what needs to change and why — 1-2 sentences when that's enough>
 
 ## Background (when the why can't be re-derived)
+
 <the constraint, the failure this came from, the decision it implements, the
 approach already ruled out — what a reader would otherwise reconstruct from a
 thread>
 
 ## Acceptance Criteria
+
 - [ ] <verifiable check>
 
 ## Context (if applicable)
+
 <links, screenshots, references that help someone start cold>
 ```
 
@@ -230,7 +233,7 @@ thread>
 line is right for self-evident work; a ticket carrying a decision, a constraint,
 a prior failed approach, or negative space ("not X, because Y") earns the
 paragraphs that say so — that's the part nobody can reconstruct later. What
-stays cut at any length is the padding *Cut before posting* names: narration,
+stays cut at any length is the padding _Cut before posting_ names: narration,
 restatement, options surveys. Past a couple of screens the material is a design
 doc — write it there and keep the issue pointing at it.
 
@@ -281,7 +284,7 @@ place as decisions land.
   that forecast a future scenario.
 - **State the negative-space decisions**, with reasons — "No per-keyword
   PUT/PATCH — keywords have no mutable attributes", "No `account_id` — the
-  authorizer middleware owns account scoping". What you decided *not* to build
+  authorizer middleware owns account scoping". What you decided _not_ to build
   is the part nobody can re-derive from the schema.
 - **Name the flags it depends on.** Which existing flags gate what this now
   needs — the one that gets missed, because it's about code you aren't writing

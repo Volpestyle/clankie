@@ -27,7 +27,7 @@ the authorization — commit without checking in again.
      takes precedence when a file mixes owners; never commit their edits merely
      because they share a file. Whole owned files usually need no hunk splitting.
    - **Never `git add -A`.** Stage files by name. A worktree can hold an untracked
-     `node_modules` *symlink* that the repo's `node_modules/` ignore pattern misses — that
+     `node_modules` _symlink_ that the repo's `node_modules/` ignore pattern misses — that
      pattern only matches directories.
    - Default to fewer commits. Split only when it helps someone reading the history later.
 3. **Write the message.** Match the repo's existing style (`git log --oneline -10` if unsure).

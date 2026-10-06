@@ -28,7 +28,7 @@ An empty roster does not make existing edits yours or prove their owner ended.
 In Clankie's fleet, coordinate contested paths through `message_peer` when
 available, or `message_clankie` to the lead. Do not type into another pane.
 
-Two agents in different *subdirectories* of one repo still share one index.
+Two agents in different _subdirectories_ of one repo still share one index.
 Separate worktrees do not — they have their own index and HEAD, which is why
 a brief that hands you your own worktree is handing you the whole problem
 already solved.
@@ -45,7 +45,7 @@ read and your write is exactly where the other agent commits.
 
 **`git stash` belongs on that list, and it is the one you will reach for.**
 It reads as saving rather than rewriting, which is exactly why it slips past
-the instinct that stops the others. Bare `git stash push` takes *every*
+the instinct that stops the others. Bare `git stash push` takes _every_
 modified tracked file — every sibling's in-flight edit — and reverts the
 working tree out from under agents that are still running in it. To park your
 own copy of a file for a red/green comparison, use `cp`.
@@ -88,7 +88,7 @@ git status --porcelain > /tmp/before.txt
 ```
 
 Verifying what you staged is only half the job; the other half is being able to
-prove what you *did not* disturb, which you cannot reconstruct afterwards from
+prove what you _did not_ disturb, which you cannot reconstruct afterwards from
 memory. Diff against it before you report.
 
 ## Stage by path, never by wildcard
@@ -106,7 +106,7 @@ signal your lane is too wide, not a reason to reach for a wildcard.
 ## Re-check the index in the same breath as the commit
 
 The index can change between your `git add` and your `git commit` — a sibling
-staging its own work lands in *your* next commit. So verify immediately
+staging its own work lands in _your_ next commit. So verify immediately
 before committing, not at the top of the task:
 
 ```bash

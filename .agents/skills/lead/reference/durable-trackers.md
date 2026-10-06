@@ -31,12 +31,12 @@ where the repository keeps them instead of copying entire documents into issues.
 Use the project's existing statuses and transition authority. These distinctions
 must stay visible, but do not require four new workflow states:
 
-| Fact | Evidence needed |
-| --- | --- |
-| Worker reports complete | Produced result and checks against the agreed acceptance |
-| Accepted | Required review or acceptance decision, with any explicit waiver |
-| Landed | Result is at its agreed integration destination |
-| Delivered | Agreed consumer or integrated behavior works at the requested destination |
+| Fact                    | Evidence needed                                                           |
+| ----------------------- | ------------------------------------------------------------------------- |
+| Worker reports complete | Produced result and checks against the agreed acceptance                  |
+| Accepted                | Required review or acceptance decision, with any explicit waiver          |
+| Landed                  | Result is at its agreed integration destination                           |
+| Delivered               | Agreed consumer or integrated behavior works at the requested destination |
 
 An offline component can be accepted without proving the full product. Where
 several accepted components must work together, give integration its own owner
@@ -77,16 +77,16 @@ Use the direct workspace Linear MCP and load `linear-issues` before writing;
 it owns read-before-write, media publication and result-update mechanics.
 Inspect the existing project, issues and workflow before creating anything.
 
-| Work concept | Linear representation |
-| --- | --- |
-| Bounded outcome spanning several deliverables | Project; smaller work can remain one issue with sub-issues |
-| Independently accepted deliverable | Issue with acceptance and an accountable owner |
-| Separately owned part of that deliverable | Sub-issue when it warrants independent tracking |
-| Required predecessor | Blocking relation; related work alone is not a blocker |
-| Meaningful project checkpoint | Milestone when useful; never one per pane or worker |
-| Integrated delivery | Existing parent acceptance or an explicitly owned integration issue |
-| Accepted result or actionable failure | Evidence on its issue, with current stage and remaining gap |
-| Architecture or interface decision | Link to the canonical repo/project document |
+| Work concept                                  | Linear representation                                               |
+| --------------------------------------------- | ------------------------------------------------------------------- |
+| Bounded outcome spanning several deliverables | Project; smaller work can remain one issue with sub-issues          |
+| Independently accepted deliverable            | Issue with acceptance and an accountable owner                      |
+| Separately owned part of that deliverable     | Sub-issue when it warrants independent tracking                     |
+| Required predecessor                          | Blocking relation; related work alone is not a blocker              |
+| Meaningful project checkpoint                 | Milestone when useful; never one per pane or worker                 |
+| Integrated delivery                           | Existing parent acceptance or an explicitly owned integration issue |
+| Accepted result or actionable failure         | Evidence on its issue, with current stage and remaining gap         |
+| Architecture or interface decision            | Link to the canonical repo/project document                         |
 
 Keep current scope, acceptance and the latest-result link readable in the issue
 without reconstructing its comment history. Workers publish evidence once;
