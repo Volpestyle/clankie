@@ -127,7 +127,6 @@ export function createRuntimeUpdateRoutes(options: {
     const authority = await options.authorize(context.req.raw);
     if (!authority) return context.json({ error: "operator_required" }, 403);
     if (!options.updater) return context.json({ error: "runtime_updates_unavailable" }, 503);
-    const result = options.updater.status();
     try {
       await authority.guard();
     } catch {
@@ -135,7 +134,21 @@ export function createRuntimeUpdateRoutes(options: {
     }
     if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
     context.header("Cache-Control", "no-store");
-    return context.json({ ...result, ...(options.holds ? { holds: await options.holds.list() } : {}) });
+    try {
+      const result = options.updater.status();
+      const holds = options.holds ? await options.holds.list() : undefined;
+      await authority.guard();
+      if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+      return context.json({ ...result, ...(holds === undefined ? {} : { holds }) });
+    } catch {
+      return context.json(
+        {
+          error: authority.current() ? "update_status_unavailable" : "operator_revoked",
+          needsReconciliation: true,
+        },
+        authority.current() ? 503 : 403,
+      );
+    }
   });
   app.post("/v1/runtime-update", async (context) => {
     const authority = await options.authorize(context.req.raw);

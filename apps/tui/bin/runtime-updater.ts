@@ -12,10 +12,17 @@ import {
   realpathSync,
   rmSync,
   chmodSync,
+  writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { assertPinnedRuntime, installCommand, pinnedCommit, type InstallCommand } from "./pinned-runtime.ts";
+import {
+  assertPinnedRuntime,
+  installCommand,
+  pinnedCommit,
+  updateCommit,
+  type InstallCommand,
+} from "./pinned-runtime.ts";
 import { operationId, object, privateDirectory, readPrivateJson, writePrivateJson } from "./update-files.ts";
 import {
   readRuntimeUpdate,
@@ -23,17 +30,21 @@ import {
   type RuntimeBootIdentity,
   type RuntimeUpdatePlan,
   type RuntimeUpdateResult,
+  type RuntimeUpdateInitiator,
+  parseUpdateInitiator,
 } from "./runtime-update.ts";
 
 export interface UpdateAuthority {
   guard(): Promise<void>;
   current(): boolean;
+  readonly initiator?: RuntimeUpdateInitiator;
 }
 interface RuntimeUpdateStatus {
   readonly runtime: RuntimeBootIdentity;
   readonly latest?: RuntimeUpdateResult;
   readonly pending?: string;
   readonly needsReconciliation?: boolean;
+  readonly error?: "update_record_unreadable";
 }
 export interface RuntimeUpdater {
   status(): RuntimeUpdateStatus;
@@ -138,19 +149,24 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
     result.phase === "refused" ||
     (result.phase === "failed" && result.reason === "pre-cutover-failed");
   const status = (): RuntimeUpdateStatus => {
-    const result = latest();
-    const id = activeId();
-    return {
-      runtime: boot,
-      ...(result === undefined ? {} : { latest: result }),
-      ...(id === undefined ? {} : { pending: id }),
-      ...(id !== undefined &&
-      result?.id === id &&
-      ["stop-unconfirmed", "failed"].includes(result.phase) &&
-      !safeTerminal(result)
-        ? { needsReconciliation: true }
-        : {}),
-    };
+    try {
+      const result = latest();
+      const id = activeId();
+      return {
+        runtime: boot,
+        ...(result === undefined ? {} : { latest: result }),
+        ...(id === undefined ? {} : { pending: id }),
+        ...(id !== undefined &&
+        result?.id === id &&
+        ["stop-unconfirmed", "failed"].includes(result.phase) &&
+        !safeTerminal(result)
+          ? { needsReconciliation: true }
+          : {}),
+      };
+    } catch {
+      // Reading status never repairs/deletes a journal or retires its uncertain lock.
+      return { runtime: boot, needsReconciliation: true, error: "update_record_unreadable" };
+    }
   };
   return {
     status,
@@ -176,7 +192,12 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       const oldCommit = assertPinnedRuntime(checkout, runtimePath, run);
       if (boot.root !== realpathSync(runtimePath) || boot.commit !== oldCommit)
         throw Error("Running service is not the exact pinned runtime");
-      const newCommit = pinnedCommit(checkout, ref, run);
+      // Network fetch must not block the live service's event loop.
+      const target = await updateCommit(checkout, ref, oldCommit, options.run);
+      if (assertPinnedRuntime(checkout, runtimePath, run) !== oldCommit)
+        throw Error("Pinned runtime changed during fetch");
+      const { newCommit } = target;
+      const initiator = parseUpdateInitiator(authority.initiator ?? { kind: "operator" });
       // The running pin is moved during cutover; all git operations need a stable repository cwd.
       const repository = dirname(
         realpathSync(resolve(checkout, run("git", ["rev-parse", "--git-common-dir"], checkout))),
@@ -197,6 +218,9 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
           directory,
           oldCommit,
           newCommit,
+          resolvedRef: target.resolvedRef,
+          ...(target.warning === undefined ? {} : { warning: target.warning }),
+          initiator,
           oldInstanceId: boot.instanceId,
         };
         writePrivateJson(join(directory, "plan.json"), plan);
@@ -210,6 +234,9 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
           ref,
           oldCommit,
           newCommit,
+          resolvedRef: target.resolvedRef,
+          ...(target.warning === undefined ? {} : { warning: target.warning }),
+          initiator,
           phase: "scheduled",
           updatedAt: new Date().toISOString(),
         };
@@ -218,6 +245,11 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
         accepted = true;
         const log = openSync(join(directory, "helper.log"), "ax", 0o600);
         try {
+          writeSync(
+            log,
+            JSON.stringify({ event: "runtime-update-accepted", id, ref, oldCommit, ...target, initiator }) +
+              "\n",
+          );
           const helperEnv: NodeJS.ProcessEnv = { ...env, pnpm_config_verify_deps_before_run: "false" };
           for (const name of [
             "PI_SESSION_FILE",

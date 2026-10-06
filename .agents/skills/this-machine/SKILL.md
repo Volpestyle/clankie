@@ -117,15 +117,18 @@ history; loading a page preserves the visible text and does not pause live event
 ## Launcher control
 
 Landed code is not live until the pinned runtime is updated. From an admitted
-machine turn, use `update_runtime` or `clankie update [--ref REF]` to stage a local
-Git ref, install and detach a guarded restart. Default is local landed `main`.
-`clankie update --ref origin/main` uses the locally fetched remote ref; fetch in
-the reported source repository first when current remote code is requested.
-Update never fetches, merges or publishes your working branch.
+machine turn, use `update_runtime` or `clankie update [--ref REF]` to fetch the
+requested branch from origin, install its exact commit and detach a guarded
+restart. Default is fetched `origin/main`, never the local `main` branch. A failed
+fetch refuses the operation. Full SHAs, `HEAD` and `refs/tags/TAG` are explicit
+local targets. Review `resolvedRef`, `newCommit` and any older/diverged warning;
+update does not merge or publish your working branch. The external activity
+tunnel survives cutover under its current owner.
 
 `accepted: true` means pending, not completed. Finish the turn, then read
 `runtime_update_status` or `clankie update status` on your next turn and report
-the old/new commit and actual health or rollback. The TUI has `/update` and
+the old/new commit, initiator and actual health or rollback. Unreadable saved
+records return a JSON reconciliation error without changing the journal or lock. The TUI has `/update` and
 `/update status`. Never repeat an uncertain update; inspect its existing operation.
 A dirty pin or failed install leaves the old runtime untouched.
 

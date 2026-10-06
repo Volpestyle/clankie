@@ -282,15 +282,21 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 ### `update [--ref REF]` / `update status`
 
-`clankie update` stages the local landed `main` (or an explicit local Git ref),
-installs dependencies in an independent detached worktree, and schedules a fixed
-helper in a separate process group. There is no implicit fetch. The current
+`clankie update` fetches `origin/main` and stages its exact commit. Named branches
+(including `origin/BRANCH` and `refs/heads/BRANCH`) fetch that branch from origin;
+failed fetches refuse the update without using a cached or local tip. Use a full
+commit SHA, `HEAD`, or `refs/tags/TAG` for an explicit local target. The result
+records `resolvedRef` and `newCommit`, with `older-than-current-pin` or
+`diverged-from-current-pin` warnings when applicable. It installs dependencies
+in an independent detached worktree and schedules a fixed helper in a separate
+process group. The current
 service must be running the exact pinned checkout. Dirty tracked or untracked
 files in that checkout refuse the operation before any service stop.
 
 The helper installs before stopping anything, rechecks the pin, stops through
 the existing service supervisor, retains the previous worktree, activates the new
-pin and restarts the configured services. Failed new health checks trigger a
+pin and restarts the pin-dependent services. The external activity tunnel stays
+running under its current owner; an unowned tunnel cannot block the update. Failed new health checks trigger a
 confirmed-stop rollback. Unknown shutdown never authorizes a worktree move.
 Generated pnpm wrappers and known workspace metadata are relocated before cutover;
 committed source, lockfiles and global package-store files are not rewritten.
@@ -304,7 +310,12 @@ per-profile receipt in `harness-refresh.json` beside the transaction record.
 
 The CLI and TUI `/update` return an accepted/pending operation, not a success
 claim. `clankie update status` and `/update status` read the durable old/new commit,
-phase, per-service receipts and exact service boot identity. Results live in
+phase, per-service receipts and exact service boot identity. `initiator` records
+the authenticated operator or host-admitted conversation. CLI environment seat
+session/conversation claims are explicitly marked as claims, not authority.
+Newer result evidence is tolerated by readers; damaged known fields produce a
+JSON reconciliation error and leave the operation and lock untouched. CLI status
+also reports unavailable or non-JSON server responses as JSON. Results live in
 private `~/.clankie/updates/<operation-id>/` directories and survive the old
 service exiting. A nonterminal operation or uncertain shutdown blocks another
 schedule; inspect/reconcile that operation rather than retrying or deleting its
