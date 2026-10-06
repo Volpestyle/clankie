@@ -1,19 +1,30 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import { Readable } from "node:stream";
+import { text } from "node:stream/consumers";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { createRemoteCodexSeatAdapter } from "../src/captain/remote-codex-app-server.ts";
 import { HerdrWatchStore, createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import {
   createRemoteHireReceipts,
   remoteHireReceiptCommand,
   type RemoteHireClaim,
 } from "../src/remote-hire-receipts.ts";
-import { HireNoLaunchEvidenceSchema, OperatorConversationServiceRequestSchema } from "@clankie/protocol";
+import {
+  HireNoLaunchEvidenceSchema,
+  OperatorConversationServiceRequestSchema,
+  OperatorConversationServiceResultSchema,
+} from "@clankie/protocol";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
+import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
+import { runHireReceiptCommand } from "../../tui/src/command/hire-receipt.ts";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -291,11 +302,12 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
         fingerprint: original.fingerprint,
         remoteAdmission: { target: original.target, nonce: original.nonce },
       });
+      let fixtureHost = "configured-host";
       const native = createRemoteHireReceipts({
         fleet: async () => ({
           id: "pc",
           session: "default",
-          ssh: { host: "configured-host", shell: "posix" },
+          ssh: { host: fixtureHost, shell: "posix" },
         }),
         shell: () => async (command) =>
           (
@@ -329,6 +341,227 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
       } finally {
         store.close();
       }
+      // Fresh work uses a separate durable identity and the real host journal,
+      // never releasing/replaying its settled predecessor. The controller's
+      // policy denial leaves a genuinely uncertain fresh admission behind.
+      const freshOriginal = { ...claim(), receiptKey: JSON.stringify(["pc", "codex", home, "new"]) };
+      await host(home, freshOriginal, "reserve", env);
+      const freshProof = HireNoLaunchEvidenceSchema.parse(await host(home, freshOriginal, "seal", env));
+      const freshPath = join(home, "fresh-watches.json");
+      const freshFence = new DeliveryFence(`${freshPath}.hire-receipts.json`);
+      freshFence.begin(freshOriginal.receiptKey, {
+        messageId: freshOriginal.receiptId,
+        fingerprint: freshOriginal.fingerprint,
+        remoteAdmission: { target: freshOriginal.target, nonce: freshOriginal.nonce },
+      });
+      freshFence.settleNotLaunched(freshOriginal.receiptKey, freshOriginal.receiptId, freshProof);
+      let freshPreparations = 0;
+      const freshOptions = {
+        remoteHireReceipts: native,
+        runner: createHerdrWatchRunner(
+          undefined,
+          async (args) =>
+            (await exec("herdr", [...args], { env: { ...process.env, ...env }, timeout: 5000 })).stdout,
+        ),
+        remoteSeatAdapters: () => [
+          createRemoteCodexSeatAdapter(
+            { id: "pc", session: "default", ssh: { host: "configured-host", shell: "posix" } },
+            async (command) =>
+              (
+                await exec("/bin/sh", ["-c", command], {
+                  env: { ...process.env, ...env, HOME: home },
+                  timeout: 30_000,
+                })
+              ).stdout,
+            async (args) =>
+              (await exec("herdr", [...args], { env: { ...process.env, ...env }, timeout: 5000 })).stdout,
+          ),
+        ],
+        remoteWorkspace: async (fleet: string, cwd: string) => fleet === "pc" && cwd === home,
+        nativeLaunchPolicy: {
+          admit: async () => {},
+          prepare: async (): Promise<never> => {
+            freshPreparations++;
+            throw new Error("Owner denies native preparation in isolated proof");
+          },
+        },
+      };
+      const freshRequest = {
+        schemaVersion: 1 as const,
+        title: "Ada",
+        harness: "codex" as const,
+        fleet: "pc",
+        workingDirectory: home,
+        freshIntent: { id: randomUUID(), afterReceiptId: freshOriginal.receiptId },
+      };
+      const freshAuthority = {
+        owner: { conversationId: "fresh-proof-owner" },
+        current: () => true,
+        authorize: async () => true,
+      };
+      const freshStore = new HerdrWatchStore(freshPath, freshOptions);
+      try {
+        expect(await freshStore.spawnSeat(freshRequest, undefined, "new proof brief")).toMatchObject({
+          outcome: "failed",
+          reason: "not_ready",
+        });
+        fixtureHost = "replacement-host";
+        expect(
+          await freshStore.spawnSeat(freshRequest, undefined, "new proof brief", undefined, freshAuthority),
+        ).toMatchObject({
+          outcome: "failed",
+          reason: "not_ready",
+          detail: expect.stringContaining("host target changed"),
+        });
+        fixtureHost = "configured-host";
+        const concurrent = await Promise.all(
+          [
+            freshRequest,
+            { ...freshRequest, title: "Bea", freshIntent: { ...freshRequest.freshIntent, id: randomUUID() } },
+          ].map((request) =>
+            freshStore.spawnSeat(request, undefined, "new proof brief", undefined, freshAuthority),
+          ),
+        );
+        expect(
+          concurrent.map((result) => (result.outcome === "failed" ? result.reason : result.outcome)).sort(),
+        ).toEqual(["not_ready", "start_unconfirmed"]);
+        expect(freshPreparations).toBe(1);
+        expect(
+          new DeliveryFence(`${freshPath}.hire-receipts.json`).settlement(freshOriginal.receiptId),
+        ).toEqual(freshProof);
+      } finally {
+        freshStore.close();
+      }
+      const freshRestart = new HerdrWatchStore(freshPath, freshOptions);
+      try {
+        expect(
+          await freshRestart.spawnSeat(freshRequest, undefined, "new proof brief", undefined, freshAuthority),
+        ).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
+        expect(
+          await freshRestart.spawnSeat(
+            { ...freshRequest, freshIntent: undefined },
+            undefined,
+            "another brief",
+            undefined,
+            freshAuthority,
+          ),
+        ).toMatchObject({ outcome: "failed", detail: expect.stringContaining("is settled") });
+        expect(freshPreparations).toBe(1);
+        const retained = new DeliveryFence(`${freshPath}.hire-receipts.json`).all();
+        expect(retained).toHaveLength(2);
+        const pending = retained.find(([, record]) => record.freshHire)!;
+        expect(pending[1]).toMatchObject({
+          freshHire: { id: freshRequest.freshIntent.id },
+          remoteLaunchCommitted: true,
+        });
+        const hostRows = await Promise.all(
+          (await readdir(join(home, ".clankie/hire-receipts")))
+            .filter((name) => name.endsWith(".json"))
+            .map(async (name) =>
+              JSON.parse(await readFile(join(home, ".clankie/hire-receipts", name), "utf8")),
+            ),
+        );
+        expect(hostRows.find((row) => row.claim.receiptId === pending[1].messageId)).toMatchObject({
+          state: "launching",
+        });
+        expect(hostRows.find((row) => row.claim.receiptId === freshOriginal.receiptId)).toMatchObject({
+          state: "sealed",
+        });
+        // Real CLI -> authenticated HTTP route -> shared request schema -> hire
+        // mechanism and journal. Unrelated captain surfaces stay inert.
+        const { app } = await createClankieApp({
+          captain: {
+            ...createStubCaptain(),
+            serveOperatorConversation: async (request) => {
+              if (request.op === "spawn_seat")
+                return OperatorConversationServiceResultSchema.parse({
+                  op: request.op,
+                  schemaVersion: 1,
+                  result: await freshRestart.spawnSeat(
+                    request.seat,
+                    undefined,
+                    request.brief,
+                    undefined,
+                    freshAuthority,
+                  ),
+                });
+              if (request.op === "settle_hire_receipt")
+                return {
+                  op: request.op,
+                  schemaVersion: 1,
+                  result: await freshRestart.settleHireReceipt(
+                    request.receiptId,
+                    async () => {},
+                    request.disposition,
+                  ),
+                };
+              throw new Error("Unrequested fixture operation");
+            },
+          },
+          authenticateCaptain: async (request) =>
+            request.headers.get("authorization") === "Bearer fresh-fixture"
+              ? { captainId: "fresh-fixture", steerSourceLane: "api" }
+              : undefined,
+        });
+        const server = createServer(async (request, response) => {
+          const result = await app.request(request.url!, {
+            method: request.method ?? "POST",
+            headers: request.headers as Record<string, string>,
+            body: await text(request),
+          });
+          response.writeHead(result.status, { "content-type": "application/json" });
+          response.end(await result.text());
+        });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        try {
+          const address = server.address();
+          if (!address || typeof address === "string") throw new Error("Fixture HTTP address absent");
+          const commandOptions = {
+            host: `http://127.0.0.1:${address.port}`,
+            env: { CLANKIE_CAPTAIN_TOKEN: "fresh-fixture" },
+          };
+          let output = "";
+          expect(
+            await runHireReceiptCommand(["fresh", "--json-stdin"], {
+              ...commandOptions,
+              stdin: Readable.from([
+                JSON.stringify({
+                  conversationId: freshAuthority.owner.conversationId,
+                  seat: freshRequest,
+                  brief: "new proof brief",
+                }),
+              ]),
+              stdout: {
+                write: (chunk: string) => {
+                  output += chunk;
+                },
+              },
+            }),
+          ).toBe(1);
+          expect(JSON.parse(output)).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
+          output = "";
+          expect(
+            await runHireReceiptCommand(["settle", freshOriginal.receiptId], {
+              ...commandOptions,
+              stdout: {
+                write: (chunk: string) => {
+                  output += chunk;
+                },
+              },
+            }),
+          ).toBe(0);
+          expect(JSON.parse(output)).toMatchObject({
+            state: "settled-not-launched",
+            receiptId: freshOriginal.receiptId,
+          });
+          expect(freshPreparations).toBe(1);
+        } finally {
+          await new Promise<void>((resolve) => server.close(() => resolve()));
+        }
+      } finally {
+        freshRestart.close();
+      }
+
       // A real host reservation plus a controller's denied preparation crosses the
       // irreversible barrier and must remain uncertain, even with no pane created.
       const deniedPath = join(home, "denied-watches.json");

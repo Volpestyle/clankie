@@ -4,6 +4,8 @@ Current live result on runtime `72c1571a`: the failed test's original receipt is
 now retained as abandoned with authenticated evidence. A fresh, different brief
 was refused before launch because settlement fences the entire location tuple.
 VUH-1527 remains open; see the [current live blocker](#deployed-72c1571a-recovery-and-fresh-hire-refusal).
+The explicit [fresh-intent candidate](#explicit-fresh-intent-admission-candidate)
+addresses this admission gap; live acceptance awaits its deployment.
 
 Audit base: `origin/main` `8fcf47a5`, 2026-10-06. Linear issue and its five newest
 comments were read, including the 2026-10-05 PC live acceptance and added peer
@@ -228,3 +230,37 @@ This checkpoint changes evidence only. The existing native security review and
 focused tests/typechecks/scoped lint cover the unchanged recovery/launcher code;
 no new heavy tests, full check or eval ran. Evidence JSON validation, formatting,
 documentation links and `git diff --check` passed. Leave VUH-1527 In Progress.
+
+## Explicit fresh-intent admission candidate
+
+Clankie authorized a distinct new-work admission after settlement. Public
+`spawn_seat`, native `hire_agent` and `clankie hire-receipt fresh --json-stdin`
+now accept `freshIntent: {id, afterReceiptId}`. The caller chooses one stable
+lowercase UUID and supplies a different explicit brief. The service requires
+current captured hiring authority, the exact settled native predecessor in the
+same location and its unchanged configured remote target. Original settlement
+and evidence remain fenced; there is no resend, deletion or adoption of originals.
+
+Each fresh identity records its owner, resolved project and launch scope, and
+finalized brief fingerprint in the existing hire journal. An unresolved sibling
+blocks new admission. Exact same-ID retries inspect only that original native
+binding, while changed scope, owner, brief or another UUID for the pending work
+refuses. Confirmed and proven failed fresh IDs survive restart and age pruning.
+Pending project allocation cannot substitute an earlier request for new intent.
+Initial and recovered adoption recheck host/project/authority before the final
+native occupant observation, then latch live authority synchronously before
+adoption and reconciliation.
+
+[Verification](fresh-intent/CHECKS.md) and the independent
+[native security review](fresh-intent/SECURITY-REVIEW.md) cover this source
+candidate. The isolated integration uses a real Herdr server, OS census, host
+journal and authenticated CLI/HTTP request boundary. It deliberately denies native
+agent preparation after launch commitment; it proves admission/restart fences,
+not a successful Windows Codex turn.
+
+After landing and deployment, use the retained native predecessor
+`719dd6b1-2814-4c2b-9eb6-118fb785427c` with a saved new intent to run the PC
+Codex hire → brief → follow-up → completion → peer-message acceptance on owned
+panes. The earlier five unowned PC panes remain untouched. Claude's personal
+`/login` stays with James and does not block Codex acceptance. Leave VUH-1527
+In Progress until the deployed live evidence covers its acceptance.

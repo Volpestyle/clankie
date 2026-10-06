@@ -400,6 +400,47 @@ attest its own history. The journal covers service-authorized effects, not arbit
 programs launched outside Clankie's controlled hire path. It adds no fleet tool,
 worker authority, account setup or TUI setting.
 
+`clankie hire-receipt fresh --json-stdin` admits separately authorized new remote
+work after a retained settlement. Supply an existing hiring conversation, a new
+brief and `seat.freshIntent` through the public `spawn_seat` request:
+
+```json
+{
+  "conversationId": "conv-YOUR-HIRING-CONVERSATION",
+  "seat": {
+    "schemaVersion": 1,
+    "fleet": "pc",
+    "harness": "codex",
+    "title": "Ada",
+    "role": "tester",
+    "workingDirectory": "C:\\work\\approved-repo",
+    "freshIntent": {
+      "id": "f219ef86-91ba-4697-8e2e-91fc9416e72c",
+      "afterReceiptId": "9ef6657c-2d09-4b15-85b4-04608168a532"
+    }
+  },
+  "brief": "The owner authorized this independent new task. Complete its bounded acceptance check."
+}
+```
+
+Save the request before calling `clankie hire-receipt fresh --json-stdin < request.json`.
+Choose one new lowercase UUID for that intent and retain it. `afterReceiptId` is
+the exact **native hire** UUID of the settled original, including when delivery
+recovery used a `seat-…` message ID. Use the original fleet, harness and exact
+working-directory value; its configured host/session must still match. Resume,
+an unresolved sibling, changed authority or replay of any retained brief refuses.
+The service records the captured owner, resolved project/launch settings and
+brief fingerprint before any new effect. A reused UUID with different scope,
+owner or brief refuses. An exact retry only inspects the original native binding;
+it never launches or sends again. A completed fresh UUID stays fenced permanently:
+use its existing seat for follow-up. Both original settlement evidence and fresh
+receipts remain retained, including across restart and age pruning. Older service
+versions may refuse this journal; upgrade forward rather than editing its records.
+
+The native `hire_agent` tool accepts the same optional `freshIntent`. This adds
+no account change, fleet alias or TUI setting. Exit 0 from the fresh CLI means
+the service returned `spawned`; completion still needs the matching native event.
+
 ### `integrate`
 
 ```bash

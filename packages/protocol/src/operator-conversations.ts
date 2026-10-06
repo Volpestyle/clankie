@@ -995,6 +995,20 @@ export const SpawnOperatorSeatSchema = z
     ...HireProfileSchema.shape,
     /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
     resume: z.string().trim().min(1).max(128).optional(),
+    /** Explicit new remote work after a settled native hire; both identities stay fenced. */
+    freshIntent: z
+      .object({
+        id: z
+          .string()
+          .uuid()
+          .refine((id) => id === id.toLowerCase(), "Use a canonical lowercase UUID"),
+        afterReceiptId: z
+          .string()
+          .uuid()
+          .refine((id) => id === id.toLowerCase(), "Use a canonical lowercase UUID"),
+      })
+      .strict()
+      .optional(),
     /** What the roster calls it; herdr's own agent name is derived from this. */
     title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */
