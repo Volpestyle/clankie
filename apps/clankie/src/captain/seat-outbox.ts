@@ -27,9 +27,10 @@ const REPLY_TIMEOUT_MS = 10 * 60_000;
 
 /** The service lost its reply waiter; this says nothing about the native turn. */
 export class SeatLinkInterruptedError extends Error {
-  public constructor() {
+  public constructor(cause?: unknown) {
     super(
       "The service link was interrupted. The seat may still be working, but its reply target is gone. Check the seat before sending the request again.",
+      cause === undefined ? undefined : { cause },
     );
   }
 }
@@ -44,6 +45,11 @@ export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
 
 export interface SeatDeliveryInput {
   readonly delivery?: "steer" | "queue";
+  /** Host-owned watch identity. Preparation must persist before any native take. */
+  readonly original?: {
+    readonly messageId: string;
+    prepare(receipt: { messageId: string; fingerprint: string; recipientBinding?: string }): void;
+  };
   /** Queue admission or the channel's exact take acknowledgment. */
   readonly onAdmitted?: (state: "started" | "steered" | "queued") => void;
   readonly kind: OperatorSeatEventKind;
@@ -66,6 +72,7 @@ interface ParkedPoller {
 
 interface Pending {
   readonly holdUntilTurnEnd: boolean;
+  readonly exactRecipient: boolean;
   readonly onAdmitted?: SeatDeliveryInput["onAdmitted"];
   admission?: "started" | "steered";
   readonly event: OperatorSeatEvent;
@@ -195,6 +202,12 @@ export class SeatOutbox {
     );
   }
 
+  /** The current proven poll binding, including an explicitly unbound legacy poll. */
+  public recipientBinding(): string | undefined {
+    const current = [...this.pollers][0];
+    return current === undefined ? this.lastPollBinding : current.recipientBinding;
+  }
+
   /**
    * Hand one turn to the seat. Resolves `unbound` at once when no seat is
    * polling and the grace has lapsed, so the caller runs the pi lane instead;
@@ -225,17 +238,27 @@ export class SeatOutbox {
     return new Promise((resolve, reject) => {
       const event: OperatorSeatEvent = {
         schemaVersion: 1,
-        id: `seat-${randomUUID()}`,
+        id: input.original?.messageId ?? `seat-${randomUUID()}`,
         kind: input.kind,
         conversationId: input.conversationId,
         source: input.source,
         content: input.content,
         createdAt: new Date(this.now()).toISOString(),
       };
+      input.original?.prepare({
+        messageId: event.id,
+        fingerprint: deliveryFingerprint(input.content),
+        ...(input.recipientBinding === undefined ? {} : { recipientBinding: input.recipientBinding }),
+      });
       this.fence.begin(event.id, {
         messageId: event.id,
         fingerprint: deliveryFingerprint(input.content),
-        ...(input.recipientBinding === undefined ? {} : { sessionId: input.recipientBinding }),
+        ...(input.original === undefined
+          ? input.recipientBinding === undefined
+            ? {}
+            : { sessionId: input.recipientBinding }
+          : // Empty is an exact absent binding, distinct from legacy wildcard receipts.
+            { sessionId: input.recipientBinding ?? "" }),
       });
       this.active.add(event.id);
       const onAbort = (): void =>
@@ -252,6 +275,7 @@ export class SeatOutbox {
         );
       const pending: Pending = {
         holdUntilTurnEnd: input.delivery === "queue",
+        exactRecipient: input.original !== undefined,
         ...(input.onAdmitted === undefined ? {} : { onAdmitted: input.onAdmitted }),
         event,
         wantsReply: input.wantsReply,
@@ -344,14 +368,20 @@ export class SeatOutbox {
   }
 
   /** The seat's answer to an escalation. False when nothing is waiting on that id. */
-  public reply(eventId: string, text: string): boolean {
+  public reply(eventId: string, text: string, recipientBinding?: string): boolean {
     const pending =
       this.awaitingReply.get(eventId) ?? this.inFlight.find((candidate) => candidate.event.id === eventId);
     if (pending === undefined) {
       // A late reply proves receipt of the original event, but no live waiter
       // remains to publish its text. Never report that this answer was sent.
+      const original = this.fence.pending(eventId);
+      if (original?.sessionId !== undefined && original.sessionId !== (recipientBinding ?? "")) return false;
       this.fence.reconcile(eventId, eventId);
       return false;
+    }
+    if (pending.exactRecipient) {
+      if (!this.matchesRecipient(pending, recipientBinding)) return false;
+      if (!pending.acknowledged) this.ackPending(pending);
     }
     pending.settle({ outcome: "replied", text });
     return true;
@@ -366,10 +396,10 @@ export class SeatOutbox {
         const delivered = this.delivered.all().find(([, receipt]) => receipt.messageId === eventId)?.[1];
         return (
           delivered?.messageId === eventId &&
-          (delivered.sessionId === undefined || delivered.sessionId === recipientBinding)
+          (delivered.sessionId === undefined || delivered.sessionId === (recipientBinding ?? ""))
         );
       }
-      if (original.sessionId !== undefined && original.sessionId !== recipientBinding) return false;
+      if (original.sessionId !== undefined && original.sessionId !== (recipientBinding ?? "")) return false;
       if (!this.delivered.pending(eventId)) this.delivered.begin(eventId, original);
       return this.fence.reconcile(eventId, eventId);
     }
@@ -410,7 +440,11 @@ export class SeatOutbox {
         this.delivered.begin(pending.event.id, {
           messageId: pending.event.id,
           fingerprint: deliveryFingerprint(pending.event.content),
-          ...(pending.recipientBinding === undefined ? {} : { sessionId: pending.recipientBinding }),
+          ...(pending.exactRecipient
+            ? { sessionId: pending.recipientBinding ?? "" }
+            : pending.recipientBinding === undefined
+              ? {}
+              : { sessionId: pending.recipientBinding }),
         });
       this.fence.reconcile(pending.event.id, pending.event.id);
     } catch (error) {
@@ -433,9 +467,11 @@ export class SeatOutbox {
   }
 
   private matchesRecipient(pending: Pending, recipientBinding?: string): boolean {
-    return pending.recipientBinding === undefined
-      ? pending.event.source !== "peer"
-      : pending.recipientBinding === recipientBinding;
+    return pending.exactRecipient
+      ? pending.recipientBinding === recipientBinding
+      : pending.recipientBinding === undefined
+        ? pending.event.source !== "peer"
+        : pending.recipientBinding === recipientBinding;
   }
 
   private take(recipientBinding?: string): OperatorSeatEvent[] {

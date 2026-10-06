@@ -223,6 +223,7 @@ it("persists hire intent before discovery and exact pane/seat ownership before c
     "another admitted conversation",
   );
   await vi.waitFor(() => expect(waits).toBe(1));
+  const originalWatch = JSON.parse(readFileSync(path, "utf8")).watches[0];
   store.close();
   const wake = vi.fn(async () => {});
   const restarted = new HerdrWatchStore(path, { runner });
@@ -235,6 +236,7 @@ it("persists hire intent before discovery and exact pane/seat ownership before c
     expect.stringContaining("Harvest the worker"),
     undefined,
     expect.any(Function),
+    { messageId: `seat-watch-${originalWatch.id}`, receipt: undefined, reserve: expect.any(Function) },
   );
   restarted.close();
 });

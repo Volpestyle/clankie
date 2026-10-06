@@ -8,6 +8,7 @@ import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { HireOwners } from "./hire-owners.ts";
 import {
   captureConversationAuthority,
+  ConversationOwnerSchema,
   assertConversationAuthority,
   type ConversationAuthority,
   type ConversationOwner,
@@ -105,6 +106,21 @@ import {
  * Exact persisted conversation and route for a one-shot completion wake.
  * Current authority is checked again by the host dispatcher (ADR 0186/0215).
  */
+const HerdrWatchWakeReceiptSchema = z.strictObject({
+  messageId: z.string().min(1),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+  owner: ConversationOwnerSchema,
+  recipientBinding: z.string().min(1).optional(),
+});
+type HerdrWatchWakeReceipt = z.infer<typeof HerdrWatchWakeReceiptSchema>;
+export interface HerdrWatchWakeContext {
+  readonly messageId: string;
+  readonly receipt: HerdrWatchWakeReceipt | undefined;
+  /** Persist the exact original before the native mailbox can expose it. */
+  reserve(receipt: HerdrWatchWakeReceipt): void;
+}
+type HerdrWatchWakeResult = "accepted" | "deferred";
+
 const HerdrWatchRecordSchema = z
   .object({
     id: z.string().min(1),
@@ -117,6 +133,7 @@ const HerdrWatchRecordSchema = z
     hired: z.literal(true).optional(),
     /** Native accepted turn identity; never infer its completion from another idle turn. */
     messageId: z.string().min(1).max(512).optional(),
+    wakeReceipt: HerdrWatchWakeReceiptSchema.optional(),
     reason: z.string().min(1),
     createdAt: z.string().min(1),
     discord: DiscordWatchOriginSchema.optional(),
@@ -271,7 +288,8 @@ type InternalWake = (
   prompt: string,
   discord?: DiscordWatchOrigin,
   guard?: () => Promise<void>,
-) => Promise<void>;
+  original?: HerdrWatchWakeContext,
+) => Promise<void | HerdrWatchWakeResult>;
 type HerdrSeatProjection =
   | { readonly kind: "status"; readonly status: string }
   | { readonly kind: "summary"; readonly text: string }
@@ -3872,14 +3890,33 @@ export class HerdrWatchStore implements HerdrWatchPort {
           }
         }
       };
-      // Explicit watches retain their existing wake shape. Automatic harvests refresh
-      // persisted adoption and fence it again at the asynchronous host boundary.
-      if (record.hired === true) await this.wake?.(owner.conversationId, prompt, owner.discord, guard);
-      else
-        await (owner.discord === undefined
-          ? this.wake?.(owner.conversationId, prompt)
-          : this.wake?.(owner.conversationId, prompt, owner.discord));
-      this.remove(record.id);
+      // Watches retain their existing owner and prompt with an optional exact receipt
+      // reservation. Automatic harvests also refresh adoption at the host boundary.
+      const original: HerdrWatchWakeContext = {
+        messageId: `seat-watch-${record.id}`,
+        get receipt() {
+          return record.wakeReceipt;
+        },
+        reserve: (receipt) => {
+          const checked = HerdrWatchWakeReceiptSchema.parse(receipt);
+          if (
+            signal.aborted ||
+            this.closed ||
+            !this.state.watches.some((watch) => watch.id === record.id) ||
+            checked.messageId !== original.messageId ||
+            !isDeepStrictEqual(checked.owner, owner) ||
+            !isDeepStrictEqual(this.watchOwner(record), owner) ||
+            (record.wakeReceipt && !isDeepStrictEqual(record.wakeReceipt, checked))
+          )
+            throw new Error("Original completion wake reservation changed");
+          record.wakeReceipt = checked;
+          this.save();
+        },
+      };
+      if (!this.wake) return;
+      const result = await this.wake(owner.conversationId, prompt, owner.discord, guard, original);
+      if (result === "deferred") this.retry(record);
+      else this.remove(record.id);
     } catch {
       this.retry(record);
     }

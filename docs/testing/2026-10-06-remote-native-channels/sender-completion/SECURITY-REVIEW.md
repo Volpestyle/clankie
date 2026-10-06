@@ -32,3 +32,25 @@ native occupants remove it. No name-based aliases or receipt deletions were adde
 
 The reviewer ran no suites or PC actions. This assessment does not prove deployed
 PC delivery, completion, peer messages, or authenticated receipt settlement.
+
+## Integration review
+
+Pell's integration review reproduced a remaining admission failure: a native
+delivery could finish unconfirmed without its admission callback, yet the wake
+returned success and removed the durable completion watch. Retrying with a new
+event after a late acknowledgment would risk delivering the same wake twice.
+
+The integration repair reserves the original event ID, content fingerprint,
+conversation owner and recipient binding in the watch journal before mailbox
+dispatch. Unconfirmed attempts retain that watch. Later attempts inspect only
+the original receipt under fresh source, owner and recipient checks; a missing,
+conflicting or unacknowledged receipt cannot authorize another dispatch or a
+fallback. Late replies without a durable acknowledgment remain unconfirmed.
+Ordinary wakes also preserve the prohibition on fallback after uncertain native
+delivery.
+
+Four integration regressions exercise prior outbox uncertainty, late original
+acknowledgment across the real retry interval, watch restoration after a late
+reply without acknowledgment, and an admitted one-shot Pi turn with no response.
+The latter cannot replay the turn or wake its designated head. These checks do
+not replace new-intent owned-PC acceptance after deployment.

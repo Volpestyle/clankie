@@ -68,12 +68,16 @@ describe("HerdrWatchStore", () => {
     expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
       watches: [{ conversationId: "global-default", terminalId: "term-potato" }],
     });
+    const original = JSON.parse(await readFile(path, "utf8")).watches[0];
 
     settled.resolve(done);
     await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
     expect(wake).toHaveBeenCalledWith(
       "global-default",
       expect.stringContaining("Harvest the PStack synthesis"),
+      undefined,
+      expect.any(Function),
+      { messageId: `seat-watch-${original.id}`, receipt: undefined, reserve: expect.any(Function) },
     );
     expect(wake.mock.calls[0]?.[1]).toContain("agent status done");
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ schemaVersion: 1, watches: [] });
@@ -197,6 +201,7 @@ describe("HerdrWatchStore", () => {
     });
     first.start(() => Promise.resolve());
     await first.watch("discord_presence:guild:channel", "w18:p1", "Report the publish result", origin);
+    const original = JSON.parse(await readFile(path, "utf8")).watches[0];
     first.close();
 
     const wake = vi.fn(() => Promise.resolve());
@@ -213,6 +218,8 @@ describe("HerdrWatchStore", () => {
       "discord_presence:guild:channel",
       expect.stringContaining("Report the publish result"),
       origin,
+      expect.any(Function),
+      { messageId: `seat-watch-${original.id}`, receipt: undefined, reserve: expect.any(Function) },
     );
     second.close();
   });
@@ -292,6 +299,7 @@ describe("HerdrWatchStore", () => {
     await vi.waitFor(() => expect(wait).toHaveBeenCalledOnce());
     expect(wake).not.toHaveBeenCalled();
     expect(JSON.parse(await readFile(path, "utf8")).watches).toHaveLength(1);
+    const original = JSON.parse(await readFile(path, "utf8")).watches[0];
     first.close();
     const second = new HerdrWatchStore(path, {
       runner: {
@@ -302,7 +310,13 @@ describe("HerdrWatchStore", () => {
     });
     second.start(wake);
     await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
-    expect(wake).toHaveBeenCalledWith("global-default", expect.stringContaining("agent status done"));
+    expect(wake).toHaveBeenCalledWith(
+      "global-default",
+      expect.stringContaining("agent status done"),
+      undefined,
+      expect.any(Function),
+      { messageId: `seat-watch-${original.id}`, receipt: undefined, reserve: expect.any(Function) },
+    );
     second.close();
   });
 

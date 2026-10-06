@@ -7,6 +7,7 @@ import {
 import { resolveDiscordSettings, type ClankieSettings } from "@clankie/settings";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { join } from "node:path";
 import { captureDiscordBodyIdentity, planConversationWakeSession } from "./body-identity.ts";
 import {
@@ -24,10 +25,10 @@ import { ConversationStore } from "./conversations.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
 import { normalizeDiscordTurn, replyIsUnderway, type NormalizedDiscordTurn } from "./discord-turn.ts";
-import { type DiscordWatchOrigin } from "./herdr-watch.ts";
+import { type DiscordWatchOrigin, type HerdrWatchWakeContext } from "./herdr-watch.ts";
 import { laneKey, LaneLog } from "./lane-log.ts";
 import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
-import { SeatOutbox } from "./seat-outbox.ts";
+import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { roomKey } from "./tools.ts";
 import {
@@ -65,6 +66,7 @@ export interface CreateDiscordTurnsContext {
   readonly settings: () => Promise<ClankieSettings>;
   readonly deps: CaptainDeps;
   readonly seatOutbox: (conversationId: string) => SeatOutbox;
+  readonly watchRecipientBinding?: (conversationId: string) => Promise<string | undefined>;
   readonly shutdown: AbortController;
   readonly roomConversations: RoomConversations;
   readonly laneLog: LaneLog;
@@ -185,8 +187,11 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     mode: "machine" | "social" = "machine",
     allowHeadFallback = true,
     waitForCompletion = false,
+    original?: HerdrWatchWakeContext,
   ): Promise<boolean> {
-    if (await wakeExactConversation(input, notification, guard, mode, waitForCompletion)) return true;
+    if (await wakeExactConversation(input, notification, guard, mode, waitForCompletion, original))
+      return true;
+    if (original) return false;
     if (!allowHeadFallback || !(await validateConversationOwner(input, mode))) return false;
     const head = ctx.conversations.designatedHead(input.conversationId);
     if (head === undefined) return false;
@@ -206,6 +211,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       finalGuard,
       "machine",
       waitForCompletion,
+      original,
     );
   }
 
@@ -215,12 +221,42 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     guard?: () => Promise<void>,
     mode: "machine" | "social" = "machine",
     waitForCompletion = false,
+    original?: HerdrWatchWakeContext,
   ): Promise<boolean> {
     const owner = ConversationOwnerSchema.parse(input);
     if (!(await validateConversationOwner(owner, mode))) return false;
+    if (original?.receipt) {
+      const expected = original.receipt;
+      if (expected.messageId !== original.messageId || !isDeepStrictEqual(expected.owner, owner))
+        return false;
+      await guard?.();
+      const outbox = ctx.seatOutbox(owner.conversationId);
+      const recipientBinding = ctx.watchRecipientBinding
+        ? await ctx.watchRecipientBinding(owner.conversationId)
+        : outbox.recipientBinding();
+      await guard?.();
+      if (
+        !(await validateConversationOwner(owner, mode)) ||
+        recipientBinding !== expected.recipientBinding ||
+        (outbox.bound() && outbox.recipientBinding() !== expected.recipientBinding)
+      )
+        return false;
+      try {
+        const receipt = outbox.recoveryReceipt(expected.messageId);
+        return (
+          receipt?.messageId === expected.messageId &&
+          receipt.fingerprint === expected.fingerprint &&
+          receipt.sessionId === (expected.recipientBinding ?? "") &&
+          outbox.recoveryAcknowledged(expected.messageId)
+        );
+      } catch {
+        // Active, unreadable or absent originals never authorize a replacement.
+        return false;
+      }
+    }
     if (owner.discord !== undefined) {
       // Once the exact room accepts the turn, never replay a failed harvest.
-      return runDiscordWatchTurn(owner, notification, guard, mode, waitForCompletion);
+      return runDiscordWatchTurn(owner, notification, guard, mode, waitForCompletion, "escalation", original);
     }
     await guard?.();
     if (!ctx.conversations.runsCaptainTurns(owner.conversationId)) return false;
@@ -245,6 +281,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     mode: "machine" | "social" = "machine",
     waitForCompletion = false,
     nativeEventKind: "escalation" | "message" = "escalation",
+    original?: HerdrWatchWakeContext,
   ): Promise<boolean> {
     const origin = owner.discord!;
     // No body reply port means this route cannot accept an asynchronous turn.
@@ -291,9 +328,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     };
     if (!(await validateConversationOwner(owner, mode))) return false;
     await guard?.();
+    let accepted = false;
     let accept!: () => void;
-    const admitted = new Promise<void>((resolve) => {
-      accept = resolve;
+    const admitted = new Promise<boolean>((resolve) => {
+      accept = () => {
+        accepted = true;
+        resolve(true);
+      };
     });
     const finished = finishDiscordWatchTurn(
       plan.systemTools,
@@ -303,15 +344,21 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       guard,
       nativeEventKind,
       accept,
+      original,
     );
-    if (waitForCompletion) await finished;
-    else {
+    try {
+      if (waitForCompletion) return (await finished) || accepted;
       // Keep the original watch and its final census/owner guard until native
       // acceptance. Admission does not wait for the room's answer or Pi turn.
-      await Promise.race([admitted, finished]);
+      const result = await Promise.race([admitted, finished]);
       void finished.catch((error) => console.error("Conversation wake failed:", error));
+      return result || accepted;
+    } catch (error) {
+      if (!accepted) throw error;
+      // Failure after original admission never authorizes another delivery.
+      console.error("Accepted conversation wake failed:", error);
+      return true;
     }
-    return true;
   }
 
   async function finishDiscordWatchTurn(
@@ -322,7 +369,8 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     guard?: () => Promise<void>,
     nativeEventKind: "escalation" | "message" = "escalation",
     onAdmitted?: () => void,
-  ): Promise<void> {
+    original?: HerdrWatchWakeContext,
+  ): Promise<boolean> {
     const origin = owner.discord!;
     const result = await dispatchDiscordTurn(
       normalized,
@@ -340,13 +388,20 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       nativeEventKind,
       false,
       onAdmitted,
+      original === undefined ? undefined : { owner, context: original },
     );
+    if (original === undefined && result.state === "failed" && result.deliveryStage === "uncertain")
+      throw new SeatLinkInterruptedError(result);
+    const accepted =
+      result.state !== "failed" ||
+      result.deliveryStage === "delivered" ||
+      (original === undefined && result.deliveryStage === undefined);
     if (
       result.state !== "settled" ||
       ctx.deps.discordActions === undefined ||
       !(await validateConversationOwner(owner, mode))
     )
-      return;
+      return accepted;
     const posted = await ctx.deps.discordActions.execute(
       {
         action: "send_reply",
@@ -363,6 +418,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       },
     );
     if (!posted.ok) console.error("Herdr watch reply was not posted:", posted.message);
+    return accepted;
   }
 
   async function dispatchDiscordTurn(
@@ -375,6 +431,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     nativeEventKind: "escalation" | "message" = "escalation",
     preferPi = false,
     onAdmitted?: () => void,
+    watch?: { readonly owner: ConversationOwner; readonly context: HerdrWatchWakeContext },
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = ctx.conversations.roomConversation(normalized.lane, normalized.targetId);
     return ctx.conversations.runWithConversationDriver<CaptainChannelTurnResult>(
@@ -401,8 +458,27 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         return {
           run: async () => {
             const preparation = new ConversationServiceRun(ctx.shutdown.signal);
+            let recipientBinding: string | undefined;
             try {
               await preparation.wait("native room authority", guard?.() ?? Promise.resolve());
+              if (watch) {
+                recipientBinding = ctx.watchRecipientBinding
+                  ? await preparation.wait(
+                      "native watch recipient",
+                      ctx.watchRecipientBinding(conversationId),
+                    )
+                  : outbox.recipientBinding();
+                await preparation.wait("native watch final authority", guard?.() ?? Promise.resolve());
+                if (watch.context.receipt || outbox.recipientBinding() !== recipientBinding)
+                  return {
+                    handled: true as const,
+                    result: {
+                      state: "failed" as const,
+                      captainSessionId: normalized.sessionKey,
+                      code: "captain_seat_delivery_uncertain",
+                    },
+                  };
+              }
             } finally {
               preparation.close();
             }
@@ -420,8 +496,34 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
               wantsReply: true,
               signal: ctx.shutdown.signal,
               ...(onAdmitted === undefined ? {} : { onAdmitted }),
+              ...(watch === undefined
+                ? {}
+                : {
+                    original: {
+                      messageId: watch.context.messageId,
+                      prepare: (receipt: {
+                        messageId: string;
+                        fingerprint: string;
+                        recipientBinding?: string;
+                      }) => {
+                        if (conversationId !== watch.owner.conversationId)
+                          throw new Error("Original watch conversation changed");
+                        watch.context.reserve({ ...receipt, owner: watch.owner });
+                      },
+                    },
+                    ...(recipientBinding === undefined ? {} : { recipientBinding }),
+                  }),
             });
             const result = roomSeatTurnResult(delivery, normalized.sessionKey, `seat-${deliveryId}`);
+            if (result === undefined && watch?.context.receipt)
+              return {
+                handled: true as const,
+                result: {
+                  state: "failed" as const,
+                  captainSessionId: normalized.sessionKey,
+                  code: "captain_seat_delivery_uncertain",
+                },
+              };
             return result === undefined ? { handled: false as const } : { handled: true as const, result };
           },
         };
@@ -438,7 +540,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         const unsubscribe = lane.session.subscribe((event) => run.observe(event));
         try {
           return await waitForConversationRun(
-            runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin, run, onAdmitted),
+            runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin, run, onAdmitted, guard),
             run.signal,
           );
         } finally {
@@ -458,6 +560,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     origin: DiscordWatchOrigin,
     serviceRun: ConversationServiceRun,
     onAdmitted?: () => void,
+    admissionGuard?: () => Promise<void>,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = ctx.conversations.roomConversation(normalized.lane, normalized.targetId);
     const executionConversationId = normalized.handoffConversationId ?? conversationId;
@@ -659,10 +762,14 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         // read it off that session rather than resolving the config a second time.
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         const prepared = await serviceRun.wait("room guidance", guidancePrompt());
+        const prompt = prepared();
+        const images = normalized.images.map(toImageContent);
+        await serviceRun.wait("room Pi admission authority", admissionGuard?.() ?? Promise.resolve());
         serviceRun.signal.throwIfAborted();
+        onAdmitted?.();
         const completed = await serviceRun.wait(
           "room Pi execution",
-          runOneShotDiscordTurn(lane.session, prepared(), normalized.images.map(toImageContent)),
+          runOneShotDiscordTurn(lane.session, prompt, images),
         );
         if (!completed) {
           settled = "interrupted";

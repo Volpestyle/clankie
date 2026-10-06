@@ -248,6 +248,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get seatOutbox() {
         return seatOutbox;
       },
+      watchRecipientBinding: async (conversationId) =>
+        inboundBinding(await operatorNativeSource(conversationId)),
       get shutdown() {
         return shutdown;
       },
@@ -2699,7 +2701,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }, options.fleetRoundIntervalMs);
   herdrWatches.start(
-    async (conversationId, prompt, discord, guard) => {
+    async (conversationId, prompt, discord, guard, original) => {
       const owner = { conversationId, ...(discord === undefined ? {} : { discord }) };
       let review = "";
       try {
@@ -2714,7 +2716,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           "\n\nFleet review observations are unavailable. Use the lead skill and inspect the roster.";
         if (prompt.length + hint.length <= OPERATOR_CONVERSATION_TEXT_MAX) review = hint;
       }
-      await wakeConversation(owner, `${prompt}${review}`, guard);
+      return (await wakeConversation(owner, `${prompt}${review}`, guard, "machine", true, false, original))
+        ? ("accepted" as const)
+        : ("deferred" as const);
     },
     (seatId, projection) => {
       if (seatId === headSeat?.seatId && projection.kind === "transcript") {
@@ -4211,11 +4215,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return seatOutbox(binding.conversationId).acknowledge(eventId, inboundBinding(source));
     },
 
-    replySeatEvent(eventId, text, conversationId) {
+    async replySeatEvent(eventId, text, conversationId) {
       const binding = seatContext(conversationId);
-      return Promise.resolve(
-        binding !== undefined && seatOutbox(binding.conversationId).reply(eventId, text),
-      );
+      if (binding === undefined) return false;
+      const source = await operatorNativeSource(binding.conversationId);
+      shutdown.signal.throwIfAborted();
+      return seatOutbox(binding.conversationId).reply(eventId, text, inboundBinding(source));
     },
 
     observeDurableMessages(listener) {

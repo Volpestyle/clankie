@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -7,11 +7,22 @@ import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { ConversationOwner } from "../src/captain/conversation-owner.ts";
-import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import {
+  HerdrWatchStore,
+  type HerdrAgentSnapshot,
+  type HerdrWatchRunner,
+} from "../src/captain/herdr-watch.ts";
+import { DeliveryFence } from "../src/captain/delivery-fence.ts";
+import { SeatLinkInterruptedError } from "../src/captain/seat-outbox.ts";
+import { planDiscordTurnSession } from "../src/captain/system-authority.ts";
 import type { NativeRoomHandoffExecutor } from "../src/captain/native-room-handoffs.ts";
 import type { LinearActivityEvent } from "../src/linear-webhook.ts";
 
-const fake = vi.hoisted(() => ({ prompts: [] as string[], banks: [] as unknown[] }));
+const fake = vi.hoisted(() => ({
+  prompts: [] as string[],
+  banks: [] as unknown[],
+  response: "Service answer",
+}));
 vi.mock("../src/captain/model.ts", () => ({
   createCaptainModelRuntime: async () => ({
     runtime: {},
@@ -43,7 +54,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
           for (const listener of listeners)
             listener({
               type: "message_end",
-              message: { role: "assistant", content: [{ type: "text", text: "Service answer" }] },
+              message: { role: "assistant", content: [{ type: "text", text: fake.response }] },
             });
         },
       },
@@ -65,7 +76,10 @@ vi.mock("../src/captain/lane-tools.ts", () => ({
 }));
 
 const fixtures: { captain: ReturnType<typeof createCaptain>; root: string }[] = [];
+const watchStores: HerdrWatchStore[] = [];
+const startWatchStore = HerdrWatchStore.prototype.start;
 afterEach(async () => {
+  for (const store of watchStores.splice(0)) store.close();
   for (const fixture of fixtures.splice(0)) {
     await fixture.captain.close();
     rmSync(fixture.root, { recursive: true, force: true });
@@ -73,6 +87,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   fake.prompts.splice(0);
   fake.banks.splice(0);
+  fake.response = "Service answer";
 });
 
 function request(id: string, channelId = "67890"): DiscordPresenceChannelTurnRequest {
@@ -102,7 +117,10 @@ function request(id: string, channelId = "67890"): DiscordPresenceChannelTurnReq
 
 async function fixture(granted = false, runNativeRoomHandoff?: NativeRoomHandoffExecutor) {
   const root = mkdtempSync(join(tmpdir(), "captain-room-seat-"));
-  vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
+  let watchWake!: Parameters<HerdrWatchStore["start"]>[0];
+  vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation((wake) => {
+    watchWake = wake;
+  });
   const settings = new SettingsStore(join(root, "settings.json"));
   if (granted)
     await settings.update((current) => ({
@@ -145,7 +163,78 @@ async function fixture(granted = false, runNativeRoomHandoff?: NativeRoomHandoff
       transportKind: "bot",
     },
   };
-  return { captain, settings, route, execute, conversationId, owner, root };
+  return { captain, settings, route, execute, conversationId, owner, root, watchWake };
+}
+
+async function durableRoomWatch(f: Awaited<ReturnType<typeof fixture>>) {
+  // The established watch runner fixture supplies a stable observed session;
+  // Captain's room authorization, outbox and receipt writes remain real.
+  let current: HerdrAgentSnapshot = {
+    paneId: "w18:p1",
+    terminalId: "term_abcd",
+    agent: "claude",
+    status: "working",
+    title: "Room worker completion",
+    session: { source: "herdr:claude", kind: "id", value: "room-worker-original-session" },
+  };
+  let finish!: (agent: HerdrAgentSnapshot) => void;
+  const completion = new Promise<HerdrAgentSnapshot>((resolve) => {
+    finish = resolve;
+  });
+  const runner: HerdrWatchRunner = {
+    get: async () => current,
+    resolveTerminal: async () => current,
+    wait: async () => completion,
+  };
+  const path = join(f.root, "room-worker-watches.json");
+  let store = new HerdrWatchStore(path, { runner });
+  watchStores.push(store);
+  let attempts = 0;
+  let finishedAttempts = 0;
+  const wake: Parameters<HerdrWatchStore["start"]>[0] = async (...args) => {
+    attempts++;
+    try {
+      return await f.watchWake(...args);
+    } finally {
+      finishedAttempts++;
+    }
+  };
+  startWatchStore.call(store, wake);
+  const armed = await store.watch(
+    f.conversationId,
+    current.paneId,
+    "Harvest the exact room completion",
+    f.owner.discord,
+  );
+  if (armed.outcome !== "watching") throw new Error("Working fixture did not arm its durable watch");
+  const original = JSON.parse(readFileSync(path, "utf8")).watches[0];
+  return {
+    original,
+    records: () => JSON.parse(readFileSync(path, "utf8")).watches,
+    attempts: () => attempts,
+    finishedAttempts: () => finishedAttempts,
+    restart: () => {
+      store.close();
+      store = new HerdrWatchStore(path, { runner });
+      watchStores.push(store);
+      startWatchStore.call(store, wake);
+    },
+    settle: () => {
+      current = { ...current, status: "done" };
+      finish(current);
+    },
+  };
+}
+
+function roomReceipts(f: Awaited<ReturnType<typeof fixture>>, acknowledged = false) {
+  return new DeliveryFence(
+    join(
+      f.root,
+      "delivery-receipts",
+      "head",
+      `${encodeURIComponent(f.conversationId)}.json${acknowledged ? ".delivered" : ""}`,
+    ),
+  );
 }
 
 const organizationId = "96d2a27b-950b-4a8a-afae-8776605c0ef1";
@@ -316,6 +405,127 @@ it("a room-owned watch reaches its attached seat and replies on its original gua
     ),
   );
   expect(fake.prompts).toEqual([]);
+});
+
+it("an unresolved original room outbox retains its durable completion watch without dispatching a replacement", async () => {
+  const f = await fixture(true);
+  const poll = f.captain.pollSeatEvents(1000, undefined, f.conversationId);
+  const originalTurn = f.captain.wakeConversation(f.owner, "unresolved-original-room-turn");
+  const originalUncertain = expect(originalTurn).rejects.toBeInstanceOf(SeatLinkInterruptedError);
+  const [originalEvent] = await poll;
+  expect(originalEvent?.content).toContain("unresolved-original-room-turn");
+  // Leave a genuine taken event past its native acknowledgment deadline.
+  await originalUncertain;
+  const receipt = roomReceipts(f).pending(originalEvent!.id);
+  expect(receipt?.messageId).toBe(originalEvent!.id);
+  const watch = await durableRoomWatch(f);
+  watch.settle();
+  await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(1));
+  expect(watch.records()).toEqual([expect.objectContaining(watch.original)]);
+  expect(roomReceipts(f).pending(originalEvent!.id)).toEqual(receipt);
+  expect(roomReceipts(f).all()).toHaveLength(1);
+  expect(await f.captain.pollSeatEvents(0, undefined, f.conversationId)).toEqual([]);
+  expect(f.execute).not.toHaveBeenCalled();
+  expect(fake.prompts).toEqual([]);
+});
+
+it("a taken unacknowledged room wake retains its original watch and late acknowledgment settles retry without redispatch", async () => {
+  const f = await fixture(true);
+  const poll = f.captain.pollSeatEvents(1000, undefined, f.conversationId);
+  const watch = await durableRoomWatch(f);
+  watch.settle();
+  const [originalEvent] = await poll;
+  expect(originalEvent?.content).toContain("Harvest the exact room completion");
+  await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(1), { timeout: 4000 });
+  expect(watch.records()).toEqual([expect.objectContaining(watch.original)]);
+  const receipt = roomReceipts(f).pending(originalEvent!.id);
+  expect(receipt?.messageId).toBe(originalEvent!.id);
+  expect(roomReceipts(f).all()).toHaveLength(1);
+  expect(await f.captain.acknowledgeSeatEvent(originalEvent!.id, f.conversationId)).toBe(true);
+  expect(roomReceipts(f).pending(originalEvent!.id)).toBeUndefined();
+  expect(roomReceipts(f, true).pending(originalEvent!.id)).toEqual(receipt);
+  const controller = new AbortController();
+  const retryPoll = f.captain.pollSeatEvents(8000, controller.signal, f.conversationId);
+  try {
+    // Exercise the store's real five-second retry, not a second synthetic wake.
+    await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(2), { timeout: 9000 });
+    controller.abort();
+    expect(await retryPoll).toEqual([]);
+    expect(watch.records()).toEqual([]);
+    expect(roomReceipts(f, true).all()).toHaveLength(1);
+    expect(roomReceipts(f, true).pending(originalEvent!.id)).toEqual(receipt);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(fake.prompts).toEqual([]);
+  } finally {
+    controller.abort();
+    await retryPoll;
+  }
+});
+
+it("a late room reply without a durable original acknowledgment cannot redispatch its restored watch", async () => {
+  const f = await fixture(true);
+  const poll = f.captain.pollSeatEvents(1000, undefined, f.conversationId);
+  const watch = await durableRoomWatch(f);
+  watch.settle();
+  const [originalEvent] = await poll;
+  expect(originalEvent?.content).toContain("Harvest the exact room completion");
+  await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(1), { timeout: 4000 });
+  expect(watch.records()).toEqual([expect.objectContaining(watch.original)]);
+  expect(roomReceipts(f).pending(originalEvent!.id)?.messageId).toBe(originalEvent!.id);
+  expect(await f.captain.replySeatEvent(originalEvent!.id, "Late native answer", f.conversationId)).toBe(
+    false,
+  );
+  expect(roomReceipts(f).pending(originalEvent!.id)).toBeUndefined();
+  expect(roomReceipts(f, true).pending(originalEvent!.id)).toBeUndefined();
+  const controller = new AbortController();
+  const restoredPoll = f.captain.pollSeatEvents(1000, controller.signal, f.conversationId);
+  try {
+    watch.restart();
+    await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(2));
+    controller.abort();
+    expect(await restoredPoll).toEqual([]);
+    expect(watch.records()).toEqual([expect.objectContaining(watch.original)]);
+    expect(roomReceipts(f).all()).toEqual([]);
+    expect(roomReceipts(f, true).all()).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(fake.prompts).toEqual([]);
+  } finally {
+    controller.abort();
+    await restoredPoll;
+  }
+});
+
+it("an individually granted room watch that starts one-shot Pi but has no response never replays or wakes its head", async () => {
+  const f = await fixture(true);
+  await f.captain.setDesignatedConversationHead(f.conversationId, "global-default");
+  expect(
+    planDiscordTurnSession({
+      baseSessionKey: f.owner.discord!.baseSessionKey,
+      actorId: f.owner.discord!.actorId,
+      channelId: f.owner.discord!.channelId,
+      transportKind: f.owner.discord!.transportKind,
+      ...(f.owner.discord!.guildId === undefined ? {} : { guildId: f.owner.discord!.guildId }),
+      durable: true,
+      settings: (await f.settings.load()).discord,
+    }),
+  ).toMatchObject({ kind: "system_turn", durable: false, systemTools: true });
+  fake.response = "";
+  const watch = await durableRoomWatch(f);
+  watch.settle();
+  await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(1));
+  const journal = join(f.root, "conversations", f.conversationId, "events.jsonl");
+  await vi.waitFor(() => expect(readFileSync(journal, "utf8")).toContain("captain_response_missing"));
+  expect(fake.prompts).toHaveLength(1);
+  expect(fake.prompts[0]).toContain("Harvest the exact room completion");
+  expect(watch.records()).toEqual([]);
+  watch.restart();
+  expect(watch.attempts()).toBe(1);
+  expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+  const headJournal = join(f.root, "conversations", "global-default", "events.jsonl");
+  if (existsSync(headJournal))
+    expect(readFileSync(headJournal, "utf8")).not.toContain("Harvest the exact room completion");
+  expect(fake.prompts).toHaveLength(1);
+  expect(f.execute).not.toHaveBeenCalled();
 });
 
 it.each(["before dispatch", "before reply"])(
