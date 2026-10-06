@@ -15,8 +15,10 @@ parent Claude PID 99898 at 02:12:53Z. The next update receipt
 (SHA-256 `846ec394f18f57e82eb3672adaa5e45884d3acb6539bfa96169c815353261995`).
 
 That loaded pump awaits a channel notification, then throws when the exact ACK
-returns false; an ACK exception also escapes. Its outer handler prints to stderr
-and ends the pump while tools keep serving. Updating files afterward cannot
+returns false; an ACK exception also escapes. Its outer `.catch(() => undefined)`
+silently swallows the rejection and ends the pump while tools keep serving.
+Only poll failures reach the old stderr diagnostic; fatal ACK or notification
+failures leave no stopping-error record. Updating files afterward cannot
 replace code already imported by this Node process.
 
 The last observed original channel event was
@@ -24,8 +26,8 @@ The last observed original channel event was
 delivered receipt has fingerprint
 `315a7b42f3bf4f6e134d9b17f90de468327a2792ffe2660e12e832d9dce5ecc1`.
 The precise error or lost ACK response that stopped the original pump remains
-unproved: the original stderr was piped into Claude and no matching persisted
-stderr log was found. A delivered ledger entry cannot establish that the bridge
+unproved: the old wrapper did not log fatal rejections, and its original stderr
+was piped into Claude with no matching persisted log found. A delivered ledger entry cannot establish that the bridge
 received a successful HTTP response.
 
 ## Repair and boundaries
