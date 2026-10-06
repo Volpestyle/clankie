@@ -73,9 +73,17 @@ describe("captain lane prompt and memory card", () => {
     const response = await app.app.request("/v1/captain/prompt?sections=persona,%20model", {
       headers: { authorization: "Bearer operator" },
     });
+    // The seat-start log projection is a section the hooks name explicitly.
+    const seeded = await app.app.request("/v1/captain/prompt?sections=persona,conversation", {
+      headers: { authorization: "Bearer operator" },
+    });
 
     expect(response.status).toBe(200);
-    expect(prompts).toEqual([{ lane: "operator", sections: ["persona", "model"] }]);
+    expect(seeded.status).toBe(200);
+    expect(prompts).toEqual([
+      { lane: "operator", sections: ["persona", "model"] },
+      { lane: "operator", sections: ["persona", "conversation"] },
+    ]);
     app.close();
   });
 

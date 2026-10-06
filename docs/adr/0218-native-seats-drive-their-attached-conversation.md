@@ -299,3 +299,89 @@ Native delivery retains its existing acknowledgment and reply deadlines, includi
 the ten-minute escalation reply wait. The service inactivity watchdog does not
 impose a five-minute native reply cutoff or permit replay of taken, accepted or
 uncertain native delivery.
+
+## The log is the conversation, 2026-10-06
+
+Accepted for engineering by James on 2026-10-06, after the 2026-10-06 operator
+backlog: a closed Claude seat held 65 worker reports for about four hours, then
+delivered them as 65 separate turns. The service was running the whole time.
+
+**The rule above holds for every harness.** When no seat is live, the service
+runner executes worker reports, self-wakes and watch notifications, whether
+Claude, Codex or any later harness last held the seat. The 2026-10-05 refusal
+(`309b693d`, "keep internal native-owned deliveries out of Pi") is withdrawn;
+its exponential wake backoff remains. That refusal worked around a Pi session
+that had grown to about 316k tokens and stalled in compaction. The fix below
+removes that cause instead. Native-only parent routes still never invoke the
+generic service runner. Signed Linear activity keeps its own VUH-1743
+contract: it waits for the attached receiver and is offered again on its next
+poll. Taken, accepted or uncertain native deliveries still never fall back.
+
+**The conversation event log is the single source of truth.** The service lane
+and every harness are bounded views of it, and nothing writes into a harness's
+own session file. Harness transcripts already sync into the log. One bounded
+projection (`projectConversation`: messages and finished tool actions, newest
+first within about 24k characters, read oldest first, with an omission marker)
+carries the log back out at each change of driver:
+
+- **Log → service lane.** When a harness has driven the conversation since
+  the service lane last ran (the native transcript revision has moved), the
+  service starts a fresh Pi session seeded with the projection. It does not
+  resume its private session file, which stays on disk. Pi's next turns
+  continue that fresh session until a harness drives again.
+- **Log → fresh harness session.** The operator seat's SessionStart hook asks
+  for `clankie prompt --sections …,conversation`, for both the Claude and the
+  Codex plugin. Reading it records the projected cursor as the harness cursor.
+- **Log → reconnecting harness.** A service turn in a conversation that a
+  harness has driven opens a handoff span at the harness cursor. Its internal
+  input enters the log as an `external` message. When the seat polls again,
+  inside the existing driver fence, it first receives exactly one
+  `service-handoff` turn. That turn holds the service's actual turns since the
+  harness cursor, verbatim within the same budget, and points to the
+  worker-report inbox for anything omitted. The original inputs are never
+  delivered again as separate turns.
+
+The existing fence decides in-flight work. A service run admitted before the
+seat polled finishes on the service lane and lands inside the handoff. Input
+queued behind it selects its driver after the poll binds, so it goes to the
+seat, after the handoff. A SessionStart projection that already covers an open
+span satisfies it, so the harness is not seeded twice.
+
+The handoff is sealed and persisted as `attempting` before transport.
+Acknowledgment advances the harness cursor. A definite pre-take refusal reopens
+the span. An unproven take advances the cursor without resending and records a
+visible `external` note in the conversation. A restart turns `attempting` into
+`unresolved`: an exact acknowledged receipt settles it as delivered, and
+anything else is uncertain and never resent. Service turns that begin after
+sealing carry into the next span.
+
+```mermaid
+flowchart LR
+  Log[(Conversation event log)]
+  Harness[Native harness seat<br/>Claude, Codex, any]
+  Service[Service lane<br/>fresh bounded Pi session]
+  Input[Worker report, wake, watch] --> Fence{Seat live?}
+  Fence -->|yes| Harness
+  Fence -->|no| Service
+  Harness -->|transcript sync| Log
+  Service -->|turn events and its input| Log
+  Log -->|projection seed when a harness drove since| Service
+  Log -->|SessionStart conversation section| Harness
+  Log -->|one service-handoff turn on reconnect| Harness
+```
+
+Regression coverage is `apps/clankie/test/native-seat-service-fallback.integration.test.ts`.
+It uses real admission, driver fence, journals, inbound receipts, seat outbox
+and handoff state, with a scripted model. It covers the following:
+
+- a worker report runs once on the service lane, seeded from a bounded log;
+- a taken but unacknowledged native report never moves to the service lane,
+  including across a restart;
+- a reconnect receives one handoff that contains the in-flight run, and queued
+  input follows it to the seat;
+- a second rebind gets no handoff;
+- a restart between take and settlement does not duplicate the handoff;
+- the SessionStart projection suppresses a second handoff;
+- failed service wakes keep their backoff.
+
+No live harness, provider or production state was exercised.

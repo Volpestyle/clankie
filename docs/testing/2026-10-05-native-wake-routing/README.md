@@ -2,6 +2,15 @@
 
 Date: 2026-10-05. Base: `ae91cca8186f5b4d83197a930f213039d59f94c2`.
 
+> **Superseded 2026-10-06** by
+> [ADR 0218, "The log is the conversation"](../../adr/0218-native-seats-drive-their-attached-conversation.md#the-log-is-the-conversation-2026-10-06).
+> Internal deliveries to a native-owned chat once again run on the service lane
+> while no seat is live. The compaction stall this note records is addressed by
+> starting a fresh, log-seeded Pi session instead of refusing the fallback. The
+> wake backoff below is kept. `native-wake-report.integration.test.ts` was
+> replaced by `native-seat-service-fallback.integration.test.ts`. The text below
+> is historical.
+
 A stored self-wake for the default conversation was due at 17:00Z. The native
 operator seat remained recorded as current, but its polling mailbox was idle.
 The internal runner fell through to Pi and stalled in compaction. The wake stayed

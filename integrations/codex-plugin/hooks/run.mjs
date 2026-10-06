@@ -107,7 +107,7 @@ const run = (args, required = true) =>
 const sync = run(["seat-sync"], false);
 if (hook.hook_event_name === "SessionStart") {
   const [prompt] = await Promise.all([
-    run(["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"]),
+    run(["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model,conversation"]),
     run(["memory-card", "--lane", "operator", "--hook"]),
   ]);
   process.stdout.write(

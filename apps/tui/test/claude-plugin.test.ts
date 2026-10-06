@@ -33,7 +33,7 @@ describe("clankie claude plugin", () => {
         "--lane",
         "operator",
         "--sections",
-        "persona,reach,address,model",
+        "persona,reach,address,model,conversation",
         "--harness",
         "claude",
       ],
