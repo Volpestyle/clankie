@@ -502,6 +502,25 @@ describe("census across fleets", () => {
               ? JSON.stringify({
                   result: {
                     snapshot: {
+                      agents: [
+                        {
+                          pane_id: "w2:p1J",
+                          terminal_id: "term_abc",
+                          agent: "claude",
+                          agent_status: "working",
+                          name: "rivals-lead",
+                          cwd: "C:\\src\\rivals",
+                          agent_session: { source: "herdr:claude", kind: "id", value: "s1" },
+                        },
+                        {
+                          pane_id: "w2:p2",
+                          terminal_id: "term_head",
+                          agent: "claude",
+                          name: "clankie",
+                          agent_status: "idle",
+                          agent_session: { source: "herdr:claude", kind: "id", value: "head" },
+                        },
+                      ],
                       workspaces: [{ workspace_id: "w2", label: "Rivals", number: 2 }],
                       tabs: [{ tab_id: "t1", label: "Renderer", number: 1 }],
                       panes: [
