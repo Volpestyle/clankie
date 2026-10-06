@@ -297,10 +297,7 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["skills"],
-    lines: [
-      "  skills [opinionated on|off | exclude NAME | include NAME]",
-      "                           Bundled skill classes and selection (JSON)",
-    ],
+    lines: ["  skills                   Skills shipped with this body (JSON)"],
   },
   {
     nouns: ["desktop"],
@@ -545,7 +542,7 @@ export function commandHelp(): string {
     "  An endpoint that wants a key reads it from the credential store under the provider",
     "  id; put it there with /auth <providerId> in the console.",
     "  --set selects the first listed model as captain.",
-    "  Config writes need `clankie restart`, except Linear follow (live) and skills (new sessions/hires).",
+    "  Config writes need `clankie restart`, except Linear follow (live).",
     "",
     "pair / devices / operator-credential rotate default to human text; pass --json.",
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",

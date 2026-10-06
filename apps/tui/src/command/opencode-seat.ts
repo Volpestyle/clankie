@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { bundledSkills, defaultSettingsPath, SettingsStore } from "@clankie/settings";
+import { bundledSkills } from "@clankie/settings";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import { clankieStateHome } from "../state-home.ts";
@@ -80,7 +80,6 @@ export async function planOpenCodeSeat(
   const { conversationId, cwd } = context;
   if (previous && cwd !== previous.cwd)
     throw new Error("Resume workspace changed; refusing to redirect native session");
-  const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
   return {
     command,
     args: [
@@ -92,7 +91,7 @@ export async function planOpenCodeSeat(
       ...(previous ? ["--session", previous.sessionId] : []),
     ],
     plugin: { source: "plugin-dir", path: source },
-    skills: bundledSkills(options.repoRoot, selection),
+    skills: bundledSkills(options.repoRoot),
     channel: true,
     sessionId: previous?.sessionId ?? "pending-native-session",
     resumed: !!previous,
@@ -405,10 +404,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
   config.plugin = [...(config.plugin ?? []), pathToFileURL(join(plan.plugin.path, "plugin.mjs")).href];
   config.skills = {
     ...config.skills,
-    paths: [
-      ...(config.skills?.paths ?? []),
-      ...plan.skills.filter((skill) => skill.included).map((skill) => skill.path),
-    ],
+    paths: [...(config.skills?.paths ?? []), ...plan.skills.map((skill) => skill.path)],
   };
   childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(config);
   stderr.write(`clankie opencode: waiting for native context; ${plan.delivery} Receipts: ${directory}\n`);

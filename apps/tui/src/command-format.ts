@@ -17,7 +17,6 @@ function rows(entries: readonly (readonly [string, string | undefined])[]): stri
 }
 
 export function formatSeatPlan(plan: SeatPlan): string {
-  const included = plan.skills.filter((skill) => skill.included).length;
   return [
     `Launch ${plan.command} with Clankie`,
     ...rows([
@@ -30,7 +29,7 @@ export function formatSeatPlan(plan: SeatPlan): string {
       ],
       ["wakes", plan.channel ? "reach it as channel events" : "not delivered (no channel)"],
       ["plugin", `${plan.plugin.source} ${home(plan.plugin.path)}`],
-      ["skills", `${included} of ${plan.skills.length} bundled`],
+      ["skills", `${plan.skills.length} bundled`],
       ["pane", plan.herdrPaneId],
     ]),
   ].join("\n");

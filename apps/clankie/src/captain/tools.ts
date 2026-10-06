@@ -909,12 +909,6 @@ function hireAgentTool(
             "Stable work item/deliverable key, e.g. VUH-1596. Required for native-first; all slices keep this same key.",
         }),
       ),
-      skills: Type.Optional(
-        StringEnum(["bundled", "plain"], {
-          description:
-            "Override the owner's opinionated skill setting for this local hire. Product/tool skills always remain; bundled still respects exclusions. Result records the condition. Other harness/global/project skills are unchanged.",
-        }),
-      ),
       chrome: Type.Optional(
         Type.Boolean({
           description:

@@ -259,11 +259,6 @@ describe("install doctor", () => {
     await writeFile(join(root, "package.json"), `${JSON.stringify({ version: "0.2.0" })}\n`);
     await mkdir(join(root, "integrations", "herdr-plugin"), { recursive: true });
     await writeFile(join(root, "integrations", "herdr-plugin", "herdr-plugin.toml"), 'id = "clankie"\n');
-    await mkdir(join(root, "vendor"));
-    await writeFile(
-      join(root, "vendor/opinionated-skills.json"),
-      JSON.stringify({ skills: { lead: "agent/lead" } }),
-    );
     for (const name of ["lead", "this-machine"]) {
       await mkdir(join(root, ".agents/skills", name), { recursive: true });
       await writeFile(join(root, ".agents/skills", name, "SKILL.md"), "test");
@@ -272,7 +267,6 @@ describe("install doctor", () => {
     await settings.update((current) => ({
       ...current,
       schemaVersion: SETTINGS_SCHEMA_VERSION,
-      skills: { opinionated: false, exclude: [] },
       discord: { ...current.discord, activeBody: "bot", textIngressEnabled: true },
     }));
     const store = new FileCredentialStore(join(root, "credentials.json"));
@@ -287,13 +281,7 @@ describe("install doctor", () => {
       fetchImpl: offline,
     });
 
-    expect(report.skills.selection).toEqual({ opinionated: false, exclude: [] });
-    expect(report.skills.catalog).toContainEqual(
-      expect.objectContaining({ name: "lead", class: "opinionated", included: false }),
-    );
-    expect(report.skills.catalog).toContainEqual(
-      expect.objectContaining({ name: "this-machine", class: "product", included: true }),
-    );
+    expect(report.skills.catalog.map((skill) => skill.name)).toEqual(["lead", "this-machine"]);
     expect(report.kind).toBe("checkout");
     expect(report.version).toBe("0.2.0");
     expect(report.model).toBeNull();

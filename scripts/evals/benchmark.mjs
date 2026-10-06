@@ -111,14 +111,12 @@ export function layer(harness, config, skillRoot) {
   const skills =
     config.skills === "none"
       ? []
-      : bundledSkills(repo, { opinionated: config.skills === "bundled", exclude: [] })
-          .filter((s) => s.included)
-          .map((skill) => {
-            // Copies, never links: the container sees files, not the checkout.
-            const path = join(skillRoot, skill.name);
-            if (!existsSync(path)) cpSync(skill.path, path, { recursive: true, dereference: true });
-            return { name: skill.name, class: skill.class, path };
-          });
+      : bundledSkills(repo).map((skill) => {
+          // Copies, never links: the container sees files, not the checkout.
+          const path = join(skillRoot, skill.name);
+          if (!existsSync(path)) cpSync(skill.path, path, { recursive: true, dereference: true });
+          return { name: skill.name, path };
+        });
   const kwargs = {};
   if (instructions && harness === "claude") kwargs.append_system_prompt = instructions;
   if (instructions && harness === "codex") kwargs.config = { developer_instructions: instructions };
@@ -129,7 +127,6 @@ export function layer(harness, config, skillRoot) {
       instructionsSha256: instructions ? hash(instructions) : null,
       skills: skills.map((s) => ({
         name: s.name,
-        class: s.class,
         sha256: hash(readFileSync(join(s.path, "SKILL.md"))),
       })),
     },

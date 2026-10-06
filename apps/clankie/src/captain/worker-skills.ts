@@ -1,12 +1,6 @@
 import { existsSync } from "node:fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import {
-  bundledSkills,
-  clankieSkillRoots,
-  mergedLeadershipSkills,
-  projectSkillPlugin,
-  type SkillsSettings,
-} from "@clankie/settings";
+import { bundledSkills, clankieSkillRoots, mergedLeadershipSkills } from "@clankie/settings";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -17,38 +11,29 @@ export async function workerSkills(
   repoRoot: string,
   stateDir: string,
   codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex"),
-  settings: SkillsSettings = { opinionated: true, exclude: [] },
   cwd?: string,
 ): Promise<{ args: readonly string[]; env?: Readonly<Record<string, string>> }> {
-  const catalog = bundledSkills(repoRoot, settings);
+  const catalog = bundledSkills(repoRoot);
   if (harness === "grok") {
     // The interactive leader cannot load a CLI plugin directory. Supply the
-    // selected skill paths through its native per-launch rules instead.
+    // skill paths through its native per-launch rules instead.
     return {
       args: [
         "--rules",
         "Available Clankie skills (read the relevant SKILL.md before using it):\n" +
-          catalog
-            .filter((skill) => skill.included)
-            .map((skill) => `${skill.name}: ${join(skill.path, "SKILL.md")}`)
-            .join("\n"),
+          catalog.map((skill) => `${skill.name}: ${join(skill.path, "SKILL.md")}`).join("\n"),
       ],
     };
   }
   if (harness === "claude") {
-    const plugin = await projectSkillPlugin(
-      join(repoRoot, "integrations", "worker-skills"),
-      stateDir,
-      catalog,
-    );
-    return { args: ["--plugin-dir", plugin] };
+    // A skills-only plugin: no identity, hooks or MCP from the operator seat.
+    return { args: ["--plugin-dir", join(repoRoot, "integrations", "worker-skills")] };
   }
   if (harness === "pi") {
     const paths = clankieSkillRoots({
       repoRoot,
       agentDir: getAgentDir(),
       home: homedir(),
-      skills: settings,
       ...(cwd === undefined ? {} : { cwd }),
     }).filter(existsSync);
     return { args: ["--no-skills", ...paths.flatMap((path) => ["--skill", path])] };
@@ -103,9 +88,7 @@ export async function workerSkills(
   );
   // Keep personal tool skills (and system skills), with bundle names winning.
   const bundled: readonly string[] = [...catalog.map((skill) => skill.name), ...mergedLeadershipSkills];
-  for (const skill of catalog) {
-    if (skill.included) await symlink(skill.path, join(overlay, "skills", skill.name));
-  }
+  for (const skill of catalog) await symlink(skill.path, join(overlay, "skills", skill.name));
   for (const name of await readdir(join(codexHome, "skills")).catch(() => [])) {
     if (!bundled.includes(name))
       await symlink(join(codexHome, "skills", name), join(overlay, "skills", name));

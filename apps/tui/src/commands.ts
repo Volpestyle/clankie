@@ -332,7 +332,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           formatSeatPlan(plan),
           "",
           `Launch from a terminal: clankie ${harness} ${args.map((value) => JSON.stringify(value)).join(" ")}`,
-          "Native permissions remain owner decisions. /skills controls bundled skill selection.",
+          "Native permissions remain owner decisions. /skills lists the shipped skills.",
         ].join("\n"),
         "success",
       );
@@ -1189,61 +1189,19 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "skills",
       aliases: [],
-      description: "Choose Clankie's bundled working skills",
-      argumentHint: "[opinionated on|off | exclude NAME | include NAME]",
-      takesArgument: true,
-      async run(argument, shell): Promise<void> {
-        if (!settings || !context.repoRoot) {
-          shell.insertCommandResult("/skills", "Skill settings are unavailable.", "error");
+      description: "List the skills shipped with Clankie",
+      takesArgument: false,
+      async run(_argument, shell): Promise<void> {
+        if (!context.repoRoot) {
+          shell.insertCommandResult("/skills", "The shipped skill catalog is unavailable.", "error");
           return;
         }
-        const options = { settings, repoRoot: context.repoRoot };
-        const words = argument.trim().split(/\s+/u).filter(Boolean);
-        if (words.length > 0) {
-          const result = await runSkillsCommand(words, options);
-          shell.insertCommandResult(
-            "/skills",
-            `${result.catalog.map((skill) => `${skill.included ? "✓" : "○"} ${skill.name} (${skill.class})`).join("\n")}\n\n${result.applies}`,
-            "success",
-          );
-          return;
-        }
-        const flow = shell.setupFlow;
-        flow.begin("skills");
-        try {
-          for (;;) {
-            const result = await runSkillsCommand([], options);
-            const choice = await flow.readSelect({
-              message: "Bundled skills · product/tool skills are always on",
-              options: [
-                {
-                  value: "opinionated",
-                  label: `Opinionated skills: ${result.skills.opinionated ? "on" : "off"}`,
-                  hint: "Toggle the whole class",
-                },
-                ...result.catalog
-                  .filter((skill) => skill.class === "opinionated")
-                  .map((skill) => ({
-                    value: skill.name,
-                    label: `${skill.included ? "✓" : "○"} ${skill.name}`,
-                    hint: result.skills.exclude.includes(skill.name)
-                      ? "excluded"
-                      : "included when opinionated is on",
-                  })),
-              ],
-              statusActions: [{ value: "done", label: "Done", hint: "applies to new sessions and hires" }],
-            });
-            if (!choice || choice === "done") break;
-            await runSkillsCommand(
-              choice === "opinionated"
-                ? ["opinionated", result.skills.opinionated ? "off" : "on"]
-                : [result.skills.exclude.includes(choice) ? "include" : "exclude", choice],
-              options,
-            );
-          }
-        } finally {
-          flow.end();
-        }
+        const result = await runSkillsCommand([], { repoRoot: context.repoRoot });
+        shell.insertCommandResult(
+          "/skills",
+          `${result.catalog.map((skill) => skill.name).join("\n")}\n\nEvery shipped skill is always on.`,
+          "success",
+        );
       },
     },
     {

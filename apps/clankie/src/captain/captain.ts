@@ -540,7 +540,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     skillBundle: {
       repoRoot: options.repoRoot,
       stateDir: options.stateDir,
-      settings: async () => (await settings()).skills,
     },
     runner: herdrRunner,
     // A pane Clankie did not hire reports nothing on settling; its own transcript holds its last word.
@@ -1080,7 +1079,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         agentDir: getAgentDir(),
         repoRoot: options.repoRoot,
         home: homedir(),
-        skills: currentSettings.skills,
         quieted: quietSkills,
         systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
         noExtensions: true,

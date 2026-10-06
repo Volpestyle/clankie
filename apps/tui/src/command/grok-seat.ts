@@ -4,7 +4,7 @@ import { globSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { bundledSkills, defaultSettingsPath, SettingsStore } from "@clankie/settings";
+import { bundledSkills } from "@clankie/settings";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { readHerdrSeatTranscript, SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import {
@@ -72,7 +72,6 @@ export async function planGrokSeat(
     },
     options,
   );
-  const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
   const sessionId = previous?.sessionId ?? randomUUID();
   return {
     command,
@@ -86,7 +85,7 @@ export async function planGrokSeat(
       ...(previous ? ["--resume", sessionId] : ["--session-id", sessionId]),
     ],
     plugin: { source: "skill-paths", path: join(options.repoRoot, ".agents", "skills") },
-    skills: bundledSkills(options.repoRoot, selection),
+    skills: bundledSkills(options.repoRoot),
     channel: true,
     sessionId,
     resumed: !!previous,
@@ -139,7 +138,6 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
   };
   delete childEnv.CLANKIE_SEAT_PARENT_ARGV;
   const context = `${prompt}\n\n${memory}\n\nAvailable Clankie skills (read the relevant SKILL.md before using it):\n${plan.skills
-    .filter((skill) => skill.included)
     .map((skill) => `${skill.name}: ${join(skill.path, "SKILL.md")}`)
     .join("\n")}`;
   let child: ChildProcess | undefined, native: GrokNativeController | undefined;

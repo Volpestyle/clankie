@@ -328,18 +328,13 @@ export function prepare(root, test, config, { boundary: framing, repoRoot = repo
   const instructions =
     config.instructionsText ??
     (config.instructions ? readFileSync(join(repo, config.instructions), "utf8") : "");
-  // Same classifier as `clankie skills opinionated on|off` and hire_agent's
-  // bundled/plain override; unlike workerSkills, copy files and never link state.
-  const catalog =
-    config.skills === "none"
-      ? []
-      : bundledSkills(repoRoot, { opinionated: config.skills === "bundled", exclude: [] }).filter(
-          (s) => s.included,
-        );
+  // Every shipped skill, as a hire receives them; unlike workerSkills, copy
+  // files and never link state.
+  const catalog = config.skills === "none" ? [] : bundledSkills(repoRoot);
   const skills = catalog.map((skill) => {
     const path = join(seed, ".agents", "skills", skill.name);
     cpSync(skill.path, path, { recursive: true, dereference: true });
-    return { name: skill.name, class: skill.class, sha256: hash(readFileSync(join(path, "SKILL.md"))) };
+    return { name: skill.name, sha256: hash(readFileSync(join(path, "SKILL.md"))) };
   });
   const boundary =
     framing ??
@@ -473,12 +468,7 @@ export function campaignInputs(options, { repoRoot = repo, selectedCases = cases
   return {
     configurations: [...new Set(options.matrix.map((cell) => cell.config))].sort().map((name) => {
       const definition = definitions[name];
-      const skills =
-        definition.skills === "none"
-          ? []
-          : bundledSkills(repoRoot, { opinionated: definition.skills === "bundled", exclude: [] }).filter(
-              (skill) => skill.included,
-            );
+      const skills = definition.skills === "none" ? [] : bundledSkills(repoRoot);
       return {
         name,
         definition,
@@ -487,7 +477,6 @@ export function campaignInputs(options, { repoRoot = repo, selectedCases = cases
         ),
         skills: skills.map((skill) => ({
           name: skill.name,
-          class: skill.class,
           content: contentTree(skill.path),
         })),
       };
@@ -793,7 +782,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (process.argv.includes("--help")) {
       console.log(
-        "node scripts/evals/run.mjs [--harness claude|codex] [--configs bare,current,plain,trimmed] [--cases smoke|all|incidents|social|code|heldout|ID,...] [--reps 5] [--max-runs 15] [--timeout 120] [--rework 0] [--token-budget 2000000] [--pause SECONDS] [--stop-at five_hour=0.8,seven_day=0.5] [--model NAME] [--cli PATH] [--concurrency N] [--resume CAMPAIGN_DIR] [--accounts LABEL,...] [--dry-run]\nDefaults: three smoke cases, current arm, five reps; no automatic rework. Budgets count CLI calls, not cases. The run stops when the subscription's reported usage reaches --stop-at.",
+        "node scripts/evals/run.mjs [--harness claude|codex] [--configs bare,current,trimmed] [--cases smoke|all|incidents|social|code|heldout|ID,...] [--reps 5] [--max-runs 15] [--timeout 120] [--rework 0] [--token-budget 2000000] [--pause SECONDS] [--stop-at five_hour=0.8,seven_day=0.5] [--model NAME] [--cli PATH] [--concurrency N] [--resume CAMPAIGN_DIR] [--accounts LABEL,...] [--dry-run]\nDefaults: three smoke cases, current arm, five reps; no automatic rework. Budgets count CLI calls, not cases. The run stops when the subscription's reported usage reaches --stop-at.",
       );
     } else {
       const options = plan(process.argv.slice(2));

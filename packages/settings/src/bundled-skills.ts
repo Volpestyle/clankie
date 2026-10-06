@@ -1,52 +1,34 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, realpath, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { SkillsSettings } from "./schema.ts";
 
-/** The manifest survives release dereferencing: classification never depends on symlinks. */
-export function bundledSkills(
-  repoRoot: string,
-  settings: SkillsSettings = { opinionated: true, exclude: [] },
-) {
-  const manifestPath = join(repoRoot, "vendor", "opinionated-skills.json");
-  const manifest = existsSync(manifestPath)
-    ? (JSON.parse(readFileSync(manifestPath, "utf8")) as { skills: Record<string, string> })
-    : { skills: {} };
+/** Every skill authored in `.agents/skills` ships with this body and is always on. */
+export function bundledSkills(repoRoot: string): { readonly name: string; readonly path: string }[] {
   const root = join(repoRoot, ".agents", "skills");
   return (existsSync(root) ? readdirSync(root) : [])
     .filter((name) => existsSync(join(root, name, "SKILL.md")))
     .sort()
-    .map((name) => {
-      const skillClass = Object.hasOwn(manifest.skills, name) ? "opinionated" : "product";
-      return {
-        name,
-        class: skillClass,
-        path: resolve(root, name),
-        included: skillClass === "product" || (settings.opinionated && !settings.exclude.includes(name)),
-      };
-    });
+    .map((name) => ({ name, path: resolve(root, name) }));
 }
 
 /** Fresh per-launch projections cannot change a running session's catalog. */
 async function projectSkillDirectory(
   stateDir: string,
-  skills: readonly { name: string; path: string; included: boolean }[],
+  skills: readonly { name: string; path: string }[],
 ): Promise<string> {
   const parent = join(stateDir, "skill-projections");
   await mkdir(parent, { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(join(parent, "launch-")));
   await mkdir(join(root, "skills"));
-  for (const skill of skills) {
-    if (skill.included) await symlink(skill.path, join(root, "skills", skill.name));
-  }
+  for (const skill of skills) await symlink(skill.path, join(root, "skills", skill.name));
   return root;
 }
 
-/** A plugin cannot filter at runtime. Project its components and only selected skills. */
+/** A plugin cannot filter at runtime. Project its components and only the given skills. */
 export async function projectSkillPlugin(
   source: string,
   stateDir: string,
-  skills: readonly { name: string; path: string; included: boolean }[],
+  skills: readonly { name: string; path: string }[],
 ): Promise<string> {
   const root = await projectSkillDirectory(stateDir, skills);
   for (const name of await readdir(source)) {

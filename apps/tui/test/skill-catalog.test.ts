@@ -97,10 +97,7 @@ it("discovers the shipped tidy declaration and submits /tidy as a visible stoppa
   temporaryDirectories.push(root);
   const repo = join(root, "repo"),
     home = join(root, "home");
-  const file = await readFile(
-    new URL("../../../vendor/opinionated-skills/agent/tidy/SKILL.md", import.meta.url),
-    "utf8",
-  );
+  const file = await readFile(new URL("../../../.agents/skills/tidy/SKILL.md", import.meta.url), "utf8");
   await mkdir(join(repo, ".agents", "skills", "tidy"), { recursive: true });
   await writeFile(join(repo, ".agents", "skills", "tidy", "SKILL.md"), file);
   const skills = await discoverClankieSkills(repo, { HOME: home, XDG_CONFIG_HOME: join(root, "config") });

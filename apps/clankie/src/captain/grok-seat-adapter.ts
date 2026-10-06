@@ -82,7 +82,6 @@ export async function discoverGrok(env: NodeJS.ProcessEnv = process.env) {
 }
 function grokSkillContext(repoRoot: string) {
   return bundledSkills(repoRoot)
-    .filter((skill) => skill.included)
     .map((skill) => `${skill.name}: ${join(skill.path, "SKILL.md")}`)
     .join("\n");
 }

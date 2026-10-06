@@ -1071,8 +1071,6 @@ export const SpawnOperatorSeatSchema = z
      * own Codex settings, so it needs no flag; other harnesses fail typed.
      */
     chrome: z.boolean().optional(),
-    /** Local hire's opinionated skill condition; product/tool skills remain present. */
-    skills: z.enum(["bundled", "plain"]).optional(),
     /**
      * The Herdr fleet it starts on (ADR 0184): a registered machine's name.
      * Absent means the local default fleet; the seat id comes back as
@@ -1136,6 +1134,10 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
       seat: OperatorFleetSeatSchema,
       control: SeatControlModeSchema.optional(),
       profile: HireProfileSchema.optional(),
+      /**
+       * Retired opinionated-skill condition. Bodies no longer send it; kept so
+       * clients still parse spawn results from an older body.
+       */
       skills: z
         .object({
           mode: z.enum(["bundled", "plain"]),

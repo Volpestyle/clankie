@@ -1,4 +1,4 @@
-import { bundledSkills, projectSkillPlugin, SettingsStore, defaultSettingsPath } from "@clankie/settings";
+import { bundledSkills, projectSkillPlugin } from "@clankie/settings";
 /**
  * `clankie claude` — land in Claude Code as Clankie
  * ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
@@ -241,16 +241,14 @@ function herdrFailureText(caught: unknown): string {
  * bundled copies, so the seat lists each skill once. Only plain `claude` is
  * checked: a numbered command's alias may point at another profile we cannot see.
  */
-function withoutUserSkills<T extends { readonly name: string; readonly included: boolean }>(
+function withoutUserSkills<T extends { readonly name: string }>(
   skills: readonly T[],
   command: string,
   env: NodeJS.ProcessEnv,
 ): T[] {
   if (command !== "claude") return [...skills];
   const root = join(env.CLAUDE_CONFIG_DIR?.trim() || join(env.HOME ?? homedir(), ".claude"), "skills");
-  return skills.map((skill) =>
-    skill.included && existsSync(join(root, skill.name, "SKILL.md")) ? { ...skill, included: false } : skill,
-  );
+  return skills.filter((skill) => !existsSync(join(root, skill.name, "SKILL.md")));
 }
 
 export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): Promise<SeatPlan> {
@@ -298,8 +296,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
       `The Clankie plugin is not bundled at ${source}; update this install or pass --plugin-dir PATH.`,
     );
   }
-  const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
-  const skills = withoutUserSkills(bundledSkills(options.repoRoot, selection), command, env);
+  const skills = withoutUserSkills(bundledSkills(options.repoRoot), command, env);
   const plugin: SeatPlan["plugin"] = {
     source: "plugin-dir",
     path: await projectSkillPlugin(source, join(clankieStateHome(env), "clankie"), skills),
