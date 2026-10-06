@@ -2,10 +2,6 @@
 
 Vendored code and instructions:
 
-- [Opinionated process skills](vendor/opinionated-skills.json) — MIT, authored in
-  Volpestyle/skills. The snapshot retains [its license](vendor/opinionated-skills/LICENSE);
-  downloadable releases include it as `licenses/opinionated-skills-MIT.txt`.
-
 - [`apps/vox`](apps/vox/README.md) — Clankie's recovered native media package,
   AGPL-3.0-or-later. See its [license](apps/vox/LICENSE),
   [provenance](apps/vox/PROVENANCE.md), and

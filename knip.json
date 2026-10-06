@@ -4,13 +4,14 @@
     "docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs",
     "docs/testing/2026-09-26-hosted-connections/flows/serve.mts",
     "docs/testing/2026-09-26-work-items/flows/serve.mts",
-    "vendor/opinionated-skills/**",
     "integrations/codex-plugin/skills/**"
   ],
   "workspaces": {
     ".": {
       "entry": [
         "scripts/evals/run.mjs",
+        ".agents/skills/shared-checkout/scripts/land.mjs",
+        ".agents/skills/shared-checkout/scripts/land.test.mjs",
         "scripts/evals/codex.mjs",
         "scripts/evals/report.mjs",
         "docs/testing/2026-09-27-remote-fleet/connect/enroll-clankie.mjs",
