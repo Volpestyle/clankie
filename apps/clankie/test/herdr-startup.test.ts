@@ -9,8 +9,9 @@ import {
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
 
-// Exercise real subprocess completion and watchdog termination at one tenth
-// of their production time. The long/short deadline ratio stays unchanged.
+// Scale the agent commands whose watchdogs are under test to one tenth of
+// production time. Setup queries retain their real deadline; the agent
+// long/short deadline ratio stays unchanged.
 vi.mock("node:child_process", async (original) => {
   const child = await original<typeof import("node:child_process")>();
   return {
@@ -27,7 +28,9 @@ vi.mock("node:child_process", async (original) => {
         {
           ...options,
           encoding: "utf8",
-          ...(command === "herdr" && options.timeout !== undefined ? { timeout: options.timeout / 10 } : {}),
+          ...(command === "herdr" && args[0] === "agent" && options.timeout !== undefined
+            ? { timeout: options.timeout / 10 }
+            : {}),
         },
         callback,
       ),
@@ -41,7 +44,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fakeHerdr(start: string) {
+async function fakeHerdr(start: string, worktreeDelay = 0) {
   const root = await mkdtemp(join(tmpdir(), "clankie-herdr-start-"));
   roots.push(root);
   await writeFile(
@@ -54,8 +57,10 @@ fs.appendFileSync(root + "/calls", JSON.stringify(args) + "\\n");
 // This temp directory is not a Git worktree. Keep Herdr's real error shape
 // so hire placement uses its exact cwd identity before native startup.
 if (args[0] === "worktree" && args[1] === "list") {
-  console.error(JSON.stringify({error:{code:"not_git_worktree",message:"not a Git worktree"}}));
-  process.exitCode = 1;
+  setTimeout(() => {
+    console.error(JSON.stringify({error:{code:"not_git_worktree",message:"not a Git worktree"}}));
+    process.exitCode = 1;
+  }, ${worktreeDelay});
 }
 else if (args[0] === "api" && args[1] === "snapshot") console.log(JSON.stringify({result:{snapshot:{
   workspaces:[{workspace_id:"w1",label:"Fixture",number:1}],
@@ -90,7 +95,7 @@ else console.log("{}");
 }
 
 it("lets Herdr report a pi session after the short command deadline, without restarting the agent", async () => {
-  const fake = await fakeHerdr('setTimeout(() => console.log("{}"), 550);');
+  const fake = await fakeHerdr('setTimeout(() => console.log("{}"), 550);', 550);
   try {
     const result = await fake.store.spawnSeat({
       schemaVersion: 1,
