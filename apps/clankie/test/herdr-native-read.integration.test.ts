@@ -1,6 +1,7 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { readFleet } from "../src/captain/herdr-census.ts";
 import { nativeHerdrRead } from "../src/herdr-native-read.ts";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
@@ -23,6 +24,19 @@ it.skipIf(process.platform !== "darwin")(
         "codex",
         "--state",
         "idle",
+        "--agent-session-id",
+        "abcdef00-1234-4567-8901-abcdef123456",
+      );
+      await herdr.cli(
+        "pane",
+        "report-agent-session",
+        herdr.pane,
+        "--source",
+        "herdr:codex",
+        "--agent",
+        "codex",
+        "--agent-session-id",
+        "abcdef00-1234-4567-8901-abcdef123456",
       );
       for (const args of [
         ["agent", "list"],
@@ -35,6 +49,35 @@ it.skipIf(process.platform !== "darwin")(
         const reply = JSON.parse((await nativeHerdrRead(binding, args))!);
         expect(reply.result).toEqual(cli.result);
       }
+      // A remote census uses the real complete snapshot for both occupants and
+      // placement. Each read is fresh; revocation must not recover via agent.list.
+      const reads: string[][] = [];
+      let available = true;
+      const fleets = [
+        {
+          id: "owned",
+          host: "owned-fixture",
+          session: "default",
+          run: async (args: readonly string[]) => {
+            reads.push([...args]);
+            return (await nativeHerdrRead(
+              available ? binding : { ...binding, socketPath: join(herdr.root, "missing.sock") },
+              args,
+            ))!;
+          },
+        },
+      ];
+      const first = await readFleet({ localAvailable: false, fleets });
+      expect(reads).toEqual([["api", "snapshot"]]);
+      expect(first.seats.some((seat) => seat.paneId === `owned/${herdr.pane}`)).toBe(true);
+      await herdr.cli("agent", "rename", herdr.pane, "fresh-snapshot-name");
+      const second = await readFleet({ localAvailable: false, fleets });
+      expect(second.seats.find((seat) => seat.paneId === `owned/${herdr.pane}`)?.renamed?.name).toBe(
+        "fresh-snapshot-name",
+      );
+      available = false;
+      expect((await readFleet({ localAvailable: false, fleets })).seats).toEqual([]);
+      expect(reads).toEqual(Array.from({ length: 3 }, () => ["api", "snapshot"]));
       const runner = createHerdrWatchRunner(
         undefined,
         async () => {

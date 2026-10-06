@@ -23,6 +23,13 @@ import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
 export interface CaptainOptions {
+  /** Content-free native alert outcome; no raw provider exception or message text. */
+  readonly onHealthAlertDelivery?: (result: {
+    fingerprint: string;
+    conversationId: string;
+    outcome: "submitted" | "unavailable";
+    reason: string;
+  }) => void;
   /** Native room child execution, selected before admission under the original room ceiling. */
   readonly runNativeRoomHandoff?: NativeRoomHandoffExecutor;
   readonly runtimeProvider?: Pick<RuntimeProvider, "heartbeat">;
