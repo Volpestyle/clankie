@@ -335,7 +335,10 @@ function parseHarnessRefresh(input: unknown): NonNullable<RuntimeUpdateResult["h
 }
 
 function errorText(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 1024);
+  return (
+    (error instanceof Error ? error.message : String(error)).replaceAll("\0", "").slice(0, 1024) ||
+    "Unknown update failure"
+  );
 }
 
 export function writeRuntimeUpdate(directory: string, result: RuntimeUpdateResult): void {

@@ -168,6 +168,21 @@ it("failed install leaves old pin and all services untouched", async () => {
   expect(f.calls).toEqual(["stage", "install"]);
   expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
 });
+it.each(["", "\0", "install\0 failure", "x".repeat(2048)])(
+  "keeps failed update records readable for bounded exception text %#",
+  async (message) => {
+    const f = fixture();
+    f.onInstall(() => {
+      throw Error(message);
+    });
+    const result = await executeRuntimeUpdate(f.plan, f);
+    expect(result).toMatchObject({ phase: "failed", reason: "pre-cutover-failed" });
+    expect(result.error).toBe(message.replaceAll("\0", "").slice(0, 1024) || "Unknown update failure");
+    expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
+    expect(f.calls).toEqual(["stage", "install"]);
+    expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
+  },
+);
 it("a dirty pin at admission does not even stage", async () => {
   const f = fixture();
   f.dirty.add(f.plan.runtime);
