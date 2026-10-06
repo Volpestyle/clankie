@@ -3028,8 +3028,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }> {
     const defaultId = conversations.defaultGlobalConversationId();
     const child = fleet.seats.find((seat) => seat.paneId === agent.paneId);
-    if (child && inboundBinding(observedAgent(child)) !== inboundBinding(agent))
-      throw new Error("Reporting native occupant changed in the census");
+    const reporterBinding = inboundBinding(agent);
+    if (!child || reporterBinding === undefined || inboundBinding(observedAgent(child)) !== reporterBinding)
+      throw new Error("Reporting native occupant is unavailable or changed in the census");
     const adopted = herdrWatches.nativeOwner(agent);
     if (adopted) {
       if (conversations.conversation(adopted.conversationId))
@@ -3046,7 +3047,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
       };
     }
-    const pane = child?.parentPaneId;
+    const pane = child.parentPaneId;
     const parent =
       pane === undefined
         ? undefined
@@ -3062,7 +3063,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ...(parent === undefined ? {} : { leadSeatId: parent.seatId }),
       },
     });
-    if (!child) return fallback("parent_unavailable");
     if (pane === undefined) return fallback("no_parent");
     if (!parent?.session || parent.paneId === agent.paneId) return fallback("parent_unavailable");
     const source = observedAgent(parent);

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -26,7 +26,9 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture(options: { gone?: boolean; room?: boolean; denied?: boolean; remote?: boolean } = {}) {
+async function fixture(
+  options: { gone?: boolean; room?: boolean; denied?: boolean; remote?: boolean; unadopted?: boolean } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "worker-lead-integration-"));
   const seeded = new ConversationStore(join(root, "conversations"), async () => {});
   const leads: string[] = [];
@@ -63,14 +65,15 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
         }
       : {}),
   };
-  new HireOwners(join(root, "herdr-watches.json.owners.json")).bind(
-    agent.paneId,
-    owner,
-    agent.terminalId,
-    undefined,
-    occupantIdForHerdrSession(agent.session!),
-    JSON.stringify([options.remote ? "away" : "local", "codex", "native-one"]),
-  );
+  if (!options.unadopted)
+    new HireOwners(join(root, "herdr-watches.json.owners.json")).bind(
+      agent.paneId,
+      owner,
+      agent.terminalId,
+      undefined,
+      occupantIdForHerdrSession(agent.session!),
+      JSON.stringify([options.remote ? "away" : "local", "codex", "native-one"]),
+    );
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
   vi.spyOn(HerdrWatchStore.prototype, "deliverToSeat").mockResolvedValue({
@@ -105,6 +108,11 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
     cwd: root,
   };
   const censusAgent = structuredClone(wireAgent);
+  const snapshotState: {
+    fault?: "missing" | "malformed" | "empty" | "session_missing" | "session_malformed" | "failed";
+    atRead?: number;
+    reads: number;
+  } = { reads: 0 };
   // Raw Herdr replies exercise the real census and session binding. Mocking
   // readFleet can omit session metadata and mask sender-binding faults.
   const herdrResponse = (args: readonly string[]) => {
@@ -113,9 +121,30 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
     else if (args[0] === "agent" && args[1] === "get") result = { agent: wireAgent };
     else if (args[0] === "pane" && args[1] === "list") result = { panes: [wireAgent] };
     else if (args[0] === "workspace" && args[1] === "list") result = { workspaces: [] };
-    else if (args[0] === "api" && args[1] === "snapshot")
-      result = { snapshot: { workspaces: [], tabs: [], panes: [wireAgent] } };
-    else throw new Error(`Unexpected external Herdr command: ${args.join(" ")}`);
+    else if (args[0] === "api" && args[1] === "snapshot") {
+      snapshotState.reads++;
+      const fault =
+        snapshotState.atRead === undefined || snapshotState.reads === snapshotState.atRead
+          ? snapshotState.fault
+          : undefined;
+      if (fault === "failed") throw new Error("Fresh snapshot failed");
+      const censusRow: Record<string, unknown> = structuredClone(censusAgent);
+      if (fault === "session_missing") delete censusRow.agent_session;
+      if (fault === "session_malformed")
+        censusRow.agent_session = { source: "herdr:codex", kind: "id", value: "" };
+      result = {
+        snapshot: {
+          workspaces: [],
+          tabs: [],
+          panes: [wireAgent],
+          ...(fault === "missing"
+            ? {}
+            : {
+                agents: fault === "malformed" ? {} : fault === "empty" ? [] : [censusRow],
+              }),
+        },
+      };
+    } else throw new Error(`Unexpected external Herdr command: ${args.join(" ")}`);
     return JSON.stringify({ result });
   };
   const remoteRun = vi.fn(async (args: readonly string[]) => herdrResponse(args));
@@ -168,6 +197,7 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
     remoteRun,
     censusRun,
     censusAgent,
+    snapshotState,
   };
 }
 
@@ -251,7 +281,7 @@ it.each([false, true])(
       readFileSync(join(f.root, "conversations", f.leads[0]!, "meta.json"), "utf8"),
     );
     expect(persisted.inboundAcceptances?.[receipt.id]).toBeUndefined();
-    if (remote) expect(f.remoteRun).toHaveBeenCalledWith(["agent", "list"]);
+    if (remote) expect(f.remoteRun).toHaveBeenCalledWith(["api", "snapshot"]);
     else expect(f.censusRun).toHaveBeenCalledWith("herdr", ["agent", "list"]);
 
     // A known pre-send refusal does not poison the delivery ID. Exact matching
@@ -271,6 +301,80 @@ it.each([false, true])(
     expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
   },
 );
+
+it.each(
+  (["missing", "malformed", "empty", "session_missing", "session_malformed", "failed"] as const).flatMap(
+    (fault) => (["adopted", "owner_removed", "unadopted"] as const).map((route) => ({ fault, route })),
+  ),
+)(
+  "a remote $route reporter with $fault fresh census refuses before persistence or fallback",
+  async ({ fault, route }) => {
+    const f = await fixture({
+      remote: true,
+      gone: route === "owner_removed",
+      unadopted: route === "unadopted",
+    });
+    const receipt = await delivery(f.captain, f.agent.paneId);
+    const lead = f.captain.pollSeatEvents(100, undefined, f.leads[0]);
+    const global = f.captain.pollSeatEvents(100, undefined, "global-default");
+    // Authenticated agent/get remains exact. It cannot replace a failed or
+    // incomplete fresh inventory, even when an original adoption is retained.
+    f.snapshotState.fault = fault;
+    expect(
+      await f.captain.receiveFleetSeatMessage(f.agent.paneId, "No current census proof", receipt),
+    ).toMatchObject({
+      received: false,
+      deliveryStage: "unavailable",
+    });
+    expect(await lead).toEqual([]);
+    expect(await global).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
+    for (const conversationId of readdirSync(join(f.root, "conversations"))) {
+      const path = join(f.root, "conversations", conversationId, "meta.json");
+      if (!existsSync(path)) continue;
+      const persisted = JSON.parse(readFileSync(path, "utf8"));
+      expect(persisted.inboundAcceptances?.[receipt.id]).toBeUndefined();
+    }
+    expect(f.remoteRun).toHaveBeenCalledWith(["api", "snapshot"]);
+  },
+);
+
+it("a remote reporter disappearing only at route revalidation refuses before persistence", async () => {
+  const f = await fixture({ remote: true });
+  const receipt = await delivery(f.captain, f.agent.paneId);
+  const lead = f.captain.pollSeatEvents(100, undefined, f.leads[0]);
+  const global = f.captain.pollSeatEvents(100, undefined, "global-default");
+  f.snapshotState.fault = "empty";
+  f.snapshotState.atRead = f.snapshotState.reads + 2;
+  // Initial routing has exact census proof. The refresh across asynchronous
+  // control discovery loses that reporter; later recovery cannot authorize it.
+  expect(
+    await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Lost during revalidation", receipt),
+  ).toMatchObject({
+    received: false,
+    deliveryStage: "unavailable",
+  });
+  expect(await lead).toEqual([]);
+  expect(await global).toEqual([]);
+  const persisted = JSON.parse(readFileSync(join(f.root, "conversations", f.leads[0]!, "meta.json"), "utf8"));
+  expect(persisted.inboundAcceptances?.[receipt.id]).toBeUndefined();
+  expect(f.execute).not.toHaveBeenCalled();
+});
+
+it("an unadopted remote reporter with a valid census and no parent reaches global-default", async () => {
+  const f = await fixture({ remote: true, unadopted: true });
+  const receipt = await delivery(f.captain, f.agent.paneId);
+  const poll = f.captain.pollSeatEvents(2000, undefined, "global-default");
+  expect(
+    await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Valid unparented report", receipt),
+  ).toMatchObject({
+    received: true,
+    deliveryStage: "stored",
+  });
+  const [event] = await poll;
+  expect(event).toMatchObject({ conversationId: "global-default", kind: "message" });
+  await f.captain.acknowledgeSeatEvent(event!.id, "global-default");
+});
 
 it("message_seat adopts another conversation's worker before its immediate report and persists it across restart", async () => {
   const f = await fixture();
