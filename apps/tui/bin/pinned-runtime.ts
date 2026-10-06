@@ -1,5 +1,6 @@
 /** Shared pinned checkout/install mechanics. Importing this module has no effects. */
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import {
   existsSync,
   lstatSync,
@@ -32,6 +33,67 @@ export function pinnedCommit(checkout: string, ref: string, run: InstallCommand 
   const commit = run("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], checkout);
   if (!/^[a-f0-9]{40,64}$/u.test(commit)) throw new Error("Git did not resolve an exact commit");
   return commit;
+}
+
+/** Branch updates use the fetched origin tip, never the owner's local branch. */
+export async function updateCommit(
+  checkout: string,
+  ref: string,
+  oldCommit: string,
+  run: (command: string, args: readonly string[], cwd: string) => string | Promise<string> = async (
+    command,
+    args,
+    cwd,
+  ) => {
+    const { stdout } = await promisify(execFile)(command, [...args], {
+      cwd,
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return stdout.trim();
+  },
+): Promise<{
+  newCommit: string;
+  resolvedRef: string;
+  warning?: "older-than-current-pin" | "diverged-from-current-pin";
+}> {
+  if (!ref || ref.length > 256 || ref.startsWith("-") || ref.includes("\0") || /\s/u.test(ref))
+    throw Error("Invalid runtime ref");
+  let resolvedRef = ref;
+  if (ref !== "HEAD" && !/^[a-f0-9]{40,64}$/u.test(ref) && !ref.startsWith("refs/tags/")) {
+    const branch = ref.replace(/^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/u, "");
+    await run("git", ["check-ref-format", `refs/heads/${branch}`], checkout);
+    resolvedRef = `refs/remotes/origin/${branch}`;
+    // An explicit refspec also handles clones with a narrow fetch configuration.
+    // Failed fetches refuse admission; a cached remote or local tip is not a fallback.
+    await run("git", ["fetch", "--no-tags", "origin", `+refs/heads/${branch}:${resolvedRef}`], checkout);
+  }
+  const newCommit = await run(
+    "git",
+    ["rev-parse", "--verify", "--end-of-options", `${resolvedRef}^{commit}`],
+    checkout,
+  );
+  if (!/^[a-f0-9]{40,64}$/u.test(newCommit)) throw Error("Git did not resolve an exact commit");
+  const ancestor = async (older: string, newer: string) => {
+    try {
+      await run("git", ["merge-base", "--is-ancestor", older, newer], checkout);
+      return true;
+    } catch (error) {
+      const failed = error as { status?: number; code?: number };
+      if (failed.status === 1 || failed.code === 1) return false;
+      throw error;
+    }
+  };
+  const warning =
+    newCommit === oldCommit
+      ? undefined
+      : (await ancestor(newCommit, oldCommit))
+        ? "older-than-current-pin"
+        : (await ancestor(oldCommit, newCommit))
+          ? undefined
+          : "diverged-from-current-pin";
+  return { newCommit, resolvedRef, ...(warning === undefined ? {} : { warning }) };
 }
 
 export function assertPinnedRuntime(

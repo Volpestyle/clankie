@@ -56,10 +56,14 @@ for (const name of expected) {
 const { readPrivateJson, object, boundedString, commitString, operationId } =
   await import("./update-files.ts");
 const { installCommand } = await import("./pinned-runtime.ts");
-const { executeRuntimeUpdate, parseServiceReceipt, readRuntimeUpdate } = await import("./runtime-update.ts");
+const { executeRuntimeUpdate, runtimeUpdateServices, readRuntimeUpdate, parseUpdateInitiator } =
+  await import("./runtime-update.ts");
 const data = object(readPrivateJson(join(directory, "plan.json")));
 if (
-  Object.keys(data).sort().join(",") !==
+  Object.keys(data)
+    .filter((key) => !["resolvedRef", "warning", "initiator"].includes(key))
+    .sort()
+    .join(",") !==
   ["id", "ref", "checkout", "runtime", "home", "directory", "oldCommit", "newCommit", "oldInstanceId"]
     .sort()
     .join(",")
@@ -75,6 +79,9 @@ const plan = {
   oldCommit: commitString(data.oldCommit),
   newCommit: commitString(data.newCommit),
   oldInstanceId: operationId(data.oldInstanceId),
+  ...(data.resolvedRef === undefined ? {} : { resolvedRef: boundedString(data.resolvedRef, 512) }),
+  ...(data.warning === undefined ? {} : { warning: data.warning }),
+  ...(data.initiator === undefined ? {} : { initiator: parseUpdateInitiator(data.initiator) }),
 };
 if (
   plan.directory !== directory ||
@@ -86,11 +93,15 @@ if (
 const active = object(readPrivateJson(join(dirname(directory), "active", "operation.json")));
 const accepted = readRuntimeUpdate(directory);
 if (
+  ![undefined, "older-than-current-pin", "diverged-from-current-pin"].includes(plan.warning) ||
   active.id !== plan.id ||
   accepted.id !== plan.id ||
   accepted.phase !== "scheduled" ||
   accepted.oldCommit !== plan.oldCommit ||
-  accepted.newCommit !== plan.newCommit
+  accepted.newCommit !== plan.newCommit ||
+  accepted.resolvedRef !== plan.resolvedRef ||
+  accepted.warning !== plan.warning ||
+  JSON.stringify(accepted.initiator) !== JSON.stringify(plan.initiator)
 )
   throw Error("Update is not accepted for execution");
 // A copied helper is one-shot even if invoked twice. A crash requires reconciliation, never replay.
@@ -120,20 +131,7 @@ const result = await executeRuntimeUpdate(plan, {
     writeFileSync(receipt, JSON.stringify(result) + "\n", { mode: 0o600, flag: "wx" });
     return { ok: result.ok === true, receipt };
   },
-  services: async (runtime, action) => {
-    let outcome;
-    try {
-      outcome = await cli(runtime, [action, "all"]);
-    } catch (error) {
-      // Nonzero supervisor exits may still carry exact per-service failure receipts.
-      if (typeof error?.stdout !== "string") throw Error("Service result unavailable");
-      outcome = JSON.parse(error.stdout);
-    }
-    const receipt = parseServiceReceipt(outcome);
-    if (action === "down" || !receipt.ok) return receipt;
-    const status = object(await cli(runtime, ["update", "status"]));
-    return parseServiceReceipt({ ...receipt, runtime: status.runtime });
-  },
+  services: (runtime, action) => runtimeUpdateServices(runtime, action, cli),
 });
 process.stdout.write(JSON.stringify(result) + "\n");
 process.exitCode = result.phase === "healthy" && result.harnessRefresh?.ok !== false ? 0 : 1;

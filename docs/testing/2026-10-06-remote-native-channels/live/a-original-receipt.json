@@ -1,0 +1,20 @@
+{
+  "key": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\",\"new\"]",
+  "entry": {
+    "fingerprint": "0f48da6277ef4186a6c2c781fc0abe097e242b6b0ad2927eff34f2f2f17f30cb",
+    "beforeIds": [],
+    "messageId": "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+    "remoteAdmission": {
+      "target": {
+        "fleet": "pc",
+        "host": "volpe@supedupsilly",
+        "session": "default",
+        "shell": "powershell"
+      }
+    },
+    "remoteLaunchCommitted": true,
+    "paneId": "pc/wB:p2",
+    "agentName": "tess1527-a-f626-tess-202610-b3ba"
+  },
+  "privateReservationNonceOmitted": true
+}

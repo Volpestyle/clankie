@@ -10,14 +10,18 @@ export function runtimeUpdateTools(updater: RuntimeUpdater | undefined, turn: Tu
   const authority = () => {
     if (turn.shell !== true) throw Error("Machine tools are unavailable for this turn");
     const source = captureConversationAuthority(turn.conversationAuthority);
-    return { guard: () => assertConversationAuthority(source), current: source.current };
+    return {
+      guard: () => assertConversationAuthority(source),
+      current: source.current,
+      initiator: { kind: "conversation" as const, conversationId: source.owner.conversationId },
+    };
   };
   return [
     defineTool({
       name: "update_runtime",
       label: "Update Clankie",
       description:
-        "Stage and install local landed main (or ref), then detach a guarded restart. Accepted means pending, not healthy. Read runtime_update_status on the next turn; never repeat an uncertain request.",
+        "Fetch and install origin/main (or an explicit branch, SHA or refs/tags/... ref), then detach a guarded restart. The result names the exact target commit and warns of rollback or divergence. Accepted means pending, not healthy. Read runtime_update_status on the next turn; never repeat an uncertain request.",
       parameters: Type.Object(
         { ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) },
         { additionalProperties: false },

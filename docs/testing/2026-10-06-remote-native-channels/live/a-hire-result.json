@@ -1,0 +1,13 @@
+{
+  "op": "spawn_seat",
+  "schemaVersion": 1,
+  "result": {
+    "outcome": "failed",
+    "deliveryStage": "uncertain",
+    "reason": "start_unconfirmed",
+    "detail": "Error: unsupported: a remote Codex server takes its environment from its own machine; inspect pane pc/wB:p2; no fallback was started",
+    "control": {
+      "mode": "adapter"
+    }
+  }
+}

@@ -30,6 +30,30 @@ export interface RuntimeUpdatePlan {
   readonly oldCommit: string;
   readonly newCommit: string;
   readonly oldInstanceId: string;
+  readonly resolvedRef?: string;
+  readonly warning?: RuntimeUpdateResult["warning"];
+  readonly initiator?: RuntimeUpdateInitiator;
+}
+export interface RuntimeUpdateInitiator {
+  readonly kind: "operator" | "cli" | "conversation";
+  readonly operatorId?: string;
+  readonly conversationId?: string;
+  /** CLI environment claims are attribution, never admission proof. */
+  readonly claimedConversationId?: string;
+  readonly claimedSeatSessionId?: string;
+}
+export function parseUpdateInitiator(input: unknown): RuntimeUpdateInitiator {
+  const value = object(input);
+  if (!["operator", "cli", "conversation"].includes(String(value.kind)))
+    throw Error("Invalid update initiator");
+  return {
+    kind: value.kind as RuntimeUpdateInitiator["kind"],
+    ...Object.fromEntries(
+      ["operatorId", "conversationId", "claimedConversationId", "claimedSeatSessionId"]
+        .filter((key) => value[key] !== undefined)
+        .map((key) => [key, boundedString(value[key], 256)]),
+    ),
+  };
 }
 export interface RuntimeBootIdentity {
   readonly root: string;
@@ -49,7 +73,7 @@ interface RuntimeServiceReceipt {
   }[];
   readonly runtime?: RuntimeBootIdentity;
 }
-export function parseServiceReceipt(input: unknown): RuntimeServiceReceipt {
+function parseServiceReceipt(input: unknown): RuntimeServiceReceipt {
   const value = object(input);
   if (
     typeof value.ok !== "boolean" ||
@@ -132,10 +156,49 @@ export interface RuntimeUpdateResult {
   readonly serviceReceipts?: readonly RuntimeServiceReceipt[];
   readonly harnessRefresh?: { readonly ok: boolean; readonly result?: unknown; readonly error?: string };
   readonly canary?: RuntimeCanaryResult;
+  readonly resolvedRef?: string;
+  readonly warning?: "older-than-current-pin" | "diverged-from-current-pin";
+  readonly initiator?: RuntimeUpdateInitiator;
+}
+/** Pin cutover leaves the external activity tunnel running under its current owner. */
+export async function runtimeUpdateServices(
+  runtime: string,
+  action: "down" | "restart",
+  cli: (runtime: string, args: readonly string[]) => Promise<unknown>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<RuntimeServiceReceipt> {
+  // This helper is copied without workspace dependencies. Respect the same
+  // image loadout the existing supervisor receives, including disabled activity.
+  const loadout = env.CLANKIE_SERVICES?.trim();
+  const activity = !loadout || loadout.split(",").some((id) => id.trim() === "activity");
+  const targets =
+    action === "down"
+      ? ["activity", "discord-user-session", "discord-bridge", "relay", "clankie"]
+      : ["clankie", ...(activity ? ["activity"] : [])];
+  const services: RuntimeServiceReceipt["services"][number][] = [];
+  let ok = true;
+  for (const target of targets) {
+    let outcome: unknown;
+    try {
+      outcome = await cli(runtime, [action, target]);
+    } catch (error) {
+      const stdout = (error as { stdout?: unknown }).stdout;
+      if (typeof stdout !== "string") throw Error("Service result unavailable");
+      outcome = JSON.parse(stdout);
+    }
+    const receipt = parseServiceReceipt(outcome);
+    services.push(...receipt.services);
+    ok &&= receipt.ok;
+    if (!ok) break;
+  }
+  const receipt = parseServiceReceipt({ ok, services });
+  if (action === "down" || !receipt.ok) return receipt;
+  const status = object(await cli(runtime, ["update", "status"]));
+  return parseServiceReceipt({ ...receipt, runtime: status.runtime });
 }
 export interface RuntimeUpdatePorts {
   readonly run: InstallCommand;
-  /** Existing CLI service supervisor; a successful stop means all exact owned services stopped. */
+  /** Existing CLI service supervisor; a successful stop means all exact owned pin-dependent services stopped. */
   readonly services: (runtime: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;
   readonly now?: () => Date;
   readonly refreshHarnesses?: (runtime: string) => Promise<{ ok: boolean }>;
@@ -157,24 +220,13 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
   ];
   if (!phases.includes(String(value.phase)) || !Number.isFinite(Date.parse(String(value.updatedAt))))
     throw Error("Invalid update result phase/time");
-  for (const key of Object.keys(value))
-    if (
-      ![
-        "id",
-        "ref",
-        "oldCommit",
-        "newCommit",
-        "phase",
-        "updatedAt",
-        "healthy",
-        "rollbackHealthy",
-        "reason",
-        "serviceReceipts",
-        "harnessRefresh",
-        "canary",
-      ].includes(key)
-    )
-      throw Error("Unknown update result field");
+  // Results are responses: newer writers may add evidence older readers do not know.
+  // Known fields remain validated; unknown evidence cannot authorize another mutation.
+  if (
+    value.warning !== undefined &&
+    !["older-than-current-pin", "diverged-from-current-pin"].includes(String(value.warning))
+  )
+    throw Error("Invalid update warning");
   for (const key of ["healthy", "rollbackHealthy"])
     if (value[key] !== undefined && typeof value[key] !== "boolean") throw Error("Invalid update health");
   if (
@@ -189,6 +241,11 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
     newCommit: commitString(value.newCommit),
     phase: value.phase as RuntimeUpdateResult["phase"],
     updatedAt: boundedString(value.updatedAt, 64),
+    ...(value.resolvedRef === undefined ? {} : { resolvedRef: boundedString(value.resolvedRef, 512) }),
+    ...(value.warning === undefined
+      ? {}
+      : { warning: value.warning as NonNullable<RuntimeUpdateResult["warning"]> }),
+    ...(value.initiator === undefined ? {} : { initiator: parseUpdateInitiator(value.initiator) }),
     ...(value.healthy === undefined ? {} : { healthy: value.healthy as boolean }),
     ...(value.rollbackHealthy === undefined ? {} : { rollbackHealthy: value.rollbackHealthy as boolean }),
     ...(value.reason === undefined ? {} : { reason: boundedString(value.reason, 256) }),
@@ -306,6 +363,9 @@ export async function executeRuntimeUpdate(
       ref: plan.ref,
       oldCommit: plan.oldCommit,
       newCommit: plan.newCommit,
+      ...(plan.resolvedRef === undefined ? {} : { resolvedRef: plan.resolvedRef }),
+      ...(plan.warning === undefined ? {} : { warning: plan.warning }),
+      ...(plan.initiator === undefined ? {} : { initiator: plan.initiator }),
       phase,
       updatedAt: (ports.now?.() ?? new Date()).toISOString(),
       ...(serviceReceipts.length === 0 ? {} : { serviceReceipts: [...serviceReceipts] }),

@@ -110,3 +110,20 @@ could delay dispatch by roughly 500 ms while the handler remained below 1 ms;
 the [passive investigation](../testing/2026-10-05-health-latency/README.md)
 records that measurement fault. The 250 ms budget remains unchanged, and no
 global dispatcher or background wakeup is added.
+
+## Source update repair (VUH-1737, 2026-10-06)
+
+The source updater previously resolved bare `main` from the owner's checkout.
+Operation `70adecaa-cd71-4dc1-bfb9-a31bbbdc5cee` selected local `e1f45750`
+over a newer live pin, then reported healthy. Named branch updates now fetch
+that branch from origin before accepting its exact SHA; failed fetches cannot
+fall back to a local or cached branch. Explicit SHA/tag targets remain available
+with older/diverged warnings. Each accepted operation retains its authenticated
+operator or host-admitted conversation; CLI seat/session claims remain attribution.
+
+Cutover supervises only code dependent on the pin. The external activity tunnel
+stays with its existing owner instead of failing cleanup or acquiring authority
+to kill an unowned process. Result readers tolerate unknown optional evidence;
+malformed known records report reconciliation as JSON without retiring locks.
+Tests use actual Git remotes, HTTP CLI calls and isolated native supervisor
+processes. Integration into the live pin belongs to the fleet integrator.
