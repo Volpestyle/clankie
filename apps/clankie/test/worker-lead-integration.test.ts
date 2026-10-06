@@ -183,10 +183,12 @@ async function projectWorkerReport(
   event: OperatorSeatEvent,
 ): Promise<void> {
   const stop = new AbortController();
-  const notification = vi.fn(async () => {
+  const notification = vi.fn(async () => {});
+  const acknowledge = vi.fn(async (id: string) => {
+    const acknowledged = await captain.acknowledgeSeatEvent(id, event.conversationId);
     stop.abort();
+    return acknowledged;
   });
-  const acknowledge = vi.fn((id: string) => captain.acknowledgeSeatEvent(id, event.conversationId));
   await pumpSeatEvents({ notification }, { pollEvents: async () => [event], acknowledge }, stop.signal, {
     waitMs: 1,
   });
