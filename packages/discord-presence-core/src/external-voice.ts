@@ -61,7 +61,7 @@ export interface ExternalVoiceRealtimePort {
   createResponse(context?: string, shouldStart?: () => boolean): void;
   cancelResponse(requestEventId: string): void;
   submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
-  settleFunctionCallSilently?(callId: string): void;
+  settleFunctionCallSilently?(callId: string, resume?: false): void;
   close(): void;
 }
 
@@ -243,8 +243,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     if (shouldRespond !== false) this.createResponse(undefined, shouldRespond);
   }
 
-  public settleFunctionCallSilently(callId: string): void {
-    this.requireRealtime().settleFunctionCallSilently?.(callId);
+  public settleFunctionCallSilently(callId: string, resume?: false): void {
+    this.requireRealtime().settleFunctionCallSilently?.(callId, resume);
   }
 
   private queueResponse(start: () => void, shouldStart?: () => boolean): void {

@@ -204,6 +204,7 @@ index). Configure through the headless CLI:
 | Service effort                         | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                                                                                         |
 | Cheaper model for everyday turns       | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`                                                                               |
 | When long sessions compact             | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                                                                                     |
+| Voice brain                            | `clankie voice brain set PROVIDER [MODEL_ID]`, `clankie voice brain model clear`                                                                                   |
 | ElevenLabs voice model                 | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear`                                                                     |
 | Image / video models                   | `clankie image-model set provider/model`, `clankie video-model set provider/model`                                                                                 |
 | Persona                                | `clankie persona status`, `clankie persona set --display-name Clankie …`                                                                                           |

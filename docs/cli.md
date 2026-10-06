@@ -1126,7 +1126,6 @@ IDs and the exact gateway `/account/connections/callback` arrive through body
 bootstrap; developer secrets are excluded. Provider app registration and terms
 acceptance remain owner actions.
 
-<<<<<<< HEAD
 For a local development Google web OAuth client, set its public client ID and
 registered redirect URI through `accounts apps set`. The callback path is
 `/account/connections/google/callback`; HTTPS is required except for local
@@ -1138,10 +1137,7 @@ environment variables, settings, output or device responses. Google public
 settings also support `CLANKIE_GOOGLE_OAUTH_CLIENT_ID` and
 `CLANKIE_GOOGLE_OAUTH_REDIRECT_URI` overrides; neither variable accepts a secret.
 
-### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
-=======
 ### `voice [status]` / `voice brain set PROVIDER [MODEL_ID]` / `voice model set MODEL_ID`
->>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
 
 The headless launcher inspects voice settings, selects the voice brain, and
 changes an already configured ElevenLabs speech model. These commands store

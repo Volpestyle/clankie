@@ -23,6 +23,8 @@ import type { VoiceConversationPort } from "../src/voice-session.ts";
 interface RequestBody {
   model: string;
   max_tokens: number;
+  thinking: { type: string; display: string };
+  output_config: { effort: string };
   system: { type: string; text: string }[];
   messages: { role: string; content: Record<string, unknown>[] }[];
   tools: { name: string }[];
@@ -72,6 +74,30 @@ class ProviderStream {
     this.event("content_block_delta", {
       index: this.index,
       delta: { type: "input_json_delta", partial_json: JSON.stringify(input) },
+    });
+    this.event("content_block_stop", { index: this.index++ });
+  }
+  public thinking(text: string, signature: string): void {
+    this.endText();
+    this.event("content_block_start", {
+      index: this.index,
+      content_block: { type: "thinking", thinking: "", signature: "" },
+    });
+    this.event("content_block_delta", {
+      index: this.index,
+      delta: { type: "thinking_delta", thinking: text },
+    });
+    this.event("content_block_delta", {
+      index: this.index,
+      delta: { type: "signature_delta", signature },
+    });
+    this.event("content_block_stop", { index: this.index++ });
+  }
+  public redactedThinking(data: string): void {
+    this.endText();
+    this.event("content_block_start", {
+      index: this.index,
+      content_block: { type: "redacted_thinking", data },
     });
     this.event("content_block_stop", { index: this.index++ });
   }
@@ -316,7 +342,12 @@ describe("Anthropic voice through native SDK and existing ElevenLabs mouth", () 
         audioBytes: 0,
       });
       expect(f.audioItems).toHaveLength(1); // Native brain metadata has no audio; the separate mouth delivered PCM.
-      expect(f.requests[0]).toMatchObject({ model: DEFAULT_ANTHROPIC_VOICE_MODEL, max_tokens: 800 });
+      expect(f.requests[0]).toMatchObject({
+        model: DEFAULT_ANTHROPIC_VOICE_MODEL,
+        max_tokens: 4_096,
+        thinking: { type: "adaptive", display: "omitted" },
+        output_config: { effort: "high" },
+      });
       expect(f.requests[0]!.system).toEqual([{ type: "text", text: "Owner supplied voice instructions." }]);
       expect(f.requests[0]!.messages.every((message) => message.role === "user")).toBe(true);
       expect(JSON.stringify(f.requests[0]!.messages)).toContain(
@@ -437,6 +468,207 @@ describe("Anthropic voice through native SDK and existing ElevenLabs mouth", () 
       expect(final).toContain("tool_result");
       expect(final).toContain('"media_type":"image/png"');
       expect(f.errors).toEqual([]);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it("echoes canonical signed and redacted thinking across a native tool continuation without voicing it", async () => {
+    const firstThought = {
+      type: "thinking",
+      thinking: "PRIVATE first reasoning",
+      signature: "opaque-signature-A",
+    };
+    const redacted = { type: "redacted_thinking", data: "opaque-redacted-A" };
+    const omitted = { type: "thinking", thinking: "", signature: "opaque-omitted-signature" };
+    const f = await fixture([
+      (stream) => {
+        stream.thinking(firstThought.thinking, firstThought.signature);
+        stream.thinking(omitted.thinking, omitted.signature);
+        stream.redactedThinking(redacted.data);
+        stream.text("Checking state.");
+        stream.tool("signed_state", "get_self_state", {});
+        stream.finish("tool_use");
+      },
+      (stream) => {
+        stream.thinking("PRIVATE continuation reasoning", "opaque-signature-B");
+        stream.text("State is ready.");
+        stream.finish();
+      },
+      textReply("Next answer."),
+    ]);
+    try {
+      f.port.createTextItem("Original signed request");
+      f.port.createResponse();
+      await until(() => f.calls.length === 1 && f.dones.length === 1);
+      f.port.submitFunctionResult("signed_state", "admitted state", () => true);
+      await until(() => f.dones.length === 2);
+      const assistant = f.requests[1]!.messages[1]!;
+      expect(assistant).toEqual({
+        role: "assistant",
+        content: [
+          firstThought,
+          omitted,
+          redacted,
+          { type: "text", text: "Checking state." },
+          { type: "tool_use", id: "signed_state", name: "get_self_state", input: {} },
+        ],
+      });
+      expect(f.requests[1]!.messages[2]!.content[0]).toMatchObject({
+        type: "tool_result",
+        tool_use_id: "signed_state",
+        content: "admitted state",
+      });
+      f.port.createTextItem("Next real request");
+      f.port.createResponse();
+      await until(() => f.dones.length === 3);
+      expect(f.requests[2]!.messages[1]).toEqual(assistant);
+      expect(f.requests[2]!.messages[3]!.content[0]).toEqual({
+        type: "thinking",
+        thinking: "PRIVATE continuation reasoning",
+        signature: "opaque-signature-B",
+      });
+      const spoken = f.frames
+        .filter((frame) => typeof frame.text === "string")
+        .map((frame) => frame.text)
+        .join("");
+      expect(spoken).toContain("Checking state.");
+      expect(spoken).not.toContain("PRIVATE");
+      expect(spoken).not.toContain("opaque");
+      expect(f.calls).toHaveLength(1);
+      expect(f.errors).toEqual([]);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it("closes instead of pruning a prefix retained by signed thinking", async () => {
+    const f = await fixture(
+      [
+        (stream) => {
+          stream.thinking("bounded reasoning", "prefix-bound-signature");
+          stream.text("Complete.");
+          stream.finish();
+        },
+      ],
+      { brain: { contextCharacterLimit: 1_200 } },
+    );
+    try {
+      f.port.createTextItem("old:" + "a".repeat(300));
+      f.port.createResponse();
+      await until(() => f.dones.length === 1);
+      expect(() => f.port.createTextItem("new:" + "b".repeat(800))).toThrow("context limit");
+      expect(f.port.isOpen).toBe(false);
+      expect(f.closed).toEqual(["error"]);
+      expect(f.errors).toEqual(["Anthropic voice signed history cannot be changed; start a new call"]);
+      expect(f.requests).toHaveLength(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it("closes a signed tool batch on callback interruption without editing or replaying its undispatched call", async () => {
+    let cancel = () => {};
+    const f = await fixture(
+      [
+        (stream) => {
+          stream.thinking("signed tool reasoning", "tool-signature");
+          stream.tool("signed_admitted", "get_self_state", {});
+          stream.tool("signed_not_admitted", "ask_clankie", { request: "do not execute" });
+          stream.finish("tool_use");
+        },
+      ],
+      { onTool: () => cancel() },
+    );
+    try {
+      cancel = () => f.port.cancelResponse(f.starts[0]!.requestEventId);
+      f.port.createTextItem("Signed tools");
+      f.port.createResponse();
+      await until(() => f.closed.length === 1);
+      expect(f.calls.map((call) => call.callId)).toEqual(["signed_admitted"]);
+      expect(f.requests).toHaveLength(1);
+      expect(f.dones).toEqual([]);
+      expect(f.nativeAbandoned).toHaveLength(1);
+      expect(f.port.isOpen).toBe(false);
+      expect(() => f.port.submitFunctionResult("signed_admitted", "result", false)).toThrow("closed");
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it.each(["thinking", "signature", "redacted"])(
+    "bounds hidden %s before any tool authority or TTS",
+    async (kind) => {
+      const f = await fixture(
+        [
+          (stream) => {
+            if (kind === "thinking") stream.thinking("x".repeat(601), "signature");
+            else if (kind === "signature") stream.thinking("small", "x".repeat(601));
+            else stream.redactedThinking("x".repeat(601));
+            stream.tool("hidden_overflow", "ask_clankie", { request: "must not execute" });
+            stream.finish("tool_use");
+          },
+        ],
+        { brain: { contextCharacterLimit: 600 } },
+      );
+      try {
+        f.port.createTextItem("Bound hidden content");
+        f.port.createResponse();
+        await until(() => f.abandoned.length === 1);
+        expect(f.calls).toEqual([]);
+        expect(f.frames).toEqual([]);
+        expect(f.dones).toEqual([]);
+        expect(f.errors).toEqual(["Anthropic voice response failed"]);
+        expect(f.requests).toHaveLength(1);
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+
+  it.each(["max_tokens", "only_thinking"])(
+    "fails %s output visibly without admitting tools or pretending to finish speech",
+    async (kind) => {
+      const f = await fixture([
+        (stream) => {
+          stream.thinking("reasoning consumes output", "bounded-signature");
+          if (kind === "max_tokens")
+            stream.tool("exhausted_tool", "ask_clankie", { request: "do not execute" });
+          stream.finish(kind === "max_tokens" ? "max_tokens" : "end_turn");
+        },
+      ]);
+      try {
+        f.port.createTextItem("Bounded response");
+        f.port.createResponse();
+        await until(() => f.abandoned.length === 1);
+        expect(f.calls).toEqual([]);
+        expect(f.frames).toEqual([]);
+        expect(f.dones).toEqual([]);
+        expect(f.errors).toEqual(["Anthropic voice response failed"]);
+        expect(f.requests).toHaveLength(1);
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+
+  it("refuses unsigned thinking before tool authority instead of silently dropping it on a continuation", async () => {
+    const f = await fixture([
+      (stream) => {
+        stream.thinking("unsigned provider reasoning", "");
+        stream.tool("unsigned_tool", "ask_clankie", { request: "must not execute" });
+        stream.finish("tool_use");
+      },
+    ]);
+    try {
+      f.port.createTextItem("Require canonical replay");
+      f.port.createResponse();
+      await until(() => f.abandoned.length === 1);
+      expect(f.calls).toEqual([]);
+      expect(f.frames).toEqual([]);
+      expect(f.dones).toEqual([]);
+      expect(f.errors).toEqual(["Anthropic voice response failed"]);
+      expect(f.requests).toHaveLength(1);
     } finally {
       await f.cleanup();
     }
@@ -588,70 +820,193 @@ describe("Anthropic voice through native SDK and existing ElevenLabs mouth", () 
       expect(() => f.port.submitFunctionResult("bounded_tool", "bounded result", false)).toThrow("closed");
       const reopened = await fixture([textReply("Complete.")]);
       try {
-        reopened.port.createTextItem("Fresh request"); reopened.port.createResponse();
+        reopened.port.createTextItem("Fresh request");
+        reopened.port.createResponse();
         await until(() => reopened.dones.length === 1);
         expect(reopened.calls).toEqual([]);
         expect(JSON.stringify(reopened.requests[0]!.messages)).not.toContain("bounded_tool");
-      } finally { await reopened.cleanup(); }
+      } finally {
+        await reopened.cleanup();
+      }
     } finally {
       await f.cleanup();
     }
   });
 
-  it.each(["declined", "absorbed"])("settles captain %s locally without a paid continuation and serves the next real request", async (_outcome) => {
-    const f = await fixture([(stream) => {
-      stream.tool("silent_captain", "ask_clankie", { request: "captain decides silence" }); stream.finish("tool_use");
-    }, textReply("Still here.")]);
+  it.each(["declined", "absorbed"])(
+    "settles captain %s locally without a paid continuation and serves the next real request",
+    async (_outcome) => {
+      const f = await fixture([
+        (stream) => {
+          stream.tool("silent_captain", "ask_clankie", { request: "captain decides silence" });
+          stream.finish("tool_use");
+        },
+        textReply("Still here."),
+      ]);
+      try {
+        f.port.createTextItem("Ask the captain");
+        f.port.createResponse();
+        await until(() => f.calls.length === 1 && f.dones.length === 1);
+        f.port.settleFunctionCallSilently!("silent_captain");
+        await delay(25);
+        expect(f.requests).toHaveLength(1);
+        expect(f.starts).toHaveLength(1);
+        expect(f.frames).toEqual([]);
+        f.port.createTextItem("A new real request");
+        f.port.createResponse();
+        await until(() => f.dones.length === 2);
+        expect(f.requests).toHaveLength(2);
+        expect(f.calls).toHaveLength(1);
+        const messages = f.requests[1]!.messages;
+        const use = messages.findIndex((message) => message.content.some((part) => part.type === "tool_use"));
+        expect(messages[use + 1]!.content[0]).toMatchObject({
+          type: "tool_result",
+          tool_use_id: "silent_captain",
+          content: "",
+        });
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+
+  it.each(["allowed", "host_revoked", "response_revoked"])(
+    "silently settles an already waiting %s continuation with a fresh admission fence",
+    async (admission) => {
+      let hostCurrent = true;
+      let responseCurrent = true;
+      const f = await fixture(
+        [
+          (stream) => {
+            stream.thinking("signed pending reasoning", "pending-signature");
+            stream.tool("waiting_captain", "ask_clankie", { request: "captain decides silence" });
+            stream.finish("tool_use");
+          },
+          textReply("Still eligible."),
+        ],
+        { brain: { current: () => hostCurrent } },
+      );
+      try {
+        f.port.createTextItem("Ask the captain");
+        f.port.createResponse();
+        await until(() => f.calls.length === 1 && f.dones.length === 1);
+        f.port.createResponse(undefined, () => responseCurrent);
+        expect(f.starts).toHaveLength(2);
+        expect(f.requests).toHaveLength(1);
+        if (admission === "host_revoked") hostCurrent = false;
+        if (admission === "response_revoked") responseCurrent = false;
+        f.port.settleFunctionCallSilently!("waiting_captain");
+        if (admission === "allowed") {
+          await until(() => f.dones.length === 2);
+          expect(f.requests).toHaveLength(2);
+          const use = f.requests[1]!.messages.findIndex((message) =>
+            message.content.some((part) => part.type === "tool_use"),
+          );
+          expect(f.requests[1]!.messages[use + 1]!.content[0]).toMatchObject({
+            type: "tool_result",
+            tool_use_id: "waiting_captain",
+            content: "",
+          });
+          expect(f.errors).toEqual([]);
+        } else {
+          await until(() => f.nativeAbandoned.length === 1);
+          expect(f.requests).toHaveLength(1);
+          expect(f.frames).toEqual([]);
+          expect(f.dones).toHaveLength(1);
+        }
+        expect(f.calls).toHaveLength(1);
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+
+  it("closes only a pending revoked brain on silent settlement false without a result edit or paid continuation", async () => {
+    const f = await fixture([
+      (stream) => {
+        stream.thinking("signed pending reasoning", "pending-signature");
+        stream.tool("revoked_captain", "ask_clankie", { request: "revoked actor" });
+        stream.finish("tool_use");
+      },
+    ]);
     try {
-      f.port.createTextItem("Ask the captain"); f.port.createResponse();
+      f.port.createTextItem("Revocable request");
+      f.port.createResponse();
       await until(() => f.calls.length === 1 && f.dones.length === 1);
-      f.port.settleFunctionCallSilently!("silent_captain");
-      await delay(25);
-      expect(f.requests).toHaveLength(1); expect(f.starts).toHaveLength(1); expect(f.frames).toEqual([]);
-      f.port.createTextItem("A new real request"); f.port.createResponse();
-      await until(() => f.dones.length === 2);
-      expect(f.requests).toHaveLength(2); expect(f.calls).toHaveLength(1);
-      const messages = f.requests[1]!.messages;
-      const use = messages.findIndex((message) => message.content.some((part) => part.type === "tool_use"));
-      expect(messages[use + 1]!.content[0]).toMatchObject({ type: "tool_result", tool_use_id: "silent_captain", content: "" });
-    } finally { await f.cleanup(); }
+      expect(() => f.port.settleFunctionCallSilently!("unrelated_call", false)).toThrow("no pending call");
+      expect(f.port.isOpen).toBe(true);
+      f.port.createResponse();
+      expect(f.starts).toHaveLength(2);
+      f.port.settleFunctionCallSilently!("revoked_captain", false);
+      await until(() => f.nativeAbandoned.length === 1);
+      expect(f.port.isOpen).toBe(false);
+      expect(f.closed).toEqual(["error"]);
+      expect(f.requests).toHaveLength(1);
+      expect(f.frames).toEqual([]);
+      expect(f.calls).toHaveLength(1);
+      expect(f.errors).toEqual(["Anthropic voice tool admission is no longer current"]);
+    } finally {
+      await f.cleanup();
+    }
   });
 
-  it.each(["host", "response"])("fences revoked %s admission after an awaited guard before any private HTTP egress", async (revocation) => {
-    let release = () => {};
-    let entered = false;
-    let hostCurrent = true;
-    let responseCurrent = true;
-    const barrier = new Promise<void>((resolve) => { release = resolve; });
-    const f = await fixture([textReply("Fresh authorized response.")], {
-      brain: { guard: async () => { entered = true; await barrier; }, current: () => hostCurrent },
-    });
-    try {
-      f.port.createTextItem("PRIVATE revoked request"); f.port.createResponse(undefined, () => responseCurrent);
-      expect(f.starts).toHaveLength(1);
-      await until(() => entered);
-      expect(f.requests).toEqual([]);
-      if (revocation === "host") hostCurrent = false;
-      else responseCurrent = false;
-      release();
-      await until(() => f.abandoned.length === 1);
-      expect(f.requests).toEqual([]); expect(f.frames).toEqual([]);
-      expect(f.errors).toEqual(["Anthropic voice response failed"]);
-      hostCurrent = true; responseCurrent = true;
-      f.port.createTextItem("Fresh authorized request"); f.port.createResponse(undefined, () => responseCurrent);
-      await until(() => f.dones.length === 1);
-      expect(f.requests).toHaveLength(1);
-      expect(JSON.stringify(f.requests[0]!.messages)).not.toContain("PRIVATE revoked request");
-    } finally { release(); await f.cleanup(); }
-  });
+  it.each(["host", "response"])(
+    "fences revoked %s admission after an awaited guard before any private HTTP egress",
+    async (revocation) => {
+      let release = () => {};
+      let entered = false;
+      let hostCurrent = true;
+      let responseCurrent = true;
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const f = await fixture([textReply("Fresh authorized response.")], {
+        brain: {
+          guard: async () => {
+            entered = true;
+            await barrier;
+          },
+          current: () => hostCurrent,
+        },
+      });
+      try {
+        f.port.createTextItem("PRIVATE revoked request");
+        f.port.createResponse(undefined, () => responseCurrent);
+        expect(f.starts).toHaveLength(1);
+        await until(() => entered);
+        expect(f.requests).toEqual([]);
+        if (revocation === "host") hostCurrent = false;
+        else responseCurrent = false;
+        release();
+        await until(() => f.abandoned.length === 1);
+        expect(f.requests).toEqual([]);
+        expect(f.frames).toEqual([]);
+        expect(f.errors).toEqual(["Anthropic voice admission is no longer current"]);
+        hostCurrent = true;
+        responseCurrent = true;
+        f.port.createTextItem("Fresh authorized request");
+        f.port.createResponse(undefined, () => responseCurrent);
+        await until(() => f.dones.length === 1);
+        expect(f.requests).toHaveLength(1);
+        expect(JSON.stringify(f.requests[0]!.messages)).not.toContain("PRIVATE revoked request");
+      } finally {
+        release();
+        await f.cleanup();
+      }
+    },
+  );
 
   it("abandons a revoked live stream and never dispatches its late authority callbacks", async () => {
     let current = true;
-    const f = await fixture([(stream) => stream.text("An audible prefix."), textReply("Fresh authorized response.")], {
-      brain: { current: () => current },
-    });
+    const f = await fixture(
+      [(stream) => stream.text("An audible prefix."), textReply("Fresh authorized response.")],
+      {
+        brain: { current: () => current },
+      },
+    );
     try {
-      f.port.createTextItem("Original request"); f.port.createResponse();
+      f.port.createTextItem("Original request");
+      f.port.createResponse();
       await until(() => f.audioItems.length === 1);
       current = false;
       f.streams[0]!.tool("revoked_tool", "ask_clankie", { request: "unwanted authority" });
@@ -659,10 +1014,14 @@ describe("Anthropic voice through native SDK and existing ElevenLabs mouth", () 
       expect(f.calls).toEqual([]);
       expect(f.errors).toEqual(["Anthropic voice admission is no longer current"]);
       current = true;
-      f.port.createTextItem("Latest authorized request"); f.port.createResponse();
+      f.port.createTextItem("Latest authorized request");
+      f.port.createResponse();
       await until(() => f.dones.length === 1);
-      expect(f.requests).toHaveLength(2); expect(f.nativeAbandoned).toHaveLength(1);
-    } finally { await f.cleanup(); }
+      expect(f.requests).toHaveLength(2);
+      expect(f.nativeAbandoned).toHaveLength(1);
+    } finally {
+      await f.cleanup();
+    }
   });
 
   it("abandons premature SSE EOF and oversized streamed tool arguments without admitting tools", async () => {

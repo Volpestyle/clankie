@@ -378,8 +378,8 @@ export interface VoiceConversationPort {
   cancelResponse(requestEventId: string): void;
   truncate(itemId: string, audioEndMs: number): void;
   submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
-  /** Close a text brain's tool exchange without paying for a spoken continuation. */
-  settleFunctionCallSilently?(callId: string): void;
+  /** Settle without a new continuation; only an already-waiting admitted turn may resume. */
+  settleFunctionCallSilently?(callId: string, resume?: false): void;
   close(): void;
 }
 
@@ -3104,6 +3104,7 @@ export class DiscordVoiceSession {
       }
     };
     if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.settleFunctionCallSilentlySafely(call.callId, conversation, false);
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3140,6 +3141,7 @@ export class DiscordVoiceSession {
       }
     }
     if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.settleFunctionCallSilentlySafely(call.callId, conversation, false);
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3373,6 +3375,7 @@ export class DiscordVoiceSession {
       }
     };
     if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.settleFunctionCallSilentlySafely(call.callId, conversation, false);
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3479,6 +3482,7 @@ export class DiscordVoiceSession {
       // The session must not hang on a captain failure: a short fixed
       // sentence goes back so the model can close the exchange.
       if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+        this.settleFunctionCallSilentlySafely(call.callId, conversation, false);
         this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
         return;
       }
@@ -3511,6 +3515,7 @@ export class DiscordVoiceSession {
     }
     const handoffMs = this.clock() - startedAtMs;
     if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.settleFunctionCallSilentlySafely(call.callId, conversation, false);
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3548,17 +3553,16 @@ export class DiscordVoiceSession {
       return;
     }
     if (outcome.state === "declined") {
-      // The captain chose silence (defensive — voice never offers the
-      // decline path). Nothing is spoken and nothing is receipted; the
-      // no provider response is requested. Text brains may settle their local
-      // tool history without speaking; native realtime providers retain their
-      // existing unresolved-call semantics (ADR 0051 via ADR 0057).
-      this.settleFunctionCallSilentlySafely(call.callId);
+      // The captain chose silence (defensive — voice never offers the decline
+      // path). Settling the result requests no spoken continuation. A text brain
+      // may release an already-waiting admitted room turn; native realtime
+      // providers retain their unresolved-call semantics (ADR 0051 via ADR 0057).
+      this.settleFunctionCallSilentlySafely(call.callId, conversation);
       this.emitRealtimeTool(call, exchange, "completed", guildId, channelId, "captain_declined");
       return;
     }
     if (outcome.state === "absorbed") {
-      this.settleFunctionCallSilentlySafely(call.callId);
+      this.settleFunctionCallSilentlySafely(call.callId, conversation);
       this.emitRealtimeTool(call, exchange, "completed", guildId, channelId, "captain_absorbed");
       return;
     }
@@ -3705,9 +3709,13 @@ export class DiscordVoiceSession {
     }
   }
 
-  private settleFunctionCallSilentlySafely(callId: string): void {
+  private settleFunctionCallSilentlySafely(
+    callId: string,
+    conversation: VoiceConversationPort | undefined,
+    resume?: false,
+  ): void {
     try {
-      this.conversation?.settleFunctionCallSilently?.(callId);
+      conversation?.settleFunctionCallSilently?.(callId, resume);
     } catch {
       // A boundary that cannot retain the admitted result closes itself; never replay the tool.
     }

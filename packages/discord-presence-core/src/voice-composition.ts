@@ -297,28 +297,6 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
             open,
             {
               openRealtime: (handlers) =>
-<<<<<<< HEAD
-                openRealtimeConversationSession({
-                  ...common,
-                  ...(open.guard === undefined ? {} : { guard: open.guard }),
-                  ...(open.current === undefined ? {} : { current: open.current }),
-                  model: config.realtimeModel,
-                  outputModality: "text",
-                  instructions: dialogue
-                    ? `${open.instructions}\n\n${VOICE_TONE_CAPABILITY}`
-                    : open.instructions,
-                  truncationRetentionRatio: config.truncationRetentionRatio,
-                  postInstructionsTokenLimit: config.postInstructionsTokenLimit,
-                  onAudioDelta: open.onAudioDelta,
-                  onTextDelta: handlers.onTextDelta,
-                  onFunctionCall: handlers.onFunctionCall,
-                  onResponseStarted: handlers.onResponseStarted,
-                  onResponseAbandoned: handlers.onResponseAbandoned,
-                  onResponseDone: handlers.onResponseDone,
-                  onClose: handlers.onClose,
-                  onError: handlers.onError,
-                }),
-=======
                 config.realtimeProvider === "anthropic"
                   ? openAnthropicVoiceConversation({
                       apiKey,
@@ -339,6 +317,8 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
                     })
                   : openRealtimeConversationSession({
                       ...common,
+                      ...(open.guard === undefined ? {} : { guard: open.guard }),
+                      ...(open.current === undefined ? {} : { current: open.current }),
                       model: config.realtimeModel,
                       outputModality: "text",
                       instructions: dialogue
@@ -355,7 +335,6 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
                       onClose: handlers.onClose,
                       onError: handlers.onError,
                     }),
->>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
               openTts: (handlers) =>
                 openElevenLabsTtsSession({
                   apiKey: elevenLabsApiKey,

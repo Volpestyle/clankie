@@ -2337,7 +2337,6 @@ paths:
         "400": { description: Invalid persona patch }
         "401": { description: Operator authentication required }
         "503": { description: Settings persistence unavailable }
-<<<<<<< HEAD
   /v1/operator/runtime-health:
     get:
       tags: [Operator]
@@ -2365,7 +2364,22 @@ paths:
         one alarm and one recovery with incident duration; it creates no service
         model turn. The schema and bounded ranges live in @clankie/protocol.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
-=======
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              expectedRevision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              changes: { cpuPercent: 50, healthLatencyMs: 1000, sustainedMs: 300000 }
+      responses:
+        "200": { description: Saved revision and live observation }
+        "400": { description: Malformed or out-of-range settings }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Settings revision or owner authority changed }
+        "503": { description: Settings unavailable }
+
   /v1/operator/voice:
     get:
       tags: [Operator]
@@ -2392,25 +2406,10 @@ paths:
       summary: Apply a validated partial voice settings update
       description: Native owner/self-hosted voice control; this route is not admitted by the paired hosted-device bridge. Merges a strict patch into the current settings under the atomic settings store. The merged configuration must satisfy VoiceSettings, including Anthropic's ElevenLabs voice requirement. Preserves inactive provider models and unrelated settings. Unknown fields and token-shaped values are refused; provider keys belong in the credential broker. Owner authority is rechecked before persistence. Changes stored settings only and requires an active Discord body restart to apply; does not restart a body or contact providers.
       security: [{ operatorBearer: [] }]
->>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
       requestBody:
         required: true
         content:
           application/json:
-<<<<<<< HEAD
-            example:
-              schemaVersion: 1
-              expectedRevision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-              changes: { cpuPercent: 50, healthLatencyMs: 1000, sustainedMs: 300000 }
-      responses:
-        "200": { description: Saved revision and live observation }
-        "400": { description: Malformed or out-of-range settings }
-        "401": { description: Authentication required }
-        "403": { description: Owner authority required }
-        "409": { description: Settings revision or owner authority changed }
-        "503": { description: Settings unavailable }
-
-=======
             schema: { $ref: "#/components/schemas/VoiceSettingsPatch" }
       responses:
         "200":
@@ -2427,7 +2426,6 @@ paths:
         "400": { description: Malformed, secret-shaped or incompatible voice settings patch }
         "401": { description: Operator authentication required or revoked before persistence }
         "503": { description: Operator authentication or settings persistence unavailable }
->>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
   /health:
     get:
       tags: [Health]

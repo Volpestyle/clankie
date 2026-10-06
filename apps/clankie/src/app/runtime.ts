@@ -50,16 +50,13 @@ import {
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/public-gateway";
-<<<<<<< HEAD
-import { GameplaySettingsSchema, PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
-=======
 import {
   assertNoSecretShapedValue,
+  GameplaySettingsSchema,
   PersonaSettingsSchema,
   SettingsStore,
   VoiceSettingsSchema,
 } from "@clankie/settings";
->>>>>>> 247622b8 (WIP: add Sonnet voice brain controls and streaming adapter)
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";

@@ -32,6 +32,11 @@ Keep each call to about one minute; do not run it as a scheduled eval.
    `lastAudioToFirstAudioMs`, trigger and handoff timing when present; absent
    counters stay blank. Note observed interruption delay and how he sounds.
 
+   In each call, add one short browser lookup through `ask_clankie` so its result
+   arrives after the voice brain has handed off. Note whether the acknowledgment
+   and a new utterance remain responsive while that result is pending. Stop the
+   lookup if it grows beyond this short trial; do not turn it into an eval suite.
+
 4. Select Sonnet explicitly, inspect the result, then restart:
 
    ```sh
@@ -63,6 +68,11 @@ settings and requires a body restart; it does not make a provider call. Paired
 hosted-device routing and the hosted fleet's included provider selection are
 outside this experiment. Real Discord/Vox/provider quality remains unverified
 until this manual trial; local provider fixtures do not establish it.
+
+Signed Sonnet reasoning must retain its exact conversation prefix. If the bounded
+brain cannot retain that prefix, it closes visibly instead of pruning and
+replaying signed blocks. Record that failure and start a new call deliberately;
+do not retry an uncertain tool action or count a failed call as a quality result.
 
 References checked 2026-10-06: [Sonnet 5.5 model ID and capabilities](https://platform.claude.com/docs/en/models/sonnet-5-5/overview),
 [Messages streaming](https://platform.claude.com/docs/en/build-with-claude/streaming).

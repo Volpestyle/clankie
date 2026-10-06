@@ -38,7 +38,8 @@ export interface AnthropicVoiceConversationOptions extends ExternalVoiceRealtime
   readonly retentionRatio?: number;
 }
 
-const MAX_OUTPUT_TOKENS = 800;
+// Adaptive reasoning shares the output budget with spoken text and tool inputs.
+const MAX_OUTPUT_TOKENS = 4_096;
 export const DEFAULT_ANTHROPIC_VOICE_MODEL = "claude-sonnet-5-5";
 const DEFAULT_CONTEXT_CHARACTERS = 48_000;
 const MAX_CONTEXT_CHARACTERS = 512_000;
@@ -169,6 +170,7 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
     const response = this.active;
     if (response?.id !== requestEventId) return;
     response.controller.abort();
+    if (response.committed && response.group !== undefined && this.refuseSignedHistoryEdit()) return;
     // Keep only text already delivered. Undispatched tool calls never enter history or authority callbacks.
     if (!response.committed && response.group !== undefined && response.text)
       response.group.messages.push({ role: "assistant", content: response.text });
@@ -191,15 +193,27 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
       this.makeRoom();
     } catch {
       // The authority path does not retry a completed tool. Leaving its result pending would wedge every turn.
-      this.options.onError("Anthropic voice function result exceeded the context limit");
-      this.closeWith("error");
+      if (!this.closed) {
+        this.options.onError("Anthropic voice function result exceeded the context limit");
+        this.closeWith("error");
+      }
       throw new Error("Anthropic voice function result exceeded the context limit");
     }
     if (this.active !== undefined) this.startIfReady(this.active);
     else if (shouldRespond !== false) this.createResponse(undefined, shouldRespond);
   }
 
-  public settleFunctionCallSilently(callId: string): void {
+  public settleFunctionCallSilently(callId: string, resume?: false): void {
+    if (resume === false) {
+      this.assertOpen();
+      const call = this.history.find((group) => group.calls.has(callId))?.calls.get(callId);
+      if (call === undefined || !call.dispatched || call.output !== undefined)
+        throw new Error("Anthropic voice function result has no pending call");
+      // A revoked actor must not unblock a waiting paid response or edit signed provider history.
+      this.options.onError("Anthropic voice tool admission is no longer current");
+      this.closeWith("error");
+      return;
+    }
     this.submitFunctionResult(callId, "", false);
   }
 
@@ -250,6 +264,8 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
 
   private discardUndispatchedCalls(group: HistoryGroup): void {
     const discarded = new Set([...group.calls].filter(([, call]) => !call.dispatched).map(([id]) => id));
+    if (discarded.size === 0) return;
+    if (this.refuseSignedHistoryEdit()) return;
     for (const id of discarded) group.calls.delete(id);
     for (const message of group.messages) {
       if (message.role === "assistant" && Array.isArray(message.content)) {
@@ -264,8 +280,36 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
     this.finishResults(group);
   }
 
+  private refuseSignedHistoryEdit(): boolean {
+    if (
+      !this.history.some((group) =>
+        group.messages.some(
+          (message) =>
+            message.role === "assistant" &&
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type === "reasoning"),
+        ),
+      )
+    )
+      return false;
+    this.options.onError("Anthropic voice signed history cannot be changed; start a new call");
+    this.closeWith("error");
+    return true;
+  }
+
+  private discardFailedResponse(response: Response): void {
+    if (response.group === undefined) return;
+    if (this.refuseSignedHistoryEdit()) return;
+    if (response.committed) this.discardUndispatchedCalls(response.group);
+    else if (response.newGroup) this.history.splice(this.history.indexOf(response.group), 1);
+    else response.group.messages.length = response.historyStartLength;
+  }
+
   private makeRoom(): void {
     if (this.contextSize() <= this.contextLimit) return;
+    // Sonnet 5.5 signs thinking against the exact preceding messages. Dropping an earlier
+    // exchange would invalidate every retained signature; rotate the brain instead.
+    if (this.refuseSignedHistoryEdit()) throw new Error("Anthropic voice context limit exceeded");
     const target = Math.floor(this.contextLimit * this.retentionRatio);
     // Never evict an active request or half of a tool exchange, even to accommodate newer room data.
     while (this.contextSize() > target) {
@@ -279,10 +323,7 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
   private startIfReady(response: Response): void {
     if (!this.current(response) || response.running || this.history.some((group) => group.calls.size !== 0))
       return;
-    if (response.shouldStart?.() === false) {
-      this.abandon(response);
-      return;
-    }
+    if (!this.admitted(response)) return;
     response.running = true;
     // A tool continuation with no new user data belongs to the same complete exchange.
     // Pruning must never leave its assistant reply as an orphaned first message.
@@ -302,6 +343,7 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
         this.history.flatMap((candidate) => candidate.messages),
       );
     } catch {
+      if (!this.current(response)) return;
       this.options.onError("Anthropic voice context limit exceeded");
       this.abandon(response);
     }
@@ -310,12 +352,19 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
   private createModel(response?: Response): LanguageModel {
     return createLanguageModel({
       provider: { id: "anthropic", name: "Anthropic", npm: "@ai-sdk/anthropic", env: [], models: {} },
-      modelId: this.options.model, credential: { type: "api", key: this.options.apiKey }, env: {},
+      modelId: this.options.model,
+      credential: { type: "api", key: this.options.apiKey },
+      env: {},
       fetchImpl: async (input, init) => {
         await this.options.guard?.();
         const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
-        if (response === undefined || !this.current(response) || this.options.current?.() === false ||
-            response.shouldStart?.() === false || signal?.aborted) {
+        if (
+          response === undefined ||
+          !this.current(response) ||
+          this.options.current?.() === false ||
+          response.shouldStart?.() === false ||
+          signal?.aborted
+        ) {
           response?.controller.abort();
           throw new Error("Anthropic voice admission is no longer current");
         }
@@ -331,8 +380,9 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
     let toolInputCharacters = 0;
     let serializedToolCharacters = 0;
     let toolStarts = 0;
+    let hiddenCharacters = 0;
+    let hadReasoning = false;
     let finished = false;
-    let status = "completed";
     try {
       const result = streamText({
         model: this.createModel(response),
@@ -341,6 +391,9 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
         tools: this.tools,
         maxRetries: 0,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        providerOptions: {
+          anthropic: { thinking: { type: "adaptive", display: "omitted" }, effort: "high" },
+        },
         abortSignal: response.controller.signal,
         onError: () => {
           /* Provider errors can echo keys or room data; the terminal catch emits a static error. */
@@ -350,6 +403,13 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
         if (!this.admitted(response)) return;
         if (part.type === "error" || part.type === "tool-error" || part.type === "abort")
           throw new Error("provider failed");
+        if ("providerMetadata" in part && part.providerMetadata !== undefined)
+          hiddenCharacters += JSON.stringify(part.providerMetadata).length;
+        if (part.type === "reasoning-delta") {
+          hadReasoning = true;
+          hiddenCharacters += part.text.length;
+        } else if (part.type === "reasoning-start") hadReasoning = true;
+        if (hiddenCharacters > this.contextLimit) throw new Error("provider reasoning bound");
         if (part.type === "text-delta") {
           response.text += part.text;
           if (response.text.length > MAX_REALTIME_RESPONSE_TEXT_CHARACTERS) throw new Error("response bound");
@@ -395,14 +455,36 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
           outputTokens = part.totalUsage.outputTokens;
           if (part.finishReason === "error" || part.finishReason === "other")
             throw new Error("provider failed");
-          if (part.finishReason === "length" || part.finishReason === "content-filter") status = "incomplete";
+          if (part.finishReason === "length" || part.finishReason === "content-filter")
+            throw new Error("provider output incomplete");
         }
       }
       if (!this.admitted(response)) return;
       if (!finished) throw new Error("provider ended before completion");
+      const responseMessages = await result.responseMessages;
+      // SDK metadata completion is another asynchronous boundary before history or authority dispatch.
+      if (!this.admitted(response)) return;
+      if (hadReasoning && !response.text && calls.length === 0)
+        throw new Error("provider produced only reasoning");
+      if (JSON.stringify(responseMessages).length > this.contextLimit)
+        throw new Error("provider history bound");
+      for (const message of responseMessages) {
+        if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+        for (const part of message.content) {
+          if (part.type !== "reasoning") continue;
+          const signature = part.providerOptions?.anthropic?.signature;
+          const redactedData = part.providerOptions?.anthropic?.redactedData;
+          if (
+            !(typeof signature === "string" && signature.length > 0) &&
+            !(typeof redactedData === "string" && redactedData.length > 0)
+          )
+            throw new Error("provider reasoning has no replayable signature");
+        }
+      }
       const group = response.group!;
-      const content = [...(response.text ? [{ type: "text" as const, text: response.text }] : []), ...calls];
-      if (content.length !== 0) group.messages.push({ role: "assistant", content });
+      // SDK7 supplies the canonical ordering and opaque Anthropic thinking signatures/redaction.
+      // Rebuilding text/tool messages loses information required by the next native request.
+      group.messages.push(...responseMessages);
       for (const call of calls) {
         group.calls.set(call.toolCallId, { name: call.toolName, output: undefined, dispatched: false });
       }
@@ -421,16 +503,13 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
           argumentsJson: JSON.stringify(call.input),
         });
       }
-      if (this.admitted(response)) this.done(response, status, inputTokens, outputTokens);
+      if (this.admitted(response)) this.done(response, "completed", inputTokens, outputTokens);
     } catch {
       if (!this.current(response)) return;
       response.controller.abort();
       // A failed incomplete exchange is never fed back or automatically retried.
-      if (response.group !== undefined) {
-        if (response.committed) this.discardUndispatchedCalls(response.group);
-        else if (response.newGroup) this.history.splice(this.history.indexOf(response.group), 1);
-        else response.group.messages.length = response.historyStartLength;
-      }
+      this.discardFailedResponse(response);
+      if (!this.current(response)) return;
       this.options.onError("Anthropic voice response failed");
       this.abandon(response);
     }
@@ -444,11 +523,8 @@ class AnthropicVoiceConversation implements ExternalVoiceRealtimePort {
     if (!this.current(response)) return false;
     if (this.options.current?.() !== false && response.shouldStart?.() !== false) return true;
     response.controller.abort();
-    if (response.group !== undefined) {
-      if (response.committed) this.discardUndispatchedCalls(response.group);
-      else if (response.newGroup) this.history.splice(this.history.indexOf(response.group), 1);
-      else response.group.messages.length = response.historyStartLength;
-    }
+    this.discardFailedResponse(response);
+    if (!this.current(response)) return false;
     this.options.onError("Anthropic voice admission is no longer current");
     this.abandon(response);
     return false;
