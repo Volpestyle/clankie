@@ -12,6 +12,12 @@ int main(int argc, char **argv) {
     argv[2] = (char *)executable;
     argv[3] = "";
     execv(executable, &argv[2]);
+  } else if (strcmp(argv[2], "long-argv0") == 0) {
+    char first[4098];
+    memset(first, 'x', sizeof(first) - 1);
+    first[sizeof(first) - 1] = '\0';
+    argv[2] = first;
+    execv(executable, &argv[2]);
   }
   perror("execv");
   return 1;

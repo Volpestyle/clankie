@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { OperatorPresenceResultSchema, OperatorPresenceSnapshotSchema } from "@clankie/protocol/presence";
-import { ConversationStore } from "../src/captain/conversations.ts";
+import { ConversationStore, OPERATOR_CONVERSATION_RETAINED_MAX } from "../src/captain/conversations.ts";
+import { createWorkerReports, type WorkerReportsContext } from "../src/captain/captain-worker-reports.ts";
+import { deliveryFingerprint } from "../src/captain/delivery-fence.ts";
+import { InboundAcceptanceSchema } from "../src/captain/conversations/constants.ts";
 import {
   createOperatorService,
   type CreateOperatorServiceContext,
@@ -15,11 +18,14 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { readHerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
 import type { HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
+import { DesktopExpressions } from "../src/captain/desktop.ts";
+import type { DeliveryStage } from "@clankie/protocol";
 
 const roots: string[] = [];
 const stores: ConversationStore[] = [];
 afterEach(async () => {
   await Promise.all(stores.splice(0).map((store) => store.close()));
+  vi.restoreAllMocks();
   vi.useRealTimers();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -36,7 +42,15 @@ async function fixture() {
   roots.push(root);
   let mode: "reply" | "failed" | "quiet" | "ask" = "reply";
   const live = { thinking: false, voice: false };
-  const store = new ConversationStore(join(root, "conversations"), async (id, _message, publish, context) => {
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const desktop = new DesktopExpressions(async () => (await settings.load()).desktop);
+  const clock = new FleetChangeClock();
+  const runner: ConstructorParameters<typeof ConversationStore>[1] = async (
+    id,
+    _message,
+    publish,
+    context,
+  ) => {
     if (mode === "ask") {
       await store.requestQuestion(
         id,
@@ -52,8 +66,19 @@ async function fixture() {
       publish({ type: "message", role: "captain", text: "Owner-only reply", streaming: false });
       if (mode === "failed") throw new Error("Private turn diagnostic");
     }
-  });
+  };
+  let store = new ConversationStore(join(root, "conversations"), runner);
   stores.push(store);
+  const reportHelpers = () =>
+    createWorkerReports({
+      conversations: store,
+      onChange: () => clock.touch(),
+      inboundBinding: () => undefined,
+    } as unknown as WorkerReportsContext);
+  let reports = reportHelpers();
+  const reportSummaries = vi.fn((...args: Parameters<typeof reports.reportSummaries>) =>
+    reports.reportSummaries(...args),
+  );
   const context = {
     personas: { ready: async () => undefined },
     conversations: store,
@@ -63,7 +88,7 @@ async function fixture() {
       },
       embodiment: { getLiveSession: async () => undefined },
     },
-    fleetChanges: new FleetChangeClock(),
+    fleetChanges: clock,
     refreshFleet: async () => [],
     observeFleet: async () => ({}),
     sessions: new Map([
@@ -78,22 +103,68 @@ async function fixture() {
         }),
       ],
     ]),
-    desktop: { current: async () => undefined },
+    desktop,
+    reportSummaries,
     shutdown: new AbortController(),
   } as unknown as CreateOperatorServiceContext;
-  const serve = createOperatorService(context);
+  let serve = createOperatorService(context);
   return {
-    store,
+    get store() {
+      return store;
+    },
     root,
     live,
+    desktop,
+    settings,
+    reportSummaries,
+    clock,
+    report: async (deliveryId: string, stage: DeliveryStage, conversationId = "global-default") => {
+      const text = "Private worker report";
+      const accepted = store.submitInbound(
+        text,
+        {
+          deliveryId,
+          binding: "a".repeat(64),
+          fingerprint: deliveryFingerprint(text),
+          paneId: "private-worker-pane",
+          text,
+        },
+        conversationId,
+        async (_id, _message, _publish, context) => {
+          context.deliveryReceipt?.(stage);
+        },
+      );
+      if (accepted.status !== "accepted") throw new Error("Report refused");
+      await store.awaitRun(accepted.runId);
+      return store
+        .inboundReports(conversationId, { includeRead: true })
+        .find((report) => report.deliveryId === deliveryId)!;
+    },
+    read: async (conversationId = "global-default") => {
+      const authority = { owner: { conversationId }, current: () => true, authorize: async () => true };
+      const page = await reports.workerReportActions.read(authority);
+      expect(await reports.workerReportActions.acknowledge(authority, page.ackDeliveryIds)).toBe(true);
+    },
+    reload: async () => {
+      await store.close();
+      store = new ConversationStore(join(root, "conversations"), runner);
+      stores.push(store);
+      reports = reportHelpers();
+      serve = createOperatorService({ ...context, conversations: store });
+    },
     mode: (value: typeof mode) => {
       mode = value;
     },
-    presence: async (includeFace = true) =>
+    presence: async (includeFace = true, includeBeats = false) =>
       OperatorPresenceResultSchema.parse(
         JSON.parse(
           JSON.stringify(
-            await serve({ op: "presence", schemaVersion: 1, ...(includeFace ? { includeFace: true } : {}) }),
+            await serve({
+              op: "presence",
+              schemaVersion: 1,
+              ...(includeFace ? { includeFace: true } : {}),
+              ...(includeBeats ? { includeBeats: true } : {}),
+            }),
           ),
         ),
       ).snapshot,
@@ -120,6 +191,130 @@ async function fixture() {
     },
   };
 }
+
+it("offers brief hire and confirmed report IDs only to opted-in clients, expires them, and honors quiet hours", async () => {
+  const f = await fixture();
+  const legacy = await f.presence(false);
+  f.desktop.recordHire();
+  const hired = await f.presence(true, true);
+  expect(hired.beats).toEqual([f.desktop.recentHire()]);
+  expect(hired.cursor).not.toBe(legacy.cursor);
+  const oldClient = await f.presence(false);
+  expect(oldClient.cursor).toBe(legacy.cursor);
+  expect(OperatorPresenceSnapshotSchema.omit({ face: true, beats: true }).parse(oldClient)).toEqual(legacy);
+  await f.report("10000000-0000-4000-8000-000000000001", "unavailable");
+  await f.report("10000000-0000-4000-8000-000000000002", "uncertain");
+  expect((await f.presence(true, true)).beats).toEqual(hired.beats);
+  const delivered = await f.report("10000000-0000-4000-8000-000000000003", "delivered");
+  const snapshot = await f.presence(true, true);
+  expect(snapshot.beats).toEqual([
+    ...hired.beats!,
+    { id: delivered.deliveryId, kind: "worker_report", at: delivered.acceptedAt },
+  ]);
+  expect(JSON.stringify(snapshot)).not.toMatch(/private-thread|private-worker-pane/);
+  f.store.readInboundReports("global-default");
+  expect(f.store.acknowledgeInboundReports("global-default", [delivered.deliveryId])).toBe(true);
+  expect((await f.presence(true, true)).cursor).toBe(snapshot.cursor);
+  vi.setSystemTime(Date.now() + 10000);
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+  f.desktop.recordHire();
+  await f.report("10000000-0000-4000-8000-000000000004", "delivered");
+  await f.settings.update((current) => ({
+    ...current,
+    desktop: { quietHours: { start: "10:00", end: "11:00", timeZone: "UTC" } },
+  }));
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+  expect((await f.presence(true, true)).mood).toBe("idle");
+});
+
+it("retains a confirmed report cue when the lead reads it before the first presence sample, including after restart", async () => {
+  const f = await fixture();
+  const report = await f.report("10000000-0000-4000-8000-000000000011", "consumed");
+  await f.read();
+  expect(f.reportSummaries()).toEqual([]);
+  const expected = [{ id: report.deliveryId, kind: "worker_report", at: report.acceptedAt }];
+  expect((await f.presence(true, true)).beats).toEqual(expected);
+  await f.reload();
+  expect(f.reportSummaries()).toEqual([]);
+  expect((await f.presence(true, true)).beats).toEqual(expected);
+  vi.setSystemTime(Date.now() + 10_000);
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+});
+
+it("samples only recent report payloads once per fleet revision and invalidates on durable progress and reads", async () => {
+  const f = await fixture();
+  const old = await f.report("10000000-0000-4000-8000-000000000021", "delivered");
+  vi.setSystemTime(Date.now() + 10_001);
+  const recent = await f.report("10000000-0000-4000-8000-000000000022", "unavailable");
+  const parse = vi.spyOn(InboundAcceptanceSchema, "parse");
+  f.reportSummaries.mockClear();
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+  expect(f.reportSummaries).toHaveBeenCalledTimes(1);
+  expect(parse).toHaveBeenCalledTimes(1);
+  expect(parse.mock.calls[0]![0]).toMatchObject({ deliveryId: recent.deliveryId });
+  for (let sample = 0; sample < 20; sample += 1) await f.presence(true, true);
+  expect(f.reportSummaries).toHaveBeenCalledTimes(1);
+  expect(parse).toHaveBeenCalledTimes(1);
+  const beforeProgress = f.clock.current();
+  expect(f.store.recordInboundReportDelivery(recent.deliveryId, "delivered")).toBe(true);
+  expect(f.clock.current()).not.toBe(beforeProgress);
+  const delivered = await f.presence(true, true);
+  expect(delivered.beats).toEqual([{ id: recent.deliveryId, kind: "worker_report", at: recent.acceptedAt }]);
+  const beforeOffer = f.clock.current();
+  f.store.readInboundReports("global-default");
+  expect(f.clock.current()).not.toBe(beforeOffer);
+  expect((await f.presence(true, true)).beats).toEqual(delivered.beats);
+  const beforeRead = f.clock.current();
+  expect(f.store.acknowledgeInboundReports("global-default", [old.deliveryId, recent.deliveryId])).toBe(true);
+  expect(f.clock.current()).not.toBe(beforeRead);
+  parse.mockClear();
+  expect((await f.presence(true, true)).cursor).toBe(delivered.cursor);
+  expect(parse).toHaveBeenCalledTimes(1);
+  f.reportSummaries.mockClear();
+  vi.setSystemTime(Date.now() + 10_000);
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+  expect(f.reportSummaries).not.toHaveBeenCalled();
+  expect(parse).toHaveBeenCalledTimes(1);
+});
+
+it("invalidates a cached read report when its conversation is closed or pruned", async () => {
+  const f = await fixture();
+  const create = async () => {
+    const result = await f.store.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "global" },
+      title: "Report thread",
+    });
+    if (result.op !== "create") throw new Error("Conversation missing");
+    return result.conversation.conversationId;
+  };
+  const closedId = await create();
+  const closedReport = await f.report("10000000-0000-4000-8000-000000000031", "delivered", closedId);
+  await f.read(closedId);
+  expect((await f.presence(true, true)).beats?.[0]?.id).toBe(closedReport.deliveryId);
+  const beforeClose = f.clock.current();
+  expect(await f.store.serve({ op: "close", schemaVersion: 1, conversationId: closedId })).toMatchObject({
+    closed: true,
+  });
+  expect(f.clock.current()).not.toBe(beforeClose);
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+  const prunedId = await create();
+  const prunedReport = await f.report("10000000-0000-4000-8000-000000000032", "delivered", prunedId);
+  await f.read(prunedId);
+  expect((await f.presence(true, true)).beats?.[0]?.id).toBe(prunedReport.deliveryId);
+  const beforePrune = f.clock.current();
+  for (let index = 0; index < OPERATOR_CONVERSATION_RETAINED_MAX; index += 1) {
+    vi.setSystemTime(Date.now() + 1);
+    await create();
+  }
+  expect(await f.store.serve({ op: "get", schemaVersion: 1, conversationId: prunedId })).toEqual({
+    op: "get",
+    schemaVersion: 1,
+  });
+  expect(f.clock.current()).not.toBe(beforePrune);
+  expect((await f.presence(true, true)).beats).toBeUndefined();
+});
 
 it("projects durable owner replies and source priority, then changes the cursor on expiry", async () => {
   const f = await fixture();

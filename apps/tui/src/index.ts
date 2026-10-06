@@ -79,6 +79,7 @@ import { PresencePoller } from "./observation/presence.ts";
 import { discoverClankieSkills } from "./skill-catalog.ts";
 import { statusCommand } from "./command/status.ts";
 import { runAwakeCommand } from "./command/awake.ts";
+import { runRuntimeHealthCommand } from "./command/runtime-health.ts";
 import { runEvaluatorCommand } from "./command/evaluator.ts";
 import { doctorCommand } from "./command/doctor.ts";
 import { runAccountsCommand } from "./command/accounts.ts";
@@ -500,6 +501,7 @@ const commands = [
     commandDoctor: () => doctorCommand({ repoRoot, env: process.env }),
     commandAwake: (args) =>
       runAwakeCommand(args, { repoRoot, env: process.env, stderr: { write: () => undefined } }),
+    commandRuntimeHealth: (args) => runRuntimeHealthCommand(args, { env: process.env }),
     conversations: conversationsContext,
     laneTrace,
     presence: () => presence.snapshot,

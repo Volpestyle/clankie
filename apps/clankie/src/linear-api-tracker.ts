@@ -14,6 +14,12 @@ import {
 } from "@clankie/work-items";
 import { z } from "zod";
 import { callPrioritySortedLinearIssues } from "./tracker-tool-router.ts";
+import {
+  currentLinearRequestPriority,
+  withinLinearRequestInvocation,
+  LinearRequestBudgetRefused,
+  type LinearRequestBudget,
+} from "./linear-request-budget.ts";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => {
@@ -55,6 +61,7 @@ class LinearApiTrackerError extends Error {
 export function createLinearApiTracker(options: {
   credentials: CredentialStore;
   fetch?: typeof fetch;
+  requestBudget?: LinearRequestBudget;
 }): TrackerToolBackend {
   const request = options.fetch ?? fetch;
   const invocation = new AsyncLocalStorage<TrackerToolCallOptions>();
@@ -68,18 +75,31 @@ export function createLinearApiTracker(options: {
     });
     if (!bearer) throw new LinearApiTrackerError("unavailable", "Connect Linear to use the API tracker");
     const authority = publication ?? invocation.getStore();
+    const credentialForRequest = await options.credentials.get(LINEAR_API_PROVIDER_ID);
     await authority?.beforeWrite?.();
-    publication?.onDispatch?.();
     let response: Response;
     try {
-      response = await request(LINEAR_API_GRAPHQL_ENDPOINT, {
+      const init: RequestInit = {
         method: "POST",
         redirect: "error",
         headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
         body: JSON.stringify({ query, variables }),
         signal: AbortSignal.timeout(30_000),
-      });
-    } catch {
+      };
+      if (options.requestBudget && credentialForRequest) {
+        response = await options.requestBudget.fetch(
+          credentialForRequest,
+          request,
+          LINEAR_API_GRAPHQL_ENDPOINT,
+          init,
+          publication?.onDispatch,
+        );
+      } else {
+        publication?.onDispatch?.();
+        response = await request(LINEAR_API_GRAPHQL_ENDPOINT, init);
+      }
+    } catch (error) {
+      if (error instanceof LinearRequestBudgetRefused) throw error;
       throw new LinearApiTrackerError("unavailable");
     }
     if (!response.ok) throw new LinearApiTrackerError("provider_rejected");
@@ -806,6 +826,12 @@ export function createLinearApiTracker(options: {
                   }
                 : tool,
       ),
-    call: (name, args, authority = {}) => invocation.run(authority, () => call(name, args, authority)),
+    call: (name, args, authority = {}) =>
+      withinLinearRequestInvocation(
+        /^(?:get|list|search|check|fetch|read)_/u.test(name)
+          ? currentLinearRequestPriority("interactive")
+          : "interactive",
+        () => invocation.run(authority, () => call(name, args, authority)),
+      ),
   };
 }

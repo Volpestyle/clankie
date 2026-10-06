@@ -179,7 +179,13 @@ const failureDetail = (detail: string | undefined) => {
   if (detail === undefined) return false;
   try {
     const parsed = object(JSON.parse(detail));
-    if (parsed.isError === true || parsed.is_error === true || parsed.status === "failed") return true;
+    if (
+      parsed.isError === true ||
+      parsed.is_error === true ||
+      parsed.status === "failed" ||
+      parsed.received === false
+    )
+      return true;
   } catch {
     /* Native transport errors are often plain text rather than JSON. */
   }
@@ -246,11 +252,10 @@ function parseSeatTelemetry(harness: "codex" | "claude", raw: string, sessionId?
     if (!reportCalls.has(entry.toolCallId) || entry.phase === "started") continue;
     const at = timestamp(entry.occurredAt);
     if (at === undefined) continue;
-    if (lastReportAt === undefined || at > lastReportAt) lastReportAt = at;
     if (entry.phase === "failed" || failureDetail(entry.detail)) {
       failed.add(entry.toolCallId);
       if (reportFailedAt === undefined || at > reportFailedAt) reportFailedAt = at;
-    }
+    } else if (lastReportAt === undefined || at > lastReportAt) lastReportAt = at;
   }
   return {
     ...(model === undefined ? {} : { model }),

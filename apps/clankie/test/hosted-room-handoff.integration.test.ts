@@ -12,14 +12,19 @@ import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileCredentialStore } from "@clankie/credential-broker";
-import { DiscordIngressEventSchema } from "@clankie/protocol/discord-ingress";
+import { DiscordIngressEventSchema, DiscordIngressResultSchema } from "@clankie/protocol/discord-ingress";
 import { prepareDiscordIngress } from "@clankie/protocol/discord-ingress-crypto";
 import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { expect, it, vi } from "vitest";
 import { createStubCaptain, type CaptainPort } from "../src/captain/port.ts";
-import { createDiscordIngressRoutes, createHostedDiscordIngress } from "../src/discord-ingress.ts";
+import { createClankieApp } from "../src/app.ts";
+import {
+  createDiscordIngressRoutes,
+  createHostedDiscordIngress,
+  createHostedDiscordVoiceCallback,
+} from "../src/discord-ingress.ts";
 import { HostedBodyClient } from "../src/hosted-body.ts";
 
 it("binds encrypted hosted room handoffs to signed owner and live source proof, with durable retries", async () => {
@@ -104,6 +109,7 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
   }) as Server;
   let hosted: Awaited<ReturnType<typeof createHostedDiscordIngress>> | undefined;
   let restarted: Awaited<ReturnType<typeof createHostedDiscordIngress>> | undefined;
+  let voiceApp: Awaited<ReturnType<typeof createClankieApp>> | undefined;
   let prepared: ReturnType<typeof prepareDiscordIngress> | undefined;
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -151,12 +157,27 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
         prompt: "PRIVATE_APPROVAL_PROMPT: approve machine access here",
       };
     });
-    const captain = createStubCaptain({ submitDiscordTurn: submit });
+    const selfTool = vi.fn<CaptainPort["voiceSelfTool"]>(async () => ({
+      content: [{ type: "text", text: JSON.stringify({ written: true }) }],
+    }));
+    const captain = createStubCaptain({ submitDiscordTurn: submit, voiceSelfTool: selfTool });
+    voiceApp = await createClankieApp({
+      captain,
+      authenticateCaptain: async (request) =>
+        request.headers.get("authorization") === "Bearer fixture-local-voice"
+          ? { captainId: "fixture", steerSourceLane: "discord_voice" as const }
+          : undefined,
+    });
+    const voiceCallback = createHostedDiscordVoiceCallback(
+      (request) => voiceApp!.app.fetch(request),
+      "fixture-local-voice",
+    );
     hosted = await createHostedDiscordIngress({
       client,
       store: new FileCredentialStore(credentialsPath),
       statePath,
       captain,
+      voice: voiceCallback,
     });
     ingressRoutes = createDiscordIngressRoutes(hosted.ingress);
     await vi.waitFor(() => expect(registeredDiscordKeys).toHaveLength(1));
@@ -236,6 +257,7 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
       store: new FileCredentialStore(credentialsPath),
       statePath,
       captain,
+      voice: voiceCallback,
     });
     ingressRoutes = createDiscordIngressRoutes(restarted.ingress);
     await vi.waitFor(() => expect(registeredDiscordKeys).toHaveLength(2));
@@ -243,11 +265,191 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
     const cached = await (await post(request.envelope)).json();
     expect(request.openResponse(cached.sealed)).toEqual(expected);
     expect(submit).toHaveBeenCalledTimes(1);
+
+    // Voice uses the same sealed admission, source proof and durable retry path.
+    const voiceEvent = DiscordIngressEventSchema.parse({
+      ...event,
+      deliveryId: "discord:hosted-voice-1",
+      guildId: "1",
+      kind: "voice",
+      owner: false,
+      voice: {
+        action: "handoff",
+        request: {
+          schemaVersion: 1,
+          deliveryId: "untrusted-nested-delivery",
+          identity: {
+            presenceSessionId: "untrusted-nested-session",
+            correlationId: "untrusted-nested-correlation",
+            profileHash: "untrusted-nested-profile",
+            characterId: "clankie",
+            credentialRef: "hosted_discord",
+            transportKind: "bot",
+          },
+          trigger: {
+            kind: "voice_event",
+            id: "voice:1",
+            guildId: "1",
+            channelId: "2",
+            actorId: "4",
+            body: "Please investigate this room request.",
+          },
+          contextMessages: [],
+        },
+      },
+    });
+    const voicePrepared = prepareDiscordIngress(voiceEvent, registeredDiscordKeys[1]!);
+    const voiceRequest = voicePrepared.seal(
+      token("clankie-discord", {
+        typ: "clankie-discord",
+        aud: "clankie-body",
+        inst: installationId,
+        dig: voicePrepared.digest,
+        jti: "v".repeat(22),
+        exp: issuedAt + 60,
+      }),
+    );
+    try {
+      expect((await post(voiceEvent)).status).toBe(401);
+      await post(voiceRequest.envelope);
+      await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+      const [voiceTurn, voiceAuthority] = submit.mock.calls[1]!;
+      expect(voiceTurn).toMatchObject({
+        deliveryId: voiceEvent.deliveryId,
+        identity: {
+          presenceSessionId: "discord:2",
+          correlationId: voiceEvent.deliveryId,
+          profileHash: "hosted-discord-v1",
+          credentialRef: "hosted_discord",
+        },
+        trigger: { kind: "voice_event", guildId: "1", channelId: "2", actorId: "4" },
+      });
+      expect(voiceAuthority?.verifiedOwner).toBe(false);
+      expect(voiceAuthority?.sourceCurrent?.()).toBe(true);
+      await vi.waitFor(async () => {
+        const response = await post(voiceRequest.envelope);
+        const wire = await response.text();
+        expect(wire).not.toContain("PRIVATE_APPROVAL_PROMPT");
+        expect(voiceRequest.openResponse(JSON.parse(wire).sealed)).toMatchObject({
+          state: "voice",
+          result: { state: "waiting_user", approvalRequired: true, prompt: expected.text },
+        });
+      });
+      expect(await readFile(statePath, "utf8")).not.toContain("PRIVATE_APPROVAL_PROMPT");
+      restarted.close();
+      expect(voiceAuthority?.sourceCurrent?.()).toBe(false);
+      restarted = await createHostedDiscordIngress({
+        client,
+        store: new FileCredentialStore(credentialsPath),
+        statePath,
+        captain,
+        voice: voiceCallback,
+      });
+      ingressRoutes = createDiscordIngressRoutes(restarted.ingress);
+      expect(
+        voiceRequest.openResponse((await (await post(voiceRequest.envelope)).json()).sealed),
+      ).toMatchObject({ state: "voice" });
+      expect(submit).toHaveBeenCalledTimes(2);
+      expect(
+        DiscordIngressEventSchema.safeParse({
+          ...voiceEvent,
+          voice: {
+            ...voiceEvent.voice,
+            request: { ...voiceTurn, trigger: { ...voiceTurn.trigger, actorId: "9" } },
+          },
+        }).success,
+      ).toBe(false);
+      const foreign = prepareDiscordIngress(
+        { ...voiceEvent, tenantId: `tn_${"b".repeat(20)}`, deliveryId: "discord:foreign-voice" },
+        registeredDiscordKeys[1]!,
+      );
+      try {
+        const foreignRequest = foreign.seal(
+          token("clankie-discord", {
+            typ: "clankie-discord",
+            aud: "clankie-body",
+            tid: `tn_${"b".repeat(20)}`,
+            inst: installationId,
+            dig: foreign.digest,
+            jti: "f".repeat(22),
+            exp: issuedAt + 60,
+          }),
+        );
+        expect((await post(foreignRequest.envelope)).status).toBe(401);
+        expect(submit).toHaveBeenCalledTimes(2);
+      } finally {
+        foreign.destroy();
+      }
+      for (const operation of [
+        { action: "briefing" as const, consentedUserIds: ["34567"] },
+        {
+          action: "self_tool" as const,
+          tool: "remember_episode" as const,
+          arguments: { text: "A fixture voice memory.", visibility: "private" },
+        },
+      ]) {
+        const callbackEvent = DiscordIngressEventSchema.parse({
+          ...event,
+          guildId: "12345",
+          channelId: "23456",
+          actorId: "34567",
+          kind: "voice",
+          deliveryId: `discord:voice-${operation.action}`,
+          voice: operation,
+        });
+        const callbackPrepared = prepareDiscordIngress(callbackEvent, registeredDiscordKeys[1]!);
+        try {
+          const callbackRequest = callbackPrepared.seal(
+            token("clankie-discord", {
+              typ: "clankie-discord",
+              aud: "clankie-body",
+              inst: installationId,
+              dig: callbackPrepared.digest,
+              jti: "c".repeat(22),
+              exp: issuedAt + 60,
+            }),
+          );
+          await post(callbackRequest.envelope);
+          await vi.waitFor(async () => {
+            const wire = await (await post(callbackRequest.envelope)).json();
+            const result = DiscordIngressResultSchema.parse(callbackRequest.openResponse(wire.sealed));
+            expect(result.state).toBe("voice");
+            if (result.state !== "voice") throw new Error("Voice callback did not settle");
+            expect(result.result).not.toHaveProperty("schemaVersion");
+            if (operation.action === "briefing")
+              expect(result.result).toMatchObject({
+                instructions: expect.any(String),
+                briefing: expect.any(String),
+              });
+            else
+              expect(result.result).toEqual({
+                text: JSON.stringify({ remembered: true }, null, 2),
+                isError: false,
+              });
+            expect(JSON.stringify(wire)).not.toContain("fixture-local-voice");
+          });
+          await post(callbackRequest.envelope);
+        } finally {
+          callbackPrepared.destroy();
+        }
+      }
+      expect(selfTool).toHaveBeenCalledTimes(1);
+      expect(selfTool.mock.calls[0]?.[0]).toMatchObject({
+        guildId: "12345",
+        channelId: "23456",
+        speakerId: "34567",
+        name: "remember_episode",
+      });
+      expect(selfTool.mock.calls[0]?.[0].arguments).not.toHaveProperty("visibility");
+    } finally {
+      voicePrepared.destroy();
+    }
   } finally {
     release();
     prepared?.destroy();
     hosted?.close();
     restarted?.close();
+    voiceApp?.close();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });

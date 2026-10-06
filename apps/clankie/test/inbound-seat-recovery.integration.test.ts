@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { FleetSeatMessageReceiptSchema } from "@clankie/protocol";
+import {
+  FleetSeatMessageReceiptSchema,
+  WorkerReportBridgeStatusSchema,
+  type WorkerReportBridgeStatus,
+} from "@clankie/protocol";
+import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
 import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import { createInboundSender } from "../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 
@@ -137,11 +142,21 @@ function acceptance(root: string, id: string): unknown {
   const meta = JSON.parse(readFileSync(join(root, "conversations/global-default/meta.json"), "utf8"));
   return meta.inboundAcceptances?.[id];
 }
-function worker(root: string, current: () => Awaited<ReturnType<typeof service>>) {
+function worker(
+  root: string,
+  current: () => Awaited<ReturnType<typeof service>>,
+  metrics?: FleetHealthMetrics,
+) {
   let controller: AbortController | undefined;
   const send = createInboundSender({
     directory: join(root, "worker-claims"),
     scope: pane,
+    ...(metrics
+      ? {
+          onObservation: (report: WorkerReportBridgeStatus) =>
+            metrics.observeReport("default", pane, WorkerReportBridgeStatusSchema.parse(report)),
+        }
+      : {}),
     request: (suffix, init) =>
       current().request(suffix, {
         ...init,
@@ -260,7 +275,8 @@ it.skipIf(process.platform === "win32")(
 it("keeps a live same-instance original uncertain and reconciles its later acceptance without replacement", async () => {
   const root = fixtureRoot();
   const current = await service(root, "hold");
-  const sender = worker(root, () => current);
+  const metrics = new FleetHealthMetrics();
+  const sender = worker(root, () => current, metrics);
   const controller = sender.interruptNextPost();
   const originalPost = sender.send("still in flight");
   await expect
@@ -285,12 +301,17 @@ it("keeps a live same-instance original uncertain and reconciles its later accep
       { timeout: 10_000 },
     )
     .toBe(true);
+  const beforeReconciliation = metrics.snapshot().totals.reports;
   expect(await sender.send("replacement must still not send")).toMatchObject({
     received: false,
     deliveryStage: "unavailable",
     detail: "The original message is stored. This different follow-up was not sent.",
   });
   expect(claim(root)).toBeUndefined();
+  const afterReconciliation = metrics.snapshot().totals.reports;
+  expect(afterReconciliation.attempts).toBe(beforeReconciliation.attempts + 1);
+  expect(afterReconciliation.failures).toBe(beforeReconciliation.failures);
+  expect(afterReconciliation.byReason.receipt_invalid).toBe(beforeReconciliation.byReason.receipt_invalid);
   expect(acceptance(root, original.deliveryId)).toMatchObject({
     text: original.text,
     fingerprint: original.fingerprint,

@@ -200,6 +200,7 @@ export class LinearAttributionJournal {
       lane: "operator",
       server: "linear",
       tool: "get_issue",
+      requestPriority: "interactive",
       arguments: { id: activity.issueId },
       resultMode: "data",
       timeoutMs: 1_000,

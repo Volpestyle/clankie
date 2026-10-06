@@ -3,7 +3,8 @@ import { promisify } from "node:util";
 import type { Socket } from "node:net";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import type { HerdrBinding } from "@clankie/protocol";
-import { nativeRequest } from "./herdr-native-request.ts";
+import type { FleetProofRefusalReason } from "@clankie/protocol";
+import { nativeRequest, NativePaneNotFoundError } from "./herdr-native-request.ts";
 import type { NativeTransportReason } from "./native-process-transport.ts";
 import { createProjectProcessObserver, type ProjectProcessProof } from "./project-process-proof.ts";
 import {
@@ -81,33 +82,21 @@ export interface LocalFleetProofOptions extends Pick<
   /** Server-owned additional lifetime pin. It can refuse, never grant admission. */
   expectedOwner?(socket: Socket): NativeSocketOwner | undefined;
   /** Server-owned opt-in diagnostics; fixed stages only, never caller authority. */
-  diagnostics?(event: LocalFleetProofDiagnostic): void;
+  diagnostics?(event: LocalFleetProofDiagnostic, pane?: string): void;
 }
 
 export type LocalFleetProofDiagnostic =
+  | { source: "proof_success" }
   | { source: "native"; checkpoint: "initial" | "final"; event: NativeProcessDiagnostic }
   | { source: "transport"; reason: NativeTransportReason }
   | {
       source: "proof";
-      reason:
-        | "unsupported_platform"
-        | "invalid_pane"
-        | "closed_socket"
-        | "missing_binding"
-        | "native_initial_unavailable"
-        | "native_final_unavailable"
-        | "pane_unavailable"
-        | "not_member"
-        | "snapshot_changed"
-        | "pane_changed"
-        | "private_seat_expired"
-        | "binding_changed"
-        | "observation_failed";
+      reason: FleetProofRefusalReason;
     };
 
-function diagnostic(options: LocalFleetProofOptions, event: LocalFleetProofDiagnostic) {
+function diagnostic(options: LocalFleetProofOptions, event: LocalFleetProofDiagnostic, pane?: string) {
   try {
-    void Promise.resolve(options.diagnostics?.(event)).catch(() => {});
+    void Promise.resolve(options.diagnostics?.(event, pane)).catch(() => {});
   } catch {
     /* Observation never changes admission. */
   }
@@ -121,7 +110,7 @@ export function localFleetProof(options: LocalFleetProofOptions) {
   return async (socket: Socket, pane: string, signal?: AbortSignal): Promise<boolean> => {
     signal?.throwIfAborted();
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
-      diagnostic(options, { source: "proof", reason });
+      diagnostic(options, { source: "proof", reason }, pane);
       return false;
     };
     const snapshot = (checkpoint: "initial" | "final", expected?: NativeSocketOwner) =>
@@ -133,8 +122,8 @@ export function localFleetProof(options: LocalFleetProofOptions) {
             expected,
             options.diagnostics === undefined
               ? undefined
-              : (event) => diagnostic(options, { source: "native", checkpoint, event }),
-            (reason) => diagnostic(options, { source: "transport", reason }),
+              : (event) => diagnostic(options, { source: "native", checkpoint, event }, pane),
+            (reason) => diagnostic(options, { source: "transport", reason }, pane),
             signal,
           );
     if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
@@ -161,20 +150,27 @@ export function localFleetProof(options: LocalFleetProofOptions) {
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
       const paneInfo = async () => {
         signal?.throwIfAborted();
-        const result = options.run
-          ? JSON.parse(
-              await execute(
-                options.herdrBinary,
-                ["pane", "process-info", "--pane", pane],
-                pinHerdrEnvironment({ ...process.env }, binding.socketPath),
-              ),
-            )
-          : await nativeRequest(
-              binding,
-              "pane.process_info",
-              { pane_id: pane },
-              { timeoutMs: 5_000, ...(signal ? { signal } : {}) },
-            );
+        let result: unknown;
+        try {
+          result = options.run
+            ? JSON.parse(
+                await execute(
+                  options.herdrBinary,
+                  ["pane", "process-info", "--pane", pane],
+                  pinHerdrEnvironment({ ...process.env }, binding.socketPath),
+                ),
+              )
+            : await nativeRequest(
+                binding,
+                "pane.process_info",
+                { pane_id: pane },
+                { timeoutMs: 5_000, ...(signal ? { signal } : {}) },
+              );
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (error instanceof NativePaneNotFoundError) return undefined;
+          throw error;
+        }
         signal?.throwIfAborted();
         return (result as { result?: { process_info?: { pane_id: string; shell_pid: number } } })?.result
           ?.process_info;
@@ -211,6 +207,7 @@ export function localFleetProof(options: LocalFleetProofOptions) {
       // Pin only an admitted connection's identity. Every later check still
       // observes OS ownership, ancestry, the linked pane and registry afresh.
       owners.set(socket, initial.owner);
+      diagnostic(options, { source: "proof_success" }, pane);
       return true;
     } catch {
       signal?.throwIfAborted();
@@ -224,6 +221,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
   const observeSocket = (
     socket: Socket,
     checkpoint: "initial" | "final",
+    pane: string,
     expected?: NativeSocketOwner,
     signal?: AbortSignal,
   ) =>
@@ -235,8 +233,8 @@ export function localProjectProof(options: LocalFleetProofOptions) {
           expected,
           options.diagnostics === undefined
             ? undefined
-            : (event) => diagnostic(options, { source: "native", checkpoint, event }),
-          (reason) => diagnostic(options, { source: "transport", reason }),
+            : (event) => diagnostic(options, { source: "native", checkpoint, event }, pane),
+          (reason) => diagnostic(options, { source: "transport", reason }, pane),
           signal,
         );
   const owners = new WeakMap<Socket, NativeSocketOwner>();
@@ -246,9 +244,23 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     signal?: AbortSignal,
   ): Promise<ProjectProcessProof | undefined> => {
     signal?.throwIfAborted();
-    const observe = createProjectProcessObserver({ ...options, ...(signal ? { signal } : {}) });
+    const observe = createProjectProcessObserver({
+      ...options,
+      ...(signal ? { signal } : {}),
+      ...(options.diagnostics === undefined
+        ? {}
+        : {
+            nativeDiagnostics: (
+              event: NativeProcessDiagnostic,
+              checkpoint: "initial" | "final",
+              pane: string,
+            ) => diagnostic(options, { source: "native", checkpoint, event }, pane),
+            nativeTransportDiagnostics: (reason: NativeTransportReason, pane: string) =>
+              diagnostic(options, { source: "transport", reason }, pane),
+          }),
+    });
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
-      diagnostic(options, { source: "proof", reason });
+      diagnostic(options, { source: "proof", reason }, pane);
       return undefined;
     };
     if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
@@ -277,17 +289,18 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       const initial = await observeSocket(
         socket,
         "initial",
+        pane,
         options.expectedOwner?.(socket) ?? owners.get(socket),
         signal,
       );
       signal?.throwIfAborted();
       if (!initial) return refuse("native_initial_unavailable");
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
+      if (!alive()) return refuse("closed_socket");
       if (
         !proof ||
         !initial ||
         chain.length === 0 ||
-        !alive() ||
         binding.socketPath !== proof.binding.socketPath ||
         binding.session !== proof.binding.session
       )
@@ -317,17 +330,17 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         (await options.privateProjectSeat?.(chain, pane, binding, proof, signal)) === true;
       signal?.throwIfAborted();
       if (!direct && !privateSeat) return refuse("not_member");
-      const final = await observeSocket(socket, "final", initial.owner, signal);
+      const final = await observeSocket(socket, "final", pane, initial.owner, signal);
       signal?.throwIfAborted();
       if (!final) return refuse("native_final_unavailable");
       const finalProof = await observe("default", pane);
       signal?.throwIfAborted();
       const finalChain = final?.ancestors.map((ancestor) => ancestor.pid) ?? [];
+      if (!alive()) return refuse("closed_socket");
       if (
         !final ||
         JSON.stringify(final) !== JSON.stringify(initial) ||
-        JSON.stringify(finalProof) !== JSON.stringify(proof) ||
-        !alive()
+        JSON.stringify(finalProof) !== JSON.stringify(proof)
       )
         return refuse("snapshot_changed");
       if (
@@ -344,9 +357,11 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       signal?.throwIfAborted();
       const current = await options.binding();
       signal?.throwIfAborted();
-      if (!alive() || current?.socketPath !== binding.socketPath || current?.session !== binding.session)
+      if (!alive()) return refuse("closed_socket");
+      if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
         return refuse("binding_changed");
       owners.set(socket, initial.owner);
+      diagnostic(options, { source: "proof_success" }, pane);
       return privateSeat ? { ...proof, privateSeat: true } : proof;
     } catch {
       signal?.throwIfAborted();

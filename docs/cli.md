@@ -125,6 +125,40 @@ Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
 keep-awake ([`awake`](#awake)); it reads healthy and "off" until
 they opt in.
 
+`status` and `doctor --json` include `runtimeHealth` when the service exposes it:
+process CPU percentage, `/health` latency, fixed CPU/health reasons, alarm state,
+delivery state, and the last incident duration. `/status` and `/doctor` show the
+same observation. Missing observations remain unknown.
+
+### `runtime-health`
+
+`clankie runtime-health status` reads the live observation and settings from the
+owner API, `GET /v1/operator/runtime-health`. `on` and `off` enable or disable
+alarms. Change any subset with `set`:
+
+```sh
+clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300 \
+  --sample-seconds 15 --cooldown-seconds 1800
+```
+
+These are the defaults. `/runtime-health` opens the TUI menu for every setting.
+Changes use revision-guarded `POST /v1/operator/runtime-health` and apply on the
+next sample without a restart. CPU is this service process's consumed CPU time
+divided by elapsed wall time (100% is one fully busy core), rather than machine
+load. A failed or timed-out health response also counts as slow health.
+
+CPU above its threshold or slow health must persist for the sustained duration
+before one alert goes to the native `global-default` conversation. Recovery
+reports the incident duration. A persistent incident emits no repeated alert;
+the cooldown bounds alarms for subsequent incidents. An unavailable native
+delivery retries at most once a minute, and a retained uncertain native receipt
+counts as accepted so it is not replayed. These observations create no service
+model turn. Include incident and recovery evidence in the next Linear check-in.
+
+The public `/health` observation and consented hosted `body.runtime_health`
+events contain fixed numeric and enum metadata only. Conversation text, worker
+reports, credentials, and command output never enter this projection.
+
 ### `doctor`
 
 The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
@@ -652,6 +686,44 @@ the connected Linear app. Input is JSON with `personaId`; comments also need
 the name and colored Clankie portrait from the fleet. Output includes the MCP
 result and `ok`; provider/tool rejection sets `ok: false` and exits nonzero.
 See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
+
+### `linear budget`
+
+`clankie linear budget` reads `/v1/linear/request-budget` without calling Linear.
+It reports each connected actor's actual HTTP attempts in the last hour across
+MCP, the API tracker, pagination, and worker publishing. The same workspace and
+actor share one budget across OAuth audiences. Counters reset on service restart;
+provider remaining/reset headers account for usage by other clients after the
+next provider response. No credentials or request bodies appear in the report.
+
+At 50% of the 5,000-request hourly budget, Clankie emits one warning through
+native runtime alerts and shows `warning` in `/doctor`. Unaccepted warnings retry
+on subsequent budget observations after at least one minute; a pending delivery
+cannot start another warning. At 80%, device Work refreshes
+and explicitly marked background reads
+share a one-minute minimum interval per actor; excess calls are refused before
+dispatch with a retry time. Existing issue-list caching continues to apply.
+Ordinary owner/lead reads, writes and webhook context reads retain priority. Every request remains subject
+to the hard budget, which leaves one request below the cap. Provider headers can
+lower the effective limit. The warning rearms after usage falls below 50%.
+`doctor --json` and `/doctor json` include `linearRequestBudget`; unavailable
+observations remain explicit. These fixed limits need no owner setup.
+
+### `linear read TOOL --json-stdin [--background]`
+
+Read through the connected Linear tool bank using JSON arguments on stdin.
+Use `--background` for automated polling; owner reads default to interactive
+priority. The fleet equivalent is `clankie_call({name, arguments, background: true})`.
+Background markers do not grant authority or downgrade writes. Each logical
+read gets its own admission and may finish its provider pages. For example:
+
+```sh
+printf '%s' '{"team":"VUH"}' | clankie linear read list_issues --json-stdin --background
+```
+
+Initial account setup and OAuth token endpoint calls are outside the connected
+Linear request counter; GraphQL identity verification during a connected app's
+credential refresh is counted.
 
 ### `linear status` / `linear follow on|off`
 
@@ -2285,6 +2357,13 @@ What crosses the link, and what cannot:
   agent's output, not the owner's instruction; he answers with `message_seat`,
   which reaches a session that loaded `--channels plugin:clankie-worker@clankie`.
   Its receipt reports `stored` only after durable conversation acceptance.
+  The roster exposes `workerReportBridge` separately from tool health: the last
+  `stored`, `uncertain`, `rejected` or `unavailable` outcome, observation time,
+  fixed safe reason, and last confirmed stored time when observed. `doctor` and
+  the console show it. A hired seat held idle or done for 15 minutes without a
+  stored report since its last brief carries `finished, unreported`. Three
+  distinct failed seats within ten minutes produce one native alert to their
+  owning lead, rearmed after recovery; raising it spends no service-model turn.
   Both `mcp --seat` and `mcp --fleet` preserve an uncertain original across
   bridge/service replacement. Calling again reconciles that exact ID through
   a read; it never resends it. A different follow-up during reconciliation
@@ -2499,6 +2578,17 @@ Notes stay until forgotten, without a retention flag or count quota.
 exposes the same controls in the console. See [Memory](memory.md) for lane
 privacy and migration behavior.
 
+### `metrics --fleet`
+
+Read operator-only `GET /v1/fleet/metrics` for proof attempts and refusals, worker
+report attempts and failures, and fixed native/transport reason counters. The
+five- and sixty-minute windows show failure fractions and failures per minute;
+counters contain no process IDs, paths, argv, report bodies or credentials.
+Doctor includes the same windows. A live seat with more than 1% terminal proof
+refusals in five minutes produces a native alert to its current owning lead,
+with a five-minute cooldown; native retries are counted separately from terminal
+refusals. Metrics restart with the service and state their coverage start.
+
 ### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
 
 Per-issue and per-worker measurements from the service's existing records,
@@ -2536,10 +2626,23 @@ The JSON `report` contains `issues`, `workers`, `window`, and explicit `coverage
   work on that issue.
 - Worker `seatSettlements` and `unresolvedHireReceipt` expose ledger edges and
   pending receipts. A passed/ship edge is never issue acceptance; missing
-  receipts do not establish historical delivery.
+  receipts do not establish historical delivery. Ledger edges match the preferred
+  retained seat ID. Older seat aliases have no saved association intervals, so
+  their ledger rows are excluded from that worker's settlement totals.
 
-Only retained exact local native bindings can be read. Missing, remote,
-unreadable, or over-64-MiB sources appear in `coverage.warnings`. Reads also have
+Retained exact local bindings come from conversation metadata, the persisted
+hire-owner journal, and archived pane-tidy entries. This includes workers whose
+conversation metadata predates `nativeSource` and panes that have been closed.
+Matching session IDs and transcript paths are combined before counting, so the
+same native history is counted once across these records. Retained labels, seat
+IDs, session IDs, and transcript paths can select that worker with `--worker`.
+These historical bindings provide attribution; they grant no current pane
+control or delivery authority and cannot establish issue approval.
+
+Missing, remote, malformed, conflicting, unreadable, or over-64-MiB sources
+appear in `coverage.warnings`. Unbound session directories are not searched for
+issue mentions. Separate files claiming the same native session are ambiguous
+and excluded, including when `--worker` selects only one of their aliases. Reads also have
 a 256-MiB total request budget, with skipped sources reported. There is no
 fuzzy pane attribution or new metrics ledger. Known totals are partial when
 other sources are unavailable. No transcript, command, tool output, or
@@ -4131,6 +4234,16 @@ The face and its expiry participate in the presence cursor. Reduce Motion
 holds a distinct static face, and an unreachable pet uses his offline art.
 Legacy reads omit the field. The desktop client retries without the opt-in
 when an older service rejects it, checking again after one minute.
+
+Desktop consumers may separately request `includeBeats: true`. Its optional
+`beats` array contains only an ID, `hire` or `worker_report` kind, and source
+timestamp; at most the latest completed hire and confirmed report accepted
+within ten seconds. Quiet hours suppress them. Expiry changes the opted-in
+cursor. Legacy requests omit the field and keep their existing cursor. A
+resumed seat, failed hire or uncertain report never creates a beat. The desktop
+client consumes IDs once and skips history and bursts; this metadata does not
+contain worker output or identify a private conversation. See
+[ADR 0220](adr/0220-clankie-has-one-present-tense.md).
 
 ## Computer body
 

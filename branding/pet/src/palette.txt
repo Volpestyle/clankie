@@ -2,7 +2,7 @@
 # --- from branding/clankie-logo-512-alpha.png ---
 L      c6d668   leaf light
 l      7d8f41   leaf dark
-s      6f5f36   stem
+s      9e8b57   stem (lighter for dark desktop backgrounds)
 f      806440   frame
 o      503b2c   outline
 c      f2e5c8   face

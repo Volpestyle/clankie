@@ -34,7 +34,8 @@
     "./autonomy": "./src/autonomy.ts",
     "./fleet-settings": "./src/fleet-settings.ts",
     "./activity-sharing": "./src/activity-sharing.ts",
-    "./activity-sharing-crypto": "./src/activity-sharing-crypto.ts"
+    "./activity-sharing-crypto": "./src/activity-sharing-crypto.ts",
+    "./linear-request-budget": "./src/linear-request-budget.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

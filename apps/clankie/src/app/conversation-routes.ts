@@ -20,6 +20,7 @@ import type {
   WorkItemWriteRequest,
 } from "@clankie/protocol/work-item-write";
 import { Hono } from "hono";
+import { withLinearRequestInvocation } from "../linear-request-budget.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { QuestionAuthority } from "../captain/conversation-questions.ts";
 import { ConversationRefusedError, ConversationResetError } from "../captain/conversations.ts";
@@ -398,9 +399,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       try {
         const label = parsed.data.label?.trim();
-        const result = await ctx.dependencies.workItems.handle(
-          { action: "list", repo: repoId, ...(label ? { label } : {}) },
-          false,
+        const result = await withLinearRequestInvocation("background", () =>
+          ctx.dependencies.workItems!.handle(
+            { action: "list", repo: repoId, ...(label ? { label } : {}) },
+            false,
+          ),
         );
         if (!("items" in result)) throw new Error("unexpected work result");
         return context.json({

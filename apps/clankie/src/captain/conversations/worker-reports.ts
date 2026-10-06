@@ -46,23 +46,29 @@ export function notifyInboundReportChange(ctx: ConversationStore): void {
 export function inboundReports(
   ctx: ConversationStore,
   conversationId?: string,
-  options: { includeRead?: boolean } = {},
+  options: { includeRead?: boolean; acceptedAfterMs?: number } = {},
 ): InboundReport[] {
   return [...ctx["metas"].values()]
     .filter((meta) => conversationId === undefined || meta.conversationId === conversationId)
     .flatMap((meta) =>
-      Object.values(meta.inboundAcceptances ?? {}).map((value) => {
-        const receipt = InboundAcceptanceSchema.parse(value);
-        return {
-          ...receipt,
-          conversationId: meta.conversationId,
-          acceptedAt: receipt.acceptedAt ?? meta.createdAt,
-          reportDelivery: receipt.reportDelivery ?? {
-            state: "uncertain" as const,
-            stage: "uncertain" as const,
-          },
-        };
-      }),
+      Object.values(meta.inboundAcceptances ?? {})
+        .filter(
+          (value) =>
+            options.acceptedAfterMs === undefined ||
+            Date.parse(value.acceptedAt ?? meta.createdAt) > options.acceptedAfterMs,
+        )
+        .map((value) => {
+          const receipt = InboundAcceptanceSchema.parse(value);
+          return {
+            ...receipt,
+            conversationId: meta.conversationId,
+            acceptedAt: receipt.acceptedAt ?? meta.createdAt,
+            reportDelivery: receipt.reportDelivery ?? {
+              state: "uncertain" as const,
+              stage: "uncertain" as const,
+            },
+          };
+        }),
     )
     .filter((receipt) => options.includeRead || receipt.reportDelivery.state !== "read")
     .sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt) || a.deliveryId.localeCompare(b.deliveryId));
@@ -120,6 +126,7 @@ export function readInboundReports(
       for (const [id, delivery] of before) meta.inboundAcceptances![id]!.reportDelivery = delivery;
       throw error;
     }
+    ctx["notifyInboundReportChange"]();
   }
   return {
     conversationId,

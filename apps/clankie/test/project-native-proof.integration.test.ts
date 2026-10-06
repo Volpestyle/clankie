@@ -22,6 +22,7 @@ import { countProofSpawns, type SpawnRecord } from "./helpers/project-native-pro
 import { baselineProof } from "./helpers/project-native-proof/baseline.ts";
 import { closeNativeProcessObservers } from "../src/native-process-transport.ts";
 import { peerSeatAuthority } from "../src/app/peer-seat-authority.ts";
+import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
 
 const checkout = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtures = fileURLToPath(new URL("./helpers/project-native-proof/", import.meta.url));
@@ -53,6 +54,7 @@ nativeIt(
     let effects = 0;
     let phase = "cold";
     const trace: unknown[] = [];
+    const metrics = new FleetHealthMetrics();
     const snapshots = new Map<number, NativeSocketOwner>();
     const sockets = new Map<number, Socket>();
     const children: ChildProcess[] = [];
@@ -73,7 +75,10 @@ nativeIt(
         binding: async () => (linked ? binding : undefined),
         launcher: async () => ({ executable: node, script: trustedScript }),
         expectedOwner: () => expected,
-        diagnostics: (event) => trace.push({ phase, diagnostic: event }),
+        diagnostics: (event, pane) => {
+          trace.push({ phase, diagnostic: event });
+          metrics.observeProof("project", event, pane);
+        },
         ...(baseline
           ? {
               run: async (command: string, args: string[], env?: NodeJS.ProcessEnv) => {
@@ -153,12 +158,18 @@ nativeIt(
       const endpoint = `http://127.0.0.1:${address.port}${
         peers ? `/v1/fleet/seats/${encodeURIComponent(herdr.pane)}/peer-messages` : "/v1/fleet/mcp"
       }`;
-      const launch = async (name: string, script = harness, shell = false, emptyArgv = false) => {
+      const launch = async (
+        name: string,
+        script = harness,
+        shell = false,
+        emptyArgv = false,
+        longArgv = false,
+      ) => {
         const args = [herdr.controlPath, client, name, endpoint, herdr.pane, herdr.socketPath, randomUUID()];
         const command = shell
           ? ["/bin/sh", join(fixtures, "shell.sh"), ...args, node]
-          : emptyArgv
-            ? [join(herdr.root, "exec-argv"), node, "argv0", script, ...args]
+          : emptyArgv || longArgv
+            ? [join(herdr.root, "exec-argv"), node, longArgv ? "long-argv0" : "argv0", script, ...args]
             : [node, script, ...args, "TAIL_ARG_SENTINEL_DO_NOT_EMIT"];
         await herdr.cli(
           "pane",
@@ -348,11 +359,29 @@ nativeIt(
       await copyFile(harness, trustedScript);
       trustedScript = await realpath(trustedScript);
       const spaced = await launch("spaced", trustedScript);
-      await ask("spaced", 200);
+      const spacedResponse = await ask("spaced", 200);
       const spacedNative = await observeNativeProcesses(herdr.shellPid, spaced.agentPid, helper);
       expect(spacedNative?.processes[1]?.argv).toEqual([node, trustedScript]);
       expect(JSON.stringify(spacedNative)).not.toContain("TAIL_ARG_SENTINEL_DO_NOT_EMIT");
       trace.push({ phase, native: spacedNative });
+      phase = "socket-closes-after-real-native-read";
+      const peer = sockets.get(spacedResponse.port)!;
+      const beforeClosed = metrics.snapshot().totals.proof.byReason.closed_socket ?? 0;
+      const beforeEffects = effects;
+      const closingProof = localProjectProof({
+        ...options,
+        observeSocket: async (socket, pin) => {
+          const snapshot = await observeSocketProcess(socket, helper, pin);
+          expect(snapshot).toBeDefined();
+          const closed = once(socket, "close");
+          socket.destroy();
+          await closed;
+          return snapshot;
+        },
+      });
+      expect(await closingProof(peer, herdr.pane)).toBeUndefined();
+      expect(metrics.snapshot().totals.proof.byReason.closed_socket).toBe(beforeClosed + 1);
+      expect(effects).toBe(beforeEffects);
       await stop("spaced", spaced);
       phase = "empty-argv-zero";
       await promisify(execFile)("cc", [
@@ -370,6 +399,25 @@ nativeIt(
       await ask("empty", 403);
       trace.push({ phase, native: emptyNative });
       await stop("empty", empty);
+      phase = "over-limit-argv-zero";
+      const before = metrics.snapshot().totals.nativeDiagnostics.argv_invalid ?? 0;
+      const oversized = await launch("oversized", trustedScript, false, false, true);
+      await ask("oversized", 403);
+      expect(metrics.snapshot().totals.nativeDiagnostics.argv_invalid).toBeGreaterThan(before);
+      expect(
+        trace.some((row) => {
+          const entry = row as {
+            phase?: string;
+            diagnostic?: { source?: string; event?: { reason?: string } };
+          };
+          return (
+            entry.phase === phase &&
+            entry.diagnostic?.source === "native" &&
+            entry.diagnostic.event?.reason === "argv_invalid"
+          );
+        }),
+      ).toBe(true);
+      await stop("oversized", oversized);
       expect(
         measurements.flatMap((item) => item.records).some((record) => /^(ps|lsof)$/u.test(record.command)),
       ).toBe(false);
@@ -378,7 +426,14 @@ nativeIt(
         await writeFile(
           join(logDirectory, "evidence.json"),
           JSON.stringify(
-            { baseline, peers, measurements, trace, socketOwners: [...snapshots.values()] },
+            {
+              baseline,
+              peers,
+              measurements,
+              trace,
+              counters: metrics.snapshot(),
+              socketOwners: [...snapshots.values()],
+            },
             null,
             2,
           ) + "\n",

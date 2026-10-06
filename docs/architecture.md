@@ -668,6 +668,14 @@ body's broker; the portals exchange only sealed lifecycle requests and public
 connection metadata. Registered Linear API OAuth uses a separate `linear-api`
 credential and in-process tracker, preserving the existing MCP audience and
 grant fences ([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)).
+Both Linear audiences share a service-owned [request budget](../apps/clankie/src/linear-request-budget.ts)
+per verified workspace and actor. Actual HTTP attempts are counted over a rolling
+hour, provider rate-limit headers tighten headroom, and background reads slow
+at 80%. Device Work refreshes and explicit CLI/fleet poll markers select background
+priority; owner/lead reads, writes and webhook context remain interactive. One
+logical read retains admission across provider pagination while every HTTP attempt
+obeys the hard cap. `clankie linear budget` and `/doctor` expose
+the observation; the 50% warning uses native alerts without starting a model turn.
 Herdr contains the native
 interactive workers; Clankie uses their supported channels or session APIs for
 delivery. Linked independent agents can write first with `message_clankie`. Untrusted input stays fenced, secrets stay in the credential
