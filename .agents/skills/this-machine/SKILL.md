@@ -245,6 +245,9 @@ in the service log for its fixed reason and original content fingerprint.
 `submitted` can retain an uncertain dispatch: reconcile its original receipt,
 never send a replacement. Include the alarm, recovery and duration in the next
 Linear check-in; an available notifier does not prove that check-in occurred.
+For matched local health measurements, use the runtime sampler's fresh native
+HTTP transport on both versions. Idle pooled fetch sockets can delay sending;
+a profiler or frequent event-loop histogram can hide that delay.
 
 `clankie linear budget` and `clankie doctor --json` show account request usage.
 At 50%, a native warning remains pending until admission succeeds; refused or

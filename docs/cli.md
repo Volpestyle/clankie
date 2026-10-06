@@ -146,6 +146,8 @@ Changes use revision-guarded `POST /v1/operator/runtime-health` and apply on the
 next sample without a restart. CPU is this service process's consumed CPU time
 divided by elapsed wall time (100% is one fully busy core), rather than machine
 load. A failed or timed-out health response also counts as slow health.
+Health probes use a fresh local HTTP connection and time the complete bounded
+response, so an idle shared fetch connection does not inflate the measurement.
 
 CPU above its threshold or slow health must persist for the sustained duration
 before one alert goes to the native `global-default` conversation. Recovery

@@ -1,0 +1,807 @@
+{
+  "sourceCommit": "53cb4c91",
+  "method": "Passive diagnostics_channel request timestamps, handler timestamps, eventLoopUtilization counter deltas, then paired fresh native HTTP controls. No profiler, histogram or extra wakeup timer. Diagnostic workload has 25 extra controls; not a matched acceptance sample.",
+  "fixtureSha256": "c1453a625bd51e1ec76277245cb03c03d0197987aa85e3948e76615c984e978a",
+  "excluded": "Earlier diagnostic-head used a 10ms event-loop histogram and is excluded because it can hide idle pre-send scheduling delay.",
+  "worst": {
+    "at": "2026-10-06T14:03:04.307Z",
+    "latencyMs": 212.05516699999862,
+    "processHealth": {
+      "schemaVersion": 1,
+      "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+      "pid": 9206,
+      "uptimeMs": 107411.641041,
+      "cpu": {
+        "userMicros": 4534145,
+        "systemMicros": 590672
+      }
+    },
+    "diagnostics": {
+      "start": 107201.68075,
+      "scheduledLateMs": 2.127875000005588,
+      "inFlight": 0,
+      "created": 0.13683299999684095,
+      "sentHeaders": 211.23370799999975,
+      "handlerStart": 211.4554999999964,
+      "handlerEnd": 211.82224999999744,
+      "receivedHeaders": 211.94637499999953,
+      "loop": {
+        "idle": 211.0101250000007,
+        "active": 1.0429171733849216,
+        "utilization": 0.00491819010326755
+      }
+    },
+    "nativeControlMs": 1.3108329999959096
+  },
+  "result": {
+    "mode": "diagnostic-head-passive",
+    "pid": 9206,
+    "boot": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+    "elapsedMs": 119942.31049999999,
+    "cpuMicros": 3544398,
+    "cpuPercent": 2.955085645111031,
+    "healthP95Ms": 67.32383299999856,
+    "clients": 10,
+    "fleets": ["pc", "kh2"],
+    "requests": 352,
+    "errors": 0,
+    "turns": 0,
+    "spawns": {
+      "ps": 88,
+      "ssh": 104
+    },
+    "scope": "Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled."
+  },
+  "samples": [
+    {
+      "at": "2026-10-06T14:01:29.159Z",
+      "latencyMs": 67.32383299999856,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 12264.266291,
+        "cpu": {
+          "userMicros": 2102256,
+          "systemMicros": 318678
+        }
+      },
+      "diagnostics": {
+        "start": 12199.558875,
+        "scheduledLateMs": 0.006000000001222361,
+        "inFlight": 0,
+        "created": 0.3358749999988504,
+        "sentHeaders": 65.46841700000004,
+        "handlerStart": 65.81016699999964,
+        "handlerEnd": 66.89487499999996,
+        "receivedHeaders": 67.12816699999894,
+        "loop": {
+          "idle": 65.00816699999996,
+          "active": 2.2133748815613217,
+          "utilization": 0.032926571149782646
+        }
+      },
+      "nativeControlMs": 2.9846250000009604
+    },
+    {
+      "at": "2026-10-06T14:01:34.155Z",
+      "latencyMs": 52.62537499999962,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 17249.805,
+        "cpu": {
+          "userMicros": 2219292,
+          "systemMicros": 331551
+        }
+      },
+      "diagnostics": {
+        "start": 17199.449667,
+        "scheduledLateMs": 0,
+        "inFlight": 0,
+        "created": 0.15341600000101607,
+        "sentHeaders": 51.627040999999736,
+        "handlerStart": 51.82995799999844,
+        "handlerEnd": 52.25354099999822,
+        "receivedHeaders": 52.49191599999904,
+        "loop": {
+          "idle": 51.31224999999904,
+          "active": 1.3095840396890708,
+          "utilization": 0.024886704608230958
+        }
+      },
+      "nativeControlMs": 13.942167000001064
+    },
+    {
+      "at": "2026-10-06T14:01:39.145Z",
+      "latencyMs": 55.077792000000045,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 22252.564791,
+        "cpu": {
+          "userMicros": 2311781,
+          "systemMicros": 341589
+        }
+      },
+      "diagnostics": {
+        "start": 22199.638625,
+        "scheduledLateMs": 0.08574999999837019,
+        "inFlight": 0,
+        "created": 0.18495800000164309,
+        "sentHeaders": 54.29100000000108,
+        "handlerStart": 54.457375000001775,
+        "handlerEnd": 54.80104199999914,
+        "receivedHeaders": 54.93895799999882,
+        "loop": {
+          "idle": 54.0101250000007,
+          "active": 1.0633751564018894,
+          "utilization": 0.019308290800149307
+        }
+      },
+      "nativeControlMs": 1.4636669999999867
+    },
+    {
+      "at": "2026-10-06T14:01:44.092Z",
+      "latencyMs": 0.875041000002966,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 27199.206749999998,
+        "cpu": {
+          "userMicros": 2494686,
+          "systemMicros": 354547
+        }
+      },
+      "diagnostics": {
+        "start": 27200.387042,
+        "scheduledLateMs": 0.834166999997251,
+        "inFlight": 1,
+        "created": 0.11433300000135205,
+        "sentHeaders": 0.2956660000018019,
+        "handlerStart": 0.3414580000026035,
+        "handlerEnd": 0.6734160000014526,
+        "receivedHeaders": 0.7876660000001721,
+        "loop": {
+          "idle": 0.0015420000017911661,
+          "active": 0.8703330476819247,
+          "utilization": 0.9982313979441346
+        }
+      },
+      "nativeControlMs": 1.3524580000012065
+    },
+    {
+      "at": "2026-10-06T14:01:49.127Z",
+      "latencyMs": 35.159082999998645,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 32233.998041,
+        "cpu": {
+          "userMicros": 2583254,
+          "systemMicros": 366756
+        }
+      },
+      "diagnostics": {
+        "start": 32200.980292,
+        "scheduledLateMs": 1.427416999998968,
+        "inFlight": 0,
+        "created": 0.14608299999963492,
+        "sentHeaders": 34.29987500000061,
+        "handlerStart": 34.55025000000023,
+        "handlerEnd": 34.8872080000001,
+        "receivedHeaders": 35.065458000000945,
+        "loop": {
+          "idle": 34.00858299999891,
+          "active": 1.1498339864665468,
+          "utilization": 0.03270437309248552
+        }
+      },
+      "nativeControlMs": 1.0024169999996957
+    },
+    {
+      "at": "2026-10-06T14:01:54.130Z",
+      "latencyMs": 38.06291600000259,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 37236.692708,
+        "cpu": {
+          "userMicros": 2647942,
+          "systemMicros": 374797
+        }
+      },
+      "diagnostics": {
+        "start": 37200.722792,
+        "scheduledLateMs": 1.1699169999992591,
+        "inFlight": 0,
+        "created": 0.23054099999717437,
+        "sentHeaders": 37.33849999999802,
+        "handlerStart": 37.50837499999761,
+        "handlerEnd": 37.83558300000004,
+        "receivedHeaders": 37.95025000000169,
+        "loop": {
+          "idle": 37.00883299999987,
+          "active": 1.0495421201630961,
+          "utilization": 0.027577165784123524
+        }
+      },
+      "nativeControlMs": 1.1885419999962323
+    },
+    {
+      "at": "2026-10-06T14:01:59.123Z",
+      "latencyMs": 29.97070800000074,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 42229.035458,
+        "cpu": {
+          "userMicros": 2889444,
+          "systemMicros": 392860
+        }
+      },
+      "diagnostics": {
+        "start": 42201.169625,
+        "scheduledLateMs": 1.6167500000010477,
+        "inFlight": 0,
+        "created": 0.15079200000036508,
+        "sentHeaders": 29.21233299999585,
+        "handlerStart": 29.390666999999667,
+        "handlerEnd": 29.721999999994296,
+        "receivedHeaders": 29.89129200000025,
+        "loop": {
+          "idle": 29.006083000000217,
+          "active": 0.9631261941831326,
+          "utilization": 0.03213719080615792
+        }
+      },
+      "nativeControlMs": 1.0488340000010794
+    },
+    {
+      "at": "2026-10-06T14:02:04.094Z",
+      "latencyMs": 0.8885420000005979,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 47199.420666,
+        "cpu": {
+          "userMicros": 2981343,
+          "systemMicros": 406114
+        }
+      },
+      "diagnostics": {
+        "start": 47200.592375,
+        "scheduledLateMs": 1.0394999999989523,
+        "inFlight": 1,
+        "created": 0.12329199999658158,
+        "sentHeaders": 0.33416700000088895,
+        "handlerStart": 0.3879579999993439,
+        "handlerEnd": 0.6734999999971478,
+        "receivedHeaders": 0.7958329999964917,
+        "loop": {
+          "idle": 0,
+          "active": 0.8867502212524414,
+          "utilization": 1
+        }
+      },
+      "nativeControlMs": 2.0927079999964917
+    },
+    {
+      "at": "2026-10-06T14:02:09.095Z",
+      "latencyMs": 3.0024590000030003,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 52200.296791,
+        "cpu": {
+          "userMicros": 3040987,
+          "systemMicros": 418082
+        }
+      },
+      "diagnostics": {
+        "start": 52199.339958,
+        "scheduledLateMs": 0,
+        "inFlight": 0,
+        "created": 0.13925000000017462,
+        "sentHeaders": 2.4090420000065933,
+        "handlerStart": 2.543667000005371,
+        "handlerEnd": 2.808375000000524,
+        "receivedHeaders": 2.903542000000016,
+        "loop": {
+          "idle": 2.2061670000039157,
+          "active": 0.792707902721304,
+          "utilization": 0.2643351018079923
+        }
+      },
+      "nativeControlMs": 1.1939590000038152
+    },
+    {
+      "at": "2026-10-06T14:02:14.115Z",
+      "latencyMs": 0.8991249999962747,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 57198.849500000004,
+        "cpu": {
+          "userMicros": 3104411,
+          "systemMicros": 430964
+        }
+      },
+      "diagnostics": {
+        "start": 57200.005292,
+        "scheduledLateMs": 0.4524170000004233,
+        "inFlight": 1,
+        "created": 0.12195799999608425,
+        "sentHeaders": 0.3218750000014552,
+        "handlerStart": 0.4121660000018892,
+        "handlerEnd": 0.6896659999983967,
+        "receivedHeaders": 0.8057079999998678,
+        "loop": {
+          "idle": 0.005708000004233327,
+          "active": 0.8897499830127344,
+          "utilization": 0.9936256082222842
+        }
+      },
+      "nativeControlMs": 22.9372499999954
+    },
+    {
+      "at": "2026-10-06T14:02:19.095Z",
+      "latencyMs": 3.401124999996682,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 62199.847791,
+        "cpu": {
+          "userMicros": 3359823,
+          "systemMicros": 448002
+        }
+      },
+      "diagnostics": {
+        "start": 62198.56925,
+        "scheduledLateMs": 0,
+        "inFlight": 0,
+        "created": 0.17508300000190502,
+        "sentHeaders": 2.664582999997947,
+        "handlerStart": 2.7638329999972484,
+        "handlerEnd": 3.1465830000015558,
+        "receivedHeaders": 3.2889169999980368,
+        "loop": {
+          "idle": 2.4337499999965075,
+          "active": 0.9647080040012952,
+          "utilization": 0.2838663896586197
+        }
+      },
+      "nativeControlMs": 1.3125419999996666
+    },
+    {
+      "at": "2026-10-06T14:02:24.096Z",
+      "latencyMs": 4.709917000000132,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 67201.36562499999,
+        "cpu": {
+          "userMicros": 3459594,
+          "systemMicros": 460848
+        }
+      },
+      "diagnostics": {
+        "start": 67198.754,
+        "scheduledLateMs": 0,
+        "inFlight": 0,
+        "created": 0.162333000000217,
+        "sentHeaders": 3.9976670000032755,
+        "handlerStart": 4.17295799999556,
+        "handlerEnd": 4.471457999999984,
+        "receivedHeaders": 4.595166999992216,
+        "loop": {
+          "idle": 3.755125000003318,
+          "active": 0.9511249523129663,
+          "utilization": 0.20209826548733337
+        }
+      },
+      "nativeControlMs": 1.4531670000142185
+    },
+    {
+      "at": "2026-10-06T14:02:29.097Z",
+      "latencyMs": 2.013165999989724,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 72202.400416,
+        "cpu": {
+          "userMicros": 3529908,
+          "systemMicros": 477655
+        }
+      },
+      "diagnostics": {
+        "start": 72202.431542,
+        "scheduledLateMs": 2.878667000011774,
+        "inFlight": 0,
+        "created": 0.12329099999624304,
+        "sentHeaders": 1.4317499999888241,
+        "handlerStart": 1.5492079999967245,
+        "handlerEnd": 1.8216249999968568,
+        "receivedHeaders": 1.9170829999929992,
+        "loop": {
+          "idle": 1.258332999990671,
+          "active": 0.751625028802664,
+          "utilization": 0.3739506089357981
+        }
+      },
+      "nativeControlMs": 1.2175419999985024
+    },
+    {
+      "at": "2026-10-06T14:02:34.096Z",
+      "latencyMs": 0.9452500000043074,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 77200.04375000001,
+        "cpu": {
+          "userMicros": 3783673,
+          "systemMicros": 495603
+        }
+      },
+      "diagnostics": {
+        "start": 77201.165375,
+        "scheduledLateMs": 1.6125000000029104,
+        "inFlight": 1,
+        "created": 0.11654200000339188,
+        "sentHeaders": 0.31979200000932906,
+        "handlerStart": 0.3885830000072019,
+        "handlerEnd": 0.7356670000008307,
+        "receivedHeaders": 0.8522079999966081,
+        "loop": {
+          "idle": 0.0017090000037569553,
+          "active": 0.9408330761070829,
+          "utilization": 0.9981868183425734
+        }
+      },
+      "nativeControlMs": 1.991083000000799
+    },
+    {
+      "at": "2026-10-06T14:02:39.096Z",
+      "latencyMs": 4.666874999995343,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 82201.729041,
+        "cpu": {
+          "userMicros": 3848882,
+          "systemMicros": 509492
+        }
+      },
+      "diagnostics": {
+        "start": 82199.138,
+        "scheduledLateMs": 0,
+        "inFlight": 0,
+        "created": 0.12866699999722186,
+        "sentHeaders": 3.9909999999945285,
+        "handlerStart": 4.1593749999883585,
+        "handlerEnd": 4.445957999996608,
+        "receivedHeaders": 4.564291999995476,
+        "loop": {
+          "idle": 3.772540999998455,
+          "active": 0.890918062577839,
+          "utilization": 0.19104232515459413
+        }
+      },
+      "nativeControlMs": 0.9013750000012806
+    },
+    {
+      "at": "2026-10-06T14:02:44.098Z",
+      "latencyMs": 4.702625000005355,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 87203.098625,
+        "cpu": {
+          "userMicros": 3947493,
+          "systemMicros": 522939
+        }
+      },
+      "diagnostics": {
+        "start": 87200.460167,
+        "scheduledLateMs": 0.9072920000035083,
+        "inFlight": 0,
+        "created": 0.17012500000419095,
+        "sentHeaders": 4.024375000008149,
+        "handlerStart": 4.185750000004191,
+        "handlerEnd": 4.493875000000116,
+        "receivedHeaders": 4.599457999996957,
+        "loop": {
+          "idle": 3.7777079999941634,
+          "active": 0.920542055318947,
+          "utilization": 0.19593296322700693
+        }
+      },
+      "nativeControlMs": 1.4497499999997672
+    },
+    {
+      "at": "2026-10-06T14:02:49.104Z",
+      "latencyMs": 5.86891600000672,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 92204.234083,
+        "cpu": {
+          "userMicros": 4005271,
+          "systemMicros": 536003
+        }
+      },
+      "diagnostics": {
+        "start": 92200.453417,
+        "scheduledLateMs": 0.9005420000030426,
+        "inFlight": 0,
+        "created": 0.1427079999994021,
+        "sentHeaders": 5.207625000010012,
+        "handlerStart": 5.337458000009065,
+        "handlerEnd": 5.636958000002778,
+        "receivedHeaders": 5.753582999997889,
+        "loop": {
+          "idle": 5.004207999998471,
+          "active": 0.8612080499588046,
+          "utilization": 0.14682812653419153
+        }
+      },
+      "nativeControlMs": 5.935958000001847
+    },
+    {
+      "at": "2026-10-06T14:02:54.152Z",
+      "latencyMs": 57.62304199999198,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 97256.764458,
+        "cpu": {
+          "userMicros": 4220653,
+          "systemMicros": 556137
+        }
+      },
+      "diagnostics": {
+        "start": 97201.21025,
+        "scheduledLateMs": 1.6573750000097789,
+        "inFlight": 0,
+        "created": 0.15508299999055453,
+        "sentHeaders": 56.94791699999769,
+        "handlerStart": 57.03858300000138,
+        "handlerEnd": 57.4149999999936,
+        "receivedHeaders": 57.524416999993264,
+        "loop": {
+          "idle": 56.692250000007334,
+          "active": 0.9249169959948631,
+          "utilization": 0.016052802388896333
+        }
+      },
+      "nativeControlMs": 1.0227910000103293
+    },
+    {
+      "at": "2026-10-06T14:02:59.155Z",
+      "latencyMs": 61.01654100000451,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 102259.58770799999,
+        "cpu": {
+          "userMicros": 4315940,
+          "systemMicros": 571042
+        }
+      },
+      "diagnostics": {
+        "start": 102200.666417,
+        "scheduledLateMs": 1.1135420000064187,
+        "inFlight": 0,
+        "created": 0.13245799999276642,
+        "sentHeaders": 60.29095799999777,
+        "handlerStart": 60.46020800000406,
+        "handlerEnd": 60.78162500000326,
+        "receivedHeaders": 60.89812499999243,
+        "loop": {
+          "idle": 60.02599999999802,
+          "active": 0.9880838623066666,
+          "utilization": 0.016194357101821828
+        }
+      },
+      "nativeControlMs": 1.3773749999963911
+    },
+    {
+      "at": "2026-10-06T14:03:04.307Z",
+      "latencyMs": 212.05516699999862,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 107411.641041,
+        "cpu": {
+          "userMicros": 4534145,
+          "systemMicros": 590672
+        }
+      },
+      "diagnostics": {
+        "start": 107201.68075,
+        "scheduledLateMs": 2.127875000005588,
+        "inFlight": 0,
+        "created": 0.13683299999684095,
+        "sentHeaders": 211.23370799999975,
+        "handlerStart": 211.4554999999964,
+        "handlerEnd": 211.82224999999744,
+        "receivedHeaders": 211.94637499999953,
+        "loop": {
+          "idle": 211.0101250000007,
+          "active": 1.0429171733849216,
+          "utilization": 0.00491819010326755
+        }
+      },
+      "nativeControlMs": 1.3108329999959096
+    },
+    {
+      "at": "2026-10-06T14:03:09.096Z",
+      "latencyMs": 0.7415000000037253,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 112201.010125,
+        "cpu": {
+          "userMicros": 4631600,
+          "systemMicros": 608426
+        }
+      },
+      "diagnostics": {
+        "start": 112202.297167,
+        "scheduledLateMs": 2.7442920000030426,
+        "inFlight": 1,
+        "created": 0.08766600000672042,
+        "sentHeaders": 0.25983300000370946,
+        "handlerStart": 0.3045410000049742,
+        "handlerEnd": 0.5530830000061542,
+        "receivedHeaders": 0.6615410000085831,
+        "loop": {
+          "idle": 0,
+          "active": 0.7389168739318848,
+          "utilization": 1
+        }
+      },
+      "nativeControlMs": 1.2537080000038259
+    },
+    {
+      "at": "2026-10-06T14:03:14.096Z",
+      "latencyMs": 2.174750000005588,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 117201.48375,
+        "cpu": {
+          "userMicros": 4866032,
+          "systemMicros": 628848
+        }
+      },
+      "diagnostics": {
+        "start": 117201.392333,
+        "scheduledLateMs": 1.839458000002196,
+        "inFlight": 0,
+        "created": 0.15983400000550319,
+        "sentHeaders": 1.472750000000815,
+        "handlerStart": 1.5931669999990845,
+        "handlerEnd": 1.9602089999971213,
+        "receivedHeaders": 2.076333999997587,
+        "loop": {
+          "idle": 1.2719579999975394,
+          "active": 0.8995419675775338,
+          "utilization": 0.4142491277962383
+        }
+      },
+      "nativeControlMs": 0.8799999999901047
+    },
+    {
+      "at": "2026-10-06T14:03:19.098Z",
+      "latencyMs": 4.581208000003244,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 122203.26174999999,
+        "cpu": {
+          "userMicros": 4961345,
+          "systemMicros": 645161
+        }
+      },
+      "diagnostics": {
+        "start": 122200.741625,
+        "scheduledLateMs": 1.1887500000011642,
+        "inFlight": 0,
+        "created": 0.12812500000291038,
+        "sentHeaders": 3.9466250000114087,
+        "handlerStart": 4.079750000004424,
+        "handlerEnd": 4.37316699999792,
+        "receivedHeaders": 4.480542000004789,
+        "loop": {
+          "idle": 3.7567500000004657,
+          "active": 0.8186250801081769,
+          "utilization": 0.17891977505125953
+        }
+      },
+      "nativeControlMs": 1.0651249999937136
+    },
+    {
+      "at": "2026-10-06T14:03:24.100Z",
+      "latencyMs": 7.142124999998487,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 127204.917291,
+        "cpu": {
+          "userMicros": 5217534,
+          "systemMicros": 666717
+        }
+      },
+      "diagnostics": {
+        "start": 127199.840542,
+        "scheduledLateMs": 0.28766700001142453,
+        "inFlight": 0,
+        "created": 0.15462499999557622,
+        "sentHeaders": 6.473540999999386,
+        "handlerStart": 6.589582999993581,
+        "handlerEnd": 6.938624999995227,
+        "receivedHeaders": 7.047249999988708,
+        "loop": {
+          "idle": 6.254333000004408,
+          "active": 0.8843338682054309,
+          "utilization": 0.12387941397623937
+        }
+      },
+      "nativeControlMs": 1.0608749999955762
+    },
+    {
+      "at": "2026-10-06T14:03:29.102Z",
+      "latencyMs": 6.767334000003757,
+      "processHealth": {
+        "schemaVersion": 1,
+        "instanceId": "09f52cee-c8ff-4dc9-8f30-1f16fb658570",
+        "pid": 9206,
+        "uptimeMs": 132206.576791,
+        "cpu": {
+          "userMicros": 5282745,
+          "systemMicros": 682587
+        }
+      },
+      "diagnostics": {
+        "start": 132201.860083,
+        "scheduledLateMs": 2.3072080000129063,
+        "inFlight": 0,
+        "created": 0.12770899999304675,
+        "sentHeaders": 6.173666999995476,
+        "handlerStart": 6.290166999999201,
+        "handlerEnd": 6.567333999992115,
+        "receivedHeaders": 6.67516699997941,
+        "loop": {
+          "idle": 5.9852499999979045,
+          "active": 0.7785000762960408,
+          "utilization": 0.11509888264863322
+        }
+      },
+      "nativeControlMs": 1.0217500000144355
+    }
+  ]
+}

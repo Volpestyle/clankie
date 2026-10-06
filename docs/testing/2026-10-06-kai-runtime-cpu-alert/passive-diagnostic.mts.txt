@@ -1,0 +1,60 @@
+import {mkdir,writeFile} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {homedir} from 'node:os';
+import {once} from 'node:events';
+import {channel} from 'node:diagnostics_channel';
+import {get} from 'node:http';
+import {performance as perfHooks} from 'node:perf_hooks';
+import {serve} from '@hono/node-server';
+import {SettingsStore} from '../../../packages/settings/src/index.ts';
+import {createCaptain} from '../../../apps/clankie/src/captain/captain.ts';
+import {createCaptainMemory} from '../../../apps/clankie/src/captain-memory.ts';
+import {createFileMemory} from '../../../apps/clankie/src/memory.ts';
+import {createClankieApp,createBearerAuthenticator} from '../../../apps/clankie/src/app.ts';
+import {ExecutionConnections} from '../../../apps/clankie/src/herdr-session.ts';
+import {frequencySpawns} from '../../../apps/clankie/test/helpers/project-native-proof/frequency-spawns.ts';
+process.chdir(new URL('../../../',import.meta.url).pathname);
+const mode=process.argv[2]; const root=resolve('.local/bench/'+mode); await mkdir(root,{recursive:true});
+const owner=await new SettingsStore().load();const socketPath=owner.herdr.socketPath||join(homedir(),'.config/herdr/herdr.sock');
+const binding={runtime:'external',socketPath,session:owner.herdr.session??'default'} as const;
+const settings=new SettingsStore(join(root,'settings.json'));
+await settings.update(c=>({...c,herdr:{...c.herdr,...binding},execution:owner.execution,captain:{...c.captain,workingDirectory:resolve('.')},fleet:owner.fleet,machines:owner.machines}));
+const runtimes=new ExecutionConnections({settings,primary:{binding:()=>binding,status:()=>({available:true,binding})} as never,sshControlDirectory:join(root,'ssh')});
+const fleets=await runtimes.fleets();
+const dispatch=frequencySpawns();
+let turns=0;
+const captain=createCaptain({herdrAvailable:()=>true,runtimes,memory:createCaptainMemory(createFileMemory({dataDir:join(root,'memory')})),mcp:{catalog:async()=>[]},browser:{catalog:async()=>({available:false,tools:[]})},fleets:{list:fleets,current:()=>runtimes.fleets(),run:f=>runtimes.fleetRun(f),remoteWorkspace:()=>Promise.reject(Error('read-only fixture'))}} as never,{repoRoot:resolve('.'),stateDir:join(root,'captain'),settings,localCodexSocket:()=>socketPath,fleetRoundIntervalMs:3600000,runtimeProvider:{heartbeat:{begin:()=>{turns++;return()=>{};}}} as never});
+const body=await createClankieApp({captain,settings,authenticateOperator:createBearerAuthenticator('owned-bench',{operatorId:'owned-cpu-bench'}),authenticateCaptain:createBearerAuthenticator('owned-bench',{captainId:'owned-cpu-bench'})});
+
+let trace: any; const byRequest = new WeakMap<object, any>();
+for (const [name, key] of [['undici:request:create','created'],['undici:client:sendHeaders','sentHeaders'],['undici:request:headers','receivedHeaders']]) channel(name).subscribe((event:any)=>{
+ if(event.request?.path !== '/health')return;
+ if(key==='created' && trace)byRequest.set(event.request,trace);
+ const row=byRequest.get(event.request);if(row)row[key]=performance.now()-row.start;
+});
+const server=serve({hostname:'127.0.0.1',port:0,fetch:(request:any,...args:any[])=>{
+ if(new URL(request.url).pathname!=='/health')return body.app.fetch(request,...args);
+ const row=trace;if(row)row.handlerStart=performance.now()-row.start;
+ return Promise.resolve(body.app.fetch(request,...args)).then(response=>{if(row)row.handlerEnd=performance.now()-row.start;return response;});
+}});if(!server.listening)await once(server,'listening');
+const host='http://127.0.0.1:'+(server.address() as any).port;
+const headers={authorization:'Bearer owned-bench','content-type':'application/json'};
+const nativeHealth=()=>new Promise<any>((resolve,reject)=>{const begin=performance.now();const req=get(host+'/health',{agent:false,signal:AbortSignal.timeout(5000)},res=>{const chunks:Buffer[]=[];res.on('data',b=>chunks.push(b));res.on('error',reject);res.on('end',()=>resolve({latencyMs:performance.now()-begin,body:JSON.parse(Buffer.concat(chunks).toString('utf8'))}));});req.once('error',reject);});
+const controller=new AbortController();let requests=0,errors=0;const inFlight=new Set<Promise<any>>();
+const call=async(path:string,init:any={})=>{const r=await fetch(host+path,{...init,headers,signal:controller.signal});const data=await r.json();if(!r.ok)throw Error(path+' '+r.status+JSON.stringify(data));return data};
+const polls=Array.from({length:10},(_,i)=>setInterval(()=>{const pending=call('/operator/v1/dispatch',{method:'POST',body:JSON.stringify({schemaVersion:1,op:'roster'})}).then(()=>{requests++;}).catch(e=>{if(!controller.signal.aborted){errors++;if(errors<3)console.error(String(e));}});inFlight.add(pending);pending.finally(()=>inFlight.delete(pending));},5000+i*20));
+const native=setInterval(()=>{const p=call('/v1/seat/events?wait=0').then(()=>{requests++;}).catch(e=>{if(!controller.signal.aborted){errors++;if(errors<3)console.error(String(e));}});inFlight.add(p);p.finally(()=>inFlight.delete(p));},1000);
+try{
+ await call('/operator/v1/dispatch',{method:'POST',body:JSON.stringify({schemaVersion:1,op:'roster'})});
+ await call('/v1/seat/events?wait=0');
+ if(process.argv.includes('--preflight')){console.log('preflight passed');process.exitCode=0;}else{
+ await new Promise(r=>setTimeout(r,10000));
+ const start=performance.now();const spawnStart=dispatch.records.length;const initialRequests=requests;const samples=[];
+ for(let i=0;i<25;i++){const wait=start+i*5000-performance.now();if(wait>0)await new Promise(r=>setTimeout(r,wait));const sent=performance.now();const loopBefore=perfHooks.eventLoopUtilization();trace={start:sent,scheduledLateMs:Math.max(0,sent-(start+i*5000)),inFlight:inFlight.size};const health=await call('/health');const fetchLatency=performance.now()-sent;const row=trace;row.loop=perfHooks.eventLoopUtilization(loopBefore);trace=undefined;const control=await nativeHealth();samples.push({at:new Date().toISOString(),latencyMs:fetchLatency,processHealth:health.processHealth,diagnostics:row,nativeControlMs:control.latencyMs});await writeFile(join(root,'samples.json'),JSON.stringify(samples,null,2));}
+ const first=samples[0].processHealth,last=samples.at(-1)!.processHealth;if(first.pid!==last.pid||first.instanceId!==last.instanceId)throw Error('boot changed');
+ const elapsedMs=last.uptimeMs-first.uptimeMs,cpuMicros=last.cpu.userMicros+last.cpu.systemMicros-first.cpu.userMicros-first.cpu.systemMicros;
+ const latencies=samples.map(s=>s.latencyMs).sort((a,b)=>a-b);
+ const spawns=dispatch.records.slice(spawnStart);const counts={};for(const r of spawns)(counts as any)[r.kind]=((counts as any)[r.kind]||0)+1;
+ const result={mode,pid:first.pid,boot:first.instanceId,elapsedMs,cpuMicros,cpuPercent:cpuMicros/elapsedMs/10,healthP95Ms:latencies[Math.ceil(latencies.length*.95)-1],clients:10,fleets:fleets.map(f=>f.id),requests:requests-initialRequests,errors,turns,spawns:counts,scope:'Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled.'};
+ await writeFile(join(root,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));if(errors||turns)throw Error('Requests failed or a model turn started');
+}}finally{for(const p of polls)clearInterval(p);clearInterval(native);controller.abort();await Promise.allSettled([...inFlight]);await captain.close();body.close();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));dispatch.close();}
