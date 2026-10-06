@@ -49,6 +49,8 @@ export const ProviderCredentialSchema = z.discriminatedUnion("type", [
     clientSecret: z.string().optional(),
     /** API-audience app/user tokens never authenticate the legacy MCP audience. */
     linearAuth: z.enum(["app", "api"]).optional(),
+    /** Body-owned Google OAuth; unrelated harness tokens are never eligible. */
+    googleAuth: z.literal("user").optional(),
     /** Broker-only connection metadata, including actual provider-granted scopes. */
     metadata: z.record(z.string(), z.string()).optional(),
     account: ProviderAccountSchema.optional(),
@@ -89,12 +91,19 @@ export function redactCredential(credential: ProviderCredential): RedactedCreden
  * providerId (trim, lowercase, strip trailing "/"), and `list()` only ever returns
  * redacted summaries — callers needing the secret must `get()` a specific provider.
  */
+export type CredentialGroup = Record<string, ProviderCredential | undefined>;
+
 export interface CredentialStore {
   get(providerId: string): Promise<ProviderCredential | undefined>;
   set(providerId: string, credential: ProviderCredential): Promise<void>;
   /** Revoke the exact current credential under the mutation lock before deleting it; callback must not call this store again. */
   delete(providerId: string, beforeDelete?: (current: ProviderCredential) => Promise<void>): Promise<boolean>;
   list(): Promise<Record<string, RedactedCredential>>;
+  /** One broker lock for related Google grants. Callbacks must not call this store. */
+  updateMany?(
+    providerIds: readonly string[],
+    transform: (current: CredentialGroup) => Promise<CredentialGroup>,
+  ): Promise<CredentialGroup>;
   /**
    * Transform an existing entry under the same cross-process lock as set/delete.
    * Missing entries stay missing. The callback must not call this store again.
@@ -230,10 +239,34 @@ export class FileCredentialStore implements CredentialStore {
     });
   }
 
+  public updateMany(
+    providerIds: readonly string[],
+    transform: (current: CredentialGroup) => Promise<CredentialGroup>,
+  ): Promise<CredentialGroup> {
+    const ids = [...new Set(providerIds.map(normalizeProviderId))];
+    return this.enqueue(async (assertHeld) => {
+      const { credentials } = await this.load();
+      const next = await transform(Object.fromEntries(ids.map((id) => [id, credentials[id]])));
+      let changed = false;
+      for (const id of ids) {
+        const value = next[id];
+        if (value === credentials[id]) continue;
+        changed = true;
+        if (value === undefined) delete credentials[id];
+        else credentials[id] = ProviderCredentialSchema.parse(value);
+      }
+      assertHeld();
+      if (changed) await this.persist(credentials);
+      return Object.fromEntries(ids.map((id) => [id, credentials[id]]));
+    });
+  }
+
   public async list(): Promise<Record<string, RedactedCredential>> {
     const { credentials } = await this.load();
     return Object.fromEntries(
-      Object.entries(credentials).map(([id, credential]) => [id, redactCredential(credential)]),
+      Object.entries(credentials)
+        .filter(([id]) => id !== "google-oauth-app")
+        .map(([id, credential]) => [id, redactCredential(credential)]),
     );
   }
 
@@ -379,6 +412,36 @@ export class KeychainCredentialStore implements CredentialStore {
     });
   }
 
+  public updateMany(
+    providerIds: readonly string[],
+    transform: (current: CredentialGroup) => Promise<CredentialGroup>,
+  ): Promise<CredentialGroup> {
+    const ids = [...new Set(providerIds.map(normalizeProviderId))];
+    return this.enqueue(async (assertHeld) => {
+      const current: CredentialGroup = {};
+      for (const id of ids) current[id] = await this.getDirect(id);
+      const previous = { ...current };
+      const next = await transform(current);
+      // Validate the entire group before the first Keychain publication.
+      for (const id of ids) if (next[id] !== undefined) ProviderCredentialSchema.parse(next[id]);
+      // All Google consumers resolve under this same lock. Disable/revoke is
+      // published before another consumer can refresh any sibling capability.
+      for (const id of ids) {
+        assertHeld();
+        const value = next[id];
+        if (value === previous[id]) continue;
+        if (value === undefined) {
+          if (previous[id] !== undefined) {
+            await this.deleteDirect(id);
+            const index = await this.readIndex();
+            await this.writeIndex(index.filter((entry) => entry !== id));
+          }
+        } else await this.setDirect(id, ProviderCredentialSchema.parse(value), assertHeld);
+      }
+      return next;
+    });
+  }
+
   private async setDirect(id: string, parsed: ProviderCredential, assertHeld: () => void): Promise<void> {
     const previous = await this.read(id);
     const index = await this.readIndex();
@@ -425,6 +488,7 @@ export class KeychainCredentialStore implements CredentialStore {
     return this.enqueue(async () => {
       const redacted: Record<string, RedactedCredential> = {};
       for (const id of await this.readIndex()) {
+        if (id === "google-oauth-app") continue;
         try {
           const credential = await this.getDirect(id);
           if (credential !== undefined) redacted[id] = redactCredential(credential);

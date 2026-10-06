@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createGoogleAccounts, type GoogleAccountsOptions } from "./google-accounts.ts";
 import { z } from "zod";
 import {
   connectLinearApp,
@@ -20,6 +21,9 @@ import type {
   AccountLinearCompleteResult,
   AccountLinearStartResult,
   AccountProvider,
+  GoogleAccountProvider,
+  AccountGoogleStartResult,
+  AccountGoogleCompleteResult,
   AccountsResponse,
 } from "@clankie/protocol/accounts";
 
@@ -42,11 +46,24 @@ const MAX_PENDING_FLOWS = 16;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export interface OauthApps {
+  readonly google?: { readonly clientId?: string | undefined; readonly redirectUri?: string | undefined };
   readonly github: { readonly clientId?: string | undefined };
   readonly linear: { readonly clientId?: string | undefined; readonly redirectUri?: string | undefined };
 }
 
 export interface AccountsPort {
+  startGoogle(provider: GoogleAccountProvider): Promise<AccountGoogleStartResult>;
+  completeGoogle(
+    provider: GoogleAccountProvider,
+    state: string,
+    code: string,
+    guard?: () => Promise<void>,
+    pickedFileIds?: readonly string[],
+  ): Promise<AccountGoogleCompleteResult>;
+  checkGoogle(
+    provider: GoogleAccountProvider,
+    guard?: () => Promise<void>,
+  ): Promise<AccountGoogleCompleteResult>;
   list(): Promise<AccountsResponse>;
   startGithub(): Promise<AccountGithubStartResult>;
   pollGithub(flowId: string, guard?: () => Promise<void>): Promise<AccountGithubPollResult>;
@@ -64,6 +81,7 @@ export interface AccountsPort {
 }
 
 export interface AccountsOptions {
+  readonly googleEndpoints?: GoogleAccountsOptions["endpoints"];
   /** Derived from the active hosted body runtime; developer OAuth secrets are self-hosted only. */
   readonly hosted?: boolean;
   readonly store: CredentialStore;
@@ -80,6 +98,7 @@ export interface AccountsOptions {
 /** Settings first, the environment wins: a hosted body's provisioner sets the environment. */
 export function oauthAppsFrom(
   settings: {
+    readonly google?: { readonly clientId?: string | undefined; readonly redirectUri?: string | undefined };
     readonly github?: { readonly clientId?: string | undefined };
     readonly linear?: { readonly clientId?: string | undefined; readonly redirectUri?: string | undefined };
   },
@@ -87,6 +106,10 @@ export function oauthAppsFrom(
 ): OauthApps {
   const pick = (name: string, fallback: string | undefined) => env[name]?.trim() || fallback;
   return {
+    google: {
+      clientId: pick("CLANKIE_GOOGLE_OAUTH_CLIENT_ID", settings.google?.clientId),
+      redirectUri: pick("CLANKIE_GOOGLE_OAUTH_REDIRECT_URI", settings.google?.redirectUri),
+    },
     github: { clientId: pick("CLANKIE_GITHUB_OAUTH_CLIENT_ID", settings.github?.clientId) },
     linear: {
       clientId: pick("CLANKIE_LINEAR_OAUTH_CLIENT_ID", settings.linear?.clientId),
@@ -165,6 +188,13 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
   const linearIssuer = options.linearIssuer ?? LINEAR_OAUTH_ISSUER;
   const githubFlows = new Map<string, GithubFlow>();
   const linearFlows = new Map<string, LinearFlow>();
+  const google = createGoogleAccounts({
+    store,
+    apps: async () => (await options.apps()).google ?? {},
+    fetch: request,
+    now,
+    ...(options.googleEndpoints === undefined ? {} : { endpoints: options.googleEndpoints }),
+  });
 
   const call = (url: string, init: RequestInit) =>
     request(url, { ...init, redirect: "error", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -293,8 +323,30 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
   const service: AccountsPort = {
     async list() {
       const apps = await options.apps();
-      return { connections: [await githubConnection(apps), await linearConnection(apps)] };
+      return {
+        connections: [
+          {
+            ...(await githubConnection(apps)),
+            name: "GitHub",
+            description: "Work with your repositories and issues.",
+            access: "Read and write repositories and issues.",
+            readOnly: false,
+          },
+          {
+            ...(await linearConnection(apps)),
+            name: "Linear",
+            description: "Work with your workspace's issues.",
+            access: "Read and write workspace issues.",
+            readOnly: false,
+          },
+          ...(await google.list()),
+        ],
+      };
     },
+    startGoogle: (provider) => google.start(provider),
+    completeGoogle: (provider, state, code, guard, pickedFileIds) =>
+      google.complete(provider, state, code, guard, pickedFileIds),
+    checkGoogle: (provider, guard) => google.check(provider, guard),
 
     async startGithub() {
       const { github } = await options.apps();
@@ -477,6 +529,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
     },
 
     async disconnect(provider, guard) {
+      if (provider !== "github" && provider !== "linear") return google.disconnect(provider, guard);
       const apps = await options.apps();
       if (provider === "github") {
         githubFlows.clear();
@@ -534,6 +587,10 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
     return next;
   };
   return {
+    startGoogle: (provider) => service.startGoogle(provider),
+    completeGoogle: (provider, state, code, guard, pickedFileIds) =>
+      service.completeGoogle(provider, state, code, guard, pickedFileIds),
+    checkGoogle: (provider, guard) => service.checkGoogle(provider, guard),
     list: () => service.list(),
     startGithub: () => serialize("github", () => service.startGithub()),
     pollGithub: (id, guard) => serialize("github", () => service.pollGithub(id, guard)),

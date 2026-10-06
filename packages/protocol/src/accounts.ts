@@ -13,8 +13,13 @@ export const ACCOUNT_LINEAR_START_PATH = "/v1/accounts/linear/start";
 export const ACCOUNT_LINEAR_COMPLETE_PATH = "/v1/accounts/linear/complete";
 export const ACCOUNT_LINEAR_APP_PATH = "/v1/accounts/linear/app";
 export const ACCOUNT_DISCONNECT_PATH = "/v1/accounts/disconnect";
+export const ACCOUNT_GOOGLE_START_PATH = "/v1/accounts/google/start";
+export const ACCOUNT_GOOGLE_COMPLETE_PATH = "/v1/accounts/google/complete";
+export const ACCOUNT_GOOGLE_CHECK_PATH = "/v1/accounts/google/check";
 
-export const AccountProviderSchema = z.enum(["github", "linear"]);
+export const GoogleAccountProviderSchema = z.enum(["google-gmail", "google-calendar", "google-drive"]);
+export type GoogleAccountProvider = z.infer<typeof GoogleAccountProviderSchema>;
+export const AccountProviderSchema = z.enum(["github", "linear", ...GoogleAccountProviderSchema.options]);
 export type AccountProvider = z.infer<typeof AccountProviderSchema>;
 
 const FlowIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u);
@@ -46,7 +51,31 @@ export const AccountConnectionSchema = z
   .object({
     provider: AccountProviderSchema,
     /** `unconfigured`: this body has no OAuth client for the provider yet. */
-    status: z.enum(["connected", "not_connected", "unconfigured"]),
+    status: z.enum([
+      "connected",
+      "not_connected",
+      "unconfigured",
+      "awaiting_consent",
+      "expired",
+      "reconnect_required",
+      "unavailable",
+      "disconnected",
+    ]),
+    /** Body-owned catalog metadata. Optional for older bodies, never inferred from credentials by a portal. */
+    name: z.string().max(128).optional(),
+    group: z.string().max(64).optional(),
+    description: z.string().max(512).optional(),
+    access: z.string().max(512).optional(),
+    readOnly: z.boolean().optional(),
+    lastCheckedAt: z.string().datetime().optional(),
+    revocationPending: z.boolean().optional(),
+    selectedFileIds: z
+      .array(z.string().regex(/^[A-Za-z0-9_-]{1,256}$/u))
+      .max(100)
+      .optional(),
+    reason: z
+      .enum(["invalid_grant", "scope_required", "provider_unavailable", "revocation_pending"])
+      .optional(),
     account: z.string().max(320).optional(),
     actor: z.enum(["user", "app"]).optional(),
     workspace: z.string().max(320).optional(),
@@ -142,3 +171,24 @@ export const AccountDisconnectResultSchema = z.discriminatedUnion("ok", [
   Failure,
 ]);
 export type AccountDisconnectResult = z.infer<typeof AccountDisconnectResultSchema>;
+
+export const AccountGoogleStartRequestSchema = z.object({ provider: GoogleAccountProviderSchema }).strict();
+export const AccountGoogleCompleteRequestSchema = AccountLinearCompleteRequestSchema.extend({
+  provider: GoogleAccountProviderSchema,
+  /** The system Google Picker returns selected IDs with its one-time code. */
+  pickedFileIds: z
+    .array(z.string().regex(/^[A-Za-z0-9_-]{1,256}$/u))
+    .min(1)
+    .max(100)
+    .optional(),
+})
+  .strict()
+  .refine((value) =>
+    value.provider === "google-drive"
+      ? value.pickedFileIds !== undefined && new Set(value.pickedFileIds).size === value.pickedFileIds.length
+      : value.pickedFileIds === undefined,
+  );
+export const AccountGoogleStartResultSchema = AccountLinearStartResultSchema;
+export type AccountGoogleStartResult = z.infer<typeof AccountGoogleStartResultSchema>;
+export const AccountGoogleCompleteResultSchema = AccountLinearCompleteResultSchema;
+export type AccountGoogleCompleteResult = z.infer<typeof AccountGoogleCompleteResultSchema>;
