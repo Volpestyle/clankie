@@ -147,14 +147,15 @@ describe("trusted remote SSH relay", () => {
   });
   it("expired observations keep their bounded capacity and drain identity until original replies settle", async () => {
     const { child, relay } = await setup();
-    const command =
+    // Distinct scripts: identical ones coalesce onto one run.
+    const observation = (index: number) =>
       "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
-      Buffer.from("'read-only'", "utf16le").toString("base64");
-    const attempts = Array.from({ length: 16 }, () =>
-      relay.execute(command, 10).catch((error: Error) => error.message),
+      Buffer.from(`'read-only ${String(index)}'`, "utf16le").toString("base64");
+    const attempts = Array.from({ length: 16 }, (_, index) =>
+      relay.execute(observation(index), 10).catch((error: Error) => error.message),
     );
     expect(await Promise.all(attempts)).toEqual(Array(16).fill("Remote observation timed out"));
-    await expect(relay.execute(command)).rejects.toThrow("Remote observer unavailable");
+    await expect(relay.execute(observation(16))).rejects.toThrow("Remote observer unavailable");
     const drained = vi.fn();
     relay.drain(drained);
     child.stdout.write(frame(6, 0));
@@ -162,6 +163,55 @@ describe("trusted remote SSH relay", () => {
     for (let id = 1; id <= 16; id++) child.stdout.write(frame(4, id, Buffer.from("late-proof")));
     expect(drained).toHaveBeenCalledTimes(1);
     expect(child.kill).not.toHaveBeenCalled();
+  });
+  it("identical concurrent observations share only a run dispatched after each caller arrived (VUH-1748)", async () => {
+    const { child, relay } = await setup();
+    const dispatched: number[] = [];
+    child.stdin.on("data", (data: Buffer) => {
+      if (data[0] === 4) dispatched.push(data.readUInt32LE(1));
+    });
+    const command =
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+      Buffer.from("'census'", "utf16le").toString("base64");
+    const other =
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+      Buffer.from("'other pane proof'", "utf16le").toString("base64");
+    const first = relay.execute(command);
+    // Both arrive while the first run is already on the serial Windows queue.
+    const second = relay.execute(command);
+    const third = relay.execute(command);
+    const distinct = relay.execute(other);
+    let secondValue: string | undefined;
+    void second.then((value) => (secondValue = value));
+    await settle(() => dispatched.length === 2);
+    expect(dispatched).toEqual([1, 2]);
+    child.stdout.write(frame(4, 1, Buffer.from("observed-before-they-asked")));
+    await expect(first).resolves.toBe("observed-before-they-asked");
+    // The earlier result never satisfies a later caller; their shared run starts now.
+    await settle(() => dispatched.length === 3);
+    expect(secondValue).toBeUndefined();
+    child.stdout.write(frame(4, 2, Buffer.from("other")));
+    await expect(distinct).resolves.toBe("other");
+    child.stdout.write(frame(4, 3, Buffer.from("observed-after-they-asked")));
+    await expect(second).resolves.toBe("observed-after-they-asked");
+    await expect(third).resolves.toBe("observed-after-they-asked");
+    // Three identical callers cost two Windows runs; the run map empties afterwards.
+    expect(dispatched).toEqual([1, 2, 3]);
+    const later = relay.execute(command);
+    await settle(() => dispatched.length === 4);
+    child.stdout.write(frame(4, 4, Buffer.from("fresh")));
+    await expect(later).resolves.toBe("fresh");
+  });
+  it("a caller waiting for the next run still times out from its own arrival", async () => {
+    const { child, relay } = await setup();
+    const command =
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+      Buffer.from("'slow'", "utf16le").toString("base64");
+    const first = relay.execute(command, 10_000);
+    const waiting = relay.execute(command, 20);
+    await expect(waiting).rejects.toThrow("Remote observation timed out");
+    child.stdout.write(frame(4, 1, Buffer.from("late")));
+    await expect(first).resolves.toBe("late");
   });
   it("a genuinely stalled observer has bounded grace and cannot retain a retired relay indefinitely", async () => {
     const { child, relay, sockets } = await setup();

@@ -6,6 +6,34 @@ import type { RemoteStream } from "./remote-project-proof.ts";
 const MAX_FRAME = 65536;
 const MAX_PENDING = 4 * 1024 * 1024;
 const OBSERVATION_GRACE_MS = 30_000;
+const STATS_WINDOW_MS = 5 * 60_000;
+/** Herdr census reads (herdr-fleet.ts remoteHerdrObservation); everything else is a proof or path check. */
+const CENSUS_SCRIPT = /Native Herdr observation failed/u;
+
+interface Deferred {
+  readonly promise: Promise<string>;
+  resolve(value: string): void;
+  reject(error: unknown): void;
+  timeoutMs: number;
+}
+interface Run {
+  current?: Promise<string>;
+  next: Deferred | undefined;
+}
+function deferred(timeoutMs: number): Deferred {
+  let resolve!: (value: string) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<string>((ok, fail) => {
+    resolve = ok;
+    reject = fail;
+  });
+  // A queued run nobody awaits after its callers timed out must not surface as unhandled.
+  promise.catch(() => undefined);
+  return { promise, resolve, reject, timeoutMs };
+}
+function emptyStats() {
+  return { dispatched: 0, census: 0, joined: 0, timedOut: 0 };
+}
 /** Safe transport reasons; never carries the observation script or its output. */
 export class RemoteObservationError extends Error {
   readonly code: "remote_observation_timeout" | "remote_observer_unavailable";
@@ -37,6 +65,14 @@ export class RemoteFleetRelay {
   private draining = false;
   private drainAcknowledged = false;
   private commandId = 0;
+  /**
+   * Identical read-only observations in flight, by exact command. A caller that
+   * arrives while one runs joins the next run, never the current one, so every
+   * result it sees came from a script dispatched after it asked (VUH-1748).
+   */
+  private readonly runs = new Map<string, Run>();
+  private stats = emptyStats();
+  private statsTimer: ReturnType<typeof setInterval> | undefined;
   private readonly commands = new Map<
     number,
     {
@@ -118,6 +154,22 @@ export class RemoteFleetRelay {
     return this.open && this.readyNotified;
   }
 
+  /** One summary line per window measures what the serial Windows queue carries. */
+  private reportStats(): void {
+    if (this.statsTimer !== undefined || this.options.log === undefined) return;
+    this.statsTimer = setInterval(() => {
+      const { dispatched, census, joined, timedOut } = this.stats;
+      this.stats = emptyStats();
+      if (dispatched + joined + timedOut === 0) return;
+      this.options.log?.(
+        `remote observations in ${String(STATS_WINDOW_MS / 60_000)} min: dispatched ${String(dispatched)} ` +
+          `(census ${String(census)}, other ${String(dispatched - census)}), joined ${String(joined)}, ` +
+          `timed out ${String(timedOut)}`,
+      );
+    }, STATS_WINDOW_MS);
+    this.statsTimer.unref?.();
+  }
+
   /** Retain accepted HTTP streams and observations until their replies finish. */
   drain(complete: () => void): void {
     this.drained = complete;
@@ -140,13 +192,68 @@ export class RemoteFleetRelay {
     complete();
   }
 
+  /**
+   * Windows runs observations one at a time, so duplicates queue behind each
+   * other and push latency-sensitive proofs past their timeout. Coalesce exact
+   * duplicates onto the next run: at most one running and one queued per
+   * command, and each caller still times out from its own arrival.
+   */
   execute(command: string, timeoutMs = 10_000): Promise<string> {
+    const run = this.runs.get(command);
+    if (run === undefined) {
+      const entry: Run = { next: undefined };
+      this.runs.set(command, entry);
+      this.track(command, entry, this.dispatch(command, timeoutMs));
+      return entry.current!;
+    }
+    this.stats.joined++;
+    const next = (run.next ??= deferred(timeoutMs));
+    next.timeoutMs = Math.max(next.timeoutMs, timeoutMs);
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.stats.timedOut++;
+        reject(new RemoteObservationError("remote_observation_timeout"));
+      }, timeoutMs);
+      next.promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
+  }
+
+  private track(command: string, entry: Run, current: Promise<string>): void {
+    entry.current = current;
+    const advance = () => {
+      if (this.runs.get(command) !== entry) return;
+      const next = entry.next;
+      if (next === undefined) {
+        this.runs.delete(command);
+        return;
+      }
+      entry.next = undefined;
+      const started = this.dispatch(command, next.timeoutMs);
+      started.then(next.resolve, next.reject);
+      this.track(command, entry, started);
+    };
+    current.then(advance, advance);
+  }
+
+  private dispatch(command: string, timeoutMs: number): Promise<string> {
     const encoded = /^powershell\.exe -NoProfile -NonInteractive -EncodedCommand ([A-Za-z0-9+/=]+)$/u.exec(
       command,
     )?.[1];
     if (!this.open || !this.readyNotified || !encoded || this.commands.size >= 16)
       return Promise.reject(new RemoteObservationError("remote_observer_unavailable"));
     const script = Buffer.from(Buffer.from(encoded, "base64").toString("utf16le"), "utf8");
+    this.stats.dispatched++;
+    if (CENSUS_SCRIPT.test(script.toString("utf8"))) this.stats.census++;
+    this.reportStats();
     if (script.length > MAX_FRAME || this.commandId >= 0xffffffff)
       return Promise.reject(new Error("Remote observation too large"));
     const id = ++this.commandId;
@@ -159,6 +266,7 @@ export class RemoteFleetRelay {
         // Keep its exact ID and capacity until the original reply arrives;
         // an expired result can never become proof or satisfy a later request.
         command.expired = true;
+        this.stats.timedOut++;
         reject(new RemoteObservationError("remote_observation_timeout"));
         this.options.log?.(`remote observation ${id} timed out after ${timeoutMs} ms; relay retained`);
         // A truly hung script stops Windows' serial observer queue. Bound the
@@ -347,6 +455,8 @@ export class RemoteFleetRelay {
       command.reject(new RemoteObservationError("remote_observer_unavailable"));
     }
     this.commands.clear();
+    if (this.statsTimer !== undefined) clearInterval(this.statsTimer);
+    this.statsTimer = undefined;
     this.finishDrain();
     this.options.child.stdin?.destroy();
     this.options.child.kill();

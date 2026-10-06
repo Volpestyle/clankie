@@ -55,6 +55,17 @@ The resident relay executes service-authored, bounded observations without
 starting a new PowerShell process for each read. It caches the compiled native
 reader, never a successful authorization result.
 
+Windows runs these observations one at a time, and since 242f7f9c Herdr census
+reads share that queue with pane proofs. Exact duplicate observations therefore
+coalesce on the Mac (VUH-1748): a caller that arrives while the same script is
+running joins the next run, which is dispatched only after the current one
+settles, so no caller ever receives a result observed before it asked. Each
+command keeps at most one run in flight and one queued, and every caller still
+times out from its own arrival. Proof scripts carry the accepted stream's TCP
+tuple, so they coalesce only within one connection. The relay logs one summary
+line per five minutes (dispatched, census, joined, timed out) to measure what
+the queue carries.
+
 - `GetExtendedTcpTable` identifies the unique owner of the exact accepted tuple.
 - Toolhelp process enumeration and kernel process handles supply parent PIDs,
   executable paths and full creation timestamps. Ancestry is bounded, cycle-safe,
