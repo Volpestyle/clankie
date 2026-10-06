@@ -1,0 +1,381 @@
+{
+  "issue": "VUH-1527",
+  "result": "partial-pass-remains-open",
+  "runtime": {
+    "pid": 74279,
+    "commit": "7ee4da048fe40682d54e013591032ec06e28f727",
+    "root": "/Users/james/.clankie/pinned",
+    "instanceId": "72f0594c-f0d5-41d4-b94b-3dc92f5bcd10"
+  },
+  "freshAdmission": {
+    "requestedAt": "2026-10-06T12:13:38.752Z",
+    "freshIntent": {
+      "id": "965edf88-0551-4641-93a4-4798348b0a6c",
+      "afterReceiptId": "719dd6b1-2814-4c2b-9eb6-118fb785427c"
+    },
+    "originalReceiptState": "abandoned",
+    "originalReceiptRetained": true,
+    "originalResent": false
+  },
+  "hire": {
+    "op": "spawn_seat",
+    "schemaVersion": 1,
+    "result": {
+      "outcome": "spawned",
+      "deliveryStage": "consumed",
+      "seat": {
+        "seatId": "pc/term_65d2aeeb73a1b19",
+        "occupantId": "session-1dbe32b46e20758fc9dee5a395567134eedd00c948641758c429a7c401466bd4",
+        "personaId": "agent-ea8a3b77-8855-4646-8037-df36b164758e",
+        "harness": "codex",
+        "status": "working",
+        "title": "ada-b0f7",
+        "conversationId": "conv-55b9baad-4de2-46ec-b484-7759d67e5e9f",
+        "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer"
+      },
+      "control": {
+        "mode": "adapter"
+      },
+      "profile": {
+        "harness": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "delegation": "panes",
+        "placement": "new-tab"
+      },
+      "skills": {
+        "mode": "bundled",
+        "source": "setting",
+        "applied": false,
+        "included": [],
+        "excluded": []
+      }
+    }
+  },
+  "followup": {
+    "schemaVersion": 1,
+    "status": "accepted",
+    "deliveryStage": "consumed",
+    "conversationId": "conv-55b9baad-4de2-46ec-b484-7759d67e5e9f",
+    "runId": "run-c0541881-e9d1-469a-805f-4a26e2bbb045",
+    "revision": 1,
+    "safeCursor": "000000000000",
+    "seatDelivery": {
+      "state": "started"
+    }
+  },
+  "nativeCompletion": {
+    "observedAt": "2026-10-06T12:18:23.6878296Z",
+    "pane": "wF:p2",
+    "terminal": "term_65d2aeeb73a1b19",
+    "session": "01a11122-b743-7310-85c6-ae47dc0de220",
+    "nativeStatus": "done",
+    "lifecycle": [
+      {
+        "utc": "2026-10-06T12:14:27.358Z",
+        "type": "task_started",
+        "turnId": "01a11122-f904-7570-ad43-cf7769103f51",
+        "lastAgentMessage": null
+      },
+      {
+        "utc": "2026-10-06T12:15:18.337Z",
+        "type": "task_complete",
+        "turnId": "01a11122-f904-7570-ad43-cf7769103f51",
+        "lastAgentMessage": "TESS1527_7EE_a_BRIEF_OK\n\n- All five requested native tools are present. No independent Linear connector tools are exposed.\n- Read [VUH-1527](https://linear.app/vuhlp/issue/VUH-1527) once: \u201cReach remote agents through their native channels, without Swarm.\u201d Receipt: `9a777270-39ae-4992-a3e9-e54aea937ae9`.\n- `message_clankie` called once: rejected\u2014\u201cNo durable native binding is available; nothing was sent.\u201d\n- `list_fleet_seats` called once: MCP `-32000`, \u201cPeer discovery answered 403: native_peer_sender_required.\u201d No seat IDs returned.\n\nNo retries, peer messages, or changes. Available for native follow-up; native binding remains unresolved."
+      },
+      {
+        "utc": "2026-10-06T12:17:54.512Z",
+        "type": "task_started",
+        "turnId": "01a11126-22d4-7d92-978e-5b94ca40c5a7",
+        "lastAgentMessage": null
+      },
+      {
+        "utc": "2026-10-06T12:18:05.453Z",
+        "type": "task_complete",
+        "turnId": "01a11126-22d4-7d92-978e-5b94ca40c5a7",
+        "lastAgentMessage": "TESS1527_7EE_a_FOLLOWUP_OK\n\n`message_clankie` called once. Exact outcome:\n```json\n{\"received\":false,\"deliveryStage\":\"rejected\",\"detail\":\"No durable native binding is available; nothing was sent.\"}\n```\n\nSession remains open for native follow-up."
+      }
+    ],
+    "clankieToolCalls": []
+  },
+  "leadCompletion": {
+    "conversationId": "conv-1e269af8-1a7c-4393-8bea-d6baa074fb7b",
+    "events": [
+      {
+        "schemaVersion": 1,
+        "conversationId": "conv-1e269af8-1a7c-4393-8bea-d6baa074fb7b",
+        "cursor": "000000000001",
+        "revision": 1,
+        "occurredAt": "2026-10-06T12:15:24.836Z",
+        "type": "turn",
+        "runId": "run-4d5c502b-c7c4-420d-8a6a-295e7ced4ce7",
+        "phase": "accepted"
+      },
+      {
+        "schemaVersion": 1,
+        "conversationId": "conv-1e269af8-1a7c-4393-8bea-d6baa074fb7b",
+        "cursor": "000000000048",
+        "revision": 2,
+        "occurredAt": "2026-10-06T12:18:09.991Z",
+        "type": "turn",
+        "runId": "run-5bea2f49-fc2c-4bb1-b9e3-25639acc0337",
+        "phase": "accepted"
+      },
+      {
+        "schemaVersion": 1,
+        "conversationId": "conv-1e269af8-1a7c-4393-8bea-d6baa074fb7b",
+        "cursor": "000000000066",
+        "revision": 2,
+        "occurredAt": "2026-10-06T12:19:23.687Z",
+        "type": "message",
+        "role": "captain",
+        "text": "Harvested Ada\u2019s PC test: **partial pass, VUH-1527 remains open.**\n\n- Native brief, fresh follow-up and connected Linear read succeeded.\n- Both worker reports were rejected: \u201cNo durable native binding.\u201d\n- Peer discovery failed: `403 native_peer_sender_required`.\n\nThe sender-binding blocker persists on `7ee4da04`; its cause remains unproven. Reviewed the sole owned seat and kept it open\u2014no retries or replacement hire.\n\nEvidence: `.local/watch-harvest-1527/REPORT.md`.",
+        "streaming": false
+      },
+      {
+        "schemaVersion": 1,
+        "conversationId": "conv-1e269af8-1a7c-4393-8bea-d6baa074fb7b",
+        "cursor": "000000000068",
+        "revision": 2,
+        "occurredAt": "2026-10-06T12:19:23.691Z",
+        "type": "turn",
+        "deliveryStage": "responded",
+        "runId": "run-4d5c502b-c7c4-420d-8a6a-295e7ced4ce7",
+        "phase": "completed"
+      },
+      {
+        "schemaVersion": 1,
+        "conversationId": "conv-1e269af8-1a7c-4393-8bea-d6baa074fb7b",
+        "cursor": "000000000086",
+        "revision": 2,
+        "occurredAt": "2026-10-06T12:20:28.541Z",
+        "type": "message",
+        "role": "captain",
+        "text": "The follow-up completion **did wake this lead**\u2014that gap is now verified and recorded.\n\nWorker reporting still fails with \u201cNo durable native binding\u201d; peer discovery remains blocked. VUH-1527 stays open. Reviewed the sole owned seat and preserved it for follow-up; no retries.",
+        "streaming": false
+      },
+      {
+        "schemaVersion": 1,
+        "conversationId": "conv-1e269af8-1a7c-4393-8bea-d6baa074fb7b",
+        "cursor": "000000000088",
+        "revision": 2,
+        "occurredAt": "2026-10-06T12:20:28.543Z",
+        "type": "turn",
+        "deliveryStage": "responded",
+        "runId": "run-5bea2f49-fc2c-4bb1-b9e3-25639acc0337",
+        "phase": "completed"
+      }
+    ],
+    "exactNativeHarvest": {
+      "observedAt": "2026-10-06T12:21:08.033Z",
+      "watches": [],
+      "harvestedTurns": [
+        {
+          "terminalId": "pc/term_65d2aeeb73a1b19",
+          "occupantId": "session-1dbe32b46e20758fc9dee5a395567134eedd00c948641758c429a7c401466bd4",
+          "messageId": "01a11122-f904-7570-ad43-cf7769103f51",
+          "watchId": "4e6218af-2ba8-45dc-9fa7-32e0d76937b9"
+        },
+        {
+          "terminalId": "pc/term_65d2aeeb73a1b19",
+          "occupantId": "session-1dbe32b46e20758fc9dee5a395567134eedd00c948641758c429a7c401466bd4",
+          "messageId": "01a11126-22d4-7d92-978e-5b94ca40c5a7",
+          "watchId": "ebe6fedb-3ef8-4d0e-ab80-01b98e305481"
+        }
+      ]
+    }
+  },
+  "workerReport": {
+    "briefAndFollowupOutcome": {
+      "received": false,
+      "deliveryStage": "rejected",
+      "detail": "No durable native binding is available; nothing was sent."
+    },
+    "roster": {
+      "outcome": "rejected",
+      "reason": "binding_rejected",
+      "observedAt": "2026-10-06T12:18:01.618Z"
+    },
+    "failureCount": 2
+  },
+  "peerDiscovery": {
+    "outcome": "rejected",
+    "error": "Peer discovery answered 403: native_peer_sender_required",
+    "seatIdsReturned": [],
+    "exchange": "not-attempted-no-admitted-recipient-binding",
+    "secondHire": "not-created"
+  },
+  "tracker": {
+    "connectedIssue": "VUH-1527",
+    "connectedReadReceiptId": "9a777270-39ae-4992-a3e9-e54aea937ae9",
+    "independentLinearToolsInWorker": false,
+    "hiredTuiLinearDisabled": true,
+    "dedicatedAppServerLinearDisabled": true,
+    "configSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46",
+    "configUnchanged": true,
+    "swarmUsed": false
+  },
+  "sshLoss": {
+    "intent": {
+      "utc": "2026-10-06T12:21:21.373235+00:00",
+      "pid": 64301,
+      "parentPid": 74279,
+      "startTime": "Tue Oct 6 07:14:01 2026",
+      "scope": "Only the dedicated forward for owned pc/wF:p2; shared fleet link untouched"
+    },
+    "originalDedicatedForward": {
+      "pid": 64301,
+      "parentPid": 74279,
+      "startTime": "Tue Oct 6 07:14:01 2026"
+    },
+    "remotePort": 56075,
+    "controlMaster": false,
+    "controlPath": "none",
+    "publicSendResult": {
+      "schemaVersion": 1,
+      "status": "seat_offline",
+      "deliveryStage": "unavailable",
+      "conversationId": "conv-55b9baad-4de2-46ec-b484-7759d67e5e9f",
+      "personaId": "agent-ea8a3b77-8855-4646-8037-df36b164758e",
+      "currentRevision": 1,
+      "safeCursor": "000000000003"
+    },
+    "dedicatedAppServerAbsentAfterLoss": true,
+    "sharedFleetLink": {
+      "state": "ready",
+      "since": "2026-10-06T12:20:16.395Z",
+      "port": 62372
+    },
+    "remoteInspector": {
+      "status": "unavailable",
+      "detail": "Remote inspection requires a reachable fleet and the shipped harness inspector; run explicit owner preparation if missing."
+    },
+    "replacementLaunched": false,
+    "fallbackTyping": false
+  },
+  "handStarted": {
+    "seatId": "pc/term_65d2aee6390b518",
+    "occupantId": "session-26aa73162d16a8037994ccb48c31863d015dfac0409a1976f39c08a1a4eb4936",
+    "pane": "wF:p1",
+    "noDaemon": true,
+    "reportBridge": {
+      "outcome": "stored",
+      "reason": "stored",
+      "observedAt": "2026-10-06T12:21:29.346Z",
+      "lastStoredAt": "2026-10-06T12:21:29.346Z"
+    },
+    "reportReceiptId": "9755d44e-61c9-4dd8-a678-098898b4d7c1",
+    "reportStage": "stored",
+    "reportReplyDeliveryProven": false,
+    "nativeCompletion": {
+      "observedAt": "2026-10-06T12:23:44.7068395Z",
+      "pane": "wF:p1",
+      "terminal": "term_65d2aee6390b518",
+      "session": "01a11128-c0c6-7400-98ec-1ef3f91cf4e2",
+      "nativeStatus": "done",
+      "lifecycle": [
+        {
+          "utc": "2026-10-06T12:20:48.123Z",
+          "type": "task_started",
+          "turnId": "01a11128-c7b3-72a0-bd7f-196f39e64295",
+          "lastAgentMessage": null
+        },
+        {
+          "utc": "2026-10-06T12:21:34.555Z",
+          "type": "task_complete",
+          "turnId": "01a11128-c7b3-72a0-bd7f-196f39e64295",
+          "lastAgentMessage": "Exact `message_clankie` result:\n\n```json\n{\"schemaVersion\":1,\"received\":true,\"deliveryStage\":\"stored\",\"deliveryId\":\"9755d44e-61c9-4dd8-a678-098898b4d7c1\",\"binding\":\"2445ef573e5e1be8ed7471460e81477060166d7f120e57202bfc2a8c63e74f0f\",\"fingerprint\":\"7332e2d4df73e4d090e9ca8d25eaf8296bd12786df173d75966a6d5e8eb485a9\"}\n```\n\nCalled exactly once. TUI remains open for one native owner reply.\n\nTESS1527_7EE_HAND_START_OK"
+        }
+      ],
+      "clankieToolCalls": []
+    },
+    "steerResult": {
+      "schemaVersion": 1,
+      "status": "seat_undelivered",
+      "deliveryStage": "rejected",
+      "conversationId": "conv-4e4e33e0-6464-4d5a-b14b-cedfb6eec226",
+      "seatId": "pc/term_65d2aee6390b518",
+      "currentRevision": 0,
+      "safeCursor": "000000000000",
+      "detail": "This agent's native connection cannot steer the running turn. Choose Queue or use its terminal. Nothing was sent."
+    },
+    "queueResult": {
+      "schemaVersion": 1,
+      "status": "seat_offline",
+      "deliveryStage": "unavailable",
+      "conversationId": "conv-4e4e33e0-6464-4d5a-b14b-cedfb6eec226",
+      "personaId": "agent-c798a3b3-cdf2-4050-bb16-122458ae7a3c",
+      "currentRevision": 0,
+      "safeCursor": "000000000000"
+    },
+    "replyMarkerCompleted": false
+  },
+  "startupTrust": {
+    "promptAppeared": false,
+    "trustReconnectFailureObservedDuringHire": false
+  },
+  "claudeSeat": {
+    "performed": false,
+    "block": "James personal PC Claude /login is still outstanding; accounts/config unchanged"
+  },
+  "remainingGaps": [
+    "Hired PC Codex message_clankie still rejects durable native binding",
+    "Hired PC peer discovery returns native_peer_sender_required; owned peer exchange blocked",
+    "Hand-started PC Codex report stores, but native Queue reply returns seat_offline while TUI remains live",
+    "Managed hire startup catalog is still labelled embedded/unverified",
+    "Claude-seat follow-up and Stop hook proof await James PC /login"
+  ],
+  "postCleanupNativeHistory": {
+    "observedAt": "2026-10-06T12:30:46.5144064Z",
+    "ownedHistories": [
+      {
+        "session": "01a11122-b743-7310-85c6-ae47dc0de220",
+        "nativeLifecycle": [
+          {
+            "utc": "2026-10-06T12:14:27.358Z",
+            "type": "task_started",
+            "turnId": "01a11122-f904-7570-ad43-cf7769103f51",
+            "lastAgentMessage": null
+          },
+          {
+            "utc": "2026-10-06T12:15:18.337Z",
+            "type": "task_complete",
+            "turnId": "01a11122-f904-7570-ad43-cf7769103f51",
+            "lastAgentMessage": "TESS1527_7EE_a_BRIEF_OK\n\n- All five requested native tools are present. No independent Linear connector tools are exposed.\n- Read [VUH-1527](https://linear.app/vuhlp/issue/VUH-1527) once: \u201cReach remote agents through their native channels, without Swarm.\u201d Receipt: `9a777270-39ae-4992-a3e9-e54aea937ae9`.\n- `message_clankie` called once: rejected\u2014\u201cNo durable native binding is available; nothing was sent.\u201d\n- `list_fleet_seats` called once: MCP `-32000`, \u201cPeer discovery answered 403: native_peer_sender_required.\u201d No seat IDs returned.\n\nNo retries, peer messages, or changes. Available for native follow-up; native binding remains unresolved."
+          },
+          {
+            "utc": "2026-10-06T12:17:54.512Z",
+            "type": "task_started",
+            "turnId": "01a11126-22d4-7d92-978e-5b94ca40c5a7",
+            "lastAgentMessage": null
+          },
+          {
+            "utc": "2026-10-06T12:18:05.453Z",
+            "type": "task_complete",
+            "turnId": "01a11126-22d4-7d92-978e-5b94ca40c5a7",
+            "lastAgentMessage": "TESS1527_7EE_a_FOLLOWUP_OK\n\n`message_clankie` called once. Exact outcome:\n```json\n{\"received\":false,\"deliveryStage\":\"rejected\",\"detail\":\"No durable native binding is available; nothing was sent.\"}\n```\n\nSession remains open for native follow-up."
+          }
+        ],
+        "logSha256": "5f82758dd6803dc30464e02b0b0410b0dbbb6ac678610d1408f32a3d03e9a5a6"
+      },
+      {
+        "session": "01a11128-c0c6-7400-98ec-1ef3f91cf4e2",
+        "nativeLifecycle": [
+          {
+            "utc": "2026-10-06T12:20:48.123Z",
+            "type": "task_started",
+            "turnId": "01a11128-c7b3-72a0-bd7f-196f39e64295",
+            "lastAgentMessage": null
+          },
+          {
+            "utc": "2026-10-06T12:21:34.555Z",
+            "type": "task_complete",
+            "turnId": "01a11128-c7b3-72a0-bd7f-196f39e64295",
+            "lastAgentMessage": "Exact `message_clankie` result:\n\n```json\n{\"schemaVersion\":1,\"received\":true,\"deliveryStage\":\"stored\",\"deliveryId\":\"9755d44e-61c9-4dd8-a678-098898b4d7c1\",\"binding\":\"2445ef573e5e1be8ed7471460e81477060166d7f120e57202bfc2a8c63e74f0f\",\"fingerprint\":\"7332e2d4df73e4d090e9ca8d25eaf8296bd12786df173d75966a6d5e8eb485a9\"}\n```\n\nCalled exactly once. TUI remains open for one native owner reply.\n\nTESS1527_7EE_HAND_START_OK"
+          }
+        ],
+        "logSha256": "b51f00ca80359e01a8a0af1ae7f5edd3ac2c7ac90983e1e480985edd57b6318b"
+      }
+    ]
+  }
+}

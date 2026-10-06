@@ -1,0 +1,67 @@
+{
+  "baseline": {
+    "observedAt": "2026-10-06T12:13:21.9748599Z",
+    "panes": [
+      {
+        "pane": "w9:p1",
+        "terminal": "term_65d0ca2fa70f81"
+      },
+      {
+        "pane": "w9:p2",
+        "terminal": "term_65d0ca3cb067b2"
+      },
+      {
+        "pane": "w9:p3",
+        "terminal": "term_65d0e2463eaeb3"
+      },
+      {
+        "pane": "w9:p4",
+        "terminal": "term_65d0e8822cbf54"
+      },
+      {
+        "pane": "w9:p6",
+        "terminal": "term_65d106ee2fa839"
+      }
+    ],
+    "codexConfigSource": ["C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml"],
+    "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+  },
+  "after": {
+    "observedAt": "2026-10-06T12:25:58.5593989Z",
+    "closed": ["wF:p2", "wF:p1"],
+    "remaining": [
+      {
+        "pane": "w9:p1",
+        "terminal": "term_65d0ca2fa70f81"
+      },
+      {
+        "pane": "w9:p2",
+        "terminal": "term_65d0ca3cb067b2"
+      },
+      {
+        "pane": "w9:p3",
+        "terminal": "term_65d0e2463eaeb3"
+      },
+      {
+        "pane": "w9:p4",
+        "terminal": "term_65d0e8822cbf54"
+      },
+      {
+        "pane": "w9:p6",
+        "terminal": "term_65d106ee2fa839"
+      }
+    ],
+    "capturedOwnedPids": [
+      310868, 349968, 458700, 717968, 132676, 213692, 537896, 110928, 26864, 107776, 312884, 115172, 798544,
+      172860, 450400, 591000, 239416, 782568, 425136, 684732, 474956, 613072, 283864, 148604, 184636, 296696
+    ],
+    "survivors": [],
+    "codexConfigSource": ["C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml"],
+    "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+  },
+  "sameFivePaneIdentities": true,
+  "codexConfigUnchanged": true,
+  "accountsChanged": false,
+  "desktopUsed": false,
+  "nonOwnedPanesSteeredOrClosed": false
+}

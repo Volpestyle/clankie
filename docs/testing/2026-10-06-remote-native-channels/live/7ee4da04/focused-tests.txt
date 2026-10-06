@@ -1,0 +1,8 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/tess-vuh-1527
+
+
+ Test Files  3 passed (3)
+      Tests  88 passed (88)
+   Start at  07:24:35
+   Duration  4.79s (transform 452ms, setup 23ms, import 1.60s, tests 2.95s, environment 0ms)
