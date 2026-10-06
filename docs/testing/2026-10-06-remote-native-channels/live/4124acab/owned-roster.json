@@ -1,0 +1,63 @@
+[
+  {
+    "toolCatalog": {
+      "status": "unverified",
+      "detail": "This embedded Codex session exposes no native catalog endpoint. Start a Clankie-managed hire to verify its tools.",
+      "missing": [],
+      "remediation": "Ask Clankie to launch this work with hire_agent so the managed Codex controller can verify its native tools.",
+      "harness": "codex",
+      "sessionId": "01a11098-decc-7603-9a31-998a3048e17f",
+      "bridge": "worker",
+      "checkedAt": "2026-10-06T09:44:01.979Z"
+    },
+    "workerTools": {
+      "status": "ready",
+      "reason": "Native bridge reported: ",
+      "observedAt": "2026-10-06T09:44:39.247Z",
+      "tools": ["message_clankie", "clankie_tools", "clankie_call", "list_fleet_seats", "message_peer"],
+      "pluginVersion": "0.6.7",
+      "expectedPluginVersion": "0.6.7",
+      "behind": false,
+      "runtimeRevision": "c6ea3606-78ae-4f6c-906c-1036128a088e",
+      "expectedRuntimeRevision": "c6ea3606-78ae-4f6c-906c-1036128a088e"
+    },
+    "workerReportBridge": {
+      "outcome": "rejected",
+      "reason": "binding_rejected",
+      "observedAt": "2026-10-06T09:44:39.233Z"
+    },
+    "seatId": "pc/term_65d28d44cce3f15",
+    "occupantId": "session-a1070e763c06ba2ddfc2c009c7ec533ef758f796668a04463bebc5f93089c8c0",
+    "personaId": "agent-2b370480-976e-493e-adf4-ec5b7bca6302",
+    "harness": "codex",
+    "status": "idle",
+    "title": "ada-612c",
+    "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+    "placement": {
+      "workspace": {
+        "id": "wD",
+        "label": "kh2-multiplayer",
+        "number": 2
+      },
+      "tab": {
+        "id": "wD:t2",
+        "label": "Ada \u00b7 tester",
+        "number": 2
+      }
+    },
+    "machine": "volpe@supedupsilly",
+    "herdrSession": "default",
+    "fleet": "pc",
+    "workerReportRouting": {
+      "source": "adoption",
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e"
+    },
+    "workerReports": [],
+    "efficiency": {
+      "checkedAt": "2026-10-06T09:44:46.993Z",
+      "ownerConversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "flags": ["reports failing", "idle"],
+      "reportFailures": 1
+    }
+  }
+]

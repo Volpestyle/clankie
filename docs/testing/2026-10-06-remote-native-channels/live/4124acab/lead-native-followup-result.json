@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "status": "accepted",
+  "deliveryStage": "delivered",
+  "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+  "runId": "run-5bfdd2b6-cb1a-497d-9880-6e1949a3785d",
+  "revision": 2,
+  "safeCursor": "000000000068",
+  "seatDelivery": {
+    "state": "started"
+  }
+}

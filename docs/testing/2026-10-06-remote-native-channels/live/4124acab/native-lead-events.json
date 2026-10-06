@@ -1,0 +1,118 @@
+{
+  "observedAt": "2026-10-06T09:59:50Z",
+  "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+  "safeCursor": "000000000079",
+  "hasMore": false,
+  "events": [
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000001",
+      "revision": 1,
+      "occurredAt": "2026-10-06T09:44:46.996Z",
+      "type": "turn",
+      "runId": "run-c7de581c-f121-422e-9752-659a45202d6d",
+      "phase": "accepted"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000028",
+      "revision": 1,
+      "occurredAt": "2026-10-06T09:45:31.906Z",
+      "type": "message",
+      "role": "captain",
+      "text": "The PC worker received its brief and read Linear through my bridge, but its report back was rejected: \u201cNo durable native binding is available.\u201d I\u2019m checking that failure; VUH-1527 is not accepted yet.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000066",
+      "revision": 1,
+      "occurredAt": "2026-10-06T09:47:21.680Z",
+      "type": "message",
+      "role": "captain",
+      "text": "Harvested Ada\u2019s result; reviewed the sole seat I own.\n\n- Verified: native brief arrived, five bridge tools present, Linear read succeeded, independent Linear tools absent.\n- Failed: report rejected for missing durable binding; Tess\u2019s follow-up returned `seat_offline`.\n\nVUH-1527 stays In Progress. Tess is investigating; I left the pane open without retrying or duplicating her test.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000068",
+      "revision": 1,
+      "occurredAt": "2026-10-06T09:47:21.684Z",
+      "type": "turn",
+      "deliveryStage": "responded",
+      "runId": "run-c7de581c-f121-422e-9752-659a45202d6d",
+      "phase": "completed"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000069",
+      "revision": 2,
+      "occurredAt": "2026-10-06T09:52:03.178Z",
+      "type": "message",
+      "role": "operator",
+      "text": "Tess is running James's authorized VUH-1527 PC acceptance in this test conversation. This is acceptance only: no code/account/config changes, no tracker writes, no other panes, no additional hires. The original public child-conversation follow-up returned seat_offline / unavailable with revision 0, so it was not delivered. Test the normal native lead channel now with ONE message_seat call to the exact owned hire pc/term_65d28d44cce3f15. Send this new follow-up intent: \"TESS1527_412_a_NATIVE_FOLLOWUP_INPUT. Read-only PC acceptance: reply exactly TESS1527_412_a_NATIVE_FOLLOWUP_OK. Use message_clankie once to report that new marker. Invoke list_fleet_seats once and report its exact receipt/outcome; do not message any peer yet. No changes. Finish promptly; keep this session open.\" Never resend an uncertain dispatch, fall back to typing, adopt another worker, or attempt repairs. Report the exact native message_seat outcome and stop. I will clean up my panes after evidence collection.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000070",
+      "revision": 2,
+      "occurredAt": "2026-10-06T09:52:03.178Z",
+      "type": "turn",
+      "runId": "run-5bfdd2b6-cb1a-497d-9880-6e1949a3785d",
+      "phase": "accepted"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000074",
+      "revision": 2,
+      "occurredAt": "2026-10-06T09:52:12.057Z",
+      "type": "tool",
+      "toolCallId": "call_bKOoyIZFHKmRgdz6jSVuyB2E|fc_03728c27b638d155016ac4c4ca665487d1973a67c5a2416c18",
+      "name": "message_seat",
+      "phase": "started",
+      "detail": "{\n  \"seat\": \"pc/term_65d28d44cce3f15\",\n  \"message\": \"TESS1527_412_a_NATIVE_FOLLOWUP_INPUT. Read-only PC acceptance: reply exactly TESS1527_412_a_NATIVE_FOLLOWUP_OK. Use message_clankie once to report that new marker. Invoke list_fleet_seats once and report its exact receipt/outcome; do not message any peer yet. No changes. Finish promptly; keep this session open.\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000075",
+      "revision": 2,
+      "occurredAt": "2026-10-06T09:52:24.062Z",
+      "type": "tool",
+      "toolCallId": "call_bKOoyIZFHKmRgdz6jSVuyB2E|fc_03728c27b638d155016ac4c4ca665487d1973a67c5a2416c18",
+      "name": "message_seat",
+      "phase": "completed",
+      "detail": "{\n  \"outcome\": \"delivered\",\n  \"messageId\": \"01a110a0-e3d7-7fc3-92df-82e9693afc69\",\n  \"state\": \"started\",\n  \"deliveryStage\": \"consumed\",\n  \"seatId\": \"pc/term_65d28d44cce3f15\",\n  \"status\": \"working\"\n}"
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000077",
+      "revision": 2,
+      "occurredAt": "2026-10-06T09:52:28.190Z",
+      "type": "message",
+      "role": "captain",
+      "text": "One native call: `delivered`, `deliveryStage: consumed`, `state: started`, seat `working`.\n\nMessage ID: `01a110a0-e3d7-7fc3-92df-82e9693afc69`.\n\nReceipt confirms native acceptance, not a completed reply. Stopped; no retry or repairs.",
+      "streaming": false
+    },
+    {
+      "schemaVersion": 1,
+      "conversationId": "conv-0da6937a-0e21-413e-b0c3-2261da81df5e",
+      "cursor": "000000000079",
+      "revision": 2,
+      "occurredAt": "2026-10-06T09:52:28.192Z",
+      "type": "turn",
+      "deliveryStage": "responded",
+      "runId": "run-5bfdd2b6-cb1a-497d-9880-6e1949a3785d",
+      "phase": "completed"
+    }
+  ]
+}

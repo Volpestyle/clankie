@@ -1,0 +1,27 @@
+{
+  "observedAt": "2026-10-06T09:42:40.1252671Z",
+  "panes": [
+    {
+      "pane": "w9:p1",
+      "terminal": "term_65d0ca2fa70f81"
+    },
+    {
+      "pane": "w9:p2",
+      "terminal": "term_65d0ca3cb067b2"
+    },
+    {
+      "pane": "w9:p3",
+      "terminal": "term_65d0e2463eaeb3"
+    },
+    {
+      "pane": "w9:p4",
+      "terminal": "term_65d0e8822cbf54"
+    },
+    {
+      "pane": "w9:p6",
+      "terminal": "term_65d106ee2fa839"
+    }
+  ],
+  "codexConfigSource": ["C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml"],
+  "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+}
