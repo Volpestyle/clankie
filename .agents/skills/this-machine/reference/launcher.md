@@ -50,7 +50,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Machines / discovery / sessions        | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                             |
 | Pair a device / list / revoke          | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                                                                              |
 | Rotate operator credential             | `clankie operator-credential rotate --json`                                                                                                                        |
-| Restart / stop a service               | `clankie restart [service]`, `clankie down [service]`                                                                                                              |
+| Restart / stop a service               | `clankie start`, `stop` or `restart [service]`                                                                                                                     |
 | Play session                           | `clankie play status` / `clankie play stop`                                                                                                                        |
 | Spider-Man gameplay skill              | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                               |
 
@@ -73,6 +73,10 @@ tunnel survives cutover under its current owner.
 the old/new commit, initiator and actual health or rollback. Unreadable saved
 records return a JSON reconciliation error without changing the journal or lock. The TUI has `/update` and
 `/update status`. Never repeat an uncertain update; inspect its existing operation.
+An uncertain ending your restarted service can prove (helper finished, clean pin,
+booted from it) retires itself and shows `latest.reconciled`; then update again.
+Do not run `clankie restart` while an update is mid-cutover: it refuses, and the
+update restarts services itself.
 A dirty pin or failed install leaves the old runtime untouched.
 
 New service liveness starts a five-minute `/health` canary;

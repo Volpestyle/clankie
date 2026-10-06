@@ -9,17 +9,19 @@ import {
   realpathSync,
   existsSync,
   symlinkSync,
+  appendFileSync,
+  readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { afterEach, expect, it } from "vitest";
 import { createServer as createHttpServer } from "node:http";
-import { createRuntimeUpdater } from "../bin/runtime-updater.ts";
+import { createRuntimeUpdater, updateHoldingServices } from "../bin/runtime-updater.ts";
 import { writeRuntimeUpdate, runtimeUpdateServices } from "../bin/runtime-update.ts";
 import { createRuntimeUpdateRoutes } from "../../clankie/src/runtime-update-routes.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
-import { runDownCommand, runRestartCommand } from "../src/command/restart.ts";
+import { runDownCommand, runRestartCommand, runStartCommand } from "../src/command/restart.ts";
 import { inspectService, listProcessCommands } from "../bin/service-supervisor.ts";
 import { managedService, stopTarget } from "../bin/services.ts";
 
@@ -388,3 +390,75 @@ it("cuts over isolated launcher services while a real unowned activity tunnel su
     await new Promise<void>((resolve) => tunnel.once("exit", () => resolve()));
   }
 }, 30_000);
+
+it("an uncertain ending retires itself once its helper finished and this service runs the clean pin", async () => {
+  const f = fixture();
+  const accepted = await f.updater.request("main", authority);
+  const updates = join(f.home, ".clankie/updates");
+  const directory = join(updates, accepted.pending!);
+  const ended = {
+    ...accepted.latest!,
+    phase: "stop-unconfirmed" as const,
+    reason: "new-services-stop-unconfirmed",
+    updatedAt: new Date().toISOString(),
+  };
+  writeRuntimeUpdate(directory, ended);
+  // The service that boots next proves the outcome; the helper is a fake here.
+  const booted = createRuntimeUpdater({
+    repoRoot: f.runtime,
+    env: { HOME: f.home },
+    spawnHelper: () => Object.assign(new EventEmitter(), { unref() {} }) as ChildProcess,
+  });
+  // No final result line yet: the helper may still be running.
+  expect(booted.reconcile!()).toBeUndefined();
+  expect(booted.status()).toMatchObject({ pending: accepted.pending, needsReconciliation: true });
+  expect((await booted.request("main", authority)).accepted).toBe(false);
+  appendFileSync(join(directory, "helper.log"), `${JSON.stringify(ended)}\n`);
+  // An edited pin is the owner's to resolve.
+  writeFileSync(join(f.runtime, "content"), "edited in place");
+  expect(booted.reconcile!()).toBeUndefined();
+  f.git(f.runtime, "checkout", "--", "content");
+  const reconciled = booted.reconcile!();
+  expect(reconciled?.reconciled).toMatchObject({ commit: f.old, instanceId: booted.runtime.instanceId });
+  expect(booted.status().pending).toBeUndefined();
+  expect(booted.status().needsReconciliation).toBeUndefined();
+  expect(booted.status().latest?.reconciled?.commit).toBe(f.old);
+  expect(readdirSync(updates).some((name) => name.startsWith(`active.reconciled-${accepted.pending}`))).toBe(
+    true,
+  );
+  expect((await booted.request("main", authority)).accepted).toBe(true);
+});
+it("owner start, stop and restart wait while an update helper runs; the helper's own calls pass", async () => {
+  const f = fixture();
+  const accepted = await f.updater.request("main", authority);
+  const directory = join(f.home, ".clankie/updates", accepted.pending!);
+  writeRuntimeUpdate(directory, {
+    ...accepted.latest!,
+    phase: "restarting",
+    updatedAt: new Date().toISOString(),
+  });
+  const env = { HOME: f.home };
+  // A real process whose command names this operation's helper, as `ps` sees it.
+  const helper = spawn(
+    process.execPath,
+    ["-e", "setInterval(()=>{},1000)", join(directory, "runtime-update-helper.mjs")],
+    {
+      stdio: "ignore",
+    },
+  );
+  await new Promise<void>((resolve) => helper.once("spawn", resolve));
+  try {
+    const options = { repoRoot: f.runtime, env, stderr: { write() {} }, stdout: { write() {} } };
+    for (const run of [runRestartCommand, runStartCommand, runDownCommand])
+      await expect(run([], options)).rejects.toThrow("An update is restarting");
+    expect(updateHoldingServices(env)).toEqual({ id: accepted.pending, phase: "restarting" });
+    expect(updateHoldingServices({ ...env, CLANKIE_UPDATE_OPERATION: accepted.pending })).toBeUndefined();
+    // A helper copied by an older runtime is recognized as the caller's parent.
+    expect(updateHoldingServices(env, undefined, helper.pid)).toBeUndefined();
+  } finally {
+    helper.kill();
+    await new Promise((resolve) => helper.once("exit", resolve));
+  }
+  // A helper that is gone holds nothing; restart stays the owner's remedy.
+  expect(updateHoldingServices(env)).toBeUndefined();
+});

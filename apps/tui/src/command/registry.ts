@@ -176,7 +176,13 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["restart"],
     lines: ["  restart [service]        Restart in dependency order (JSON; progress on stderr)"],
   },
-  { nouns: ["down"], lines: ["  down [service]           Stop in reverse order (JSON; progress on stderr)"] },
+  {
+    nouns: ["start"],
+    lines: [
+      "  start [service]          Start what is not running, in dependency order (JSON; progress on stderr)",
+    ],
+  },
+  { nouns: ["stop"], lines: ["  stop [service]           Stop in reverse order (JSON; progress on stderr)"] },
   {
     nouns: ["autostart"],
     lines: [
@@ -487,7 +493,8 @@ const HEADLESS_COMMAND_HELP = [
 ] as const;
 
 export const HEADLESS_NOUNS: readonly string[] = [
-  ...new Set(HEADLESS_COMMAND_HELP.flatMap((entry) => [...entry.nouns])),
+  // `down` is the former name of `stop`; update helpers from older runtimes still call it.
+  ...new Set([...HEADLESS_COMMAND_HELP.flatMap((entry) => [...entry.nouns]), "down"]),
 ];
 
 export function isHeadlessCaptainCommand(command: string | undefined): boolean {
@@ -502,10 +509,8 @@ export function isHeadlessCaptainCommand(command: string | undefined): boolean {
 
 /** Words people reach for that name a different launcher command. */
 const LAUNCHER_COMMAND_HINTS: Readonly<Record<string, string>> = {
-  stop: "down",
-  start: "restart",
-  up: "restart",
-  kill: "down",
+  up: "start",
+  kill: "stop",
 };
 
 /**
@@ -533,7 +538,7 @@ export function commandHelp(): string {
     ...HEADLESS_COMMAND_HELP.flatMap((entry) => [...entry.lines]),
     "  help | --help | -h       This text",
     "",
-    "Services for restart/down: all (default), clankie, relay, discord, user-session, activity, tunnel",
+    "Services for start/stop/restart: all (default), clankie, relay, discord, user-session, activity, tunnel",
     "Aliases: captain, eve, cp, control-plane, bridge, lab, watch, viewer, cloudflared, app-relay, phone",
     "",
     "Model notes:",

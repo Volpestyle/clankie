@@ -671,6 +671,26 @@ export async function restartTarget(
   return outcomes;
 }
 
+/** Starts in dependency order; a service already healthy keeps running untouched. */
+export async function startTarget(
+  target: ServiceTarget,
+  options: ServiceRegistryOptions,
+): Promise<readonly ServiceOutcome[]> {
+  const outcomes: ServiceOutcome[] = [];
+  const env = options.env ?? process.env;
+  for (const id of resolveTargets(target)) {
+    const service = managedService(id);
+    if (service.enabled?.(env) === false) continue;
+    try {
+      outcomes.push(outcomeFrom(await startService(service, options)));
+    } catch (error) {
+      outcomes.push(failureFrom(id, error));
+      break;
+    }
+  }
+  return outcomes;
+}
+
 /** Stops in reverse dependency order so dependents never outlive what they call. */
 export async function stopTarget(
   target: ServiceTarget,

@@ -952,6 +952,16 @@ const runtimeUpdater =
   hostedBody === undefined && existsSync(join(repoRoot, ".git"))
     ? createRuntimeUpdater({ repoRoot })
     : undefined;
+try {
+  const reconciled = runtimeUpdater?.reconcile?.();
+  if (reconciled)
+    logger.info(
+      { event: "runtime.update.reconciled", id: reconciled.id, phase: reconciled.phase },
+      "Retired an uncertain update this runtime proved safe",
+    );
+} catch (error) {
+  logger.warn({ event: "runtime.update.reconcile_failed", error }, "Update reconciliation unavailable");
+}
 const minecraftPrivateDelivery = createMinecraftPrivateDeliveryClient();
 const minecraftHostGuard = createMinecraftHostAuthority({
   settings: async () => resolveDiscordSettings((await settingsStore.load()).discord, process.env).settings,
