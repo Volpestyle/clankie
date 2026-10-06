@@ -353,12 +353,18 @@ roll back the service. `harnessRefresh` in update status links the complete
 per-profile receipt in `harness-refresh.json` beside the transaction record.
 
 After the new service responds with its exact boot identity, a persistent
-post-update canary observes it for five minutes. The default budgets are 10%
-captain-process CPU (100% means one core) and 250 ms `/health` p95, sampled every
-10 seconds. Health latency includes TCP setup and the complete response on a
-fresh loopback HTTP connection. Its deploy hold blocks further updates and integration landings
-during observation. A pass releases only that canary's hold. A regression or
-missing health signal records a failed canary, retains the hold, names the
+post-update canary observes it for five minutes. It holds only on an unhealthy
+new service: missing, stale or wrong-identity `/health`, a sampling gap, or
+`/health` p95 over its 250 ms default budget, sampled every 10 seconds. Health
+latency includes TCP setup and the complete response on a fresh loopback HTTP
+connection. Captain-process CPU (100% means one core) is recorded but never
+fails the canary: an absolute CPU figure depends on the machine and its fleet.
+`update status` (`canaryCpu`) and `update canary` (`cpu`) report the new mean
+beside the previous runtime's recorded mean on this machine, their ratio, and
+whether it exceeds the advisory `cpuPercent` (default 10). Its deploy hold blocks
+further updates and integration landings during observation. A pass releases
+only that canary's hold. A health regression or missing health signal records a
+failed canary, retains the hold, names the
 previous healthy commit, and attempts the runtime-health alert path. The new
 pin keeps running; rollback requires an explicit owner decision. Alert status
 distinguishes submitted, unavailable, and an uncertain claimed attempt.
@@ -366,8 +372,8 @@ Submitted means the native notification path accepted the attempt; it does not
 claim a confirmed recipient receipt.
 
 `clankie update canary` reads the policy and last canary. Configure the next
-update with `--window-seconds N`, `--sample-seconds N`, `--cpu-percent N`, and
-`--health-ms N`; omitted fields retain their values. Policy changes do not
+update with `--window-seconds N`, `--sample-seconds N`, `--cpu-percent N`
+(advisory only), and `--health-ms N`; omitted fields retain their values. Policy changes do not
 change an in-flight observation. `/update` offers the same settings in the TUI.
 A restart of the observed service starts a fresh full window for its new boot
 identity; elapsed downtime never counts as healthy observation.

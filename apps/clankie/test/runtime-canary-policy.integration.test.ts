@@ -134,8 +134,8 @@ it("reads defaults through HTTP and CLI, then durably retains every unmentioned 
   const response = await f.http("GET");
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.json()).toEqual({ policy: defaults, canary: null });
-  expect(await f.cli(["canary"])).toEqual({ policy: defaults, canary: null });
+  expect(await response.json()).toEqual({ policy: defaults, canary: null, cpu: null });
+  expect(await f.cli(["canary"])).toEqual({ policy: defaults, canary: null, cpu: null });
   await expect(stat(f.policyFile)).rejects.toMatchObject({ code: "ENOENT" });
 
   const configured: RuntimeCanaryPolicy = {
@@ -165,7 +165,7 @@ it("reads defaults through HTTP and CLI, then durably retains every unmentioned 
   expect(JSON.parse(await f.persisted())).toEqual(updated);
   expect((await stat(f.policyFile)).mode & 0o077).toBe(0);
   expect(f.createCanary().policy()).toEqual(updated);
-  expect(await f.cli(["canary"])).toEqual({ policy: updated, canary: null });
+  expect(await f.cli(["canary"])).toEqual({ policy: updated, canary: null, cpu: null });
   expect(f.requests.filter((request) => request.method === "PUT")).toHaveLength(2);
 });
 

@@ -153,6 +153,9 @@ export interface RuntimeUpdateResult {
   readonly healthy?: boolean;
   readonly rollbackHealthy?: boolean;
   readonly reason?: string;
+  /** The exception behind a failed `reason`; rollback failures keep their own. */
+  readonly error?: string;
+  readonly rollbackError?: string;
   readonly serviceReceipts?: readonly RuntimeServiceReceipt[];
   readonly harnessRefresh?: { readonly ok: boolean; readonly result?: unknown; readonly error?: string };
   readonly canary?: RuntimeCanaryResult;
@@ -249,6 +252,8 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
     ...(value.healthy === undefined ? {} : { healthy: value.healthy as boolean }),
     ...(value.rollbackHealthy === undefined ? {} : { rollbackHealthy: value.rollbackHealthy as boolean }),
     ...(value.reason === undefined ? {} : { reason: boundedString(value.reason, 256) }),
+    ...(value.error === undefined ? {} : { error: boundedString(value.error, 1024) }),
+    ...(value.rollbackError === undefined ? {} : { rollbackError: boundedString(value.rollbackError, 1024) }),
     ...(value.serviceReceipts === undefined
       ? {}
       : { serviceReceipts: (value.serviceReceipts as unknown[]).map(parseServiceReceipt) }),
@@ -327,6 +332,10 @@ function parseHarnessRefresh(input: unknown): NonNullable<RuntimeUpdateResult["h
     ...(value.result === undefined ? {} : { result: value.result }),
     ...(value.error === undefined ? {} : { error: boundedString(value.error, 1024) }),
   };
+}
+
+function errorText(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 1024);
 }
 
 export function writeRuntimeUpdate(directory: string, result: RuntimeUpdateResult): void {
@@ -437,10 +446,7 @@ export async function executeRuntimeUpdate(
         const result = await ports.refreshHarnesses(plan.runtime);
         harnessRefresh = { ok: result.ok === true, result };
       } catch (error) {
-        harnessRefresh = {
-          ok: false,
-          error: (error instanceof Error ? error.message : String(error)).slice(0, 1024),
-        };
+        harnessRefresh = { ok: false, error: errorText(error) };
       }
     }
     return persist("healthy", {
@@ -450,15 +456,21 @@ export async function executeRuntimeUpdate(
         ? { harnessRefresh, ...(harnessRefresh.ok ? {} : { reason: "harness-refresh-incomplete" }) }
         : {}),
     });
-  } catch {
+  } catch (failure) {
+    const error = errorText(failure);
     if (!oldStopped)
       return persist(stopAttempted ? "stop-unconfirmed" : "failed", {
         reason: stopAttempted ? "old-services-stop-unconfirmed" : "pre-cutover-failed",
+        error,
       });
     try {
       if (newMoved) {
         if (!(await service("down", plan.newCommit)))
-          return persist("stop-unconfirmed", { reason: "new-services-stop-unconfirmed", healthy: false });
+          return persist("stop-unconfirmed", {
+            reason: "new-services-stop-unconfirmed",
+            error,
+            healthy: false,
+          });
         if (assertPinnedRuntime(plan.checkout, plan.runtime, run) !== plan.newCommit)
           throw Error("New runtime changed before rollback");
         move(plan.runtime, stage);
@@ -474,11 +486,18 @@ export async function executeRuntimeUpdate(
       const rollbackHealthy = await service("restart", plan.oldCommit);
       return persist(rollbackHealthy ? "rolled-back" : "failed", {
         reason: "cutover-failed",
+        error,
         healthy: false,
         rollbackHealthy,
       });
-    } catch {
-      return persist("failed", { reason: "rollback-unconfirmed", healthy: false, rollbackHealthy: false });
+    } catch (rollbackFailure) {
+      return persist("failed", {
+        reason: "rollback-unconfirmed",
+        error,
+        rollbackError: errorText(rollbackFailure),
+        healthy: false,
+        rollbackHealthy: false,
+      });
     }
   }
 }

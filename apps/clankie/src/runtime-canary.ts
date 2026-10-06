@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { join } from "node:path";
 import { z } from "zod";
@@ -16,6 +16,7 @@ export const RuntimeCanaryPolicySchema = z
   .strictObject({
     windowMs: z.number().int().min(1000).max(86_400_000).default(300_000),
     sampleIntervalMs: z.number().int().min(50).max(60_000).default(10_000),
+    /** Advisory only: reported beside the previous runtime's mean, never a deploy hold. */
     cpuPercent: z.number().finite().positive().max(10_000).default(10),
     healthLatencyMs: z.number().finite().positive().max(60_000).default(250),
   })
@@ -28,6 +29,16 @@ export const RuntimeCanaryPolicySchema = z
     "Canary sample count exceeds its bound",
   );
 export type RuntimeCanaryPolicy = z.infer<typeof RuntimeCanaryPolicySchema>;
+
+/** CPU is machine- and workload-specific, so it is compared with the previous runtime here, not gated. */
+export interface RuntimeCanaryCpu {
+  readonly commit: string;
+  readonly cpuMeanPercent?: number;
+  readonly advisoryPercent: number;
+  readonly aboveAdvisory?: boolean;
+  readonly previous?: { readonly commit: string; readonly cpuMeanPercent: number; readonly updateId: string };
+  readonly ratioToPrevious?: number;
+}
 
 const HOLDER = "Clankie runtime canary";
 const CheckpointSchema = z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40,64}$/u) });
@@ -83,6 +94,45 @@ export class RuntimeCanary {
 
   status(): RuntimeCanaryResult | undefined {
     return this.latest()?.canary;
+  }
+
+  /** Read-time comparison; older readers never see new fields in the durable canary record. */
+  cpu(): RuntimeCanaryCpu | undefined {
+    const result = this.latest();
+    if (!result?.canary) return undefined;
+    const advisoryPercent = result.canary.policy?.cpuPercent ?? this.policy().cpuPercent;
+    const current = result.canary.cpuMeanPercent;
+    let previous: RuntimeCanaryCpu["previous"];
+    let previousAt = -Infinity;
+    for (const entry of readdirSync(this.options.updatesDirectory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === result.id) continue;
+      let candidate: RuntimeUpdateResult;
+      try {
+        candidate = readRuntimeUpdate(join(this.options.updatesDirectory, entry.name));
+      } catch {
+        continue;
+      }
+      const mean = candidate.canary?.cpuMeanPercent;
+      const at = Date.parse(candidate.updatedAt);
+      if (
+        candidate.newCommit !== result.oldCommit ||
+        mean === undefined ||
+        candidate.canary?.state === "pending" ||
+        at <= previousAt
+      )
+        continue;
+      previous = { commit: candidate.newCommit, cpuMeanPercent: mean, updateId: candidate.id };
+      previousAt = at;
+    }
+    return {
+      commit: result.newCommit,
+      advisoryPercent,
+      ...(current === undefined ? {} : { cpuMeanPercent: current, aboveAdvisory: current > advisoryPercent }),
+      ...(previous === undefined ? {} : { previous }),
+      ...(current === undefined || previous === undefined || previous.cpuMeanPercent <= 0
+        ? {}
+        : { ratioToPrevious: current / previous.cpuMeanPercent }),
+    };
   }
 
   private latest(): RuntimeUpdateResult | undefined {
@@ -304,10 +354,9 @@ export class RuntimeCanary {
       await this.save(result, canary);
       return;
     }
+    // CPU is recorded for comparison only; holds are for a new service that is not healthy.
     if (session.latencies.length < 2) {
       await this.fail(result, canary, "runtime-canary-samples-incomplete");
-    } else if (cpuMeanPercent > session.policy.cpuPercent) {
-      await this.fail(result, canary, "runtime-canary-cpu-budget-exceeded");
     } else if (healthP95Ms > session.policy.healthLatencyMs) {
       await this.fail(result, canary, "runtime-canary-latency-budget-exceeded");
     } else {
@@ -375,7 +424,7 @@ export class RuntimeCanary {
       await this.options.holds.release(
         wanted.id,
         HOLDER,
-        "Runtime canary passed its full CPU and latency window",
+        "Runtime canary passed its full health and latency window",
         wanted,
       );
     }
