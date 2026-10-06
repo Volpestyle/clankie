@@ -25,12 +25,11 @@ Focused Mac checks:
 - Clankie and TUI typechecks passed.
 - Scoped oxlint passed; changed-file formatting and `git diff --check` passed.
 
-Remaining acceptance: Clankie must approve refreshing the installed PC plugin,
-then an owned fresh Codex pane must run SessionStart, prompt and Stop without
-hook errors and show its session seated in Clankie's roster. Changed native hook
-definitions require the owner's `/hooks` trust review. Linux was not run; POSIX
-behavior has Mac shell evidence only. Leave the issue open until live evidence
-covers its acceptance criteria.
+Remaining acceptance: an owned fresh Codex pane must run SessionStart, prompt
+and Stop without hook errors and show its session seated in Clankie's roster.
+Changed native hook definitions require the owner's `/hooks` trust review.
+Linux was not run; POSIX behavior has Mac shell evidence only. Leave the issue
+open until live evidence covers its acceptance criteria.
 
 Native contract confirmation: the [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks)
 identifies `PLUGIN_ROOT` as the installed plugin root supplied to hooks. The local
@@ -42,3 +41,27 @@ native contract without depending on either shell's variable syntax.
 
 The additional harness-profile version check passed, 9 tests (28 focused tests
 in total). No executable inputs changed after those checks.
+
+## Deployed PC update and native trust boundary
+
+Clankie confirmed and authorized runtime `f6260751` on 2026-10-06. The normal
+update succeeded from the registered `/Users/james/dev/clankie` project context:
+`clankie herdr prepare pc --codex-source-setup C:\Users\volpe\dotfiles\scripts\codex-worker-setup.py --approve`.
+The worktree context initially refused with HTTP 409 before changes. The normal
+path then installed worker 0.6.6, ran the existing source-owned setup script and
+preserved the Codex config link. [Version/config proof](live/pc-update.json).
+
+Owned test pane `w9:p8` (`term_65d256106c3b9b`) launched native Codex 0.160.1
+with `--no-daemon` and one bounded initial prompt. Its native `/hooks` review
+showed three new or changed hooks: the worker SessionStart and UserPromptSubmit
+definitions were inactive pending review. Opening review allowed the model turn
+to complete with `TESS_VUH1709_WINDOWS_HOOKS_OK`, while those hooks stayed
+untrusted. That answer establishes account/model availability, not hook execution
+or Clankie seating. [Native observation](live/native-hook-review.txt).
+
+No hook trust records were changed. The test pane was idle with an empty prompt
+before closing; [cleanup](live/cleanup.json) confirms it is absent. The original
+five PC panes were preserved. VUH-1709 remains open. The next decision is owner
+review/trust of the changed worker hooks through native `/hooks`, followed by a
+fresh owned-pane hook/seating check. A controller-owned trust fix is being tracked
+separately in VUH-1738; this run does not assume that fix is deployed.
