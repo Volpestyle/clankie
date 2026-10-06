@@ -412,12 +412,14 @@ paths:
     post:
       tags: [Discord]
       operationId: discordIngress
-      summary: Admit an encrypted, fleet-permitted addressed Discord turn
+      summary: Admit an encrypted Discord turn or scoped voice callback
       description: >-
         Remote connection API, not an operator bearer. P-256 ECDH and AES-GCM
         protect request and response; a 60-second Ed25519 fleet permit binds the
         tenant, installation, event digest and ephemeral response recipient.
-        Durable delivery dedupe prevents repeated captain effects. See docs/discord-ingress.md.
+        Durable delivery dedupe prevents repeated captain effects. Voice callbacks use
+        the existing briefing, attributed captain handoff and three voice self-tools.
+        See docs/discord-ingress.md.
       requestBody:
         required: true
         content:
@@ -434,7 +436,7 @@ paths:
                 sealed: { type: string, maxLength: 100000 }
       responses:
         "200":
-          description: Sealed pending, reply, silent or failed result
+          description: Sealed pending, reply, voice operation, silent or failed result
         "401":
           description: Invalid, expired, unsealed or wrongly scoped event
         "409":
