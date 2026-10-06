@@ -165,7 +165,7 @@ export interface RuntimeUpdateResult {
   /** An uncertain ending the running service later proved safe; it retires the lock. */
   readonly reconciled?: RuntimeUpdateReconciliation;
 }
-export interface RuntimeUpdateReconciliation {
+interface RuntimeUpdateReconciliation {
   readonly at: string;
   /** The pinned commit the reconciling service booted from. */
   readonly commit: string;
