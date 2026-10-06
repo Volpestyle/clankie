@@ -1,0 +1,10 @@
+{
+  "op": "spawn_seat",
+  "schemaVersion": 1,
+  "result": {
+    "outcome": "failed",
+    "deliveryStage": "unavailable",
+    "reason": "not_ready",
+    "detail": "Original hire 719dd6b1-2814-4c2b-9eb6-118fb785427c is settled. Its receipt is retained; this original intent cannot dispatch again."
+  }
+}

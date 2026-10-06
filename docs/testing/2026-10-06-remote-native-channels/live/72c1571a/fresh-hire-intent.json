@@ -1,0 +1,21 @@
+{
+  "utc": "2026-10-06T06:13:42.147Z",
+  "request": {
+    "op": "spawn_seat",
+    "schemaVersion": 1,
+    "conversationId": "conv-08935784-3827-4e04-8a03-ad89e22be86e",
+    "seat": {
+      "schemaVersion": 1,
+      "harness": "codex",
+      "title": "Ada",
+      "role": "tester",
+      "fleet": "pc",
+      "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+      "delegation": "panes",
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "placement": "new-tab"
+    },
+    "brief": "Owned VUH-1527 PC acceptance 72c1571a-tess-20261006 seat a. This is a read-only test. No code or configuration changes, no desktop actions, no other panes, no processes to start or stop. First report exact marker TESS1527_72c_a_BRIEF_OK. Inspect your actual native tool catalog: report whether clankie_tools, clankie_call, message_clankie, list_fleet_seats and message_peer are present, and whether independent Linear connector tools remain enabled. If the Clankie bridge is present, read Linear VUH-1527 through it (no writes), and use message_clankie to report TESS1527_72c_a_BRIEF_OK plus that tool inventory. Finish promptly and wait for a later native follow-up and peer message. Do not close your session."
+  }
+}

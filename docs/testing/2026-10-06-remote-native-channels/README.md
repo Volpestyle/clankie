@@ -1,5 +1,10 @@
 # Remote native channels and authenticated receipt recovery (VUH-1527)
 
+Current live result on runtime `72c1571a`: the failed test's original receipt is
+now retained as abandoned with authenticated evidence. A fresh, different brief
+was refused before launch because settlement fences the entire location tuple.
+VUH-1527 remains open; see the [current live blocker](#deployed-72c1571a-recovery-and-fresh-hire-refusal).
+
 Audit base: `origin/main` `8fcf47a5`, 2026-10-06. Linear issue and its five newest
 comments were read, including the 2026-10-05 PC live acceptance and added peer
 exchange criterion. The initial `13b1e445` audit corrected marketplace Swarm
@@ -154,7 +159,7 @@ The follow-up candidate consumes that controller metadata only if the identical
 value is already present in the scoped bridge configuration. All other remote
 environment/account overrides still fail before SSH. [Native security review](live/SECURITY-REVIEW.md)
 approved the change. [46 focused tests](live/focused-tests.txt), Clankie typecheck,
-scoped lint, formatting and diff checks pass. This candidate is not deployed;
+scoped lint, formatting and diff checks passed. At this checkpoint the candidate was not deployed;
 native PC delivery, follow-up, completion wake, tracker isolation and peer-message
 acceptance remain open. The failed test's original receipt also needs an explicit
 supported disposition before a later acceptance attempt.
@@ -166,3 +171,60 @@ desktop operations changed. `message_clankie` still reconciles the old unresolve
 receipt; the worker has no callable MCP refresh capability, so its original
 controller needs to refresh that connection on the same thread. Linear reads and
 tool discovery now succeed through Clankie's OAuth app.
+
+## Deployed 72c1571a recovery and fresh hire refusal
+
+Clankie confirmed runtime `72c1571a3a9a13db6af1189594febaf4cd2d5e50`, including
+`9d280b68` and the native trust/connection fix. The installed checkout matched
+that SHA. On 2026-10-06 at 06:12Z, the supported operator CLI settled
+`719dd6b1-2814-4c2b-9eb6-118fb785427c` as **abandoned**:
+
+```sh
+clankie hire-receipt settle 719dd6b1-2814-4c2b-9eb6-118fb785427c abandoned
+```
+
+The receipt had committed launch and allocated a shell, so historical no-launch
+was not a valid disposition. The service's authenticated census observed five
+panes, 548 processes and four sessions on the pinned PC host. Its original
+allocation `pc/wB:p2` was absent. The retained evidence records its original key,
+fingerprint, host identity and census hash. No original was resent, adopted,
+deleted or relaunched. [Settlement result](live/72c1571a/original-failed-hire-abandoned.json).
+
+The explicit fresh acceptance used a new owner conversation, a different bounded
+brief, a named Codex tester and the same granted PC working directory. The public
+`spawn_seat` API refused it before pane or native server allocation:
+
+> Original hire 719dd6b1-2814-4c2b-9eb6-118fb785427c is settled. Its receipt is retained; this original intent cannot dispatch again.
+
+[Fresh request](live/72c1571a/fresh-hire-intent.json) and
+[public result](live/72c1571a/fresh-hire-result.json) establish this refusal.
+`HerdrWatchStore.spawn` keys the fence by `[fleet, harness, workingDirectory,
+resumeSessionOrNew]`, then refuses every settled key before inspecting the new
+brief. `DeliveryFence.settled` retains that terminal disposition permanently.
+The current API cannot distinguish a new authorized intent in that location
+from the abandoned original. Changing a title or conversation does not help.
+No location/account/harness/key alias was used to bypass the fence.
+
+Remaining acceptance is precise:
+
+- An explicit new-hire path must distinguish a fresh authorized intent from
+  retained originals while preserving original evidence and never replaying them.
+  The deployed metadata fix was not reached by this refusal.
+- Fresh PC Codex brief, later native follow-up, correlated completion/lead wake,
+  inherited tracker isolation and two-owned-pane peer exchange are unrun because
+  the first hire could not allocate a pane.
+- Claude still reports `loggedIn:false`; native Claude follow-up and Stop
+  completion require James's personal `/login` and a subsequent owned-pane check.
+- Hand-started PC reply delivery and service-path hired-worker SSH-loss acceptance
+  remain unproven. The earlier owned control/SSH-loss result on VUH-1563 does not
+  establish those service paths.
+
+[Final read-only census](live/72c1571a/pc-after.json) matches the original five
+pane identities and confirms Claude's login status. No test pane was created,
+no automated message was typed and no account/config/desktop changed. VUH-1709's
+separate owned native hook proof is complete and its ticket is Done.
+
+This checkpoint changes evidence only. The existing native security review and
+focused tests/typechecks/scoped lint cover the unchanged recovery/launcher code;
+no new heavy tests, full check or eval ran. Evidence JSON validation, formatting,
+documentation links and `git diff --check` passed. Leave VUH-1527 In Progress.
