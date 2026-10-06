@@ -1,11 +1,9 @@
 # Remote native channels and authenticated receipt recovery (VUH-1527)
 
-Current live result on runtime `72c1571a`: the failed test's original receipt is
-now retained as abandoned with authenticated evidence. A fresh, different brief
-was refused before launch because settlement fences the entire location tuple.
-VUH-1527 remains open; see the [current live blocker](#deployed-72c1571a-recovery-and-fresh-hire-refusal).
-The explicit [fresh-intent candidate](#explicit-fresh-intent-admission-candidate)
-addresses this admission gap; live acceptance awaits its deployment.
+Current live result on runtime `2e1c08be`: explicit fresh admission allocated an
+owned PC Codex pane, but its project/native process binding refused before brief
+delivery. The failed fresh receipt is retained as abandoned after cleanup.
+VUH-1527 remains open; see the [current live blocker](#deployed-2e1c08be-pc-acceptance-process-proof-refusal).
 
 Audit base: `origin/main` `8fcf47a5`, 2026-10-06. Linear issue and its five newest
 comments were read, including the 2026-10-05 PC live acceptance and added peer
@@ -264,3 +262,80 @@ Codex hire → brief → follow-up → completion → peer-message acceptance on
 panes. The earlier five unowned PC panes remain untouched. Claude's personal
 `/login` stays with James and does not block Codex acceptance. Leave VUH-1527
 In Progress until the deployed live evidence covers its acceptance.
+
+## Deployed 2e1c08be PC acceptance: process-proof refusal
+
+On 2026-10-06, Clankie authorized the Codex PC acceptance on runtime
+`2e1c08be6506b0c7d5ed6d18bda34a9b10c0affe`, including fresh-intent admission
+`ae3b63fd`. The installed runtime matched that SHA. Fleet `pc` was healthy;
+Windows Codex was 0.160.1 and its worker plugin was 0.6.6. The existing five
+unowned panes were preserved.
+
+The first request overescaped the Windows cwd and was definitively refused
+before admission. The [correction](live/2e1c08be/scope-correction.json) used the
+exact retained settlement value with the same fresh UUID and brief. The
+[original settlement recheck](live/2e1c08be/original-settlement-recheck.json)
+matched the earlier authenticated abandonment evidence exactly.
+
+The [corrected public request](live/2e1c08be/a-corrected-hire-intent.json) used
+fresh intent `80741ad0-3fec-4cf9-9932-43bd0ad2b09e`, predecessor
+`719dd6b1-2814-4c2b-9eb6-118fb785427c`, and a new hiring conversation
+`conv-eba43df2-b0e8-486b-a1ec-f64a76d52ba2`. It allocated `pc/wC:p2`, terminal
+`term_65d27c3f464e613`, native session `01a11053-0973-7133-8ab4-099e72cba83c`.
+The native Codex TUI started; the [public result](live/2e1c08be/a-hire-result.json)
+then returned `start_unconfirmed`, delivery `uncertain`:
+
+> Native hire binding has no matching current process proof; no brief was sent; inspect pane pc/wC:p2; no fallback was started
+
+The service retained native receipt `af9b1c8b-f573-4f74-8d48-ef7bf6287920`, its
+[fresh owner/scope binding and irreversible launch flag](live/2e1c08be/a-original-native-receipt.json).
+No brief, follow-up or peer message was resent. The TUI displayed “Reconnecting
+to server…” after the failed binding; the owned app-server was already absent
+at inspection. No startup trust prompt appeared and no trust keys were sent.
+This observation does not establish a regression in VUH-1738's trust handling.
+
+Source tracing identifies an address mismatch at the failed boundary:
+`HerdrWatchStore.observeHireIdentity` passes fleet `pc` and pane `pc/wC:p2`
+directly to `projectHireIdentity`. `index.ts` dispatches that callback to
+`createRemoteProjectObserver`, whose first guard requires a bare `w…:p…` pane.
+The [deployed observer check](live/2e1c08be/proof-address-check.json) returned no
+proof before any fleet lookup or host call. Repair must preserve the exact
+fleet, native occupant, process lifetime and socket checks while consistently
+mapping qualified Herdr identities to the observer's host-local pane identity.
+The stored project assignment and membership lookups also need the same
+consistent namespace; weakening the process proof would not address the cause.
+
+| Acceptance                                            | Live evidence                                                                                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Explicit fresh intent after retained settlement       | Admitted; owned pane and native process allocated                                                                             |
+| Inherited tracker isolation                           | Launcher and native `codex.exe` both carried `mcp_servers.linear.enabled=false`; default PC Linear connector remained enabled |
+| Native bridge catalog                                 | Doctor observed `message_clankie`, `clankie_tools`, `clankie_call`, `list_fleet_seats`, `message_peer` on the owned pane      |
+| Brief and later follow-up through app-server          | Blocked before brief by native process-proof refusal                                                                          |
+| Correlated completion and hiring-lead wake            | Unrun because no brief reached a model                                                                                        |
+| Owned-pane peer exchange and worker-side tracker read | Unrun because hire did not return a bound seat                                                                                |
+| Hand-started reply and hired-worker SSH-loss outcomes | Remain unproven; unrelated panes/link were untouched                                                                          |
+| Claude channel/Stop completion                        | Still needs James's personal `/login`; it did not block this Codex attempt                                                    |
+
+[Tracker/process evidence](live/2e1c08be/tracker-and-process-proof.json) records
+the actual owned process chain and its override flags without credentials or
+full command lines. [Native catalog evidence](live/2e1c08be/owned-native-catalog.json)
+records the observed worker tools. It does not claim the model used those tools.
+
+Cleanup closed only the test's `wC:p2` and its empty workspace root `wC:p1`,
+after checking their exact terminal identities and the absent owned backend.
+[Final census](live/2e1c08be/cleanup.json) matched all original five pane/terminal
+identities. [Captured owned processes](live/2e1c08be/owned-process-cleanup.json)
+were absent. The PC's Codex config target and SHA-256 stayed unchanged.
+
+The supported operator CLI then recorded the failed fresh native receipt as
+[abandoned with authenticated evidence](live/2e1c08be/fresh-failed-hire-abandoned.json):
+five panes, 546 processes and four sessions; its allocation was absent. Both
+original and fresh records remain retained and permanently fenced. A later
+acceptance must use a separately authorized new intent after the binding fix,
+never this brief or UUID again.
+
+This checkpoint changes evidence only. JSON validation, scoped formatting,
+documentation links and `git diff --check` passed. The source candidate's prior
+focused checks and security review remain source evidence; they do not certify
+this live failure. No new heavy suite, full check, eval, account/config change,
+desktop action or unrelated pane mutation ran. Leave VUH-1527 In Progress.

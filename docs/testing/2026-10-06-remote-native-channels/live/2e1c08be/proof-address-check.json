@@ -1,0 +1,9 @@
+{
+  "runtime": "2e1c08be6506b0c7d5ed6d18bda34a9b10c0affe",
+  "fleet": "pc",
+  "paneArgument": "pc/wC:p2",
+  "proofAvailable": false,
+  "fleetLookups": 0,
+  "hostCalls": 0,
+  "observerRequiredPanePattern": "^w[\\w]+:p[\\w]+$"
+}

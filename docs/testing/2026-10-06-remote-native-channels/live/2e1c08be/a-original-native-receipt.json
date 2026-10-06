@@ -1,0 +1,38 @@
+{
+  "receiptKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\",\"new\",\"fresh\",\"80741ad0-3fec-4cf9-9932-43bd0ad2b09e\"]",
+  "receipt": {
+    "fingerprint": "efaa49d9f758acdd0fba5bfceeee7fd3ebeb866f872f31bf85e22c9b35dfa9ef",
+    "freshHire": {
+      "id": "80741ad0-3fec-4cf9-9932-43bd0ad2b09e",
+      "afterReceiptId": "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+      "baseKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\",\"new\"]",
+      "owner": {
+        "conversationId": "conv-eba43df2-b0e8-486b-a1ec-f64a76d52ba2"
+      },
+      "launch": {
+        "schemaVersion": 1,
+        "harness": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "delegation": "panes",
+        "placement": "new-tab",
+        "title": "Ada",
+        "workingDirectory": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+        "fleet": "pc",
+        "projectId": "clankie",
+        "role": "tester"
+      }
+    },
+    "beforeIds": [],
+    "messageId": "af9b1c8b-f573-4f74-8d48-ef7bf6287920",
+    "remoteLaunchCommitted": true,
+    "paneId": "pc/wC:p2",
+    "agentName": "ada-86a8",
+    "remoteTarget": {
+      "fleet": "pc",
+      "host": "volpe@supedupsilly",
+      "session": "default",
+      "shell": "powershell"
+    }
+  }
+}
