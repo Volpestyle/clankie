@@ -96,6 +96,16 @@ only requests, CPU identity, 302/503 refusal, the 32 KiB body bound, timeout
 through body completion, and all four response boot identity fields. The
 existing policy and real-child canary tests remain in the focused lane.
 
+The first default-window attempt was interrupted by its status observer's
+two-second fetch timeout after about 211 seconds. The last product result was
+still pending and healthy: 21 samples, 0.500% mean CPU, 6.419 ms health p95.
+Its 22 native health requests all used fresh sockets and took at most 18.106 ms.
+[default-observer-abort.json](default-observer-abort.json) preserves the
+incomplete result; it is not a product canary failure or a five-minute pass.
+The harness observer now also uses bounded fresh native HTTP, preserving its
+two-second GET/five-second POST timeouts and observation cadence. The exact
+cause of that observer timeout was not traced independently.
+
 ## Separate CPU and alerting work
 
 The observed live commit does not contain VUH-1699's

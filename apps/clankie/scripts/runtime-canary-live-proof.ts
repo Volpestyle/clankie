@@ -451,13 +451,60 @@ try {
     });
     receipt.independentHealth = comparisons;
   }
-  async function get<T>(path: string): Promise<T> {
-    const response = await fetch(`${base}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(2000),
+  async function api<T>(
+    path: string,
+    method = "GET",
+    body?: unknown,
+    timeoutMs = 2000,
+  ): Promise<{ status: number; body: T }> {
+    // The observer must not reuse the affected Undici idle keepalive path either.
+    return new Promise((done, reject) => {
+      const fail = (error: unknown) =>
+        reject(
+          Error(`${method} ${path}: ${error instanceof Error ? error.message : String(error)}`, {
+            cause: error,
+          }),
+        );
+      const request = httpRequest(
+        `${base}${path}`,
+        {
+          method,
+          agent: false,
+          headers: {
+            authorization: `Bearer ${token}`,
+            ...(body === undefined ? {} : { "content-type": "application/json" }),
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          let bytes = 0;
+          response.on("data", (chunk: Buffer) => {
+            bytes += chunk.length;
+            if (bytes > 1024 * 1024) request.destroy(Error("Observer response exceeds 1MiB"));
+            else chunks.push(chunk);
+          });
+          response.once("error", fail);
+          response.once("end", () => {
+            try {
+              done({
+                status: response.statusCode ?? 0,
+                body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as T,
+              });
+            } catch (error) {
+              fail(error);
+            }
+          });
+        },
+      );
+      request.once("error", fail);
+      request.end(body === undefined ? undefined : JSON.stringify(body));
     });
-    assert.equal(response.status, 200, `${path}: ${await response.clone().text()}`);
-    return response.json() as Promise<T>;
+  }
+  async function get<T>(path: string): Promise<T> {
+    const response = await api<T>(path);
+    assert.equal(response.status, 200, `${path}: ${JSON.stringify(response.body)}`);
+    return response.body;
   }
   let health: Health | undefined;
   const bootDeadline = Date.now() + 45_000;
@@ -571,13 +618,13 @@ try {
       firstCounters.cpu.userMicros + firstCounters.cpu.systemMicros,
   );
   if (!healthy) {
-    const response = await fetch(`${base}/v1/runtime-update`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ ref: "HEAD" }),
-      signal: AbortSignal.timeout(5000),
-    });
-    const refusal = (await response.json()) as { error: string; detail: string };
+    const response = await api<{ error: string; detail: string }>(
+      "/v1/runtime-update",
+      "POST",
+      { ref: "HEAD" },
+      5000,
+    );
+    const refusal = response.body;
     assert.equal(response.status, 409);
     assert.equal(refusal.error, "update_refused");
     assert.match(refusal.detail, /Deploy held/u);
