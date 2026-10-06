@@ -2828,6 +2828,10 @@ the default window is the last 24 hours, with an exclusive end and a maximum
 of 366 days. The window selects approval time for accepted episodes, or the
 latest observation for unfinished episodes; totals cover the whole selected
 episode. Turn-mode `--run` / `--limit` cannot be combined with issue mode.
+Issue-only queries stream assignment records from exact retained bindings before
+loading matching histories. Unrelated histories do not consume the 256 MiB full-read
+budget; each source still has a 64 MiB limit. Unavailable or ambiguous sources
+remain explicit coverage warnings.
 
 ```sh
 clankie metrics --issue VUH-1608 --since 2026-10-04T00:00:00Z --until 2026-10-05T00:00:00Z

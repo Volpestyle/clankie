@@ -1,3 +1,5 @@
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveHerdrSeatTranscriptPathAsync, sessionIdFromPath } from "@clankie/agent-transcript";
@@ -229,6 +231,50 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
   return records.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
+function assignedIssue(text: string): string | undefined {
+  return (
+    text.match(/^(?:You own Linear|You own|Implement|Fix)\s+([A-Z][A-Z0-9]*-\d+)\b/u)?.[1] ??
+    text.match(/\bNext for you:\s*([A-Z][A-Z0-9]*-\d+)\b/u)?.[1]
+  );
+}
+
+/** Scan only an already bound source, retaining one line at a time. An issue
+ * mention in model/tool output cannot select a source. The full read budgets
+ * apply after selection, so unrelated histories cannot starve an issue query. */
+async function containsAssignment(
+  path: string,
+  harness: "codex" | "claude",
+  sessionId: string | undefined,
+  issue: string,
+): Promise<boolean> {
+  const stream = createReadStream(path, { encoding: "utf8", end: MAX_SOURCE_BYTES - 1 });
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  let scanned = 0;
+  try {
+    for await (const line of lines) {
+      scanned += Buffer.byteLength(line) + 1;
+      if (scanned > MAX_SOURCE_BYTES) throw new Error("Source grew beyond scan budget");
+      let entry;
+      try {
+        entry = obj(JSON.parse(line));
+      } catch {
+        continue;
+      }
+      if (obj(harness === "codex" ? entry.payload : entry.message).role !== "user") continue;
+      if (
+        nativeRecords(line, harness, sessionId).some(
+          (row) => row.prompt !== undefined && assignedIssue(row.prompt) === issue,
+        )
+      )
+        return true;
+    }
+    return false;
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+}
+
 function episodes(
   records: NativeRecord[],
   workerId: string,
@@ -262,9 +308,7 @@ function episodes(
           active.reworkRounds = (active.reworkRounds ?? 0) + 1;
         }
       }
-      const assigned =
-        text.match(/^(?:You own Linear|You own|Implement|Fix)\s+([A-Z][A-Z0-9]*-\d+)\b/u)?.[1] ??
-        text.match(/\bNext for you:\s*([A-Z][A-Z0-9]*-\d+)\b/u)?.[1];
+      const assigned = assignedIssue(text);
       if (assigned && (!active || active.issueId !== assigned || active.acceptedAt !== null)) {
         active = {
           issueId: assigned,
@@ -508,11 +552,6 @@ export async function readIssueMetrics(
     }
     const native = primary.native;
     const path = group.path;
-    const raw = await read(path);
-    if (raw === undefined) {
-      warnings.push(`Native history unreadable: ${native.terminalId}`);
-      continue;
-    }
     const namedSession = sessionIdFromPath({
       harness: native.agent,
       path,
@@ -522,6 +561,23 @@ export async function readIssueMetrics(
     const sessionId =
       found.find((binding) => binding.native.session.kind === "id")?.native.session.value ??
       (SESSION_UUID.test(namedSession) ? namedSession : undefined);
+    if (query.issue !== undefined) {
+      if (group.size > MAX_SOURCE_BYTES) {
+        warnings.push(`Source exceeds 64 MiB: ${path.split("/").at(-1)}`);
+        continue;
+      }
+      try {
+        if (!(await containsAssignment(path, native.agent, sessionId, query.issue))) continue;
+      } catch {
+        warnings.push(`Native history scan unavailable: ${native.terminalId}`);
+        continue;
+      }
+    }
+    const raw = await read(path);
+    if (raw === undefined) {
+      warnings.push(`Native history unreadable: ${native.terminalId}`);
+      continue;
+    }
     sourceSessions.set(
       key,
       new Set([

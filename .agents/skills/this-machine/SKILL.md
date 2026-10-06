@@ -68,6 +68,9 @@ list uncertain ownership/activity/drafts for the lead. A new acceptance requires
 its own authorized intent, never an automatic retry. See `docs/cli.md` under
 `repoRoot` for the operator boundary.
 
+Issue-only metrics stream assignment discovery in exact bound histories before
+loading matching sources; unrelated histories cannot exhaust their full-read budget.
+Coverage warnings still identify oversized, unavailable and ambiguous sources.
 For accepted-issue cost evidence, use `clankie metrics --issue ISSUE --since ISO
 --until ISO` or `clankie metrics --issues --worker LABEL`. The operator route
 projects retained native history and existing ledgers. Exact local bindings in

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, appendFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,6 +112,68 @@ it("serves the real VUH-1608 golden through the production service, client and C
         },
       }),
     );
+    let unrelatedBytes = 0;
+    let starvationMeta: string | undefined;
+    const unrelated: { metadata: string; native: string }[] = [];
+    if (process.env.ISSUE_METRICS_STARVATION_TEST === "1") {
+      // Real native tool rows may mention the issue; only an actual user
+      // assignment selects a source. Five bound histories exceed 256 MiB.
+      const assistant = nativeBytes
+        .toString("utf8")
+        .split("\n")
+        .find((line) => {
+          try {
+            return JSON.parse(line).payload?.type === "custom_tool_call";
+          } catch {
+            return false;
+          }
+        });
+      if (!assistant) throw new Error("Golden has no tool row");
+      const chunk = (assistant + "\n").repeat(Math.ceil((1024 * 1024) / Buffer.byteLength(assistant + "\n")));
+      for (let index = 0; index < 5; index++) {
+        const metadata = join(captain, "conversations", `aaa-unrelated-${index}`);
+        const path = join(
+          nativeDir,
+          `rollout-2026-10-04T00-00-00-00000000-0000-4000-8000-00000000000${index}.jsonl`,
+        );
+        await mkdir(metadata);
+        for (let chunkIndex = 0; chunkIndex < 55; chunkIndex++) await appendFile(path, chunk);
+        await writeFile(
+          join(metadata, "meta.json"),
+          JSON.stringify({
+            ...JSON.parse(await readFile(metaPath, "utf8")),
+            conversationId: `aaa-unrelated-${index}`,
+            scope: { kind: "seat", seatId: `term_unrelated_${index}` },
+            title: `Unrelated ${index}`,
+            nativeSource: {
+              terminalId: `term_unrelated_${index}`,
+              paneId: `w3Z:p${index}`,
+              agent: "codex",
+              session: { source: "herdr:codex", kind: "path", value: path },
+            },
+          }),
+        );
+        unrelated.push({ metadata, native: path });
+      }
+      unrelatedBytes = (
+        await Promise.all(unrelated.map(async ({ native: path }) => (await stat(path)).size))
+      ).reduce((sum, size) => sum + size, 0);
+      expect(unrelatedBytes).toBeGreaterThan(256 * 1024 * 1024);
+      // The requested historical owner binding follows all current unrelated
+      // sources, reproducing the installed issue-only starvation order.
+      starvationMeta = await readFile(metaPath, "utf8");
+      const historical = JSON.parse(starvationMeta);
+      delete historical.nativeSource;
+      await writeFile(metaPath, JSON.stringify(historical));
+      new HireOwners(ownersPath).bind(
+        "w3Z:p1P",
+        { conversationId },
+        manifest.terminalId,
+        undefined,
+        "historical-noor-occupant",
+        JSON.stringify(["local", "codex", manifest.sessionId]),
+      );
+    }
     const settings = join(dir, "settings.json");
     await writeFile(
       settings,
@@ -182,6 +244,9 @@ it("serves the real VUH-1608 golden through the production service, client and C
       reportedTokens: 23106300,
       fullCheckRuns: 3,
     });
+    expect(report.coverage.warnings).not.toContain(
+      "256 MiB request read budget exhausted; remaining sources unavailable",
+    );
     expect(report.coverage.tokens).toContain("Native subagents");
     const runCli = (worker?: string) =>
       exec(
@@ -207,6 +272,23 @@ it("serves the real VUH-1608 golden through the production service, client and C
     expect(JSON.parse(cli.stdout)).toEqual({ ok: true, report });
     expect(IssueMetricsReportSchema.parse(JSON.parse(cli.stdout).report)).toEqual(report);
     expect((await client.readIssueMetrics({ ...query, worker: "Noor" })).issues).toEqual(report.issues);
+    if (unrelated.length)
+      console.log(
+        JSON.stringify({
+          unrelatedBytes,
+          issueOnly: report.issues[0]?.reportedTokens,
+          fullChecks: report.issues[0]?.fullCheckRuns,
+          budgetWarning: report.coverage.warnings.some((warning) => warning.includes("256 MiB")),
+        }),
+      );
+    for (const entry of unrelated) {
+      await rm(entry.metadata, { recursive: true });
+      await rm(entry.native);
+    }
+    if (starvationMeta !== undefined) {
+      await writeFile(metaPath, starvationMeta);
+      await rm(ownersPath);
+    }
     expect((await client.readIssueMetrics({ ...query, worker: "different-worker" })).issues).toEqual([]);
     expect((await client.readIssueMetrics({ ...query, since: "2026-10-04T19:16:00Z" })).issues).toEqual([]);
     const route = `${host}/v1/captain/issue-metrics`;
@@ -614,4 +696,4 @@ it("serves the real VUH-1608 golden through the production service, client and C
       );
     await rm(dir, { recursive: true, force: true });
   }
-}, 60_000);
+}, 180_000);
