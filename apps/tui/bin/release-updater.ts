@@ -17,11 +17,11 @@ import { createUpdateJournal, type RuntimeUpdater } from "./runtime-updater.ts";
 import { commitString, object, writePrivateJson } from "./update-files.ts";
 
 /** Where official releases are published: the GitHub API and its download host. */
-export interface ReleaseSource {
+interface ReleaseSource {
   readonly api: string;
   readonly download: string;
 }
-export const OFFICIAL_RELEASES: ReleaseSource = {
+const OFFICIAL_RELEASES: ReleaseSource = {
   api: "https://api.github.com/repos/Volpestyle/clankie",
   download: "https://github.com/Volpestyle/clankie/releases/download",
 };

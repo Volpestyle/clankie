@@ -73,7 +73,7 @@ export function currentRelease(installRoot: string): string {
 }
 
 /** Point `current` at a release atomically; command links already follow `current`. */
-export function switchCurrent(installRoot: string, release: string): void {
+function switchCurrent(installRoot: string, release: string): void {
   const current = join(installRoot, "current");
   const temporary = `${current}.update-${process.pid}`;
   rmSync(temporary, { force: true });
@@ -127,7 +127,7 @@ export function parseReleasePlan(input: unknown): ReleaseUpdatePlan {
   };
 }
 
-export interface ReleaseUpdatePorts {
+interface ReleaseUpdatePorts {
   readonly fetchImpl?: typeof fetch;
   /** The release's own supervisor, as `runtimeUpdateServices` drives a checkout. */
   readonly services: (release: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;

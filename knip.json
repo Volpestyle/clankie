@@ -96,7 +96,7 @@
       "ignoreExportsUsedInFile": true
     },
     "apps/tui": {
-      "entry": ["bin/runtime-update-helper.mjs"]
+      "entry": ["bin/runtime-update-helper.mjs", "bin/release-update-helper.ts"]
     },
     "packages/vec3": {
       "entry": ["test/**/*.test.ts"]
