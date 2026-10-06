@@ -656,6 +656,114 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
+  /v1/model-keys/subscriptions/methods:
+    get:
+      tags: [Operator]
+      operationId: modelSubscriptionMethods
+      summary: List currently supported provider subscription sign-in methods
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Policy-filtered providers and browser or device methods
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [methods]
+                properties:
+                  methods:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [providerId, name, methods]
+                      properties:
+                        providerId: { type: string, enum: [openai-codex, xai] }
+                        name: { type: string }
+                        methods: { type: array, items: { type: string, enum: [browser, device] } }
+        "401": { description: authentication_required }
+        "403": { description: forbidden }
+        "503": { description: unavailable }
+  /v1/model-keys/subscriptions/start:
+    post:
+      tags: [Operator]
+      operationId: startModelSubscription
+      summary: Start a provider sign-in for the authenticated initiating principal
+      description: |
+        Reuses console sign-in helpers. Poll status for the URL and optional code,
+        then open it in the initiating client's browser. Browser callbacks reach
+        this Mac; phones use the device method. Credentials and the selected
+        catalog model are committed together after a fresh authority check.
+        Claude subscription login remains unsupported. No-store; no raw provider errors.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [providerId, method, model]
+              properties:
+                providerId: { type: string, maxLength: 128 }
+                method: { type: string, enum: [browser, device] }
+                model: { type: string, maxLength: 512 }
+      responses:
+        "200":
+          description: New pending interaction
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelSubscriptionResult" }
+        "400": { description: malformed or unsupported provider/model }
+        "401": { description: authentication_required }
+        "403": { description: forbidden }
+        "409": { description: busy }
+        "503": { description: unavailable }
+  /v1/model-keys/subscriptions/status:
+    post:
+      tags: [Operator]
+      operationId: modelSubscriptionStatus
+      summary: Read the initiating principal's sign-in interaction
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelSubscriptionSessionRequest" }
+      responses:
+        "200":
+          description: Pending URL/code, committing write, or terminal result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelSubscriptionResult" }
+        "400": { description: malformed }
+        "401": { description: authentication_required }
+        "403": { description: forbidden }
+        "404": { description: session_not_found }
+        "503": { description: unavailable }
+  /v1/model-keys/subscriptions/cancel:
+    post:
+      tags: [Operator]
+      operationId: cancelModelSubscription
+      summary: Cancel a pending sign-in; an admitted credential write finishes as committing
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelSubscriptionSessionRequest" }
+      responses:
+        "200":
+          description: Cancelled or already committing/terminal interaction
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelSubscriptionResult" }
+        "400": { description: malformed }
+        "401": { description: authentication_required }
+        "403": { description: forbidden }
+        "404": { description: session_not_found }
+        "503": { description: unavailable }
   /v1/model-keys/options:
     get:
       tags: [Operator]
@@ -714,6 +822,9 @@ paths:
       operationId: setModelKey
       summary: Store or replace a write-only provider API key
       description: |
+        On a self-hosted Mac, device key entry returns forbidden when shared
+        Clankie readiness is true. Operator key management and hosted behavior
+        remain unchanged. The write rechecks readiness and authority.
         Owner operator bearer or active device with terminalControl only. Public
         gateway calls require the encrypted envelope. No key, provider error text,
         or generated text is returned or logged. Cache-Control no-store.
@@ -4882,6 +4993,81 @@ paths:
         "429": { description: Support ticket rate limit reached }
         "503": { description: Durable ticket admission or command unavailable }
 
+  /v1/pairing/local/offer:
+    post:
+      tags: [Operator]
+      operationId: mintLocalCompanionOffer
+      summary: Mint the same-UID Mac companion handoff through owner-private IPC
+      description: |
+        Self-hosted macOS only. The CLI uses the protected Unix socket, never
+        unverified TCP. Local native transport and operator bearer are required.
+        The five-minute offer is not published to the gateway or generic store.
+        A new mint invalidates its predecessor. No-store; secrets never enter logs.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Single-use offer for the private handoff file
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [version, offerSecret, expiresAt]
+                properties:
+                  version: { type: integer, const: 1 }
+                  offerSecret: { type: string, minLength: 22, maxLength: 22 }
+                  expiresAt: { type: string, format: date-time }
+        "401": { description: operator_authentication_required }
+        "403": { description: native_loopback_required }
+        "404": { description: not_found }
+        "503": { description: device_authentication_unavailable }
+  /v1/pairing/local/redeem:
+    post:
+      tags: [Operator]
+      operationId: redeemLocalCompanionOffer
+      summary: Redeem the owner-local handoff once over native loopback
+      description: |
+        Refuses browser pages, forwarded requests, the gateway and the LAN device
+        doorway. Reuses the active companion's durable device ID and grants on
+        reinstall. Revoked identities never revive. Session uses the existing
+        device signer and includes host, grants and loopback control/relay routes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [offerSecret]
+              properties:
+                offerSecret: { type: string, minLength: 22, maxLength: 22 }
+      responses:
+        "200":
+          description: Existing device-session fields plus host name and loopback directRoute
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, deviceToken, grants, sessionExpiresAt, host, relayUrl, directRoute]
+                properties:
+                  deviceId: { type: string }
+                  deviceToken: { type: string }
+                  grants: { $ref: "#/components/schemas/DeviceGrantSet" }
+                  sessionExpiresAt: { type: string, format: date-time }
+                  host: { type: object, required: [name], properties: { name: { type: string } } }
+                  relayUrl: { type: string, format: uri }
+                  directRoute:
+                    type: object
+                    required: [controlPlaneUrl, relayUrl]
+                    properties:
+                      controlPlaneUrl: { type: string, format: uri }
+                      relayUrl: { type: string, format: uri }
+        "400": { description: malformed }
+        "403": { description: native_loopback_required or revoked }
+        "404": { description: not_found }
+        "409": { description: consumed }
+        "410": { description: expired }
+        "503": { description: device_authentication_unavailable }
   /v1/pairing/offer:
     post:
       tags: [Pairing]
@@ -5805,6 +5991,51 @@ components:
                   properties:
                     id: { type: string }
                     name: { type: string }
+    DeviceGrantSet:
+      type: object
+      required: [chat, steer, terminalObserve, terminalControl]
+      properties:
+        chat: { type: boolean }
+        steer: { type: boolean }
+        terminalObserve: { type: boolean }
+        terminalControl: { type: boolean }
+    ModelSubscriptionSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [sessionId]
+      properties:
+        sessionId: { type: string, format: uuid }
+    ModelSubscriptionResult:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [ok, sessionId, providerId, expiresAt, state]
+          properties:
+            ok: { type: boolean, const: true }
+            sessionId: { type: string, format: uuid }
+            providerId: { type: string, enum: [openai-codex, xai] }
+            expiresAt: { type: string, format: date-time }
+            state: { type: string, enum: [pending, committing, complete, cancelled, expired, failed] }
+            url: { type: string, format: uri }
+            userCode: { type: string, maxLength: 256 }
+        - type: object
+          additionalProperties: false
+          required: [ok, error]
+          properties:
+            ok: { type: boolean, const: false }
+            error:
+              type: string
+              enum:
+                [
+                  authentication_required,
+                  forbidden,
+                  malformed,
+                  unsupported_provider,
+                  unsupported_model,
+                  busy,
+                  session_not_found,
+                  unavailable,
+                ]
     ModelKeyResult:
       oneOf:
         - type: object

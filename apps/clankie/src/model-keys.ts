@@ -1,3 +1,4 @@
+import { ModelSubscriptionSignIns, type ModelSignInAuthority } from "./model-subscriptions.ts";
 import type { BodyTelemetry, BodyModelTelemetryInput } from "@clankie/observability/body-telemetry";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { createModelRegistry, loadBundledCatalog } from "@clankie/model-registry";
@@ -19,6 +20,9 @@ import {
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type {
+  ModelSubscriptionMethods,
+  ModelSubscriptionStart,
+  ModelSubscriptionResult,
   ModelEffort,
   ModelKeyResult,
   ModelKeysResponse,
@@ -28,9 +32,16 @@ import type {
 import { BrokerCredentialStore } from "./captain/model.ts";
 
 export interface ModelKeysPort {
+  close?(): void;
+  subscriptionMethods?(): Promise<ModelSubscriptionMethods>;
+  startSubscription?(
+    input: ModelSubscriptionStart,
+    authority: ModelSignInAuthority,
+  ): Promise<ModelSubscriptionResult>;
+  subscriptionStatus?(sessionId: string, principal: string, cancel?: boolean): ModelSubscriptionResult;
   readiness?(): Promise<import("@clankie/protocol/captain-readiness").CaptainReadinessResponse>;
   list(): Promise<ModelKeysResponse>;
-  set(providerId: string, apiKey: string): Promise<ModelKeyResult>;
+  set(providerId: string, apiKey: string, guard?: () => Promise<boolean>): Promise<ModelKeyResult>;
   validate(providerId: string, modelId: string): Promise<ModelKeyResult>;
   select(model: string): Promise<ModelKeyResult>;
   remove(providerId: string): Promise<ModelKeyResult>;
@@ -55,6 +66,7 @@ export function providerDisplayName(provider: { readonly id: string; readonly na
 
 export function createModelKeys(options: {
   store: CredentialStore;
+  subscriptionLogin?: { fetchImpl?: typeof fetch; browserPort?: number; timeoutMs?: number };
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   runtime?: () => Promise<ModelRuntime>;
@@ -67,6 +79,12 @@ export function createModelKeys(options: {
   onModelChanged?: () => Promise<void>;
 }): ModelKeysPort {
   const { store } = options;
+  let writing: Promise<unknown> = Promise.resolve();
+  const mutate = <T>(operation: () => Promise<T>): Promise<T> => {
+    const next = writing.catch(() => undefined).then(operation);
+    writing = next;
+    return next;
+  };
   const env = options.env ?? process.env;
   const telemetryCatalog = options.telemetry === undefined ? undefined : loadBundledCatalog();
   const report = (
@@ -144,7 +162,68 @@ export function createModelKeys(options: {
       return undefined;
     }
   };
+  const signIns = new ModelSubscriptionSignIns({
+    env,
+    ...options.subscriptionLogin,
+    validate: async (input) => {
+      if (
+        !["openai-codex", "xai"].includes(input.providerId) ||
+        (input.providerId === "openai-codex" && isHostedModelEnvironment(env)) ||
+        (input.providerId === "xai" && input.method !== "device")
+      )
+        return "unsupported_provider";
+      const ref = parseModelRef(input.model);
+      const state = await snapshot();
+      if (!state.providers.some((provider) => provider.id === input.providerId))
+        return "unsupported_provider";
+      if (
+        !ref ||
+        ref.providerId !== input.providerId ||
+        !piModelFor(state.models, ref.providerId, ref.modelId, state)
+      )
+        return "unsupported_model";
+      return undefined;
+    },
+    commit: (input, credential, authority, signal, admit) =>
+      mutate(async () => {
+        signal.throwIfAborted();
+        if (
+          !(await authority.commit(async () => {
+            signal.throwIfAborted();
+            if (!modelCredentialAllowed(input.providerId, credential, { env }))
+              throw Error("unsupported_provider");
+            admit();
+            await store.set(input.providerId, credential);
+            await setCaptainModel(input.model, { env });
+            await options.onModelChanged?.();
+          }))
+        )
+          throw Error("principal_revoked");
+      }),
+  });
   return {
+    close: () => signIns.close(),
+    async subscriptionMethods() {
+      const state = await snapshot();
+      return {
+        methods: [
+          ...(!isHostedModelEnvironment(env) && state.providers.some((p) => p.id === "openai-codex")
+            ? [
+                {
+                  providerId: "openai-codex" as const,
+                  name: "ChatGPT Plus / Pro",
+                  methods: ["browser" as const, "device" as const],
+                },
+              ]
+            : []),
+          ...(state.providers.some((p) => p.id === "xai")
+            ? [{ providerId: "xai" as const, name: "SuperGrok / X Premium", methods: ["device" as const] }]
+            : []),
+        ],
+      };
+    },
+    startSubscription: (input, authority) => signIns.start(input, authority),
+    subscriptionStatus: (sessionId, principal, cancel) => signIns.status(sessionId, principal, cancel),
     async readiness() {
       const loaded = await loadConfig({ env, ...(options.cwd ? { cwd: options.cwd } : {}) });
       if (loaded.issues.length > 0) throw new Error("model_configuration_invalid");
@@ -249,30 +328,33 @@ export function createModelKeys(options: {
       );
       return { ok: true };
     },
-    async set(providerId, apiKey) {
-      let action: "key-set" | "key-replaced" = "key-set";
-      try {
-        if (
-          !modelCredentialAllowed(providerId, { type: "api", key: apiKey }, { env }) ||
-          (await apiProvider(providerId)) === undefined
-        ) {
-          report(action, "unsupported_provider", providerId);
-          return { ok: false, error: "unsupported_provider" };
-        }
-        if (options.telemetry !== undefined) {
-          try {
-            if ((await store.list())[providerId]?.type === "api") action = "key-replaced";
-          } catch {
-            /* Optional replacement classification cannot prevent the write. */
+    async set(providerId, apiKey, guard) {
+      return mutate(async () => {
+        let action: "key-set" | "key-replaced" = "key-set";
+        try {
+          if (
+            !modelCredentialAllowed(providerId, { type: "api", key: apiKey }, { env }) ||
+            (await apiProvider(providerId)) === undefined
+          ) {
+            report(action, "unsupported_provider", providerId);
+            return { ok: false, error: "unsupported_provider" };
           }
+          if (options.telemetry !== undefined) {
+            try {
+              if ((await store.list())[providerId]?.type === "api") action = "key-replaced";
+            } catch {
+              /* Optional replacement classification cannot prevent the write. */
+            }
+          }
+          if (guard && !(await guard())) return { ok: false, error: "forbidden" };
+          await store.set(providerId, { type: "api", key: apiKey });
+          report(action, "ok", providerId);
+          return { ok: true };
+        } catch (error) {
+          report(action, "unavailable", providerId);
+          throw error;
         }
-        await store.set(providerId, { type: "api", key: apiKey });
-        report(action, "ok", providerId);
-        return { ok: true };
-      } catch (error) {
-        report(action, "unavailable", providerId);
-        throw error;
-      }
+      });
     },
     async validate(providerId, modelId) {
       const state = await apiProvider(providerId);
@@ -321,35 +403,37 @@ export function createModelKeys(options: {
       }
     },
     async select(model) {
-      const ref = parseModelRef(model);
-      // Unknown input is never an identifier in telemetry: report() checks the bundled catalog.
-      const providerId = ref?.providerId ?? "";
-      try {
-        const state = await snapshot();
-        if (ref === undefined || !state.providers.some((provider) => provider.id === ref.providerId)) {
-          report("model-selected", "unsupported_provider", providerId);
-          return { ok: false, error: "unsupported_provider" };
-        }
-        if (!modelCredentialAllowed(providerId, await store.get(providerId), { env }))
-          return { ok: false, error: "unsupported_model" };
+      return mutate(async () => {
+        const ref = parseModelRef(model);
+        // Unknown input is never an identifier in telemetry: report() checks the bundled catalog.
+        const providerId = ref?.providerId ?? "";
         try {
-          resolvePiModelSelection({ ...state.config, model }, state.models, {
-            catalog: state.catalog,
-            hasCodexSubscription:
-              !isHostedModelEnvironment(env) && (await store.get(CODEX_PROVIDER_ID)) !== undefined,
-          });
-        } catch {
-          report("model-selected", "unsupported_model", providerId, ref.modelId);
-          return { ok: false, error: "unsupported_model" };
+          const state = await snapshot();
+          if (ref === undefined || !state.providers.some((provider) => provider.id === ref.providerId)) {
+            report("model-selected", "unsupported_provider", providerId);
+            return { ok: false, error: "unsupported_provider" };
+          }
+          if (!modelCredentialAllowed(providerId, await store.get(providerId), { env }))
+            return { ok: false, error: "unsupported_model" };
+          try {
+            resolvePiModelSelection({ ...state.config, model }, state.models, {
+              catalog: state.catalog,
+              hasCodexSubscription:
+                !isHostedModelEnvironment(env) && (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+            });
+          } catch {
+            report("model-selected", "unsupported_model", providerId, ref.modelId);
+            return { ok: false, error: "unsupported_model" };
+          }
+          await setCaptainModel(model, options.env === undefined ? {} : { env: options.env });
+          await options.onModelChanged?.();
+          if (state.config.model !== model) report("model-selected", "ok", providerId, ref.modelId);
+          return { ok: true };
+        } catch (error) {
+          report("model-selected", "unavailable", providerId, ref?.modelId);
+          throw error;
         }
-        await setCaptainModel(model, options.env === undefined ? {} : { env: options.env });
-        await options.onModelChanged?.();
-        if (state.config.model !== model) report("model-selected", "ok", providerId, ref.modelId);
-        return { ok: true };
-      } catch (error) {
-        report("model-selected", "unavailable", providerId, ref?.modelId);
-        throw error;
-      }
+      });
     },
     async remove(providerId) {
       try {

@@ -320,13 +320,15 @@ describe("runCodexBrowserLogin", () => {
     );
   });
 
-  it("rejects the login and returns 400 when the callback state does not match", async () => {
+  it("refuses a foreign callback without cancelling the owner sign-in", async () => {
     const opened = deferred<string>();
     const { fetchImpl, calls } = recordingFetch(() => {
       throw new Error("the token endpoint must not be called");
     });
 
+    const controller = new AbortController();
     const login = runCodexBrowserLogin({
+      signal: controller.signal,
       port: 0,
       openUrl: (url) => opened.resolve(url),
       fetchImpl,
@@ -334,7 +336,7 @@ describe("runCodexBrowserLogin", () => {
     });
 
     // Attach the rejection handler before the callback fires so the rejection is never unhandled.
-    const rejection = expect(login).rejects.toThrow(/Invalid state/);
+    const rejection = expect(login).rejects.toThrow(/cancelled or expired/);
 
     const authorizeUrl = new URL(await opened.promise);
     const redirectUri = authorizeUrl.searchParams.get("redirect_uri")!;
@@ -343,7 +345,8 @@ describe("runCodexBrowserLogin", () => {
     callbackUrl.searchParams.set("state", "wrong-state");
     const callback = await fetch(callbackUrl);
     expect(callback.status).toBe(400);
-    expect(await callback.text()).toContain("Login failed");
+    expect(await callback.text()).toContain("Invalid or consumed callback");
+    controller.abort();
 
     await rejection;
     expect(calls).toHaveLength(0);

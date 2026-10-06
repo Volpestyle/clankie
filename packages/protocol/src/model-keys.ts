@@ -136,3 +136,63 @@ export const ModelKeyResultSchema = z.discriminatedUnion("ok", [
     .strict(),
 ]);
 export type ModelKeyResult = z.infer<typeof ModelKeyResultSchema>;
+
+/** Separate from the strict subscriptions listing, which remains names only. */
+export const MODEL_SUBSCRIPTION_METHODS_PATH = "/v1/model-keys/subscriptions/methods";
+export const MODEL_SUBSCRIPTION_START_PATH = "/v1/model-keys/subscriptions/start";
+export const MODEL_SUBSCRIPTION_STATUS_PATH = "/v1/model-keys/subscriptions/status";
+export const MODEL_SUBSCRIPTION_CANCEL_PATH = "/v1/model-keys/subscriptions/cancel";
+export const ModelSubscriptionMethodsSchema = z
+  .object({
+    methods: z.array(
+      z
+        .object({
+          providerId: z.enum(["openai-codex", "xai"]),
+          name: z.string(),
+          methods: z.array(z.enum(["browser", "device"])),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ModelSubscriptionMethods = z.infer<typeof ModelSubscriptionMethodsSchema>;
+export const ModelSubscriptionStartSchema = z
+  .object({
+    providerId: ProviderIdSchema,
+    method: z.enum(["browser", "device"]),
+    /** The chosen model is committed with sign-in so first-run readiness can pass. */
+    model: ModelRefSchema,
+  })
+  .strict();
+export type ModelSubscriptionStart = z.infer<typeof ModelSubscriptionStartSchema>;
+export const ModelSubscriptionSessionRequestSchema = z.object({ sessionId: z.string().uuid() }).strict();
+export const ModelSubscriptionResultSchema = z.discriminatedUnion("ok", [
+  z
+    .object({
+      ok: z.literal(true),
+      sessionId: z.string().uuid(),
+      providerId: z.enum(["openai-codex", "xai"]),
+      expiresAt: z.string().datetime(),
+      state: z.enum(["pending", "committing", "complete", "cancelled", "expired", "failed"]),
+      /** Login interaction only, returned exclusively to the initiating principal. */
+      url: z.string().url().optional(),
+      userCode: z.string().max(256).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      error: z.enum([
+        "authentication_required",
+        "forbidden",
+        "malformed",
+        "unsupported_provider",
+        "unsupported_model",
+        "busy",
+        "session_not_found",
+        "unavailable",
+      ]),
+    })
+    .strict(),
+]);
+export type ModelSubscriptionResult = z.infer<typeof ModelSubscriptionResultSchema>;

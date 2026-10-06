@@ -125,6 +125,7 @@ function extractCodexAccountId(token: string): string | undefined {
 }
 
 export interface CodexBrowserLoginOptions {
+  readonly signal?: AbortSignal;
   readonly env?: NodeJS.ProcessEnv;
   /** Local callback port; 0 binds an ephemeral port. Defaults to 1455 (the registered Codex port). */
   port?: number;
@@ -144,9 +145,18 @@ export async function runCodexBrowserLogin(
 ): Promise<ProviderCredential> {
   assertChatgptLoginAllowed(options.env);
   const port = options.port ?? DEFAULT_OAUTH_PORT;
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const openUrl = options.openUrl ?? openWithDefaultBrowser;
   const timeoutMs = options.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
+  const signal = AbortSignal.any([
+    AbortSignal.timeout(timeoutMs),
+    ...(options.signal ? [options.signal] : []),
+  ]);
+  signal.throwIfAborted();
+  const fetchImpl: typeof fetch = (input, init) =>
+    (options.fetchImpl ?? fetch)(input, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
+    });
+  const openUrl = options.openUrl ?? openWithDefaultBrowser;
   const pkce = generateCodexPkce();
   const state = randomBytes(32).toString("base64url");
 
@@ -158,21 +168,28 @@ export async function runCodexBrowserLogin(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal.removeEventListener("abort", aborted);
       server.close();
       settle();
     };
     const succeed = (credential: ProviderCredential): void => finish(() => resolve(credential));
     const fail = (error: Error): void => finish(() => reject(error));
 
+    const aborted = () => fail(new Error("Login cancelled or expired"));
+    let exchanging = false;
     const server = createServer((request, response) => {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (url.pathname !== "/auth/callback") {
-        if (url.pathname === "/cancel") {
+        if (url.pathname === "/cancel" && url.searchParams.get("state") === state) {
           respond(response, 200, "text/plain", "Login cancelled");
           fail(new Error("Login cancelled"));
           return;
         }
         respond(response, 404, "text/plain", "Not found");
+        return;
+      }
+      if (url.searchParams.get("state") !== state || settled || exchanging) {
+        respond(response, 400, "text/plain", "Invalid or consumed callback");
         return;
       }
       const error = url.searchParams.get("error");
@@ -206,6 +223,7 @@ export async function runCodexBrowserLogin(
         "text/html; charset=utf-8",
         loginResultPage("Login successful", "You can close this window and return to the terminal."),
       );
+      exchanging = true;
       exchangeAuthorizationCode({ code, redirectUri, verifier: pkce.verifier, fetchImpl })
         .then((tokens) => succeed(credentialFromTokens(tokens)))
         .catch((cause: unknown) => fail(toError(cause)));
@@ -216,6 +234,7 @@ export async function runCodexBrowserLogin(
       timeoutMs,
     );
 
+    signal.addEventListener("abort", aborted, { once: true });
     server.once("error", (error) => fail(error));
     server.listen(port, "127.0.0.1", () => {
       const address = server.address();
@@ -231,6 +250,7 @@ export async function runCodexBrowserLogin(
 }
 
 export interface CodexDeviceLoginOptions {
+  readonly signal?: AbortSignal;
   readonly env?: NodeJS.ProcessEnv;
   /** Receives the user code and the verification URL to show the user. */
   onUserCode: (code: string, verificationUrl: string) => void;
@@ -247,8 +267,17 @@ export interface CodexDeviceLoginOptions {
  */
 export async function runCodexDeviceLogin(options: CodexDeviceLoginOptions): Promise<ProviderCredential> {
   assertChatgptLoginAllowed(options.env);
-  const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
+  const signal = AbortSignal.any([
+    AbortSignal.timeout(timeoutMs),
+    ...(options.signal ? [options.signal] : []),
+  ]);
+  signal.throwIfAborted();
+  const fetchImpl: typeof fetch = (input, init) =>
+    (options.fetchImpl ?? fetch)(input, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
+    });
   const deadline = Date.now() + timeoutMs;
 
   const response = await fetchImpl(`${CODEX_ISSUER}/api/accounts/deviceauth/usercode`, {
@@ -289,7 +318,7 @@ export async function runCodexDeviceLogin(options: CodexDeviceLoginOptions): Pro
     }
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) throw new Error("Device login timeout - authorization took too long");
-    await sleep(Math.min(intervalMs, remainingMs));
+    await sleep(Math.min(intervalMs, remainingMs), undefined, { signal });
   }
 }
 

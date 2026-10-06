@@ -1,3 +1,5 @@
+import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
+import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
 import { ComputerBody } from "./computer-body.ts";
 import { randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
@@ -1361,6 +1363,7 @@ const runtimeHealth = new RuntimeHealthObserver({
       "Runtime health observation unavailable",
     ),
 });
+const localCompanionBoundary = new LocalCompanionBoundary();
 const clankie = await createClankieApp({
   fleetResources,
   runtimeHealth: () => runtimeHealth.snapshot(),
@@ -1469,6 +1472,8 @@ const clankie = await createClankieApp({
     store: operatorCredentialStore,
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
   }),
+  isLocalCompanionRequest: (request) => localCompanionBoundary.has(request),
+  modelDeviceSetup: { platform: process.platform, hosted: hostedBody !== undefined },
   modelKeys: createModelKeys({
     store: operatorCredentialStore,
     cwd: repoRoot,
@@ -1705,10 +1710,30 @@ const webSocketServer = new WebSocketServer({
   maxPayload: MAX_REALTIME_AUDIO_APPEND_BYTES,
 });
 const server = serve({
-  fetch: clankie.app.fetch,
+  fetch: localCompanionBoundary.fetch(clankie.app.fetch),
   port,
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
+});
+let localCompanionIssuer: Awaited<ReturnType<typeof startLocalCompanionIssuer>> | undefined;
+const publishLocalCompanionIssuer = async () => {
+  if (process.platform !== "darwin" || hostedBody) return;
+  const address = server.address();
+  if (!address || typeof address !== "object") return;
+  try {
+    localCompanionIssuer = await startLocalCompanionIssuer({
+      stateRoot,
+      controlPlaneUrl: `http://127.0.0.1:${address.port}`,
+      boundary: localCompanionBoundary,
+      fetch: clankie.app.fetch,
+    });
+    if (shutdownStarted) await localCompanionIssuer.close();
+  } catch {
+    logger.warn("Local companion minting unavailable");
+  }
+};
+server.once("listening", () => {
+  void publishLocalCompanionIssuer();
 });
 if (server.listening) runtimeHealth.start();
 else server.once("listening", () => runtimeHealth.start());
@@ -1785,6 +1810,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   deviceDoorway?.close();
+  void localCompanionIssuer?.close();
   void localFleet.close().catch(() => undefined);
   localFleetServer?.close();
   fleetLinks.close();

@@ -690,6 +690,14 @@ lives five minutes. A remote `CLANKIE_CONTROL_PLANE_URL` fails with
 `unavailable`: run pairing on that host so its launcher can verify the relay.
 The console's `/pair` runs this same command and accepts the same flags.
 
+On a self-hosted Mac, `--local-companion` writes a single-use offer to the
+owner-private `~/.clankie/companion/companion-offer.json` (`CLANKIE_STATE`
+overrides the root), for the locally installed companion to redeem. Output
+contains only the handoff path. Re-running it reuses the active companion's
+device identity; it cannot be combined with review offers. See
+[the local companion handoff](local-companion.md) for the typed API and security
+contract. Signed app distribution and the installer's call remain separate work.
+
 Public-gateway pairing uses a secure QR or full pasted link; the encryption
 credential is in its fragment. Short codes are for direct private connections.
 An ordinary offer also returns `localCode`, the offer's own short code, even when

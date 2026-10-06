@@ -96,6 +96,7 @@ async function requestXaiDeviceCode(
 }
 
 export interface XaiDeviceLoginOptions {
+  readonly signal?: AbortSignal;
   /** Receives the user code and the verification URL to show the operator. */
   readonly onUserCode: (code: string, verificationUrl: string) => void;
   /** Receives the browser URL. Defaults to macOS `open`; pass a no-op for headless. */
@@ -111,8 +112,17 @@ export interface XaiDeviceLoginOptions {
  * verification URL, then polls until authorized. Resolves an oauth credential.
  */
 export async function runXaiDeviceLogin(options: XaiDeviceLoginOptions): Promise<ProviderCredential> {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const wait = options.sleep ?? sleep;
+  const signal = AbortSignal.any([
+    AbortSignal.timeout(options.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS),
+    ...(options.signal ? [options.signal] : []),
+  ]);
+  signal.throwIfAborted();
+  const fetchImpl: XaiTransport = (input, init) =>
+    (options.fetchImpl ?? fetch)(input, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
+    });
+  const wait = options.sleep ?? ((ms: number) => sleep(ms, undefined, { signal }));
   const now = options.now ?? Date.now;
   const device = await requestXaiDeviceCode({ fetchImpl });
   const verificationUrl = device.verificationUriComplete ?? device.verificationUri;
@@ -126,6 +136,7 @@ export async function runXaiDeviceLogin(options: XaiDeviceLoginOptions): Promise
   let intervalMs = device.intervalMs;
 
   for (;;) {
+    signal.throwIfAborted();
     const remainingMs = deadline - now();
     if (remainingMs <= 0) throw new Error("xAI device authorization timed out");
     const poll = await fetchImpl(XAI_TOKEN_URL, {

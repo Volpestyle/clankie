@@ -251,6 +251,34 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/model-keys/subscriptions/methods",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "List sign-in methods allowed by the body's provider policy.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/subscriptions/start",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Start a provider sign-in for this device and its chosen catalog model.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/subscriptions/status",
+      {
+        access: "Encrypted initiating device bearer with terminalControl (Take Control)",
+        purpose: "Read this device's transient browser URL/code or sign-in outcome.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/subscriptions/cancel",
+      {
+        access: "Encrypted initiating device bearer with terminalControl (Take Control)",
+        purpose: "Cancel a pending sign-in before its credential write is admitted.",
+      },
+    ],
+    [
       "GET /v1/model-keys/options",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
