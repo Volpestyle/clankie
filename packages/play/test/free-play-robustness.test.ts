@@ -104,6 +104,28 @@ describe("Pokémon play robustness with offline fixtures", () => {
     expect(queue.take()).toBeNull();
   });
 
+  it("delivers all deferred text after a full 32-slot queue overflows", async () => {
+    const interjections = new InterjectionQueue(32);
+    const lines = Array.from({ length: 40 }, (_, i) => `${String(i).padStart(2, "0")}:` + "x".repeat(497));
+    for (const line of lines) interjections.offer(line);
+    const seen: string[] = [];
+    const result = await runFreePlay({
+      io: io(),
+      turns: 50,
+      interjections,
+      mind: {
+        decide: async (view) => {
+          if (view.interjection !== null) seen.push(view.interjection);
+          return decision;
+        },
+      },
+    });
+    expect(result.accepted).toBe(50);
+    expect(seen.every((text) => text.length <= 500)).toBe(true);
+    expect(seen.join("").replaceAll("\n", "")).toBe(lines.join(""));
+    expect(interjections.hasPending()).toBe(false);
+  });
+
   it("backs off for invalid decisions and observes stop during a retry", async () => {
     let stop = false;
     let calls = 0;

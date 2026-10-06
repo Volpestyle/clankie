@@ -496,7 +496,8 @@ const OBSERVED_KINDS: GbaEmulatorObservationKind[] = [
  *
  * Injection is asynchronous. A message offered while the mind is deciding
  * aborts that proposal so the same turn can be decided again with the new words.
- * Later lines wait in a bounded FIFO once the turn has used its two preemptions.
+ * Later lines wait in FIFO batches once the turn has used its two preemptions.
+ * Overflow text stays queued and drains in bounded prompt chunks.
  */
 export class InterjectionQueue {
   private pending: string[] = [];
@@ -511,19 +512,22 @@ export class InterjectionQueue {
   public offer(message: string): void {
     const trimmed = message.trim().slice(0, FREE_PLAY_INTERJECTION_MAX);
     if (trimmed.length === 0) return;
-    // Merge overflow into the last slot, keeping memory and prompt size bounded.
+    // Coalesce overflow without truncating deferred words. take() bounds each
+    // prompt chunk; retaining unread text necessarily grows with room traffic.
     if (this.capacity === 1) this.pending = [trimmed];
     else if (this.pending.length < this.capacity) this.pending.push(trimmed);
-    else
-      this.pending[this.capacity - 1] = `${this.pending[this.capacity - 1]}\n${trimmed}`.slice(
-        -FREE_PLAY_INTERJECTION_MAX,
-      );
+    else this.pending[this.capacity - 1] += `\n${trimmed}`;
     for (const listener of this.listeners) listener();
   }
 
   /** Taken by the next proposal; a later offer preempts it with newer words. */
   public take(): string | null {
-    return this.pending.shift() ?? null;
+    const next = this.pending[0];
+    if (next === undefined) return null;
+    const chunk = next.slice(0, FREE_PLAY_INTERJECTION_MAX);
+    if (next.length > chunk.length) this.pending[0] = next.slice(chunk.length);
+    else this.pending.shift();
+    return chunk;
   }
 
   public hasPending(): boolean {
