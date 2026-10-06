@@ -13,7 +13,15 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { CaptainSessionLaneV2Schema, type CaptainSessionLaneV2 } from "@clankie/protocol";
 import { commandHost, type Writable } from "./io.ts";
 
-const PROMPT_SECTIONS = ["identity", "persona", "reach", "fleet", "address", "model"] as const;
+const PROMPT_SECTIONS = [
+  "identity",
+  "persona",
+  "reach",
+  "fleet",
+  "address",
+  "model",
+  "conversation",
+] as const;
 const HARNESSES = ["claude"] as const;
 const LANES = CaptainSessionLaneV2Schema.options;
 const LANE_READ_TIMEOUT_MS = 10_000;

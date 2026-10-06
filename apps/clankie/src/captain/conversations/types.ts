@@ -127,6 +127,19 @@ export interface InboundReport extends InboundAcceptance {
   readonly reportDelivery: z.infer<typeof InboundReportDeliverySchema>;
 }
 
+export interface ServiceHandoffSpan {
+  /** Exclusive log cursor: the harness already holds everything up to here. */
+  fromCursor: string;
+  /** `attempting` is persisted before transport; restart turns it into `unresolved`. */
+  state: "open" | "attempting" | "unresolved";
+  spanId?: string;
+  text?: string;
+  /** Inclusive end of the sealed projection. */
+  toCursor?: string;
+  /** A service turn began after sealing; it carries into the next span. */
+  pendingAfter?: boolean;
+}
+
 export interface ConversationMeta {
   questions?: QuestionState;
   designatedHeadConversationId?: string;
@@ -156,6 +169,16 @@ export interface ConversationMeta {
   roomTranscripts?: Record<string, SeatTranscriptCheckpoint>;
   /** Native launcher sessions are pinned to one service conversation. */
   nativeSeatSessions?: Record<string, "current" | "retired">;
+  /** Bumped whenever harness transcript entries are folded into this conversation. */
+  nativeTranscriptRevision?: number;
+  /** The native transcript revision the service session was last seeded from. */
+  serviceContextRevision?: number;
+  /** Newest log cursor a harness is known to hold (its sync, a handoff, or a start seed). */
+  harnessCursor?: string;
+  /** Service-run turns not yet handed to a returning harness (ADR 0218). */
+  serviceHandoff?: ServiceHandoffSpan;
+  /** The last handoff whose native take could not be proven; never resent. */
+  serviceHandoffUncertain?: { spanId: string; at: string; text?: string };
   /**
    * The channel roster, in turn order. Present exactly on a `channel` scope
    * (ADR 0146); it lives on the meta so pruning the conversation takes the

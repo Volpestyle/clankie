@@ -71,7 +71,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
   }
 
   function conversationReportRunner(owner: ConversationOwner, deliveryId: string): ConversationRunner {
-    return async (conversationId, prompt, _publish, context) => {
+    return async (conversationId, prompt, publish, context) => {
       if (context.signal.aborted || !(await ctx.validateConversationOwner(owner)))
         throw new Error("Worker report owner is unavailable");
       const outbox = ctx.seatOutboxes.get(conversationId);
@@ -81,10 +81,10 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
         context.deliveryReceipt?.("delivered");
         return;
       }
-      if (!outbox?.bound() && !outbox?.uncertain()) {
-        context.deliveryReceipt?.("unavailable");
-        throw new Error("Worker report is retained until its conversation receiver returns");
-      }
+      // ADR 0218: with no live seat, the service runs the conversation. Its
+      // driver fence rechecks the seat, so a seat that binds meanwhile still wins.
+      if (!outbox?.bound() && !outbox?.uncertain())
+        return ctx.conversations.serviceRunner(conversationId, content, publish, context);
       const result = await outbox!.deliver({
         kind: "message",
         conversationId,
@@ -127,8 +127,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
           if (
             recipient.owner.conversationId !== conversationId ||
             recipient.owner.discord !== undefined ||
-            !(await ctx.validateConversationOwner(recipient.owner)) ||
-            !ctx.seatOutboxes.get(conversationId)?.bound()
+            !(await ctx.validateConversationOwner(recipient.owner))
           )
             continue;
           runner = conversationReportRunner(recipient.owner, report.deliveryId);
@@ -162,5 +161,21 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       reportRecovery.delete(conversationId);
     }
   }
-  return { workerReportActions, reportSummaries, conversationReportRunner, recoverWorkerReports };
+  /** Definitely undispatched reports need no seat: the service may run them (ADR 0218). */
+  function recoverAllWorkerReports() {
+    const pending = new Set(
+      ctx.conversations
+        .inboundReports()
+        .filter((report) => report.reportDelivery.state === "pending")
+        .map((report) => report.conversationId),
+    );
+    for (const conversationId of pending) void recoverWorkerReports(conversationId).catch(() => undefined);
+  }
+  return {
+    workerReportActions,
+    reportSummaries,
+    conversationReportRunner,
+    recoverWorkerReports,
+    recoverAllWorkerReports,
+  };
 }

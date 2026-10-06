@@ -48,6 +48,16 @@ import { type LinearActivityEvent } from "../../linear-webhook.ts";
 import { CHANNEL_ROUND_INTERRUPTED_NOTICE, type ChannelTranscriptEntry } from "../channel-turns.ts";
 import { ConversationJournal } from "../conversation-journal.ts";
 import {
+  claimServiceHandoff,
+  markServiceContext,
+  noteServiceTurn,
+  restoreServiceHandoff,
+  seatStartProjection,
+  serviceContextSeed,
+  settleServiceHandoff,
+  type ServiceHandoffClaim,
+} from "./service-handoff.ts";
+import {
   authorizeQuestion,
   newQuestionState,
   QuestionStateSchema,
@@ -357,6 +367,7 @@ export class ConversationStore {
           readFileSync(join(root, entry.name, "meta.json"), "utf8"),
         ) as ConversationMeta;
         this.restoreInboundReports(meta);
+        if (restoreServiceHandoff(meta)) this.saveMeta(meta);
         const legacy = meta as unknown as Record<string, unknown>;
         const retired = [
           "linearReadCursor",
@@ -828,8 +839,51 @@ export class ConversationStore {
   }
 
   /** A native head remains native while its channel is offline. */
+  /** The service runner every unrouted turn uses; host fallbacks reuse it (ADR 0218). */
+  public get serviceRunner(): ConversationRunner {
+    return this.runner;
+  }
+
+  /** Invocations currently executing for this conversation, on any driver. */
+  public activeInvocationCount(conversationId: string): number {
+    return this.activeInvocations.get(conversationId) ?? 0;
+  }
+
   public hasNativeSeat(conversationId: string): boolean {
     return hasNativeSeat(this, conversationId);
+  }
+
+  /** A fresh service-session seed after a harness drove this conversation (ADR 0218). */
+  public serviceContextSeed(
+    conversationId: string,
+  ): { readonly revision: number; readonly text: string } | undefined {
+    return serviceContextSeed(this, conversationId);
+  }
+
+  public markServiceContext(conversationId: string, revision: number): void {
+    return markServiceContext(this, conversationId, revision);
+  }
+
+  /** Opens the handoff span before a service turn appends anything. */
+  public noteServiceTurn(conversationId: string): boolean {
+    return noteServiceTurn(this, conversationId);
+  }
+
+  /** The SessionStart projection for a fresh harness session; advances its cursor. */
+  public seatStartProjection(conversationId: string): string {
+    return seatStartProjection(this, conversationId);
+  }
+
+  public claimServiceHandoff(conversationId: string): ServiceHandoffClaim | undefined {
+    return claimServiceHandoff(this, conversationId);
+  }
+
+  public settleServiceHandoff(
+    conversationId: string,
+    spanId: string,
+    outcome: "delivered" | "refused" | "uncertain",
+  ): void {
+    return settleServiceHandoff(this, conversationId, spanId, outcome);
   }
 
   /** Retain host-observed head ownership without changing transcript checkpoints. */

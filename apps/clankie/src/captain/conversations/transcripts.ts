@@ -1,6 +1,7 @@
 import { isDeliveredImagePath, namedImagePaths } from "../../delivered-files.ts";
 import type { HerdrSeatTranscript, HerdrTranscriptEntry } from "../herdr-transcript.ts";
 import { transcriptEventBody, transcriptImageKey } from "./helpers.ts";
+import { noteNativeTranscript } from "./service-handoff.ts";
 import type { ConversationStore } from "./store.ts";
 import { type ConversationMeta } from "./types.ts";
 export function syncConversationTranscript(
@@ -86,6 +87,7 @@ export function syncConversationTranscript(
     seen.add(entry.id);
   }
   if (!advanced) return;
+  noteNativeTranscript(meta, ctx["lastCursor"](meta));
   ctx["resettle"](meta);
   const nextCheckpoint = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
   if (room) (meta.roomTranscripts ??= {})[transcript.sessionKey] = nextCheckpoint;
