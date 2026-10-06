@@ -1,3 +1,5 @@
-# Built from the single authored product skill before installation or fleet copy.
+# Built from the authored product skills before installation or fleet copy.
 skills/clankie/
 skills/clankie.bundle.json
+skills/fleet-resources/
+skills/fleet-resources.bundle.json

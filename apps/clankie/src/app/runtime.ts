@@ -1,5 +1,6 @@
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
+import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { SupportGrantStore } from "../support-access.ts";
@@ -914,6 +915,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
+  app.route("/", createFleetResourceRoutes(authorizeOwnerSecrets, dependencies.fleetResources));
   app.route(
     "/",
     createProjectRoutes(

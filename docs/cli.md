@@ -1524,6 +1524,63 @@ browser is unaffected. JSON is the `browser status` shape with
 in the TUI call the same code. A listed harness is hired with `hire_agent`;
 `chrome: true` starts claude with `--chrome`.
 
+<a id="fleet-resource-governor"></a>
+
+### `heavy [--seat LABEL] -- COMMAND [ARGS...]` / `fleet resources` / `simulator`
+
+`heavy` runs a local command inside the shared OS-account resource governor.
+It preserves child arguments, exit status and signals. Keep installs, compilers,
+test suites, builds and entire owned runtime lifetimes inside the wrapper, and
+serialize multi-package compilers with `--workspace-concurrency=1`. Native local
+hire briefs include this contract automatically. Nested verified commands reuse
+the same permit; surviving descendants retain it after a wrapper exits.
+
+`fleet resources` returns current capacity, pressure, holders and queue as JSON.
+The operator fleet snapshot carries the cached `resources` field; the TUI
+`/status` and `/doctor` show holders by seat label or actual PID. Sampling does
+not run on `/health`. Resource metadata contains no arguments or credentials.
+
+The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
+
+| Flag                                      | Default | Meaning                                                                             |
+| ----------------------------------------- | ------- | ----------------------------------------------------------------------------------- |
+| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Shared capacity, 1–64; auto is min(floor(cores/8), floor(RAM GiB/24)), at least one |
+| `--simulator-slots N`                     | `1`     | Simulator ceiling, 0–64; each consumes a shared slot                                |
+| `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                            |
+| `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                     |
+| `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                          |
+
+CLI edits update the journal immediately; API edits are reconciled by the body
+within its five-second refresh. High pressure delays queued heavy work and refuses
+new local hires with a reason. Existing accepted agents keep running. Missing
+Python 3, helper or pressure observations refuse resource admission while the
+body remains available. The canonical registry is the OS user's
+`~/.clankie/fleet-resources`; worker environment and settings-path overrides do
+not create independent capacity. See the [shipped skill](../.agents/skills/fleet-resources/SKILL.md).
+
+`simulator acquire JSON` accepts `seatId`, optional `fleet`, `deviceType` and
+`runtime`. The host proves the current local seat and occupant, creates a new
+device, records its exact UUID and boots it. `simulator touch JSON` and
+`simulator release JSON` accept `seatId`, optional `fleet` and lease `id`.
+`simulator status` lists receipts. The operator credential is required; native
+occupant, process proof and binding fields are rejected as caller input.
+Idle expiry or proven seat exit cleans up only the exact created device. External
+booted devices count toward the ceiling. Unknown receipts remain held for review;
+observer shutdown does not release them.
+
+Owner HTTP routes are `GET /v1/operator/fleet-resources` and
+`GET|POST /v1/operator/fleet-resources/simulators`. POST uses the same strict JSON
+with `action: acquire|touch|release`, a 16 KiB limit and fresh authority checks
+before native effects. Unavailable resource status is 503; rejected mutations
+are 409. These routes retain the existing operator owner boundary.
+
+The manual `pnpm check:resources -- --run` proof starts an isolated Captain and
+service embedding plus ten bounded command processes. Run its whole lifetime
+through the active fleet limiter. It checks a two-slot pool, actual queueing,
+process cleanup, service CPU and 250 ms health p95. It runs no coding model or
+CoreSimulator; the VUH-1706 release gate remains the worker-bridge load proof.
+The command is excluded from `pnpm check` and push, PR and scheduled CI.
+
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
 ### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]` / `fleet clear`

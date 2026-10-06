@@ -18,6 +18,7 @@
     "@clankie/agent-transcript": "workspace:*",
     "@clankie/api-client": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
+    "@clankie/fleet-resources": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
     "@clankie/model-provider": "workspace:*",
     "@clankie/model-registry": "workspace:*",

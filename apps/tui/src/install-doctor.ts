@@ -32,7 +32,11 @@ import { inspectHarnessBridges } from "./harness-doctor.ts";
 import { commandHost } from "./command/io.ts";
 import { probeHealth, type GatewayDoorwayReport } from "./command/gateway.ts";
 import { nextStepLine } from "./next-step.ts";
-import { DeviceDirectRouteSchema, type WorkerBridgeStatus } from "@clankie/protocol";
+import {
+  DeviceDirectRouteSchema,
+  type WorkerBridgeStatus,
+  type FleetResourceSnapshot,
+} from "@clankie/protocol";
 import { probeHostPower, type HostPowerReport } from "@clankie/protocol/host-power";
 
 const execFileAsync = promisify(execFileCallback);
@@ -73,6 +77,7 @@ interface HerdrPluginReport {
 
 export interface InstallDoctorReport {
   readonly ok: true;
+  readonly resources?: FleetResourceSnapshot | { readonly status: "unavailable"; readonly detail: string };
   readonly kind: InstallKind;
   readonly version: string;
   readonly repoRoot: string;

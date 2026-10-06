@@ -259,7 +259,9 @@ export function parseDirectConversation(args: readonly string[]): {
   readonly conversationId?: string;
   readonly remaining: readonly string[];
 } {
-  const index = args.indexOf("--chat");
+  // A command after `--` owns its flags (for example `clankie heavy -- cmd --chat`).
+  const separator = args.indexOf("--");
+  const index = args.slice(0, separator < 0 ? args.length : separator).indexOf("--chat");
   if (index < 0) return { remaining: args };
   const conversationId = args[index + 1]?.trim();
   if (conversationId === undefined || conversationId.length === 0) {

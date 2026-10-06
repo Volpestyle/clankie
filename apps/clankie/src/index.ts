@@ -36,6 +36,7 @@ import { BodyLeaseStore } from "./body-leases.ts";
 import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
+import { createFleetResourceRuntime } from "./fleet-resource-runtime.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
@@ -946,6 +947,11 @@ const minecraftHost = new MinecraftHostService({
   }),
 });
 let fleetProjectMembership: FleetProjectMembership | undefined;
+const fleetResources = await createFleetResourceRuntime({
+  policy: async () => (await settingsStore.load()).fleet.resources,
+  onError: (error) =>
+    logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
+});
 const captain = createCaptain(
   {
     activitySharing,
@@ -1073,6 +1079,7 @@ const captain = createCaptain(
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
   },
   {
+    fleetResources,
     projectHireIdentity: projectProcessObserver,
     fleetProjectMembership: () => fleetProjectMembership,
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
@@ -1118,6 +1125,7 @@ const captain = createCaptain(
     ...(discordPresenceRuntime === undefined ? {} : { discordChannels: discordPresenceRuntime }),
   },
 );
+fleetResources.start();
 
 const hostedDiscord =
   hostedBody === undefined
@@ -1214,6 +1222,7 @@ const workerMcp = new WorkerMcp({
 });
 
 const clankie = await createClankieApp({
+  fleetResources,
   discordPermissions: (query, body) =>
     managedDiscord
       ? managedDiscord.permissions(query, body)
@@ -1608,6 +1617,11 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
   hostPower.stop();
+  void fleetResources
+    .close()
+    .catch(() =>
+      logger.warn({ event: "fleet_resources.close_failed" }, "Fleet resource observation cleanup failed"),
+    );
   void closeRuntimeProvider().catch(() =>
     logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
   );

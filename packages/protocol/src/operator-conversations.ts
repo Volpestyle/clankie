@@ -8,6 +8,7 @@ import { OperatorGoalSchema, OperatorWorkAssignmentSchema } from "./agent-work.t
 import { HireProfileSchema } from "./hire-profile.ts";
 import { DeliveryStageSchema } from "./delivery.ts";
 import { isCanonicalBase64 } from "./base64.ts";
+import { FleetResourceSnapshotSchema } from "./fleet-resources.ts";
 
 // ---------------------------------------------------------------------------
 // Operator conversations (ADR 0032, VUH-769).
@@ -930,6 +931,8 @@ export type RoomHandoffMetadata = z.infer<typeof RoomHandoffMetadataSchema>;
 export const OperatorFleetSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
+    /** Cached host capacity and holders; no process probing on a snapshot read. */
+    resources: FleetResourceSnapshotSchema.optional(),
     cursor: OperatorConversationCursorSchema,
     goals: z
       .array(z.object({ conversationId: OperatorConversationIdSchema, goal: OperatorGoalSchema }).strict())

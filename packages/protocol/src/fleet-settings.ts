@@ -5,6 +5,7 @@ import {
   FleetWorkingPreferencesSchema,
 } from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
+import { FleetResourcePolicySchema } from "./fleet-resources.ts";
 
 export const FLEET_SETTINGS_PATH = "/v1/operator/fleet-settings";
 export const FLEET_SETTINGS_CONTEXT_PATH = `${FLEET_SETTINGS_PATH}/context`;
@@ -12,6 +13,7 @@ const FleetPolicySchema = z
   .object({
     size: z.enum(["max", "large", "small", "solo"]),
     models: z.enum(["optimal", "efficient"]),
+    resources: FleetResourcePolicySchema.optional(),
     ...FleetAutonomyWireSchema.shape,
   })
   .strict();

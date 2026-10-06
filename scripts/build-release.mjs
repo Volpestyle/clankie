@@ -200,6 +200,7 @@ function gitRevision() {
 async function copyRuntimeAssets(targetRoot) {
   await copySkillAssets(repoRoot, targetRoot);
   const files = [
+    ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
     ["apps/clankie/src/captain/instructions.md", "apps/clankie/src/instructions.md"],
     ["apps/discord-activity/src/client.html", "apps/discord-activity/src/client.html"],
     ["LICENSE", "LICENSE"],

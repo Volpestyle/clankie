@@ -1,5 +1,6 @@
 import { createHireLayout, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
+import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import { realpath } from "node:fs/promises";
 import { ProjectHires, type ProjectHireProcessProof } from "./project-hires.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
@@ -780,6 +781,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private stateUnreadable = false;
   private closed = false;
   private readonly nativeLaunchPolicy: NativeLaunchPolicy | undefined;
+  private readonly fleetResources: FleetResourceRuntime | undefined;
   private readonly hireDefaults: (() => Promise<HireProfile>) | undefined;
   private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
   private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
@@ -794,6 +796,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly remoteHireReceipts?: RemoteHireReceipts;
       readonly channelReceipt?: HerdrWatchStore["channelReceipt"];
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
+      readonly fleetResources?: FleetResourceRuntime;
       readonly projectHirePolicy?: ProjectHirePolicy;
       readonly fleetHireTools?: () => Promise<readonly string[]>;
       readonly hireDefaults?: () => Promise<HireProfile>;
@@ -861,6 +864,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.validateOwner = options.validateOwner;
     this.hireOwners = new HireOwners(`${path}.owners.json`);
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
+    this.fleetResources = options.fleetResources;
     this.projectHires = new ProjectHires(`${path}.project-hires.json`);
     this.projectPolicy = options.projectHirePolicy;
     this.fleetHireTools = options.fleetHireTools;
@@ -1589,6 +1593,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return result;
   }
 
+  private async admitResourceMutation(input: SpawnOperatorSeat, authority?: HireAuthority): Promise<void> {
+    if (!this.fleetResources) return;
+    await this.fleetResources.admitHire(input);
+    // The new sensor wait cannot carry an old conversation/project grant
+    // into the native mutation after that grant was revoked.
+    if (authority !== undefined) await assertConversationAuthority(authority);
+    await this.admitProjectLaunch(input);
+  }
+
   private async expectedHireTools(input: SpawnOperatorSeat): Promise<readonly string[]> {
     const fleetTools = (await this.fleetHireTools?.()) ?? [];
     const project = this.projectContexts.get(input)?.projectId;
@@ -1624,6 +1637,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         { ...input, ...(subagentModel ? { subagents: { ...input.subagents, model: subagentModel } } : {}) },
         brief,
       );
+      brief = (await this.fleetResources?.hireBrief(input, brief)) ?? brief;
     } catch (error) {
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
     }
@@ -1701,6 +1715,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         phase: "request",
         resumed: resume !== undefined,
       });
+      await this.fleetResources?.admitHire(input);
     } catch (error) {
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
     }
@@ -2598,6 +2613,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error("Claude account profile changed during startup");
       }
       await this.assertRemoteHireAuthority(input, receiptKey, authority);
+      // Prepared adapters can await account, process and private-state setup.
+      // Pressure is re-read after those awaits, immediately before the pane
+      // command can create its native process.
+      if (this.fleetResources) await this.admitResourceMutation(input, authority);
       paneId = await createTab({
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),
@@ -2627,11 +2646,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return {
         outcome: "failed",
         reason:
-          caught instanceof HireLayoutUnconfirmed
-            ? "start_unconfirmed"
-            : adapter?.prepare
-              ? "harness_unavailable"
-              : "herdr_unreachable",
+          caught instanceof ResourceAdmissionError
+            ? "not_ready"
+            : caught instanceof HireLayoutUnconfirmed
+              ? "start_unconfirmed"
+              : adapter?.prepare
+                ? "harness_unavailable"
+                : "herdr_unreachable",
         detail: reasonDetail(caught),
       };
     }
@@ -2773,12 +2794,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
             await this.admitProjectLaunch(input);
             if (nativePrepared || !runInPane)
               throw new Error("Prepared native launch has no terminal input fallback");
+            if (this.fleetResources) await this.admitResourceMutation(input, authority);
             return runInPane(paneId, argv);
           },
           start: async (harness, argv) => {
             if (authority !== undefined) await assertConversationAuthority(authority);
             await this.admitProjectLaunch(input);
             if (nativePrepared) throw new Error("Prepared native launch cannot start a second process");
+            if (this.fleetResources) await this.admitResourceMutation(input, authority);
             return startAgent({
               name: subject,
               kind: harness,
@@ -2882,6 +2905,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(resume === undefined ? [] : nativeResumeArgs(resume)),
       ];
       await this.admitProjectLaunch(input);
+      if (this.fleetResources) await this.admitResourceMutation(input, authority);
       startAttempted = true;
       await startAgent({
         name: subject,
@@ -3012,6 +3036,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       const current = await this.runner.resolveTerminal(seatId);
       if (current === undefined) return false;
+      const resourceOwner = await this.fleetResources?.proveSimulatorSeat({ seatId }).catch(() => undefined);
+      const noteVerifiedExit = () => {
+        if (resourceOwner)
+          void this.fleetResources?.observeVerifiedSeatExit(resourceOwner).catch(() => undefined);
+      };
       // pane.close has no lifetime condition. A prepared native TUI can exit
       // itself through its original process-bound controller; Herdr removes
       // its command pane on process exit. Never fall back to physical close.
@@ -3033,6 +3062,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         do {
           if ((await this.runner.resolveTerminal(seatId)) === undefined) {
             await control.close().catch(() => undefined);
+            noteVerifiedExit();
             return true;
           }
           await delay(SPAWN_SESSION_POLL_MS);
@@ -3046,6 +3076,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await control?.close().catch(() => undefined);
       await guard?.();
       await this.runner.closePane(current.paneId);
+      // The manager independently checks this original process tuple. A pane
+      // close reply alone cannot reclaim a still-live or replaced occupant.
+      noteVerifiedExit();
       return true;
     } catch {
       return false;

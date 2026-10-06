@@ -1,0 +1,156 @@
+{
+  "ticket": "VUH-1740",
+  "branch": "bex/vuh-1740-resource-governor",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "node": "v26.7.0",
+    "cores": 18,
+    "memoryGiB": 128,
+    "automaticHeavySlots": 2
+  },
+  "focusedTests": {
+    "passed": 130,
+    "failed": 0,
+    "files": 14,
+    "reports": [
+      {
+        "artifact": ".local/verification/vuh1740/focused-regressions.json",
+        "sha256": "1c9b8edb9150ae3078cc41d044e0dd6726760622aa8769eb87f1b8ada698fc9f",
+        "passed": 96,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "apps/tui/test/doctor-fleet-link.integration.test.ts",
+          "apps/tui/test/fleet-autonomy-cli.test.ts",
+          "apps/tui/test/fleet-commands.test.ts",
+          "apps/tui/test/headless-captain.test.ts",
+          "apps/tui/test/herdr-roster.test.ts",
+          "apps/tui/test/install-doctor.test.ts",
+          "packages/fleet-resources/test/simulators.integration.test.ts",
+          "apps/clankie/test/fleet-resource-hire.integration.test.ts",
+          "apps/clankie/test/fleet-settings.integration.test.ts"
+        ]
+      },
+      {
+        "artifact": ".local/vuh1740-native-availability-tests.json",
+        "sha256": "e03202833ce08e43c51db7bfefbd8075eea160f79ae9bcd69984c33f6cb364d5",
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "packages/fleet-resources/test/heavy-process.integration.test.ts",
+          "packages/fleet-resources/test/probe-failure.integration.test.ts"
+        ]
+      },
+      {
+        "artifact": ".local/vuh1740-doctor-cli-tests.json",
+        "sha256": "fb384067c8325619fe270003b0494afe4d67f8b0d507426110d00fa2690c3195",
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "apps/tui/test/fleet-resources-cli.integration.test.ts"
+        ]
+      }
+    ],
+    "additional": [
+      {
+        "file": "apps/clankie/test/fleet-resource-routes.integration.test.ts",
+        "passed": 10,
+        "failed": 0,
+        "proof": "Native worker final real-TCP run, exec session60076, exit0"
+      },
+      {
+        "file": "apps/clankie/test/skill-release.test.ts",
+        "selector": "assembles only selected skills",
+        "passed": 1,
+        "failed": 0,
+        "deselected": 1,
+        "proof": "Native worker focused standalone assembly run, exec session80096, exit0"
+      }
+    ]
+  },
+  "typecheck": {
+    "passed": true,
+    "packages": [
+      "@clankie/protocol",
+      "@clankie/fleet-resources",
+      "@clankie/settings",
+      "@clankie/clankie",
+      "@clankie/tui"
+    ],
+    "workspaceConcurrency": 1,
+    "logs": [
+      ".local/verification/vuh1740/typecheck.log",
+      ".local/verification/vuh1740/typecheck-final.log"
+    ],
+    "note": "Initial TUI optional-field error corrected; final core+TUI rerun passes. Protocol/settings unchanged combined checks and governor final PID 1 availability package rerun pass."
+  },
+  "lint": {
+    "passed": true,
+    "scopedFiles": 52,
+    "log": ".local/verification/vuh1740/scoped-lint-final.log"
+  },
+  "packageSmoke": {
+    "passed": true,
+    "launcherHelp": true,
+    "isolatedBundledRunner": {
+      "code": 17,
+      "leases": 0,
+      "queue": 0
+    },
+    "helperExactCopy": true,
+    "fullReleaseBuild": false
+  },
+  "burst": {
+    "passed": true,
+    "rawArtifact": ".local/verification/vuh1740/fleet-resource-burst-final.json",
+    "rawArtifactSha256": "756e9d62c0c0b27c176e8b4a8cbf912175ec3e7f100ac8680e86138704d4d164",
+    "committedSourceDigestsMatchFinalRawArtifact": true
+  },
+  "nativeReview": {
+    "closed": true,
+    "fixes": [
+      "exact native uncertainty remains unknown",
+      "bulk census failure falls back to exact recorded proofs",
+      "runner occupancy includes all UIDs and excludes its actual observer",
+      "cancelled inherited command is never submitted",
+      "CLI preserves SIGINT",
+      "simulator status projects public inventory metadata",
+      "standalone worker ships its companion skill",
+      "helper availability supports a hosted PID 1 caller without granting PID 1 lease or signal authority"
+    ]
+  },
+  "limits": [
+    "CoreSimulator adapter tested through a real process fixture only; no live xcrun invocation or device boot was authorized",
+    "Linux read-failure branches and PID 1 caller have controlled fixtures; no live Linux kernel/container run because Docker daemon was unavailable",
+    "Python 3 is an explicit host dependency; missing helper/interpreter refuses new local builders while the runtime stays available",
+    "Burst uses an isolated registry with owner load16/memory0; default pressure refusal is verified separately with controlled sensors",
+    "Burst is an actual Captain/service embedding; Discord, models and other body providers are absent",
+    "Service CPU excludes native helper/command CPU",
+    "Burst admission waits total67.744s for ten2s jobs; first start13.919s, cause not profiled",
+    "Existing worker/plugin caches were not refreshed; full artifact refresh is required",
+    "No full pnpm check, release build, AWS deploy or app changes"
+  ],
+  "format": {
+    "passed": true,
+    "scopedFiles": 69
+  },
+  "docLinks": {
+    "passed": true,
+    "markdownFiles": 428
+  },
+  "pythonSyntax": {
+    "passed": true,
+    "files": [
+      "packages/fleet-resources/src/native.py",
+      "apps/clankie/scripts/fleet-resource-burst-job.py"
+    ]
+  },
+  "linuxPackaging": {
+    "python3IncludedInRuntimeStage": true,
+    "imageBuilt": false,
+    "reason": "Docker daemon unavailable"
+  }
+}

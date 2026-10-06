@@ -352,13 +352,17 @@ check their connected actor, inspect conversations and sessions, and interpret
 delivery receipts. Its authored source is `.agents/skills/clankie/SKILL.md`.
 The operator Claude plugin links it; `worker-skills` links the canonical catalog.
 Codex installation needs regular files, so its build materializes the catalog.
-The worker package contains a regular `skills/clankie/SKILL.md` snapshot, shared
-by its Claude and Codex manifests.
+The worker package contains regular `skills/clankie/SKILL.md` and
+`skills/fleet-resources/SKILL.md` snapshots, shared by its Claude and Codex
+manifests. The companion teaches local heavy permits and simulator leases.
 
 Before a checkout worker install or fleet copy, the existing Codex materializer
-refreshes that snapshot. Release assembly does the same.
-`node integrations/claude-plugin/worker/bin/skill-bundle.mjs` builds it manually.
-`skills/clankie.bundle.json` records its content SHA-256 and worker version; a
-standalone package validates both without importing a repository or builder.
+refreshes both snapshots. Release assembly does the same.
+`node integrations/claude-plugin/worker/bin/skill-bundle.mjs` builds them manually.
+Each has a separate `skills/NAME.bundle.json` recording its content SHA-256 and
+worker version. A standalone package validates both regular snapshots without
+importing a repository or builder. An older clankie-only package must be refreshed
+from the complete artifact; replacing the helper alone is refused. This does not
+refresh a running harness or its plugin cache.
 Doctor checks the installed skill marker separately from native membership.
 Shipping or loading the skill grants no tools and is not a live delivery check.

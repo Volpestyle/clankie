@@ -14,6 +14,8 @@ export async function copySkillAssets(repoRoot, targetRoot) {
         path !== join(source, "skills") &&
         path !== join(source, "worker/skills/clankie") &&
         path !== join(source, "worker/skills/clankie.bundle.json") &&
+        path !== join(source, "worker/skills/fleet-resources") &&
+        path !== join(source, "worker/skills/fleet-resources.bundle.json") &&
         basename(path) !== ".DS_Store",
     });
   }

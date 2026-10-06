@@ -1650,6 +1650,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             ...(roster === undefined
               ? []
               : [
+                  ...(roster.resources === undefined
+                    ? []
+                    : [
+                        s.line(
+                          "heavy slots",
+                          `${roster.resources.capacity.used}/${roster.resources.capacity.heavySlots} · ${roster.resources.queue.length} waiting`,
+                          roster.resources.pressure.healthy ? "normal" : "warn",
+                        ),
+                        ...roster.resources.leases.map((lease) =>
+                          s.line(
+                            "resource holder",
+                            `${lease.seatId ?? (lease.pid === undefined ? "unidentified" : `pid ${lease.pid}`)} · ${lease.kind} · ${lease.executable ?? lease.deviceId ?? lease.state}`,
+                            "normal",
+                          ),
+                        ),
+                      ]),
                   s.line(
                     "herdr workers",
                     roster.error === undefined

@@ -3,6 +3,7 @@ import {
   AutonomySettingsSchema,
   FLEET_WORKING_PREFERENCE_FIELDS,
   HireProfileSchema,
+  FleetResourcePolicySchema,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
@@ -463,6 +464,8 @@ export const FleetSettingsSchema = z
     tools: z.enum(["connected", "off"]).default("connected"),
     /** Proven native workers may message their own fleet unless the owner turns this off. */
     peerMessages: z.enum(["on", "off"]).default("on"),
+    /** Physical machine capacity is separate from the fleet-size staffing preference. */
+    resources: FleetResourcePolicySchema.optional(),
   })
   .strict();
 export type FleetSettings = z.infer<typeof FleetSettingsSchema>;

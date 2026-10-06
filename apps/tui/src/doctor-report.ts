@@ -37,6 +37,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
           : worker.status;
     return `  ${marker} Worker ${clean(worker.seatId)} tools · ${status} · ${clean(worker.reason)}`;
   });
+  const resources = formatResourceLines(report.resources);
   if (report.workerTools?.error)
     workerTools.push(`  ○ Worker tools · unknown · ${clean(report.workerTools.error)}`);
   const lines = [
@@ -58,6 +59,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     }`,
     ...fleetLinks,
     ...workerTools,
+    ...resources,
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
     ...(report.tracker
       ? [
@@ -79,4 +81,24 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
   if (report.remediations.length) lines.push("", "Fix", ...report.remediations.map((step) => `  ${step}`));
   lines.push("", `Next: ${report.nextStep}`, "", "/doctor json shows the full report.");
   return lines.join("\n");
+}
+
+/** Optional machine metadata is bounded and independent of captain readiness. */
+export function formatResourceLines(resources: InstallDoctorReport["resources"]): string[] {
+  if (!resources) return [];
+  if ("status" in resources) return [`  ○ Fleet resources · unavailable · ${clean(resources.detail)}`];
+  const holder = (entry: { seatId?: string | undefined; pid?: number | undefined }) =>
+    entry.seatId ? clean(entry.seatId) : entry.pid ? `PID ${entry.pid}` : "unattributed";
+  return [
+    `  ${mark(resources.pressure.healthy)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} shared permits · simulator limit ${resources.capacity.simulatorSlots} · ${resources.queue.length} queued`,
+    ...(!resources.pressure.healthy ? [`    Pressure · ${resources.pressure.reason ?? "unavailable"}`] : []),
+    ...resources.leases.map(
+      (lease) =>
+        `    ${holder(lease)} · ${lease.kind}${lease.executable ? ` ${clean(lease.executable)}` : ""}${lease.deviceId ? ` ${clean(lease.deviceId)}` : ""} · ${clean(lease.state)}`,
+    ),
+    ...resources.queue.map(
+      (entry) =>
+        `    Queued ${holder(entry)} · ${entry.kind}${entry.executable ? ` ${clean(entry.executable)}` : ""}`,
+    ),
+  ];
 }

@@ -16,7 +16,12 @@ import {
 } from "./fleet-settings-context.ts";
 
 function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot {
-  const fleet = { size: settings.fleet.size, models: settings.fleet.models, ...settings.autonomy.fleet };
+  const fleet = {
+    size: settings.fleet.size,
+    models: settings.fleet.models,
+    ...(settings.fleet.resources === undefined ? {} : { resources: settings.fleet.resources }),
+    ...settings.autonomy.fleet,
+  };
   return {
     schemaVersion: 1,
     workingPreferences: true,
@@ -55,7 +60,7 @@ export function createFleetSettingsRoutes(
           if (fleetSettingsSnapshot(current).revision !== input.data.expectedRevision)
             throw new Error("Fleet settings changed");
           before = JSON.stringify(current);
-          const { size, models, ...preferences } = input.data.changes;
+          const { size, models, resources, ...preferences } = input.data.changes;
           const defaults = FleetAutonomySchema.parse({});
           const resolved = Object.fromEntries(
             Object.entries(preferences).map(([field, value]) => [
@@ -69,6 +74,7 @@ export function createFleetSettingsRoutes(
               ...current.fleet,
               ...(size === undefined ? {} : { size }),
               ...(models === undefined ? {} : { models }),
+              ...(resources === undefined ? {} : { resources }),
             },
             autonomy: {
               ...current.autonomy,

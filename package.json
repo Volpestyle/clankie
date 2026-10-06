@@ -18,6 +18,7 @@
     "infra:check": "infra/aws/public-docs/check.sh",
     "testing:view": "node docs/testing/serve-archive.mjs",
     "check": "pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test",
+    "check:resources": "pnpm --filter @clankie/clankie exec tsx scripts/fleet-resource-burst.ts",
     "check:load": "pnpm --filter @clankie/clankie exec tsx scripts/fleet-load.ts",
     "doctor": "node scripts/doctor.mjs",
     "mcp:check": "vitest run --config vitest.config.ts apps/clankie/test/mcp-tool-schema.test.ts apps/clankie/test/mcp-host.test.ts apps/clankie/test/lane-mcp.test.ts apps/clankie/test/fleet-tools.test.ts apps/clankie/test/hired-catalog-bridge.test.ts -t \"strict client contract\"",

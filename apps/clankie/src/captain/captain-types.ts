@@ -10,6 +10,7 @@ import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import { type PersonaImageSource } from "../persona-images.ts";
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import type { RuntimeProvider } from "../runtime-provider.ts";
+import type { FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
 import type { GrokNativeHost } from "./grok-native-host.ts";
 import { type HerdrCensusRunner } from "./herdr-census.ts";
@@ -34,6 +35,8 @@ export interface CaptainOptions {
   readonly piNative?: ReturnType<typeof createPreparedNativeHost>;
   readonly remoteOpenCode?: RemoteOpenCodeWorkers;
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
+  /** Machine-wide resource admission and cached fleet metadata; never project-local policy. */
+  readonly fleetResources?: FleetResourceRuntime;
   readonly projectHireIdentity?: (
     fleet: string,
     pane: string,

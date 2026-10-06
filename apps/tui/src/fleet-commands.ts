@@ -15,6 +15,7 @@ import {
   FLEET_AUTONOMY_GUIDANCE,
   FleetReportingStyleSchema,
   FleetReleasePolicySchema,
+  FleetResourcePolicySchema,
   type FleetAutonomy,
 } from "@clankie/protocol";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
@@ -38,12 +39,16 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
       name: "fleet",
       aliases: [],
       description: "Edit how Clankie routes work across the agents he leads",
-      argumentHint: "[status|clear]",
+      argumentHint: "[status|resources|clear]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const verb = argument.trim().toLowerCase();
         if (verb === "status") {
           await showFleetStatus(shell, services);
+          return;
+        }
+        if (verb === "resources") {
+          await editFleetResources(shell, services);
           return;
         }
         if (verb === "clear") {
@@ -83,6 +88,77 @@ function isFleetSize(value: string): value is FleetSize {
 
 function isFleetModelMode(value: string): value is FleetModelMode {
   return (FLEET_MODEL_MODES as readonly string[]).includes(value);
+}
+
+async function editFleetResources(shell: ClankieFaceShell, services: FleetCommandServices): Promise<void> {
+  const flow = shell.setupFlow;
+  flow.begin("fleet resources");
+  try {
+    const current = (await fleetStatus({ settings: services.settings })).fleet;
+    const resources = FleetResourcePolicySchema.parse(current.resources ?? {});
+    const capacity = await flow.readText({
+      message: "Fleet — shared heavy capacity (auto or 1–64)",
+      defaultValue: String(resources.heavySlots ?? "auto"),
+      allowBack: true,
+      validate: (value: string) =>
+        value === "auto" || (/^\d+$/u.test(value) && Number(value) >= 1 && Number(value) <= 64)
+          ? undefined
+          : "Use auto or an integer from 1 to 64.",
+    });
+    if (capacity === undefined) return;
+    resources.heavySlots = capacity === "auto" ? null : Number(capacity);
+    const simulators = await flow.readText({
+      message: "Fleet — maximum booted simulators (0–64)",
+      defaultValue: String(resources.simulatorSlots),
+      allowBack: true,
+      validate: (value: string) =>
+        /^\d+$/u.test(value) && Number(value) >= 0 && Number(value) <= 64
+          ? undefined
+          : "Use an integer from 0 to 64.",
+    });
+    if (simulators === undefined) return;
+    resources.simulatorSlots = Number(simulators);
+    const idle = await flow.readText({
+      message: "Fleet — simulator idle timeout in seconds (1–86400)",
+      defaultValue: String(resources.simulatorIdleMs / 1000),
+      allowBack: true,
+      validate: (value: string) =>
+        /^\d+$/u.test(value) && Number(value) >= 1 && Number(value) <= 86400
+          ? undefined
+          : "Use an integer from 1 to 86400.",
+    });
+    if (idle === undefined) return;
+    resources.simulatorIdleMs = Number(idle) * 1000;
+    const load = await flow.readText({
+      message: "Fleet — load limit per core (0–16, greater than zero)",
+      defaultValue: String(resources.maxLoadRatio),
+      allowBack: true,
+      validate: (value: string) =>
+        Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) <= 16
+          ? undefined
+          : "Use a positive number up to 16.",
+    });
+    if (load === undefined) return;
+    resources.maxLoadRatio = Number(load);
+    const memory = await flow.readText({
+      message: "Fleet — minimum available memory in MiB",
+      defaultValue: String(resources.minAvailableMemoryMb),
+      allowBack: true,
+      validate: (value: string) =>
+        /^\d+$/u.test(value) && Number(value) >= 0 && Number(value) <= 1048576
+          ? undefined
+          : "Use an integer from 0 to 1048576.",
+    });
+    if (memory === undefined) return;
+    resources.minAvailableMemoryMb = Number(memory);
+    await fleetUpdate({ resources }, { settings: services.settings });
+    flow.renderLine(
+      "Saved. Resource capacity and pressure limits apply to the shared machine governor.",
+      "success",
+    );
+  } finally {
+    flow.end();
+  }
 }
 
 async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices): Promise<void> {

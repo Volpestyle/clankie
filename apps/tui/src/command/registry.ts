@@ -3,6 +3,14 @@ import { operatorHarness } from "./harness-command.ts";
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["heavy", "simulator"],
+    lines: [
+      "  heavy -- COMMAND [ARGS...]  Run a local heavy step with the machine-wide fleet permit",
+      "  fleet resources           Inspect machine pressure, permit holders and queue (JSON)",
+      "  simulator status | acquire JSON | touch JSON | release JSON  Lease a simulator to a verified local seat",
+    ],
+  },
+  {
     nouns: ["integrate"],
     lines: [
       "  integrate SHA... [--app SHA]... [--push] | status UUID | push UUID | revert UUID | holds | hold | release  Compose, isolate the full gate, and land approved commits (JSON)",
