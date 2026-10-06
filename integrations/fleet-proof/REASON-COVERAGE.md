@@ -85,6 +85,37 @@ but cannot be promised on each run without replacing native observations.
 Pure final-check budget expiration reports `budget_exhausted` without inventing
 a socket mismatch.
 
+## Worker receipt failures
+
+`fleet-report-reasons.integration.test.ts` exercises the production installed
+sender against real loopback HTTP, the durable conversation store and inbound
+receipt fence, and real local files. Every fixed failure reason reaches the
+collector, authenticated HTTP schema and CLI five/sixty-minute windows:
+
+| Reason                      | Actual failure boundary                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `binding_timeout`           | The owned binding endpoint holds its response past the request deadline.                                             |
+| `binding_unavailable`       | The binding endpoint returns HTTP 503.                                                                               |
+| `binding_rejected`          | The binding endpoint denies the request with HTTP 403.                                                               |
+| `receipt_timeout`           | The original POST response exceeds its deadline; the local claim remains.                                            |
+| `receipt_invalid`           | The service stores the original, then its reply fingerprint is corrupted. Exact GET reconciliation later settles it. |
+| `receipt_unresolved`        | The POST returns HTTP 503; the real listener is then closed before refreshed-bridge GET reconciliation.              |
+| `connection_refused`        | The real listener closes after binding and before POST dispatch.                                                     |
+| `local_receipt_unavailable` | A real file occupies the required claim-directory path.                                                              |
+
+The stored control verifies durable receipt evidence and removes only its exact
+claim. Retained originals are reconciled by GET without another POST. Repeated
+polls of the same health observation do not add attempts. Snapshots contain only
+fixed counters, never report bodies, binding fingerprints, paths or process data.
+This proves receipt transport and counter boundaries, not native OS diagnostics.
+
+The proof-alert integration in `fleet-lead-round.integration.test.ts` uses real
+TCP refusals and durable native outbox receipts with a captured census boundary.
+It proves threshold → `notifyFleetHealthAlert` → exact head acknowledgment, and
+that unavailable delivery does not consume the accepted-alert cooldown. Native
+owner TUI acceptance remains a separate live proof; this fixture does not claim
+that an original operator TUI received the alert.
+
 ## Focused checks
 
 ```sh

@@ -7,6 +7,19 @@ import { join } from "node:path";
 const hash = (text) => createHash("sha256").update(text.replace(/\r\n?/gu, "\n").trim()).digest("hex");
 const hex = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 const uuid = (value) => typeof value === "string" && /^[a-f0-9-]{36}$/u.test(value);
+/** Read-only recovery guard. A corrupt claim or abandoned lock remains held. */
+export function hasPendingInboundClaim(directory, scope) {
+  const path = join(directory, `${hash(scope)}.json`);
+  for (const candidate of [path, `${path}.lock`]) {
+    try {
+      statSync(candidate);
+      return true;
+    } catch (error) {
+      if (error?.code !== "ENOENT") return true;
+    }
+  }
+  return false;
+}
 /** Only refused connection attempts prove that the POST never reached a service. */
 function refusedConnection(error, ancestors = new Set()) {
   if (!error || typeof error !== "object" || ancestors.has(error)) return false;
@@ -237,8 +250,12 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       try {
         record = inspect();
         return record === undefined ? undefined : await reconcile(record, record.text);
-      } catch {
-        return uncertain(record);
+      } catch (error) {
+        const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
+        return observed(
+          uncertain(record),
+          record ? (timeout ? "receipt_timeout" : "receipt_unresolved") : "local_receipt_unavailable",
+        );
       }
     },
   });

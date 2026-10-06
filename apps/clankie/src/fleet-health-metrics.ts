@@ -65,17 +65,23 @@ export class FleetHealthMetrics {
   private readonly buckets = new Map<number, Counters>();
   private readonly seats = new Map<
     string,
-    { buckets: Map<number, Counters>; lastSeen: number; alertAt?: number }
+    {
+      buckets: Map<number, Counters>;
+      lastSeen: number;
+      alertAt?: number;
+      attemptAt?: number;
+      alertPending?: boolean;
+    }
   >();
   private readonly reports = new Map<string, { signature: string; lastSeen: number }>();
   private readonly options: {
     now?: () => number;
-    onProofAlert?(pane: string, window: FleetHealthMetricsWindow): void | Promise<void>;
+    onProofAlert?(pane: string, window: FleetHealthMetricsWindow): boolean | Promise<boolean>;
   };
   constructor(
     options: {
       now?: () => number;
-      onProofAlert?(pane: string, window: FleetHealthMetricsWindow): void | Promise<void>;
+      onProofAlert?(pane: string, window: FleetHealthMetricsWindow): boolean | Promise<boolean>;
     } = {},
   ) {
     this.options = options;
@@ -135,13 +141,25 @@ export class FleetHealthMetrics {
     if (
       event.source === "proof" &&
       rates.proofRefusalRate > 0.01 &&
+      !seat.alertPending &&
+      (seat.attemptAt === undefined || minute - seat.attemptAt >= 1) &&
       (seat.alertAt === undefined || minute - seat.alertAt >= 5)
     ) {
-      seat.alertAt = minute;
+      seat.attemptAt = minute;
+      seat.alertPending = true;
+      const original = seat;
+      const settled = (accepted: boolean) => {
+        // A replaced/expired seat observation cannot acquire an old cooldown.
+        if (this.seats.get(pane) !== original) return;
+        original.alertPending = false;
+        if (accepted) original.alertAt = Math.floor(this.now() / MINUTE);
+      };
       try {
-        void Promise.resolve(this.options.onProofAlert?.(pane, rates)).catch(() => {});
+        void Promise.resolve(this.options.onProofAlert?.(pane, rates))
+          .then((accepted) => settled(accepted === true))
+          .catch(() => settled(false));
       } catch {
-        /* Health observation cannot change authority. */
+        settled(false);
       }
     }
   }

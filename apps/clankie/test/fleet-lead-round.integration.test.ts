@@ -1,3 +1,6 @@
+import { once } from "node:events";
+import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
+import { localFleetProof } from "../src/local-fleet-proof.ts";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -901,5 +904,83 @@ it("a held fleet refresh cannot recreate efficiency persistence after Captain cl
   } finally {
     held.release();
     await refresh.catch(() => undefined);
+  }
+});
+
+it("proof threshold retries an unavailable native alert, then cools down only after exact head acknowledgment", async () => {
+  const originalId = randomUUID();
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    async (root) => {
+      new DeliveryFence(join(root, "delivery-receipts", "head", "global-default.json")).begin(originalId, {
+        messageId: originalId,
+        fingerprint: deliveryFingerprint("Earlier original"),
+      });
+    },
+    undefined,
+    false,
+    false,
+  );
+  let now = Date.now();
+  const attempts: Promise<boolean>[] = [];
+  const metrics = new FleetHealthMetrics({
+    now: () => now,
+    onProofAlert: (pane, rates) => {
+      const delivery = f.captain.notifyFleetHealthAlert(
+        pane,
+        `Fleet proof alert: ${rates.proof.refusals}/${rates.proof.attempts} refused.`,
+      );
+      attempts.push(delivery);
+      return delivery;
+    },
+  });
+  const proof = localFleetProof({
+    platform: "darwin",
+    herdrBinary: "herdr",
+    binding: async () => undefined,
+    diagnostics: (event, pane) => metrics.observeProof("fleet", event, pane),
+  });
+  const server = serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (_request, environment) =>
+      Response.json({ accepted: await proof(environment.incoming.socket, "w1:p1") }),
+  });
+  if (!server.listening) await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing real proof TCP listener");
+  try {
+    const refuse = async () => {
+      const response = await fetch(`http://127.0.0.1:${address.port}`);
+      expect(await response.json()).toEqual({ accepted: false });
+    };
+    await refuse();
+    expect(attempts).toHaveLength(1);
+    expect(await attempts[0]).toBe(false);
+    expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+    expect(await f.captain.acknowledgeSeatEvent(originalId, "global-default")).toBe(true);
+    now += 60_000;
+    const poll = f.captain.pollSeatEvents(3000, undefined, "global-default");
+    await refuse();
+    const [event] = await poll;
+    expect(event?.content).toBe("Fleet proof alert: 2/2 refused.");
+    expect(attempts).toHaveLength(2);
+    expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
+    expect(await attempts[1]).toBe(true);
+    now += 60_000;
+    await refuse();
+    expect(attempts).toHaveLength(2);
+    expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
+    expect(metrics.snapshot().totals.proof).toEqual({
+      attempts: 3,
+      refusals: 3,
+      byReason: { missing_binding: 3 },
+    });
+  } finally {
+    if ("closeAllConnections" in server) server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

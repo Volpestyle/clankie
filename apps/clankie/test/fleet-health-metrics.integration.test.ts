@@ -28,6 +28,7 @@ it("counts terminal real socket refusals, keeps diagnostics separate, and serves
     now: () => now,
     onProofAlert: (pane, window) => {
       alerts.push(`${pane}:${window.proofRefusalRate}`);
+      return true;
     },
   });
   const logger = createLogger({ service: "fleet-metrics-integration" }, { level: "silent" });
