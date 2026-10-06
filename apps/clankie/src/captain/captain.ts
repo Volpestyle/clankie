@@ -1530,6 +1530,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
     await refreshFleets();
+    if (request.freshIntent && brief === undefined)
+      return { outcome: "failed", reason: "not_ready", detail: "freshIntent requires an explicit new brief" };
     if (
       brief !== undefined &&
       (!brief.trim() || brief.includes("\0") || Buffer.byteLength(brief) > 32 * 1024)

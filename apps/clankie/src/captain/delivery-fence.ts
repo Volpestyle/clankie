@@ -1,21 +1,35 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import {
   DeliveryStageSchema,
   HireNoLaunchEvidenceSchema,
   HireRecoveryEvidenceSchema,
   RetainedHireEvidenceSchema,
+  SpawnOperatorSeatSchema,
   type HireRecoveryEvidence,
   type RetainedHireEvidence,
   type HireNoLaunchEvidence,
 } from "@clankie/protocol";
+import { ConversationOwnerSchema, type ConversationOwner } from "./conversation-owner.ts";
+
+const FreshHireReceiptSchema = SpawnOperatorSeatSchema.shape.freshIntent
+  .unwrap()
+  .extend({
+    baseKey: z.string().min(1),
+    owner: ConversationOwnerSchema,
+    launch: SpawnOperatorSeatSchema.omit({ freshIntent: true }),
+  })
+  .strict();
 
 export const ReceiptSchema = z
   .object({
     messageId: z.string().min(1),
     fingerprint: z.string(),
+    /** Explicit fresh admission keeps its UUID, original location and host-authored owner forever. */
+    freshHire: FreshHireReceiptSchema.optional(),
     /** Host reservation begins before any remote hire effect. Legacy records have no window. */
     remoteAdmission: z
       .object({
@@ -104,6 +118,57 @@ export class DeliveryFence {
     return [...this.records.entries()];
   }
 
+  /** Read-only validation; repeat synchronously immediately before begin, after any awaits. */
+  public freshHireAdmission(
+    baseKey: string,
+    input: z.infer<typeof SpawnOperatorSeatSchema>,
+    owner: ConversationOwner,
+    fingerprint: string,
+  ) {
+    const { freshIntent, ...launch } = input;
+    if (!freshIntent || !input.fleet || input.resume)
+      throw new Error("freshIntent requires a new remote hire, never a saved-session resume");
+    // Canonical persisted shape: optional undefined properties cannot become aliases on restart.
+    const metadata = FreshHireReceiptSchema.parse(
+      JSON.parse(JSON.stringify({ ...freshIntent, baseKey, owner, launch })),
+    );
+    const entries = this.all();
+    if (entries.some(([, record]) => record.messageId === metadata.id))
+      throw new Error("Fresh intent UUID already names a native receipt");
+    const originals = entries.filter(([, record]) => record.messageId === metadata.afterReceiptId);
+    const original = originals[0];
+    if (
+      originals.length !== 1 ||
+      !original?.[1].settlement ||
+      (original[1].freshHire?.baseKey ?? original[0]) !== baseKey
+    )
+      throw new Error("freshIntent requires the exact settled native hire receipt at this location");
+    const key = JSON.stringify([...(JSON.parse(baseKey) as string[]), "fresh", metadata.id]);
+    const known = entries.filter(([, record]) => record.freshHire?.id === metadata.id);
+    const identity = (value: z.infer<typeof FreshHireReceiptSchema>) => {
+      const { discord, ...route } = value.owner;
+      if (!discord) return { ...value, owner: route };
+      const { messageId: _message, deliveryId: _delivery, ...origin } = discord;
+      return { ...value, owner: { ...route, discord: origin } };
+    };
+    if (
+      known.length > 1 ||
+      (known[0] &&
+        (known[0][0] !== key ||
+          known[0][1].fingerprint !== fingerprint ||
+          !isDeepStrictEqual(identity(known[0][1].freshHire!), identity(metadata))))
+    )
+      throw new Error("Fresh intent UUID already names a different owner, launch or brief");
+    const siblings = entries.filter(
+      ([id, record]) => id !== key && (record.freshHire?.baseKey ?? id) === baseKey,
+    );
+    if (siblings.some(([, record]) => !record.settlement && !record.completed))
+      throw new Error("Another original hire at this location is unresolved; no fresh dispatch may begin");
+    if (siblings.some(([, record]) => record.fingerprint === fingerprint))
+      throw new Error("A fresh intent cannot replay any retained original brief at this location");
+    return { key, metadata, target: original[1].settlement.target };
+  }
+
   public settleRecovery(key: string, messageId: string, evidence: HireRecoveryEvidence): void {
     const previous = this.records.get(key);
     const proof = HireRecoveryEvidenceSchema.parse(evidence);
@@ -129,7 +194,7 @@ export class DeliveryFence {
     const receipt = this.records.get(key);
     return !this.unreadable &&
       receipt?.completed &&
-      receipt.completed.at > Date.now() - COMPLETED_RETENTION_MS
+      (receipt.freshHire !== undefined || receipt.completed.at > Date.now() - COMPLETED_RETENTION_MS)
       ? receipt
       : undefined;
   }
@@ -148,7 +213,12 @@ export class DeliveryFence {
     if (this.pending(key) || this.completed(key) || this.settled(key))
       throw new Error("Delivery is uncertain; reconcile its original receipt before any retry");
     for (const [id, value] of this.records)
-      if (!value.settlement && value.completed && value.completed.at <= Date.now() - COMPLETED_RETENTION_MS)
+      if (
+        !value.freshHire &&
+        !value.settlement &&
+        value.completed &&
+        value.completed.at <= Date.now() - COMPLETED_RETENTION_MS
+      )
         this.records.delete(id);
     const value = { ...receipt, messageId: receipt.messageId ?? randomUUID() };
     const previous = this.records.get(key);
@@ -192,6 +262,9 @@ export class DeliveryFence {
       this.unreadable ||
       previous?.messageId !== messageId ||
       previous.settlement ||
+      (previous.freshHire &&
+        ((Object.hasOwn(fields, "freshHire") && !isDeepStrictEqual(fields.freshHire, previous.freshHire)) ||
+          (Object.hasOwn(fields, "fingerprint") && fields.fingerprint !== previous.fingerprint))) ||
       (previous.recoveryRequested &&
         Object.hasOwn(fields, "recoveryRequested") &&
         fields.recoveryRequested !== true) ||
@@ -252,7 +325,9 @@ export class DeliveryFence {
     )
       return false;
     const previous = this.records.get(key)!;
-    this.records.delete(key);
+    if (previous.freshHire)
+      this.records.set(key, { ...previous, completed: previous.completed ?? { at: Date.now() } });
+    else this.records.delete(key);
     try {
       this.save();
     } catch (error) {

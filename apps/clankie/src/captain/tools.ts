@@ -806,6 +806,29 @@ function hireAgentTool(
             "Saved transcript ref (host:sessionId). Reuse its live native seat, or reopen the exact session interactively. Harness and workingDirectory must match; remote fleet must point to the same SSH host. Never starts a headless continuation.",
         }),
       ),
+      freshIntent: Type.Optional(
+        Type.Object(
+          {
+            id: Type.String({
+              format: "uuid",
+              pattern: "^[0-9a-f-]{36}$",
+              description:
+                "Stable new intent UUID; retain it across uncertainty and never generate another to retry.",
+            }),
+            afterReceiptId: Type.String({
+              format: "uuid",
+              pattern: "^[0-9a-f-]{36}$",
+              description:
+                "Exact settled native remote hire UUID in this location; new work only, never resume or replay its brief.",
+            }),
+          },
+          {
+            additionalProperties: false,
+            description:
+              "Explicit owner-authorized fresh remote work after a settled original. Requires a different brief. Both original and fresh identities stay retained and fenced.",
+          },
+        ),
+      ),
       account: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",

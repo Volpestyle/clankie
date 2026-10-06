@@ -147,6 +147,18 @@ export class ProjectHires {
     return this.change((state) => {
       const pending = state.allocations.find((a) => a.key === key && !a.gone && !a.confirmed);
       if (pending) {
+        if (pending.request.freshIntent || input.freshIntent) {
+          const requested = projectHireRequest(settings, projectId, input, defaults);
+          if (
+            !isDeepStrictEqual(
+              { ...pending.request, projectId: pending.projectId },
+              { ...requested, projectId },
+            )
+          )
+            throw new Error(
+              "An unresolved fresh hire has a different intent or launch scope; inspect its original, never substitute it",
+            );
+        }
         if (
           pending.projectId !== projectId ||
           operatorAgentRoleKey(pending.role ?? "") !== operatorAgentRoleKey(input.role ?? "") ||
