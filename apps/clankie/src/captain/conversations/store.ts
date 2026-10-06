@@ -438,15 +438,19 @@ export class ConversationStore {
     this.ensureDefaultGlobalConversation();
     for (const meta of this.metas.values()) {
       if (meta.linearWakeCheckpoint) {
-        const completed =
+        const definitelyUnavailable =
           meta.linearWakeCheckpoint.runId &&
           this.readEvents(meta.conversationId).some(
             (event) =>
               event.type === "turn" &&
               event.runId === meta.linearWakeCheckpoint!.runId &&
-              event.phase === "completed",
+              event.phase === "failed" &&
+              event.deliveryStage === "unavailable",
           );
-        if (!completed) meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
+        // A missing terminal event can mean a native take preceded the crash.
+        // Keep the offered cursor; a fresh webhook must not re-offer that
+        // uncertain original under a new native event ID after a late ACK.
+        if (definitelyUnavailable) meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
         delete meta.linearWakeCheckpoint;
         this.saveMeta(meta);
       }
@@ -2305,7 +2309,8 @@ export class ConversationStore {
         );
         if (provenance.origin === "hook" && !invoked) this.linearHookQueued.delete(conversationId);
         if (provenance.origin === "hook" && meta.linearWakeCheckpoint) {
-          if (cancelled) meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
+          if (cancelled && deliveryStage === "unavailable")
+            meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
           delete meta.linearWakeCheckpoint;
         }
         if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "waiting";
@@ -2317,7 +2322,10 @@ export class ConversationStore {
         if (provenance.origin === "hook" && !meta.linearWakeCheckpoint)
           this.linearHookQueued.delete(conversationId);
         if (provenance.origin === "hook" && meta.linearWakeCheckpoint) {
-          meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
+          // A native take can precede shutdown or cancellation even when its
+          // final receipt callback never ran. Only a definite pre-take refusal
+          // permits a later owner event to re-offer this activity.
+          if (deliveryStage === "unavailable") meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
           delete meta.linearWakeCheckpoint;
         }
         if (provenance.origin === "hook" && deliveryStage === "unavailable")

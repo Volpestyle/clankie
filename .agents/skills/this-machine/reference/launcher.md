@@ -68,7 +68,9 @@ If the native receiver is unavailable before taking a wake, its signed activity
 stays pending. The next poll for that chat retries it as one compact wake;
 confirmed or uncertain native takes are never replayed. Following off still
 suppresses pending wakes. A connected MCP tool bank alone does not prove the
-seat's channel is polling.
+seat's channel is polling. An interrupted offered wake without a definite
+unavailable receipt keeps its cursor across shutdown, cancellation and restart;
+inspect its retained history and exact native receipt before any recovery.
 
 Use the operator-only `linear_wake({ action: "show" })` or authenticated
 `clankie linear wake show` to inspect rules. These are your non-secret settings:

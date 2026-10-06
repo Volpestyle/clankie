@@ -240,7 +240,7 @@ it("drops legacy unread inbox items once, removes routing and read/ack state, an
   expect(again.wakes).toEqual([]);
 });
 
-it("recovers an interrupted chat wake and keeps completed wakes consumed on later restarts", async () => {
+it("keeps an interrupted offered wake consumed when no definite delivery refusal was saved", async () => {
   const root = temporaryRoot();
   const snapshot = temporaryRoot();
   let release!: () => void;
@@ -261,9 +261,10 @@ it("recovers an interrupted chat wake and keeps completed wakes consumed on late
   await closing;
   const reopened = fixture(snapshot);
   await reopened.store.close();
-  expect(reopened.wakes).toEqual([
-    { id: "global-default", prompt: expect.stringContaining("Crash recovery") },
-  ]);
+  expect(reopened.wakes).toEqual([]);
+  expect(await events(reopened.store)).toContainEqual(
+    expect.objectContaining({ type: "message", role: "external" }),
+  );
   expect(reopened.store.receiveLinearActivity(activity, true)).toBe(false);
   const again = fixture(snapshot);
   await again.store.close();
