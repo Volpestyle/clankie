@@ -15,8 +15,13 @@ export interface RegisterLinearRoutesContext {
   readonly app: Hono;
   readonly dependencies: Pick<
     ClankieAppDependencies,
-    "captain" | "linearWebhook" | "authenticateOperator" | "linearRequestBudget"
-  >;
+    "linearWebhook" | "authenticateOperator" | "linearRequestBudget"
+  > & {
+    readonly captain: Pick<
+      ClankieAppDependencies["captain"],
+      "receiveLinearActivity" | "linearWakeTargetAllowed"
+    >;
+  };
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
 }
@@ -211,7 +216,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     const ownActor =
       own !== undefined && own.workspaceId === activity.organizationId && own.userId === activity.actorId;
     const ownWorker = activity.worker !== undefined;
-    const types = linearActivityWakeTypes(activity);
+    const types = linearActivityWakeTypes(activity, own, hook.writes, ctx.clock());
     const matches =
       !types.some((type) => current.linearWebhook.wake.excludedNotificationTypes.includes(type)) &&
       types.some((type) =>

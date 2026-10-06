@@ -254,6 +254,7 @@ export class ConversationStore {
   private readonly runCounts = new Map<string, number>();
   /** A Linear hook turn accepted and not yet started; later deliveries ride it. */
   private readonly linearHookQueued = new Set<string>();
+  private readonly linearHookDeferred = new Set<string>();
   private readonly linearHookTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Provider delivery receipts outlive conversation history and target changes. */
   private linearEventReceipts: Record<string, number> = {};
@@ -2317,6 +2318,8 @@ export class ConversationStore {
           meta.linearWakeCursor = meta.linearWakeCheckpoint.previous;
           delete meta.linearWakeCheckpoint;
         }
+        if (provenance.origin === "hook" && deliveryStage === "unavailable")
+          this.linearHookDeferred.add(conversationId);
         this.deliveryAdmissions.get(runId)?.resolve({
           state: "uncertain",
           detail: turnFailureSummary(error).slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX),

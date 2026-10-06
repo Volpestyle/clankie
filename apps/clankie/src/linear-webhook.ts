@@ -168,7 +168,7 @@ export function linearActivityIssueId(
   activity: Pick<LinearActivityEvent, "type" | "data">,
 ): string | undefined {
   if (activity.type === "Issue") return consistentUuid([activity.data.id]);
-  if (activity.type === "Comment")
+  if (activity.type === "Comment" || activity.type === "Reaction")
     return consistentUuid([activity.data.issueId, record(activity.data.issue).id]);
 }
 
@@ -618,7 +618,12 @@ export function linearReplyTo(
  * Linear represents mentions as resource/profile URLs in Markdown. Only newly
  * added links in a created or changed content field count as a mention.
  */
-export function linearActivityWakeTypes(activity: LinearActivityEvent): string[] {
+export function linearActivityWakeTypes(
+  activity: LinearActivityEvent,
+  own?: { userId: string; workspaceId: string },
+  writes?: LinearWriteReceipts,
+  now = new Date(),
+): string[] {
   if (!["create", "update"].includes(activity.action)) return [`${activity.type}${activity.action}`];
   const data = activity.data;
   const resource =
@@ -638,6 +643,25 @@ export function linearActivityWakeTypes(activity: LinearActivityEvent): string[]
             ? "document"
             : "issue";
   const types: string[] = [];
+  const ownId = own !== undefined && own.workspaceId === activity.organizationId ? own.userId : undefined;
+  if (activity.type === "Issue" && ownId !== undefined) {
+    for (const field of ["assigneeId", "delegateId"] as const)
+      if (
+        data[field] === ownId &&
+        (activity.action === "create" ||
+          (Object.hasOwn(activity.updatedFrom ?? {}, field) && activity.updatedFrom?.[field] !== ownId))
+      )
+        types.push("issueAssignedToYou");
+  }
+  if (activity.type === "Reaction" && activity.action === "create" && ownId !== undefined) {
+    const comment = record(data.comment);
+    const author =
+      typeof data.commentId === "string"
+        ? writes?.author(activity.organizationId, "Comment", data.commentId, now)
+        : undefined;
+    if ((typeof comment.userId === "string" ? comment.userId : author?.actorId) === ownId)
+      types.push("issueCommentReaction");
+  }
   if (activity.type === "Comment" && activity.action === "create") types.push(`${resource}NewComment`);
   const mentions = (value: unknown) =>
     new Set(
@@ -656,14 +680,9 @@ export function linearActivityWakeTypes(activity: LinearActivityEvent): string[]
     types.push(`${resource}Mention`);
     if (activity.type === "Comment") types.push(`${resource}CommentMention`);
   }
-  if (!types.length) {
-    if (activity.type === "Issue" && Object.hasOwn(activity.updatedFrom ?? {}, "stateId"))
-      types.push("issueStatusChanged");
-    else if (activity.type === "Issue" && Object.hasOwn(activity.updatedFrom ?? {}, "assigneeId"))
-      types.push("issueAssignedToYou");
-    else types.push(`${activity.type}${activity.action}`);
-  }
-  return types;
+  if (activity.type === "Issue" && Object.hasOwn(activity.updatedFrom ?? {}, "stateId"))
+    types.push("issueStatusChanged");
+  return types.length ? [...new Set(types)] : [`${activity.type}${activity.action}`];
 }
 
 /** Compact, quoted context for the normal conversation journal and coalesced wake. */
@@ -693,6 +712,9 @@ export function linearActivityPrompt(activity: LinearActivityEvent): string {
     action: activity.action,
     ...(changed.length ? { changed } : {}),
     ...(activity.type === "Comment" ? { comment: compact(activity.data.body, 600) } : {}),
+    ...(activity.type === "Reaction"
+      ? { reaction: compact(activity.data.emoji), comment: compact(record(activity.data.comment).body, 600) }
+      : {}),
     actor: { id: activity.actorId, name: compact(activity.actorName), email: activity.actorEmail },
     link: compact(activity.url, 2048),
   };

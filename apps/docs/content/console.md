@@ -114,7 +114,8 @@ Connecting an account and following its activity are separate choices.
 Use `/connect linear` for the account and the follow setup. Bare `/linear` opens
 **Follow Linear**, including **Wake rules** and the ordinary chat destination.
 The default chat is `global-default`; default rules wake only for James's signed
-comments and mentions (`volpestyle@gmail.com`). Other activity remains visible
+comments and mentions (`volpestyle@gmail.com`), assignments/delegations to Clankie,
+and reactions on his comments. Other activity remains visible
 without starting a turn. Clankie can change the non-secret rules himself with
 `linear_wake` or `clankie linear wake set`. The
 [Linear reference](/cli/#linear-status-linear-follow-on-off) owns webhook

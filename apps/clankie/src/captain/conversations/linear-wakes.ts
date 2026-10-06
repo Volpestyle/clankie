@@ -51,6 +51,7 @@ export function receiveLinearActivity(
 
 export function queueLinearActivity(ctx: ConversationStore, id: string): void {
   if (ctx["linearHookQueued"].has(id) || !ctx["linearWakeTargetAllowed"](id)) return;
+  ctx["linearHookDeferred"].delete(id);
   ctx["linearHookQueued"].add(id);
   ctx["linearHookTimers"].set(
     id,
@@ -63,6 +64,11 @@ export function queueLinearActivity(ctx: ConversationStore, id: string): void {
       }
     }, LINEAR_BURST_WINDOW_MS),
   );
+}
+
+/** Retry only a definite pre-delivery refusal when this chat's native poll returns. */
+export function recoverLinearActivity(ctx: ConversationStore, id: string): void {
+  if (ctx["linearHookDeferred"].has(id)) ctx["queueLinearActivity"](id);
 }
 
 export function freshLinearEvents(ctx: ConversationStore, id: string) {
@@ -161,11 +167,7 @@ export function retireLinearInbox(ctx: ConversationStore): void {
 /** A configured Linear target is an ordinary owner-openable global chat. */
 export function linearWakeTargetAllowed(ctx: ConversationStore, conversationId: string): boolean {
   const meta = ctx["metas"].get(conversationId);
-  return (
-    meta?.scope.kind === "global" &&
-    meta.nativeSource === undefined &&
-    meta.parentConversationId === undefined
-  );
+  return meta?.scope.kind === "global" && meta.parentConversationId === undefined;
 }
 
 export function flushLinearActivity(ctx: ConversationStore, id: string): void {
