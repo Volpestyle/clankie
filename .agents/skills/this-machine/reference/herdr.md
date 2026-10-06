@@ -17,6 +17,18 @@ stopping workers. Historical connection IDs, transcript references and grants
 keep their meaning. `herdr add/remove/fleets`, `runtime connect` and `agents hosts`
 remain aliases. Only a changed default workspace needs `clankie restart captain`.
 
+## Worker defaults
+
+`clankie fleet set --harness codex --model gpt-6.1-sol --effort xhigh` updates
+fleet worker defaults one field at a time. Use `auto` for a field to remove its
+default and let Clankie choose per job. Other hire-profile fields and fleet
+resource settings are preserved. `--hire-profile FILE.json` replaces the whole
+profile; use it separately from these flags. Explicit hire choices override
+project roles, which override fleet defaults. New hires use the result; existing
+lanes stay as they are. `clankie fleet status` reports stored defaults and
+effective role profiles; TUI `/fleet` edits them and `/fleet status` (also `/fleet show`) prints
+`worker defaults: …`. `fleet clear` clears them too.
+
 ## Herdr runtime
 
 The TUI `/status` shows the live binding. In the TUI, `/herdr` opens the

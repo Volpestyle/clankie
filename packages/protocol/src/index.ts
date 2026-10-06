@@ -2,6 +2,7 @@ export * from "./worker-reports.ts";
 export * from "./seat-efficiency.ts";
 export * from "./discord-server.ts";
 export {
+  HireEffortSchema,
   HireProfileSchema,
   effectiveHireProfile,
   type HireProfile,

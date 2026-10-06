@@ -13,6 +13,8 @@ import { fleetStatus, fleetUpdate, formatFleetLines, runFleetCommand } from "./c
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import {
   FLEET_AUTONOMY_GUIDANCE,
+  HireEffortSchema,
+  OPERATOR_SEAT_HARNESSES,
   FleetReportingStyleSchema,
   FleetReleasePolicySchema,
   FleetResourcePolicySchema,
@@ -39,11 +41,11 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
       name: "fleet",
       aliases: [],
       description: "Edit how Clankie routes work across the agents he leads",
-      argumentHint: "[status|resources|clear]",
+      argumentHint: "[status|show|resources|clear]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const verb = argument.trim().toLowerCase();
-        if (verb === "status") {
+        if (verb === "status" || verb === "show") {
           await showFleetStatus(shell, services);
           return;
         }
@@ -186,6 +188,37 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (models === undefined || !isFleetModelMode(models)) return;
+    const auto = { value: "auto", label: "auto", description: "He chooses per job." };
+    const harness = await flow.readSelect({
+      message: "Fleet — default worker harness",
+      options: [auto, ...OPERATOR_SEAT_HARNESSES.map((value) => ({ value, label: value }))],
+      initialValue: current.hire?.harness ?? "auto",
+      currentValue: current.hire?.harness ?? "auto",
+      allowBack: true,
+    });
+    if (harness === undefined) return;
+    const model = await flow.readText({
+      message: "Fleet — default worker model (empty: he chooses)",
+      defaultValue: current.hire?.model ?? "",
+      placeholder: "e.g. gpt-6.1-sol",
+      allowBack: true,
+      validate: (value: string) => (value.trim().length > 200 ? "Keep it under 200 characters." : undefined),
+    });
+    if (model === undefined) return;
+    const effort = await flow.readSelect({
+      message: "Fleet — default worker effort",
+      options: [
+        auto,
+        ...HireEffortSchema.options.map((value) => ({ value, label: value })),
+        ...(current.hire?.effort && !HireEffortSchema.safeParse(current.hire.effort).success
+          ? [{ value: current.hire.effort, label: current.hire.effort }]
+          : []),
+      ],
+      initialValue: current.hire?.effort ?? "auto",
+      currentValue: current.hire?.effort ?? "auto",
+      allowBack: true,
+    });
+    if (effort === undefined) return;
     const tools = await flow.readSelect({
       message: "Fleet — access to connected tools",
       options: [
@@ -325,6 +358,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     await fleetUpdate(
       { size, models, tools, peerMessages, closure, machineSetup, notes: notes.trim(), ...preference },
       { settings: services.settings },
+      { harness, model: model.trim() || "auto", effort },
     );
     flow.renderLine(
       "Saved. Fleet autonomy, tool access and peer-message settings apply immediately. Run `clankie restart` to apply routing preferences.",
