@@ -44,6 +44,8 @@ if (
   args[0] === "health" ||
   args[0] === "status" ||
   args[0] === "restart" ||
+  args[0] === "start" ||
+  args[0] === "stop" ||
   args[0] === "down"
 ) {
   await applyLauncherDiscordEnvironment();

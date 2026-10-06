@@ -179,7 +179,8 @@ it("the launcher refuses an unknown command instead of starting the service for 
   expect(unknownLauncherCommand(undefined)).toBeUndefined();
   expect(unknownLauncherCommand("restart")).toBeUndefined();
   expect(unknownLauncherCommand("down")).toBeUndefined();
-  expect(unknownLauncherCommand("stop")).toContain("clankie down");
-  expect(unknownLauncherCommand("start")).toContain("clankie restart");
+  expect(unknownLauncherCommand("stop")).toBeUndefined();
+  expect(unknownLauncherCommand("start")).toBeUndefined();
+  expect(unknownLauncherCommand("up")).toContain("clankie start");
   expect(unknownLauncherCommand("frobnicate")).toBe('unknown command "frobnicate"; run `clankie help`');
 });

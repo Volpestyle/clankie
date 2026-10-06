@@ -7,11 +7,13 @@ import {
   createServiceOptions,
   parseServiceTarget,
   restartTarget,
+  startTarget,
   stopTarget,
   type CreateServiceOptionsInput,
   type ServiceOutcome,
   type ServiceTarget,
 } from "../../bin/services.ts";
+import { updateHoldingServices } from "../../bin/runtime-updater.ts";
 import { commandHost, outputJson } from "./io.ts";
 import { clankieStateHome } from "../state-home.ts";
 
@@ -76,6 +78,14 @@ function activeTurn(env: NodeJS.ProcessEnv): RestartTurnHandoff | undefined {
   } catch {
     return undefined;
   }
+}
+
+function refuseDuringUpdate(options: RestartCommandOptions): void {
+  const held = updateHoldingServices(options.env ?? process.env);
+  if (held !== undefined)
+    throw new Error(
+      `An update is ${held.phase} and restarts services itself; wait for it to finish (clankie update status), then retry.`,
+    );
 }
 
 function restartIncludesClankie(target: ServiceTarget): boolean {
@@ -215,6 +225,7 @@ export async function runRestartCommand(
       return 0;
     }
   }
+  refuseDuringUpdate(options);
   const registryOptions = await createServiceOptions(options);
   const outcomes = await restartTarget(target, registryOptions);
   const clankie = outcomes.find((outcome) => outcome.id === "clankie");
@@ -231,11 +242,35 @@ export async function runRestartCommand(
   return ok ? 0 : 1;
 }
 
+export async function runStartCommand(
+  args: readonly string[],
+  options: RestartCommandOptions,
+): Promise<number> {
+  if (args.length > 1) throw new Error("Usage: clankie start [service]");
+  const target = parseServiceTarget(args[0]);
+  refuseDuringUpdate(options);
+  const outcomes = await startTarget(target, await createServiceOptions(options));
+  const ok = outcomes.length > 0 && outcomes.every((outcome) => outcome.ok);
+  const stderr = options.stderr ?? process.stderr;
+  const out = options.stdout ?? process.stdout;
+  stderr.write(`${describeOutcomes(outcomes)}\n`);
+  outputJson(out, {
+    ok,
+    status: ok ? "ready" : "failed",
+    target,
+    host: commandHost(options),
+    services: outcomes,
+  });
+  return ok ? 0 : 1;
+}
+
+/** `clankie stop`; `down` remains its alias because older update helpers call it. */
 export async function runDownCommand(
   args: readonly string[],
   options: RestartCommandOptions,
 ): Promise<number> {
   const target = parseServiceTarget(args[0]);
+  refuseDuringUpdate(options);
   const outcomes = await stopTarget(target, await createServiceOptions(options));
   const ok = outcomes.every((outcome) => outcome.ok);
   const stderr = options.stderr ?? process.stderr;

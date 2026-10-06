@@ -188,6 +188,8 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "reset",
   "deprovision",
   "remote-access",
+  "start",
+  "stop",
   "down",
   "autostart",
   "awake",

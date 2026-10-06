@@ -37,7 +37,7 @@ The console opens at the latest messages; scrolling up loads older retained
 history in pages without moving the text you are reading. Live messages continue
 to arrive while older history loads. This applies to local and hosted consoles.
 An unknown command exits 1 without starting anything. Common near-misses name
-the real command: stop the service with `clankie down`, not `stop`.
+the real command: `clankie up` suggests `clankie start`.
 
 ## Conventions
 
@@ -57,7 +57,7 @@ the token is never an argument, settings value, or printed result.
 | Command                                                                                                                       | stdout                                                                                       |
 | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `doctor [--machine NAME]`                                                                                                     | Human summary; `--json` preserves the full card                                              |
-| `health`, `status`, `restart`, `down`, `autostart …`, `awake`                                                                 | JSON                                                                                         |
+| `health`, `status`, `start`, `stop`, `restart`, `autostart …`, `awake`                                                        | JSON                                                                                         |
 | `model …`, `effort …`, `image-model …`, `video-model …`                                                                       | JSON                                                                                         |
 | `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr use/create/disable`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                                                                                 | JSON                                                                                         |
@@ -82,7 +82,7 @@ Do not edit `~/.config/clankie/clankie.json`,
 | ------------------------------------------------------ | ------------------------------------------------------- |
 | [Control Activity shares](#activity-shares)            | `share list`, `share request JSON`                      |
 | [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                            |
-| [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`                 |
+| [Manage service lifecycle](#service-lifecycle)         | `start`, `stop`, `restart`, `autostart`, `awake`        |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                            |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`                                      |
 | [List shipped skills](#skill-setup)                    | `skills`                                                |
@@ -432,6 +432,13 @@ private `~/.clankie/updates/<operation-id>/` directories and survive the old
 service exiting. A nonterminal operation or uncertain shutdown blocks another
 schedule; inspect/reconcile that operation rather than retrying or deleting its
 lock. PIDs alone are never proof that an abandoned operation is safe to repeat.
+An operation that ended `stop-unconfirmed` or `failed` reconciles itself when the
+service next starts, and again before the next update, once three facts hold: its
+helper wrote that final result as its last log line, the pin is a clean detached
+worktree at the old or new commit, and the running service booted from that exact
+pin. The result gains `reconciled` (time, commit, instance) and the lock is kept
+beside the operation as `active.reconciled-ID-TIME`. Anything else, such as a
+missing or edited pin, still needs the owner and is never repaired automatically.
 
 The operator API is `POST /v1/runtime-update` with optional `{ "ref": "main" }`
 and `GET /v1/runtime-update` for status. It requires the actual operator credential;
@@ -625,7 +632,7 @@ Restart launcher-owned services in dependency order
 Naming a service restarts it **and** anything that holds a live claim against
 it. `clankie` (`captain`) also restarts `relay` and the Discord body, because
 those processes cache presence and bearer state from this service instance.
-Stopping is different: `down` names one service and stops only that service.
+Stopping is different: `stop` names one service and stops only that service.
 
 Local HTTP services check listeners on their configured port (`PORT` for
 Clankie, `CLANKIE_RELAY_PORT` for the relay, and both `CLANKIE_ACTIVITY_PORT`
@@ -652,10 +659,17 @@ New service processes clear inherited pnpm lifecycle and Pi session markers.
 Otherwise a restart launched from a running package script can be mistaken for
 a recursive `start` and skipped by pnpm, leaving all stopped dependents offline.
 
-### `down [service]`
+### `start [service]` / `stop [service]`
 
-Stop in reverse dependency order. Default `all`. Same stdout shape as restart,
-with `"status": "stopped"` on success.
+`start` starts what is not running, in dependency order, and leaves a healthy
+service untouched. `stop` stops in reverse dependency order. Default `all`.
+Same stdout shape as restart, with `"status": "ready"` or `"stopped"` on success.
+`down` remains an alias of `stop`.
+
+While an accepted update is mid-cutover, its helper stops and restarts services
+itself. `start`, `stop` and `restart` refuse until it finishes rather than race
+it; `clankie update status` shows its phase. A helper no longer running holds
+nothing.
 
 ### `autostart enable` / `autostart disable` / `autostart status`
 
@@ -4098,7 +4112,7 @@ interactive in the console. The capability exists — only the flag does not:
 - `/voice` — realtime/TTS provider and brokered credentials
 - `/btw`, `/board`, `/jump`, `/conversation`, `/goal`, `/layout` — live console state
 
-There is no `clankie start`, `clankie up`, or `clankie auth`. Local model
+There is no `clankie up` or `clankie auth`. Local model
 servers are not supervised.
 
 ### Where a provider key lives

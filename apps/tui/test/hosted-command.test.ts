@@ -10,6 +10,8 @@ it.each([
   "reset",
   "deprovision",
   "remote-access",
+  "start",
+  "stop",
   "down",
   "autostart",
   "herdr",

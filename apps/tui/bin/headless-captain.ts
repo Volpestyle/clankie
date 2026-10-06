@@ -60,7 +60,7 @@ import { runVoiceCommand } from "../src/command/voice.ts";
 import { runImageModelCommand } from "../src/command/image-model.ts";
 import { runVideoModelCommand } from "../src/command/video-model.ts";
 import { runDiscordCommand } from "../src/command/discord.ts";
-import { runRestartCommand, runDownCommand } from "../src/command/restart.ts";
+import { runRestartCommand, runDownCommand, runStartCommand } from "../src/command/restart.ts";
 import { runPairCommand } from "../src/command/pair.ts";
 import { runDevicesCommand } from "../src/command/devices.ts";
 import { runSupportCommand } from "../src/command/support.ts";
@@ -215,7 +215,8 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "restart") return await runRestartCommand(rest, options);
-    if (command === "down") return await runDownCommand(rest, options);
+    if (command === "start") return await runStartCommand(rest, options);
+    if (command === "stop" || command === "down") return await runDownCommand(rest, options);
     if (command === "autostart") {
       const result = await runAutostartCommand(rest, {
         ...(options.env === undefined ? {} : { env: options.env }),

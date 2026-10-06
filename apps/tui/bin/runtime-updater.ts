@@ -10,6 +10,7 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   chmodSync,
   writeSync,
@@ -23,6 +24,7 @@ import {
   updateCommit,
   type InstallCommand,
 } from "./pinned-runtime.ts";
+import { listProcessCommands } from "./service-supervisor.ts";
 import { operationId, object, privateDirectory, readPrivateJson, writePrivateJson } from "./update-files.ts";
 import {
   readRuntimeUpdate,
@@ -54,6 +56,58 @@ export interface RuntimeUpdater {
     ref: string,
     authority: UpdateAuthority,
   ): Promise<RuntimeUpdateStatus & { readonly accepted: boolean }>;
+  /**
+   * Retire an operation that ended uncertain once this running service proves
+   * the outcome: its helper wrote a final result and this process booted from
+   * the clean pin that result left. Returns the reconciled result, if any.
+   */
+  reconcile?(): RuntimeUpdateResult | undefined;
+}
+const IN_FLIGHT_PHASES: readonly RuntimeUpdateResult["phase"][] = [
+  "scheduled",
+  "installing",
+  "stopping",
+  "activating",
+  "restarting",
+];
+/**
+ * An accepted update owns service lifecycle while its helper is mid-cutover; a
+ * concurrent `clankie restart` races its stop/start and strands services. The
+ * helper's own calls pass (its operation ID, or as their direct parent for a
+ * helper copied by an older runtime). A helper no longer running holds nothing.
+ */
+export function updateHoldingServices(
+  env: NodeJS.ProcessEnv,
+  processes: () => readonly (readonly [number, string])[] = listProcessCommands,
+  parentPid: number = process.ppid,
+): { readonly id: string; readonly phase: RuntimeUpdateResult["phase"] } | undefined {
+  const updates = join(env.HOME || homedir(), ".clankie", "updates");
+  let id: string;
+  let phase: RuntimeUpdateResult["phase"];
+  try {
+    id = operationId(object(readPrivateJson(join(updates, "active", "operation.json"))).id);
+    phase = existsSync(join(updates, id, "result.json"))
+      ? readRuntimeUpdate(join(updates, id)).phase
+      : "scheduled";
+  } catch {
+    // No lock, or one too damaged to read: restart stays the owner's remedy.
+    return undefined;
+  }
+  if (!IN_FLIGHT_PHASES.includes(phase) || env.CLANKIE_UPDATE_OPERATION === id) return undefined;
+  const helper = join(updates, id, "runtime-update-helper.mjs");
+  const helpers = processes().filter(([, command]) => command.includes(helper));
+  if (helpers.length === 0 || helpers.some(([pid]) => pid === parentPid)) return undefined;
+  return { id, phase };
+}
+/** The helper's last stdout line is the final result it persisted, written just before exit. */
+function helperFinished(directory: string, result: RuntimeUpdateResult): boolean {
+  try {
+    const last = readFileSync(join(directory, "helper.log"), "utf8").trimEnd().split("\n").at(-1);
+    const final = object(JSON.parse(last ?? ""));
+    return final.id === result.id && final.phase === result.phase && final.updatedAt === result.updatedAt;
+  } catch {
+    return false;
+  }
 }
 export interface RuntimeUpdaterOptions {
   readonly repoRoot: string;
@@ -152,7 +206,8 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
         (result.canary.state === "failed" && result.canary.holdEstablished === true))) ||
     result.phase === "rolled-back" ||
     result.phase === "refused" ||
-    (result.phase === "failed" && result.reason === "pre-cutover-failed");
+    (result.phase === "failed" && result.reason === "pre-cutover-failed") ||
+    result.reconciled !== undefined;
   const status = (): RuntimeUpdateStatus => {
     try {
       const result = latest();
@@ -173,13 +228,51 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       return { runtime: boot, needsReconciliation: true, error: "update_record_unreadable" };
     }
   };
+  const reconcile = (): RuntimeUpdateResult | undefined => {
+    const id = activeId();
+    if (id === undefined) return undefined;
+    const directory = join(updates, id);
+    // A request still preparing has no result yet; there is nothing to prove.
+    if (!existsSync(join(directory, "result.json"))) return undefined;
+    const result = readRuntimeUpdate(directory);
+    if (result.id !== id || !["stop-unconfirmed", "failed"].includes(result.phase) || safeTerminal(result))
+      return undefined;
+    if (!helperFinished(directory, result)) return undefined;
+    let commit: string;
+    try {
+      commit = assertPinnedRuntime(checkout, runtimePath, run);
+    } catch {
+      // A missing, moved or edited pin needs the owner; nothing here repairs it.
+      return undefined;
+    }
+    if (
+      boot.root !== realpathSync(runtimePath) ||
+      boot.commit !== commit ||
+      (commit !== result.oldCommit && commit !== result.newCommit)
+    )
+      return undefined;
+    const reconciled: RuntimeUpdateResult = {
+      ...result,
+      reconciled: { at: new Date().toISOString(), commit, instanceId: boot.instanceId },
+    };
+    writeRuntimeUpdate(directory, reconciled);
+    // Keep the retired lock beside the operation for audit, as owners did by hand.
+    if (activeId() === id)
+      renameSync(
+        lock,
+        join(updates, `active.reconciled-${id}-${reconciled.reconciled!.at.replaceAll(":", "")}`),
+      );
+    return reconciled;
+  };
   return {
     runtime: boot,
     status,
+    reconcile,
     async request(ref, authority) {
       await authority.guard();
       if (!authority.current()) throw Error("Update authority expired");
       initialize();
+      reconcile();
       const active = activeId();
       if (active !== undefined) {
         if (!existsSync(join(updates, active, "result.json"))) return { ...status(), accepted: false };

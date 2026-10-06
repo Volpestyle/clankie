@@ -59,7 +59,7 @@ job to its command. JSON is on stdout and progress on stderr. The most common:
 | Account connections         | `clankie accounts list`; `/connect accounts` in the console          |
 | Fleet and working policy    | `clankie fleet status`, `clankie project settings PROJECT`           |
 | Machines and Herdr sessions | `clankie machines --json`, `clankie herdr status --json`             |
-| Restart / stop a service    | `clankie restart [service]`, `clankie down [service]`                |
+| Restart / stop a service    | `clankie start`, `stop` or `restart [service]`                       |
 
 `credential_unavailable` or `not_configured` means nobody connected it yet. Say
 that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying

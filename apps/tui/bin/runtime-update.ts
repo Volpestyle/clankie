@@ -162,6 +162,14 @@ export interface RuntimeUpdateResult {
   readonly resolvedRef?: string;
   readonly warning?: "older-than-current-pin" | "diverged-from-current-pin";
   readonly initiator?: RuntimeUpdateInitiator;
+  /** An uncertain ending the running service later proved safe; it retires the lock. */
+  readonly reconciled?: RuntimeUpdateReconciliation;
+}
+export interface RuntimeUpdateReconciliation {
+  readonly at: string;
+  /** The pinned commit the reconciling service booted from. */
+  readonly commit: string;
+  readonly instanceId: string;
 }
 /** Pin cutover leaves the external activity tunnel running under its current owner. */
 export async function runtimeUpdateServices(
@@ -261,6 +269,17 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
       ? {}
       : { harnessRefresh: parseHarnessRefresh(value.harnessRefresh) }),
     ...(value.canary === undefined ? {} : { canary: parseRuntimeCanary(value.canary) }),
+    ...(value.reconciled === undefined ? {} : { reconciled: parseReconciliation(value.reconciled) }),
+  };
+}
+
+function parseReconciliation(input: unknown): RuntimeUpdateReconciliation {
+  const value = object(input);
+  if (!Number.isFinite(Date.parse(String(value.at)))) throw Error("Invalid update reconciliation time");
+  return {
+    at: boundedString(value.at, 64),
+    commit: commitString(value.commit),
+    instanceId: operationId(value.instanceId),
   };
 }
 

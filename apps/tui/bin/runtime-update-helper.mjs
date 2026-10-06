@@ -110,7 +110,8 @@ const exec = promisify(execFile);
 const cli = async (runtime, args) => {
   const { stdout } = await exec(process.execPath, [join(runtime, "apps/tui/bin/clankie.ts"), ...args], {
     cwd: runtime,
-    env: process.env,
+    // Owner restarts wait while this operation's helper runs; its own calls pass.
+    env: { ...process.env, CLANKIE_UPDATE_OPERATION: plan.id },
     timeout: args[0] === "harness" ? 20 * 60_000 : 300_000,
     maxBuffer: 2 * 1024 * 1024,
   });
