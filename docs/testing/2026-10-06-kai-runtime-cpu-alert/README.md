@@ -2,6 +2,9 @@
 
 Candidate branch `fix/kai-runtime-cpu-alert`, based on `7ee4da04`.
 Source: [`c9475545`](https://github.com/Volpestyle/clankie/commit/c9475545b10069bf3a65bcee2633461fdc7905da).
+That source alone is held: integration also requires the capture-only Windows
+correction described below and present in this branch's
+[observer command](../../../apps/clankie/src/herdr-fleet.ts).
 This is an owned Captain/API result. Full live single-digit idle and actual
 owner native TUI acceptance remain open.
 
@@ -58,6 +61,41 @@ is not included in body CPU. [Before](before.json) and [after](after.json) retai
 exact counters. The executable fixture and raw samples remain under ignored
 `.local/bench/`; invalid authentication/preparation trials are retained and excluded.
 
+## Real Windows observer correction
+
+Pell's review found that `RemoteFleetRelay.execute` decodes the PowerShell
+command and runs the resulting script inside the resident host. The original
+native CLI wrapper wrote raw bytes to the host's stdout and called `exit`, which
+could corrupt binary framing and terminate the relay. The earlier fixture
+returned canned command output and did not exercise that Windows script.
+
+The manual real Windows test reproduced a disconnect on its first `api snapshot`
+before the correction. The observer now captures the owned native child's UTF-8
+stdout and stderr concurrently, returns text through the PowerShell pipeline,
+checks JSON/exit status, and bounds/disposes its own child. It never writes raw
+console bytes or exits the relay host. Non-JSON CLI failures return a fixed error
+envelope; no attempted observation is replayed over SSH.
+
+After the correction, an owned Windows PowerShell/C# relay over actual SSH ran
+installed Herdr's `api snapshot`, `agent list`, `pane list` and another snapshot.
+A nonexistent session returned `fleet_command_failed`; a following valid snapshot
+and a Unicode probe succeeded on the same living relay. No link file was
+published, no existing pane was changed, and no SSH fallback occurred.
+[Real Windows receipt](windows-observer.json) records payload sizes and timings.
+The first four native reads took 171.51, 53.17, 55.06 and 42.15 ms. These are
+command timings, not an idle CPU comparison. The owned CPU measurements above
+remain valid because that workload did not create resident relays.
+
+The test is manual only and requires an explicitly selected, already-authenticated
+Windows destination with an installed Herdr session:
+
+```sh
+~/.herdr-handoffs/clankie-backlog-20261003/bin/heavy clankie heavy -- \
+  env WINDOWS_CENSUS_HOST=USER@HOST WINDOWS_CENSUS_SESSION=default \
+  pnpm exec vitest run --config vitest.config.ts \
+  apps/clankie/test/windows-census-observer.integration.test.ts
+```
+
 ## Native alert route
 
 A fresh kernel-proven operator catalog may preserve its already-attached exact
@@ -103,12 +141,12 @@ native TUI receipt or a completed owning-lead Linear check-in.
 ## Checks and handoff
 
 Clankie typecheck, changed TypeScript lint/format, 47 tests across six affected
-files, and the 454-file Markdown link check pass. The additional exact-default
-manual test passes (48 distinct affected cases total). The real owned Herdr checks
+files, and the Markdown link check pass. The additional exact-default
+manual and real Windows tests pass (49 distinct affected cases total). The real owned Herdr checks
 confirm fresh complete snapshots, changed names, missing sockets and no subprocess
-fallback. Resident relay checks use real child/TCP framing with the existing
-fixture boundary at remote PowerShell/C#; actual Windows census execution through
-that fast path is not claimed. Existing owner-change, uncertain-receipt and native
+fallback. The resident relay fixture still has a boundary at remote PowerShell/C#;
+the separate manual test above proves actual installed Windows census execution
+through the corrected fast path. Existing owner-change, uncertain-receipt and native
 alert routing coverage passes.
 
 Pell advanced the live runtime independently to `2acffdcf` while this work ran.
