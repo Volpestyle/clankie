@@ -30,12 +30,18 @@ afterEach(async () => {
 async function fixture(boundGraceMs = 20) {
   const root = mkdtempSync(join(tmpdir(), "linear-native-delivery-"));
   const settings = new SettingsStore(join(root, "settings.json"));
+  const owner = { id: randomUUID(), email: "owner@example.com" };
   await settings.update((value) => ({
     ...value,
     linearWebhook: {
       ...value.linearWebhook,
       following: true,
       url: "https://fixture.example/v1/hooks/linear",
+      wake: {
+        ...value.linearWebhook.wake,
+        ownerUserIds: [owner.id],
+        ownerUserEmails: [owner.email],
+      },
     },
   }));
   const own = { userId: randomUUID(), workspaceId: randomUUID() };
@@ -153,7 +159,7 @@ async function fixture(boundGraceMs = 20) {
       createdAt: new Date().toISOString(),
       webhookTimestamp: Date.now(),
       organizationId: own.workspaceId,
-      actor: { id: randomUUID(), type: "user", name: "James Volpe", email: "volpestyle@gmail.com" },
+      actor: { ...owner, type: "user", name: "Owned operator" },
       url: "https://linear.app/fixture/issue/VUH-1538/onboard#comment-093e4ffb",
       data: { id: randomUUID(), issue, body: "Can Clankie choose sensible defaults?", ...data },
       ...extra,
