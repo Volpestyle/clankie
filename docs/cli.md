@@ -3342,6 +3342,16 @@ escalating conversation as his own message. Claude Code loads the channel
 only when `clankie claude` passes its development flag; without it the tools
 still work without consuming events, leaving those turns with the service.
 
+The bridge keeps polling through acknowledgment errors, retaining exact receipt
+IDs for reconciliation without repeating channel notifications. Content-free
+pump diagnostics live in the state home's `clankie/seat-bridges/<pid>.jsonl`
+(`~/.local/state/clankie/seat-bridges/` by default): PID, conversation, source
+hash captured at module load, stage and event ID. A live tool connection alone
+does not prove a running receiver. A failed channel write remains uncertain;
+the bridge stops polling rather than implicitly acknowledging an unseen take.
+An installed update affects newly loaded bridges; recovery of an existing
+stopped receiver must preserve its original harness session and delivery fences.
+
 Worker `message_clankie` reports project as `kind="message"`, framed as
 untrusted agent output, never an owner instruction. Completion harvests remain
 `kind="watch"`, and self-wakes remain `kind="wake"`. These tags do not change
