@@ -101,6 +101,19 @@ must still confirm detachment before the caller releases its stay or returns Vox
 to a pool. Neither model completion nor the core's local `left` receipt proves a
 Discord account leave. Billing, tenant limits and wake policy remain the host's.
 
+Private briefing and tool callbacks may outlast their original authority. The
+session captures the admitted lease and checks its fresh guard/current state
+after each awaited briefing, handoff or self-tool result, before opening or
+seeding a provider conversation or submitting a tool result. The host must also
+recheck the original actor and room after its body RPC. Revocation discards the
+late local result; it does not undo or replay an already admitted body action.
+`VoiceBodyAdmission.guard(actorId?)` and `current(actorId?)` accept the captured
+initiator. Initial openings use the attributed speaker or admitted initiating
+actor; later room turns keep their own speaker. The optional native conversation
+admission guard/current hooks run after socket acquisition and before private
+session configuration, closing a denied connected socket without sending it
+persona instructions. Existing callers without these hooks keep their behavior.
+
 `DiscordVoxGatewayBridge` accepts a structural gateway adapter and has no Discord
 client dependency. `startOfficialBotVox({ enabled: true, env })` starts the same
 tokenless media process and checks its versioned IPC handshake. The official bot

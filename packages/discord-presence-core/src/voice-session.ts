@@ -388,6 +388,10 @@ export interface VoiceTranscriptionHandlers {
 }
 
 export interface VoiceConversationOpenInput {
+  /** Trusted admission checked after socket acquisition, before private configuration. */
+  readonly guard?: () => Promise<void>;
+  /** Synchronous final fence before provider construction after the awaited guard. */
+  readonly current?: () => boolean;
   /** Private generated wording; separate from content-free receipts. */
   readonly onOutputTranscript?: (event: RealtimeTranscriptEvent, source: "native_audio" | "tts_text") => void;
   readonly instructions: string;
@@ -416,6 +420,8 @@ export interface DiscordVoiceRealtimePorts {
 export interface DiscordVoiceBriefingRequest {
   readonly guildId: string;
   readonly channelId: string;
+  /** Captured authenticated initiator; the host keeps tenant/persona owner separate. */
+  readonly actorId?: string;
   /** The current explicit consents; the service resolves person memory for exactly these ids. */
   readonly consentedUserIds: readonly string[];
 }
@@ -1243,6 +1249,8 @@ export class DiscordVoiceSession {
       guildId = this.guildId,
       channelId = this.channelId;
     const generation = this.sessionGeneration;
+    const lease = this.bodyLease;
+    const actorId = this.lastRoomUserId ?? lease?.stay.target.actorId;
     if (!conversation?.updateInstructions || guildId === undefined || channelId === undefined || this.ending)
       return Promise.resolve(false);
     const current = (): boolean =>
@@ -1250,17 +1258,19 @@ export class DiscordVoiceSession {
       generation === this.sessionGeneration &&
       this.conversation === conversation &&
       conversation.isOpen &&
-      this.bodyLease?.current() !== false;
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false;
     const refresh = this.conversationOps.then(async () => {
       if (!current()) return false;
-      await this.bodyLease?.guard();
+      await lease?.guard(actorId);
       if (!current()) return false;
       const briefing = await this.options.briefing({
         guildId,
         channelId,
+        ...(actorId === undefined ? {} : { actorId }),
         consentedUserIds: this.briefingUserIds(guildId, channelId),
       });
-      await this.bodyLease?.guard();
+      await lease?.guard(actorId);
       if (!current()) return false;
       conversation.updateInstructions!(briefing.instructions);
       const text = briefing.briefing.trim();
@@ -2622,16 +2632,34 @@ export class DiscordVoiceSession {
     preferredSpeakerId?: string,
   ): Promise<void> {
     const generation = this.sessionGeneration;
+    const lease = this.bodyLease;
+    const actorId = preferredSpeakerId ?? lease?.stay.target.actorId;
+    const ending = this.ending;
+    const isCurrent = (): boolean =>
+      generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
+      this.guildId === guildId &&
+      this.channelId === channelId &&
+      this.ending === ending;
+    const guard = async (): Promise<void> => {
+      await lease?.guard(actorId);
+      if (!isCurrent()) throw new Error("voice_session_stale");
+    };
     let briefing: DiscordVoiceBriefing;
     try {
+      if (lease !== undefined) await guard();
+      if (!isCurrent()) return;
       briefing = await this.options.briefing({
         guildId,
         channelId,
+        ...(actorId === undefined ? {} : { actorId }),
         // Who may be heard, not who filled in a form: under the `presence`
         // policy those are different sets and only the first one is the room.
         consentedUserIds: this.briefingUserIds(guildId, channelId, preferredSpeakerId),
       });
-      await this.bodyLease?.guard();
+      if (lease !== undefined) await guard();
+      if (!isCurrent()) return;
     } catch {
       await this.emitSafely({
         type: "failed",
@@ -2642,11 +2670,12 @@ export class DiscordVoiceSession {
       });
       return;
     }
-    if (generation !== this.sessionGeneration || this.bodyLease?.current() === false) return;
     let port: VoiceConversationPort | undefined;
     let opening = true;
     try {
       port = await this.options.realtime.openConversation({
+        ...(lease === undefined ? {} : { guard }),
+        current: isCurrent,
         instructions: briefing.instructions,
         onOutputTranscript: (event, source) => {
           if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(event.itemId)) return;
@@ -2753,7 +2782,14 @@ export class DiscordVoiceSession {
     } finally {
       opening = false;
     }
-    if (generation !== this.sessionGeneration || this.bodyLease?.current() === false) {
+    let admitted = false;
+    try {
+      if (lease !== undefined) await guard();
+      admitted = isCurrent();
+    } catch {
+      // Provider startup may also span a revocation. Do not install or seed it.
+    }
+    if (!admitted) {
       try {
         port.close();
       } catch {
@@ -3047,6 +3083,28 @@ export class DiscordVoiceSession {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
+    const lease = this.bodyLease;
+    const conversation = this.conversation;
+    const actorId = exchange?.speakerId ?? lease?.stay.target.actorId;
+    const isCurrent = (): boolean =>
+      generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
+      this.conversation === conversation &&
+      conversation?.isOpen === true &&
+      !this.ending;
+    const guardCurrent = async (): Promise<boolean> => {
+      try {
+        await lease?.guard(actorId);
+        return isCurrent();
+      } catch {
+        return false;
+      }
+    };
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     let args: Record<string, unknown> | undefined;
     try {
       const parsed: unknown = JSON.parse(call.argumentsJson || "{}");
@@ -3079,7 +3137,7 @@ export class DiscordVoiceSession {
         code = "self_tool_failed";
       }
     }
-    if (generation !== this.sessionGeneration) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3295,10 +3353,27 @@ export class DiscordVoiceSession {
       return;
     }
     const conversation = this.conversation;
+    const lease = this.bodyLease;
+    const actorId = exchange?.speakerId;
     const isCurrent = (): boolean =>
       generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
       this.conversation === conversation &&
-      conversation?.isOpen === true;
+      conversation?.isOpen === true &&
+      !this.ending;
+    const guardCurrent = async (): Promise<boolean> => {
+      try {
+        await lease?.guard(actorId);
+        return isCurrent();
+      } catch {
+        return false;
+      }
+    };
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
     const request = parseAskClankieRequest(call.argumentsJson);
     if (request === undefined) {
       this.submitLocalFunctionResult(call.callId, CAPTAIN_UNREACHABLE_TEXT, exchange, guildId, channelId);
@@ -3401,7 +3476,7 @@ export class DiscordVoiceSession {
     } catch {
       // The session must not hang on a captain failure: a short fixed
       // sentence goes back so the model can close the exchange.
-      if (!isCurrent()) {
+      if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
         this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
         return;
       }
@@ -3433,7 +3508,7 @@ export class DiscordVoiceSession {
       }
     }
     const handoffMs = this.clock() - startedAtMs;
-    if (!isCurrent()) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -4428,22 +4503,29 @@ export class DiscordVoiceSession {
     const channelId = this.channelId;
     if (conversation === undefined || guildId === undefined || channelId === undefined) return;
     const generation = this.sessionGeneration;
+    const lease = this.bodyLease;
+    const actorId = preferredSpeakerId ?? this.lastRoomUserId ?? lease?.stay.target.actorId;
+    const isCurrent = (): boolean =>
+      generation === this.sessionGeneration &&
+      this.bodyLease === lease &&
+      lease?.current(actorId) !== false &&
+      this.conversation === conversation &&
+      conversation.isOpen &&
+      !this.ending;
     this.conversationOps = this.conversationOps
       .then(async () => {
-        if (
-          generation !== this.sessionGeneration ||
-          this.conversation !== conversation ||
-          !conversation.isOpen
-        ) {
-          return;
-        }
+        if (lease !== undefined) await lease.guard(actorId);
+        if (!isCurrent()) return;
         const briefing = await this.options.briefing({
           guildId,
           channelId,
+          ...(actorId === undefined ? {} : { actorId }),
           consentedUserIds: this.briefingUserIds(guildId, channelId, preferredSpeakerId),
         });
+        if (lease !== undefined) await lease.guard(actorId);
+        if (!isCurrent()) return;
         const text = briefing.briefing.trim();
-        if (text.length > 0 && this.conversation === conversation && conversation.isOpen) {
+        if (text.length > 0) {
           const prefix = "Room participant briefing refresh:\n";
           conversation.createTextItem(
             prefix + text.slice(0, MAX_REALTIME_TEXT_ITEM_CHARACTERS - prefix.length),

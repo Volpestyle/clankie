@@ -15,8 +15,9 @@ export class VoiceBodyLeaseDenied extends Error {
 }
 export interface VoiceBodyAdmission {
   readonly stay: BodyVoiceStay;
-  readonly guard: () => Promise<void>;
-  readonly current: () => boolean;
+  /** Hosts may additionally fence the originally attributed participant. */
+  readonly guard: (actorId?: string) => Promise<void>;
+  readonly current: (actorId?: string) => boolean;
   readonly start?: () => void;
 }
 interface Active {
