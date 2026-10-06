@@ -2,11 +2,23 @@ import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { HoldOverrideSchema } from "@clankie/protocol/integrate";
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+
+const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
 export async function runUpdateCommand(
   args: readonly string[],
   options: BrowserCommandOptions = {},
 ): Promise<unknown> {
+  // Scheduled idle installs on a hosted body (ADR 0237); a managed body always takes them.
+  if (args[0] === "auto") {
+    const verb = args[1] ?? "status";
+    if (args.length > 2 || !["status", "on", "off"].includes(verb)) throw Error(AUTO_USAGE);
+    const store = new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+    if (verb !== "status")
+      await store.update((current) => ({ ...current, host: { ...current.host, autoUpdate: verb === "on" } }));
+    return { autoUpdate: (await store.load()).host.autoUpdate };
+  }
   const canary = args[0] === "canary";
   const status = args.length === 1 && args[0] === "status";
   const policy: Record<string, number> = {};
@@ -40,7 +52,7 @@ export async function runUpdateCommand(
         !["--ref", "--override-hold", "--actor", "--reason"].includes(key ?? "")
       )
         throw Error(
-          "Usage: clankie update [--ref REF] [--override-hold UUID --actor NAME --reason TEXT] | status | canary",
+          "Usage: clankie update [--ref REF] [--override-hold UUID --actor NAME --reason TEXT] | status | canary | auto",
         );
       if (key === "--ref") ref = value;
       else if (key === "--override-hold") holdIds.push(value);

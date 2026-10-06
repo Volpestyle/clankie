@@ -18,6 +18,7 @@ import { join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createReleaseUpdater } from "../bin/release-updater.ts";
 import { readRuntimeUpdate, writeRuntimeUpdate, type RuntimeUpdateResult } from "../bin/runtime-update.ts";
+import { startScheduledUpdates } from "../../clankie/src/scheduled-update.ts";
 
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((step) => step()));
@@ -241,6 +242,40 @@ it("a managed body installs the fleet-approved release and nothing newer", async
   const accepted = await approved.updater(approved.old).request("main", authority);
   expect(await approved.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
   expect(readlinkSync(join(approved.install, "current"))).toBe(join("releases", "v1.1.0"));
+});
+
+it("a hosted body's scheduled check installs only while idle and enabled", async () => {
+  const logger = { info() {}, warn() {} };
+  const schedule = (
+    updater: ReturnType<Awaited<ReturnType<typeof fixture>>["updater"]>,
+    state: { enabled: boolean; idle: boolean },
+  ) => {
+    const scheduled = startScheduledUpdates({
+      updater,
+      enabled: async () => state.enabled,
+      idle: async () => state.idle,
+      logger,
+      initialDelayMs: 3_600_000,
+    });
+    cleanup.push(() => scheduled.close());
+    return scheduled;
+  };
+  const held = await fixture({ approved: null });
+  expect(await schedule(held.updater(held.old), { enabled: true, idle: true }).check()).toBe("waiting");
+
+  const f = await fixture();
+  const state = { enabled: false, idle: false };
+  const scheduled = schedule(f.updater(f.old), state);
+  expect(await scheduled.check()).toBe("disabled");
+  state.enabled = true;
+  expect(await scheduled.check()).toBe("body-busy");
+  expect(f.calls()).toEqual([]);
+  state.idle = true;
+  expect(await scheduled.check()).toBe("accepted");
+  const pending = JSON.parse(readFileSync(join(f.home, ".clankie", "updates", "latest.json"), "utf8")).id;
+  const result = await f.settled(pending);
+  expect(result).toMatchObject({ phase: "healthy", initiator: { kind: "schedule" } });
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.1.0"));
 });
 
 it("restores the previous release when the new one fails to come up", async () => {

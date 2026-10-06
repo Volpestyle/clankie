@@ -156,11 +156,13 @@ export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
  * This host's own behavior. `keepAwake` is the owner's opt-in to an always-on
  * Mac (VUH-1461): the launcher supervises `caffeinate -s`, which macOS holds
  * only while the Mac is plugged in. Off by default; sleep stays a normal
- * condition to recover from.
+ * condition to recover from. `autoUpdate` lets a self-run hosted body install
+ * official releases while idle (ADR 0237); managed bodies always do.
  */
 export const HostSettingsSchema = z
   .object({
     keepAwake: z.boolean().default(false),
+    autoUpdate: z.boolean().default(true),
   })
   .strict();
 export type HostSettings = z.infer<typeof HostSettingsSchema>;
