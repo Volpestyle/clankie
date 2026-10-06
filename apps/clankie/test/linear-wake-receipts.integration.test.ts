@@ -26,6 +26,7 @@ import { linearWakeTools } from "../src/captain/tools.ts";
 import { TurnSettledLog } from "../src/captain/turn-metrics.ts";
 import { LinearAttributionJournal } from "../src/linear-attribution.ts";
 import { LinearWakeReadReceipts } from "../src/linear-wake-read.ts";
+import { LinearRequestBudget } from "../src/linear-request-budget.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { runLinearCommand } from "../../tui/src/command/linear.ts";
 
@@ -48,7 +49,7 @@ async function listen(app: Awaited<ReturnType<typeof createClankieApp>>) {
 
 /** Owned signed ingress → production runner/store/outbox → authenticated seat wire → real SDK tool
  * → stateful provider MCP, with persistent original/read receipts. No model or live account calls. */
-async function fixture() {
+async function fixture(options: { oldBudgetWindow?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "linear-wake-receipts-"));
   cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -71,6 +72,11 @@ async function fixture() {
     verifiedAt: new Date().toISOString(),
   };
   const token = randomUUID();
+  const credential = { type: "api" as const, key: token, account };
+  let budgetTime = options.oldBudgetWindow ? Date.now() - 3_540_000 : undefined;
+  const clock = () => budgetTime ?? Date.now();
+  const budget = new LinearRequestBudget({ clock });
+  cleanups.push(async () => budget.close());
   const secret = randomUUID();
   const project = { id: randomUUID(), name: "KH2" };
   const update = { id: randomUUID(), project };
@@ -81,6 +87,7 @@ async function fixture() {
   const reads: Record<string, unknown>[] = [];
   let failedAfterWrite = false;
   let failedWithoutWrite = false;
+  let exhaustAfterInbox = false;
   const tools: LaneTool[] = [
     {
       name: "get_issue",
@@ -117,6 +124,10 @@ async function fixture() {
       },
       call: async (args) => {
         reads.push(args);
+        if (exhaustAfterInbox) {
+          exhaustAfterInbox = false;
+          await budget.fetch(credential, fetch, `${providerUrl}/owned-budget/exhaust`);
+        }
         return { content: [{ type: "text", text: JSON.stringify({ notifications, hasNextPage: false }) }] };
       },
     },
@@ -151,12 +162,24 @@ async function fixture() {
         ? { operatorId: "owned-provider" }
         : undefined,
   });
+  provider.app.get(
+    "/owned-budget/exhaust",
+    () =>
+      new Response("exhausted", {
+        headers: {
+          "x-ratelimit-requests-limit": "5000",
+          "x-ratelimit-requests-remaining": "0",
+          "x-ratelimit-requests-reset": String(clock() + 30_000),
+        },
+      }),
+  );
   const providerUrl = await listen(provider);
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  await credentials.set("linear", { type: "api", key: token, account });
+  await credentials.set("linear", credential);
   const host = createMcpHost({
     credentials,
     settings,
+    linearRequestBudget: budget,
     curated: [
       {
         id: "linear",
@@ -174,7 +197,14 @@ async function fixture() {
   cleanups.push(() => host.close());
   const attribution = new LinearAttributionJournal(join(root, "attribution.json"));
   const own = async () => (await host.account("linear", "operator")).account;
-  const readOptions = { path: join(root, "read.json"), host, attribution, ownAccount: own, retryMs: 30_000 };
+  const readOptions = {
+    path: join(root, "read.json"),
+    host,
+    attribution,
+    ownAccount: own,
+    retryMs: 30_000,
+    clock,
+  };
   let reader = new LinearWakeReadReceipts(readOptions);
   const recipients = new Map<string, string>();
   const outboxes = new Map<string, SeatOutbox>();
@@ -380,6 +410,24 @@ async function fixture() {
     notifications,
     marks,
     reads,
+    budget,
+    clock,
+    useCurrentBudgetTime: () => {
+      budgetTime = undefined;
+    },
+    advanceBudgetTime: (at: number) => {
+      budgetTime = at;
+    },
+    exhaustReadBudget: () => {
+      exhaustAfterInbox = true;
+    },
+    mark: (id: string) =>
+      host.call({
+        lane: "operator",
+        server: "linear",
+        tool: "mark_notification",
+        arguments: { id, read: true },
+      }),
     events: (id: string) => new ConversationJournal(join(root, "conversations")).read(id),
     deliveries: async () => (await fetch(`${url}/v1/linear/deliveries`, { headers })).json(),
     serviceStarts: () => serviceStarts,
@@ -559,6 +607,74 @@ it("holds an uncertain read mutation across reload even when the notification st
   expect((await f.confirm("global-default", original.id)).isError).not.toBe(true);
   expect(f.marks).toEqual([e.notification.id]);
   expect(f.reader().report()).toMatchObject({ receipts: [{ notifications: [{ state: "uncertain" }] }] });
+});
+
+it("retries a definitely unsent budget refusal without clearing another uncertain original", async () => {
+  const f = await fixture({ oldBudgetWindow: true });
+  const uncertain = f.event();
+  f.notifications.push(uncertain.notification);
+  const original = await wake(f, "global-default", uncertain.raw);
+  f.useCurrentBudgetTime();
+  f.failWithoutWrite();
+  expect((await f.confirm("global-default", original.id)).isError).not.toBe(true);
+  const before = JSON.parse(readFileSync(join(f.root, "read.json"), "utf8"));
+  expect(before.claims[uncertain.notification.id]).toMatchObject({
+    state: "uncertain",
+    receiver: { userId: f.account.userId, workspaceId: f.account.workspaceId },
+  });
+
+  const pending = f.event();
+  f.notifications.push(pending.notification);
+  const target = await wake(f, "global-default", pending.raw);
+  f.exhaustReadBudget();
+  expect((await f.confirm("global-default", target.id)).isError).not.toBe(true);
+  expect(f.marks).toEqual([uncertain.notification.id]);
+  expect(pending.notification.readAt).toBeNull();
+  const refused = await f.mark(pending.notification.id);
+  expect(refused).toMatchObject({
+    outcome: "refused",
+    reason: "linear_request_budget",
+    possiblyDispatched: false,
+  });
+  if (refused.outcome !== "refused" || refused.retryAt === undefined)
+    throw new Error("The real MCP budget must provide its exact refusal deadline");
+  expect(refused.retryAt).toBeGreaterThan(f.clock());
+  expect(refused.retryAt).toBeLessThan(f.clock() + 600_000);
+  const deferred = JSON.parse(readFileSync(join(f.root, "read.json"), "utf8"));
+  expect(deferred.claims[pending.notification.id]).toBeUndefined();
+  expect(deferred.claims[uncertain.notification.id]).toEqual(before.claims[uncertain.notification.id]);
+
+  const inboxReads = f.reads.length;
+  await f.reader().reconcile();
+  expect(f.reads).toHaveLength(inboxReads);
+  f.advanceBudgetTime(refused.retryAt);
+  await f.reader().reconcile();
+  expect(f.marks).toEqual([uncertain.notification.id, pending.notification.id]);
+  expect(pending.notification.readAt).not.toBeNull();
+  await f.reload();
+  await f.reader().reconcile();
+  expect(f.marks).toEqual([uncertain.notification.id, pending.notification.id]);
+  const settled = JSON.parse(readFileSync(join(f.root, "read.json"), "utf8"));
+  expect(settled.claims[uncertain.notification.id]).toEqual({
+    ...before.claims[uncertain.notification.id],
+    receiver: { userId: f.account.userId, workspaceId: f.account.workspaceId },
+  });
+  expect(settled.claims[pending.notification.id]).toMatchObject({ state: "read" });
+});
+
+it("does not create a new read mutation after the consumed wake retry window expires", async () => {
+  const f = await fixture();
+  const e = f.event();
+  const original = await wake(f, "global-default", e.raw);
+  expect((await f.confirm("global-default", original.id)).isError).not.toBe(true);
+  const state = JSON.parse(readFileSync(join(f.root, "read.json"), "utf8"));
+  const received = Object.values(state.received) as { retryUntil: number }[];
+  expect(received).toHaveLength(1);
+  f.notifications.push(e.notification);
+  f.advanceBudgetTime(received[0]!.retryUntil + 1);
+  await f.reader().reconcile();
+  expect(f.marks).toEqual([]);
+  expect(e.notification.readAt).toBeNull();
 });
 
 it("does not mark a comment notification when its signed create evidence is ambiguous", async () => {

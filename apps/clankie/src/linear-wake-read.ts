@@ -50,12 +50,14 @@ export class LinearWakeReadReceipts {
   private work: Promise<void> | undefined;
   private closed = false;
   private readAfter = 0;
+  private readonly clock: () => number;
   private readonly options: {
     path: string;
     attribution: Pick<LinearAttributionJournal, "notificationEvent">;
     host: Pick<McpHost, "call">;
     ownAccount(): Promise<{ userId: string; workspaceId: string } | undefined>;
     retryMs?: number;
+    clock?: () => number;
   };
 
   constructor(options: {
@@ -64,8 +66,10 @@ export class LinearWakeReadReceipts {
     host: Pick<McpHost, "call">;
     ownAccount(): Promise<{ userId: string; workspaceId: string } | undefined>;
     retryMs?: number;
+    clock?: () => number;
   }) {
     this.options = options;
+    this.clock = options.clock ?? Date.now;
     try {
       this.state = StateSchema.parse(JSON.parse(readFileSync(options.path, "utf8")));
     } catch (error) {
@@ -75,7 +79,7 @@ export class LinearWakeReadReceipts {
   }
 
   async received(references: readonly LinearWakeNotificationReference[]) {
-    const now = Date.now();
+    const now = this.clock();
     // Expiring signed evidence can no longer justify a new provider mutation.
     this.state.received = Object.fromEntries(
       Object.entries(this.state.received).filter(([, item]) => item.receivedAt > now - RETENTION),
@@ -137,7 +141,7 @@ export class LinearWakeReadReceipts {
     if (
       this.closed ||
       this.timer ||
-      !Object.values(this.state.received).some((item) => item.retryUntil > Date.now())
+      !Object.values(this.state.received).some((item) => item.retryUntil > this.clock())
     )
       return;
     this.timer = setTimeout(
@@ -147,13 +151,13 @@ export class LinearWakeReadReceipts {
           .catch(() => undefined)
           .finally(() => this.schedule());
       },
-      Math.max(this.options.retryMs ?? 30_000, this.readAfter - Date.now()),
+      Math.max(this.options.retryMs ?? 30_000, this.readAfter - this.clock()),
     );
     this.timer.unref();
   }
 
   private async scan() {
-    if (Date.now() < this.readAfter) return;
+    if (this.clock() < this.readAfter) return;
     if (!Object.keys(this.state.received).length) return;
     const own = await this.options.ownAccount().catch(() => undefined);
     if (!own) return;
@@ -161,7 +165,8 @@ export class LinearWakeReadReceipts {
       (item) =>
         item.receiver.userId === own.userId &&
         item.receiver.workspaceId === own.workspaceId &&
-        item.receivedAt > Date.now() - RETENTION,
+        item.receivedAt > this.clock() - RETENTION &&
+        item.retryUntil > this.clock(),
     );
     if (!eligible.length) return;
     let cursor: string | undefined;
@@ -207,17 +212,20 @@ export class LinearWakeReadReceipts {
           const latest = await this.options.ownAccount();
           if (this.closed || latest?.userId !== own.userId || latest.workspaceId !== own.workspaceId)
             throw new Error("Linear wake notification receiver changed");
+          if (received.retryUntil <= this.clock())
+            throw new Error("Linear wake notification retry window expired");
         };
         await guard();
         if (Object.keys(this.state.claims).length >= MAX) return;
-        this.state.claims[notification.id] = {
+        const claim = {
           eventId: received.eventId,
           receiver: own,
-          state: "uncertain",
-          at: Date.now(),
+          state: "uncertain" as const,
+          at: this.clock(),
         };
+        this.state.claims[notification.id] = claim;
         this.save(); // Claim BEFORE dispatch, including the crash/lost-response window.
-        await this.options.host
+        const marked = await this.options.host
           .call({
             lane: "operator",
             server: "linear",
@@ -228,6 +236,16 @@ export class LinearWakeReadReceipts {
             fence: guard,
           })
           .catch(() => undefined);
+        if (marked?.outcome === "refused" && marked.possiblyDispatched === false) {
+          // Only definite pre-dispatch refusal releases this exact original.
+          // Throws and possible dispatches keep their no-replay fence.
+          if (this.state.claims[notification.id] === claim) {
+            delete this.state.claims[notification.id];
+            this.save();
+          }
+          if (marked.retryAt !== undefined) this.readAfter = Math.max(this.readAfter, marked.retryAt);
+          return;
+        }
         // A read-only inbox observation settles even a successful response; wrappers may contain errors.
       }
       if (!parsed.data.hasNextPage) return;
