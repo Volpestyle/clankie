@@ -60,9 +60,9 @@ import { createAgentSessions } from "./agent-sessions.ts";
  * surface plus its in-process capabilities (play host, browser,
  * activity observation), one process, one port (4310).
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
@@ -949,16 +949,15 @@ minecraftCapture = new MinecraftCapture({
     ),
   onError: () => logger.warn({ event: "minecraft.capture_unavailable" }, "Minecraft capture unavailable"),
 });
-// A checkout follows origin/main; a Mac release install follows official releases.
-// A hosted image is replaced whole by its deployment, so it never updates itself.
-const releaseManifestPath = join(repoRoot, "release.json");
+// A checkout follows origin/main; an installed release (`<root>/releases/<version>`)
+// follows official releases. A release run from elsewhere, like an image's seed
+// tree, is replaced by its deployment instead.
 const runtimeUpdater =
   hostedBody !== undefined
     ? undefined
     : existsSync(join(repoRoot, ".git"))
       ? createRuntimeUpdater({ repoRoot })
-      : existsSync(releaseManifestPath) &&
-          String(JSON.parse(readFileSync(releaseManifestPath, "utf8")).target).startsWith("darwin-")
+      : existsSync(join(repoRoot, "release.json")) && basename(dirname(realpathSync(repoRoot))) === "releases"
         ? createReleaseUpdater({ releaseRoot: repoRoot })
         : undefined;
 try {

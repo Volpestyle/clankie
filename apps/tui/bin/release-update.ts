@@ -28,7 +28,21 @@ import {
   type RuntimeUpdateResult,
 } from "./runtime-update.ts";
 
-export const RELEASE_ARCHIVE = "clankie-darwin-arm64.tar.gz";
+/** Releases built before targets were recorded are all macOS arm64. */
+export const DEFAULT_RELEASE_TARGET = "darwin-arm64";
+const TARGET = /^(darwin-arm64|linux-arm64|linux-x64)$/u;
+
+export function releaseTarget(value: unknown): string {
+  if (value === undefined) return DEFAULT_RELEASE_TARGET;
+  const target = boundedString(value, 32);
+  if (!TARGET.test(target)) throw Error("Invalid release target");
+  return target;
+}
+
+/** Each official release publishes one archive per target. */
+export function releaseArchive(target: string): string {
+  return `clankie-${releaseTarget(target)}.tar.gz`;
+}
 const VERSION = /^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$/u;
 
 export function releaseVersion(value: unknown): string {
@@ -54,12 +68,16 @@ function readReleaseFile(path: string): string {
 }
 
 /** The identity a release directory declares in its own manifest. */
-export function releaseManifest(root: string): { readonly version: string; readonly revision: string } {
+export function releaseManifest(root: string): {
+  readonly version: string;
+  readonly revision: string;
+  readonly target: string;
+} {
   const manifest = object(JSON.parse(readReleaseFile(join(root, "release.json"))));
   const version = releaseVersion(manifest.version);
   if (readReleaseFile(join(root, "VERSION")).split("\n")[0] !== version)
     throw Error("Release VERSION does not match its manifest");
-  return { version, revision: commitString(manifest.revision) };
+  return { version, revision: commitString(manifest.revision), target: releaseTarget(manifest.target) };
 }
 
 /** `<install>/current` must be a symlink into `<install>/releases/`; returns the release it names. */
@@ -95,6 +113,7 @@ export interface ReleaseUpdatePlan {
   readonly newVersion: string;
   readonly oldCommit: string;
   readonly newCommit: string;
+  readonly target: string;
   readonly archiveUrl: string;
   readonly checksumUrl: string;
   readonly oldInstanceId: string;
@@ -119,6 +138,7 @@ export function parseReleasePlan(input: unknown): ReleaseUpdatePlan {
     newVersion: releaseVersion(value.newVersion),
     oldCommit: commitString(value.oldCommit),
     newCommit: commitString(value.newCommit),
+    target: releaseTarget(value.target),
     archiveUrl: releaseUrl(value.archiveUrl),
     checksumUrl: releaseUrl(value.checksumUrl),
     oldInstanceId: operationId(value.oldInstanceId),
@@ -148,7 +168,7 @@ async function download(url: string, path: string, fetchImpl: typeof fetch): Pro
 
 /** Download, verify and unpack exactly as install.sh does; returns the staged `clankie` tree. */
 async function stageRelease(plan: ReleaseUpdatePlan, fetchImpl: typeof fetch): Promise<string> {
-  const archive = join(plan.directory, RELEASE_ARCHIVE);
+  const archive = join(plan.directory, releaseArchive(plan.target));
   const checksum = `${archive}.sha256`;
   await download(plan.archiveUrl, archive, fetchImpl);
   await download(plan.checksumUrl, checksum, fetchImpl);
@@ -167,6 +187,7 @@ async function stageRelease(plan: ReleaseUpdatePlan, fetchImpl: typeof fetch): P
   const manifest = releaseManifest(staged);
   if (manifest.version !== plan.newVersion || manifest.revision !== plan.newCommit)
     throw Error("Release archive is not the accepted version");
+  if (manifest.target !== plan.target) throw Error("Release archive is for another target");
   return staged;
 }
 
