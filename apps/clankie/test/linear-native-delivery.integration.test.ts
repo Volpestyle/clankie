@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
@@ -27,7 +27,7 @@ afterEach(async () => {
 
 // Owned HTTP ingress, disk settings/journal, production runner, driver fence,
 // native mailbox and wire schema. No live credentials, model or harness calls.
-async function fixture() {
+async function fixture(boundGraceMs = 20) {
   const root = mkdtempSync(join(tmpdir(), "linear-native-delivery-"));
   const settings = new SettingsStore(join(root, "settings.json"));
   await settings.update((value) => ({
@@ -43,8 +43,8 @@ async function fixture() {
   const secret = randomUUID();
   const bearer = randomUUID();
   const recipient = "a".repeat(64);
-  const shutdown = new AbortController();
-  const outbox = new SeatOutbox({ boundGraceMs: 20, uncertaintyPath: join(root, "outbox.json") });
+  let shutdown = new AbortController();
+  const outbox = new SeatOutbox({ boundGraceMs, uncertaintyPath: join(root, "outbox.json") });
   const autonomy = new AutonomyStore(join(root, "autonomy.json"));
   let serviceStarts = 0;
   const forbiddenSession = async (): Promise<never> => {
@@ -52,7 +52,9 @@ async function fixture() {
     throw new Error("The native owner must not fall back to a model");
   };
   const runner = createConversationRunner({
-    shutdown,
+    get shutdown() {
+      return shutdown;
+    },
     get conversations() {
       return store;
     },
@@ -74,9 +76,10 @@ async function fixture() {
     goalExecutionReason: () => undefined,
     refuseNativeGoal: () => false,
   });
-  const store = new ConversationStore(join(root, "conversations"), runner);
+  let store = new ConversationStore(join(root, "conversations"), runner);
   store.rememberNativeHead("global-default", "original-claude-session");
   const app = new Hono();
+  const issueLookups: string[] = [];
   registerLinearRoutes({
     app,
     dependencies: {
@@ -85,7 +88,15 @@ async function fixture() {
           store.receiveLinearActivity(event, following, target),
         linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
       },
-      linearWebhook: { secret: async () => secret, ownAccount: async () => own, writes },
+      linearWebhook: {
+        secret: async () => secret,
+        ownAccount: async () => own,
+        writes,
+        issueContext: async (activity) => {
+          const response = await fetch(`${endpoint}/owned/issues/${activity.issueId}`);
+          return response.ok ? response.json() : undefined;
+        },
+      },
     },
     settingsSource: settings,
     clock: () => new Date(),
@@ -111,6 +122,10 @@ async function fixture() {
   app.post("/v1/seat/events/:id/ack", (context) => {
     if (context.req.header("authorization") !== `Bearer ${bearer}`) return context.json({}, 401);
     return context.json({ acknowledged: outbox.acknowledge(context.req.param("id"), recipient) });
+  });
+  app.get("/owned/issues/:id", (context) => {
+    issueLookups.push(context.req.param("id"));
+    return context.req.param("id") === issue.id ? context.json(issue) : context.json({}, 404);
   });
   const server = serve({ hostname: "127.0.0.1", port: 0, fetch: app.fetch }) as Server;
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -166,7 +181,9 @@ async function fixture() {
       })
     ).json();
   return {
-    store,
+    get store() {
+      return store;
+    },
     settings,
     outbox,
     own,
@@ -178,6 +195,25 @@ async function fixture() {
     poll,
     ack,
     serviceStarts: () => serviceStarts,
+    issueLookups,
+    checkpoint: () => ({
+      meta: readFileSync(join(root, "conversations/global-default/meta.json"), "utf8"),
+      journal: readFileSync(join(root, "conversations/global-default/events.jsonl"), "utf8"),
+    }),
+    shutdown: () => shutdown.abort(),
+    restart: async (checkpoint?: { meta: string; journal: string }) => {
+      await store.close();
+      // An actual metadata snapshot captured before the uncertain settlement,
+      // as retained when a process dies before its final metadata save.
+      if (checkpoint) {
+        writeFileSync(join(root, "conversations/global-default/meta.json"), checkpoint.meta, { mode: 0o600 });
+        writeFileSync(join(root, "conversations/global-default/events.jsonl"), checkpoint.journal, {
+          mode: 0o600,
+        });
+      }
+      shutdown = new AbortController();
+      store = new ConversationStore(join(root, "conversations"), runner);
+    },
   };
 }
 
@@ -228,16 +264,29 @@ it("recovers signed issue/update comments after an offline receiver returns, onc
   expect(f.serviceStarts()).toBe(0);
 });
 
-it("does not replay a taken wake whose native acknowledgment was lost", async () => {
-  const f = await fixture();
-  await f.post(f.body());
-  const [wake] = await f.poll(4000);
-  expect(wake?.kind).toBe("wake");
-  await until(() => f.events().some((event) => event.type === "turn" && event.deliveryStage === "uncertain"));
-  expect(await f.poll(1800)).toEqual([]);
-  expect(await f.ack(wake!.id)).toMatchObject({ acknowledged: true });
-  expect(f.serviceStarts()).toBe(0);
-});
+it.each([false, true])(
+  "does not re-offer a taken wake after a late ACK and new comment (restart=%s)",
+  async (restart) => {
+    const f = await fixture(400);
+    await f.post(f.body());
+    const [wake] = await f.poll(4000);
+    expect(wake?.kind).toBe("wake");
+    const checkpoint = f.checkpoint();
+    expect(JSON.parse(checkpoint.meta).linearWakeCheckpoint).toBeDefined();
+    await until(() =>
+      f.events().some((event) => event.type === "turn" && event.deliveryStage === "uncertain"),
+    );
+    expect(await f.poll(1800)).toEqual([]);
+    expect(await f.ack(wake!.id)).toMatchObject({ acknowledged: true });
+    if (restart) await f.restart(checkpoint);
+    await f.post(f.body("Comment", { body: "Brand new owner comment after the late ACK" }));
+    const [next] = await f.poll(4000);
+    expect(next?.content).toContain("Brand new owner comment after the late ACK");
+    expect(next?.content).not.toContain("Can Clankie choose sensible defaults?");
+    await f.ack(next!.id);
+    expect(f.serviceStarts()).toBe(0);
+  },
+);
 
 it("suppresses deferred wakes when following turns off and keeps external history", async () => {
   const f = await fixture();
@@ -251,6 +300,35 @@ it("suppresses deferred wakes when following turns off and keeps external histor
   expect(f.events().filter((event) => event.type === "message" && event.role === "external")).toHaveLength(1);
   expect(f.serviceStarts()).toBe(0);
 });
+
+it.each(["shutdown", "cancel"] as const)(
+  "does not re-offer a native take after %s, late ACK and reload",
+  async (mode) => {
+    const f = await fixture(400);
+    await f.post(f.body());
+    const [original] = await f.poll(4000);
+    const runId = JSON.parse(f.checkpoint().meta).linearWakeCheckpoint.runId;
+    expect(original?.content).toContain("Can Clankie choose sensible defaults?");
+    if (mode === "shutdown") f.shutdown();
+    else expect(f.store.cancel("global-default", runId)).toBe(true);
+    await until(() =>
+      f
+        .events()
+        .some(
+          (event) =>
+            event.type === "turn" && event.runId === runId && ["failed", "cancelled"].includes(event.phase),
+        ),
+    );
+    expect(await f.ack(original!.id)).toMatchObject({ acknowledged: true });
+    await f.restart();
+    await f.post(f.body("Comment", { body: "Fresh comment after shutdown or cancellation" }));
+    const [fresh] = await f.poll(4000);
+    expect(fresh?.content).toContain("Fresh comment after shutdown or cancellation");
+    expect(fresh?.content).not.toContain("Can Clankie choose sensible defaults?");
+    await f.ack(fresh!.id);
+    expect(f.serviceStarts()).toBe(0);
+  },
+);
 
 it("maps signed assignments, delegation and comment reactions using the connected app identity", async () => {
   const f = await fixture();
@@ -268,11 +346,15 @@ it("maps signed assignments, delegation and comment reactions using the connecte
       { action: "update", updatedFrom: { delegateId: null } },
     ),
   );
+  const reactionCommentId = randomUUID();
   await f.post(
     f.body("Reaction", {
+      // Linear's CommentChildWebhookPayload can carry the only issue UUID.
+      // Do not inherit the fixture's outer Issue display context.
+      issue: undefined,
       emoji: "eyes",
-      commentId: randomUUID(),
-      comment: { body: "Clankie result", userId: f.own.userId },
+      commentId: reactionCommentId,
+      comment: { id: reactionCommentId, body: "Clankie result", userId: f.own.userId, issueId: f.issue.id },
     }),
   );
   const ownCommentId = randomUUID();
@@ -318,6 +400,35 @@ it("maps signed assignments, delegation and comment reactions using the connecte
   expect(wake?.content).toContain("delegateId");
   expect(wake?.content).toContain("eyes");
   expect(wake?.content).toContain("thumbsup");
+  const reaction = f
+    .events()
+    .find(
+      (event) =>
+        event.type === "message" && event.role === "external" && event.text.includes('"reaction":"eyes"'),
+    );
+  expect(reaction).toMatchObject({ text: expect.stringContaining(f.issue.id) });
+  expect(reaction).toMatchObject({ text: expect.stringContaining(f.issue.identifier) });
+  expect(reaction).toMatchObject({ text: expect.stringContaining(f.issue.title) });
+  expect(f.issueLookups).toContain(f.issue.id);
   expect(wake?.content).not.toContain("Someone else's");
+  await f.ack(wake!.id);
+});
+
+it("does not enrich a reaction whose signed parent UUIDs disagree", async () => {
+  const f = await fixture();
+  const commentId = randomUUID();
+  await f.post(
+    f.body("Reaction", {
+      issue: undefined,
+      issueId: f.issue.id,
+      commentId,
+      emoji: "eyes",
+      comment: { id: commentId, userId: f.own.userId, issueId: randomUUID(), body: "Conflicting parents" },
+    }),
+  );
+  const [wake] = await f.poll(4000);
+  expect(wake?.content).toContain("Conflicting parents");
+  expect(wake?.content).not.toContain('"issueId":');
+  expect(f.issueLookups).toEqual([]);
   await f.ack(wake!.id);
 });

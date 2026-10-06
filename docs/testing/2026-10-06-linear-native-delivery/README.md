@@ -8,6 +8,61 @@ and entered `global-default` as External activity. Their subsequent turns failed
 before native delivery. Zero webhook entries in the domain journal was an
 incorrect diagnostic: webhook acceptance receipts live in the service log.
 
+Follow-up branch `ash/vuh-1743-delivery-followup` covers interrupted delivery
+checkpoints and the nested reaction parent identified during review. Linear's
+[published SDK schema](https://raw.githubusercontent.com/linear/linear/refs/heads/master/packages/sdk/src/schema.graphql)
+defines `ReactionWebhookPayload.comment` as `CommentChildWebhookPayload`, with
+`issueId` and `userId`. The signed nested issue UUID now participates in the
+same consistency check as top-level `issueId` and `issue.id`. Contradictory
+UUIDs supply no lookup authority.
+
+The owned HTTP regression removes the reaction fixture's inherited outer issue,
+then checks that nested `comment.issueId` drives an actual context lookup and
+retains the issue UUID, identifier and title. A contradictory-parent case makes
+no lookup. This is schema-grounded mapping proof; receipt of an actual live
+Reaction webhook and its Linear-side subscription are still unproved. No app
+settings were changed. To enable that resource if absent, an administrator must
+add `Reaction` to the existing webhook's selected resource types, retaining the
+same URL and signing secret; `Issue` is required for assignment/delegation.
+
+The nested-parent regression fails on the initial `2d23a90e` source (no signed
+issue UUID reaches context enrichment). Raw mapping evidence:
+`.local/evidence/vuh-1743/reaction-red-base.txt` and `reaction-green.txt`.
+
+## Interrupted native takes
+
+The production runner awaits native delivery, then checks the service shutdown
+signal before publishing its final delivery receipt. Shutdown after a native
+take can therefore reach the generic error path without a definite receipt.
+Public conversation cancellation can finish with an uncertain receipt. Both
+paths rewound the offered Linear cursor. A fresh owner comment could then
+re-offer the original taken comment under a new native event ID, even after
+the original exact late ACK had reconciled it.
+
+Startup also rewound a persisted checkpoint unless a completed turn had been
+saved. The owned test captures the real metadata and journal immediately after
+the native HTTP take, then reloads those pre-settlement files. That crash
+checkpoint has no terminal event proving that delivery was unavailable.
+
+The correction retains the offered cursor in all three cases. Only a definite
+`unavailable` receipt permits rollback. External history remains available for
+inspection. This preserves uncertainty across cancellation, shutdown and
+restart without replaying an original under a new event ID.
+
+The owned tests call the actual shutdown controller and public cancellation
+method after a native HTTP take, reconcile its exact late ACK, reload the
+persisted store and send a fresh signed comment. The next wake contains only
+the fresh comment. Both cases fail on unchanged `2d23a90e`; the pre-settlement
+crash-checkpoint reload also fails there. The normal resolved-uncertainty case
+already passed unchanged `2d23a90e`, so no normal-path defect is claimed.
+Raw logs: `cursor-stop-red.txt`, `cursor-crash-red.txt` and `followup-green.txt`
+under `.local/evidence/vuh-1743/`.
+
+The separate checked [pump repair evidence](https://github.com/Volpestyle/clankie/blob/d321e4dd3bfa5a504e8037009e7b15c3caf0f239/docs/testing/2026-10-06-seat-pump/README.md)
+records the loaded-source provenance, bounded ACK recovery, durable content-free
+diagnostics and real HTTP/stdio tests. It does not establish the original
+operator's exact triggering error or actual Claude consumption.
+
 ## Live evidence
 
 Read `~/.local/state/clankie/clankie.log` and
@@ -65,7 +120,8 @@ or model calls. It verifies:
   wake with text and links, duplicate deliveries stay consumed, and new comments
   still wake after native attachment.
 - A taken wake with a lost acknowledgment stays uncertain and is not replayed;
-  its original late acknowledgment reconciles it.
+  its original late acknowledgment reconciles it. A fresh comment after shutdown,
+  cancellation or a pre-settlement checkpoint reload excludes the original.
 - Disabling following suppresses a pending wake while retaining external history.
 - Assignment and delegation to the connected app, and reactions to its comments,
   match the selected rules. Assignment/reaction to someone else stays passive.
@@ -73,7 +129,7 @@ or model calls. It verifies:
   a contradictory embedded author is not overridden by a write receipt.
 - No internal Pi invocation occurs for the native-owned conversation.
 
-Verification passed on this branch:
+Initial verification passed on `ash/vuh-1743-linear-wakes` at `2d23a90e`:
 
 - Base `2acffdcf`: three new regression cases fail and one passes. The same
   four cases pass with the source patch restored.
@@ -88,6 +144,14 @@ Local raw evidence and gate output are retained in
 `live-trace.json`, `red-base.txt`, `focused-tests.txt`, `green-regression.txt`,
 `typecheck.txt`, `lint.txt`, `doc-links.txt`, `public-docs.txt`.
 The live file omits the public relay capability URL and secrets.
+
+Follow-up verification on `ash/vuh-1743-delivery-followup`: **87 passed** across
+the six focused test files (native delivery, webhook, routing, operator cancel,
+operator failure and conversation driver). The eight owned native-delivery
+cases include the three interrupted-take paths and nested Reaction parents.
+The affected Clankie typecheck, scoped lint, formatting and docs checks pass.
+Final local gate files: `followup-green.txt`, `followup-typecheck.txt`,
+`followup-lint.txt` and `followup-docs.txt` in the same evidence directory.
 
 ## Activity names and remaining acceptance
 
