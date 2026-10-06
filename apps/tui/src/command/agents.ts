@@ -8,6 +8,8 @@ import {
   OperatorAgentNameSchema,
   type OperatorAgentPersona,
   type OperatorAgentRole,
+  OperatorConversationServiceRequestSchema,
+  WorkerReportPageSchema,
 } from "@clankie/protocol";
 import {
   createCaptainOperatorConversationClient,
@@ -22,6 +24,8 @@ const AGENTS_USAGE =
   "       clankie agents readopt SEAT --conversation ID\n" +
   "       clankie agents reports --conversation ID [--limit N]\n" +
   "       clankie agents reports ack DELIVERY_ID... --conversation ID\n" +
+  "       clankie agents reports ack --json-stdin --conversation ID\n" +
+  "       clankie agents reports ack-history DELIVERY_ID... --conversation ID\n" +
   "       clankie agents efficiency [review SEAT --json-stdin] --conversation ID\n" +
   "       clankie agents tidy-worktrees --repo PATH [--merged-into REF]\n" +
   `       clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
@@ -147,6 +151,9 @@ export async function runAgentsCommand(
     return response.json();
   }
   if (args[0] === "readopt" || args[0] === "reports") {
+    const jsonInput = args.includes("--json-stdin");
+    if (args.filter((arg) => arg === "--json-stdin").length > 1) throw new Error(AGENTS_USAGE);
+    args = args.filter((arg) => arg !== "--json-stdin");
     const first = args.findIndex((arg) => arg.startsWith("--"));
     if (first < 0) throw new Error(AGENTS_USAGE);
     const values = flags(
@@ -161,25 +168,46 @@ export async function runAgentsCommand(
     });
     if (!credential)
       throw new Error("Worker ownership and reports need the operator credential. Run clankie doctor.");
-    const client = createCaptainOperatorConversationClient(
-      createCaptainRouteClient({
-        host: commandHost(options),
-        captainToken: credential.token,
-        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-      }),
-    );
+    const transport = createCaptainRouteClient({
+      host: commandHost(options),
+      captainToken: credential.token,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    });
+    const client = createCaptainOperatorConversationClient(transport, transport);
     if (args[0] === "readopt") {
-      if (first !== 2) throw new Error(AGENTS_USAGE);
+      if (first !== 2 || jsonInput) throw new Error(AGENTS_USAGE);
       return { seatId: args[1], adopted: await client.readoptSeat!(args[1]!, conversationId) };
     }
-    if (args[1] === "ack") {
-      if (first < 3 || values.has("--limit")) throw new Error(AGENTS_USAGE);
+    if (args[1] === "ack" || args[1] === "ack-history") {
+      if ((jsonInput ? first !== 2 : first < 3) || values.has("--limit")) throw new Error(AGENTS_USAGE);
+      let deliveryIds = args.slice(2, first);
+      if (jsonInput) {
+        const page = WorkerReportPageSchema.parse(JSON.parse(await text(options.stdin ?? process.stdin)));
+        if (page.conversationId !== conversationId)
+          throw new Error("Worker report page belongs to a different conversation");
+        deliveryIds = page.ackDeliveryIds;
+      }
+      const operation =
+        args[1] === "ack-history" ? "acknowledge_worker_report_history" : "acknowledge_worker_reports";
+      const parsed = OperatorConversationServiceRequestSchema.safeParse({
+        op: operation,
+        schemaVersion: 1,
+        conversationId,
+        deliveryIds,
+      });
+      if (!parsed.success)
+        throw new Error(
+          `Supply ${args[1] === "ack-history" ? "1–1000" : "1–100"} exact delivery IDs from the returned report page`,
+        );
       return {
         conversationId,
-        acknowledged: await client.acknowledgeWorkerReports!(conversationId, args.slice(2, first)),
+        acknowledged:
+          args[1] === "ack-history"
+            ? await client.acknowledgeWorkerReportHistory!(conversationId, deliveryIds)
+            : await client.acknowledgeWorkerReports!(conversationId, deliveryIds),
       };
     }
-    if (first !== 1) throw new Error(AGENTS_USAGE);
+    if (first !== 1 || jsonInput) throw new Error(AGENTS_USAGE);
     const limit = values.has("--limit") ? Number(values.get("--limit")) : undefined;
     if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100))
       throw new Error(AGENTS_USAGE);

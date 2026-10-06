@@ -216,7 +216,8 @@ export function createOperatorService(
     if (
       request.op === "readopt_seat" ||
       request.op === "worker_reports" ||
-      request.op === "acknowledge_worker_reports"
+      request.op === "acknowledge_worker_reports" ||
+      request.op === "acknowledge_worker_report_history"
     ) {
       if (authority) await authorizeQuestion(authority);
       const owner: ConversationOwner = { conversationId: request.conversationId };
@@ -244,6 +245,19 @@ export function createOperatorService(
             request.conversationId,
             request.limit === undefined ? {} : { limit: request.limit },
           ),
+        };
+      }
+      if (request.op === "acknowledge_worker_report_history") {
+        if (!authority || authority.principal.kind !== "operator")
+          throw new ConversationRefusedError("Worker report history requires the operator owner");
+        await authorizeQuestion(authority);
+        if (!ctx.conversations.acknowledgeInboundReportHistory(request.conversationId, request.deliveryIds))
+          throw new ConversationRefusedError("Worker report history IDs must belong to this conversation");
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          conversationId: request.conversationId,
+          acknowledged: new Set(request.deliveryIds).size,
         };
       }
       if (!ctx.conversations.acknowledgeInboundReports(request.conversationId, request.deliveryIds))
@@ -420,8 +434,8 @@ export function createOperatorService(
           result: { outcome: "unseated", herdrPaneId: request.stance.herdrPaneId },
         };
       }
-      const standing = ctx.stances.read(seat.seatId);
-      const stance = ctx.stances.state(seat.seatId, request.stance);
+      const standing = ctx.stances.read(seat.seatId, seat.occupantId);
+      const stance = ctx.stances.state(seat.seatId, request.stance, seat.occupantId);
       // The ship is the moment it says it landed something, not the whole
       // time the statement stands: restating a standing celebration is the
       // same landing, and counting it twice would be the host inflating it.
@@ -647,7 +661,7 @@ export function createOperatorService(
           result: { outcome: "failed", reason: "harness_unavailable", detail: seat.harness },
         };
       }
-      const standing = ctx.stances.read(seat.seatId);
+      const standing = ctx.stances.read(seat.seatId, seat.occupantId);
       const remainingMs = standing === undefined ? 0 : Date.parse(standing.expiresAt) - Date.now();
       const role = ctx.personas
         .all(ctx.liveSeats, () => undefined)
@@ -677,12 +691,16 @@ export function createOperatorService(
       ctx.herdrWatches.trackSeat(rehired.seatId);
       rehired.conversationId = ctx.conversations.conversationIdForPersona(rehired.personaId);
       if (standing !== undefined && remainingMs > 0) {
-        ctx.stances.state(rehired.seatId, {
-          herdrPaneId: moved.seat.paneId,
-          pose: standing.pose,
-          ...(standing.note === undefined ? {} : { note: standing.note }),
-          ttlMs: remainingMs,
-        });
+        ctx.stances.state(
+          rehired.seatId,
+          {
+            herdrPaneId: moved.seat.paneId,
+            pose: standing.pose,
+            ...(standing.note === undefined ? {} : { note: standing.note }),
+            ttlMs: remainingMs,
+          },
+          rehired.occupantId,
+        );
       }
       ctx.fleetChanges.touch();
       return { op: "move_seat", schemaVersion: 1, result: { outcome: "moved", seat: rehired } };

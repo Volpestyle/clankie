@@ -483,6 +483,14 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("acknowledge_worker_report_history"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      deliveryIds: z.array(z.string().uuid()).min(1).max(1000),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
@@ -911,6 +919,14 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("acknowledge_worker_report_history"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      acknowledged: z.number().int().min(0),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
@@ -1042,6 +1058,8 @@ export interface OperatorConversationServiceClient {
   readoptSeat?(seatId: string, conversationId: string): Promise<boolean>;
   workerReports?(conversationId: string, limit?: number): Promise<WorkerReportPage>;
   acknowledgeWorkerReports?(conversationId: string, deliveryIds: readonly string[]): Promise<number>;
+  /** Owner-only retirement of explicitly selected retained history. */
+  acknowledgeWorkerReportHistory?(conversationId: string, deliveryIds: readonly string[]): Promise<number>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
   fleet?(cursor?: string, signal?: AbortSignal): Promise<OperatorFleetSnapshot>;
   /** Park until present-tense activity changes. */
@@ -1276,6 +1294,17 @@ export function createOperatorConversationServiceClient(
       });
       if (result.op !== "acknowledge_worker_reports")
         throw new Error(`Unexpected ${result.op} result for worker report acknowledgment`);
+      return result.acknowledged;
+    },
+    async acknowledgeWorkerReportHistory(conversationId, deliveryIds) {
+      const result = await dispatch({
+        op: "acknowledge_worker_report_history",
+        schemaVersion: 1,
+        conversationId,
+        deliveryIds: [...deliveryIds],
+      });
+      if (result.op !== "acknowledge_worker_report_history")
+        throw new Error(`Unexpected ${result.op} result for worker report history acknowledgment`);
       return result.acknowledged;
     },
     async roster() {

@@ -3243,6 +3243,16 @@ returns the oldest unread reports with their original delivery IDs and exact tex
 Reading does not mark them read. After reviewing every offered report, run
 `clankie agents reports ack DELIVERY_ID... --conversation ID` (or
 `acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.
+You can pass the unmodified returned page on standard input with
+`clankie agents reports ack --json-stdin --conversation ID`; the page must name
+the same conversation. A page holds at most 100 IDs.
+For reviewed, retained history, the owner can run
+`clankie agents reports ack-history DELIVERY_ID... --conversation ID` to
+acknowledge up to 1,000 explicitly selected IDs, including migrated receipts
+that were never offered by the current runtime. This requires operator
+authentication; captain and paired-device credentials cannot use it. Unknown
+IDs or IDs from another conversation reject the entire operation. New reports
+and reports outside the selected IDs remain unread.
 The roster exposes per-worker unread receipts and the fleet retains report rows
 for disappeared panes. A finished worker with pending or uncertain output shows
 “done, report not delivered”; confirmed transport alone still shows “report unread”.
@@ -3254,7 +3264,8 @@ legacy receipts remain uncertain and readable; they are never blindly resent.
 A matching original thread may retain its output while requiring re-adoption;
 that retention grants no control or dispatch until the owner repairs the binding.
 The API uses authenticated operator dispatch operations `readopt_seat`,
-`worker_reports`, and `acknowledge_worker_reports`, each naming the exact owning
+`worker_reports`, `acknowledge_worker_reports`, and the owner-only
+`acknowledge_worker_report_history`, each naming the exact owning
 `conversationId`. Credential and conversation authority are checked again at
 admission.
 
@@ -3494,7 +3505,7 @@ retired. Use `fleet set --tools off` to disable standing fleet tools.
 `/access` exposes status, verification and revocation; issue from the terminal.
 See [worker access](worker-access.md) for restrictions and account bindings.
 
-### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
+### `stance <working|thinking|stuck|hauling|resting|celebrate> [--activity KIND] [--note TEXT] [--for SECONDS]`
 
 For agents, not for people ([ADR 0148](adr/0148-an-agent-moves-its-own-figure.md)).
 Say what you are doing with your own figure in the commons; the operator's app
@@ -3517,6 +3528,16 @@ goes back to being posed by what its pane is observed to be doing.
 
 `{"outcome":"unseated"}` means the pane holds no fleet seat — normal in a plain
 shell pane, and not an error.
+
+`--activity reading|editing|testing|planning|waiting` explicitly states the kind
+of work for the World activity bubble. For example, before a generic shell test
+run: `clankie stance working --activity testing --for 60`. The roster/fleet read
+returns `seat.activity` with its kind and `source: stated`, or `native_tool` when
+a fresh outstanding known native tool establishes it. Unknown kinds are refused;
+notes and shell arguments are never classified. Omitting `--activity` on the
+next stance clears it. The statement expires, belongs to this exact occupying
+session, and is absent for idle/offline seats. Unsupported native telemetry
+can still carry a live explicit statement; absence means unknown.
 
 ### `discord [status]`
 

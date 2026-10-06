@@ -47,6 +47,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }
+  | { op: "acknowledge_worker_report_history" }
   | { op: "presence" }
   | { op: "subagent_replay" }
   | { op: "composer_catalog" }
@@ -80,6 +81,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }
+  | { op: "acknowledge_worker_report_history" }
   | { op: "presence" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }

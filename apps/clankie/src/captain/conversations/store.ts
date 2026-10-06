@@ -1398,6 +1398,11 @@ export class ConversationStore {
     return acknowledgeInboundReports(this, conversationId, deliveryIds);
   }
 
+  /** The operator explicitly retires selected history; native receipts never call this. */
+  public acknowledgeInboundReportHistory(conversationId: string, deliveryIds: readonly string[]): boolean {
+    return acknowledgeInboundReports(this, conversationId, deliveryIds, { reviewedHistory: true });
+  }
+
   /** A native transport receipt is progress, never an acknowledgment that the lead read it. */
   public recordInboundReportDelivery(deliveryId: string, stage: DeliveryStage): boolean {
     return recordInboundReportDelivery(this, deliveryId, stage);

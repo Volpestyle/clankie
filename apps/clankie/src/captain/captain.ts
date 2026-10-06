@@ -10,6 +10,7 @@ import {
   readSeatCommitClaim,
   readSeatCommitBaseline,
   readSeatTelemetry,
+  readSeatActivity,
   type SeatCommitBaseline,
 } from "./seat-telemetry.ts";
 import {
@@ -1902,6 +1903,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let seatSubagents = "";
   const withRemoteGoals = createRemoteCodexGoals({ shell: (fleet) => deps.fleets?.shell?.(fleet) });
   let seatWork = "";
+  let seatActivities = "";
   let captainGoals = "";
   const parentEdges = new HerdrParentEdges(join(options.stateDir, "herdr-parent-edges.json"));
 
@@ -2232,12 +2234,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       seats.map(async (seat) => {
         // A lapsed stance simply is not here, so no surface has to reason about
         // how old the thing it is drawing is (ADR 0148).
-        const stance = stances.read(seat.seatId);
+        const stance = stances.read(seat.seatId, seat.occupantId);
         // The ledger is the authority for what a seat has earned; the room reads
         // this and never keeps a score of its own (app ADR 0030).
         const lastOutcome = seatLedger.lastOutcome(seat.seatId);
         const parentSeatId = parents.get(seat.seatId);
         const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
+        const activity =
+          observed === undefined ? undefined : await readSeatActivity(observed, seat.status, stance);
         let workerReportRouting: WorkerReportRouting | undefined;
         let leadOwner: ConversationOwner | undefined;
         let admitted = true;
@@ -2288,6 +2292,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ...seat,
           conversationId: conversations.conversationIdForPersona(seat.personaId),
           ...(stance === undefined ? {} : { stance }),
+          ...(activity === undefined ? {} : { activity }),
           ...(lastOutcome === undefined ? {} : { lastOutcome }),
           ...(parentSeatId === undefined ? {} : { parentSeatId }),
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
@@ -2385,6 +2390,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         )
       )
         efficiency.flags.push("overlap");
+    }
+    const nextActivities = JSON.stringify(projected.map((seat) => [seat.occupantId, seat.activity ?? null]));
+    if (nextActivities !== seatActivities) {
+      seatActivities = nextActivities;
+      fleetChanges.touch();
     }
     const fingerprint = fleetRoundEvidence(projected).fingerprint;
     if (fingerprint !== efficiencyFingerprint) {

@@ -90,11 +90,15 @@ export function createCaptainOperatorConversationClient(
   ownerFetcher?: CaptainRouteFetcher,
 ): OperatorConversationClient {
   const dispatch: OperatorConversationServiceDispatch = async (request, signal) => {
-    const ownerRequired = request.op === "autonomy" && operatorAutonomyCommandRequiresOwner(request.command);
+    const ownerError =
+      request.op === "acknowledge_worker_report_history"
+        ? "Owner authentication required to acknowledge report history."
+        : "Owner authentication required to start, accept, resume, or enable autonomous goals.";
+    const ownerRequired =
+      request.op === "acknowledge_worker_report_history" ||
+      (request.op === "autonomy" && operatorAutonomyCommandRequiresOwner(request.command));
     if (ownerRequired && ownerFetcher === undefined) {
-      throw new OperatorConversationClientError(
-        "Owner authentication required to start, accept, resume, or enable autonomous goals.",
-      );
+      throw new OperatorConversationClientError(ownerError);
     }
     const transport =
       ownerFetcher &&
@@ -111,9 +115,7 @@ export function createCaptainOperatorConversationClient(
     });
     if (!response.ok) {
       if (ownerRequired && response.status === 403) {
-        throw new OperatorConversationClientError(
-          "Owner authentication required to start, accept, resume, or enable autonomous goals.",
-        );
+        throw new OperatorConversationClientError(ownerError);
       }
       if (response.status === 409) {
         const body: unknown = await response.json();
