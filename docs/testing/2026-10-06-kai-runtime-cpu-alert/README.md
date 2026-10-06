@@ -2,7 +2,10 @@
 
 Candidate branch `fix/kai-runtime-cpu-alert`, based on `7ee4da04`.
 Source: [`c9475545`](https://github.com/Volpestyle/clankie/commit/c9475545b10069bf3a65bcee2633461fdc7905da).
-That source alone is held: integration also requires the capture-only Windows
+Sustained detector probe correction:
+[`f7942f2d`](https://github.com/Volpestyle/clankie/commit/f7942f2d8bbe1a3e238d6cf171fe16dc34c77d4f).
+The lead holds this stack pending the latency follow-up below and composed
+acceptance. Integration also requires the capture-only Windows
 correction described below and present in this branch's
 [observer command](../../../apps/clankie/src/herdr-fleet.ts).
 This is an owned Captain/API result. Full live single-digit idle and actual
@@ -53,13 +56,109 @@ of one core. Own builds/tests were quiescent during these windows.
 
 CPU fell 13.7% relative in this component workload. Health tail latency rose;
 ambient fleet/machine traffic was uncontrolled, so no latency improvement or
-canary pass is claimed. The owned workload omits connected providers, app traffic
-and legacy installed worker transports; it cannot establish the original live
+canary pass is claimed from that original pair. The owned workload omits connected
+providers, app traffic and legacy installed worker transports; it cannot establish the original live
 13.21% target. It did not start resident remote relays, so that optimization is
 covered by transport checks rather than these numbers. Helper/Herdr/remote CPU
 is not included in body CPU. [Before](before.json) and [after](after.json) retain
 exact counters. The executable fixture and raw samples remain under ignored
 `.local/bench/`; invalid authentication/preparation trials are retained and excluded.
+
+## Health latency hold: bisect, cause and correction
+
+The lead held `53cb4c91` because the original pair's p95 rose from 100.80 to
+297.81 ms. Four serial owned instances used the exact original pooled-fetch
+fixture, unchanged install, warmup, workload and CPU math:
+
+| Source                            |    CPU | Health p95 |
+| --------------------------------- | -----: | ---------: |
+| `7ee4da04`, first baseline        | 3.907% | 120.938 ms |
+| `c9475545`, census/native routing | 3.266% | 119.036 ms |
+| `53cb4c91`, Windows correction    | 3.714% | 145.989 ms |
+| `7ee4da04`, repeated baseline     | 3.027% | 208.470 ms |
+
+This bisect does not establish a source-caused latency regression. Even unchanged
+baseline varied from 120.94 to 208.47 ms. The workload never starts a resident
+relay, so the Windows correction is not executed in these measurements.
+[Bisect counters and all 100 samples](latency-bisect.json) retain the failures of
+the original measurement assumption; the original 100.80/297.81 pair stays above.
+
+A passive trace on `53cb4c91` isolated the worst pooled request:
+
+| Phase                               |   Duration |
+| ----------------------------------- | ---------: |
+| Complete pooled request             | 212.055 ms |
+| Request created to headers sent     | 211.097 ms |
+| Event-loop idle during request      | 211.010 ms |
+| Server handler                      |   0.367 ms |
+| Following fresh native HTTP control |   1.311 ms |
+
+The delay precedes sending; it is not a 212 ms health handler or sustained CPU
+work. This matches the installed Node idle-fetch issue already documented in the
+[VUH-1707 health investigation](../2026-10-05-health-latency/README.md).
+[Passive timestamps and controls](passive-client-delay.json) use diagnostics
+channels and event-loop counter deltas, with no profiler, histogram or new timer.
+They are diagnostic evidence, with 25 additional control requests. An earlier
+diagnostic used a 10 ms event-loop histogram and is excluded: that wakeup can
+hide the delay.
+
+The owned measurement now uses the deploy sampler's fresh native HTTP transport,
+with a five-second full-body timeout and 32 KiB bound. **Both baseline and
+candidate use that method.** Ten roster pollers, one mailbox poll, 25 five-second
+health samples, ten-second warmup, installed dependencies and CPU counter math
+stay unchanged. Two serial pairs on the same source inputs produced:
+
+| Pair     | Source     |    CPU | Health p95 | Poll requests | Errors / model turns |
+| -------- | ---------- | -----: | ---------: | ------------: | -------------------: |
+| A before | `7ee4da04` | 3.558% |  22.237 ms |           352 |                0 / 0 |
+| A after  | `53cb4c91` | 2.922% |  17.970 ms |           352 |                0 / 0 |
+| B before | `7ee4da04` | 3.473% |  27.019 ms |           350 |                0 / 0 |
+| B after  | `53cb4c91` | 2.648% |  16.932 ms |           352 |                0 / 0 |
+
+[Matched native records](native-health-pairs.json) retain all counters and 100
+samples. Each window has one stable process/boot identity. CPU and p95 improve
+together in both pairs. These are component measurements; they do not establish
+single-digit idle for the complete live service. Ambient fleet work remains
+uncontrolled, and helper/remote CPU is excluded. The original pooled baseline
+must not be compared with a fresh-native candidate as a matched pair.
+
+The production sustained detector also still used pooled fetch, even though the
+deploy canary already used fresh native HTTP. The follow-up shares the existing
+bounded native probe with `RuntimeHealthObserver`, including caller shutdown,
+complete-body timeout, status refusal, 32 KiB limit and local endpoint validation.
+Thresholds, incident duration, cooldown and native receipt fences are unchanged.
+A real TCP integration failed before the change because three idle probes reused
+one connection; it passes after the change with three fresh connections and no
+authorization header. The existing sampler's timeout/body/identity cases remain
+green. No global dispatcher or periodic wakeup was added.
+
+The final committed-source `f7942f2d` window used the same fresh-native fixture:
+**3.499% CPU / 19.624 ms p95** over 119.999 seconds, 352 poll requests, zero
+errors and zero model turns. Its CPU lies within the two fresh-native baseline
+values (3.473–3.558%); p95 is below both baseline values (22.237–27.019 ms).
+This does not establish an additional CPU reduction from the detector transport
+change. The fixture constructs the Captain/API, without starting the sustained
+observer; that observer's behavior is covered by the real HTTP and default alarm
+checks. [Final source counters, hashes and samples](final-native-health.json)
+retain the exact inputs. Own heavy checks finished before the measurement window;
+no profiler, histogram or comparative control ran during it.
+
+The exact executable fixtures are archived as text: [original measurement](original-measurement.mts.txt),
+[fresh-native measurement](owned-measurement.mts.txt), and [passive diagnostic](passive-diagnostic.mts.txt).
+Run the selected fixture from `apps/clankie/.local/` so it resolves the app's real
+installed dependencies. The output goes to the root worktree's ignored `.local/bench/`.
+For example, from an owned, installed worktree at the selected source:
+
+```sh
+mkdir -p apps/clankie/.local
+cp docs/testing/2026-10-06-kai-runtime-cpu-alert/owned-measurement.mts.txt \
+  apps/clankie/.local/bench-native.mts
+~/.herdr-handoffs/clankie-backlog-20261003/bin/heavy clankie heavy -- \
+  pnpm --filter @clankie/clankie exec tsx .local/bench-native.mts UNIQUE_RUN_NAME
+```
+
+The fixture reads the already-configured inventories; it does not launch or
+steer existing lanes, publish a resident relay, or reproduce external providers.
 
 ## Real Windows observer correction
 
@@ -127,9 +226,10 @@ A separate explicit manual run uses every default, including five-minute dwell,
   --config vitest.config.ts apps/clankie/test/runtime-health-native.integration.test.ts
 ```
 
-The exact-default manual run passed in 324.4 seconds. One alarm was acknowledged
-at 13:16:07.393Z after 306,413 ms: CPU 61.1%, health 1,120 ms. One recovery was
-acknowledged at 13:16:22.539Z after a 321,559 ms incident: CPU 7.6%, health 1 ms.
+The exact-default manual run was repeated after the fresh-probe correction and
+passed in 324.5 seconds. One alarm was acknowledged at 14:25:11.744Z after
+306,587 ms: CPU 61.3%, health 1,111 ms. One recovery was acknowledged at
+14:25:26.892Z after a 321,736 ms incident: CPU 7.6%, health 1 ms.
 Both original event IDs received `acknowledged:true`, `deliveryStage:delivered`;
 both diagnostic outcomes were `owner_mailbox_delivered`. Service model turns: 0.
 The configured cooldown and no duplicate alarm while still hot are checked;
@@ -140,25 +240,45 @@ native TUI receipt or a completed owning-lead Linear check-in.
 
 ## Checks and handoff
 
-Clankie typecheck, changed TypeScript lint/format, 47 tests across six affected
-files, and the Markdown link check pass. The additional exact-default
-manual and real Windows tests pass (49 distinct affected cases total). The real owned Herdr checks
+The earlier census/routing/Windows gate passed Clankie typecheck, changed
+TypeScript lint/format, 47 tests across six affected files, the exact-default
+manual, real Windows test and Markdown links. The fresh-probe follow-up passed
+typecheck, changed TypeScript lint/format and 13 cases across the observer,
+sampler and native-delivery integration files, plus the repeated exact-default
+manual. The documentation link check passes across 455 Markdown files.
+The real owned Herdr checks
 confirm fresh complete snapshots, changed names, missing sockets and no subprocess
 fallback. The resident relay fixture still has a boundary at remote PowerShell/C#;
 the separate manual test above proves actual installed Windows census execution
 through the corrected fast path. Existing owner-change, uncertain-receipt and native
 alert routing coverage passes.
 
-Pell advanced the live runtime independently to `2acffdcf` while this work ran.
+Pell advanced the live runtime independently to `2acffdcf` during the original work.
 Its warm canary was 17.18% CPU / 2.03 ms health p95 and native alert unavailable;
 all six holds were preserved. Kai did not update/restart the live runtime, steer
 lanes or alter holds/budgets. The old profiled PID 74279 still listens on loopback inspector port 9229, but
-PID 45927 now owns the active HTTP port 4310. The old process was left untouched
+PID 45927 owned the active HTTP port 4310 at that observation. The old process was left untouched
 and reported 0.1% instantaneous CPU in a read-only check; this is not a sampled
 idle result. Pell was notified.
 
-Pell must integrate and check the composed source, then measure the full live body
-with the same quiet 120-second endpoint method. VUH-1702 still needs a controlled
+After the lead releases the source hold, Pell must integrate and check the
+composed source, then measure the full live body with the same quiet 120-second
+endpoint method. VUH-1702 still needs a controlled
 alert/recovery accepted by the actual original owner native lane and its next
 Linear check-in. VUH-1707's native-unavailable gap remains open until that route is
 proved. No issue was closed or deploy hold cleared by this branch.
+
+Ash's retained update receipt, source snapshot and process start-time chain now
+identify the original bridge PID 51139's loaded source as `e1f45750`. That pump
+throws after a failed or throwing acknowledgment, following notification.
+The exact triggering error remains unproved; the original stderr/receipt loss was
+not retained. Neither worker plugin telemetry nor an installed manifest proves
+the loaded code. Ash's Linear-wake fix recovers retained context only after the
+original native poll binds again; it does not revive this already-loaded stopped
+pump. Original owner acceptance therefore needs the lead's supervised MCP
+reconnect in the same Claude conversation, preserving pane `w3Z:p2N`, session
+`5bcd52ff-8d50-4139-962a-46b323c7a990`, `global-default` and original receipt
+fences. Kai's machine setup grant excludes existing-lane steering/restarts.
+The lead must select that recovery before the controlled original-TUI alarm,
+recovery and next Linear check-in can be proved. A protocol ACK or a retained
+`message_clankie` handoff does not establish those acceptances.

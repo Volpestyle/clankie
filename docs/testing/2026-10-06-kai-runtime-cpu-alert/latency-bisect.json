@@ -1,0 +1,1508 @@
+{
+  "method": "Original pooled global fetch, unchanged fixture, serial commit bisect; 25 health samples five seconds apart after 10-second warmup. CPU user+system counter difference / uptime difference.",
+  "fixtureSha256": "c2ad02394159f5663a14442a41ec1f57b89fd1384c29fcfe418b510ff0230690",
+  "runs": [
+    {
+      "sourceCommit": "7ee4da04",
+      "result": {
+        "mode": "bisect-base-a",
+        "pid": 80566,
+        "boot": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+        "elapsedMs": 119813.60645900003,
+        "cpuMicros": 4681501,
+        "cpuPercent": 3.9073199934116,
+        "healthP95Ms": 120.93783400001121,
+        "clients": 10,
+        "fleets": ["pc", "kh2"],
+        "requests": 351,
+        "errors": 0,
+        "turns": 0,
+        "spawns": {
+          "ps": 96,
+          "herdr:pane": 324,
+          "ssh": 236,
+          "git": 2,
+          "herdr:agent": 2
+        },
+        "scope": "Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled."
+      },
+      "samples": [
+        {
+          "at": "2026-10-06T13:48:15.002Z",
+          "latencyMs": 222.76366600000074,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 12265.688833,
+            "cpu": {
+              "userMicros": 2012759,
+              "systemMicros": 368169
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:19.782Z",
+          "latencyMs": 0.8933340000003227,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 17045.9355,
+            "cpu": {
+              "userMicros": 2224530,
+              "systemMicros": 392031
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:24.791Z",
+          "latencyMs": 11.818500000001222,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 22055.879917,
+            "cpu": {
+              "userMicros": 2318161,
+              "systemMicros": 413216
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:29.798Z",
+          "latencyMs": 18.155665999998746,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 27062.792292000002,
+            "cpu": {
+              "userMicros": 2375502,
+              "systemMicros": 432964
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:34.807Z",
+          "latencyMs": 26.947916999997688,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 32071.678417000003,
+            "cpu": {
+              "userMicros": 2574062,
+              "systemMicros": 456606
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:39.781Z",
+          "latencyMs": 0.8495000000038999,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 37045.791458,
+            "cpu": {
+              "userMicros": 2662113,
+              "systemMicros": 477448
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:44.781Z",
+          "latencyMs": 0.9526659999974072,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 42045.459792,
+            "cpu": {
+              "userMicros": 2921333,
+              "systemMicros": 504729
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:49.821Z",
+          "latencyMs": 42.01204200000211,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 47085.380207999995,
+            "cpu": {
+              "userMicros": 3206014,
+              "systemMicros": 532237
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:54.782Z",
+          "latencyMs": 0.8382910000000265,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 52046.059208000006,
+            "cpu": {
+              "userMicros": 3337989,
+              "systemMicros": 545444
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:48:59.780Z",
+          "latencyMs": 0.8599580000009155,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 57044.615167,
+            "cpu": {
+              "userMicros": 3576215,
+              "systemMicros": 573021
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:04.782Z",
+          "latencyMs": 1.061874999999418,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 62046.553042,
+            "cpu": {
+              "userMicros": 3671248,
+              "systemMicros": 595908
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:09.803Z",
+          "latencyMs": 23.006792000000132,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 67067.33383300001,
+            "cpu": {
+              "userMicros": 3890124,
+              "systemMicros": 621229
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:14.814Z",
+          "latencyMs": 34.89495899999747,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 72078.354708,
+            "cpu": {
+              "userMicros": 4012423,
+              "systemMicros": 645300
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:19.888Z",
+          "latencyMs": 108.15054200000304,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 77151.97475,
+            "cpu": {
+              "userMicros": 4310009,
+              "systemMicros": 705601
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:24.834Z",
+          "latencyMs": 54.12087499999325,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 82098.151292,
+            "cpu": {
+              "userMicros": 4585728,
+              "systemMicros": 747470
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:29.787Z",
+          "latencyMs": 7.077667000005022,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 87050.984917,
+            "cpu": {
+              "userMicros": 4653072,
+              "systemMicros": 763112
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:34.886Z",
+          "latencyMs": 108.0101250000007,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 92150.434458,
+            "cpu": {
+              "userMicros": 4769759,
+              "systemMicros": 790395
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:39.842Z",
+          "latencyMs": 62.96504100000311,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 97106.541375,
+            "cpu": {
+              "userMicros": 4984466,
+              "systemMicros": 819266
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:44.894Z",
+          "latencyMs": 114.90254100000311,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 102158.410833,
+            "cpu": {
+              "userMicros": 5274713,
+              "systemMicros": 849191
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:49.898Z",
+          "latencyMs": 118.01262500000303,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 107161.698167,
+            "cpu": {
+              "userMicros": 5373140,
+              "systemMicros": 876686
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:54.901Z",
+          "latencyMs": 120.93783400001121,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 112165.23091700001,
+            "cpu": {
+              "userMicros": 5481085,
+              "systemMicros": 910235
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:49:59.867Z",
+          "latencyMs": 87.62012500000128,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 117131.079042,
+            "cpu": {
+              "userMicros": 5555896,
+              "systemMicros": 939224
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:04.780Z",
+          "latencyMs": 0.89558300000499,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 122043.94629200001,
+            "cpu": {
+              "userMicros": 5803076,
+              "systemMicros": 974243
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:09.794Z",
+          "latencyMs": 15.027208999992581,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 127058.227333,
+            "cpu": {
+              "userMicros": 5899762,
+              "systemMicros": 1004505
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:14.815Z",
+          "latencyMs": 37.0487500000163,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "6f3f813e-8af7-417d-87d6-8498b7456e71",
+            "pid": 80566,
+            "uptimeMs": 132079.29529200002,
+            "cpu": {
+              "userMicros": 6027995,
+              "systemMicros": 1034434
+            }
+          }
+        }
+      ]
+    },
+    {
+      "sourceCommit": "c9475545",
+      "result": {
+        "mode": "bisect-source",
+        "pid": 19438,
+        "boot": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+        "elapsedMs": 120108.20212499998,
+        "cpuMicros": 3922539,
+        "cpuPercent": 3.2658377451339278,
+        "healthP95Ms": 119.03608299999905,
+        "clients": 10,
+        "fleets": ["pc", "kh2"],
+        "requests": 352,
+        "errors": 0,
+        "turns": 0,
+        "spawns": {
+          "ps": 96,
+          "ssh": 104,
+          "herdr:agent": 1
+        },
+        "scope": "Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled."
+      },
+      "samples": [
+        {
+          "at": "2026-10-06T13:50:27.842Z",
+          "latencyMs": 40.89966699999968,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 12214.185542,
+            "cpu": {
+              "userMicros": 1909032,
+              "systemMicros": 296819
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:32.868Z",
+          "latencyMs": 66.23941600000035,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 17240.333125,
+            "cpu": {
+              "userMicros": 2002478,
+              "systemMicros": 308641
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:37.871Z",
+          "latencyMs": 69.24874999999884,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 22242.959625,
+            "cpu": {
+              "userMicros": 2242008,
+              "systemMicros": 322131
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:42.803Z",
+          "latencyMs": 1.100125000000844,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 27175.367959,
+            "cpu": {
+              "userMicros": 2470291,
+              "systemMicros": 335684
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:47.802Z",
+          "latencyMs": 1.001166000001831,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 32174.718292,
+            "cpu": {
+              "userMicros": 2553415,
+              "systemMicros": 346049
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:52.859Z",
+          "latencyMs": 57.42179199999373,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 37230.600834,
+            "cpu": {
+              "userMicros": 2640146,
+              "systemMicros": 356146
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:50:57.803Z",
+          "latencyMs": 1.1580420000027516,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 42175.262125,
+            "cpu": {
+              "userMicros": 2702823,
+              "systemMicros": 369352
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:02.803Z",
+          "latencyMs": 1.0671670000010636,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 47175.535584000005,
+            "cpu": {
+              "userMicros": 2911940,
+              "systemMicros": 383106
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:07.802Z",
+          "latencyMs": 0.846624999998312,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 52174.664749999996,
+            "cpu": {
+              "userMicros": 3044147,
+              "systemMicros": 399692
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:12.803Z",
+          "latencyMs": 0.9675409999981639,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 57175.056625000005,
+            "cpu": {
+              "userMicros": 3316902,
+              "systemMicros": 418409
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:17.838Z",
+          "latencyMs": 36.40845799999806,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 62210.246792,
+            "cpu": {
+              "userMicros": 3537032,
+              "systemMicros": 434091
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:22.905Z",
+          "latencyMs": 103.2010420000006,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 67277.401542,
+            "cpu": {
+              "userMicros": 3658200,
+              "systemMicros": 449960
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:27.803Z",
+          "latencyMs": 0.9967499999911524,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 72175.233834,
+            "cpu": {
+              "userMicros": 3879793,
+              "systemMicros": 465886
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:32.818Z",
+          "latencyMs": 15.866416999997455,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 77190.444125,
+            "cpu": {
+              "userMicros": 3939805,
+              "systemMicros": 478883
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:37.880Z",
+          "latencyMs": 77.99454099999275,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 82251.829667,
+            "cpu": {
+              "userMicros": 4026504,
+              "systemMicros": 491657
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:42.916Z",
+          "latencyMs": 114.2217079999973,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 87287.932542,
+            "cpu": {
+              "userMicros": 4239592,
+              "systemMicros": 506998
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:47.921Z",
+          "latencyMs": 119.03608299999905,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 92292.691334,
+            "cpu": {
+              "userMicros": 4301427,
+              "systemMicros": 518750
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:52.807Z",
+          "latencyMs": 5.471833999996306,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 97179.137959,
+            "cpu": {
+              "userMicros": 4535510,
+              "systemMicros": 538843
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:51:57.803Z",
+          "latencyMs": 0.8248339999991003,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 102175.399709,
+            "cpu": {
+              "userMicros": 4631573,
+              "systemMicros": 557550
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:02.804Z",
+          "latencyMs": 0.8395840000011958,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 107175.5035,
+            "cpu": {
+              "userMicros": 4697436,
+              "systemMicros": 572851
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:07.809Z",
+          "latencyMs": 6.643624999996973,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 112180.55604200001,
+            "cpu": {
+              "userMicros": 4961520,
+              "systemMicros": 592708
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:12.850Z",
+          "latencyMs": 47.02708300000813,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 117221.479125,
+            "cpu": {
+              "userMicros": 5058563,
+              "systemMicros": 609433
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:17.891Z",
+          "latencyMs": 88.97891700000037,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 122262.38075000001,
+            "cpu": {
+              "userMicros": 5303325,
+              "systemMicros": 633728
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:22.842Z",
+          "latencyMs": 39.92158399999607,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 127213.702125,
+            "cpu": {
+              "userMicros": 5388865,
+              "systemMicros": 649688
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:27.951Z",
+          "latencyMs": 148.09700000000885,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "d8587f64-0900-43b8-b09b-186ecf6c6b8d",
+            "pid": 19438,
+            "uptimeMs": 132322.38766699997,
+            "cpu": {
+              "userMicros": 5459111,
+              "systemMicros": 669279
+            }
+          }
+        }
+      ]
+    },
+    {
+      "sourceCommit": "53cb4c91",
+      "result": {
+        "mode": "bisect-head",
+        "pid": 54436,
+        "boot": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+        "elapsedMs": 119963.259375,
+        "cpuMicros": 4454976,
+        "cpuPercent": 3.7136170050814776,
+        "healthP95Ms": 145.9892919999984,
+        "clients": 10,
+        "fleets": ["pc", "kh2"],
+        "requests": 351,
+        "errors": 0,
+        "turns": 0,
+        "spawns": {
+          "ps": 92,
+          "herdr:agent": 2,
+          "ssh": 106
+        },
+        "scope": "Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled."
+      },
+      "samples": [
+        {
+          "at": "2026-10-06T13:52:41.137Z",
+          "latencyMs": 74.01183300000048,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 12317.86075,
+            "cpu": {
+              "userMicros": 1935825,
+              "systemMicros": 322008
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:46.153Z",
+          "latencyMs": 89.48675000000003,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 17333.797584,
+            "cpu": {
+              "userMicros": 2178142,
+              "systemMicros": 342798
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:51.156Z",
+          "latencyMs": 93.16066599999976,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 22337.324667,
+            "cpu": {
+              "userMicros": 2441289,
+              "systemMicros": 361754
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:52:56.073Z",
+          "latencyMs": 8.924125000001368,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 27254.098792,
+            "cpu": {
+              "userMicros": 2524568,
+              "systemMicros": 372146
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:01.083Z",
+          "latencyMs": 20.63683300000048,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 32264.27725,
+            "cpu": {
+              "userMicros": 2773295,
+              "systemMicros": 389651
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:06.136Z",
+          "latencyMs": 73.16987500000687,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 37317.104792000006,
+            "cpu": {
+              "userMicros": 3035304,
+              "systemMicros": 403295
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:11.115Z",
+          "latencyMs": 51.543750000004366,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 42294.494417,
+            "cpu": {
+              "userMicros": 3162484,
+              "systemMicros": 419113
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:16.064Z",
+          "latencyMs": 0.9256250000034925,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 47244.479542,
+            "cpu": {
+              "userMicros": 3250765,
+              "systemMicros": 432323
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:21.157Z",
+          "latencyMs": 92.3674170000013,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 52337.642,
+            "cpu": {
+              "userMicros": 3456291,
+              "systemMicros": 444804
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:26.066Z",
+          "latencyMs": 0.9225000000005821,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 57246.387749999994,
+            "cpu": {
+              "userMicros": 3549827,
+              "systemMicros": 463263
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:31.081Z",
+          "latencyMs": 19.044000000001688,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 62262.182292,
+            "cpu": {
+              "userMicros": 3788370,
+              "systemMicros": 485891
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:36.194Z",
+          "latencyMs": 130.22766700001375,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 67374.14125,
+            "cpu": {
+              "userMicros": 3881013,
+              "systemMicros": 501671
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:41.065Z",
+          "latencyMs": 0.911166999998386,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 72245.45937499999,
+            "cpu": {
+              "userMicros": 3958770,
+              "systemMicros": 514811
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:46.126Z",
+          "latencyMs": 61.408582999996725,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 77306.319959,
+            "cpu": {
+              "userMicros": 4218192,
+              "systemMicros": 538844
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:51.126Z",
+          "latencyMs": 61.563584000003175,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 82306.88341699999,
+            "cpu": {
+              "userMicros": 4339107,
+              "systemMicros": 556381
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:53:56.082Z",
+          "latencyMs": 18.953916999991634,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 87262.855167,
+            "cpu": {
+              "userMicros": 4562343,
+              "systemMicros": 576852
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:01.211Z",
+          "latencyMs": 145.9892919999984,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 92391.255167,
+            "cpu": {
+              "userMicros": 4682910,
+              "systemMicros": 594524
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:06.215Z",
+          "latencyMs": 149.91237499999988,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 97395.277959,
+            "cpu": {
+              "userMicros": 4743286,
+              "systemMicros": 608119
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:11.155Z",
+          "latencyMs": 90.85854200000176,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 102335.644042,
+            "cpu": {
+              "userMicros": 4976426,
+              "systemMicros": 627970
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:16.064Z",
+          "latencyMs": 0.99795799999265,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 107244.68824999999,
+            "cpu": {
+              "userMicros": 5074405,
+              "systemMicros": 646021
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:21.066Z",
+          "latencyMs": 0.8850830000010319,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 112246.757667,
+            "cpu": {
+              "userMicros": 5362859,
+              "systemMicros": 670224
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:26.092Z",
+          "latencyMs": 28.115041999990353,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 117272.378667,
+            "cpu": {
+              "userMicros": 5609441,
+              "systemMicros": 689734
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:31.132Z",
+          "latencyMs": 66.90687500000058,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 122312.755459,
+            "cpu": {
+              "userMicros": 5693576,
+              "systemMicros": 706349
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:36.138Z",
+          "latencyMs": 73.53204200000619,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 127318.31525,
+            "cpu": {
+              "userMicros": 5759997,
+              "systemMicros": 724437
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:41.101Z",
+          "latencyMs": 35.98720800000592,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "1b65c2e8-eb33-4842-9e96-f85784637c88",
+            "pid": 54436,
+            "uptimeMs": 132281.120125,
+            "cpu": {
+              "userMicros": 5968790,
+              "systemMicros": 744019
+            }
+          }
+        }
+      ]
+    },
+    {
+      "sourceCommit": "7ee4da04",
+      "result": {
+        "mode": "bisect-base-b",
+        "pid": 88633,
+        "boot": "ed153704-03b7-4db9-835a-41d99555d103",
+        "elapsedMs": 119680.912292,
+        "cpuMicros": 3622593,
+        "cpuPercent": 3.0268761581308152,
+        "healthP95Ms": 208.47020899999188,
+        "clients": 10,
+        "fleets": ["pc", "kh2"],
+        "requests": 351,
+        "errors": 0,
+        "turns": 0,
+        "spawns": {
+          "ps": 92,
+          "herdr:pane": 322,
+          "ssh": 232
+        },
+        "scope": "Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled."
+      },
+      "samples": [
+        {
+          "at": "2026-10-06T13:54:54.361Z",
+          "latencyMs": 348.5569169999999,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 12326.030708,
+            "cpu": {
+              "userMicros": 2085715,
+              "systemMicros": 373850
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:54:59.020Z",
+          "latencyMs": 6.881082999996579,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 16985.906,
+            "cpu": {
+              "userMicros": 2146686,
+              "systemMicros": 393920
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:04.048Z",
+          "latencyMs": 34.268167000001995,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 22013.460792,
+            "cpu": {
+              "userMicros": 2211889,
+              "systemMicros": 415964
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:09.087Z",
+          "latencyMs": 75.70054200000232,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 27053.071167,
+            "cpu": {
+              "userMicros": 2432821,
+              "systemMicros": 439754
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:14.087Z",
+          "latencyMs": 74.03262499999983,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 32052.441125,
+            "cpu": {
+              "userMicros": 2492335,
+              "systemMicros": 460662
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:19.048Z",
+          "latencyMs": 36.036832999998296,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 37013.49725,
+            "cpu": {
+              "userMicros": 2617772,
+              "systemMicros": 488356
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:24.110Z",
+          "latencyMs": 98.04141600000003,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 42075.800792,
+            "cpu": {
+              "userMicros": 2840617,
+              "systemMicros": 519817
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:29.016Z",
+          "latencyMs": 3.100749999997788,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 46981.299208000004,
+            "cpu": {
+              "userMicros": 2911225,
+              "systemMicros": 546666
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:34.020Z",
+          "latencyMs": 7.579958999995142,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 51985.824417,
+            "cpu": {
+              "userMicros": 2975182,
+              "systemMicros": 570997
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:39.023Z",
+          "latencyMs": 9.7065419999999,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 56988.976,
+            "cpu": {
+              "userMicros": 3060421,
+              "systemMicros": 595340
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:44.216Z",
+          "latencyMs": 203.83183400000416,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 62181.433124999996,
+            "cpu": {
+              "userMicros": 3108766,
+              "systemMicros": 607644
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:49.220Z",
+          "latencyMs": 208.47020899999188,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 67185.94241700001,
+            "cpu": {
+              "userMicros": 3354494,
+              "systemMicros": 637227
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:54.034Z",
+          "latencyMs": 20.810874999995576,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 71999.45825000001,
+            "cpu": {
+              "userMicros": 3481928,
+              "systemMicros": 662492
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:55:59.014Z",
+          "latencyMs": 1.162333000000217,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 76979.48554200001,
+            "cpu": {
+              "userMicros": 3711570,
+              "systemMicros": 689359
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:04.039Z",
+          "latencyMs": 26.0870419999992,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 82004.222625,
+            "cpu": {
+              "userMicros": 3783777,
+              "systemMicros": 715908
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:09.177Z",
+          "latencyMs": 162.99324999999953,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 87142.226583,
+            "cpu": {
+              "userMicros": 3857954,
+              "systemMicros": 744640
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:14.031Z",
+          "latencyMs": 18.07987499999581,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 91996.525542,
+            "cpu": {
+              "userMicros": 3984452,
+              "systemMicros": 775311
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:19.053Z",
+          "latencyMs": 40.90533300000243,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 97018.23525,
+            "cpu": {
+              "userMicros": 4221172,
+              "systemMicros": 805086
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:24.055Z",
+          "latencyMs": 41.79891700000735,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 102020.441917,
+            "cpu": {
+              "userMicros": 4308866,
+              "systemMicros": 833738
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:29.058Z",
+          "latencyMs": 44.860249999997905,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 107023.511833,
+            "cpu": {
+              "userMicros": 4552213,
+              "systemMicros": 869781
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:34.064Z",
+          "latencyMs": 50.944250000000466,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 112029.15891700001,
+            "cpu": {
+              "userMicros": 4622457,
+              "systemMicros": 897871
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:39.013Z",
+          "latencyMs": 0.7831250000017462,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 116978.229833,
+            "cpu": {
+              "userMicros": 4690072,
+              "systemMicros": 927916
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:44.073Z",
+          "latencyMs": 60.316958000010345,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 122038.22441699999,
+            "cpu": {
+              "userMicros": 4757360,
+              "systemMicros": 957537
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:49.020Z",
+          "latencyMs": 6.488416000007419,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 126984.96066699999,
+            "cpu": {
+              "userMicros": 4845462,
+              "systemMicros": 985966
+            }
+          }
+        },
+        {
+          "at": "2026-10-06T13:56:54.042Z",
+          "latencyMs": 29.026416000007885,
+          "processHealth": {
+            "schemaVersion": 1,
+            "instanceId": "ed153704-03b7-4db9-835a-41d99555d103",
+            "pid": 88633,
+            "uptimeMs": 132006.943,
+            "cpu": {
+              "userMicros": 5060170,
+              "systemMicros": 1021988
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
