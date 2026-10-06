@@ -188,9 +188,14 @@ export async function runWorkerToolRefreshCommand(
 ) {
   if (
     args[0] !== "refresh-tools" ||
-    !(args.length === 1 || (args.length === 3 && args[1] === "--pane" && args[2]))
+    !(
+      args.length === 1 ||
+      ((args.length === 3 || (args.length === 4 && args[3] === "--restart")) &&
+        args[1] === "--pane" &&
+        args[2])
+    )
   )
-    throw new Error("Usage: clankie harness refresh-tools [--pane PANE]");
+    throw new Error("Usage: clankie harness refresh-tools [--pane PANE [--restart]]");
   const credential = await resolveOperatorCredential({
     env: options.env ?? process.env,
     ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
@@ -201,8 +206,10 @@ export async function runWorkerToolRefreshCommand(
     {
       method: "POST",
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-      body: JSON.stringify(args.length === 1 ? {} : { paneId: args[2] }),
-      signal: AbortSignal.timeout(60_000),
+      body: JSON.stringify(
+        args.length === 1 ? {} : { paneId: args[2], ...(args[3] === "--restart" ? { restart: true } : {}) },
+      ),
+      signal: AbortSignal.timeout(90_000),
     },
   );
   if (!response.ok) throw new Error(`Worker tool refresh returned ${response.status}`);

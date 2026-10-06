@@ -56,8 +56,13 @@ export const FLEET_WORKER_CATALOG_REFRESH_PATH = "/v1/fleet/worker-tool-refresh"
 export const FleetWorkerCatalogRefreshRequestSchema = z
   .object({
     paneId: z.string().trim().min(1).max(256).optional(),
+    restart: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (input) => !input.restart || (input.paneId !== undefined && /^w[\w]+:p[\w]+$/u.test(input.paneId)),
+    { message: "Restart requires one canonical local pane" },
+  );
 export const FleetWorkerCatalogRefreshResultSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -70,7 +75,7 @@ export const FleetWorkerCatalogRefreshResultSchema = z
             seatId: z.string().min(1).max(256).optional(),
             threadId: z.string().min(1).max(256).optional(),
             revision: z.string().min(1).max(256),
-            outcome: z.enum(["refreshed", "skipped-busy", "failed"]),
+            outcome: z.enum(["refreshed", "restart-needed", "restarted", "skipped-busy", "failed"]),
             reason: z.string().max(1024).optional(),
           })
           .strict(),

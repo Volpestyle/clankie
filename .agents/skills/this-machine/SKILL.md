@@ -477,17 +477,27 @@ skill are independent facts. Static installation is not live native membership.
 Doctor and roster `workerTools` separately report observed worker catalogs,
 pending requests, missing tools and stalled reads with their reasons. An unknown
 catalog remains `not-observed`; those observations grant no tool authority.
-Local Codex seats on worker plugins before 0.6.5 show `restart needed`. An explicit
-operator can inspect the staging restart command `clankie harness restart-tools
---pane PANE`; it accepts canonical pane IDs only and does not implement a
-working automatic exit for current local Codex controllers. It requires idle, no draft,
-known lead ownership and settled receipts. Production local Codex currently lacks
-verified native exit; the command refuses `native_exit_unavailable` before any
-close intent. Owner native quit plus saved-thread resume is still required.
-A controller with verified native exit can journal resume of the same thread/account/cwd. A lost receipt stays held in tidy history:
-inspect the original operation before retrying. Never use this to replay an
-uncertain report or automatically restart existing lanes. Remote/Claude recovery
-is separate.
+Local Codex seats on worker plugins before 0.6.5 show `restart needed`.
+On the lead's explicit request, use `refresh_worker_tools` with one canonical
+`paneId` and `restart:true`, or `clankie harness refresh-tools --pane PANE
+--restart`. The service supervises normal native quit, proves the original TUI
+exited, then resumes the SAME native thread/account/cwd in the SAME pane with
+the current plugin. It preserves the observed local `--remote` mode. It refuses
+busy seats, unsent or unknown styled drafts, unproven thread/account/process,
+unknown hire provenance and unresolved report receipts. A shared remote
+controller with other loaded roots refuses. There is no owner prompt for this
+lead-authorized action. An uncertain quit/reload/resume stays held in
+`worker-tool-restarts`; inspect its original history ID before further action.
+Never replay an uncertain report, delete its claim or substitute a new thread.
+Deploy polling only diagnoses restart-needed; it never restarts. A busy explicit
+restart is refused and not scheduled for later. Remote machines/Claude remain
+separate recovery work.
+Bare local launches refuse `shell_account_unproven`: initial kernel environment
+strings do not prove the shell's current exported account selection. Normal keyboard quit has no atomic idle/draft
+condition in Herdr. Concurrent owner input or a native busy transition remains
+a review boundary; the candidate requires security review before existing-lane
+use. Verify the current native catalog and a new stored report after a mechanical
+restart; `restarted` alone does not prove those results.
 Roster `workerReportBridge` separately records the last report outcome, time and
 fixed safe reason. Done/idle hires held for fifteen minutes without a stored
 report since their latest brief carry `finished, unreported`. Three failed seats

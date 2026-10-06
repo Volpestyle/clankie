@@ -1,0 +1,28 @@
+{
+  "installed": {
+    "codex": "0.160.0",
+    "herdr": "0.9.3"
+  },
+  "outcome": "restarted",
+  "sameSeat": true,
+  "sameThread": true,
+  "newTuiPid": true,
+  "modelTurnsRequested": 0,
+  "observedNativeTurnsAtRestart": 0,
+  "draft": {
+    "outcome": "refused",
+    "reason": "unsent_draft"
+  },
+  "boundaries": {
+    "denied": {
+      "error": "Worker tool restart returned 403; inspect the original operation before retrying"
+    },
+    "alias": {
+      "error": "Worker tool restart returned 400; inspect the original operation before retrying"
+    },
+    "busy": {
+      "outcome": "refused",
+      "reason": "busy"
+    }
+  }
+}

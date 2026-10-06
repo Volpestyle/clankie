@@ -25,7 +25,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["harness"],
     lines: [
-      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh native plugins under current fleet policy\n  harness refresh-tools [--pane PANE]  Refresh an original native catalog\n  harness restart-tools --pane PANE [--report /absolute/report]  Check native same-thread restart admission (local Codex exit unavailable)",
+      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh native plugins under current fleet policy\n  harness refresh-tools [--pane PANE [--restart]]  Refresh, or explicitly restart an idle legacy seat\n  harness restart-tools --pane PANE [--report /absolute/report]  Supervise idle quit and same-pane same-thread resume",
     ],
   },
   {

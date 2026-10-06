@@ -228,7 +228,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     name: "refresh-tools",
     aliases: [],
     description: "Refresh running workers' Clankie tools in place",
-    argumentHint: "[--pane PANE]",
+    argumentHint: "[--pane PANE [--restart]]",
     takesArgument: true,
     async run(argument, shell) {
       try {
@@ -249,7 +249,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   commands.push({
     name: "restart-tools",
     aliases: [],
-    description: "Check native restart admission; current local Codex exit is unavailable",
+    description: "Supervise idle quit and same-pane same-thread Codex resume",
     argumentHint: "--pane PANE [--report /absolute/report]",
     takesArgument: true,
     async run(argument, shell) {

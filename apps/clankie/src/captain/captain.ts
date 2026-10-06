@@ -4,6 +4,8 @@ import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
 import { fleetInstructions } from "./captain-prompts.ts";
+import { SupervisedCodexRestart } from "./supervised-codex-restart.ts";
+import { readLocalCodexRecords } from "../local-codex-records.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
 import {
   prepareSeatTelemetry,
@@ -1693,6 +1695,48 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     changed: () => fleetChanges.touch(),
   });
   herdrWatches.tidy = paneTidy;
+  const supervisedRestart = new SupervisedCodexRestart({
+    directory: join(options.stateDir, "worker-tool-restarts"),
+    processHelper: join(options.repoRoot, "integrations/opencode-plugin/process-birth.py"),
+    runner: herdrRunner,
+    remoteServer: (paneId, threadId) => {
+      const records = readLocalCodexRecords().filter(
+        (record) =>
+          record.pane === paneId &&
+          record.nativeOccupantId ===
+            occupantIdForHerdrSession({ source: "herdr:codex", kind: "id", value: threadId }),
+      );
+      return records.length === 1 ? records[0] : undefined;
+    },
+    binding: async () => {
+      const binding = await deps.runtimes?.configuredBinding("default");
+      return binding;
+    },
+    resolve: async (ref) => {
+      if (!deps.agentSessions?.resolve) throw new Error("Saved history unavailable");
+      return deps.agentSessions.resolve(ref);
+    },
+    prepare: async (saved, originalHome) => {
+      const account = await savedCodexAccount(saved, codexAccounts(await settings()));
+      // An isolated launch home may symlink its sessions to the registered
+      // account. Keep that exact home/config; never switch credentials.
+      if (
+        (await realpath(join(originalHome, "sessions"))) !== (await realpath(join(account.home, "sessions")))
+      )
+        throw new Error("Original account is not the saved thread owner");
+      return { home: await realpath(originalHome) };
+    },
+    admitted: async (agent, authority) => {
+      const owner = herdrWatches.tidyProvenance(agent);
+      return (
+        owner !== "unknown" &&
+        owner !== "owner_interactive" &&
+        JSON.stringify(owner) === JSON.stringify(authority.owner) &&
+        (await validateConversationOwner(owner))
+      );
+    },
+    changed: () => fleetChanges.touch(),
+  });
 
   /**
    * The one lane into a seat — an operator DM, a room turn, and the captain's
@@ -2226,7 +2270,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.workerTools = {
           ...seat.workerTools!,
           restartNeeded: true,
-          remediation: `Restart needed: native exit is unavailable for local Codex. Preserve the original thread and receipts; owner native quit plus same-thread resume is required.`,
+          remediation: `Restart needed: the lead can request refresh_worker_tools with this canonical paneId and restart:true for supervised idle quit and same-pane same-thread resume. Busy seats, drafts, unproven threads and unresolved receipts refuse.`,
         };
       }
       const report = options.workerReportBridgeStatus?.(fleetId, pane);
@@ -3813,18 +3857,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         );
       };
       if (!(await receiptSettled())) return { outcome: "refused", reason: "report_receipt_unresolved" };
-      return paneTidy.restart(
-        { pane: input.paneId, ...(input.reportPath ? { reportPath: input.reportPath } : {}) },
-        {
-          owner,
-          current: () => !shutdown.signal.aborted && authority.current(),
-          authorize: async () => {
-            await authority.guard();
-            if (!(await receiptSettled())) throw new Error("report_receipt_unresolved");
-            return authority.current() && (await validateConversationOwner(owner));
-          },
+      return supervisedRestart.restart(input.paneId, {
+        owner,
+        current: () => !shutdown.signal.aborted && authority.current(),
+        authorize: async () => {
+          await authority.guard();
+          if (!(await receiptSettled())) throw new Error("report_receipt_unresolved");
+          return authority.current() && (await validateConversationOwner(owner));
         },
-      );
+      });
     },
 
     async laneMemoryCard(lane) {

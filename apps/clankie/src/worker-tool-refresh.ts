@@ -11,7 +11,7 @@ export interface WorkerCatalogRefreshAuthority {
   current(): boolean;
 }
 export type RefreshWorkerCatalogs = (
-  input: { paneId?: string },
+  input: { paneId?: string; restart?: boolean },
   authority?: WorkerCatalogRefreshAuthority,
 ) => Promise<FleetWorkerCatalogRefreshResult>;
 
@@ -52,6 +52,7 @@ export function createWorkerToolRefresh(input: {
     seat: Seat,
     target: string,
     authority?: WorkerCatalogRefreshAuthority,
+    restart = false,
   ): Promise<Result> => {
     const base = { paneId: seat.paneId, seatId: seat.seatId, revision: target };
     try {
@@ -73,6 +74,24 @@ export function createWorkerToolRefresh(input: {
         const result = results.find((row) => row.paneId === seat.paneId);
         if (result && result.revision !== target)
           return { ...base, outcome: "skipped-busy", reason: "original_controller_refresh_already_pending" };
+        if (!qualified && result?.reason === "original_codex_catalog_unverified") {
+          if (!restart) return { ...base, outcome: "restart-needed", reason: result.reason };
+          if (!authority || !input.captain.restartWorkerTools)
+            return { ...base, outcome: "failed", reason: "supervised_restart_authority_required" };
+          await guard(authority);
+          const restarted = await input.captain.restartWorkerTools({ paneId: seat.paneId }, authority);
+          return {
+            ...base,
+            outcome:
+              restarted.outcome === "restarted"
+                ? "restarted"
+                : restarted.reason === "busy"
+                  ? "skipped-busy"
+                  : "failed",
+            ...(restarted.reason ? { reason: restarted.reason } : {}),
+            ...(restarted.threadId ? { threadId: restarted.threadId } : {}),
+          };
+        }
         return result
           ? {
               ...base,
@@ -175,12 +194,14 @@ export function createWorkerToolRefresh(input: {
     }
   };
   const perform = async (
-    selection: { paneId?: string },
+    selection: { paneId?: string; restart?: boolean },
     target: string,
     authority?: WorkerCatalogRefreshAuthority,
   ): Promise<FleetWorkerCatalogRefreshResult> => {
     const serviceRevision = revision;
     await guard(authority);
+    if (selection.restart && (!selection.paneId || !authority))
+      throw new Error("Supervised restart requires one exact pane and lead authority");
     const roster = await input.captain.workerCatalogSeats?.();
     if (!roster) throw new Error("worker_catalog_roster_unavailable");
     const seats = roster
@@ -189,12 +210,12 @@ export function createWorkerToolRefresh(input: {
     const results: Result[] = [];
     // Avoid hundreds of simultaneous native-controller probes under fleet load.
     for (const seat of seats) {
-      const result = await run(seat, target, authority);
+      const result = await run(seat, target, authority, selection.restart === true);
       results.push(result);
       if (result.outcome !== "skipped-busy") {
         complete.set(key(seat, target), serviceRevision);
         if (pending.get(key(seat, target))?.revision === target) pending.delete(key(seat, target));
-      } else if (seat.harness !== "claude")
+      } else if (!selection.restart && seat.harness !== "claude")
         pending.set(key(seat, target), {
           seat,
           revision: target,

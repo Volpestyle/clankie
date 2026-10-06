@@ -135,7 +135,10 @@ export function createRuntimeUpdateRoutes(options: {
       await authority.guard();
       if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
       const result = await options.refreshWorkerCatalogs(
-        input.data.paneId === undefined ? {} : { paneId: input.data.paneId },
+        {
+          ...(input.data.paneId === undefined ? {} : { paneId: input.data.paneId }),
+          ...(input.data.restart === undefined ? {} : { restart: input.data.restart }),
+        },
         authority,
       );
       await authority.guard();

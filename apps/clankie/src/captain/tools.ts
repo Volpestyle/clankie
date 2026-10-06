@@ -183,8 +183,11 @@ export function captainTools(
             name: "refresh_worker_tools",
             label: "Refresh running worker tools",
             description:
-              "Refresh Clankie's MCP tools through original running native controllers, keeping the same threads and context. Omit paneId for all observed fleet workers. Returns per-seat refreshed, skipped-busy (deferred to idle), or failed with a reason. Preserves original receipts and never replays a report, starts a turn, or restarts a harness. Unsupported original controllers fail explicitly.",
-            parameters: Type.Object({ paneId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }),
+              "Refresh Clankie's tools on the original native threads. Omit paneId to inspect all workers. Legacy local Codex returns restart-needed. On the lead's explicit request, pass one canonical paneId and restart:true for supervised normal quit then same-pane same-thread resume with the current plugin. Refuses busy seats, unsent or unknown drafts, unproven threads/accounts and unresolved report receipts. Retains uncertain quit/resume attempts without replay. Deploy polling never restarts a seat.",
+            parameters: Type.Object({
+              paneId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+              restart: Type.Optional(Type.Boolean()),
+            }),
             executionMode: "sequential",
             execute: async (_id, input) => {
               const authority = captureConversationAuthority(turn.conversationAuthority);

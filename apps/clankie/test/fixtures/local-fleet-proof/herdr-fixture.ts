@@ -165,6 +165,8 @@ export async function isolatedHerdr(logDirectory: string) {
       controlPath,
       waitForClient,
       cli,
+      cliText: async (...args: string[]) =>
+        (await exec("herdr", args, { env, timeout: 5_000, maxBuffer: 1_000_000 })).stdout,
       startClient,
       close,
       request(name: string, selectedPane = pane, action?: "share" | "release"): Promise<Reply> {

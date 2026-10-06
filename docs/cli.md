@@ -368,32 +368,45 @@ idle, update only the private Clankie transport revision with a native config
 version check, and reload once. A lost mutation acknowledgment is held for
 read-only reconciliation. No turn or uncertain report is replayed.
 
-`clankie harness refresh-tools [--pane PANE]`, TUI `/refresh-tools [--pane PANE]`,
-and the operator tool `refresh_worker_tools` request one or all observed seats.
-The authenticated API is `POST /v1/fleet/worker-tool-refresh` with `{}` or
-`{"paneId":"PANE"}`. Each result is `refreshed`, `skipped-busy`, or `failed`
-with a reason. Busy requests remain pending under their original authority.
-Roster `workerTools` and `/doctor` show observed/expected plugin versions and
-whether the observed runtime revision is behind. Local Codex seats started on
-worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh
-success. The staging command `clankie harness restart-tools --pane PANE` (TUI
-`/restart-tools --pane PANE`) accepts canonical pane IDs only. It can take
-`--report /absolute/report` for a completed result. The current production local
-Codex adapter lacks verified native exit; an idle otherwise-eligible target
-returns `native_exit_unavailable` before any close intent. Automatic restart is
-unsupported. Owner native quit
-and saved-thread resume are required until that capability is available.
-The operator API is `POST /v1/fleet/worker-tool-restart` with
-`{"paneId":"PANE","reportPath":"/absolute/report"}` (`reportPath` is optional).
+`clankie harness refresh-tools [--pane PANE]`, TUI `/refresh-tools`, and
+`refresh_worker_tools` refresh one or all observed seats. Results include
+`refreshed`, `restart-needed`, `restarted`, `skipped-busy`, and `failed` with a
+reason. Busy in-place refresh requests remain pending under their original
+authority. Roster `workerTools` and doctor show observed/expected plugin versions
+and runtime revisions. Legacy local Codex catalogs show **restart needed**.
 
-Restart requires an idle seat, no draft, known lead ownership, saved results,
-settled report receipts, and a verified native exit controller. It rechecks the
-original occupant before exit, records the close, and resumes the same native
-thread through the saved account and working directory. The result returns the
-thread, history ID, and resumed seat ID. A missing exit/resume acknowledgment
-stays held in tidy history; inspect it before retrying. Restart is an explicit
-operator action, never automatic deployment recovery. Remote Codex and Claude
-restarts are outside this command. These fields grant no access.
+On the lead's explicit request, `clankie harness refresh-tools --pane PANE
+--restart` or `refresh_worker_tools({paneId: "PANE", restart: true})` supervises a
+normal native quit and same-pane `codex resume THREAD`. It preserves observed
+CLI flags, including a local `--remote` endpoint, the registered account home,
+cwd and thread history. The service verifies idle state, an empty styled input,
+original thread/process identity, lead hire provenance and settled report
+receipts before quitting. Unknown drafts, busy seats, ambiguous threads/accounts
+or another loaded root on a remote controller refuse. Deploy polling never
+restarts a worker, and busy restart requests are not automatically retried.
+Bare local launches refuse `shell_account_unproven`: a shell's initial kernel
+environment cannot prove its current exported account selection. A successful
+mechanical restart still needs a current native catalog and worker-report check.
+
+The authenticated API is `POST /v1/fleet/worker-tool-refresh` with `{}`, a
+`paneId`, or `{ "paneId": "PANE", "restart": true }`. Restart requires one
+canonical local pane ID. `clankie harness restart-tools --pane PANE` (TUI
+`/restart-tools`) and `POST /v1/fleet/worker-tool-restart` request the same
+supervised restart directly. The legacy optional `reportPath` is accepted for
+compatibility; restart retains the native history and existing report artifacts.
+
+Quit dispatch is journaled before Herdr sends the native double Ctrl+D. A
+kernel absence observation confirms the original TUI exited. Herdr launches
+only in the original shell-ready pane; no pane is closed or newly hired. A
+remote controller refreshes its original private Clankie transport configuration
+before same-thread resume. Public results return thread, history and seat IDs.
+Uncertain quit/reload/resume attempts stay held in `worker-tool-restarts`; inspect
+that original operation instead of deleting claims or launching again. Remote
+machines and Claude restart remain VUH-1742. These fields grant no authority.
+Idle, draft and process checks are observations before native keyboard quit;
+Herdr has no atomic idle/draft condition on that dispatch. Concurrent owner
+input or native work can race that boundary. Security review is required before
+using this candidate on existing lanes.
 
 Known native busy state also holds deployment metadata publication until idle.
 The current implementation cannot safely refresh remote Codex configurations

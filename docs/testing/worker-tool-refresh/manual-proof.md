@@ -4,8 +4,10 @@ Run after the core integrator lands and deploys the branch. This is a local
 service/native-seat proof; it requires no AWS operation or voice provider usage.
 VUH-1739 covers local Codex. Remote Codex and old Claude recovery are tracked
 separately in VUH-1742. Current local controllers use the in-place proof below;
-pre-0.6.5 worker plugins show restart needed. Automatic restart remains blocked
-because the production local Codex adapter lacks verified original-TUI exit.
+pre-0.6.5 worker plugins show restart needed. Automatic restart is never requested. An explicit lead request uses supervised
+normal quit and kernel-confirmed exit before same-pane same-thread resume.
+The new supervised fallback is a review candidate. Its observational checks do
+not make native keyboard quit atomic with owner input or busy transitions.
 
 1. Record deployed core SHA, worker plugin version, original pane IDs, original
    native root/descendant session IDs and the native Clankie tool inventory.
@@ -48,27 +50,34 @@ procedure grants no authority to restart an existing lane.
 2. Retain any original receipt claim. An unresolved claim/lock or service fence,
    busy native turn, unsent draft or missing saved result must refuse restart
    without another report POST or a second TUI.
-3. Current production local Codex must return `native_exit_unavailable` before
-   saving a close intent, with the original TUI intact. This is a capability
-   refusal, not a successful restart. The following positive proof applies only
-   once a verified native exit capability exists. With the receipt settled and
-   the seat idle, run one command:
-   `clankie harness restart-tools --pane PANE`. Add `--report /absolute/report`
-   only when the completed result has not already been retained. Record its
-   `historyId`, original `threadId`, and `resumedSeatId`.
-4. Verify the same native thread UUID, saved account and cwd after native exit
-   and resume. Verify the new plugin/catalog contains both peer tools. Make one
-   new deliberate report and require a new stored receipt, with no replay of
-   the old report. Require that roster/doctor no longer says restart needed.
-5. A lost exit or resume acknowledgment remains held in tidy history. Inspect
-   that exact operation; do not invoke restart again or substitute another
-   thread to make the result appear successful.
+3. With the original receipt settled, the seat idle and its styled composer
+   empty, request `refresh_worker_tools` with its canonical `paneId` and
+   `restart:true`, or `clankie harness refresh-tools --pane PANE --restart`.
+   Record the original thread/account/cwd, history ID and returned seat ID.
+4. Observe Herdr's normal native quit and the original TUI's kernel-confirmed
+   exit before resumption. The original shell/pane remains; no new tab or hire
+   appears. Require the SAME native thread UUID, account home, cwd and context
+   after resumption. A local `--remote` launch keeps its original endpoint.
+5. Verify the current plugin/catalog contains both peer tools. Make one new
+   deliberate report and require a new stored receipt without replaying the old
+   report. Require roster/doctor to stop showing restart needed.
+6. A lost quit, catalog reload or resume acknowledgment remains held in
+   `worker-tool-restarts`. Inspect that exact operation; never delete its claim,
+   invoke another restart or substitute another thread to fabricate success.
 
-The manual `SEAT_REFRESH_NATIVE_TEST=1` test uses a real owned Herdr namespace,
-the production atomic CLI installer in an owned prefix, and loopback HTTP. It
-proves unsupported-occupant, authorization and schema refusals with the original
-shell PID unchanged and zero close/hire effects. It does not prove a successful
-old-plugin native restart; retain that live canary result separately.
+`SUPERVISED_CODEX_ACCOUNT_HOME="$CODEX_HOME" SUPERVISED_CODEX_RESTART_TEST=1`
+runs installed Codex, a real owned Herdr
+namespace and loopback HTTP/CLI against the production restart service. It
+creates owned native fixture context without a model/provider turn. Preserve
+its actual results separately from the required old-plugin live canary: a
+mechanical restart alone does not prove the new worker report/catalog route.
+The owned test also exercises a real bounded native shell task, then checks busy
+refusal without another quit. It requests no model/provider turn. A bare local
+launch refuses `shell_account_unproven` because its effective shell account is
+not pinned;
+the positive owned case preserves an original local Unix controller.
+`SEAT_REFRESH_NATIVE_TEST=1` retains the earlier installed-CLI negative boundary
+proof for unauthorized/malformed and unsupported occupants.
 
 Other connection limits: remote Codex original-controller recovery and imported
 old Claude bridge replacement belong to VUH-1742; exact OpenCode model-visible
