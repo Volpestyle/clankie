@@ -1,0 +1,117 @@
+{
+  "ticket": "VUH-1740",
+  "focusedTests": {
+    "passed": 63,
+    "failed": 0,
+    "files": 6,
+    "reports": [
+      {
+        "path": ".local/vuh1740-admission-native-tests.json",
+        "sha256": "1375a000e0b4fac877666210b584c0a8ad12dbea921ed7d137449c530a5ff0fc",
+        "passed": 22,
+        "failed": 0,
+        "files": [
+          "packages/fleet-resources/test/heavy-process.integration.test.ts",
+          "packages/fleet-resources/test/probe-failure.integration.test.ts"
+        ]
+      },
+      {
+        "path": ".local/admission-profile/consumers-tests.json",
+        "sha256": "28a0243cc18a1f7bedfc0488e9ef61def5ffa45da67310f970f30bdaed602d2e",
+        "passed": 41,
+        "failed": 0,
+        "files": [
+          "packages/fleet-resources/test/simulators.integration.test.ts",
+          "apps/tui/test/fleet-resources-cli.integration.test.ts",
+          "apps/clankie/test/fleet-resource-hire.integration.test.ts",
+          "apps/clankie/test/fleet-resource-routes.integration.test.ts"
+        ]
+      }
+    ]
+  },
+  "typechecks": {
+    "passed": ["@clankie/fleet-resources", "@clankie/clankie", "@clankie/tui"],
+    "consumerWorkspaceConcurrency": 1,
+    "consumerLog": {
+      "path": ".local/admission-profile/typecheck-consumers.log",
+      "sha256": "5ef85495f1423ad9f69aa9be14dd4c6e082a9b845f1483774f5dff66792f4d67"
+    },
+    "packageProof": {
+      "command": "/Users/james/.herdr-handoffs/clankie-backlog-20261003/bin/heavy pnpm --filter @clankie/fleet-resources typecheck",
+      "exitCode": 0,
+      "terminalSession": 6632,
+      "separateLog": false
+    },
+    "consumerCommand": "/Users/james/.herdr-handoffs/clankie-backlog-20261003/bin/heavy pnpm --workspace-concurrency=1 --filter @clankie/clankie --filter @clankie/tui typecheck"
+  },
+  "install": {
+    "realOwnedInstall": true,
+    "frozenLockfile": true,
+    "borrowedInstallTrees": false,
+    "log": {
+      "path": ".local/admission-profile/install.log",
+      "sha256": "c6ad349b3a827666e99bba17dd132277df000ac7f740605ba48c01e74132c7d4"
+    }
+  },
+  "packaging": {
+    "result": {
+      "passed": true,
+      "launcherHelp": true,
+      "isolatedBundledRunner": {
+        "code": 17,
+        "leases": 0,
+        "queue": 0
+      },
+      "helperExactCopy": true,
+      "fullReleaseBuild": false
+    },
+    "report": {
+      "path": ".local/admission-profile/package-smoke.json",
+      "sha256": "1104fc51f291e8ed98eeee97e92d6df05a99d978b8110ac530c48990c78be45d"
+    },
+    "fullReleaseBuild": false
+  },
+  "independentReview": "Exact observation uncertainty, process-birth comparisons, runner registration, group occupancy, FIFO and cancellation reviewed; no concrete regression found.",
+  "heavySteps": "All installs/tests/typechecks/packaging and complete owned runtime lifetimes wrapped in the active shell fleet limiter.",
+  "fullRepositoryCheck": false,
+  "linuxExecuted": false,
+  "coreSimulatorExecuted": false,
+  "scopedLint": {
+    "exitCode": 0,
+    "files": 6,
+    "log": {
+      "path": ".local/admission-profile/final-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "format": {
+    "exitCode": 0,
+    "files": 13,
+    "log": {
+      "path": ".local/admission-profile/final-fmt.log",
+      "sha256": "b823ef5ac6213131912476fb8be0ece68e9a1fb8fb7a228d4d982347e49dbf25"
+    }
+  },
+  "documentationLinks": {
+    "exitCode": 0,
+    "markdownFiles": 443,
+    "log": {
+      "path": ".local/admission-profile/final-doc-links.log",
+      "sha256": "63e25bf5bbfc45a8becf8d4d3354f89da7f6385e2a11e66fe19cdec43034c777"
+    }
+  },
+  "nativeHelperSyntax": {
+    "command": "Python compile(source, filename, exec), without bytecode files",
+    "passed": true
+  },
+  "measuredSourceInputs": {
+    "count": 10,
+    "unchangedAfterFormatting": true
+  },
+  "linuxProcedureSyntax": {
+    "bashBlocks": 4,
+    "bashSyntaxPassed": true,
+    "embeddedPid1NodeSyntaxPassed": true,
+    "executionPassed": false
+  }
+}

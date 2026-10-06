@@ -46,7 +46,8 @@ async function fixture() {
     minAvailableMemoryMb: 0,
   });
   const children: ChildProcess[] = [],
-    completions = new Map<ChildProcess, Promise<number>>();
+    completions = new Map<ChildProcess, Promise<number>>(),
+    receipts: string[] = [];
   function start(seat: string, mode = "hold", exit = "0") {
     const receipt = join(directory, `${seat}.receipt`),
       release = join(directory, `${seat}.release`);
@@ -79,6 +80,7 @@ async function fixture() {
     void done.catch(() => undefined);
     children.push(child);
     completions.set(child, done);
+    receipts.push(receipt);
     return { child, done, receipt, release, output };
   }
   async function release(path: string) {
@@ -92,11 +94,18 @@ async function fixture() {
       if (lease.kind !== "heavy" || !lease.runner) continue;
       const current = await processIdentity(lease.runner.pid);
       if (current?.startTime === lease.runner.startTime) process.kill(-lease.runner.pgid, "SIGKILL");
-      else
-        for (const proof of lease.descendants ?? []) {
-          const survivor = await processIdentity(proof.pid);
-          if (survivor?.startTime === proof.startTime) process.kill(survivor.pid, "SIGKILL");
-        }
+    }
+    // Cleanup uses exact receipts from commands this fixture started, including
+    // survivors of a killed runner; journal census bookkeeping is not authority.
+    for (const receipt of receipts) {
+      if (!(await exists(receipt))) continue;
+      const proof = JSON.parse(await readFile(receipt, "utf8")) as { pid: number; startTime: string };
+      const survivor = await processIdentity(proof.pid);
+      if (survivor?.startTime === proof.startTime) process.kill(survivor.pid, "SIGKILL");
+      await eventually(
+        () => processIdentity(proof.pid),
+        (current) => current?.startTime !== proof.startTime,
+      );
     }
     await Promise.allSettled(completions.values());
     await governor.close();

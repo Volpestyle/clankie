@@ -342,6 +342,13 @@ async function burst() {
       metrics.maxQueued >= 1 && metrics.elapsedMs >= 10_000,
       "Burst must exercise real queueing across five waves",
     );
+    // Only this fixed ten-by-two-second, two-slot fixture has a wall-time budget.
+    // Production heavy commands may wait legitimately for occupied permits.
+    fail(metrics.elapsedMs <= 30_000, "Fixed command burst exceeds 30s completion budget");
+    fail(
+      metrics.startDelaysMs[0] !== undefined && metrics.startDelaysMs[0] <= 5_000,
+      "Empty-pool command admission exceeds 5s",
+    );
     fail(
       final.leases.length === 0 &&
         final.queue.length === 0 &&
@@ -369,7 +376,12 @@ async function burst() {
     );
     Object.assign(report, {
       policy,
-      budgets: { healthP95Ms: 250, serviceCpuMeanPercent: 10 },
+      budgets: {
+        healthP95Ms: 250,
+        serviceCpuMeanPercent: 10,
+        fixedBurstCompletionMs: 30_000,
+        emptyPoolAdmissionMs: 5_000,
+      },
       metrics,
       receipts,
       exited,
