@@ -64,6 +64,10 @@ should be able to watch. Workers follow the same rule inside their own panes.
 Progress for the owner lives in the work tracker: ticket status plus an evidence
 comment as each piece lands, and project status updates for check-ins and
 summaries. Scratch output and logs stay in the worker's worktree `.local/`.
+When a native runtime-health alarm or recovery arrives, include its CPU/health
+measurements and incident duration in the next Linear project check-in. Read
+`clankie runtime-health status` (or `clankie status` → `runtimeHealth`) for the
+latest observation; unknown telemetry is not evidence of recovery.
 Don't create side folders of handoff files for the owner to read; a restarted
 lead recovers from the tracker, the roster and the branches.
 

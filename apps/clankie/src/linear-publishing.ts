@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ProviderCredential } from "@clankie/credential-broker";
 import type { OperatorAgentPersona } from "@clankie/protocol";
+import { LinearRequestBudgetRefused, type LinearRequestBudget } from "./linear-request-budget.ts";
 
 const personaId = z
   .string()
@@ -65,6 +66,7 @@ export async function publishLinearWorker(input: {
   signal?: AbortSignal;
   beforeDispatch?: () => void;
   fetch?: typeof fetch;
+  requestBudget?: LinearRequestBudget;
 }): Promise<{ content: string; isError: boolean }> {
   const signal = input.signal ?? AbortSignal.timeout(30_000);
   const credential = input.credential;
@@ -96,27 +98,38 @@ export async function publishLinearWorker(input: {
   // Resolve the author first, then recheck the exact account binding at the wire boundary.
   await beforeDeadline(input.beforeWrite(), signal);
   signal.throwIfAborted();
-  input.beforeDispatch?.();
-  signal.throwIfAborted();
   // The caller can return earlier while this original write is observed for a
   // receipt. Keep its existing network cap, including response-body consumption.
   const completion = AbortSignal.timeout(30_000);
   let response: Response;
   try {
-    response = await beforeDeadline(
-      (input.fetch ?? fetch)("https://api.linear.app/graphql", {
-        method: "POST",
-        redirect: "error",
-        headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          query: `mutation WorkerPost($input: ${variableType}!) { ${kind}Create(input: $input) { success ${kind} { ${selection} } } }`,
-          variables: { input: { ...fields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
-        }),
-        signal: completion,
+    const request = input.fetch ?? fetch;
+    const init: RequestInit = {
+      method: "POST",
+      redirect: "error",
+      headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `mutation WorkerPost($input: ${variableType}!) { ${kind}Create(input: $input) { success ${kind} { ${selection} } } }`,
+        variables: { input: { ...fields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
       }),
+      signal: completion,
+    };
+    const dispatch = () => {
+      signal.throwIfAborted();
+      input.beforeDispatch?.();
+      signal.throwIfAborted();
+    };
+    response = await beforeDeadline(
+      input.requestBudget
+        ? input.requestBudget.fetch(credential, request, "https://api.linear.app/graphql", init, dispatch)
+        : (() => {
+            dispatch();
+            return request("https://api.linear.app/graphql", init);
+          })(),
       completion,
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof LinearRequestBudgetRefused) throw error;
     throw new Error("Linear worker post unavailable; inspect the issue before retrying");
   }
   if (!response.ok)

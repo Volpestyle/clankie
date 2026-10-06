@@ -24,6 +24,7 @@ import { isIP } from "node:net";
 export const SETTINGS_SCHEMA_VERSION = 1 as const;
 
 import { DiscordSettingsSchema } from "@clankie/protocol/discord-settings";
+import { RuntimeHealthSettingsSchema } from "@clankie/protocol";
 export { DiscordSettingsSchema, type DiscordSettings } from "@clankie/protocol/discord-settings";
 
 /**
@@ -708,6 +709,7 @@ export const ClankieSettingsSchema = z
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
+    runtimeHealth: RuntimeHealthSettingsSchema.default(() => RuntimeHealthSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
     claudeAccounts: z
       .array(

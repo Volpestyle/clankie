@@ -6,15 +6,32 @@ import { classifyLinearDelivery, linearReplyTo, linearActivityWakeTypes } from "
 import { authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import type { ClankieAppDependencies } from "./types.ts";
+import {
+  LINEAR_REQUEST_BUDGET_PATH,
+  LinearRequestBudgetReportSchema,
+} from "@clankie/protocol/linear-request-budget";
 
 export interface RegisterLinearRoutesContext {
   readonly app: Hono;
-  readonly dependencies: Pick<ClankieAppDependencies, "captain" | "linearWebhook" | "authenticateOperator">;
+  readonly dependencies: Pick<
+    ClankieAppDependencies,
+    "captain" | "linearWebhook" | "authenticateOperator" | "linearRequestBudget"
+  >;
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
 }
 
 export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
+  ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!ctx.dependencies.linearRequestBudget)
+      return context.json({ error: "linear_request_budget_unavailable" }, 503);
+    return context.json(LinearRequestBudgetReportSchema.parse(ctx.dependencies.linearRequestBudget.report()));
+  });
+
   ctx.app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
     const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
     if (operator === "unavailable")

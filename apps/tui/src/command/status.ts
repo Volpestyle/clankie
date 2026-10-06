@@ -8,7 +8,7 @@ import { DEFAULT_CONTROL_PLANE_URL } from "../../bin/pairing-offer.ts";
 import { nextStepLine } from "../next-step.ts";
 import { DeviceDirectRouteSchema } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
-import { probeDoorway, type GatewayDoorwayReport } from "./gateway.ts";
+import { probeHealth, type GatewayDoorwayReport } from "./gateway.ts";
 import { hostedWhoami } from "./hosted.ts";
 
 export interface StatusCommandOptions extends CreateServiceOptionsInput {
@@ -32,6 +32,7 @@ export interface StatusCommandResult {
   readonly nextStep?: string;
   readonly presence?: OperatorPresenceSnapshot;
   readonly presenceState?: "unreachable";
+  readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
 }
 
 export async function statusCommand(options: StatusCommandOptions): Promise<StatusCommandResult> {
@@ -105,21 +106,23 @@ async function phoneAccess(
   options: StatusCommandOptions,
   env: NodeJS.ProcessEnv,
   serviceHealthy: boolean,
-): Promise<Pick<StatusCommandResult, "connection" | "doorway" | "nextStep">> {
+): Promise<Pick<StatusCommandResult, "connection" | "doorway" | "nextStep" | "runtimeHealth">> {
   try {
     const settings = await new SettingsStore(defaultSettingsPath(env)).load();
     const connection = await hostedWhoami(env);
     // A service that is not healthy has no doorway to ask; skip the round trip.
-    const doorway: GatewayDoorwayReport = serviceHealthy
-      ? await probeDoorway({
+    const health = serviceHealthy
+      ? await probeHealth({
           env,
           ...(options.host === undefined ? {} : { host: options.host }),
           ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
         })
-      : { state: "unreachable" };
+      : { doorway: { state: "unreachable" as const } };
+    const { doorway } = health;
     return {
       connection,
       doorway,
+      ...(health.runtimeHealth === undefined ? {} : { runtimeHealth: health.runtimeHealth }),
       nextStep: nextStepLine({
         doorway,
         remoteAccessConfigured: settings.publicGateway.url !== undefined,

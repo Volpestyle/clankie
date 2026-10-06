@@ -7,11 +7,12 @@ import {
   type IssueMetricsQuery,
   type IssueMetricsReport,
   type CaptainTurnSettledMetrics,
+  type FleetHealthMetricsSnapshot,
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
 const METRICS_USAGE =
-  "Usage: clankie metrics [--run ID] [--limit N] | --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]";
+  "Usage: clankie metrics [--run ID] [--limit N] | --fleet | --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]";
 
 export interface MetricsCliCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -23,15 +24,21 @@ export interface MetricsCliCommandOptions {
 export type MetricsCliResult =
   | { readonly ok: true; readonly items: readonly CaptainTurnSettledMetrics[] }
   | { readonly ok: true; readonly report: IssueMetricsReport }
+  | { readonly ok: true; readonly fleet: FleetHealthMetricsSnapshot }
   | { readonly ok: false; readonly error: string };
 
 interface MetricsCliArgs {
   readonly issues?: IssueMetricsQuery;
+  readonly fleet?: true;
   readonly limit?: number;
   readonly runId?: string;
 }
 
 export function parseMetricsArgs(args: readonly string[]): MetricsCliArgs {
+  if (args.includes("--fleet")) {
+    if (args.length !== 1) throw new Error(METRICS_USAGE);
+    return { fleet: true };
+  }
   let issueMode = false;
   const issueQuery: Record<string, string> = {};
   let limit: number | undefined;
@@ -92,6 +99,9 @@ export async function runMetricsCommand(
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   try {
+    if (parsed.fleet) {
+      return { ok: true, fleet: await client.readFleetHealthMetrics() };
+    }
     if (parsed.issues !== undefined)
       return { ok: true, report: await client.readIssueMetrics(parsed.issues) };
     const page = await client.readCaptainTurnMetrics(parsed);

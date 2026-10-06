@@ -57,6 +57,14 @@ import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
 import { createPrioritySortedLinearIssueReader } from "./tracker-tool-router.ts";
+import {
+  currentLinearRequestPriority,
+  LinearRequestBudgetRefused,
+  withLinearRequestPriority,
+  withinLinearRequestInvocation,
+  type LinearRequestBudget,
+  type LinearRequestPriority,
+} from "./linear-request-budget.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -112,6 +120,7 @@ type McpRefusalReason =
   | "lane_denied"
   | "server_unavailable"
   | "result_too_large"
+  | "linear_request_budget"
   | "body_owned";
 
 /** In-process service capability; HTTP/model arguments can never construct this symbol. */
@@ -124,6 +133,7 @@ type McpCallResult =
       readonly reason: McpRefusalReason;
       readonly detail: string;
       readonly possiblyDispatched?: boolean;
+      readonly retryAt?: number;
     };
 
 export interface McpHost {
@@ -155,6 +165,8 @@ export interface McpHost {
     readonly arguments: Record<string, unknown>;
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
+    /** Internal scheduling only. Background reads yield once the account reaches 80%. */
+    readonly requestPriority?: LinearRequestPriority;
     /** Total caller budget, including setup; never a model tool argument. */
     readonly timeoutMs?: number;
     /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
@@ -216,6 +228,7 @@ export interface McpHostOptions {
   readonly localTracker?: TrackerToolBackend;
   /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
   readonly linearApiTracker?: TrackerToolBackend;
+  readonly linearRequestBudget?: LinearRequestBudget;
   readonly trackerIdentity?: string;
   /** Internal clock for list freshness; never a caller/model argument. */
   readonly trackerReadClock?: () => number;
@@ -305,7 +318,10 @@ function credentialDigest(credential: ProviderCredential): string {
 }
 
 export function createMcpHost(options: McpHostOptions): McpHost {
-  const connectImpl = options.connect ?? connectServer;
+  const connectImpl =
+    options.connect ??
+    ((server: McpServerSettings, credentials: Pick<CredentialStore, "get">, expectedCredential: string) =>
+      connectServer(server, credentials, expectedCredential, options.linearRequestBudget));
   const curated = options.curated ?? CURATED_MCP_SERVERS;
   const states = new Map<string, ServerState>();
   const retired = new Set<ServerState>();
@@ -446,12 +462,17 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     if (stored?.type === "oauth" && stored.linearAuth === "api" && !isApiTracker(server))
       throw new Error("Registered Linear API credentials cannot authenticate MCP");
     if (refresh && stored?.type === "oauth" && linearOauthNeedsRefresh(stored)) {
-      await resolveProviderBearer(
-        server.credential,
-        options.credentials,
-        Date.now(),
-        options.linearFetch ? { fetch: options.linearFetch } : {},
-      );
+      const selected = stored;
+      const request = options.linearFetch ?? fetch;
+      const refreshFetch: typeof fetch = (input, init) =>
+        server.id === "linear" &&
+        options.linearRequestBudget &&
+        String(input instanceof Request ? input.url : input) === "https://api.linear.app/graphql"
+          ? options.linearRequestBudget.fetch(selected, request, input, init)
+          : request(input, init);
+      await resolveProviderBearer(server.credential, options.credentials, Date.now(), {
+        fetch: refreshFetch,
+      });
       stored = await options.credentials.get(server.credential);
     }
     if (stored === undefined) {
@@ -1088,6 +1109,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                           assertDispatch();
                         },
                         ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                        ...(options.linearRequestBudget
+                          ? { requestBudget: options.linearRequestBudget }
+                          : {}),
                       })
                     : await dispatchFence.run(notifyDispatch, () => {
                         const callUpstream = async (args: Record<string, unknown>) => {
@@ -1210,14 +1234,17 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             dispatched &&
             !confirmed &&
             !(error instanceof DispatchRefused) &&
+            !(error instanceof LinearRequestBudgetRefused) &&
             state !== undefined &&
             state.failure === undefined
           )
             await retire(server.id, state);
           return {
             outcome: "refused",
-            reason: "server_unavailable",
+            reason:
+              error instanceof LinearRequestBudgetRefused ? "linear_request_budget" : "server_unavailable",
             possiblyDispatched: dispatched,
+            ...(error instanceof LinearRequestBudgetRefused ? { retryAt: error.retryAt } : {}),
             detail: error instanceof Error ? error.message.slice(0, 500) : "mcp_call_failed",
           };
         }
@@ -1232,7 +1259,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             detail: `MCP ${input.server}/${input.tool} timed out after ${timeoutMs}ms`,
           });
         signal.addEventListener("abort", timedOut, { once: true });
-        void perform().then(
+        void withinLinearRequestInvocation(
+          /^(?:get|list|search|check|fetch|read)_/u.test(input.tool)
+            ? (input.requestPriority ?? currentLinearRequestPriority("interactive"))
+            : "interactive",
+          perform,
+        ).then(
           (result) => {
             signal.removeEventListener("abort", timedOut);
             resolve(result);
@@ -1309,15 +1341,23 @@ async function connectServer(
   server: McpServerSettings,
   credentials: Pick<CredentialStore, "get">,
   expectedCredential: string,
+  requestBudget?: LinearRequestBudget,
 ): Promise<McpConnection> {
   const client = new Client({ name: "clankie", version: "1" }, { capabilities: {} });
   // The SDK's own transports do not satisfy its `Transport` interface under
   // `exactOptionalPropertyTypes` — their `onmessage` drops the generic and the
   // `extra` parameter the interface declares. The cast is at this one boundary
   // rather than loosening the repo's strictness for everyone.
-  const transport = (await createTransport(server, credentials, expectedCredential)) as unknown as Transport;
+  const transport = (await createTransport(
+    server,
+    credentials,
+    expectedCredential,
+    requestBudget,
+  )) as unknown as Transport;
   try {
-    await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+    await withLinearRequestPriority("interactive", () =>
+      client.connect(transport, { timeout: CONNECT_TIMEOUT_MS }),
+    );
   } catch (error) {
     await client.close().catch(() => undefined);
     throw error;
@@ -1382,8 +1422,9 @@ async function createTransport(
   server: McpServerSettings,
   credentials: Pick<CredentialStore, "get">,
   expectedCredential: string,
+  requestBudget?: LinearRequestBudget,
 ): Promise<StdioClientTransport | StreamableHTTPClientTransport> {
-  const selectedBearer = async (): Promise<string> => {
+  const selectedCredential = async (): Promise<ProviderCredential> => {
     const stored = server.credential === undefined ? undefined : await credentials.get(server.credential);
     if (stored === undefined || credentialDigest(stored) !== expectedCredential) {
       throw new Error(`${server.id} credential changed; reconnect before calling tools`);
@@ -1395,8 +1436,9 @@ async function createTransport(
       throw new Error("Registered Linear API credentials cannot authenticate MCP");
     const bearer = providerCredentialBearer(stored);
     if (bearer === undefined) throw new Error(`${server.id} has no usable stored credential`);
-    return bearer;
+    return stored;
   };
+  const selectedBearer = async (): Promise<string> => providerCredentialBearer(await selectedCredential())!;
   if (server.transport === "http") {
     if (server.url === undefined) throw new Error(`mcp server ${server.id} has no url`);
     const providerId = server.credential;
@@ -1407,9 +1449,11 @@ async function createTransport(
       // establish a fresh transport, without replaying an uncertain tool call.
       fetch: async (url, init) => {
         const headers = new Headers(init?.headers);
+        let credential: ProviderCredential | undefined;
         if (providerId !== undefined) {
           try {
-            headers.set("authorization", `Bearer ${await selectedBearer()}`);
+            credential = await selectedCredential();
+            headers.set("authorization", `Bearer ${providerCredentialBearer(credential)}`);
           } catch (error) {
             if (dispatchFence.getStore())
               throw new DispatchRefused(
@@ -1418,6 +1462,8 @@ async function createTransport(
             throw error;
           }
         }
+        if (server.id === "linear" && requestBudget && credential)
+          return requestBudget.fetch(credential, fetch, url, { ...init, headers }, dispatchFence.getStore());
         dispatchFence.getStore()?.();
         return fetch(url, { ...init, headers });
       },

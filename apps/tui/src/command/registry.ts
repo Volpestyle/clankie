@@ -149,6 +149,14 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  health | status          Probe every launcher-owned service (JSON)"],
   },
   {
+    nouns: ["runtime-health"],
+    lines: [
+      "  runtime-health [status|on|off]    Runtime CPU and slow-health alarm settings (JSON)",
+      "  runtime-health set --cpu-percent N --health-ms N --sustained-seconds N",
+      "                     [--sample-seconds N] [--cooldown-seconds N]",
+    ],
+  },
+  {
     nouns: ["doctor"],
     lines: [
       "  doctor [--machine ID] [--json]    One-line diagnosis; --json shows the full install and fleet card",
@@ -241,6 +249,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["linear"],
     lines: [
       "  linear [status] | follow on|off | target [show|set ID]  Linear webhook wakes",
+      "  linear budget            Read account request usage and background throttling",
+      "  linear read TOOL --json-stdin [--background]   Read Linear; automated polls yield to interactive work",
       "  linear wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES]",
       "  linear post comment|issue --json-stdin   Publish as an existing worker persona through the connected app",
     ],
@@ -394,6 +404,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["metrics"],
     lines: [
       "  metrics [--run ID] [--limit N]",
+      "  metrics --fleet          Fleet proof/report failure counts and 5/60-minute rates (JSON)",
       "                           Recent settled captain turns: execution identity, tool shape,",
       "                           reported usage (JSON; newest first, limit 1-100, default 20)",
     ],

@@ -17,6 +17,7 @@ import {
   FleetSeatMessageDeliverySchema,
   FleetSeatMessageReceiptSchema,
   FleetSeatMessageSchema,
+  WorkerReportBridgeStatusSchema,
   OPERATOR_SEAT_EVENTS_PATH,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OperatorConversationServiceRequestSchema,
@@ -31,6 +32,7 @@ import type { PeerSeatAuthority } from "../captain/peer-seat-messages.ts";
 import { CAPTAIN_PROMPT_SECTIONS, type CaptainPromptSection } from "../captain/port.ts";
 import { INBOUND_REQUEST_DEADLINE_MS } from "../captain/inbound-seat-receipts.ts";
 import { createLaneMcpEndpoint } from "../lane-mcp.ts";
+import { splitFleetQualified } from "../herdr-fleet.ts";
 import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
 import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-authority.ts";
@@ -311,6 +313,31 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
 
   // An agent in a fleet pane writing to Clankie (ADR 0213 phase 2). It reaches
   // him as untrusted agent output and grants the sender nothing.
+  ctx.app.post(`${FLEET_SEAT_MESSAGES_PATH}/health`, bodyLimit({ maxSize: 4096 }), async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const parsed = WorkerReportBridgeStatusSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const binding = await ctx.dependencies.captain.fleetSeatMessageBinding(pane.paneId);
+    if (!binding) return context.json({ error: "native_session_required" }, 403);
+    const identity =
+      ctx.dependencies.localFleet?.identity(context.req.raw) ??
+      ctx.dependencies.fleetLinks?.identity?.(context.req.raw);
+    if (identity && !(await identity.validate()))
+      return context.json({ error: "native_session_required" }, 403);
+    if ((await ctx.dependencies.captain.fleetSeatMessageBinding(pane.paneId)) !== binding)
+      return context.json({ error: "native_session_required" }, 403);
+    if (identity && !(await identity.validate()))
+      return context.json({ error: "native_session_required" }, 403);
+    if (!ctx.dependencies.workerMcp) return context.json({ error: "worker_health_unavailable" }, 503);
+    const qualified = splitFleetQualified(pane.paneId);
+    ctx.dependencies.workerMcp.reportBridgeObserved(
+      qualified?.fleet ?? "default",
+      qualified?.id ?? pane.paneId,
+      parsed.data,
+    );
+    return context.json({ recorded: true }, 202);
+  });
   ctx.app.get(FLEET_SEAT_MESSAGES_PATH, async (context) => {
     const pane = await fleetSeatPane(context);
     if ("denial" in pane) return pane.denial;

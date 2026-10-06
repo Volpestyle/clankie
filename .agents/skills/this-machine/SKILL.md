@@ -70,7 +70,14 @@ its own authorized intent, never an automatic retry. See `docs/cli.md` under
 
 For accepted-issue cost evidence, use `clankie metrics --issue ISSUE --since ISO
 --until ISO` or `clankie metrics --issues --worker LABEL`. The operator route
-projects retained native history and existing ledgers. Report its `coverage`
+projects retained native history and existing ledgers. Exact local bindings in
+conversation metadata, hire-owner records, and archived pane-tidy entries also
+cover older workers and closed panes. A session retained in several records or
+as both an ID and transcript path is counted once; `--worker` accepts its
+retained label, seat ID, session ID, or transcript path. Missing, remote,
+malformed, conflicting, or ambiguous bindings remain explicit coverage gaps. This read
+does not search unbound histories, alter ownership, or grant delivery authority.
+Report its `coverage`
 alongside token, wall-time, check and rework totals: parent native usage is
 partial, elapsed time includes waits, and a passed seat edge is not approval.
 Unknowns remain null; never turn missing history into a zero-cost claim. See
@@ -170,6 +177,7 @@ index). Configure through the headless CLI:
 | Can he take a turn                    | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                                                                                       |
 | Start at login                        | `clankie autostart status`, `clankie autostart enable`                                                                                                               |
 | Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                                                                                                |
+| Sustained CPU or slow health          | `clankie runtime-health status`; `clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300`; `/runtime-health` opens the settings menu   |
 | Bundled skill classes and selection   | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                            |
 | Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                                                                                              |
 | Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                                                                                       |
@@ -210,6 +218,13 @@ index). Configure through the headless CLI:
 | Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                                                                                                |
 | Play session                          | `clankie play status` / `clankie play stop`                                                                                                                          |
 | Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                                 |
+
+`clankie linear budget` and `clankie doctor --json` show account request usage.
+At 80%, the app's Work refresh and reads explicitly marked as background share
+a one-minute interval; honor refusal retry times. Automated operator scripts use
+`clankie linear read TOOL --json-stdin --background`; fleet polls use
+`clankie_call({name, arguments, background: true})`. Ordinary owner and lead reads,
+writes and webhook context retain priority within the hard cap.
 
 Everything else about the launcher (Linear activity, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
@@ -414,6 +429,13 @@ skill are independent facts. Static installation is not live native membership.
 Doctor and roster `workerTools` separately report observed worker catalogs,
 pending requests, missing tools and stalled reads with their reasons. An unknown
 catalog remains `not-observed`; those observations grant no tool authority.
+Roster `workerReportBridge` separately records the last report outcome, time and
+fixed safe reason. Done/idle hires held for fifteen minutes without a stored
+report since their latest brief carry `finished, unreported`. Three failed seats
+within ten minutes produce one native alert to their owning lead. Inspect
+`clankie metrics --fleet` for five- and sixty-minute proof/refusal and report
+failure rates. Preserve and reconcile uncertain originals; health observations
+never authorize deleting receipts or replaying reports.
 Remote reports also include `linkState`: an `unreachable` link's `error` is the
 decoded remote reason, independently of harness installation health. Fleet
 control connections and resident relays refresh at ten minutes; renewal keeps

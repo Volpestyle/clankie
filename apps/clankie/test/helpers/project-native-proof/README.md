@@ -28,6 +28,11 @@ A copied trusted script containing spaces, Unicode, quotes and a newline proves
 exact argv boundaries. `exec-argv.c` uses real execv to preserve empty argv[0]; it
 must remain empty and the request must fail. Only the first two native argv
 entries are returned; later argument and environment sentinels must be absent.
+The same real exec fixture can supply a 4097-byte `argv[0]`: the kernel accepts
+the process while the helper's bounded observation emits `argv_invalid`. That
+fixed event reaches fleet counters and the HTTP request refuses without a
+forwarded effect. A live project TCP peer closed after an actual kernel read
+separately exercises `closed_socket` during asynchronous observation.
 The helper owner's separate native probes cover empty argv[1], argc zero,
 invalid UTF-8 and output bounds.
 

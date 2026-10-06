@@ -20,6 +20,7 @@ import { LaneLog } from "../../src/captain/lane-log.ts";
 import { SeatOutbox } from "../../src/captain/seat-outbox.ts";
 import type { CaptainDeps } from "../../src/captain/deps.ts";
 import type { LaneUpstreamTransportEvent } from "../../../tui/src/command/mcp.ts";
+import type { LinearRequestBudget } from "../../src/linear-request-budget.ts";
 
 function gate() {
   let release!: () => void;
@@ -42,12 +43,14 @@ async function listen(service: Awaited<ReturnType<typeof createClankieApp>>) {
   const retryStream = gate();
   let stream: ServerResponse | undefined;
   let dropped = false;
+  const wireRequests: { method: string; path: string }[] = [];
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: (request) => service.app.fetch(request),
   }) as HttpServer;
   server.on("request", (request, response) => {
+    wireRequests.push({ method: request.method ?? "", path: request.url ?? "" });
     if (request.method !== "GET" || request.url !== "/v1/mcp") return;
     stream = response;
     if (dropped) retryStream.release();
@@ -61,6 +64,7 @@ async function listen(service: Awaited<ReturnType<typeof createClankieApp>>) {
   if (address === null || typeof address === "string") throw new Error("Fixture server has no TCP address");
   return {
     url: `http://127.0.0.1:${address.port}`,
+    wireRequests,
     async dropNotificationStream() {
       await notificationStream.promise;
       dropped = true;
@@ -84,7 +88,10 @@ export async function createConnectedLinearFixture(
     /** Captured Linear issue shapes, exposed through the real SDK transport. */
     priorityPages?: Record<string, unknown>[][];
     priorityReads?: boolean;
+    /** Serve provider cursors directly, without the host's sorted snapshot reader. */
+    nativePagesOnly?: boolean;
     heldRead?: ReturnType<typeof heldProviderRead>;
+    requestBudget?: LinearRequestBudget;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-connected-linear-"));
@@ -252,7 +259,8 @@ export async function createConnectedLinearFixture(
   const linearWrites = new linearWebhook.LinearWriteReceipts(join(root, "linear-writes.json"));
   const logs: Record<string, unknown>[] = [];
   const host = createMcpHost({
-    ...(options.priorityPages === undefined && options.priorityReads !== true
+    ...(options.requestBudget ? { linearRequestBudget: options.requestBudget } : {}),
+    ...(options.nativePagesOnly || (options.priorityPages === undefined && options.priorityReads !== true)
       ? {}
       : { localTracker: createLocalTracker({ directory: join(root, "local-tracker") }) }),
     credentials,
@@ -370,6 +378,10 @@ export async function createConnectedLinearFixture(
   });
   return {
     client,
+    host,
+    credentials,
+    providerWireRequests: provider.wireRequests,
+    cliEnv: { CLANKIE_CONTROL_PLANE_URL: endpoint.url, CLANKIE_OPERATOR_TOKEN: operatorToken },
     issueId,
     issueIdentifier,
     organizationId,

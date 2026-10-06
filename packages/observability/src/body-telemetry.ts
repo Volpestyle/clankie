@@ -152,6 +152,17 @@ export const BodyTelemetryEventSchema = z.discriminatedUnion("event", [
   z
     .object({
       ...envelope,
+      event: z.literal("body.runtime_health"),
+      state: z.enum(["starting", "disabled", "healthy", "sustaining", "alarm", "cooldown"]),
+      cpuPercent: z.number().min(0).max(10_000).optional(),
+      healthLatencyMs: DurationMs.optional(),
+      durationMs: DurationMs,
+      reasons: z.array(z.enum(["cpu", "health"])).max(2),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
       event: z.literal("body.heartbeat"),
       busy: z.boolean(),
       reasons: z.array(z.enum(["captain-turn", "herdr-agent", "scheduled-job", "activity-share"])).max(4),

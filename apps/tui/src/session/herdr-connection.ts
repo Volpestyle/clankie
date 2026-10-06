@@ -12,9 +12,21 @@ import {
   powershellScriptCommand,
 } from "../../../clankie/src/herdr-fleet.ts";
 import { runRuntimeCommand } from "../command/runtime.ts";
-import { readTerminalCatalog } from "../../../clankie/src/captain/herdr-census.ts";
+import {
+  readTerminalCatalog,
+  parseHerdrAgentList,
+  occupantIdForHerdrSession,
+} from "../../../clankie/src/captain/herdr-census.ts";
+import {
+  createCaptainOperatorConversationClient,
+  createCaptainRouteClient,
+} from "./operator-conversations.ts";
 import { ClankieApiClient } from "@clankie/api-client";
-import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import {
+  resolveCaptainCredential,
+  resolveOperatorCredential,
+  type CredentialStore,
+} from "@clankie/credential-broker";
 import {
   HerdrBindingSchema,
   type HerdrBinding,
@@ -114,16 +126,85 @@ export async function runFleetHerdr(
         },
         { controlDirectory: join(options.env?.HOME ?? homedir(), ".clankie", "ssh") },
       );
-      process.stdout.write(await run(args));
+      const stdout = await run(args);
+      process.stdout.write(isAgentList(args) ? await withFleetAgentHealth(stdout, options) : stdout);
       return 0;
     }
   }
   const { command, env } = herdrConnection(await readHerdrBinding(options), options);
+  if (isAgentList(args)) {
+    const { stdout, stderr } = await promisify(execFile)(command, [...args], {
+      env,
+      timeout: 5_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    if (stderr) process.stderr.write(stderr);
+    process.stdout.write(await withFleetAgentHealth(stdout, options));
+    return 0;
+  }
   return await new Promise<number>((resolve, reject) => {
     const child = spawn(command, [...args], { env, stdio: "inherit" });
     child.once("error", reject);
     child.once("exit", (code) => resolve(code ?? 1));
   });
+}
+
+function isAgentList(args: readonly string[]): boolean {
+  return args[0] === "agent" && args[1] === "list" && args.slice(2).every((arg) => arg === "--json");
+}
+
+/** Preserve native list fields; add only observations for the exact occupying session. */
+export async function withFleetAgentHealth(stdout: string, options: HerdrConnectionOptions): Promise<string> {
+  try {
+    const native = parseHerdrAgentList(stdout);
+    const parsed = JSON.parse(stdout) as { result?: { agents?: unknown[] } };
+    if (!Array.isArray(parsed.result?.agents)) return stdout;
+    const env = options.env ?? process.env;
+    const credential = await resolveCaptainCredential({
+      env,
+      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+    });
+    if (!credential) return stdout;
+    const client = createCaptainOperatorConversationClient(
+      createCaptainRouteClient({
+        host:
+          options.host ?? env.CLANKIE_CONTROL_PLANE_URL ?? env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310",
+        captainToken: credential.token,
+        fetchImpl: (input, init) =>
+          (options.fetchImpl ?? fetch)(input, { ...init, signal: AbortSignal.timeout(5_000) }),
+      }),
+    );
+    const seats = await client.roster();
+    const fleet =
+      options.connectionId && options.connectionId !== "default" ? options.connectionId : undefined;
+    parsed.result.agents = parsed.result.agents.map((row) => {
+      if (!row || typeof row !== "object") return row;
+      const fields = row as Record<string, unknown>;
+      const agent = native.find(
+        (entry) => entry.terminalId === fields.terminal_id && entry.paneId === fields.pane_id,
+      );
+      if (!agent?.terminalId || !agent.session) return row;
+      const seatId = fleet ? `${fleet}/${agent.terminalId}` : agent.terminalId;
+      const seat = seats.find(
+        (entry) =>
+          entry.seatId === seatId &&
+          entry.fleet === fleet &&
+          entry.occupantId === occupantIdForHerdrSession(agent.session!),
+      );
+      if (!seat) return row;
+      return {
+        ...fields,
+        ...(seat.workerReportBridge ? { workerReportBridge: seat.workerReportBridge } : {}),
+        ...(seat.efficiency?.flags.includes("finished, unreported")
+          ? { reportFlags: ["finished, unreported"] }
+          : {}),
+      };
+    });
+    return `${JSON.stringify(parsed)}\n`;
+  } catch {
+    // Native roster remains usable when observations are unavailable.
+    return stdout;
+  }
 }
 
 export async function openHerdr(options: HerdrConnectionOptions): Promise<number> {

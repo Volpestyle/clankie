@@ -2,6 +2,7 @@ import { hostedDiscordAllows } from "./hosted-discord.ts";
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
 import { OperatorConversationServiceRequestSchema } from "./index.ts";
 import { FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
+import { RUNTIME_HEALTH_PATH } from "./runtime-health.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
@@ -87,10 +88,12 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/agent-hosts",
       "/v1/agent-sessions",
       FLEET_SETTINGS_PATH,
+      RUNTIME_HEALTH_PATH,
       PROJECTS_PATH,
       "/v1/support/grants",
     ],
     POST: [
+      RUNTIME_HEALTH_PATH,
       "/v1/activity/shares",
       "/v1/discord/room-guidance",
       "/v1/discord/room-voice",

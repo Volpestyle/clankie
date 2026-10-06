@@ -1,5 +1,7 @@
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
+import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
+import { RuntimeHealthObservationSchema } from "@clankie/protocol";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { SupportGrantStore } from "../support-access.ts";
@@ -97,6 +99,7 @@ import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
+import { registerFleetHealthMetricsRoutes } from "./fleet-health-metrics-routes.ts";
 import {
   type ClankieApp,
   type ClankieAppDependencies,
@@ -409,6 +412,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  registerFleetHealthMetricsRoutes(app, dependencies);
   const supportAuditedRequests = new WeakSet<Request>();
   let managedDiscordClosed = false;
   let managedDiscordSyncRunning = false;
@@ -918,6 +922,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       runtimes: dependencies.runtimes,
       herdrBinding: dependencies.herdrBinding,
     }),
+  );
+  app.route(
+    "/",
+    createRuntimeHealthRoutes(
+      authorizeOwnerSecrets,
+      settingsSource,
+      () =>
+        dependencies.runtimeHealth?.() ?? { state: "starting", durationMs: 0, reasons: [], delivery: "none" },
+    ),
   );
   /**
    * Owner operator or any active paired device: account data that is not a
@@ -1453,6 +1466,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
       ...(runtime === undefined ? {} : { runtime }),
+      ...(() => {
+        try {
+          const observation = RuntimeHealthObservationSchema.safeParse(dependencies.runtimeHealth?.());
+          return observation.success ? { runtimeHealth: observation.data } : {};
+        } catch {
+          return {};
+        }
+      })(),
     });
   });
   const { laneMcp } = registerSeatRoutes({
