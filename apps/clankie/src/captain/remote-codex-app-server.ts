@@ -161,14 +161,26 @@ export { forwardSshArgs } from "../herdr-fleet.ts";
 export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServerLauncher {
   const { fleet, shell } = options;
   return async (input) => {
+    const launchEnv = { ...input.env };
+    // The catalog is already carried in the dedicated bridge's scoped config.
+    // It is controller metadata, not a host environment or account override.
+    const catalog = launchEnv.CLANKIE_EXPECTED_TOOL_NAMES;
+    if (
+      catalog !== undefined &&
+      input.configArgs.some(
+        (arg, index) =>
+          arg === "-c" &&
+          input.configArgs[index + 1] ===
+            `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(catalog)}`,
+      )
+    )
+      delete launchEnv.CLANKIE_EXPECTED_TOOL_NAMES;
     // Only the pane's Herdr identity crosses, so the server's MCP children find
     // their session's link; everything else comes from that machine.
     const env = Object.fromEntries(
-      Object.entries(input.env ?? {}).filter(
-        ([key]) => key === "HERDR_PANE_ID" || key === "HERDR_SOCKET_PATH",
-      ),
+      Object.entries(launchEnv).filter(([key]) => key === "HERDR_PANE_ID" || key === "HERDR_SOCKET_PATH"),
     );
-    if (Object.keys(env).length !== Object.keys(input.env ?? {}).length)
+    if (Object.keys(env).length !== Object.keys(launchEnv).length)
       throw new Error("unsupported: a remote Codex server takes its environment from its own machine");
     const id = randomUUID();
     const remotePort = options.remotePort?.() ?? randomInt(REMOTE_PORTS.min, REMOTE_PORTS.max + 1);

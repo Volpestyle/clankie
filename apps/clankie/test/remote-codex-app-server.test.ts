@@ -162,13 +162,26 @@ describe("a remote Codex app-server (VUH-1527)", () => {
     expect(shell).not.toHaveBeenCalled();
   });
 
-  it("refuses a per-hire environment it cannot carry to the other machine", async () => {
+  it.each([
+    { env: { CODEX_HOME: "/x" }, configArgs: [] },
+    { env: { CLANKIE_EXPECTED_TOOL_NAMES: "[]" }, configArgs: [] },
+    {
+      env: { CLANKIE_EXPECTED_TOOL_NAMES: "[]" },
+      configArgs: [
+        "-c",
+        `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify('["linear_get_issue"]')}`,
+      ],
+    },
+    {
+      env: { CODEX_HOME: "/x", CLANKIE_EXPECTED_TOOL_NAMES: "[]" },
+      configArgs: ["-c", 'mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"'],
+    },
+  ])("refuses a per-hire environment it cannot carry to the other machine: $env", async (input) => {
     const shell = vi.fn(async () => "");
     await expect(
       remoteCodexServer({ fleet: posix, shell })({
         cwd: "/src",
-        configArgs: [],
-        env: { CODEX_HOME: "/x" },
+        ...input,
         onExit: vi.fn(),
       }),
     ).rejects.toThrow(/environment/u);
@@ -445,8 +458,19 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
     privateSeat: { pane: "w1:p1", register },
   })({
     cwd: "C:\\repo",
-    configArgs: ["-c", "mcp_servers.other.required=true", "-c", 'mcp_servers.clankie.env.OWNER_KEEP="yes"'],
-    env: { HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "C:\\herdr.sock" },
+    configArgs: [
+      "-c",
+      "mcp_servers.other.required=true",
+      "-c",
+      'mcp_servers.clankie.env.OWNER_KEEP="yes"',
+      "-c",
+      `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(["linear_get_issue"]))}`,
+    ],
+    env: {
+      HERDR_PANE_ID: "w1:p1",
+      HERDR_SOCKET_PATH: "C:\\herdr.sock",
+      CLANKIE_EXPECTED_TOOL_NAMES: JSON.stringify(["linear_get_issue"]),
+    },
     onExit: () => {},
   });
   expect(register).toHaveBeenCalledWith(
@@ -455,6 +479,8 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
   const script = decoded(commands[0]!);
   expect(script).toContain("mcp_servers.other.required=true");
   expect(script).toContain('mcp_servers.clankie.env.OWNER_KEEP="yes"');
+  expect(script).toContain("mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES");
+  expect(script).not.toContain("$environment['CLANKIE_EXPECTED_TOOL_NAMES']");
   expect(script).toContain("GetProcessTimes(created.process");
   expect(script).toContain("ResumeThread(created.thread)");
   expect(script.indexOf("GetProcessTimes(created.process")).toBeLessThan(

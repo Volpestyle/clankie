@@ -120,3 +120,49 @@ VUH-1709 normal PC update still needs confirmation that Pell landed and deployed
 handoff comment at 03:58Z succeeded as Clankie ([comment](https://linear.app/vuhlp/issue/VUH-1527#comment-beeb7fd9-85c8-438d-b9e8-fb746a4114ea)). No other
 Linear write returned 403 this turn, and no connector substitution was used. `message_clankie` remains fenced by its original uncertain
 receipt; reports are visible in Tess's pane for Clankie to relay.
+
+## Deployed recovery and fresh PC acceptance, 2026-10-06 05:35Z
+
+Runtime `f6260751` contains the reviewed recovery. The supported operator CLI
+successfully settled all three originals, in this order, without resend:
+
+- [Original brief](live/original-delivered.json)
+  `seat-71022bcd-8afe-44cd-9d83-bd71d1ceab42`: `settled-delivered`, with the exact
+  authenticated native Claude event, session, entry ID and transcript hash.
+- [Legacy Codex hire](live/original-codex-abandoned.json)
+  `9a42ada0-5111-497e-b43c-25881932778c`: `abandoned`, with fresh host census.
+- [Legacy Claude hire](live/original-claude-abandoned.json)
+  `e70fd47b-264a-42c3-aac9-7f25b6636a4f`: `abandoned`, with fresh host census.
+
+All journals and evidence remain retained. Both legacy allocations were absent;
+no legacy pane was closed, adopted or relaunched. Positive insertion evidence
+does not establish that the expired Claude account completed its old brief.
+
+After the approved normal PC update to worker 0.6.6, a new owner conversation
+`conv-b7ff6ebf-5264-4c94-8c74-5530d5a4cb45` dispatched exactly one Codex hire
+into the granted KH2 directory. The [result](live/a-hire-result.json) is
+`start_unconfirmed`: the remote launcher rejected `CLANKIE_EXPECTED_TOOL_NAMES`
+in the controller's launch environment before creating the native server. No
+brief, follow-up or peer message was delivered, and no fallback started.
+The [new original receipt](live/a-original-receipt.json)
+`719dd6b1-2814-4c2b-9eb6-118fb785427c` remains unresolved and retained. Do not
+retry this hire or remove its claim. The two owned shell panes were empty with
+no drafts before [cleanup](live/cleanup.json); the hook-test pane was also closed.
+The final PC roster matches the original five panes.
+
+The follow-up candidate consumes that controller metadata only if the identical
+value is already present in the scoped bridge configuration. All other remote
+environment/account overrides still fail before SSH. [Native security review](live/SECURITY-REVIEW.md)
+approved the change. [46 focused tests](live/focused-tests.txt), Clankie typecheck,
+scoped lint, formatting and diff checks pass. This candidate is not deployed;
+native PC delivery, follow-up, completion wake, tracker isolation and peer-message
+acceptance remain open. The failed test's original receipt also needs an explicit
+supported disposition before a later acceptance attempt.
+
+VUH-1709's normal update succeeded, but native worker hooks require owner trust
+review before execution proof. Claude remains signed out; Clankie is passing the
+existing `/login` ask to James. No accounts, manual config edits, other panes or
+desktop operations changed. `message_clankie` still reconciles the old unresolved
+receipt; the worker has no callable MCP refresh capability, so its original
+controller needs to refresh that connection on the same thread. Linear reads and
+tool discovery now succeed through Clankie's OAuth app.
