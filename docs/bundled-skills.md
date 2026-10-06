@@ -13,11 +13,13 @@ install and is always on. There is one class and no selection setting:
 `clankie doctor` includes it. Checkout-only skills live in `.agents/dev-skills`
 and do not ship.
 
-The catalog holds 15 skills: leadership and process skills (`lead`,
+The catalog holds 17 skills: leadership and process skills (`lead`,
 `shared-checkout`, `tidy`, `linear-issues`, `linear-orient`) beside product and
 tool skills (`clankie`, `this-machine`, `trace-clankie`, `work-items`,
-`research-team`, `desktop-control`, `herdr`, `fleet-resources`, `pokeagents`,
-`minecraft`). The directory listing is the authoritative inventory.
+`research-team`, `browser-use`, `connected-accounts`, `desktop-control`,
+`herdr`, `fleet-resources`, `pokeagents`, `minecraft`). Each teaches Clankie,
+his seat or his workers how to use his own body and tools
+([ADR 0236](adr/0236-clankie-owns-the-skills-he-ships.md)). The directory listing is the authoritative inventory.
 
 The `lead` and `linear-issues` skills read the current effective
 `fleet.closure` and `fleet.machineSetup`, including project overrides. Defaults
@@ -149,7 +151,10 @@ native input evidence, refusal reasons and the remaining read/close race.
   - `solution-space`: 38 worker sessions, 1 from Clankie.
   - `trip-planning`, `comparison-shopping`, `daily-digest`, `inbox-triage`:
     at most one load each in nine days; the owner dropped the errand set.
+    Their Clankie-specific mail and Google guidance moved to the new
+    `connected-accounts` skill, with the consent reference from `this-machine`.
 
   Folded: `computer-use-delegation` (3 loads in 383 listings, none from Clankie)
-  into `desktop-control`'s delegation reference, and `browser-use` (4 loads in
-  320 listings) into `this-machine`'s browser reference.
+  into `desktop-control`'s delegation reference. `browser-use` was folded the
+  same day and restored: its browser is Clankie's own body, and few loads
+  reflect how rarely he browses, not a skill he doesn't need.

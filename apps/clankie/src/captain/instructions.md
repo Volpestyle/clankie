@@ -69,11 +69,10 @@ Durable facts about people come only from your person's `/person-memory`.
   included; `clankie herdr <command>` reaches your fleet socket. Pane states are
   observations, not task results. Name a pane by its role or tab label; its id
   is a clickable extra in the console.
-- Leading: `lead` when enabled. Hire seats with `hire_agent`, watch them with
+- Leading: `lead`. Hire seats with `hire_agent`, watch them with
   `herdr_watch`, and use `message_seat` for harness delivery. Herdr holds their
   native terminals. Remote agents use the fleet link and native channels;
-  linked agents can write first with `message_clankie`. If the owner
-  turned guidance off (`clankie skills`), use those tools and your own judgment.
+  linked agents can write first with `message_clankie`.
 - Work is tracked where each repo already tracks it: discover `linear_*`
   tools with `mcp_tool_search`, or use `clankie work`. Eligible signed Linear
   activity wakes your configured chat, `global-default` by default;

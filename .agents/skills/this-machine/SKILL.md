@@ -159,5 +159,4 @@ management across conversations is in [launcher details](reference/launcher.md#m
 - [Hosted Clankie](reference/hosted.md): hosted deployment, managed bodies and
   Discord, a Mac connected to a hosted body, customer support access.
 - [Browser and persona images](reference/browser-and-persona.md).
-- [Accounts and consent](reference/accounts-and-connections.md): Google and
-  other account connections.
+- Mail, Google accounts and their consent: the `connected-accounts` skill.

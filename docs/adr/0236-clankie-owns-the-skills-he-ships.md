@@ -21,25 +21,25 @@ good ones. A skill also has to be loaded in practice. The bundle was measured ov
 1,232 service, operator-seat and worker sessions over 21 days (2026-09-16 to 2026-10-06), and each
 skill was kept, folded into another, or dropped:
 
-| Skill                                                          | Loads (Clankie / workers) | Decision                                                       |
-| -------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------- |
-| this-machine                                                   | 44 / 86                   | Keep; core cut from 6,241 to 1,348 words, detail in references |
-| herdr                                                          | 20 / 124                  | Keep (generated from the pinned binary)                        |
-| lead                                                           | 21 / 58                   | Keep; rewritten, see below                                     |
-| linear-orient, linear-issues                                   | 11 / 57, 6 / 124          | Keep                                                           |
-| trace-clankie                                                  | 10 / 51                   | Keep                                                           |
-| minecraft                                                      | 24 / 10                   | Keep                                                           |
-| shared-checkout                                                | 2 / 148                   | Keep                                                           |
-| work-items, clankie                                            | 4 / 65, 2 / 60            | Keep                                                           |
-| tidy, fleet-resources                                          | new this month            | Keep for a fair trial                                          |
-| pokeagents                                                     | 0 / 1                     | Keep: no play session ran in the window                        |
-| desktop-control                                                | 10 total                  | Keep; absorbs `computer-use-delegation` (3)                    |
-| browser-use                                                    | 4 total                   | Fold into this-machine's browser reference                     |
-| c, p                                                           | 1 / 51, 0 / 34            | Drop; commit and push stay native to each harness              |
-| reflect, solution-space                                        | 2 / 52, 1 / 38            | Drop; nearly every load came from an owner-global copy         |
-| research-team                                                  | 0-1                       | Keep: Clankie's own way of running a research fleet            |
-| trip-planning, comparison-shopping, daily-digest, inbox-triage | 0-1 each                  | Drop: general-purpose errands                                  |
-| trip-planning                                                  | 0-1                       | Drop                                                           |
+| Skill                                                          | Loads (Clankie / workers) | Decision                                                                                        |
+| -------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------- |
+| this-machine                                                   | 44 / 86                   | Keep; core cut from 6,241 to 1,348 words, detail in references                                  |
+| herdr                                                          | 20 / 124                  | Keep (generated from the pinned binary)                                                         |
+| lead                                                           | 21 / 58                   | Keep; rewritten, see below                                                                      |
+| linear-orient, linear-issues                                   | 11 / 57, 6 / 124          | Keep                                                                                            |
+| trace-clankie                                                  | 10 / 51                   | Keep                                                                                            |
+| minecraft                                                      | 24 / 10                   | Keep                                                                                            |
+| shared-checkout                                                | 2 / 148                   | Keep                                                                                            |
+| work-items, clankie                                            | 4 / 65, 2 / 60            | Keep                                                                                            |
+| tidy, fleet-resources                                          | new this month            | Keep for a fair trial                                                                           |
+| pokeagents                                                     | 0 / 1                     | Keep: no play session ran in the window                                                         |
+| desktop-control                                                | 10 total                  | Keep; absorbs `computer-use-delegation` (3)                                                     |
+| browser-use                                                    | 4 total                   | Keep: his own browser; low use reflects how rarely he browses                                   |
+| c, p                                                           | 1 / 51, 0 / 34            | Drop; commit and push stay native to each harness                                               |
+| reflect, solution-space                                        | 2 / 52, 1 / 38            | Drop; nearly every load came from an owner-global copy                                          |
+| research-team                                                  | 0-1                       | Keep: Clankie's own way of running a research fleet                                             |
+| trip-planning, comparison-shopping, daily-digest, inbox-triage | 0-1 each                  | Drop the errands; their mail and Google tool guidance moves to a new `connected-accounts` skill |
+| trip-planning                                                  | 0-1                       | Drop                                                                                            |
 
 `lead` is rewritten as Clankie's leadership judgment (what to start, who does
 it, briefs, harvest and delivery, efficiency rounds and authority) in about

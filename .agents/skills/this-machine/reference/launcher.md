@@ -9,7 +9,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Job                                    | Command                                                                                                                                                            |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | This install                           | `clankie doctor --json` (JSON; exit 0; `ok` means the card was produced)                                                                                           |
-| Account connections and Google consent | [Consent and CLI commands](accounts-and-connections.md); `/connect accounts` or `/connections` in the console                                                      |
+| Account connections and Google consent | the `connected-accounts` skill; `/connect accounts` or `/connections` in the console                                                                               |
 | Can he take a turn                     | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                                                                                     |
 | Start at login                         | `clankie autostart status`, `clankie autostart enable`                                                                                                             |
 | Are processes up                       | `clankie status` (JSON; `clankie health` is an alias)                                                                                                              |

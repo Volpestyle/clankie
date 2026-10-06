@@ -35,7 +35,7 @@ offers separate Gmail, Calendar and selected-file Drive consent using the body
 catalog. Gmail and Calendar grants are read-only; Drive's selected-file grant
 permits edits, while Clankie's implemented tools only read. Refresh and grouped revocation
 remain on the body. Never ask for a provider token in chat; send the owner to
-the app or `/connect accounts`. See [account consent](accounts-and-connections.md).
+the app or `/connect accounts`. See the `connected-accounts` skill.
 
 ## Managed hosted bodies
 
