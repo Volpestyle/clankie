@@ -3,6 +3,7 @@
  * then stage one only when the owner picks it. Same endpoint as `clankie update`.
  */
 import type { ClankieFaceShell } from "./shell/shell.ts";
+import { formatUpdateOutput } from "./command/update-output.ts";
 
 type Run = (args: readonly string[]) => Promise<unknown>;
 type Json = Record<string, unknown>;
@@ -97,13 +98,42 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
       if (typed === undefined) return;
       ref = typed.trim();
     }
-    const staged = await update(ref === "main" ? [] : ["--ref", ref]);
+    const args = ref === "main" ? [] : ["--ref", ref];
+    let staged = await update(args);
+    if (Array.isArray(record(staged).holds) && (record(staged).holds as unknown[]).length) {
+      const held = record(staged).holds as { id: string }[];
+      const consent = await flow.readSelect({
+        message: formatUpdateOutput(staged),
+        options: [
+          { value: "keep", label: "Keep the update held" },
+          {
+            value: "override",
+            label: "Override the reviewed holds and update",
+            hint: "authenticated owner; audited per hold",
+          },
+        ],
+        allowBack: true,
+      });
+      if (consent !== "override") return;
+      const reason = await flow.readText({
+        message: "Reason for each audited override",
+        allowBack: true,
+        validate: (text) => (text.trim() ? undefined : "Enter a reason."),
+      });
+      if (reason === undefined) return;
+      staged = await update([
+        ...args,
+        ...held.flatMap((hold) => ["--override-hold", hold.id]),
+        "--reason",
+        reason,
+      ]);
+    }
     const accepted = record(staged).accepted === true;
     shell.insertCommandResult(
       "/update",
       accepted
         ? `Staged ${ref}. ${formatUpdateState(staged)}\n/update status follows it.`
-        : `Not staged: another update is still settling. ${formatUpdateState(staged)}`,
+        : formatUpdateOutput(staged),
       accepted ? "success" : "error",
     );
   } catch (error) {

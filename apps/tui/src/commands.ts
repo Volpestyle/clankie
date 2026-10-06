@@ -7,7 +7,8 @@ import { runProjectsMenu } from "./project-menu.ts";
 import { runAccessMenu } from "./access-menu.ts";
 import { runAccountsMenu } from "./accounts-menu.ts";
 import { formatDoctorReport } from "./doctor-report.ts";
-import { formatUpdateState, runUpdateMenu } from "./update-menu.ts";
+import { runUpdateMenu } from "./update-menu.ts";
+import { formatUpdateOutput } from "./command/update-output.ts";
 import { runMinecraftMenu } from "./minecraft-menu.ts";
 import { runProjectCommand } from "./command/project.ts";
 import { runMachinesCommand } from "./command/machines.ts";
@@ -233,11 +234,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       }
       try {
         const result = await context.commandUpdate(args);
-        shell.insertCommandResult(
-          "/update",
-          args[0] === "status" ? formatUpdateState(result) : JSON.stringify(result, null, 2),
-          "success",
-        );
+        shell.insertCommandResult("/update", formatUpdateOutput(result), "success");
       } catch (error) {
         shell.insertCommandResult("/update", String(error), "error");
       }

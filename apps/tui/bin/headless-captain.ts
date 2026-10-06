@@ -7,7 +7,7 @@ import {
   runWorkerToolRefreshCommand,
   runWorkerToolRestartCommand,
 } from "../src/command/harness.ts";
-import { runUpdateCommand } from "../src/command/update.ts";
+import { runUpdateCli } from "../src/command/update-output.ts";
 import { runBodyCommand } from "../src/command/body.ts";
 import { MachineInventorySchema } from "@clankie/protocol";
 import { runMachinesCommand, formatMachines, MACHINE_RESTART_HINT } from "../src/command/machines.ts";
@@ -216,8 +216,7 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "update") {
-      outputJson(stdout, await runUpdateCommand(rest, options));
-      return 0;
+      return await runUpdateCli(rest, { ...options, stdout });
     }
     if (command === "restart") return await runRestartCommand(rest, options);
     if (command === "start") return await runStartCommand(rest, options);

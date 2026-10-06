@@ -75,6 +75,13 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
+For agents, add `--json` (piped output is also JSON). A terminal shows the
+live and target commits and groups deploy holds by cause. An authenticated
+owner may explicitly use `clankie update --override-holds --reason TEXT`;
+every hold gets an audited override with the server-derived owner identity.
+Never override without the owner's reviewed reason. Older verified canary
+holds clear only after a newer runtime passes its full observation window.
+
 When a restart is authorized, run `clankie restart` from your own bash tool.
 `status: "scheduled"` means queued until your current turn finishes, not healthy;
 finish your reply, then check `clankie status`. You do not need a worker, a

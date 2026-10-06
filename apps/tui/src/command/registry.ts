@@ -48,7 +48,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["update"],
     lines: [
-      "  update [--ref REF] | status  Fetch origin/main, safely sync owner main, detach safe restart, or read durable result (JSON)",
+      "  update [--ref REF] | status [--json]  Explain the live runtime, target and deploy holds; JSON when piped",
+      "  update --override-holds --reason TEXT  Owner-only update with one audited override per hold",
       "  update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets (CPU is advisory)",
     ],
   },

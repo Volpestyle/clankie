@@ -1,6 +1,7 @@
 import { syncOwnerCheckout } from "@clankie/settings";
 /** Local host updater: one private operation, one detached helper, no mutation retry. */
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { promisify } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -55,6 +56,14 @@ export interface RuntimeUpdater {
   /** Immutable boot identity; liveness probes never need transaction-file reads. */
   readonly runtime: RuntimeBootIdentity;
   status(): RuntimeUpdateStatus;
+  preview?(ref: string): Promise<{
+    ref: string;
+    newCommit: string;
+    resolvedRef: string;
+    commitCount: number;
+    summary: string[];
+    warning?: RuntimeUpdateResult["warning"];
+  }>;
   request(
     ref: string,
     authority: UpdateAuthority,
@@ -308,6 +317,24 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
     runtime: boot,
     status,
     reconcile,
+    async preview(ref) {
+      const target = await updateCommit(checkout, ref, boot.commit, options.run);
+      const git = async (args: string[]) => {
+        if (options.run) return options.run("git", args, checkout);
+        const { stdout } = await promisify(execFile)("git", args, {
+          cwd: checkout,
+          encoding: "utf8",
+          timeout: 60_000,
+          maxBuffer: 64 * 1024,
+        });
+        return stdout.trim();
+      };
+      const range = `${boot.commit}..${target.newCommit}`;
+      const commitCount = Number(await git(["rev-list", "--count", range]));
+      if (!Number.isSafeInteger(commitCount) || commitCount < 0) throw Error("Invalid update commit count");
+      const log = await git(["log", "-5", "--format=%h %s", range]);
+      return { ref, ...target, commitCount, summary: log ? log.split("\n") : [] };
+    },
     async request(ref, authority) {
       await authority.guard();
       if (!authority.current()) throw Error("Update authority expired");

@@ -338,6 +338,20 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 ### `update [--ref REF]` / `update status` / `update canary`
 
+In a terminal, update shows the live commit, the fetched target, its new commit
+count and latest commit summaries, then groups holds by cause with CPU and
+health measurements. `status` and `canary` also use plain words. Add `--json`
+for structured output; piped output stays JSON. `update --help` lists the flags.
+
+After reviewing holds, the authenticated owner can use
+`clankie update --override-holds --reason "why proceeding is safe"`.
+An interactive terminal also offers confirmation and asks for the reason;
+declining or giving no reason leaves the update held. Each hold gets its own
+durable override audit, attributed to the authenticated owner. A new hold
+acquired after the prompt still blocks. Legacy per-hold flags remain available:
+`--override-hold UUID [--actor NAME] --reason TEXT`; the server derives the
+audit actor from authentication regardless of the supplied name.
+
 What `clankie update` installs depends on the install. A release install moves to
 the latest official GitHub release, or `--ref vX.Y.Z`; it reports `upToDate` when
 already there, and otherwise stages that verified release beside the running one,

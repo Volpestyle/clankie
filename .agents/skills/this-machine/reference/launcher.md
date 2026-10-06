@@ -89,8 +89,12 @@ New service liveness starts a five-minute `/health` canary;
 holds in update status. A pending canary holds further landings. A failed canary
 keeps the new pin running, retains its hold, names `previousHealthyCommit`, and
 records alert delivery state; do not claim a rollback or successful delivery
-from a claimed receipt. Rollback is the owner's decision. A pass clears only
-its own hold. `clankie update canary` reads its policy; configure the next
+from a claimed receipt. Rollback is the owner's decision. A full pass clears
+its own and older verified canary holds, preserving their results and release
+audits. Independent or unreadable holds still block. Terminal output groups
+holds by cause; `--json` or piped output keeps structured results. Only the
+authenticated owner can use `clankie update --override-holds --reason TEXT`,
+which records one override audit per hold. `clankie update canary` reads its policy; configure the next
 observation with `--window-seconds`, `--sample-seconds`, `--cpu-percent`, and
 `--health-ms`, or use `/update` → Canary settings. A restart begins a full new
 window. Only unhealthy, stale or slow `/health` holds; captain CPU (100% is one
