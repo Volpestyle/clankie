@@ -696,10 +696,13 @@ actor share one budget across OAuth audiences. Counters reset on service restart
 provider remaining/reset headers account for usage by other clients after the
 next provider response. No credentials or request bodies appear in the report.
 
-At 50% of the 5,000-request hourly budget, Clankie emits one warning through
-native runtime alerts and shows `warning` in `/doctor`. Unaccepted warnings retry
-on subsequent budget observations after at least one minute; a pending delivery
-cannot start another warning. At 80%, device Work refreshes
+At 50% of the 5,000-request hourly budget, Clankie shows `warning` in `/doctor`
+and submits one warning through native runtime alerts. A refused, thrown or
+rejected admission remains pending and retries after 60 seconds, including when
+provider requests stop or the hard budget refuses them. Only one admission can
+be in flight per actor. Native acceptance stops retries even if its original
+receipt is unconfirmed; acceptance does not prove the recipient read the alert.
+Boot-time warnings await the native handler's result. At 80%, device Work refreshes
 and explicitly marked background reads
 share a one-minute minimum interval per actor; excess calls are refused before
 dispatch with a retry time. Existing issue-list caching continues to apply.

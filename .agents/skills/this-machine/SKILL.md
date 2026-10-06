@@ -220,6 +220,10 @@ index). Configure through the headless CLI:
 | Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                                                                                 |
 
 `clankie linear budget` and `clankie doctor --json` show account request usage.
+At 50%, a native warning remains pending until admission succeeds; refused or
+failed admission retries after 60 seconds without spending a provider request.
+An accepted but unconfirmed native receipt stops retries; it is not proof of
+alert receipt or model awareness. Usage below 50% rearms the warning.
 At 80%, the app's Work refresh and reads explicitly marked as background share
 a one-minute interval; honor refusal retry times. Automated operator scripts use
 `clankie linear read TOOL --json-stdin --background`; fleet polls use

@@ -606,13 +606,17 @@ const boundApp = (): ClankieApp => {
 // Durable revision receipts distinguish captain echoes from delegated worker
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
-let notifyLinearBudgetWarning: ((text: string) => Promise<boolean>) | undefined;
+let bindLinearBudgetWarning!: (notify: (text: string) => Promise<boolean>) => void;
+const linearBudgetWarningReady = new Promise<(text: string) => Promise<boolean>>((resolve) => {
+  bindLinearBudgetWarning = resolve;
+});
 const linearRequestBudget = new LinearRequestBudget({
   onAlert: (account) => {
     const text = `Linear request budget reached ${Math.round(account.utilization * 100)}% (${account.used}/${account.limit} requests in an hour) at ${new Date().toISOString()}. Background reads slow at 80%; writes retain priority. Inspect clankie linear budget.`;
     logger.warn({ event: "linear.request_budget.warning", ...account }, text);
-    if (notifyLinearBudgetWarning) return notifyLinearBudgetWarning(text);
-    return false;
+    // Keep boot-time warnings tied to the original admission result. A text-only
+    // queue loses false/rejected results and cannot safely retry the incident.
+    return linearBudgetWarningReady.then((notify) => notify(text));
   },
 });
 const mcpHost = createMcpHost({
@@ -1244,7 +1248,7 @@ const workerMcp = new WorkerMcp({
   },
 });
 
-notifyLinearBudgetWarning = (text) => captain.notifyRuntimeHealthAlert(text);
+bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
 const runtimeHealth = new RuntimeHealthObserver({
   settings: async () => (await settingsStore.load()).runtimeHealth,
   healthUrl: `http://127.0.0.1:${port}/health`,
@@ -1659,6 +1663,7 @@ let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
+  linearRequestBudget.close();
   const exitCode = signal === "SIGINT" ? 130 : 143;
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
