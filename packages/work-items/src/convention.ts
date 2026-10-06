@@ -245,12 +245,18 @@ export async function discoverConvention(root: string, run?: CommandRunner): Pro
   // version or a model name ("GROK-4"), not a tracker.
   const instructions = INSTRUCTION_FILES.map((file) => ({ file, text: readText(join(root, file)) }));
   const documents = [...instructions, ...markdownUnder(join(root, "docs"), root)];
-  const projectLink = documents
-    .map(({ file, text }) => ({
+  const projectCandidates = (
+    instructions.some(({ text }) => /https:\/\/linear\.app\/[\w-]+\/project\//u.test(text))
+      ? instructions
+      : documents
+  ).flatMap(({ file, text }) =>
+    [...text.matchAll(/https:\/\/linear\.app\/[\w-]+\/project\/([\w-]+)/gu)].map((match) => ({
       file,
-      match: /https:\/\/linear\.app\/[\w-]+\/project\/([\w-]+)/u.exec(text),
-    }))
-    .find((entry) => entry.match !== null);
+      match,
+    })),
+  );
+  const projectLink = projectCandidates[0];
+  const projects = new Set(projectCandidates.map((entry) => entry.match![1]));
   const issueNumbers = new Map<string, Set<string>>();
   const cite = (key: string, number: string) => {
     if (DENIED_KEYS.has(key)) return;
@@ -266,10 +272,14 @@ export async function discoverConvention(root: string, run?: CommandRunner): Pro
     /\b([A-Z]{2,6})-(\d{1,6})\b/gu,
   ))
     cite(match[1]!, match[2]!);
+  const branchTeams = new Set<string>();
   for (const match of (await quiet(run, "git", ["branch", "-a", "--format=%(refname:short)"], root)).matchAll(
-    /(?:^|\/)([a-z]{2,6})-(\d{1,6})-/gmu,
-  ))
-    cite(match[1]!.toUpperCase(), match[2]!);
+    /(?:^|\/)([a-z]{2,6})-(\d{1,6})(?:-|$)/gimu,
+  )) {
+    const key = match[1]!.toUpperCase();
+    if (!DENIED_KEYS.has(key)) branchTeams.add(key);
+    cite(key, match[2]!);
+  }
   const [team, numbers] = [...issueNumbers.entries()]
     .map(([key, set]) => [key, set.size] as const)
     .sort((a, b) => b[1] - a[1])[0] ?? [undefined, 0];
@@ -277,7 +287,7 @@ export async function discoverConvention(root: string, run?: CommandRunner): Pro
   if (
     projectLink !== undefined ||
     linkedIssues > 0 ||
-    (team !== undefined && numbers >= 5 && namedInInstructions)
+    (team !== undefined && (numbers >= 5 || (numbers >= 1 && (namedInInstructions || branchTeams.has(team)))))
   ) {
     signals.push({
       kind: "linear",
@@ -357,6 +367,14 @@ export async function discoverConvention(root: string, run?: CommandRunner): Pro
   const trackers = signals.filter((signal) => signal.suggests?.backend !== undefined);
   const withDecisions = <T extends object>(value: T) =>
     decisions === undefined ? value : { ...value, decisions };
+  const competingTeams = [...issueNumbers].filter(
+    ([key, ids]) => ids.size >= 1 && (namedInInstructions || branchTeams.has(key) || ids.size >= 5),
+  );
+  if (projects.size > 1 || competingTeams.length > 1)
+    return {
+      signals,
+      question: `This repo points at more than one Linear ${projects.size > 1 ? "project" : "team"} (${projects.size > 1 ? [...projects].join(", ") : competingTeams.map(([key]) => key).join(", ")}). Which one should Clankie and his workers use?`,
+    };
   if (trackers.length === 1) {
     const only = trackers[0]!.suggests!;
     if (only.backend === "linear" && only.linear === undefined)

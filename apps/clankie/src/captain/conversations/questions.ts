@@ -199,9 +199,58 @@ export async function proposeProjectCreate(
   );
 }
 
+export async function proposeProjectDefaults(
+  ctx: ConversationStore,
+  conversationId: string,
+  context: ConversationTurnContext,
+): Promise<ConversationQuestionResult | ProjectProposalResult> {
+  await authorizeQuestion(context.ownerAuthority);
+  const meta = ctx["metas"].get(conversationId);
+  if (!meta || !context.questionBinding || !ctx["projectOnboarding"])
+    throw new Error("project_onboarding_unavailable");
+  ctx["validQuestionState"](meta);
+  const existing = meta.questions?.records.find((r) => r.question.status === "pending");
+  if (existing)
+    return existing.projectCreation
+      ? ctx["projectProposalOperation"](
+          {
+            op: "project_proposal_get",
+            schemaVersion: 1,
+            conversationId,
+            requestId: existing.question.requestId,
+            incarnationId: existing.question.incarnationId,
+          },
+          context.ownerAuthority,
+        )
+      : ctx["questionResult"](meta, existing, "ready", "already_pending");
+  const inferred = await ctx["projectOnboarding"].defaults(context.questionBinding.workspace.path);
+  // requestQuestion repeats owner, workspace, current-turn and pending-slot checks after the IO.
+  const result = inferred.draft
+    ? await ctx["proposeProjectCreate"](conversationId, inferred.draft, context)
+    : await ctx["requestQuestion"](
+        conversationId,
+        QuestionDraftSchema.parse({ kind: "text", prompt: inferred.question }),
+        context,
+      );
+  if (!inferred.draft || !result.question || result.status !== "ready") return result;
+  return ctx["projectProposalOperation"](
+    {
+      op: "project_proposal_get",
+      schemaVersion: 1,
+      conversationId,
+      requestId: result.question.requestId,
+      incarnationId: result.question.incarnationId,
+    },
+    context.ownerAuthority,
+  );
+}
+
 export async function projectProposalOperation(
   ctx: ConversationStore,
-  request: Extract<ConversationServiceRequest, { op: "project_proposal_get" | "project_proposal_confirm" }>,
+  request: Extract<
+    ConversationServiceRequest,
+    { op: "project_proposal_get" | "project_proposal_confirm" | "project_proposal_tweak" }
+  >,
   authority: QuestionAuthority | undefined,
 ): Promise<ProjectProposalResult> {
   await authorizeQuestion(authority);
@@ -220,7 +269,7 @@ export async function projectProposalOperation(
     authority?.principal.kind === record.issuer.kind && authority.principal.id === record.issuer.id;
   if (!originalPrincipal()) throw new Error("question_owner_unavailable");
   const target =
-    request.op === "project_proposal_confirm"
+    request.op !== "project_proposal_get"
       ? ProjectProposalTargetSchema.parse({
           conversationId: request.conversationId,
           incarnationId: request.incarnationId,
@@ -271,6 +320,63 @@ export async function projectProposalOperation(
   // Another caller may have claimed while this caller was awaiting authorization.
   if (creation.claim) return proposalResult(creation, meta.revision);
   if (!ctx["projectOnboarding"]) return { status: "refused", reason: "project_onboarding_unavailable" };
+  if (request.op === "project_proposal_tweak") {
+    const change = request.change;
+    const command = {
+      ...creation.immutable.command,
+      ...(change.field === "tracker" ? change.value : { [change.field]: change.value }),
+    };
+    // Tracker replacement clears both leaves before applying the reviewed field.
+    if (change.field === "tracker") {
+      command.trackerRef = change.value.trackerRef;
+      command.trackerSetup = change.value.trackerSetup;
+    }
+    let prepared: Awaited<ReturnType<NonNullable<ConversationStore["projectOnboarding"]>["prepare"]>>;
+    try {
+      prepared = await ctx["projectOnboarding"].prepare(command);
+    } catch {
+      return { status: "refused", reason: "project_proposal_conflict" };
+    }
+    try {
+      await guard();
+    } catch {
+      return { status: "refused", reason: "owner_context_lost" };
+    }
+    if (creation.claim) return proposalResult(creation, meta.revision);
+    const previousRoles = creation.immutable.effectiveRoles.map((r) => `${r.role}:`);
+    const immutable = {
+      ...creation.immutable,
+      command,
+      ...prepared,
+      proposalId: randomUUID(),
+      evidence: [
+        ...creation.immutable.evidence.filter(
+          (line) =>
+            !line.startsWith(`${change.field}:`) &&
+            !(change.field === "roles" && previousRoles.some((role) => line.startsWith(role))),
+        ),
+        ...(change.field === "roles"
+          ? prepared.effectiveRoles.map((r) => `${r.role}: Requested by the owner.`)
+          : [`${change.field}: Owner reviewed this field.`]),
+      ].slice(-8),
+    };
+    const replacement = ProjectCreationSchema.parse({
+      immutable,
+      artifactSha256: proposalHash(immutable),
+      status: "pending",
+    });
+    record.projectCreation = replacement;
+    meta.revision += 1;
+    try {
+      ctx["saveQuestionMeta"](meta);
+    } catch {
+      // The rename may have happened. Keep the new slot, disable confirmation,
+      // and never restore an old target or replay a possibly committed tweak.
+      ctx["questionIssuers"].delete(record.question.requestId);
+      return { status: "uncertain", reason: "tweak_persistence_unavailable" };
+    }
+    return proposalResult(replacement, meta.revision);
+  }
   creation.claim = target;
   creation.status = "committing";
   try {

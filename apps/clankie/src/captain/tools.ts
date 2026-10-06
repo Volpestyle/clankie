@@ -67,6 +67,7 @@ import { minecraftHostTools } from "./minecraft-host-tools.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  proposeProjectDefaults?: (() => Promise<unknown>) | undefined;
   proposeProjectCreate?: ((draft: ProjectProposalDraft) => Promise<ConversationQuestionResult>) | undefined;
   requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */

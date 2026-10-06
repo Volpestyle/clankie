@@ -418,6 +418,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const questionOp =
       serviceRequest.op === "project_proposal_get" ||
       serviceRequest.op === "project_proposal_confirm" ||
+      serviceRequest.op === "project_proposal_tweak" ||
       serviceRequest.op === "input_get" ||
       serviceRequest.op === "input_answer" ||
       serviceRequest.op === "input_cancel";
@@ -523,6 +524,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "work_item_write_receipt" ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
+          serviceRequest.op === "project_proposal_tweak" ||
           serviceRequest.op === "input_get" ||
           serviceRequest.op === "input_answer" ||
           serviceRequest.op === "input_cancel" ||

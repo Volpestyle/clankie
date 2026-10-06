@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/rhea-vuh-1538
+
+{"level":30,"time":"2026-10-06T13:34:57.985Z","service":"clankie","version":"0.2.0","deviceId":"control","operatorId":"owner","msg":"device revoked"}
+ ❯ apps/clankie/test/project-defaults.integration.test.ts (16 tests | 1 failed | 1 skipped) 2035ms
+   × competing Linear projects and a lone TODO require a decision 35ms
+{"level":30,"time":"2026-10-06T13:35:01.771Z","service":"clankie","version":"0.2.0","deviceId":"control","operatorId":"operator","msg":"device revoked"}
+{"level":30,"time":"2026-10-06T13:35:01.813Z","service":"clankie","version":"0.2.0","deviceId":"control","operatorId":"operator","msg":"device revoked"}
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/project-defaults.integration.test.ts > competing Linear projects and a lone TODO require a decision
+AssertionError: expected 'This repo points at Linear but no iss…' to contain 'more than one Linear project'
+
+Expected: "more than one Linear project"
+Received: "This repo points at Linear but no issue key shows up in its history. Which Linear team (and project) should its work go in?"
+
+ ❯ apps/clankie/test/project-defaults.integration.test.ts:104:66
+    102| it("competing Linear projects and a lone TODO require a decision", asy…
+    103|   const root = await repo({ "AGENTS.md": "https://linear.app/w/project…
+    104|   expect((await inferProjectDefaults(root, resources)).question).toCon…
+       |                                                                  ^
+    105|   const todo = await repo({ "TODO.md": "- work" });
+    106|   expect((await inferProjectDefaults(todo, resources)).question).toCon…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  1 failed | 78 passed | 1 skipped (80)
+   Start at  08:34:53
+   Duration  9.00s (transform 1.42s, setup 48ms, import 4.77s, tests 3.73s, environment 0ms)

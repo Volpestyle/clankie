@@ -9,6 +9,8 @@ import { z } from "zod";
 import {
   ProjectProposalLocatorSchema,
   ProjectProposalTargetSchema,
+  ProjectProposalTweakSchema,
+  type ProjectProposalTweak,
   ProjectIdSchema,
   ProjectProposalResultSchema,
   type ProjectProposalLocator,
@@ -165,6 +167,10 @@ import { encodeBase64 } from "./base64.ts";
 export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  ProjectProposalTweakSchema.extend({
+    op: z.literal("project_proposal_tweak"),
+    schemaVersion: z.literal(1),
+  }).strict(),
   ProjectProposalLocatorSchema.extend({
     op: z.literal("project_proposal_get"),
     schemaVersion: z.literal(1),
@@ -603,6 +609,13 @@ export type OperatorWorkItemsOutcome =
   | { readonly outcome: "unavailable"; readonly message: string };
 
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("project_proposal_tweak"),
+      schemaVersion: z.literal(1),
+      result: ProjectProposalResultSchema,
+    })
+    .strict(),
   z
     .object({
       op: z.literal("project_proposal_get"),
@@ -1046,6 +1059,7 @@ export type OperatorConversationTailItem =
 export interface OperatorConversationServiceClient {
   projectProposalGet?(target: ProjectProposalLocator): Promise<ProjectProposalResult>;
   projectProposalConfirm?(target: ProjectProposalTarget): Promise<ProjectProposalResult>;
+  projectProposalTweak?(target: ProjectProposalTweak): Promise<ProjectProposalResult>;
   inputGet?(conversationId: string, requestId?: string): Promise<ConversationQuestionResult>;
   inputAnswer?(
     target: ConversationQuestionTarget & { answer: ConversationQuestionAnswer },
@@ -1227,6 +1241,11 @@ export function createOperatorConversationServiceClient(
     async projectProposalGet(target) {
       const result = await dispatch({ op: "project_proposal_get", schemaVersion: 1, ...target });
       if (result.op !== "project_proposal_get") throw new Error("Unexpected proposal response");
+      return result.result;
+    },
+    async projectProposalTweak(target) {
+      const result = await dispatch({ op: "project_proposal_tweak", schemaVersion: 1, ...target });
+      if (result.op !== "project_proposal_tweak") throw new Error("Unexpected proposal response");
       return result.result;
     },
     async projectProposalConfirm(target) {

@@ -289,6 +289,29 @@ export const ProjectProposalTargetSchema = ProjectProposalLocatorSchema.extend({
   expectedProjectsRevision: z.string().regex(/^[a-f0-9]{64}$/u),
 }).strict();
 export type ProjectProposalTarget = z.infer<typeof ProjectProposalTargetSchema>;
+/** One reviewed field at a time; a tweak is never acceptance. */
+export const ProjectProposalTweakSchema = ProjectProposalTargetSchema.extend({
+  change: z.discriminatedUnion("field", [
+    z.object({ field: z.literal("name"), value: CreateProjectSettingsSchema.shape.name }).strict(),
+    z.object({ field: z.literal("roles"), value: CreateProjectSettingsSchema.shape.roles.unwrap() }).strict(),
+    z
+      .object({ field: z.literal("workerCap"), value: CreateProjectSettingsSchema.shape.workerCap.unwrap() })
+      .strict(),
+    z.object({ field: z.literal("fleet"), value: CreateProjectSettingsSchema.shape.fleet.unwrap() }).strict(),
+    z
+      .object({
+        field: z.literal("tracker"),
+        value: z
+          .object({
+            trackerRef: CreateProjectSettingsSchema.shape.trackerRef,
+            trackerSetup: CreateProjectSettingsSchema.shape.trackerSetup,
+          })
+          .strict(),
+      })
+      .strict(),
+  ]),
+}).strict();
+export type ProjectProposalTweak = z.infer<typeof ProjectProposalTweakSchema>;
 export const ProjectProposalResultSchema = z
   .object({
     status: z.enum(["pending", "committing", "created", "uncertain", "refused"]),

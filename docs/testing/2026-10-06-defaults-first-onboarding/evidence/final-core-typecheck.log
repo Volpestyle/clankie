@@ -1,0 +1,2 @@
+heavy: waiting for a slot (22047 ash-vuh-1743-linear-wakes: clankie heavy -- pnpm exec vitest run apps/clan;19166 integrate-pc-sender: env -u CLANKIE_DIRECT_CONTROL_PLANE_URL -u CLANKIE_RE;)
+$ tsc --noEmit -p tsconfig.json

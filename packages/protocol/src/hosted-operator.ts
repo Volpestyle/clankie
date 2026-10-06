@@ -34,6 +34,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "send",
         "project_proposal_get",
         "project_proposal_confirm",
+        "project_proposal_tweak",
         "input_get",
         "input_answer",
         "input_cancel",

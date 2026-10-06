@@ -15,6 +15,8 @@ import {
   type SettingsStore,
 } from "@clankie/settings";
 import { applyProjectCreate } from "../project-create.ts";
+import { inferProjectDefaults } from "./project-defaults.ts";
+import type { ResourceSnapshot } from "@clankie/fleet-resources";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const directory = z
@@ -123,9 +125,22 @@ export function proposalResult(creation: ProjectCreation, revision: number): Pro
   };
 }
 /** Only injected by the service composition; not accepted from an owner/model request. */
-export function projectOnboarding(settings: Pick<SettingsStore, "load" | "update">) {
+export function projectOnboarding(
+  settings: Pick<SettingsStore, "load" | "update">,
+  resources: () => ResourceSnapshot | undefined = () => undefined,
+) {
   return {
     load: () => settings.load(),
+    async defaults(workspace: string) {
+      const result = await inferProjectDefaults(workspace, resources());
+      if (result.draft) {
+        const existing = (await settings.load()).projects.projects;
+        const base = result.draft.projectId;
+        for (let suffix = 2; existing.some((p) => p.id === result.draft!.projectId); suffix++)
+          result.draft.projectId = `${base}-${suffix}`;
+      }
+      return result;
+    },
     async prepare(command: z.infer<typeof CreateProjectSettingsSchema>) {
       const current = await settings.load();
       const next = createProjectSettings(current.projects, command);
