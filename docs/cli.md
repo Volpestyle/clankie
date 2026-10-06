@@ -2622,6 +2622,10 @@ context is not erased. Reset a service conversation or start a fresh seat after
 changing the selection, and reopen the console for its initial autocomplete.
 No service restart is needed for selection changes once this code is running.
 
+Existing service conversations discover added, changed or removed skill files and
+workspace instructions before their next turn, keeping their history and selected
+skill exclusions. Native seats keep their harness's own resource-loading behavior.
+
 `hire_agent` accepts `skills: "bundled" | "plain"` for one local Claude, Pi or
 Codex hire; omission follows the owner setting. `bundled` still honors exclusions.
 The result records the condition and supplied names. Unsupported/remote routes
