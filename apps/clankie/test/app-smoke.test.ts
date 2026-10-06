@@ -360,7 +360,15 @@ describe("clankie app smoke", () => {
 
     const health = await app.request("/health");
     expect(health.status).toBe(200);
-    await expect(health.json()).resolves.toEqual({ ok: true, service: "clankie" });
+    await expect(health.json()).resolves.toMatchObject({
+      ok: true,
+      service: "clankie",
+      processHealth: {
+        schemaVersion: 1,
+        pid: process.pid,
+        cpu: { userMicros: expect.any(Number), systemMicros: expect.any(Number) },
+      },
+    });
 
     const turn = await app.request("/v1/captain/channel-turns", {
       method: "POST",

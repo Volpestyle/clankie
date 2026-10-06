@@ -31,6 +31,7 @@ async function fixture() {
     accepted = 0;
   let prepare = async () => {};
   const updater: RuntimeUpdater = {
+    runtime: status.runtime,
     status: () => status,
     request: async (_ref, source) => {
       await prepare();

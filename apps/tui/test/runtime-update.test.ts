@@ -24,6 +24,8 @@ function fixture() {
     writeFileSync(join(path, ".git"), "fixture");
     mkdirSync(join(path, "apps/tui/src/command"), { recursive: true });
     writeFileSync(join(path, "apps/tui/src/command/update.ts"), "fixture");
+    mkdirSync(join(path, "apps/clankie/src"), { recursive: true });
+    writeFileSync(join(path, "apps/clankie/src/runtime-canary.ts"), "fixture");
     for (const n of ["clankie", "clankie-herdr"])
       writeFileSync(join(path, `apps/tui/bin/${n}.ts`), "fixture");
     commits.set(path, commit);
@@ -291,6 +293,22 @@ it("unsupported target health protocol leaves old service untouched", async () =
     reason: "target-update-status-unsupported",
   });
   expect(f.calls).toEqual(["stage"]);
+});
+
+it("a target without the canary coordinator is refused before install or shutdown", async () => {
+  const f = fixture();
+  const run: InstallCommand = (command, args, cwd) => {
+    const result = f.run(command, args, cwd);
+    if (args[0] === "worktree" && args[1] === "add")
+      rmSync(join(args[3]!, "apps/clankie/src/runtime-canary.ts"));
+    return result;
+  };
+  expect(await executeRuntimeUpdate(f.plan, { ...f, run })).toMatchObject({
+    phase: "refused",
+    reason: "target-runtime-canary-unsupported",
+  });
+  expect(f.calls).toEqual(["stage"]);
+  expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
 });
 
 it("partial CLI link activation rolls back using the original pin path", async () => {
