@@ -181,7 +181,7 @@ export async function questionWorkspaceContext(
       projectsRevision(await load()) !== revision
     )
       throw new Error("changed context");
-    return `Host workspace context: ${JSON.stringify({ workspace: binding.path, project: matches.size ? [...matches][0] : "unassigned", projectsRevision: revision, projectProposalAvailable: matches.size === 0 })}. Preference questions do not authorize configuration.`;
+    return `Host workspace context: ${JSON.stringify({ workspace: binding.path, project: matches.size ? [...matches][0] : "unassigned", projectsRevision: revision, projectProposalAvailable: matches.size === 0 })}. Preference questions do not authorize configuration.${matches.size === 0 ? " This is an opportunity to onboard the workspace as a project. Read its repo and existing work-tracking convention, discuss the tracker, useful roles and team size in the dialog with request_user_input, then offer propose_project_create for explicit owner review. A missing tracker can be included as trackerSetup in that CREATE; answers alone do not initialize it. Choose your own questions and words, and keep any pending proposal rather than repeating it." : ""}`;
   } catch {
     return "Host workspace project context: unknown. Preference questions do not authorize configuration.";
   }

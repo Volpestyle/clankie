@@ -300,7 +300,10 @@ export class ProjectHires {
         proof.pane === a.pane &&
         proof.fleet === (a.request.fleet ?? "default")
       ) {
-        const observed = ProofSchema.parse(proof);
+        // Native observers also report cwd/private-seat metadata. A hire's
+        // intentional assignment retains only its original process identity.
+        const { nativeOccupantId, fleet, pane, binding, processes, shell } = proof;
+        const observed = ProofSchema.parse({ nativeOccupantId, fleet, pane, binding, processes, shell });
         if (a.proof && !isDeepStrictEqual(a.proof, observed))
           throw new Error(
             "The original hire's native process has changed. Check the existing agent before retrying.",

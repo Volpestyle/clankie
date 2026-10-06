@@ -454,7 +454,7 @@ export function createOperatorService(
             schemaVersion: 1,
             seats: [
               {
-                seatId: qualified?.id ?? seat.seatId,
+                seatId: seat.seatId,
                 occupantId: seat.occupantId,
                 fleet: qualified?.fleet ?? "default",
               },
@@ -472,7 +472,7 @@ export function createOperatorService(
         });
       const observed = snapshot.seats[0];
       if (
-        observed?.seatId !== (qualified?.id ?? seat.seatId) ||
+        observed?.seatId !== seat.seatId ||
         observed.occupantId !== seat.occupantId ||
         observed.membership.outcome !== "member" ||
         observed.membership.projectId !== projectId

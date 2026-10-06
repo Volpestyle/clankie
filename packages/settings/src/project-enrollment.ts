@@ -68,6 +68,25 @@ export class ProjectTrackerUnavailable extends Error {
   }
 }
 
+/** A setup proposal may create only a missing tracker, never overwrite a saved choice. */
+export async function observeProjectTrackerSetup(
+  workspace: string,
+): Promise<{ path: string; parent?: { path: string; identity: string[] } | undefined }> {
+  const path = join(workspace, ".clankie", "tracking.json");
+  try {
+    await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    try {
+      return { path, parent: await directory(join(workspace, ".clankie")) };
+    } catch (parentError) {
+      if ((parentError as NodeJS.ErrnoException).code === "ENOENT") return { path };
+      throw parentError;
+    }
+  }
+  throw new ProjectTrackerUnavailable();
+}
+
 /** Reads an existing convention only, never discovering or initializing a backend. */
 async function tracker(workspace: string) {
   const path = join(workspace, ".clankie", "tracking.json");
@@ -141,7 +160,8 @@ export async function observeProjectEnrollment(settings: ProjectsSettings, comma
   ].sort();
   return {
     directories: await Promise.all(paths.map(directory)),
-    ...(input.trackerRef ? { tracker: await tracker(input.workspacePath) } : {}),
+    ...(input.trackerSetup ? { trackerSetup: await observeProjectTrackerSetup(input.workspacePath) } : {}),
+    ...(!input.trackerSetup && input.trackerRef ? { tracker: await tracker(input.workspacePath) } : {}),
   };
 }
 
@@ -151,6 +171,8 @@ export function createProjectSettings(
   command: CreateProjectSettings,
 ): ProjectsSettings {
   const input = CreateProjectSettingsSchema.parse(command);
+  if (input.trackerSetup && !input.trackerRef)
+    throw new Error("Tracker setup requires the primary tracker binding");
   if (projectsRevision(settings) !== input.expectedRevision) throw new Error("Project settings changed");
   if (settings.projects.some((project) => project.id === input.projectId))
     throw new Error("Project already exists");

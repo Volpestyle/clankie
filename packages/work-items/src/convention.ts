@@ -1,11 +1,14 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   WorkConventionSchema,
   type WorkBackendKind,
   type WorkConvention,
   type WorkSignal,
+  WorkInitSettingsSchema,
+  type WorkInitSettings,
 } from "@clankie/protocol/work-items";
 
 /**
@@ -30,13 +33,82 @@ export async function readConvention(root: string): Promise<WorkConvention | und
   return WorkConventionSchema.parse(JSON.parse(text));
 }
 
-export async function writeConvention(root: string, convention: WorkConvention): Promise<void> {
+export async function writeConvention(
+  root: string,
+  convention: WorkConvention,
+  guard?: () => Promise<void>,
+): Promise<void> {
   const parsed = WorkConventionSchema.parse(convention);
   await mkdir(join(root, ".clankie"), { recursive: true });
+  await guard?.();
   const path = join(root, CONVENTION_FILE);
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-  await rename(temporary, path);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(parsed, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    await guard?.();
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+export class WorkInitInvalid extends Error {}
+
+export class WorkInitDecisionRequired extends Error {
+  readonly signals: WorkSignal[];
+  constructor(message: string, signals: WorkSignal[]) {
+    super(message);
+    this.signals = signals;
+  }
+}
+/** The existing work-init operation; proposals choose inputs, explicit CREATE calls it. */
+export async function initializeConvention(
+  root: string,
+  input: WorkInitSettings,
+  options: {
+    run?: CommandRunner;
+    clock?: () => Date;
+    guard?: () => Promise<void>;
+  } = {},
+): Promise<WorkConvention> {
+  const request = WorkInitSettingsSchema.parse(input);
+  let convention: WorkConvention;
+  if (request.backend === undefined) {
+    const discovery = await discoverConvention(root, options.run);
+    if (!discovery.suggestion)
+      throw new WorkInitDecisionRequired(discovery.question ?? "Choose a backend", discovery.signals);
+    convention = { ...discovery.suggestion, decidedAt: (options.clock?.() ?? new Date()).toISOString() };
+  } else {
+    convention = WorkConventionSchema.parse({
+      schemaVersion: 1,
+      backend: request.backend,
+      ...(request.directory === undefined ? {} : { directory: request.directory }),
+      ...(request.githubRepo === undefined ? {} : { github: { repo: request.githubRepo } }),
+      ...(request.linearTeam === undefined
+        ? {}
+        : {
+            linear: {
+              team: request.linearTeam,
+              ...(request.linearProject === undefined ? {} : { project: request.linearProject }),
+            },
+          }),
+      ...(request.decisions === undefined ? {} : { decisions: request.decisions }),
+      decidedBy: "owner",
+      decidedAt: (options.clock?.() ?? new Date()).toISOString(),
+      ...(request.note === undefined ? {} : { note: request.note }),
+    });
+  }
+  if (request.linearLabel !== undefined) {
+    if (convention.backend !== "linear" || !convention.linear)
+      throw new WorkInitInvalid("A Linear board label requires a linear convention with a team");
+    convention = WorkConventionSchema.parse({
+      ...convention,
+      linear: { ...convention.linear, label: request.linearLabel },
+    });
+  }
+  await options.guard?.();
+  await writeConvention(root, convention, options.guard);
+  return convention;
 }
 
 const INSTRUCTION_FILES = [

@@ -1,4 +1,7 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, realpath } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createProjectWorkspaceResolver } from "../src/project-membership.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -104,6 +107,69 @@ async function fixture(count = 1) {
 }
 const read = (service: FleetProjectMembership, input: ReadFleetProjectMembership) =>
   service.read(input, new AbortController().signal, async () => true);
+
+it("joins an owner-started process's real cwd to enrolled settings and its saved project role without a hire", async () => {
+  const f = await fixture();
+  const path = await realpath(f.directory);
+  const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { cwd: path, stdio: "ignore" });
+  await once(child, "spawn");
+  try {
+    f.proofs[0] = { ...f.proofs[0]!, processes: [{ pid: child.pid!, startTime: "owned-helper" }] };
+    f.settings().projects[0]!.workspaces = [{ id: "primary", machineId: "local", platform: "posix", path }];
+    f.settings().assignments = [{ personaId: "owner-started", projectId: "repo", role: "builder" }];
+    f.options.hires.projectHireMembershipCandidate = () => ({ state: "none" });
+    f.options.hires.personaForFleetOccupant = () => "owner-started";
+    const resolve = createProjectWorkspaceResolver({
+      settings: f.options.settings,
+      observe: (_fleet, pane) => f.observe(pane),
+    });
+    f.options.workspace = (proof) => resolve(proof);
+    const before = await readFile(f.path, "utf8");
+    const service = new FleetProjectMembership(f.options);
+    expect((await read(service, f.input)).seats[0]!.membership).toEqual({
+      outcome: "member",
+      source: "workspace",
+      projectId: "repo",
+      role: "builder",
+    });
+    f.settings().assignments = [];
+    expect((await read(service, f.input)).seats[0]!.membership).toEqual({
+      outcome: "member",
+      source: "workspace",
+      projectId: "repo",
+    });
+    expect(await readFile(f.path, "utf8")).toBe(before);
+    await expect(
+      service.read(f.input, new AbortController().signal, async () => {
+        if (f.observe.mock.calls.length > 0) f.options.workspace = async () => undefined;
+        return true;
+      }),
+    ).resolves.toMatchObject({ seats: [{ membership: { outcome: "unknown" } }] });
+  } finally {
+    const exited = once(child, "exit");
+    child.kill();
+    await exited;
+  }
+});
+
+it("rechecks workspace selection after authorization and never substitutes cwd for a broken hire", async () => {
+  const f = await fixture();
+  f.options.hires.projectHireMembershipCandidate = () => ({ state: "none" });
+  f.options.workspace = async () => "repo";
+  let authorized = 0;
+  await expect(
+    new FleetProjectMembership(f.options).read(f.input, new AbortController().signal, async () => {
+      if (++authorized === 2) f.options.workspace = async () => undefined;
+      return true;
+    }),
+  ).rejects.toThrow("changed");
+  f.options.workspace = vi.fn(async () => "repo");
+  f.options.hires.projectHireMembershipCandidate = () => ({ state: "unconfirmed" });
+  expect((await read(new FleetProjectMembership(f.options), f.input)).seats[0]!.membership.outcome).toBe(
+    "unknown",
+  );
+  expect(f.options.workspace).not.toHaveBeenCalled();
+});
 
 it("projects a real confirmed ledger proof independently of any controller and never writes on read", async () => {
   const f = await fixture();
@@ -251,6 +317,54 @@ it("keeps remote unsupported without invoking a remote observer", async () => {
   });
   expect(f.observe).not.toHaveBeenCalled();
 });
+
+it.each(["hire", "workspace"])(
+  "projects remote %s membership through its own registered host and qualified seat",
+  async (source) => {
+    const f = await fixture();
+    const agent = f.agents[0]!,
+      original = f.proofs[0]!;
+    const proof = {
+      ...original,
+      fleet: "pc",
+      workspace: { machineId: "pc", platform: "windows" as const, canonicalPath: "C:\\Project" },
+    };
+    f.proofs[0] = proof;
+    f.agents[0] = { ...agent, terminalId: `pc/${agent.terminalId}` };
+    f.input.seats[0] = { ...f.input.seats[0]!, fleet: "pc", seatId: `pc/${agent.terminalId}` };
+    const allocation = f.hires.reserve(f.settings(), "repo", {
+      schemaVersion: 1,
+      harness: "codex",
+      title: "Remote",
+      fleet: "pc",
+      workingDirectory: "C:\\Project",
+      role: "Builder",
+    });
+    f.hires.launch(allocation.id, f.settings());
+    f.hires.pane(allocation.id, agent.paneId);
+    f.hires.observe(allocation.id, agent.terminalId!, proof.nativeOccupantId, proof);
+    f.hires.confirmed(allocation.id);
+    const remote: FleetProjectMembershipOptions = {
+      ...f.options,
+      fleet: "pc",
+      workspace: async () => "repo",
+    };
+    if (source === "workspace")
+      remote.hires = { ...remote.hires, projectHireMembershipCandidate: () => ({ state: "none" }) };
+    const root = new FleetProjectMembership({
+      ...f.options,
+      remoteOptions: async (fleet) => (fleet === "pc" ? remote : undefined),
+    });
+    expect((await read(root, f.input)).seats[0]!.membership).toMatchObject({
+      outcome: "member",
+      source,
+      projectId: "repo",
+    });
+    expect(f.observe).toHaveBeenCalled();
+    remote.binding = async () => undefined;
+    expect((await read(root, f.input)).seats[0]!.membership.outcome).toBe("unknown");
+  },
+);
 it("a failed final census discards positive membership", async () => {
   const f = await fixture();
   f.roster.mockResolvedValueOnce(f.agents).mockRejectedValue(new Error("disconnected"));
