@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { requestRuntimeHealth } from "./runtime-health-sample.ts";
 import {
   RuntimeHealthObservationSchema,
   RuntimeHealthSettingsSchema,
@@ -108,16 +109,13 @@ export class RuntimeHealthObserver {
     const healthStart = performance.now();
     let healthAvailable = false;
     try {
-      const response = await fetch(this.options.healthUrl, {
-        signal: AbortSignal.any([
-          this.shutdown.signal,
-          AbortSignal.timeout(Math.max(1000, settings.healthLatencyMs * 2)),
-        ]),
-        redirect: "error",
+      await requestRuntimeHealth({
+        healthUrl: this.options.healthUrl,
+        signal: this.shutdown.signal,
+        timeoutMs: Math.max(1000, settings.healthLatencyMs * 2),
       });
-      // Read the complete response: stalled response bodies are slow health too.
-      await response.arrayBuffer();
-      healthAvailable = response.ok;
+      // The shared probe reads the complete bounded body; no idle fetch pool.
+      healthAvailable = true;
     } catch {
       /* A timeout or failed health response is a health failure. */
     }
