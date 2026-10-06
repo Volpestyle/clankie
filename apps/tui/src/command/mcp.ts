@@ -912,7 +912,7 @@ export function createFleetSeatBridge(
       instructions:
         send === undefined
           ? FLEET_CHANNEL_INSTRUCTIONS
-          : `${FLEET_CHANNEL_INSTRUCTIONS} To write to Clankie yourself, use the ${MESSAGE_CLANKIE_TOOL.name} tool.`,
+          : `${FLEET_CHANNEL_INSTRUCTIONS} To write to Clankie yourself, use the ${MESSAGE_CLANKIE_TOOL.name} tool. Questions and results for your lead go through it, not your harness's own ask-the-user prompt, which the lead may never see.`,
     },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

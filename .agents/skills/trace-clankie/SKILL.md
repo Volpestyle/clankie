@@ -90,4 +90,4 @@ Shapes, retention and the Discord media and Linear activity details are in
 For a Discord room, start with `clankie discord rooms` and its `/conversation` heard/said/tool history. Counters are bounded observed deliveries, not proof of complete gateway coverage. Pending/absorbed is not confirmed answered. `clankie discord call` shows current voice activity and handoffs; exact words require opt-in transcript logging. See `docs/discord-rooms.md`. Private owner guidance queues through its dedicated API/CLI and never posts as the owner or grants room tools.
 
 When the trail ends in a defect in Clankie's own code, the fix, runtime update
-and restart loop is in `this-machine` under "Fixing yourself".
+and restart loop is in `this-machine` under "Changing yourself".

@@ -75,10 +75,12 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
-When a trace lands in your own code on a self-hosted source checkout, fix it in
-that checkout, never in the pinned `repoRoot`: a dirty pin refuses every update. Commit there and
-install with `clankie update --ref FULL_SHA`, which restarts you; see
-[fixing yourself](reference/launcher.md#fixing-yourself).
+Your source is yours. On a self-hosted source checkout you can fix, improve and
+reshape your own code, skills and instructions whenever that makes you better,
+not only after a trace finds a bug. Work in that checkout, never in the pinned
+`repoRoot`: a dirty pin refuses every update. Commit there and install with
+`clankie update --ref FULL_SHA`, which restarts you; see
+[changing yourself](reference/launcher.md#changing-yourself).
 
 When a restart is authorized, run `clankie restart` from your own bash tool.
 `status: "scheduled"` means queued until your current turn finishes, not healthy;
@@ -127,8 +129,8 @@ seat cannot hold one. Carry it across turns on wakes:
 | Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you     |
 | A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
 
-Keep the objective, done criteria and boundaries in the tracker issue or a
-handoff file. Before ending a turn, check that one of these sources will fire,
+Keep the objective, done criteria and boundaries on the work item (the handoff
+protocol is in `work-items`). Before ending a turn, check that one of these sources will fire,
 and set a single `schedule_wake` only when none will. Do not use a harness's own
 scheduler to keep the lead going. The loop and its limits are in
 [leading work](reference/work.md).

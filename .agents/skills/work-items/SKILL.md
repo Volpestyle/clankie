@@ -148,7 +148,32 @@ explicit acceptance criterion. The lead owns scope and assignment boundaries;
 workers publish their own results and evidence directly, following the project's
 rules for status transitions. Shared integration, disputed acceptance and scope
 changes go to their decision owner. Keep the latest scope, decisions, result and
-actionable blockers on the issue; keep live coordination in native fleet messages.
+actionable blockers on the item; [where work state lives](#where-work-state-lives)
+says what goes elsewhere.
+
+## Where work state lives
+
+This is the handoff protocol for every agent here, lead and workers alike,
+whatever the backend. Each kind of state has one home, so a fresh seat, a lead
+after a reset or the owner can pick work up cold from the item:
+
+| State                                                                                            | Home                                                                                |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Status, what landed (commit), evidence, remaining acceptance, decisions                          | The work item in this repo's tracker (Linear, GitHub, Markdown or `.clankie/work/`) |
+| Briefs, questions, reports, "done at SHA"                                                        | Agent messages (`message_seat`, `message_clankie`)                                  |
+| Code and committed evidence                                                                      | The repository, linked from the item                                                |
+| Seat-swap machine state: worktree, uncommitted or unpushed changes, background jobs, local paths | `.local/HANDOFF-<name>.md` in the owned worktree, linked from the item              |
+| Fleet-wide state across items                                                                    | A project status update (`linear_save_status_update`, same local fallback)          |
+
+- A message is never the only copy of something needed later; put it on the item.
+- A worker that cannot write the tracker sends the durable part to its lead,
+  who posts it. Questions for the lead go through `message_clankie`: a harness's
+  own ask-the-user prompt reaches the lead only on a managed seat that routes
+  it, and otherwise waits unseen in the pane.
+- Before retiring a seat (context near full, stale tools), put its durable state
+  on the item and its machine state in the worktree handoff; the fresh seat
+  starts from the item.
+- Never keep work state in personal files outside the repo or in a lead-only log.
 
 For a bug investigation where a tracker is in use, search in-progress and recent
 closed items for the symptom or related changes before forming a code hypothesis.

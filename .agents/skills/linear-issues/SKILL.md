@@ -85,8 +85,9 @@ unchanged through `save_*` downgrades it to a file card.
 
 Linear holds durable product, engineering and design work, decisions and
 evidence. Local fleet events — pane assignments, leadership transfers, usage
-limits and queue coordination — belong in realtime agent messages or local
-handoffs, not issue comments or descriptions.
+limits and queue coordination — belong in realtime agent messages or a worktree
+`.local` handoff, not issue comments or descriptions (`work-items` has the
+full handoff protocol).
 
 Use the user's request, standing instructions and project workflow to determine
 write authority. A mandate to lead and keep work tracked covers routine evidence,
