@@ -11,6 +11,12 @@ An owner request to start the local world and play includes running its host
 through the machine tools available in that turn, including trusted Discord
 voice handoffs. Keep the existing room authority boundary.
 
+Pokémon's native connector and execution live in `integrations/pokemon`, using
+the shared game-extension lifecycle; its mind and journal remain in `packages/play`.
+Core retains the shared `play` lease and exact-session recovery. Extension
+`health: ready` describes local lifecycle state, not world reachability or
+visible frames; use the existing status/check/watch evidence below.
+
 ## Get the world running
 
 Use `command -v pokeagents` to find the installed host command. Its source

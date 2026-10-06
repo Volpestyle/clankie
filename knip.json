@@ -93,6 +93,9 @@
     },
     "packages/vec3": {
       "entry": ["test/**/*.test.ts"]
+    },
+    "integrations/pokemon": {
+      "entry": ["test/**/*.test.ts"]
     }
   },
   "ignoreIssues": {

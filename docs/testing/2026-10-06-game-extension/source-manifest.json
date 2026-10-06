@@ -1,0 +1,31 @@
+{
+  "baseMain": "72c1571a",
+  "pokemonRobustness": "8f4b19d17e477376fa335251f31c5f42e883eeab",
+  "files": {
+    "apps/clankie/package.json": "60addbfa00f77e3f267419b0191e6d65d832494f9324d39ae315f1d44a1ee37c",
+    "apps/clankie/src/index.ts": "ca40281a17b24592fa4333a8e1d5aa0f08d2c092fa6a92d6a8b1547d802ac150",
+    "apps/clankie/src/play-execution-shared.ts": "3db985d770e98c886edd78bd84dca375495f61ad97b49d226191c42051feae50",
+    "apps/clankie/src/play-execution-world.ts": "d43f4717d5088e643eba3eb08c2ef349ec838df355effd64a40d02227a6252d9",
+    "apps/clankie/src/play-mind.ts": "45567719fc21359a6a1aae5233b89bd185334aabb6aa1bf705c6ace55f3cf295",
+    "apps/clankie/src/world/body.ts": "8e3fcc8decc9b645a4a3f0352e6e39a0177e8eed32c6c5596bd74ee4f8fec1e7",
+    "apps/clankie/src/world/operations.ts": "4d7ca4710ba68366fbd3d3f007cb6c71959afc4df617230a8914a5aafa2456b8",
+    "apps/clankie/src/world/session.ts": "c5597d76807b2dbd85014c60b8fb9cce117c87bbf3f7881635f81ea6dd51acb0",
+    "apps/clankie/test/world-parity.test.ts": "bc5d19b7f4c4300e89dcebc483cedb401ac35123f03f5adf51183767ef056110",
+    "integrations/pokemon/package.json": "b84665bcf8f901991baedb024093a03bbf1e3798e6b4d8189d60a9d15429ee1b",
+    "integrations/pokemon/src/execution.ts": "04f7639cd1a8f9de05f4a9cc70344bb30bff6386d1d15b1bc9000bcb54217b23",
+    "integrations/pokemon/src/extension.ts": "4a00ed9261fd398da35ecb3207d7b9b6fd2ef79969dbe9a9f6ae625f2f943151",
+    "integrations/pokemon/src/index.ts": "197c13c97df79efeee70c17d1590a739ff8426e0d5515985cb038e7a463b40ed",
+    "integrations/pokemon/src/ports.ts": "e0168ada3a7e23617280275cc76191122e30fef44d0af2cdee9e2cab611cafc2",
+    "integrations/pokemon/src/world/body.ts": "f84cfcbf22a6648e649b5a301522dfadd0fcf905067d6e06e438e9a5434d5d89",
+    "integrations/pokemon/src/world/operations.ts": "fefce1f87aee923b4a20799e38e207fc7453dbca310c6e12300dc87b4964e25d",
+    "integrations/pokemon/src/world/session.ts": "ffe7b8b87a9590556917e794ab038fa0c5d2ce549643cd47461473be1f9b35b4",
+    "integrations/pokemon/test/extension.integration.test.ts": "54bf66ca94933cbac59e2cfee1b372921873a75a74cb6585455dd729bffa185a",
+    "integrations/pokemon/test/fixtures/firered-observation.json": "a7b7bc412c8328a293f0bd8e06ddf72416797958a6fe4e502a2203a68b222f34",
+    "integrations/pokemon/tsconfig.json": "666df554a4b46850760f37ed3d82764512af2eaec9a5a1f11cd835086aead0d7",
+    "knip.json": "dd3abda4e0644275a9cf496c5b3e50cf51d102a8884df18f74fcd464b7f8fe56",
+    "packages/game-extension/package.json": "a92695082d9e1a46168e7bdfa00b207727dcaf6eb14cddcf4051c9c1ebab1ca0",
+    "packages/game-extension/src/index.ts": "5f366ab9718d6f175a281bf0dfd7e5e5fb4d3065582865448946194544318d5c",
+    "packages/game-extension/tsconfig.json": "666df554a4b46850760f37ed3d82764512af2eaec9a5a1f11cd835086aead0d7",
+    "pnpm-lock.yaml": "672ae7b318f672454bd78a48ad7302c64fe791c2da03d979bafea4c44e63795d"
+  }
+}

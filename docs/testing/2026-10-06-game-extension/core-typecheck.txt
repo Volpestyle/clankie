@@ -1,0 +1,3 @@
+Command (wrapped in fleet bin/heavy): pnpm --filter @clankie/clankie typecheck
+$ tsc --noEmit -p tsconfig.json
+Observed exit code: 0

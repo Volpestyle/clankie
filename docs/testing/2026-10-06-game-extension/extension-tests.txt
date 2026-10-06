@@ -1,0 +1,11 @@
+Command (wrapped in fleet bin/heavy): pnpm exec vitest run --config vitest.config.ts integrations/pokemon/test/extension.integration.test.ts
+
+ RUN  v4.1.10 [worktree]
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  01:23:42
+   Duration  628ms (transform 329ms, setup 14ms, import 510ms, tests 37ms, environment 0ms)
+
+Observed exit code: 0

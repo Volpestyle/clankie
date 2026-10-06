@@ -103,7 +103,7 @@ import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
-import { HostedWorldSession } from "./world/session.ts";
+import { HostedWorldSession } from "@clankie/pokemon/world/session";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";

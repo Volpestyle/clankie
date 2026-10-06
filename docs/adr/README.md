@@ -90,6 +90,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0229 — Room handoffs are visible parallel threads](0229-room-handoffs-are-visible-parallel-threads.md)
 - [0230 — Fleet responsibility is owner settings](0230-fleet-responsibility-is-owner-settings.md)
 - [0233 — Activity shares own their media scope](0233-activity-shares-own-their-media-scope.md)
+- [0234 — Games share one extension contract](0234-games-share-one-extension-contract.md)
 
 ## Archived decisions
 
