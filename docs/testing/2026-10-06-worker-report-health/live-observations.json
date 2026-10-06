@@ -1,0 +1,80 @@
+{
+  "capturedAt": "2026-10-06T22:57:16.798440+00:00",
+  "cli": {
+    "command": "clankie herdr agent list",
+    "seats": 18,
+    "storedExamples": [
+      {
+        "seatId": "term_65d2eee08be9c6f",
+        "report": {
+          "outcome": "stored",
+          "reason": "stored",
+          "observedAt": "2026-10-06T22:57:13.686Z",
+          "lastStoredAt": "2026-10-06T22:57:13.686Z"
+        }
+      },
+      {
+        "seatId": "term_65d2e23dcdae86d",
+        "report": {
+          "outcome": "stored",
+          "reason": "stored",
+          "observedAt": "2026-10-06T22:56:12.607Z",
+          "lastStoredAt": "2026-10-06T22:56:12.607Z"
+        }
+      },
+      {
+        "seatId": "term_65d31fed04ec279",
+        "report": {
+          "outcome": "stored",
+          "reason": "stored",
+          "observedAt": "2026-10-06T22:56:29.746Z",
+          "lastStoredAt": "2026-10-06T22:56:29.746Z"
+        }
+      }
+    ],
+    "finishedUnreported": [
+      {
+        "seatId": "term_65d0ceae4d64ef",
+        "flags": ["finished, unreported"]
+      }
+    ]
+  },
+  "doctor": {
+    "command": "clankie doctor --json",
+    "seats": 20,
+    "storedExamples": [
+      {
+        "seatId": "term_65d2e23dcdae86d",
+        "report": {
+          "outcome": "stored",
+          "reason": "stored",
+          "observedAt": "2026-10-06T22:56:12.607Z",
+          "lastStoredAt": "2026-10-06T22:56:12.607Z"
+        }
+      },
+      {
+        "seatId": "term_65d31fed04ec279",
+        "report": {
+          "outcome": "stored",
+          "reason": "stored",
+          "observedAt": "2026-10-06T22:56:29.746Z",
+          "lastStoredAt": "2026-10-06T22:56:29.746Z"
+        }
+      }
+    ],
+    "finishedUnreported": [
+      {
+        "seatId": "term_65d0ceae4d64ef",
+        "flags": ["finished, unreported"]
+      }
+    ]
+  },
+  "limits": [
+    "The CLI and doctor captures are independent snapshots; a newer report may appear in only the later snapshot.",
+    "No live faults, threshold alert, receiver restart or report send were induced.",
+    "Missing report observations remain unknown.",
+    "The reviewed source revision is separate from the installed runtime."
+  ],
+  "reviewedMainRevision": "7e26bfa9d52034a9e69200cef9442fddf69249d3",
+  "appMainRevision": "1214a4c27b76c042db7099221edf6cbaebaaedea"
+}

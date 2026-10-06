@@ -7,12 +7,17 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import type { WorkerReportBridgeStatus } from "@clankie/protocol";
+import { OperatorFleetSeatSchema, type WorkerReportBridgeStatus } from "@clankie/protocol";
 import { afterEach, expect, it } from "vitest";
 import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
+import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
+import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
+import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -66,7 +71,7 @@ class HeldSettings extends SettingsStore {
 const wrappers = ["clankie_tools", "clankie_call"];
 const requestTimeoutMs = 250;
 
-async function fixture(slowBinding = false) {
+async function fixture(slowBinding = false, pane = "w1:p1") {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-bridge-health-"));
   const settings = new HeldSettings(join(root, "settings.json"));
   await settings.update((current) => ({
@@ -76,6 +81,9 @@ async function fixture(slowBinding = false) {
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
   const metrics = new FleetHealthMetrics();
+  const conversations = new ConversationStore(join(root, "conversations"), async () => {});
+  const receiver = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
+  let bindingSlow = slowBinding;
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
@@ -89,7 +97,7 @@ async function fixture(slowBinding = false) {
   let validations = 0;
   const identity = (): LocalFleetIdentity => ({
     fleet: "default",
-    pane: "w1:p1",
+    pane,
     current: () => valid,
     validate: async () => {
       validations += 1;
@@ -102,11 +110,15 @@ async function fixture(slowBinding = false) {
     hostname: "127.0.0.1",
     port: 0,
     fetch: async (request) => {
-      if (new URL(request.url).pathname.endsWith("/messages")) {
-        if (request.method === "POST") messagePosts++;
-        else {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith("/messages")) {
+        if (request.method === "POST") {
+          messagePosts++;
+          const { text, delivery } = await request.json();
+          return Response.json(receiver.accept(pane, delivery, text, text));
+        } else {
           bindingGets++;
-          if (slowBinding) await new Promise((resolve) => setTimeout(resolve, 750));
+          if (bindingSlow) await new Promise((resolve) => setTimeout(resolve, 750));
         }
         return Response.json({ binding: "a".repeat(64) });
       }
@@ -121,6 +133,7 @@ async function fixture(slowBinding = false) {
     settings.held?.released.release();
     await worker.close();
     await host.close();
+    await conversations.close();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
       if ("closeAllConnections" in server) server.closeAllConnections();
@@ -178,6 +191,7 @@ async function fixture(slowBinding = false) {
   return {
     worker,
     root,
+    pane,
     metrics,
     settings,
     initialize,
@@ -185,19 +199,21 @@ async function fixture(slowBinding = false) {
     url,
     headers,
     identity,
-    status: () => worker.bridgeStatus("default", "w1:p1"),
-    reportStatus: () => worker.reportBridgeStatus("default", "w1:p1"),
+    status: () => worker.bridgeStatus("default", pane),
+    reportStatus: () => worker.reportBridgeStatus("default", pane),
     bindingGets: () => bindingGets,
     messagePosts: () => messagePosts,
     validations: () => validations,
+    recoverBinding() {
+      bindingSlow = false;
+    },
     revoke() {
       valid = false;
     },
   };
 }
 
-it("records a real subprocess binding timeout independently of its healthy tool catalog", async () => {
-  const f = await fixture(true);
+async function startBridge(f: Awaited<ReturnType<typeof fixture>>) {
   const socket = join(f.root, "herdr.sock");
   await mkdir(join(f.root, ".clankie", "links"), { recursive: true });
   await writeFile(
@@ -218,9 +234,9 @@ it("records a real subprocess binding timeout independently of its healthy tool 
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:"w1:p1",parentArgv:"test",requestTimeoutMs:250});`,
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:"test",requestTimeoutMs:250});`,
     ],
-    { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: "w1:p1" } },
+    { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: f.pane } },
   );
   cleanup.push(async () => {
     if (child.exitCode !== null) return;
@@ -255,6 +271,12 @@ it("records a real subprocess binding timeout independently of its healthy tool 
   });
   await call("tools/list", {});
   await expect.poll(() => f.status().status).toBe("ready");
+  return call;
+}
+
+it("records a real subprocess binding timeout independently of its healthy tool catalog", async () => {
+  const f = await fixture(true);
+  const call = await startBridge(f);
   const reply = await call("tools/call", {
     name: "message_clankie",
     arguments: { text: "private report body must remain local" },
@@ -275,6 +297,114 @@ it("records a real subprocess binding timeout independently of its healthy tool 
     failures: 1,
     byReason: { binding_timeout: 1 },
   });
+});
+
+it("carries three real bridge binding timeouts through the inactivity flag, one owning-lead alert and recovery", async () => {
+  const workers = await Promise.all([1, 2, 3].map((i) => fixture(true, `w1:p${i}`)));
+  const calls = await Promise.all(workers.map(startBridge));
+  let now = Date.now() - 16 * 60_000;
+  const owner = { conversationId: "global-default" };
+  const efficiency = new SeatEfficiencyStore(join(workers[0]!.root, "efficiency.json"), { now: () => now });
+  const identities = workers.map((_worker, i) => ({
+    occupantId: `fixture-worker-${i}`,
+    seatId: `term_${i}`,
+    owner,
+  }));
+  for (const identity of identities) {
+    efficiency.assign(identity.occupantId, { owner, deliverable: "VUH-1703" });
+    expect(efficiency.observe({ ...identity, status: "done" }).flags).not.toContain("finished, unreported");
+  }
+  for (const [i, call] of calls.entries()) {
+    const reply = await call("tools/call", {
+      name: "message_clankie",
+      arguments: { text: `private unsent report ${i}` },
+    });
+    expect(JSON.parse(reply.result!.content![0]!.text)).toMatchObject({
+      received: false,
+      deliveryStage: "uncertain",
+    });
+    await expect
+      .poll(() => workers[i]!.reportStatus())
+      .toMatchObject({ outcome: "uncertain", reason: "binding_timeout" });
+    expect(workers[i]!.messagePosts()).toBe(0);
+  }
+  now = Date.now();
+  const seats = () =>
+    workers.map((worker, i) =>
+      OperatorFleetSeatSchema.parse({
+        occupantId: identities[i]!.occupantId,
+        seatId: identities[i]!.seatId,
+        personaId: `worker-${i}`,
+        harness: "claude",
+        status: "done",
+        title: `Worker ${i}`,
+        workerTools: worker.status(),
+        workerReportBridge: worker.reportStatus(),
+        efficiency: efficiency.observe({
+          ...identities[i]!,
+          status: "done",
+          reportBridge: worker.reportStatus(),
+        }),
+      }),
+    );
+  const failed = seats();
+  for (const seat of failed) {
+    expect(seat.workerTools?.status).toBe("ready");
+    expect(seat.efficiency?.flags).toContain("finished, unreported");
+  }
+  const alerts = new FleetReportFailureAlerts();
+  expect(alerts.observe(failed.slice(0, 2), now)).toEqual([]);
+  const [incident] = alerts.observe(failed, now);
+  expect(incident).toMatchObject({ owner: owner.conversationId, kind: "incident" });
+  expect(incident!.text).toContain("3 of your current seats");
+  expect(incident!.text).not.toContain("private unsent report");
+  const target = new SeatOutbox({ uncertaintyPath: join(workers[0]!.root, "lead-outbox.json") });
+  const other = new SeatOutbox();
+  cleanup.push(async () => {
+    target.close();
+    other.close();
+  });
+  const deliver = async (alert: NonNullable<typeof incident>) => {
+    const poll = target.poll(1000, undefined, "original-lead-binding");
+    const pending = target.deliver({
+      kind: "message",
+      conversationId: alert.owner,
+      source: "fleet-health",
+      content: alert.text,
+      wantsReply: false,
+      recipientBinding: "original-lead-binding",
+    });
+    const [event] = await poll;
+    expect(event?.conversationId).toBe(owner.conversationId);
+    expect(target.acknowledge(event!.id, "other-lead-binding")).toBe(false);
+    expect(target.acknowledge(event!.id, "original-lead-binding")).toBe(true);
+    expect(await pending).toMatchObject({ outcome: "delivered" });
+    alerts.settle(alert, true, now);
+    expect(await other.poll(0)).toEqual([]);
+  };
+  await deliver(incident!);
+  expect(alerts.observe(failed, now)).toEqual([]);
+  expect(await target.poll(0, undefined, "original-lead-binding")).toEqual([]);
+  for (const [i, worker] of workers.entries()) {
+    worker.recoverBinding();
+    const recovered = await calls[i]!("tools/call", {
+      name: "message_clankie",
+      arguments: { text: `new recovered report ${i}` },
+    });
+    expect(JSON.parse(recovered.result!.content![0]!.text)).toMatchObject({
+      received: true,
+      deliveryStage: "stored",
+    });
+    await expect.poll(() => worker.reportStatus()?.outcome).toBe("stored");
+    expect(worker.messagePosts()).toBe(1);
+  }
+  now = Date.now();
+  const recovered = seats();
+  for (const seat of recovered) expect(seat.efficiency?.flags).not.toContain("finished, unreported");
+  const [recovery] = alerts.observe(recovered, now);
+  expect(recovery).toMatchObject({ owner: owner.conversationId, kind: "recovery" });
+  await deliver(recovery!);
+  expect(alerts.observe(recovered, now)).toEqual([]);
 });
 
 it("preserves stored report time across failures and fences old bridge generations", async () => {
