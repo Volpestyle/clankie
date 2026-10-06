@@ -1,0 +1,3 @@
+Command (wrapped in fleet bin/heavy): pnpm exec knip --workspace packages/game-extension --workspace integrations/pokemon --include files,dependencies,unlisted,unresolved,exports,types
+
+Observed exit code: 0

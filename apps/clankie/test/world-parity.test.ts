@@ -23,7 +23,10 @@ describe("hosted world BODY/MIND partition", () => {
 
   it("feeds pokeagent_world from the derived mind list", () => {
     const tools = readFileSync(src("captain", "tools.ts"), "utf8");
-    const session = readFileSync(src("world", "session.ts"), "utf8");
+    const session = readFileSync(
+      join(import.meta.dirname, "../../../integrations/pokemon/src/world/session.ts"),
+      "utf8",
+    );
     expect(tools).toContain("HOSTED_WORLD_MIND_OPERATIONS");
     expect(session).toContain("HOSTED_WORLD_MIND_OPERATIONS");
     expect(session).not.toMatch(/"world\.session",\s*"world\.who"/u);

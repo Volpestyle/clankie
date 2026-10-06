@@ -6,7 +6,9 @@ This package holds no emulator. His body is a seat in a hosted PokeAgents
 world ([ADR 0145](../../docs/adr/0145-the-world-is-the-only-body.md)), and
 everything here sits above `GbaDriverIo` — one interface in
 [`src/body-seam.ts`](src/body-seam.ts) that the seat implements. The loop never
-learns what is behind it.
+learns what is behind it. The [Pokémon extension](../../integrations/pokemon/README.md)
+owns its connector and execution composition through the shared game-extension
+lifecycle; this package retains the Pokémon mind and durable journal.
 
 ## What is in here
 
