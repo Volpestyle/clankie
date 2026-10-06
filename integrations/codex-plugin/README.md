@@ -65,8 +65,11 @@ and `--plugin-dir PATH`.
   `apps/clankie/src/captain/instructions.md`. Codex has no Claude output style;
   the trusted `SessionStart` hook adds these instructions to Codex's own
   developer context, followed by `clankie prompt`'s live service sections.
-- `hooks/hooks.json` declares native command hooks. `SessionStart` re-arms
-  `clankie memory-card --hook`; `UserPromptSubmit` emits the first card and
+- `hooks/hooks.json` declares native command hooks. Hook entrypoints read
+  `PLUGIN_ROOT` inside Node and convert the path to a file
+  URL, so Windows and POSIX shells run the same definitions. Updated hook
+  definitions need the owner's native `/hooks` review again.
+  `SessionStart` re-arms `clankie memory-card --hook`; `UserPromptSubmit` emits the first card and
   changed cards only. Sync hooks upload redacted native transcript entries to
   the selected conversation for the app. Async `PostToolUse` uploads mid-turn
   commentary and tool progress, throttled to one attempt per two seconds;

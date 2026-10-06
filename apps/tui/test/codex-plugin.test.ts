@@ -24,7 +24,16 @@ test("Codex identity is generated from the shared identity and native hooks reta
     "Interrupt",
   ]);
   expect(hooks.hooks.PostToolUse).toEqual([
-    { hooks: [{ type: "command", command: 'node "$PLUGIN_ROOT/hooks/run.mjs"', timeout: 60, async: true }] },
+    {
+      hooks: [
+        {
+          type: "command",
+          command: expect.stringContaining("process.env.PLUGIN_ROOT"),
+          timeout: 60,
+          async: true,
+        },
+      ],
+    },
   ]);
   expect(JSON.stringify(hooks)).not.toContain("dangerously-bypass-hook-trust");
 });
