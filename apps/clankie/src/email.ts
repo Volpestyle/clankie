@@ -203,8 +203,18 @@ function defaultEmailAdapters(): EmailAdapters {
         auth: { user: account.username, pass: account.password },
         logger: false,
       });
-      await client.connect();
-      const lock = await client.getMailboxLock(folder);
+      // ImapFlow emits socket timeouts and resets as 'error' events; with no
+      // listener Node treats one as fatal and the whole service exits. The
+      // pending command still rejects, so this read fails on its own.
+      client.on("error", () => undefined);
+      let lock: Awaited<ReturnType<typeof client.getMailboxLock>>;
+      try {
+        await client.connect();
+        lock = await client.getMailboxLock(folder);
+      } catch (error) {
+        client.close();
+        throw error;
+      }
       return {
         async exists() {
           const mailbox = client.mailbox;
