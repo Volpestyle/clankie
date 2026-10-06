@@ -185,6 +185,13 @@ delivery retains its pane for inspection; reconcile it before retrying. A saved
 Codex session reference alone cannot recover its in-memory control after a
 service restart. Never replay uncertainty through another delivery path.
 
+Remote hire addresses include their fleet (`pc/wC:p2`); the native host census
+uses the bare pane (`wC:p2`). Both forms refer to the same pane only within that
+exact registered fleet. Process proof and project membership preserve the
+original allocation and native process binding. A legacy bare allocation or
+missing original process proof stays unconfirmed; it cannot become an
+owner-started workspace member through address normalization.
+
 Briefed local Claude hires use the approved `clankie-worker` channel and report
 `control.mode: "channel"`; Codex, supported OpenCode workers and prepared Pi report `adapter`.
 Prepared Pi is off by default. Only `CLANKIE_PI_NATIVE_ENABLED=1` in the service's

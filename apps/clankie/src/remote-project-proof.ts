@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { win32 } from "node:path";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
-import type { FleetShellRun, HerdrFleet } from "./herdr-fleet.ts";
+import { splitFleetQualified, type FleetShellRun, type HerdrFleet } from "./herdr-fleet.ts";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import {
@@ -422,13 +422,16 @@ export function createRemoteCodexQueueObserver(options: Pick<Options, "fleet" | 
   };
 }
 
-/** Fresh initial/final observations over the registered fleet's existing SSH transport. */
+/** Fresh host observations; accept either pane address form within the exact registered fleet. */
 export function createRemoteProjectObserver(options: Options) {
   return async (
     fleetId: string,
-    pane: string,
+    paneAddress: string,
     stream?: RemoteStream,
   ): Promise<ProjectProcessProof | undefined> => {
+    const qualified = splitFleetQualified(paneAddress);
+    if (qualified && qualified.fleet !== fleetId) return undefined;
+    const pane = qualified?.id ?? paneAddress;
     if (!/^w[\w]+:p[\w]+$/u.test(pane) || fleetId === "default" || (stream && !stream.alive()))
       return undefined;
     try {
@@ -506,7 +509,9 @@ export function createRemoteProjectObserver(options: Options) {
           !isDeepStrictEqual(options.privateSeats?.server(fleet, pane), privateServer))
       )
         return undefined;
-      return first.proof;
+      // Herdr/native probes and private-seat keys are host-local. The caller's
+      // address namespace remains intact for the original hire allocation.
+      return { ...first.proof, pane: paneAddress };
     } catch {
       return undefined;
     }

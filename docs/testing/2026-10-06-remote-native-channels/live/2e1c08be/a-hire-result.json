@@ -1,0 +1,13 @@
+{
+  "op": "spawn_seat",
+  "schemaVersion": 1,
+  "result": {
+    "outcome": "failed",
+    "deliveryStage": "uncertain",
+    "reason": "start_unconfirmed",
+    "detail": "Error: Native hire binding has no matching current process proof; no brief was sent; inspect pane pc/wC:p2; no fallback was started",
+    "control": {
+      "mode": "adapter"
+    }
+  }
+}

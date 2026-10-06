@@ -1,0 +1,110 @@
+{
+  "observedAt": "2026-10-06T08:30:03.9549260Z",
+  "owned": [
+    {
+      "pane": "wC:p1",
+      "terminal": "term_65d27c3d5300512",
+      "processes": [
+        {
+          "pid": 238188,
+          "parentPid": 402600,
+          "name": "powershell.exe",
+          "created": "2026-10-06T08:27:10.8951300Z",
+          "remoteTui": false,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": false
+        }
+      ]
+    },
+    {
+      "pane": "wC:p2",
+      "terminal": "term_65d27c3f464e613",
+      "processes": [
+        {
+          "pid": 333932,
+          "parentPid": 402600,
+          "name": "powershell.exe",
+          "created": "2026-10-06T08:27:12.9432220Z",
+          "remoteTui": false,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": false
+        },
+        {
+          "pid": 22216,
+          "parentPid": 333932,
+          "name": "cmd.exe",
+          "created": "2026-10-06T08:27:19.3819530Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        },
+        {
+          "pid": 525176,
+          "parentPid": 22216,
+          "name": "python.exe",
+          "created": "2026-10-06T08:27:19.4132560Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        },
+        {
+          "pid": 614816,
+          "parentPid": 525176,
+          "name": "node.exe",
+          "created": "2026-10-06T08:27:19.4679140Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        },
+        {
+          "pid": 161084,
+          "parentPid": 614816,
+          "name": "codex.exe",
+          "created": "2026-10-06T08:27:19.5078640Z",
+          "remoteTui": true,
+          "noDaemon": false,
+          "appServer": false,
+          "linearDisabled": true
+        }
+      ]
+    }
+  ],
+  "ownedAppServers": [],
+  "defaultMcpServers": [
+    {
+      "name": "clankie",
+      "enabled": true
+    },
+    {
+      "name": "code-review",
+      "enabled": false
+    },
+    {
+      "name": "codex_app",
+      "enabled": false
+    },
+    {
+      "name": "cua_repl",
+      "enabled": true
+    },
+    {
+      "name": "linear",
+      "enabled": true
+    },
+    {
+      "name": "node_repl",
+      "enabled": true
+    },
+    {
+      "name": "swarm",
+      "enabled": false
+    }
+  ],
+  "codexConfigSource": ["C:\\Users\\volpe\\dotfiles\\.local\\agents\\personal\\codex-config.toml"],
+  "codexConfigSha256": "1646ebaad2844d9cb9de83ccbe2961881b54a037ef72ff7598bfed51f8feee46"
+}

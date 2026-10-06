@@ -54,17 +54,29 @@ function setup(first = fixture(), last = structuredClone(first)) {
   };
 }
 describe("remote project process proof", () => {
-  it("binds a relay-owned socket through the native process and wrapper to the live shell", async () => {
+  it.each(["w3:p8", "pc/w3:p8"])("binds the relay-owned socket for pane address %s", async (pane) => {
     const { observe, shell } = setup();
-    const proof = await observe("pc", "w3:p8", stream);
+    const proof = await observe("pc", pane, stream);
     expect(proof).toMatchObject({
       fleet: "pc",
-      pane: "w3:p8",
+      pane,
       processes: [{ pid: 30 }],
       workspace: { machineId: "pc", platform: "windows", canonicalPath: "C:\\repos\\rivals-agent" },
     });
     expect(shell).toHaveBeenCalledTimes(1);
+    const script = scriptFromCommand(shell.mock.calls[0]![0]);
+    expect(script).toContain("'w3:p8'");
+    expect(script).not.toContain("'pc/w3:p8'");
   });
+  it.each(["other/w3:p8", "pc/other/w3:p8", "pc/w3:p8/extra", "pc/not-a-pane"])(
+    "rejects mismatched or malformed address %s before observing a host",
+    async (pane) => {
+      const { observe, shell, registered } = setup();
+      expect(await observe("pc", pane, stream)).toBeUndefined();
+      expect(registered).not.toHaveBeenCalled();
+      expect(shell).not.toHaveBeenCalled();
+    },
+  );
   it("proves a native startup with no reported session using a disjoint process identity", async () => {
     const observation = fixture();
     delete (observation.agent as { agent_session?: unknown }).agent_session;
@@ -425,10 +437,11 @@ describe("registered private remote Codex proof", () => {
     });
     return { observer, registration };
   }
-  it("binds the real socket to registered native server ancestry and independently proves the live view", async () => {
+  it.each(["w3:p8", "pc/w3:p8"])("binds the registered private server for pane address %s", async (pane) => {
     const { observer } = await privateSetup();
-    const proof = await observer("pc", "w3:p8", stream);
+    const proof = await observer("pc", pane, stream);
     expect(proof).toMatchObject({
+      pane,
       privateSeat: true,
       processes: [{ pid: 30 }],
       workspace: { canonicalPath: "C:\\repos\\rivals-agent" },
