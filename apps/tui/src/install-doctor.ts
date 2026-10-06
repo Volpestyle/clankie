@@ -75,6 +75,7 @@ export interface InstallDoctorReport {
   readonly ok: true;
   readonly kind: InstallKind;
   readonly version: string;
+  readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
   readonly repoRoot: string;
   readonly model: string | null;
   /** Whether Clankie can take a turn at all: a model, and something to authenticate it. */
@@ -264,7 +265,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     pluginBundle,
   );
   const laneTools = await inspectLaneTools(commandHost({ env }), options.fetchImpl ?? fetch);
-  const { doorway, lastSleep } = await probeHealth({
+  const { doorway, lastSleep, runtimeHealth } = await probeHealth({
     env,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
@@ -299,6 +300,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
 
   return {
     ok: true,
+    ...(runtimeHealth === undefined ? {} : { runtimeHealth }),
     kind,
     version: await readInstallVersion(options.repoRoot, kind),
     repoRoot: options.repoRoot,

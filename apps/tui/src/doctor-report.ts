@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
+import { formatRuntimeHealth } from "./command/runtime-health.ts";
 
 const mark = (ok: boolean) => (ok ? "✓" : "✗");
 const clean = (text: string) =>
@@ -50,6 +51,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     `Clankie ${report.version} · ${report.kind} · ${report.persona.displayName}`,
     "",
     `  ${captain}`,
+    `  ${report.runtimeHealth?.state === "alarm" ? "✗" : report.runtimeHealth?.state === "healthy" ? "✓" : "○"} ${report.runtimeHealth ? formatRuntimeHealth(report.runtimeHealth) : "Runtime health · unknown"}`,
     ...(endpoint ? [`  ${mark(endpoint.reachable)} Model endpoint · ${endpoint.baseURL}`] : []),
     `  ${mark(report.laneTools.reachable)} Lane tools · ${report.laneTools.url}`,
     `  ${mark(report.doorway.state !== "unreachable")} Doorway · ${report.doorway.state}`,

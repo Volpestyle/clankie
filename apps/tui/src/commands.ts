@@ -83,6 +83,11 @@ import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 import type { AwakeCommandResult } from "./command/awake.ts";
+import {
+  formatRuntimeHealth,
+  parseRuntimeHealthArgs,
+  type runRuntimeHealthCommand,
+} from "./command/runtime-health.ts";
 
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
@@ -103,6 +108,7 @@ export interface ConsoleCommandContext {
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
   /** `clankie awake`: the launcher-supervised keep-awake, and the power state it answers to. */
   readonly commandAwake?: (args: readonly string[]) => Promise<AwakeCommandResult>;
+  readonly commandRuntimeHealth?: (args: readonly string[]) => ReturnType<typeof runRuntimeHealthCommand>;
   readonly activityClient?: ActivityObservationClient;
   readonly activityWatchUrl?: string;
   /** Read-only tails onto the lanes the operator is not talking in (ADR 0083). */
@@ -1599,6 +1605,15 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                   s.title("Launcher"),
                   s.line("status", launcher.status, launcher.ok ? "ok" : "bad"),
                   s.line(
+                    "runtime",
+                    launcher.runtimeHealth ? formatRuntimeHealth(launcher.runtimeHealth) : "unknown",
+                    launcher.runtimeHealth?.state === "alarm"
+                      ? "bad"
+                      : launcher.runtimeHealth
+                        ? "normal"
+                        : "warn",
+                  ),
+                  s.line(
                     "Clankie",
                     launcher.presence?.detail ?? "Unreachable",
                     launcher.presence === undefined ? "warn" : "ok",
@@ -1714,6 +1729,83 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             "error",
           );
         }
+      },
+    },
+    {
+      name: "runtime-health",
+      aliases: [],
+      description: "Runtime CPU and slow-health alarms, thresholds, and cooldown",
+      argumentHint: "[status|on|off|set --cpu-percent N …]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const command = context.commandRuntimeHealth;
+        if (!command) {
+          shell.insertCommandResult("/runtime-health", "Runtime health unavailable.", "error");
+          return;
+        }
+        const words = argument.trim().split(/\s+/u).filter(Boolean);
+        if (words.length) {
+          try {
+            shell.insertCommandResult(
+              "/runtime-health",
+              formatRuntimeHealth((await command(words)).observation),
+              "success",
+            );
+          } catch (error) {
+            shell.insertCommandResult(
+              "/runtime-health",
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+          }
+          return;
+        }
+        await runSettingsMenu(shell, "/runtime-health", async () => {
+          const result = await command([]);
+          const fields = [
+            ["cpuPercent", "CPU threshold (%)", "--cpu-percent", 1],
+            ["healthLatencyMs", "Health latency threshold (ms)", "--health-ms", 1],
+            ["sustainedMs", "Sustained duration (seconds)", "--sustained-seconds", 1000],
+            ["sampleIntervalMs", "Sample interval (seconds)", "--sample-seconds", 1000],
+            ["cooldownMs", "Alert cooldown (seconds)", "--cooldown-seconds", 1000],
+          ] as const;
+          return {
+            title: `${formatRuntimeHealth(result.observation)} · alarms ${result.settings.enabled ? "on" : "off"}`,
+            actions: [
+              {
+                value: "toggle",
+                label: result.settings.enabled ? "Disable alarms" : "Enable alarms",
+                async run() {
+                  await command([result.settings.enabled ? "off" : "on"]);
+                  return "Runtime health setting saved; applies on the next sample.";
+                },
+              },
+              ...fields.map(([field, label, flag, multiplier]) => ({
+                value: field,
+                label,
+                hint: String(result.settings[field] / multiplier),
+                async run(flow: import("./shell/setup-flow.ts").SetupFlow) {
+                  const value = await flow.readText({
+                    message: label,
+                    defaultValue: String(result.settings[field] / multiplier),
+                    allowBack: true,
+                    validate: (value) => {
+                      try {
+                        parseRuntimeHealthArgs(["set", flag, value.trim()]);
+                        return undefined;
+                      } catch {
+                        return "Enter a value within the supported range.";
+                      }
+                    },
+                  });
+                  if (value === undefined) return undefined;
+                  await command(["set", flag, value.trim()]);
+                  return "Runtime health setting saved; applies on the next sample.";
+                },
+              })),
+            ],
+          };
+        });
       },
     },
     {

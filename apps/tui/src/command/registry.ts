@@ -149,6 +149,14 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  health | status          Probe every launcher-owned service (JSON)"],
   },
   {
+    nouns: ["runtime-health"],
+    lines: [
+      "  runtime-health [status|on|off]    Runtime CPU and slow-health alarm settings (JSON)",
+      "  runtime-health set --cpu-percent N --health-ms N --sustained-seconds N",
+      "                     [--sample-seconds N] [--cooldown-seconds N]",
+    ],
+  },
+  {
     nouns: ["doctor"],
     lines: [
       "  doctor [--machine ID] [--json]    One-line diagnosis; --json shows the full install and fleet card",

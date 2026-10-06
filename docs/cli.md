@@ -125,6 +125,40 @@ Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
 keep-awake ([`awake`](#awake)); it reads healthy and "off" until
 they opt in.
 
+`status` and `doctor --json` include `runtimeHealth` when the service exposes it:
+process CPU percentage, `/health` latency, fixed CPU/health reasons, alarm state,
+delivery state, and the last incident duration. `/status` and `/doctor` show the
+same observation. Missing observations remain unknown.
+
+### `runtime-health`
+
+`clankie runtime-health status` reads the live observation and settings from the
+owner API, `GET /v1/operator/runtime-health`. `on` and `off` enable or disable
+alarms. Change any subset with `set`:
+
+```sh
+clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300 \
+  --sample-seconds 15 --cooldown-seconds 1800
+```
+
+These are the defaults. `/runtime-health` opens the TUI menu for every setting.
+Changes use revision-guarded `POST /v1/operator/runtime-health` and apply on the
+next sample without a restart. CPU is this service process's consumed CPU time
+divided by elapsed wall time (100% is one fully busy core), rather than machine
+load. A failed or timed-out health response also counts as slow health.
+
+CPU above its threshold or slow health must persist for the sustained duration
+before one alert goes to the native `global-default` conversation. Recovery
+reports the incident duration. A persistent incident emits no repeated alert;
+the cooldown bounds alarms for subsequent incidents. An unavailable native
+delivery retries at most once a minute, and a retained uncertain native receipt
+counts as accepted so it is not replayed. These observations create no service
+model turn. Include incident and recovery evidence in the next Linear check-in.
+
+The public `/health` observation and consented hosted `body.runtime_health`
+events contain fixed numeric and enum metadata only. Conversation text, worker
+reports, credentials, and command output never enter this projection.
+
 ### `doctor`
 
 The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).

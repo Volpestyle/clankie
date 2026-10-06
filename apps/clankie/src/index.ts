@@ -96,6 +96,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -1213,7 +1214,27 @@ const workerMcp = new WorkerMcp({
   },
 });
 
+const runtimeHealth = new RuntimeHealthObserver({
+  settings: async () => (await settingsStore.load()).runtimeHealth,
+  healthUrl: `http://127.0.0.1:${port}/health`,
+  notify: (text) => captain.notifyRuntimeHealthAlert(text),
+  observed: (observation) =>
+    bodyTelemetry?.emit({
+      event: "body.runtime_health",
+      state: observation.state,
+      durationMs: observation.durationMs,
+      reasons: observation.reasons,
+      ...(observation.cpuPercent === undefined ? {} : { cpuPercent: observation.cpuPercent }),
+      ...(observation.healthLatencyMs === undefined ? {} : { healthLatencyMs: observation.healthLatencyMs }),
+    }),
+  unavailable: () =>
+    logger.warn(
+      { event: "runtime.health.observation_unavailable" },
+      "Runtime health observation unavailable",
+    ),
+});
 const clankie = await createClankieApp({
+  runtimeHealth: () => runtimeHealth.snapshot(),
   fleetHealthMetrics,
   discordPermissions: (query, body) =>
     managedDiscord
@@ -1553,6 +1574,8 @@ const server = serve({
   hostname: listenHost,
   websocket: { server: webSocketServer as unknown as WebSocketServerLike },
 });
+if (server.listening) runtimeHealth.start();
+else server.once("listening", () => runtimeHealth.start());
 // ADR 0204: opt-in LAN door for a self-hosted phone, device routes only.
 const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
 const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
@@ -1609,6 +1632,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
   hostPower.stop();
+  runtimeHealth.stop();
   void closeRuntimeProvider().catch(() =>
     logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
   );

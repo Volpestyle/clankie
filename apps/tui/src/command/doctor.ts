@@ -46,6 +46,8 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
   if (report.doorway.state === "connecting") {
     return "Phone access is still connecting — run `clankie gateway status` to check again.";
   }
+  if (report.runtimeHealth?.state === "alarm")
+    return `Runtime health alarm (${report.runtimeHealth.reasons.join(" and ")}) — run \`clankie runtime-health status\`.`;
   const remediation = report.remediations[0];
   if (remediation !== undefined) {
     const line = remediation.replace(/\s+/gu, " ").trim();

@@ -157,6 +157,7 @@ index). Configure through the headless CLI:
 | Can he take a turn                    | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                                                                                       |
 | Start at login                        | `clankie autostart status`, `clankie autostart enable`                                                                                                               |
 | Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                                                                                                |
+| Sustained CPU or slow health          | `clankie runtime-health status`; `clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300`; `/runtime-health` opens the settings menu   |
 | Bundled skill classes and selection   | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                            |
 | Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                                                                                              |
 | Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                                                                                       |

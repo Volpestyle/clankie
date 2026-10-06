@@ -22,6 +22,7 @@ import {
 } from "@clankie/settings";
 import { z } from "zod";
 import { DeviceDirectRouteSchema, type DeviceDirectRoute } from "@clankie/protocol";
+import { RuntimeHealthObservationSchema, type RuntimeHealthObservation } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
 const DOORWAY_PROBE_TIMEOUT_MS = 5_000;
@@ -121,9 +122,11 @@ export async function probeDoorway(options: GatewayCommandOptions = {}): Promise
  * slept underneath him (which only he can notice). Either is absent when he is
  * down or older than the field.
  */
-export async function probeHealth(
-  options: GatewayCommandOptions = {},
-): Promise<{ readonly doorway: GatewayDoorwayReport; readonly lastSleep?: HostPowerReport["lastSleep"] }> {
+export async function probeHealth(options: GatewayCommandOptions = {}): Promise<{
+  readonly doorway: GatewayDoorwayReport;
+  readonly lastSleep?: HostPowerReport["lastSleep"];
+  readonly runtimeHealth?: RuntimeHealthObservation;
+}> {
   const env = options.env ?? process.env;
   const url = `${commandHost({ ...options, env }).replace(/\/+$/u, "")}/health`;
   try {
@@ -131,11 +134,13 @@ export async function probeHealth(
       signal: AbortSignal.timeout(DOORWAY_PROBE_TIMEOUT_MS),
     });
     const body = HealthSchema.safeParse(await response.json());
-    if (!body.success || body.data.doorway === undefined) return { doorway: { state: "unreachable" } };
+    if (!body.success) return { doorway: { state: "unreachable" } };
     const power = HostPowerReportSchema.safeParse(body.data.power);
+    const runtimeHealth = RuntimeHealthObservationSchema.safeParse(body.data.runtimeHealth);
     return {
-      doorway: body.data.doorway,
+      doorway: body.data.doorway ?? { state: "unreachable" },
       ...(power.success && power.data.lastSleep !== undefined ? { lastSleep: power.data.lastSleep } : {}),
+      ...(runtimeHealth.success ? { runtimeHealth: runtimeHealth.data } : {}),
     };
   } catch {
     return { doorway: { state: "unreachable" } };

@@ -2115,12 +2115,55 @@ paths:
         "400": { description: Invalid persona patch }
         "401": { description: Operator authentication required }
         "503": { description: Settings persistence unavailable }
+  /v1/operator/runtime-health:
+    get:
+      tags: [Operator]
+      operationId: getRuntimeHealth
+      summary: Read runtime CPU and health alarm settings and metadata
+      description: |
+        Owner or Take Control device authority. Returns schemaVersion=1, a SHA-256
+        settings revision, settings, and the fixed RuntimeHealthObservation from
+        packages/protocol/src/runtime-health.ts. Process CPU is wall-time-normalized
+        process.cpuUsage; 100% is one fully busy core. No conversation content.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200": { description: Current settings revision and live observation }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+    post:
+      tags: [Operator]
+      operationId: updateRuntimeHealth
+      summary: Change runtime health alarm thresholds without restarting
+      description: |
+        Accepts schemaVersion=1, expectedRevision and a strict partial changes
+        object. Defaults are enabled=true, cpuPercent=50, healthLatencyMs=1000,
+        sustainedMs=300000, sampleIntervalMs=15000 and cooldownMs=1800000.
+        Settings apply on the next sample. Native global-default delivery emits
+        one alarm and one recovery with incident duration; it creates no service
+        model turn. The schema and bounded ranges live in @clankie/protocol.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              expectedRevision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              changes: { cpuPercent: 50, healthLatencyMs: 1000, sustainedMs: 300000 }
+      responses:
+        "200": { description: Saved revision and live observation }
+        "400": { description: Malformed or out-of-range settings }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Settings revision or owner authority changed }
+        "503": { description: Settings unavailable }
+
   /health:
     get:
       tags: [Health]
       operationId: getHealth
       summary: Public liveness
-      description: Optional Herdr, gateway, host-power and runtime identity findings do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md). When available, `runtime` exposes only this service boot's pid, commit, root and instanceId; update transaction details are omitted.
+      description: Optional Herdr, gateway, host-power, runtime identity and runtimeHealth findings do not change service liveness. `runtimeHealth` contains fixed CPU percentage, health latency, duration, reason/alarm/delivery enums and incident timestamps; no conversation content. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md). When available, `runtime` exposes only this service boot's pid, commit, root and instanceId; update transaction details are omitted.
       security: []
       responses:
         "200":

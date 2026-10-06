@@ -178,6 +178,7 @@ export interface ClankieAppDependencies {
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
   /** Whether this host may sleep, and when it last did, so the app can say why he went quiet. */
   hostPower?: () => HostPowerReport;
+  runtimeHealth?: () => import("@clankie/protocol").RuntimeHealthObservation;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
   /**
