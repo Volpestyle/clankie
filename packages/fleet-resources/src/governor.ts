@@ -182,6 +182,8 @@ export function createResourceGovernor(
       token = randomUUID();
     await store.transaction(async (state) => {
       await reconcile(state);
+      if (simulator && state.policy.simulatorSlots === 0)
+        throw new Error("Simulator leases are disabled by owner policy");
       if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
       state.queue.push({
         id,
@@ -199,6 +201,8 @@ export function createResourceGovernor(
         if (signal.aborted) throw abort();
         const lease = await store.transaction(async (state) => {
           await reconcile(state);
+          if (simulator && state.policy.simulatorSlots === 0)
+            throw new Error("Simulator leases are disabled by owner policy");
           if (state.queue[0]?.id !== id || state.leases.length >= resourceCapacity(state.policy))
             return undefined;
           if (!(await pressure.sample(state.policy)).healthy) return undefined;

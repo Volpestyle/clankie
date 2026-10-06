@@ -11,7 +11,9 @@ capacity is the smaller of one permit per eight available cores and one per 24Gi
 of RAM, with a minimum of one. The simulator limit defaults to one. FIFO tickets
 are removed on cancellation or a proven requester exit. High pressure delays
 resource admission and refuses new builders; unavailable native observations fail
-closed. Python 3 and the shipped native helper are required for OS locking and
+closed. A zero simulator limit disables new simulator admission and rejects
+already queued simulator tickets; valid requests retain global FIFO ordering.
+Python 3 and the shipped native helper are required for OS locking and
 process observations on macOS or Linux. Availability probes the helper
 process itself, so a hosted captain running as PID 1 can perform pressure
 admission without granting PID 1 lease or signal authority. The hosted Linux
