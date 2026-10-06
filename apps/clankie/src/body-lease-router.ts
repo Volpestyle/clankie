@@ -243,6 +243,37 @@ export class BodyLeaseRouter {
     confirmStopped: (guard: () => Promise<void>) => Promise<boolean>,
     authority: "owner" | "operator_override" = "owner",
   ): Promise<BodyLeaseResult> {
+    return this.recoverVerified(identity, resource, confirmStopped, authority);
+  }
+
+  /** Service-only cleanup of the exact idle holder; no model/operator input grants this authority. */
+  public async recoverIdle(
+    resource: BodyResource,
+    holderTurnEnded: (conversationId: string) => boolean,
+    confirmStopped: (guard: () => Promise<void>) => Promise<boolean>,
+    current: () => boolean,
+  ): Promise<BodyLeaseResult> {
+    const expected = this.store.recoveryReference(resource);
+    if (!expected || !this.store.recoveryReady(expected) || !holderTurnEnded(expected.conversationId))
+      return { outcome: "rejected", reason: "recovery_required" };
+    const identity: BodyConversationIdentity = {
+      conversationId: expected.conversationId,
+      current: () =>
+        current() &&
+        holderTurnEnded(expected.conversationId) &&
+        this.store.recoveryReference(resource)?.token === expected.token,
+      authorize: async () => true,
+    };
+    return this.recoverVerified(identity, resource, confirmStopped, "owner", true);
+  }
+
+  private async recoverVerified(
+    identity: BodyConversationIdentity,
+    resource: BodyResource,
+    confirmStopped: (guard: () => Promise<void>) => Promise<boolean>,
+    authority: "owner" | "operator_override",
+    onlyIdle = false,
+  ): Promise<BodyLeaseResult> {
     const conversationId = identity.conversationId;
     const denied = await this.authorize(identity, conversationId, resource, "recover");
     if (denied !== undefined) return denied;
@@ -256,6 +287,8 @@ export class BodyLeaseRouter {
     if (authority === "owner" && reference.conversationId !== conversationId)
       return { outcome: "rejected", reason: "not_authorized" };
     const expected = reference;
+    if (onlyIdle && !this.store.recoveryReady(expected))
+      return { outcome: "rejected", reason: "recovery_required" };
     const begun = this.store.beginRecovery(expected);
     if (begun.outcome !== "admitted") return begun;
     const guard = async () => {
@@ -264,6 +297,8 @@ export class BodyLeaseRouter {
       const current = this.store.recoveryReference(resource);
       if (current?.token !== expected.token || current.conversationId !== expected.conversationId)
         throw new BodyLeaseDenied({ outcome: "rejected", reason: "stale_lease" });
+      if (onlyIdle && !this.store.recoveryReady(expected, begun.operationId))
+        throw new BodyLeaseDenied({ outcome: "rejected", reason: "recovery_required" });
     };
     try {
       await guard();

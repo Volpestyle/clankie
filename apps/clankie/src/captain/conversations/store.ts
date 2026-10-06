@@ -827,6 +827,18 @@ export class ConversationStore {
     return meta === undefined ? undefined : publicConversation(meta);
   }
 
+  /** Host-only stop admission: includes queued runs and drivers still settling after their last event. */
+  public turnIdle(conversationId: string): boolean {
+    return (
+      this.metas.get(conversationId)?.sessionState !== "active" &&
+      (this.runCounts.get(conversationId) ?? 0) === 0 &&
+      (this.activeInvocations.get(conversationId) ?? 0) === 0 &&
+      (this.serviceDrives.get(conversationId)?.size ?? 0) === 0 &&
+      (this.driverAdmissions.get(conversationId)?.size ?? 0) === 0 &&
+      !this.liveRoomHandoffs.has(conversationId)
+    );
+  }
+
   /** A native head remains native while its channel is offline. */
   public hasNativeSeat(conversationId: string): boolean {
     return hasNativeSeat(this, conversationId);

@@ -66,6 +66,15 @@ that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying
 you refused. Secrets go through `/auth`, the existing wizards or the credential
 broker, never flags or chat.
 
+## Recovering a body
+
+A body lease marked `recovery_required` is still held. The service retries its
+verified stop-check after the holder's turn and body operations end, at boot
+and with 5–60 second backoff. Never infer release from expiry or a failed close.
+If it persists, an authorized owner can inspect `clankie body status` and use
+`clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'`
+from an existing writable conversation. Computer recovery uses its own contract.
+
 ## Updating and restarting yourself
 
 Landed code is not live until the pinned runtime is updated. From an admitted

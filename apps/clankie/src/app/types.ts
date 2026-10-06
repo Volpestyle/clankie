@@ -326,6 +326,6 @@ export interface ClankieApp {
   conversationBodyRouteAuthorized(
     owner: import("../captain/conversation-owner.ts").ConversationOwner,
   ): boolean;
-  stopBodyRequests(): void;
+  stopBodyRequests(): Promise<void>;
   close(): void;
 }

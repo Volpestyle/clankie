@@ -67,6 +67,7 @@ import { createAccountRoutes } from "../account-routes.ts";
 import { createAgentSessionRoutes } from "../agent-session-routes.ts";
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import { pumpBodyRequests } from "../body-request-pump.ts";
+import { BodyLeaseRecovery } from "../body-lease-recovery.ts";
 import { CaptainPresenceLeaseConflictError, CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import { registerComputerRoutes } from "../computer-http.ts";
@@ -362,7 +363,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const stopBodyRequests = () => {
     bodyRequestsOpen = false;
     if (bodyRequestTimer !== undefined) clearInterval(bodyRequestTimer);
+    bodyRecovery?.close();
+    return bodyRecovery?.settled() ?? Promise.resolve();
   };
+  const bodyRecovery =
+    dependencies.bodyLeases === undefined
+      ? undefined
+      : new BodyLeaseRecovery({
+          store: dependencies.bodyLeases.store,
+          router: dependencies.bodyLeases.router,
+          holderTurnEnded: (id) => dependencies.captain.conversationTurnIdle(id),
+          confirmStopped: confirmBodyStopped,
+          current: () => bodyRequestsOpen,
+          onError: (error) => logger.warn({ error }, "Body recovery check failed; lease remains held"),
+        });
+  bodyRecovery?.start();
   const captainTurnResults = new Map<
     string,
     {

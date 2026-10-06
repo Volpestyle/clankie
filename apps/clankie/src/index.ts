@@ -1839,7 +1839,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   localFleetServer?.close();
   fleetLinks.close();
   fleetLinkServer?.close();
-  clankie.stopBodyRequests();
+  const bodyRequestsStopped = clankie.stopBodyRequests();
   clearInterval(minecraftEventTimer);
   void minecraftPlayHost.close();
   minecraftCapture?.close();
@@ -1852,6 +1852,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
+    await bodyRequestsStopped;
     if (minecraft.ownsPlay()) {
       await minecraft.close().catch(() => false);
     }
