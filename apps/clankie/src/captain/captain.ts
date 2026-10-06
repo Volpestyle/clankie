@@ -1647,6 +1647,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // A watch probes project settings immediately. Finish our own role write
     // before publishing the hire, so it cannot revoke the admitted controller.
     herdrWatches.trackSeat(adopted.seatId);
+    if (resume === undefined) desktop.recordHire();
     fleetChanges.touch();
     const roleAssignment =
       adoptedRoleWrite?.outcome === "pending"
