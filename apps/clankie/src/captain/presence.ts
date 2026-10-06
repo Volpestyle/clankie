@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readClaudeSubagents, readCodexSubagents } from "@clankie/agent-transcript";
 import type { ObservedHeadSeat } from "./herdr-census.ts";
-import type { OperatorPresenceSnapshot } from "@clankie/protocol/presence";
+import type { OperatorPresenceActivity, OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 
 export interface PresenceSources {
   expression?: OperatorPresenceSnapshot["expression"];
@@ -25,11 +25,12 @@ export function projectPresence(
   sources: PresenceSources,
   includeFace = true,
   includeBeats = false,
+  includeActivities = false,
 ): OperatorPresenceSnapshot {
   const { activeSeats, pendingOwnerItem } = sources;
   const [mood, detail, since] = pendingOwnerItem
     ? (["needs_you", pendingOwnerItem.title, pendingOwnerItem.since] as const)
-    : sources.thinking
+    : sources.thinking || sources.working
       ? (["thinking", "Thinking", null] as const)
       : sources.inVoice
         ? (["in_voice", "In a voice chat", sources.voiceSince ?? null] as const)
@@ -42,6 +43,31 @@ export function projectPresence(
                 null,
               ] as const)
             : (["idle", "Taking a break", null] as const);
+  // Fixed public labels avoid leaking conversation titles, prompts or tool inputs.
+  // Keep source timestamps (including unknown starts) so long-poll cursors stay stable.
+  const activities: OperatorPresenceActivity[] = [
+    ...(pendingOwnerItem
+      ? [{ kind: "attention" as const, label: "Waiting for you", since: pendingOwnerItem.since }]
+      : []),
+    ...(sources.thinking || sources.working
+      ? [{ kind: "working" as const, label: "Working", since: null }]
+      : []),
+    ...(sources.inVoice
+      ? [{ kind: "voice" as const, label: "In a voice chat", since: sources.voiceSince ?? null }]
+      : []),
+    ...(sources.playing
+      ? [{ kind: "playing" as const, label: "Playing", since: sources.playingSince ?? null }]
+      : []),
+    ...(activeSeats > 0
+      ? [
+          {
+            kind: "leading" as const,
+            label: `Leading ${String(activeSeats)} ${activeSeats === 1 ? "worker" : "workers"}`,
+            since: null,
+          },
+        ]
+      : []),
+  ].slice(0, 3);
   const face: OperatorPresenceSnapshot["face"] = pendingOwnerItem
     ? "needs_you"
     : sources.error
@@ -66,6 +92,7 @@ export function projectPresence(
     ...(pendingOwnerItem === undefined ? {} : { pendingOwnerItem }),
     ...(sources.expression === undefined ? {} : { expression: sources.expression }),
     ...(includeBeats && sources.beats?.length ? { beats: sources.beats } : {}),
+    ...(includeActivities ? { activities } : {}),
   };
   return { ...projection, cursor: createHash("sha256").update(JSON.stringify(projection)).digest("hex") };
 }

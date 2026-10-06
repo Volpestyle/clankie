@@ -375,6 +375,7 @@ export function createOperatorService(
             },
             request.includeFace === true,
             request.includeBeats === true,
+            request.includeActivities === true,
           );
         },
         request.cursor,

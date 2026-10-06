@@ -64,6 +64,16 @@ export const OperatorPresenceBeatSchema = z
   })
   .strict();
 export type OperatorPresenceBeat = z.infer<typeof OperatorPresenceBeatSchema>;
+/** Public activity facts only; never prompts, tool arguments or credentials. */
+export const OperatorPresenceActivitySchema = z
+  .object({
+    label: z.string().trim().min(1).max(80),
+    kind: z.enum(["working", "leading", "voice", "playing", "attention"]),
+    /** Null when the live source does not expose its start. */
+    since: z.string().datetime().nullable(),
+  })
+  .strict();
+export type OperatorPresenceActivity = z.infer<typeof OperatorPresenceActivitySchema>;
 export const OperatorPresenceSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -81,6 +91,7 @@ export const OperatorPresenceSnapshotSchema = z
     pendingOwnerItem: OperatorPresenceOwnerItemSchema.optional(),
     expression: DesktopExpressionSchema.optional(),
     beats: z.array(OperatorPresenceBeatSchema).max(2).optional(),
+    activities: z.array(OperatorPresenceActivitySchema).max(3).optional(),
   })
   .strict();
 export type OperatorPresenceSnapshot = z.infer<typeof OperatorPresenceSnapshotSchema>;
@@ -93,6 +104,8 @@ export const OperatorPresenceRequestSchema = z
     includeFace: z.boolean().optional(),
     /** Opt in to brief fleet-event cues; legacy strict clients never receive them. */
     includeBeats: z.boolean().optional(),
+    /** Opt in to bounded activity labels; strict legacy readers receive no new field. */
+    includeActivities: z.boolean().optional(),
     waitMs: z.number().int().min(0).max(OPERATOR_PRESENCE_WAIT_MS_MAX).optional(),
   })
   .strict();

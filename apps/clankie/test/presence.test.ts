@@ -9,6 +9,33 @@ import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-oper
 
 const idle = { thinking: false, inVoice: false, playing: false, activeSeats: 0 };
 describe("present tense", () => {
+  it("projects bounded concurrent public activities only for opted-in readers", () => {
+    const sources = {
+      ...idle,
+      thinking: true,
+      inVoice: true,
+      playing: true,
+      activeSeats: 4,
+      voiceSince: "2026-10-06T20:00:00.000Z",
+    };
+    const old = projectPresence(sources, false);
+    expect(old).not.toHaveProperty("activities");
+    const snapshot = OperatorPresenceSnapshotSchema.parse(projectPresence(sources, false, false, true));
+    expect(snapshot.activities).toEqual([
+      { kind: "working", label: "Working", since: null },
+      { kind: "voice", label: "In a voice chat", since: sources.voiceSince },
+      { kind: "playing", label: "Playing", since: null },
+    ]);
+    expect(projectPresence(sources, false, false, true).cursor).toBe(snapshot.cursor);
+    expect(projectPresence({ ...idle, activeSeats: 4 }, false, false, true).activities).toEqual([
+      { kind: "leading", label: "Leading 4 workers", since: null },
+    ]);
+    expect(projectPresence({ ...idle, working: true }, true, false, true)).toMatchObject({
+      mood: "thinking",
+      activities: [{ kind: "working", label: "Working", since: null }],
+    });
+    expect(projectPresence(idle, false, false, true).activities).toEqual([]);
+  });
   it("reads active captain lanes, including background Discord turns, without waiting for model construction", async () => {
     const operator = Promise.resolve({ session: { isStreaming: false } });
     const discord = Promise.resolve({ running: Promise.resolve(true), session: { isStreaming: false } });

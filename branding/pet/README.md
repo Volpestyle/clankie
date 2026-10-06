@@ -101,6 +101,18 @@ uv run --with pillow python3 docs/testing/2026-10-05-pet-faces/verify-art.py --b
 That comparison is scoped to this face addition's approved original-art
 commit; later intentional body work should supply its own approved baseline.
 
+### Working loops (VUH-1754)
+
+Seven tags appended after the existing body art add typing (`work_type`),
+reading an open book (`work_read`), writing on a clipboard (`work_write`),
+tinkering with a device (`work_tinker`), listening (`voice_listen`), watching a
+game (`play_watch`), and a mirrored fist-pump cheer (`play_cheer`). Each has four
+editable frames, planted feet, and the existing palette. Their front-view
+screens are validated with zero-offset face geometry. Rebuild with the command
+above, then sync the built sheets into the app; generated outputs stay untouched
+by hand. Frame timings live in the editable grids; tour cadence and selection
+live in the app.
+
 ### Editing the walk cycle
 
 `walk_left` and `walk_right` are separate files: `src/pet/walk_left.txt` and

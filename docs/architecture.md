@@ -679,8 +679,11 @@ in [Minecraft](minecraft.md) and
 
 The operator `presence` operation projects current thinking, voice, play, active
 seats, and pending owner work from their existing sources. It does not persist
-another mood state. The `desktop` tool publishes a bounded transient expression;
-publication does not prove a client displayed it. Quiet hours and expiry apply.
+another mood state. Opted-in reads also carry up to three public activity labels
+with nullable source timestamps, so desktop clients can describe concurrent work
+without prompts or conversation contents. Legacy reads omit the new array.
+The `desktop` tool publishes a bounded transient expression; publication does
+not prove a client displayed it. Quiet hours and expiry apply.
 The projection and expression ownership live in
 [presence.ts](../apps/clankie/src/captain/presence.ts) and
 [desktop.ts](../apps/clankie/src/captain/desktop.ts), following
