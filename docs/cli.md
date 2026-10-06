@@ -3454,7 +3454,15 @@ session as `<channel source="clankie" kind="message|wake|watch|escalation"
 conversation="…" event_id="…">`; that polling is what binds the seat as his
 head, and with no bridge polling the same turns run the pi operator lane. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
-escalating conversation as his own message. Claude Code loads the channel
+escalating conversation as his own message. To speak in a Discord room on his
+own initiative, the seat calls `room_turn` with the room conversation ID and a
+brief, plus optionally `replyTo` (a message ID) and `file` (a workspace file;
+needs `replyTo`). It forks a one-shot room turn under that room's grants and
+mouth. The turn sees the room's recent history and the brief, never the seat's
+transcript. It returns what posted, its message ID, or why not, and the action
+is recorded in both conversations. An identical request, or a reused
+`requestId`, returns the first result without running again (ADR 0218,
+2026-10-06). Claude Code loads the channel
 only when `clankie claude` passes its development flag; without it the tools
 still work without consuming events, leaving those turns with the service.
 

@@ -46,6 +46,24 @@ describe("captain Discord action control", () => {
       payload: { kind: "send_message", replyToMessageId: "message-1", content: "Published." },
     });
     expect(planNonWatchCaptainDiscordAction({ ...context, action: "watch_start" })).toBeUndefined();
+    // An owner-directed room turn: a reply carries its file as one message, and
+    // a post that answers nothing names no reply target (ADR 0218, 2026-10-06).
+    const media = {
+      artifactRef: `sha256:${"a".repeat(64)}:delivered/${"b".repeat(32)}/${"c".repeat(48)}/content`,
+      filename: "shortlist.md",
+    };
+    expect(
+      planNonWatchCaptainDiscordAction({ ...context, action: "send_reply", text: "Here.", media }),
+    ).toMatchObject({
+      action: "discord.presence.reply_with_media",
+      payload: { kind: "reply_with_media", messageId: "message-1", content: "Here.", ...media },
+    });
+    const { messageId: _messageId, ...post } = context;
+    expect(planNonWatchCaptainDiscordAction({ ...post, action: "post_message", text: "Hi all." })).toEqual({
+      action: "discord.presence.send_message",
+      payload: { kind: "send_message", channelId: "channel-1", content: "Hi all." },
+      successMessage: "I posted the message.",
+    });
   });
 
   it("admits planned actions on the allowlist and leaves watch to the body", () => {

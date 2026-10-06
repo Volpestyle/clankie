@@ -74,6 +74,7 @@ export function admitCaptainDiscordAction(input: {
             ? "That message is outside my admitted Discord channels."
             : input.action.action === "send_text_update" ||
                 input.action.action === "send_reply" ||
+                input.action.action === "post_message" ||
                 input.action.action === "tool_progress"
               ? "That channel is outside my admitted Discord channels."
               : "Threads only work in my admitted server channels.",
@@ -107,7 +108,7 @@ export async function executePlannedCaptainDiscordAction(input: {
       DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
         idempotencyKey: `captain:${input.call.callId}:${input.call.action}`,
-        sourceDeliveryId: input.call.messageId,
+        ...("messageId" in input.call ? { sourceDeliveryId: input.call.messageId } : {}),
         action: input.plan.action,
         identity: {
           presenceSessionId: discordPresenceLaneAddress({
@@ -153,6 +154,12 @@ export function planNonWatchCaptainDiscordAction(
   input: DiscordCaptainActionInput,
 ): CaptainDiscordActionPlan | undefined {
   if (input.action === "server_action") return undefined;
+  if (input.action === "post_message")
+    return {
+      action: "discord.presence.send_message",
+      payload: { kind: "send_message", channelId: input.channelId, content: input.text },
+      successMessage: "I posted the message.",
+    };
   const { action, channelId, messageId } = input;
   switch (action) {
     case "react":
@@ -170,11 +177,25 @@ export function planNonWatchCaptainDiscordAction(
           "I posted that text update. Keep working; your final text reply still posts when the turn ends.",
       };
     case "send_reply":
-      return {
-        action: "discord.presence.send_message",
-        payload: { kind: "send_message", channelId, replyToMessageId: messageId, content: input.text },
-        successMessage: "I posted the reply.",
-      };
+      // A file made on the turn rides the reply as one message (ADR 0085/0088).
+      return input.media === undefined
+        ? {
+            action: "discord.presence.send_message",
+            payload: { kind: "send_message", channelId, replyToMessageId: messageId, content: input.text },
+            successMessage: "I posted the reply.",
+          }
+        : {
+            action: "discord.presence.reply_with_media",
+            payload: {
+              kind: "reply_with_media",
+              channelId,
+              messageId,
+              content: input.text,
+              artifactRef: input.media.artifactRef,
+              filename: input.media.filename,
+            },
+            successMessage: "I posted the reply with its file.",
+          };
     case "tool_progress":
       return {
         action: "discord.presence.tool_progress",

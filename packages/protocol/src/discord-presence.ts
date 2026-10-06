@@ -345,7 +345,24 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("send_reply"),
     text: z.string().trim().min(1).max(2_000),
+    /** Host-captured turn media (ADR 0085/0088); the schema admits only attachable refs. */
+    media: CaptainTurnMediaSchema.optional(),
   }).strict(),
+  /**
+   * A message an owner-directed room turn posts without answering a specific
+   * message (ADR 0218, 2026-10-06). The service stamps every ID; the model
+   * supplies only the words.
+   */
+  z
+    .object({
+      action: z.literal("post_message"),
+      callId: z.string().min(1).max(256),
+      actorId: z.string().min(1).max(128),
+      guildId: z.string().min(1).max(128).optional(),
+      channelId: z.string().min(1).max(128),
+      text: z.string().trim().min(1).max(2_000),
+    })
+    .strict(),
   /**
    * "He has started writing" — the mid-turn signal ADR 0118 left unbuilt.
    * Host-stamped from the reply stream, never a model tool: it carries no

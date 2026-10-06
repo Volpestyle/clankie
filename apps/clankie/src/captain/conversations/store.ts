@@ -9,6 +9,7 @@ import {
   type CaptainChannelTurnResult,
   type RoomHandoffMetadata,
   OPERATOR_CONVERSATION_TEXT_MAX,
+  OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   operatorConversationWindow,
   type DeliveryStage,
   type OperatorAttachmentUploadResult,
@@ -53,6 +54,7 @@ import {
   noteServiceTurn,
   restoreServiceHandoff,
   seatStartProjection,
+  roomForkContext,
   serviceContextSeed,
   settleServiceHandoff,
   type ServiceHandoffClaim,
@@ -872,6 +874,33 @@ export class ConversationStore {
   /** The SessionStart projection for a fresh harness session; advances its cursor. */
   public seatStartProjection(conversationId: string): string {
     return seatStartProjection(this, conversationId);
+  }
+
+  /** The room's own bounded projection for an owner-directed room turn. */
+  public roomForkContext(
+    conversationId: string,
+    heardAndSaid?: readonly { readonly at: string; readonly kind: string; readonly text: string }[],
+  ): string {
+    return roomForkContext(this, conversationId, heardAndSaid);
+  }
+
+  /** Records a host-run action as a finished tool event in a conversation's log. */
+  public recordToolAction(
+    conversationId: string,
+    input: {
+      readonly toolCallId: string;
+      readonly name: string;
+      readonly ok: boolean;
+      readonly detail: string;
+    },
+  ): void {
+    this.publishConversationEvent(conversationId, {
+      type: "tool",
+      toolCallId: input.toolCallId,
+      name: input.name,
+      phase: input.ok ? "completed" : "failed",
+      detail: input.detail.slice(0, OPERATOR_CONVERSATION_TOOL_DETAIL_MAX),
+    });
   }
 
   public claimServiceHandoff(conversationId: string): ServiceHandoffClaim | undefined {
