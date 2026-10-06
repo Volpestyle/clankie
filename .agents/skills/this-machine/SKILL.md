@@ -204,6 +204,7 @@ index). Configure through the headless CLI:
 | Service effort                         | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                                                                                         |
 | Cheaper model for everyday turns       | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`                                                                               |
 | When long sessions compact             | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                                                                                     |
+| Voice brain                            | `clankie voice brain set PROVIDER [MODEL_ID]`, `clankie voice brain model clear`                                                                                   |
 | ElevenLabs voice model                 | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear`                                                                     |
 | Image / video models                   | `clankie image-model set provider/model`, `clankie video-model set provider/model`                                                                                 |
 | Persona                                | `clankie persona status`, `clankie persona set --display-name Clankie …`                                                                                           |
@@ -250,6 +251,18 @@ writes and webhook context retain priority within the hard cap.
 Everything else about the launcher (Linear activity, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
 [launcher details](reference/launcher.md).
+
+Voice brain providers are `openai`, `xai`, and `anthropic`. Anthropic defaults
+to `claude-sonnet-5-5` and needs an existing ElevenLabs voice ID plus separate
+brokered API keys for `anthropic`, `openai` transcription, and `elevenlabs`.
+Configure identifiers and missing keys with `/voice`; status never reveals keys.
+Brain switches preserve inactive models. OpenAI preserves the current speech
+output, while xAI selects native speech and Anthropic selects ElevenLabs.
+Inspect `clankie voice status` for environment overrides and the prior settings
+before arranging a restart of active work. These settings commands make no
+provider call and never restart automatically. To restore native OpenAI speech
+after a Claude trial, select the OpenAI stack with `/voice` as well as restoring
+the brain; an originally unset brain model can be restored with `brain model clear`.
 
 Discord setup connects one server with Participant or Admin, fleet display and
 a tracking level. Participant follows Discord permissions. Admin controls the

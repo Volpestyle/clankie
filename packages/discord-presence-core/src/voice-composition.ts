@@ -12,6 +12,8 @@ import {
 import { openElevenLabsTtsSession } from "./elevenlabs-tts.ts";
 import { VOICE_TONE_CAPABILITY } from "./voice-tone-text.ts";
 import { openExternalVoiceConversation } from "./external-voice.ts";
+import { DEFAULT_ANTHROPIC_VOICE_MODEL, openAnthropicVoiceConversation } from "./anthropic-voice.ts";
+export { DEFAULT_ANTHROPIC_VOICE_MODEL } from "./anthropic-voice.ts";
 import { DEFAULT_DECAY_WINDOW_MS } from "./voice-floor.ts";
 import type {
   DiscordVoiceRealtimePorts,
@@ -45,7 +47,7 @@ export interface VoiceRealtimeBaseEnvConfig {
   readonly decayWindowMs: number;
 }
 
-export const VOICE_REALTIME_PROVIDERS = ["openai", "xai"] as const;
+export const VOICE_REALTIME_PROVIDERS = ["openai", "xai", "anthropic"] as const;
 export type VoiceRealtimeProvider = (typeof VOICE_REALTIME_PROVIDERS)[number];
 export const DEFAULT_VOICE_REALTIME_PROVIDER: VoiceRealtimeProvider = "openai";
 export const XAI_VOICE_REASONING_EFFORTS = ["high", "none"] as const;
@@ -70,7 +72,11 @@ export function parseVoiceRealtimeBaseEnv(env: NodeJS.ProcessEnv): VoiceRealtime
     realtimeModel: nonEmptyEnv(
       env,
       "CLANKIE_VOICE_REALTIME_MODEL",
-      realtimeProvider === "xai" ? DEFAULT_XAI_VOICE_REALTIME_MODEL : DEFAULT_VOICE_REALTIME_MODEL,
+      realtimeProvider === "xai"
+        ? DEFAULT_XAI_VOICE_REALTIME_MODEL
+        : realtimeProvider === "anthropic"
+          ? DEFAULT_ANTHROPIC_VOICE_MODEL
+          : DEFAULT_VOICE_REALTIME_MODEL,
     ),
     transcribeModel: nonEmptyEnv(env, "CLANKIE_VOICE_TRANSCRIBE_MODEL", DEFAULT_VOICE_TRANSCRIBE_MODEL),
     voice: nonEmptyEnv(
@@ -189,7 +195,7 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
     env,
     "CLANKIE_VOICE_TTS_PROVIDER",
     VOICE_TTS_PROVIDERS,
-    DEFAULT_VOICE_TTS_PROVIDER,
+    base.realtimeProvider === "anthropic" ? "elevenlabs" : DEFAULT_VOICE_TTS_PROVIDER,
   );
   const elevenLabsVoiceId = env.CLANKIE_VOICE_ELEVENLABS_VOICE_ID?.trim();
   const elevenLabsModelId = env.CLANKIE_VOICE_ELEVENLABS_MODEL_ID?.trim();
@@ -199,14 +205,19 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
         "CLANKIE_VOICE_ELEVENLABS_VOICE_ID is required when CLANKIE_VOICE_TTS_PROVIDER=elevenlabs",
       );
     }
-    if (base.realtimeProvider !== "openai") {
-      throw new Error("ElevenLabs speech output currently requires CLANKIE_VOICE_REALTIME_PROVIDER=openai");
+    if (base.realtimeProvider === "xai") {
+      throw new Error(
+        "ElevenLabs speech output requires CLANKIE_VOICE_REALTIME_PROVIDER=openai or anthropic",
+      );
     }
   } else if (elevenLabsVoiceId !== undefined || elevenLabsModelId !== undefined) {
     throw new Error(
       "CLANKIE_VOICE_ELEVENLABS_VOICE_ID and CLANKIE_VOICE_ELEVENLABS_MODEL_ID require " +
         "CLANKIE_VOICE_TTS_PROVIDER=elevenlabs",
     );
+  }
+  if (base.realtimeProvider === "anthropic" && ttsProvider !== "elevenlabs") {
+    throw new Error("Anthropic voice requires CLANKIE_VOICE_TTS_PROVIDER=elevenlabs");
   }
   if (base.realtimeProvider === "xai" && env.CLANKIE_VOICE_TRANSCRIBE_MODEL !== undefined) {
     throw new Error(
@@ -233,12 +244,16 @@ export function parseVoiceRealtimeEnv(env: NodeJS.ProcessEnv): VoiceRealtimeEnvC
 }
 
 export interface VoiceRealtimePortsInput {
-  /** Broker-resolved key for the selected realtime provider. */
+  /** Broker-resolved key for the selected brain provider. */
   readonly apiKey: string;
+  /** OpenAI transcription key, separate from an Anthropic text brain's key. */
+  readonly transcriptionApiKey?: string;
   readonly elevenLabsApiKey?: string;
   readonly config: VoiceRealtimeEnvConfig;
   readonly socketFactory?: RealtimeSocketFactory;
   readonly timers?: RealtimeTimers;
+  /** Provider HTTP transport seam; the production adapter uses native fetch. */
+  readonly fetchImpl?: typeof fetch;
 }
 
 export interface TranscriptVoiceConversationOpenInput extends VoiceConversationOpenInput {
@@ -251,7 +266,17 @@ export interface TranscriptVoiceRealtimePorts extends Omit<DiscordVoiceRealtimeP
 
 /** Shared provider composition for both Discord bodies. */
 export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): TranscriptVoiceRealtimePorts {
-  const { apiKey, elevenLabsApiKey, config, socketFactory, timers } = input;
+  const { apiKey, transcriptionApiKey, elevenLabsApiKey, config, socketFactory, timers, fetchImpl } = input;
+  if (config.realtimeProvider === "anthropic" && config.ttsProvider !== "elevenlabs") {
+    throw new Error("Anthropic voice requires ElevenLabs speech output");
+  }
+  const transcriptionKey = config.realtimeProvider === "anthropic" ? transcriptionApiKey : apiKey;
+  if (
+    transcriptionKey === undefined ||
+    (config.realtimeProvider === "anthropic" && !transcriptionKey.trim())
+  ) {
+    throw new Error("Anthropic voice requires a separate brokered openai transcription credential");
+  }
   if (config.ttsProvider === "elevenlabs" && elevenLabsApiKey === undefined) {
     throw new Error(
       "The elevenlabs TTS provider requires the brokered elevenlabs credential. " +
@@ -272,26 +297,44 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
             open,
             {
               openRealtime: (handlers) =>
-                openRealtimeConversationSession({
-                  ...common,
-                  ...(open.guard === undefined ? {} : { guard: open.guard }),
-                  ...(open.current === undefined ? {} : { current: open.current }),
-                  model: config.realtimeModel,
-                  outputModality: "text",
-                  instructions: dialogue
-                    ? `${open.instructions}\n\n${VOICE_TONE_CAPABILITY}`
-                    : open.instructions,
-                  truncationRetentionRatio: config.truncationRetentionRatio,
-                  postInstructionsTokenLimit: config.postInstructionsTokenLimit,
-                  onAudioDelta: open.onAudioDelta,
-                  onTextDelta: handlers.onTextDelta,
-                  onFunctionCall: handlers.onFunctionCall,
-                  onResponseStarted: handlers.onResponseStarted,
-                  onResponseAbandoned: handlers.onResponseAbandoned,
-                  onResponseDone: handlers.onResponseDone,
-                  onClose: handlers.onClose,
-                  onError: handlers.onError,
-                }),
+                config.realtimeProvider === "anthropic"
+                  ? openAnthropicVoiceConversation({
+                      apiKey,
+                      ...(open.guard === undefined ? {} : { guard: open.guard }),
+                      ...(open.current === undefined ? {} : { current: open.current }),
+                      model: config.realtimeModel,
+                      instructions: dialogue
+                        ? `${open.instructions}\n\n${VOICE_TONE_CAPABILITY}`
+                        : open.instructions,
+                      ...handlers,
+                      ...(fetchImpl === undefined ? {} : { fetchImpl }),
+                      ...(timers === undefined ? {} : { timers }),
+                      ...(config.sessionLifetimeMs === undefined
+                        ? {}
+                        : { maxLifetimeMs: config.sessionLifetimeMs }),
+                      contextCharacterLimit: config.postInstructionsTokenLimit * 4,
+                      retentionRatio: config.truncationRetentionRatio,
+                    })
+                  : openRealtimeConversationSession({
+                      ...common,
+                      ...(open.guard === undefined ? {} : { guard: open.guard }),
+                      ...(open.current === undefined ? {} : { current: open.current }),
+                      model: config.realtimeModel,
+                      outputModality: "text",
+                      instructions: dialogue
+                        ? `${open.instructions}\n\n${VOICE_TONE_CAPABILITY}`
+                        : open.instructions,
+                      truncationRetentionRatio: config.truncationRetentionRatio,
+                      postInstructionsTokenLimit: config.postInstructionsTokenLimit,
+                      onAudioDelta: open.onAudioDelta,
+                      onTextDelta: handlers.onTextDelta,
+                      onFunctionCall: handlers.onFunctionCall,
+                      onResponseStarted: handlers.onResponseStarted,
+                      onResponseAbandoned: handlers.onResponseAbandoned,
+                      onResponseDone: handlers.onResponseDone,
+                      onClose: handlers.onClose,
+                      onError: handlers.onError,
+                    }),
               openTts: (handlers) =>
                 openElevenLabsTtsSession({
                   apiKey: elevenLabsApiKey,
@@ -358,6 +401,7 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
           })
         : openRealtimeTranscriptionSession({
             ...common,
+            apiKey: transcriptionKey,
             model: config.transcribeModel,
             ...(config.language === undefined ? {} : { language: config.language }),
             onTranscript: handlers.onTranscript,

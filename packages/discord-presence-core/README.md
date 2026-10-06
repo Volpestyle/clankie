@@ -17,8 +17,9 @@ what lets both bodies be one character
 | `voice-address`              | Phonetic name-mention: opens a session; the offered turn decides whether to speak (ADR 0119)          |
 | `voice-floor`                | Dormant ↔ engaged floor: wake, offer (silence-ok), listen, decay, volition (ADR 0119)                 |
 | `realtime-session`           | Injectable OpenAI/xAI realtime boundaries: transcription, conversation, and `ask_clankie` round trips |
+| `anthropic-voice`            | Bounded Claude text brain, shared voice tools, streamed replies and cancellable requests              |
 | `elevenlabs-tts`             | ElevenLabs legacy TTS and explicit v4 Turbo dialogue WebSocket boundary (ADR 0070)                    |
-| `external-voice`             | Pairs a text-modality realtime session with a TTS mouth behind the one conversation port (ADR 0070)   |
+| `external-voice`             | Pairs a text brain with a TTS mouth behind the one conversation port (ADR 0070)                       |
 | `voice-session`              | Vox-backed attributed speech/text input, shared group floor, deliberate barge-in and playback         |
 | `vox-gateway`                | Structural gateway adapter, validated OP4 voice effects and confirmed account leave                   |
 | `vox-process`                | Tokenless Vox startup, versioned IPC readiness and process probes                                     |

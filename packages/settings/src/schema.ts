@@ -87,8 +87,8 @@ const ModelIdentifierSchema = z
  */
 export const VoiceSettingsSchema = z
   .object({
-    /** Which vendor owns both the dormant transcriber and engaged voice agent. */
-    realtimeProvider: z.enum(["openai", "xai"]).default("openai"),
+    /** Voice brain; Anthropic uses separate OpenAI transcription and external speech. */
+    realtimeProvider: z.enum(["openai", "xai", "anthropic"]).default("openai"),
     /**
      * Who synthesizes his speech. The historical `openai` value means the
      * selected realtime provider's native voice; `elevenlabs` is external TTS.
@@ -99,6 +99,8 @@ export const VoiceSettingsSchema = z
     /** OpenAI realtime voice name (e.g. `marin`); unset defers to the runtime default. */
     openAiVoice: z.string().min(1).max(64).optional(),
     xAiRealtimeModel: ModelIdentifierSchema.optional(),
+    /** Anthropic text brain; unset defers to claude-sonnet-5-5. */
+    anthropicModel: ModelIdentifierSchema.optional(),
     /** xAI built-in or custom voice id; unset defers to `eve`. */
     xAiVoice: VendorIdentifierSchema.optional(),
     /** xAI Voice's documented reasoning control. */
@@ -121,7 +123,14 @@ export const VoiceSettingsSchema = z
       context.addIssue({
         code: "custom",
         path: ["ttsProvider"],
-        message: "elevenlabs text output currently requires realtimeProvider openai",
+        message: "elevenlabs text output requires realtimeProvider openai or anthropic",
+      });
+    }
+    if (value.realtimeProvider === "anthropic" && value.ttsProvider !== "elevenlabs") {
+      context.addIssue({
+        code: "custom",
+        path: ["ttsProvider"],
+        message: "Anthropic voice requires elevenlabs speech output and a voice id",
       });
     }
   });

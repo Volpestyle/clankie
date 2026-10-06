@@ -9,7 +9,7 @@ import { VoiceSettingsSchema, type VoiceSettings } from "./schema.ts";
  */
 export interface ResolvedVoiceSettings {
   settings: VoiceSettings;
-  /** Field names whose effective value came from the environment. */
+  /** Environment variable names that supplied an effective override. */
   overriddenByEnvironment: string[];
 }
 
@@ -22,11 +22,14 @@ export function resolveVoiceSettings(
 
   takeString(merged, "realtimeProvider", "CLANKIE_VOICE_REALTIME_PROVIDER");
   takeString(merged, "ttsProvider", "CLANKIE_VOICE_TTS_PROVIDER");
-  const provider = merged.realtimeProvider === "xai" ? "xai" : "openai";
+  const provider = merged.realtimeProvider;
   if (provider === "xai") {
     takeString(merged, "xAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
     takeString(merged, "xAiVoice", "CLANKIE_VOICE_REALTIME_VOICE");
     takeString(merged, "xAiReasoningEffort", "CLANKIE_VOICE_XAI_REASONING_EFFORT");
+  } else if (provider === "anthropic") {
+    takeString(merged, "anthropicModel", "CLANKIE_VOICE_REALTIME_MODEL");
+    takeString(merged, "openAiTranscribeModel", "CLANKIE_VOICE_TRANSCRIBE_MODEL");
   } else {
     takeString(merged, "openAiRealtimeModel", "CLANKIE_VOICE_REALTIME_MODEL");
     takeString(merged, "openAiTranscribeModel", "CLANKIE_VOICE_TRANSCRIBE_MODEL");
@@ -73,6 +76,14 @@ export function voiceSettingsToEnvironment(settings: VoiceSettings): Record<stri
       env["CLANKIE_VOICE_REALTIME_VOICE"] = settings.xAiVoice;
     }
     env["CLANKIE_VOICE_XAI_REASONING_EFFORT"] = settings.xAiReasoningEffort;
+  } else if (settings.realtimeProvider === "anthropic") {
+    env["CLANKIE_VOICE_REALTIME_PROVIDER"] = "anthropic";
+    if (settings.anthropicModel !== undefined) {
+      env["CLANKIE_VOICE_REALTIME_MODEL"] = settings.anthropicModel;
+    }
+    if (settings.openAiTranscribeModel !== undefined) {
+      env["CLANKIE_VOICE_TRANSCRIBE_MODEL"] = settings.openAiTranscribeModel;
+    }
   } else {
     if (settings.openAiRealtimeModel !== undefined) {
       env["CLANKIE_VOICE_REALTIME_MODEL"] = settings.openAiRealtimeModel;

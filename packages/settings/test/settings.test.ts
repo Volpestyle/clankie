@@ -439,6 +439,59 @@ describe("voice settings resolution", () => {
     ).toThrow(/requires realtimeProvider openai/u);
   });
 
+  it("projects an Anthropic brain separately from OpenAI transcription and preserves inactive models", () => {
+    const voice = VoiceSettingsSchema.parse({
+      realtimeProvider: "anthropic",
+      ttsProvider: "elevenlabs",
+      elevenLabsVoiceId: "owned_voice",
+      elevenLabsModelId: "eleven_v4_turbo",
+      anthropicModel: "claude-sonnet-5-5",
+      openAiRealtimeModel: "saved-openai-brain",
+      openAiTranscribeModel: "gpt-realtime-whisper",
+      openAiVoice: "cedar",
+      xAiRealtimeModel: "saved-xai-brain",
+    });
+    expect(voiceSettingsToEnvironment(voice)).toEqual({
+      CLANKIE_VOICE_REALTIME_PROVIDER: "anthropic",
+      CLANKIE_VOICE_REALTIME_MODEL: "claude-sonnet-5-5",
+      CLANKIE_VOICE_TRANSCRIBE_MODEL: "gpt-realtime-whisper",
+      CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "owned_voice",
+      CLANKIE_VOICE_ELEVENLABS_MODEL_ID: "eleven_v4_turbo",
+    });
+    const resolved = resolveVoiceSettings(voice, {
+      CLANKIE_VOICE_REALTIME_MODEL: "claude-explicit-override",
+      CLANKIE_VOICE_TRANSCRIBE_MODEL: "explicit-transcriber",
+    });
+    expect(resolved.settings).toEqual({
+      ...voice,
+      anthropicModel: "claude-explicit-override",
+      openAiTranscribeModel: "explicit-transcriber",
+    });
+    expect(resolved.overriddenByEnvironment).toEqual([
+      "CLANKIE_VOICE_REALTIME_MODEL",
+      "CLANKIE_VOICE_TRANSCRIBE_MODEL",
+    ]);
+    expect(voiceSettingsToEnvironment({ ...voice, realtimeProvider: "openai" })).toMatchObject({
+      CLANKIE_VOICE_REALTIME_MODEL: "saved-openai-brain",
+      CLANKIE_VOICE_REALTIME_VOICE: "cedar",
+    });
+  });
+
+  it("requires external speech and its voice id before accepting an Anthropic brain", () => {
+    expect(() => VoiceSettingsSchema.parse({ realtimeProvider: "anthropic" })).toThrow(/elevenlabs/u);
+    expect(() =>
+      VoiceSettingsSchema.parse({ realtimeProvider: "anthropic", ttsProvider: "elevenlabs" }),
+    ).toThrow(/elevenLabsVoiceId/u);
+    const voice = VoiceSettingsSchema.parse({
+      realtimeProvider: "anthropic",
+      ttsProvider: "elevenlabs",
+      elevenLabsVoiceId: "owned_voice",
+    });
+    expect(voice.anthropicModel).toBeUndefined();
+    expect(voiceSettingsToEnvironment(voice)).not.toHaveProperty("CLANKIE_VOICE_REALTIME_MODEL");
+  });
+
   it("fills only unset names and lets the environment win on read", () => {
     const settings = VoiceSettingsSchema.parse({
       ttsProvider: "elevenlabs",

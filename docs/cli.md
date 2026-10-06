@@ -1160,20 +1160,36 @@ environment variables, settings, output or device responses. Google public
 settings also support `CLANKIE_GOOGLE_OAUTH_CLIENT_ID` and
 `CLANKIE_GOOGLE_OAUTH_REDIRECT_URI` overrides; neither variable accepts a secret.
 
-### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
+### `voice [status]` / `voice brain set PROVIDER [MODEL_ID]` / `voice model set MODEL_ID`
 
-The headless launcher now supports inspecting voice settings and changing only
-an already configured ElevenLabs model. Earlier builds exposed `/voice` only
-inside the console and rejected `clankie voice`.
+The headless launcher inspects voice settings, selects the voice brain, and
+changes an already configured ElevenLabs speech model. These commands store
+public settings locally; they never make a model call or restart a service.
 
 `voice status` returns `voice` (stored), `effectiveVoice`,
 `overriddenByEnvironment` (environment variable names), `settingsFile`, and
-`restart`. No credential is returned. Model writes preserve the voice ID,
-realtime provider, consent and all other settings; they never restart services.
-Select the provider and voice ID with the console's `/voice` first.
+`restart`. No credential is returned. `voice model set/clear` changes only the
+ElevenLabs model, preserving the voice ID, realtime provider, consent and all
+other settings. Select an ElevenLabs voice ID with the console's `/voice` first.
+
+`voice brain set openai|xai|anthropic [MODEL_ID]` selects the conversation brain.
+Omitting the model keeps that provider's prior model or its runtime default;
+`voice brain model clear` restores the selected brain's runtime default. The
+OpenAI and xAI models, voices, and inactive ElevenLabs configuration remain
+stored when switching. xAI selects its native speech output; OpenAI keeps the
+currently selected speech output. Anthropic selects ElevenLabs and refuses to
+save until an ElevenLabs voice ID is configured.
+
+Anthropic's default is `claude-sonnet-5-5`. It receives attributed transcript
+text and conversation context; OpenAI transcribes consented audio and
+ElevenLabs synthesizes Clankie's chosen words. The active Discord body needs
+separate brokered API credentials under `anthropic`, `openai`, and `elevenlabs`.
+Use `/voice` or `/auth` to store those keys; environment credentials and Claude
+subscription tokens are refused. `/voice status` shows all three key checks.
 
 ```bash
 clankie voice status
+clankie voice brain set anthropic claude-sonnet-5-5
 clankie voice model set eleven_v4_turbo
 # After reviewing settings and arranging an interruption of active calls/work:
 clankie restart clankie
@@ -1183,6 +1199,10 @@ clankie restart clankie
 An unset model retains `eleven_flash_v2_5` on the legacy TTS transport. To roll
 back an originally unset model, use `clankie voice model clear`, then the same
 restart. If a model was explicitly set, restore it with `model set ORIGINAL_ID`.
+To return to the prior brain, use `voice brain set ORIGINAL_PROVIDER` with its
+retained model. If its speech output was native OpenAI, select that stack again
+with `/voice`; returning from Anthropic to OpenAI preserves ElevenLabs output.
+Then use the same restart after arranging an interruption of active calls.
 Environment overrides still win: check `effectiveVoice` before restarting.
 This command is local-only; hosted mode refuses it. See the
 [voice operating guide](../apps/discord-bridge/README.md) for verification limits.

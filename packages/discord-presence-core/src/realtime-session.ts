@@ -317,6 +317,15 @@ const SELF_TOOLS = [
 ] as const;
 // --- end self tools.
 
+/** One voice tool surface, projected into each brain's native wire format. */
+export const VOICE_CONVERSATION_TOOLS = [
+  ASK_CLANKIE_TOOL,
+  VOICE_LEAVE_TOOL,
+  LOOK_AT_SCREEN_TOOL,
+  ...MUSIC_TOOLS,
+  ...SELF_TOOLS,
+] as const;
+
 /** Minimal transport seam. Production wraps a WebSocket; tests inject a fake. */
 export interface RealtimeSocket {
   send(data: string | Uint8Array): void;
@@ -882,7 +891,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               // becoming a second, conflicting floor owner.
               turn_detection: null,
               audio: { output: { format: REALTIME_PCM_FORMAT } },
-              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS, ...SELF_TOOLS],
+              tools: VOICE_CONVERSATION_TOOLS,
             }
           : {
               type: "realtime",
@@ -917,7 +926,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
                     }
                   : {}),
               },
-              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS, ...SELF_TOOLS],
+              tools: VOICE_CONVERSATION_TOOLS,
               tool_choice: "auto",
               truncation: {
                 type: "retention_ratio",

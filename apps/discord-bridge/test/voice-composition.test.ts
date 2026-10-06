@@ -317,6 +317,23 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
     expect(status).toBe("Voice is enabled but not connected.");
   });
 
+  it("discloses the three separate Anthropic voice data paths at join and consent", () => {
+    for (const disclosure of [
+      renderVoiceJoinDisclosure(1, "elevenlabs", "explicit", "anthropic"),
+      renderVoiceConsentReply(true, 2, "elevenlabs", "explicit", "anthropic"),
+    ]) {
+      expect(disclosure).toContain("audio is transcribed by OpenAI");
+      expect(disclosure).toContain(
+        "transcript text and this call's conversation context are sent to Anthropic",
+      );
+      expect(disclosure).toContain("audio is never sent to Anthropic");
+      expect(disclosure).toContain("synthesized by ElevenLabs");
+      expect(disclosure).toContain("audio is never sent to ElevenLabs");
+      expect(disclosure).toContain("privileged actions");
+      expect(disclosure).not.toContain("live OpenAI realtime session");
+    }
+  });
+
   it("describes bounded local and server-side retention in voice-status", () => {
     const active = renderVoiceStatusReply(
       {

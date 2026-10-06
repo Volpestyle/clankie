@@ -76,12 +76,17 @@ Use the matching TUI flow or headless CLI command: `/persona`, `/discord`,
 keys go to the broker. Non-secret configuration writes here. The [CLI reference](../../docs/cli.md)
 owns command syntax; do not edit generated settings by hand.
 
-`voice.realtimeProvider` selects `openai` or `xai`. Provider-specific model and
+`voice.realtimeProvider` selects `openai`, `xai`, or `anthropic`. Provider-specific model and
 voice fields are retained when switching, so trying Grok does not erase the
 OpenAI setup. The active values project to `CLANKIE_VOICE_REALTIME_*`; xAI's
 reasoning effort projects separately. xAI streaming STT has no model selector,
-while OpenAI keeps its configurable transcription model. Secrets entered in
-`/voice` go directly to the credential broker and never enter this schema.
+while OpenAI keeps its configurable transcription model. Anthropic uses the
+optional `voice.anthropicModel` (default `claude-sonnet-5-5`), OpenAI's separate
+transcription model/key, and ElevenLabs speech. It requires
+`voice.ttsProvider=elevenlabs` and an ElevenLabs voice ID. Switching providers
+retains inactive models and voice identifiers; environment overrides still win.
+Secrets entered in `/voice` go directly to the credential broker and never enter
+this schema.
 
 `discord.voiceTranscriptLoggingEnabled` is the explicit development switch for
 exact consented Discord voice text. It is off by default and projects to
