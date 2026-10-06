@@ -26,9 +26,11 @@ export async function codex0160Protocol(
   options: {
     initialQuestion?: { callId: string; title: string };
     historicalQuestion?: { callId: string; title: string };
+    /** Replay an observed thread identity across native RPC and host-proof goldens. */
+    threadId?: string;
   } = {},
 ) {
-  const threadId = randomUUID();
+  const threadId = options.threadId ?? randomUUID();
   const rolloutPath = join(directory, `rollout-2026-10-05T12-00-00-${threadId}.jsonl`);
   await writeFile(
     rolloutPath,
@@ -42,10 +44,12 @@ export async function codex0160Protocol(
   const server = new WebSocketServer({ server: http });
   let peer: WebSocket | undefined;
   let loaded = false;
+  let nextLoadedInventory: unknown;
   let closed = false;
   let omitUserReceipt = false;
   let subscribed = false;
   let nextRead: { entered: () => void; release: Promise<void> } | undefined;
+  let nextMutationReply: { entered: () => void; release: Promise<void> } | undefined;
   let ownerReply: Record<string, unknown> | undefined;
   const turns: Turn[] = [];
   const requests: Rpc[] = [];
@@ -111,7 +115,8 @@ export async function codex0160Protocol(
             result = { userAgent: "codex/0.160.0", codexHome: directory };
             break;
           case "thread/loaded/list":
-            result = { data: loaded ? [threadId] : [], nextCursor: null };
+            result = nextLoadedInventory ?? { data: loaded ? [threadId] : [], nextCursor: null };
+            nextLoadedInventory = undefined;
             break;
           case "thread/read":
             if (nextRead) {
@@ -185,6 +190,13 @@ export async function codex0160Protocol(
           default:
             throw new Error(`Unexpected fixture RPC: ${request.method}`);
         }
+        if (nextMutationReply && (request.method === "turn/start" || request.method === "turn/steer")) {
+          const held = nextMutationReply;
+          nextMutationReply = undefined;
+          held.entered();
+          void held.release.then(() => socket.send(JSON.stringify({ id: request.id, result })));
+          return;
+        }
         socket.send(JSON.stringify({ id: request.id, result }));
         if (request.method === "turn/start" && active())
           notify("turn/started", { threadId, turn: active()! });
@@ -228,6 +240,23 @@ export async function codex0160Protocol(
     close,
     startView: () => {
       loaded = true;
+    },
+    nextLoadedInventory(value: unknown) {
+      nextLoadedInventory = value;
+    },
+    holdNextMutationReply() {
+      let entered!: () => void;
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      nextMutationReply = {
+        entered,
+        release: new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      };
+      return { pending, release };
     },
     omitAnswerReceipt: () => {
       omitUserReceipt = true;

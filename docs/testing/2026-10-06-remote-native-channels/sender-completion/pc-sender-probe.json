@@ -1,0 +1,194 @@
+{
+  "first": {
+    "binding": {
+      "socketPath": "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
+      "session": "default"
+    },
+    "info": { "pane_id": "wE:p2", "shell_pid": 45644, "foreground_process_group_id": 462548 },
+    "agent": {
+      "pane_id": "wE:p2",
+      "terminal_id": "term_65d2954677c0817",
+      "agent": "codex",
+      "agent_session": {
+        "agent": "codex",
+        "kind": "id",
+        "source": "herdr:codex",
+        "value": "01a110b9-a8a2-7071-935b-f76fa11ead7c"
+      },
+      "agent_status": "done"
+    },
+    "processes": [
+      {
+        "pid": 775048,
+        "parent": 593428,
+        "startTime": "2026-10-06T10:19:24.1912188Z",
+        "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"
+      },
+      {
+        "pid": 593428,
+        "parent": 810412,
+        "startTime": "2026-10-06T10:19:24.1185099Z",
+        "executable": "C:\\Program Files\\nodejs\\node.exe"
+      },
+      {
+        "pid": 810412,
+        "parent": 462548,
+        "startTime": "2026-10-06T10:19:23.8094898Z",
+        "executable": "C:\\Users\\volpe\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+      },
+      {
+        "pid": 462548,
+        "parent": 45644,
+        "startTime": "2026-10-06T10:19:23.7300183Z",
+        "executable": "C:\\Windows\\System32\\cmd.exe"
+      },
+      {
+        "pid": 45644,
+        "parent": 402600,
+        "startTime": "2026-10-06T10:19:11.3720402Z",
+        "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+      },
+      {
+        "pid": 332796,
+        "parent": 580892,
+        "startTime": "2026-10-06T10:19:25.8786592Z",
+        "executable": "C:\\Program Files\\nodejs\\node.exe"
+      },
+      {
+        "pid": 580892,
+        "parent": 176644,
+        "startTime": "2026-10-06T10:19:16.5048576Z",
+        "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"
+      }
+    ],
+    "nativeProcesses": [
+      {
+        "pid": 775048,
+        "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+        "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+        "role": "tui",
+        "endpoint": "ws://127.0.0.1:58160",
+        "standalone": false,
+        "markers": {
+          "pane": "wE:p2",
+          "socketPath": "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
+          "homeHash": "7adcc65e6be99bfb6dccd3ef48242db879c57ce453b0cf6aa60faeb68e239f6a"
+        }
+      }
+    ],
+    "owners": [332796],
+    "installed": [
+      "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"
+    ],
+    "privateServer": {
+      "pid": 580892,
+      "startTime": "2026-10-06T10:19:16.5048576Z",
+      "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+      "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+      "port": 58160,
+      "listeners": [580892]
+    },
+    "foregroundMarkers": {
+      "pane": "wE:p2",
+      "socketPath": "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
+      "homeHash": "7adcc65e6be99bfb6dccd3ef48242db879c57ce453b0cf6aa60faeb68e239f6a"
+    },
+    "defaultHomeHash": null
+  },
+  "last": {
+    "binding": {
+      "socketPath": "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
+      "session": "default"
+    },
+    "info": { "pane_id": "wE:p2", "shell_pid": 45644, "foreground_process_group_id": 462548 },
+    "agent": {
+      "pane_id": "wE:p2",
+      "terminal_id": "term_65d2954677c0817",
+      "agent": "codex",
+      "agent_session": {
+        "agent": "codex",
+        "kind": "id",
+        "source": "herdr:codex",
+        "value": "01a110b9-a8a2-7071-935b-f76fa11ead7c"
+      },
+      "agent_status": "done"
+    },
+    "processes": [
+      {
+        "pid": 775048,
+        "parent": 593428,
+        "startTime": "2026-10-06T10:19:24.1912188Z",
+        "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"
+      },
+      {
+        "pid": 593428,
+        "parent": 810412,
+        "startTime": "2026-10-06T10:19:24.1185099Z",
+        "executable": "C:\\Program Files\\nodejs\\node.exe"
+      },
+      {
+        "pid": 810412,
+        "parent": 462548,
+        "startTime": "2026-10-06T10:19:23.8094898Z",
+        "executable": "C:\\Users\\volpe\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+      },
+      {
+        "pid": 462548,
+        "parent": 45644,
+        "startTime": "2026-10-06T10:19:23.7300183Z",
+        "executable": "C:\\Windows\\System32\\cmd.exe"
+      },
+      {
+        "pid": 45644,
+        "parent": 402600,
+        "startTime": "2026-10-06T10:19:11.3720402Z",
+        "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+      },
+      {
+        "pid": 332796,
+        "parent": 580892,
+        "startTime": "2026-10-06T10:19:25.8786592Z",
+        "executable": "C:\\Program Files\\nodejs\\node.exe"
+      },
+      {
+        "pid": 580892,
+        "parent": 176644,
+        "startTime": "2026-10-06T10:19:16.5048576Z",
+        "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"
+      }
+    ],
+    "nativeProcesses": [
+      {
+        "pid": 775048,
+        "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+        "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+        "role": "tui",
+        "endpoint": "ws://127.0.0.1:58160",
+        "standalone": false,
+        "markers": {
+          "pane": "wE:p2",
+          "socketPath": "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
+          "homeHash": "7adcc65e6be99bfb6dccd3ef48242db879c57ce453b0cf6aa60faeb68e239f6a"
+        }
+      }
+    ],
+    "owners": [332796],
+    "installed": [
+      "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"
+    ],
+    "privateServer": {
+      "pid": 580892,
+      "startTime": "2026-10-06T10:19:16.5048576Z",
+      "executable": "C:\\Users\\volpe\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+      "cwd": "C:\\Users\\volpe\\repos\\kh2-multiplayer",
+      "port": 58160,
+      "listeners": [580892]
+    },
+    "foregroundMarkers": {
+      "pane": "wE:p2",
+      "socketPath": "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
+      "homeHash": "7adcc65e6be99bfb6dccd3ef48242db879c57ce453b0cf6aa60faeb68e239f6a"
+    },
+    "defaultHomeHash": null
+  }
+}

@@ -289,6 +289,11 @@ only a removed conversation falls back to `global-default`. A revoked room
 remains refused. An attached `clankie claude|codex|opencode` seat drives that
 selected conversation; attachment adds no authority over other rooms.
 
+An accepted Codex follow-up automatically watches its native turn for the current
+lead. Completion of an earlier turn cannot settle it; reconciled receipts reuse
+the original harvest. Peer output creates no owner completion wake. An unavailable
+controller remains explicitly unverified; a delivery receipt alone is not completion.
+
 When exposed, use `list_fleet_seats({})` to discover proven same-fleet peers,
 then `message_peer({seat: returnedSeatId, text})`. The owner setting
 `fleet.peerMessages` controls discovery/new sends. Peer content is untrusted

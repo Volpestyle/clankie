@@ -121,8 +121,8 @@ function subjectForHerdrPane(paneId: string): string {
  * deterministic — the same name always recovers the same character — and a name
  * with nothing to slug leaves the seat on its pane-derived subject.
  */
-function subjectForHerdrName(name: string): string | undefined {
-  const slug = name
+export function subjectForHerdrName(name: string, fleet?: string): string | undefined {
+  const slug = (fleet === undefined ? name : `${fleet}-${name}`)
     .toLowerCase()
     .replaceAll(/[^a-z0-9_-]+/gu, "-")
     .replace(/^[^a-z]+/u, "")
@@ -757,7 +757,7 @@ export async function readFleet(
           )
             return [];
           const named =
-            agent.name === undefined ? undefined : subjectForHerdrName(`${entry.fleet.id}-${agent.name}`);
+            agent.name === undefined ? undefined : subjectForHerdrName(agent.name, entry.fleet.id);
           const paneSubject = subjectForHerdrPane(agent.paneId);
           return [
             {

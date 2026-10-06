@@ -409,7 +409,15 @@ describe("registered private remote Codex proof", () => {
     x.processes[3]!.parent = 60;
     const server = { pid: 60, startTime: "2026-10-03T10:00:01.0000001Z", executable, port: 45000 };
     x.processes.push({ ...server, parent: 999 });
-    return { ...x, privateServer: { ...server, cwd: x.nativeProcesses[0]!.cwd, listeners: [60] } };
+    return {
+      ...x,
+      nativeProcesses: x.nativeProcesses.map((process) => ({
+        ...process,
+        role: "tui",
+        endpoint: "ws://127.0.0.1:45000",
+      })),
+      privateServer: { ...server, cwd: x.nativeProcesses[0]!.cwd, listeners: [60] },
+    };
   }
   async function privateSetup(first = privateFixture(), last = structuredClone(first)) {
     const seats = new RemoteCodexSeats(async () => fleet);
@@ -456,6 +464,8 @@ describe("registered private remote Codex proof", () => {
     "shell-reuse",
     "executable",
     "unbound",
+    "tui-backend",
+    "tui-role",
   ] as const)("denies changed %s private evidence", async (kind) => {
     const first = privateFixture();
     const last = structuredClone(first);
@@ -466,6 +476,8 @@ describe("registered private remote Codex proof", () => {
     if (kind === "thread") last.agent.agent_session.value = "other-thread";
     if (kind === "shell-reuse") last.processes[0]!.startTime = "2026-10-03T10:00:00.0000002Z";
     if (kind === "executable") last.privateServer.executable = "C:\\fake.exe";
+    if (kind === "tui-backend") last.nativeProcesses[0]!.endpoint = "ws://127.0.0.1:45001";
+    if (kind === "tui-role") last.nativeProcesses[0]!.role = "other";
     const { observer, registration } = await privateSetup(first, last);
     if (kind === "unbound") registration.release();
     expect(await observer("pc", "w3:p8", stream)).toBeUndefined();

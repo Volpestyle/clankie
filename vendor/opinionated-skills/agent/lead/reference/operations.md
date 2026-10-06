@@ -21,6 +21,10 @@ is needed. Remote addresses retain their fleet prefix, such as `pc/term_…` or
 harvest owner and watch. On completion, start from the worker's final report and
 its evidence; inspect native history only for a gap or contradictory result.
 
+Accepted Codex follow-ups automatically arm a harvest for their exact native turn.
+Reuse that harvest rather than adding an explicit watch. Reconciled delivery
+receipts do not create a second harvest; peer messages do not arm an owner wake.
+
 Hires and their completion route to the admitting conversation. Another
 conversation's host-admitted `message_seat` adopts the worker and its hire harvest.
 Explicit watches keep their arming conversation. Worker reports cannot select a

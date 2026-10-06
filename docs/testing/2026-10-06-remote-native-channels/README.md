@@ -1,5 +1,12 @@
 # Remote native channels and authenticated receipt recovery (VUH-1527)
 
+The [sender and completion repair candidate](sender-completion/CHECKS.md) fixes
+permanent original-registration loss after unavailable native inventory reads,
+requires the visible remote TUI to use its original backend, preserves the hired
+persona through fleet census, and automatically harvests accepted Codex follow-up
+turns once. Source checks and security review are recorded there; deployment and
+a fresh owned-pane PC acceptance remain required before closure.
+
 Current live result on runtime `4124acab`: the pane-address repair passed; a new
 owned Codex hire received its brief and native lead follow-up, completed both
 turns, and read Linear through Clankie's isolated bridge. Worker reports and peer

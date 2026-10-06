@@ -1,0 +1,52 @@
+{
+  "runtime": "4124acab",
+  "intentId": "e6786f92-826c-411f-96b5-5fcce05b33b1",
+  "receiptId": "f256a90b-6acc-4dc6-a990-188df6a232a5",
+  "pane": "pc/wE:p2",
+  "terminal": "pc/term_65d2954677c0817",
+  "thread": "01a110b9-a8a2-7071-935b-f76fa11ead7c",
+  "deliveredRecovery": {
+    "state": "refused",
+    "receiptId": "f256a90b-6acc-4dc6-a990-188df6a232a5",
+    "detail": "Exact original channel receipt is unavailable."
+  },
+  "abandonedRecovery": {
+    "state": "abandoned",
+    "receiptId": "f256a90b-6acc-4dc6-a990-188df6a232a5",
+    "evidence": {
+      "receiptId": "f256a90b-6acc-4dc6-a990-188df6a232a5",
+      "receiptKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\volpe\\\\repos\\\\kh2-multiplayer\",\"new\",\"fresh\",\"e6786f92-826c-411f-96b5-5fcce05b33b1\"]",
+      "fingerprint": "0562a764693d2f50c49dd8477f5b07209f48b56e353e2b2c2a63ca8b049366db",
+      "target": {
+        "fleet": "pc",
+        "host": "volpe@supedupsilly",
+        "session": "default",
+        "shell": "powershell"
+      },
+      "hostIdentity": "33f0512ba73f037faf1b7683c5be31b50d4a224ed51d44158a0efc16930a9bda",
+      "census": {
+        "observedAt": 1791283983338,
+        "panes": 5,
+        "processes": 602,
+        "sessions": 4,
+        "sha256": "919221bc1bd1c14432989cc295717df0db47b7a3ebb0e3e4c4fd3261db5f565f"
+      },
+      "disposition": "abandoned",
+      "journal": "authenticated-recovery",
+      "allocation": {
+        "paneId": "pc/wE:p2",
+        "present": false
+      }
+    }
+  },
+  "retained": true,
+  "originalResent": false,
+  "ownedPanesClosed": true,
+  "abandonedRecoveryAttempts": [
+    {
+      "state": "refused",
+      "receiptId": "f256a90b-6acc-4dc6-a990-188df6a232a5",
+      "detail": "Authenticated recovery refused: fleet_command_failed: fleet pc: mux_client_request_session: session request failed: Session open refused by peer\nkex_exchange_identification: read: Connection reset by peer\nConnection reset by 100.108.214.60 port 22. Original retained; nothing sent or relaunched."
+    }
+  ]
+}

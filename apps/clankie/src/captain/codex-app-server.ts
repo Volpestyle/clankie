@@ -891,12 +891,13 @@ export async function startCodexAppServerSeat(options: {
     server.remoteRegistration?.bindThread(threadId, async () => {
       if (closed || stopped || server.failure()) return false;
       const loaded = record(await client!.request("thread/loaded/list", {}, 2_000));
-      return (
-        Array.isArray(loaded.data) &&
-        loaded.data.length === 1 &&
-        loaded.data[0] === threadId &&
-        loaded.nextCursor == null
-      );
+      if (
+        !Array.isArray(loaded.data) ||
+        !loaded.data.every((id) => typeof id === "string" && id.length > 0) ||
+        (loaded.nextCursor !== null && typeof loaded.nextCursor !== "string")
+      )
+        throw new Error("Native loaded-thread inventory is unavailable");
+      return loaded.data.length === 1 && loaded.data[0] === threadId && loaded.nextCursor === null;
     });
     if (options.policy?.bound) {
       try {

@@ -296,10 +296,12 @@ it("an uncertain native child receipt never starts a second service answer", asy
 it("a room-owned watch reaches its attached seat and replies on its original guarded route", async () => {
   const { captain, conversationId, owner, execute } = await fixture(true);
   const poll = captain.pollSeatEvents(1000, undefined, conversationId);
-  expect(await captain.wakeConversation(owner, "The room's worker settled")).toBe(true);
+  const wake = captain.wakeConversation(owner, "The room's worker settled");
   const [event] = await poll;
   expect(event).toMatchObject({ conversationId });
   expect(event?.content).toContain("The room's worker settled");
+  expect(await captain.acknowledgeSeatEvent(event!.id, conversationId)).toBe(true);
+  expect(await wake).toBe(true);
   expect(await captain.replySeatEvent(event!.id, "Room harvest answer", conversationId)).toBe(true);
   await vi.waitFor(() =>
     expect(execute).toHaveBeenCalledWith(
@@ -333,8 +335,10 @@ it.each(["before dispatch", "before reply"])(
       controller.abort();
       expect(await poll).toEqual([]);
     } else {
-      expect(await captain.wakeConversation(owner, "worker report")).toBe(true);
+      const wake = captain.wakeConversation(owner, "worker report");
       const [event] = await poll;
+      expect(await captain.acknowledgeSeatEvent(event!.id, conversationId)).toBe(true);
+      expect(await wake).toBe(true);
       await revoke();
       expect(await captain.replySeatEvent(event!.id, "Must not post after revocation", conversationId)).toBe(
         true,
@@ -351,6 +355,85 @@ it.each(["before dispatch", "before reply"])(
     expect(fake.prompts).toEqual([]);
   },
 );
+
+it("retains a room-owned watch through the delayed final census and native acknowledgment, without waiting for its reply", async () => {
+  const { captain, conversationId, owner, execute } = await fixture(true);
+  const poll = captain.pollSeatEvents(1000, undefined, conversationId);
+  let enter!: () => void;
+  let release!: () => void;
+  const finalCensus = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let watchCurrent = true;
+  let guards = 0;
+  let returned = false;
+  const guard = async () => {
+    if (++guards === 2) {
+      enter();
+      await held;
+    }
+    if (!watchCurrent) throw new Error("Original watch was removed before acceptance");
+  };
+  const wake = captain.wakeConversation(owner, "Exact native completion", guard).then((result) => {
+    returned = true;
+    watchCurrent = false;
+    return result;
+  });
+  await finalCensus;
+  expect(returned).toBe(false);
+  release();
+  const [event] = await poll;
+  expect(event?.content).toContain("Exact native completion");
+  expect(returned).toBe(false);
+  expect(await captain.acknowledgeSeatEvent(event!.id, conversationId)).toBe(true);
+  expect(await wake).toBe(true);
+  expect(guards).toBe(2);
+  expect(execute).not.toHaveBeenCalled();
+  expect(await captain.replySeatEvent(event!.id, "Accepted completion reply", conversationId)).toBe(true);
+  await vi.waitFor(() =>
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "send_reply", text: "Accepted completion reply" }),
+      expect.any(Function),
+    ),
+  );
+  expect(fake.prompts).toEqual([]);
+});
+
+it("refuses a room wake when its machine actor is revoked during the final census", async () => {
+  const { captain, conversationId, owner, settings, execute } = await fixture(true);
+  const abort = new AbortController();
+  const poll = captain.pollSeatEvents(1000, abort.signal, conversationId);
+  let enter!: () => void;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const wake = captain.wakeConversation(owner, "Must retain actor authority", async () => {
+    if (++calls === 2) {
+      enter();
+      await held;
+    }
+  });
+  const denied = expect(wake).rejects.toThrow("Conversation wake authority was revoked");
+  await pending;
+  await settings.update((current) => ({
+    ...current,
+    discord: { ...current.discord, systemActorUserIds: [] },
+  }));
+  release();
+  await denied;
+  abort.abort();
+  expect(await poll).toEqual([]);
+  expect(execute).not.toHaveBeenCalled();
+  expect(fake.prompts).toEqual([]);
+});
 
 it("refuses a Discord room as the configured Linear wake target", async () => {
   const { captain, conversationId, execute } = await fixture(true);
