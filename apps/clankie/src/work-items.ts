@@ -190,7 +190,7 @@ export class WorkRequestError extends Error {
   }
 }
 
-const defaultRun: CommandRunner = async (command, args, cwd) =>
+export const defaultRun: CommandRunner = async (command, args, cwd) =>
   (await execFileAsync(command, [...args], { cwd, timeout: COMMAND_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }))
     .stdout;
 

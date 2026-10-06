@@ -1,4 +1,8 @@
-import { ProjectProposalLocatorSchema, ProjectProposalTargetSchema } from "@clankie/protocol/projects";
+import {
+  ProjectProposalLocatorSchema,
+  ProjectProposalTargetSchema,
+  ProjectProposalTweakSchema,
+} from "@clankie/protocol/projects";
 import { ClankieApiClient } from "@clankie/api-client";
 import { parseArgs } from "node:util";
 import {
@@ -27,6 +31,8 @@ const USAGE = [
   "       clankie conversations goal ID set [--tokens N] <objective>",
   "       clankie conversations project-proposal ID --request UUID --incarnation UUID",
   "       clankie conversations confirm-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
+  "       clankie conversations accept-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
+  "       clankie conversations tweak-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA --field FIELD --value-stdin",
   "       clankie conversations channels | rooms",
   "       clankie conversations head OWNER HEAD|none",
   "       clankie conversations channel [CHANNEL_ID] [--title TITLE] [--member PERSONA_ID]...",
@@ -52,7 +58,15 @@ export async function runConversationsCommand(
 ): Promise<number> {
   if (args[0] === "goal") return runGoalAction(args.slice(1), options);
   if (
-    ["questions", "answer", "cancel-question", "project-proposal", "confirm-project"].includes(args[0] ?? "")
+    [
+      "questions",
+      "answer",
+      "cancel-question",
+      "project-proposal",
+      "confirm-project",
+      "accept-project",
+      "tweak-project",
+    ].includes(args[0] ?? "")
   )
     return runQuestionAction(args, options);
   if (args[0] === "head") {
@@ -319,6 +333,8 @@ async function runQuestionAction(
     args: [...args],
     allowPositionals: true,
     options: {
+      field: { type: "string" },
+      "value-stdin": { type: "boolean" },
       proposal: { type: "string" },
       artifact: { type: "string" },
       "projects-revision": { type: "string" },
@@ -346,7 +362,7 @@ async function runQuestionAction(
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     }),
   );
-  if (action === "project-proposal" || action === "confirm-project") {
+  if (["project-proposal", "confirm-project", "accept-project", "tweak-project"].includes(action ?? "")) {
     if (positionals.length !== 2 || values.option || values.text || values.stdin)
       throw new Error("Project confirmation accepts an exact proposal target only");
     const locator = ProjectProposalLocatorSchema.parse({
@@ -359,22 +375,48 @@ async function runQuestionAction(
       (values.revision || values.proposal || values.artifact || values["projects-revision"])
     )
       throw new Error("Proposal read accepts request and incarnation only");
+    if (
+      action === "tweak-project"
+        ? !values.field || !values["value-stdin"]
+        : values.field || values["value-stdin"]
+    )
+      throw new Error("Tweak requires --field FIELD --value-stdin; other actions accept no change");
     const result =
       action === "project-proposal"
         ? await client.projectProposalGet!(locator)
-        : await client.projectProposalConfirm!(
-            ProjectProposalTargetSchema.parse({
-              ...locator,
-              expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
-              proposalId: values.proposal,
-              artifactSha256: values.artifact,
-              expectedProjectsRevision: values["projects-revision"],
-            }),
-          );
+        : action === "tweak-project"
+          ? await client.projectProposalTweak!(
+              ProjectProposalTweakSchema.parse({
+                ...locator,
+                expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
+                proposalId: values.proposal,
+                artifactSha256: values.artifact,
+                expectedProjectsRevision: values["projects-revision"],
+                change: {
+                  field: values.field,
+                  value: JSON.parse(await readStdin(options, "field value JSON")),
+                },
+              }),
+            )
+          : await client.projectProposalConfirm!(
+              ProjectProposalTargetSchema.parse({
+                ...locator,
+                expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
+                proposalId: values.proposal,
+                artifactSha256: values.artifact,
+                expectedProjectsRevision: values["projects-revision"],
+              }),
+            );
     outputJson(options.stdout ?? process.stdout, result);
     return result.status === "pending" || result.status === "created" ? 0 : 1;
   }
-  if (values.proposal || values.artifact || values["projects-revision"])
+  if (
+    values.proposal ||
+    values.artifact ||
+    values["projects-revision"] ||
+    values.field ||
+    values["value-stdin"]
+  )
     throw new Error("Project target flags require a project action");
   let result;
   if (action === "questions") {

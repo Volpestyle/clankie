@@ -269,6 +269,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           current: bodyIdentity.current,
           authorize: bodyIdentity.authorize,
         };
+        lane.capture.proposeProjectDefaults =
+          context.ownerAuthority && context.questionBinding
+            ? () =>
+                ctx.conversations.proposeProjectDefaults(conversationId, {
+                  ...context,
+                  questionCurrent: bodyIdentity.current,
+                })
+            : undefined;
         lane.capture.proposeProjectCreate =
           context.ownerAuthority && context.questionBinding
             ? (draft) =>

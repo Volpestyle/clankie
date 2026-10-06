@@ -2977,6 +2977,15 @@ paths:
         only fully offered IDs may be marked read. Roster/fleet report summaries
         survive disappeared panes, and delivery receipts never establish reading.
         The TUI and relay both speak this.
+        Project onboarding uses `project_proposal_get` for one defaults-first
+        proposal, `project_proposal_tweak` for exactly one reviewed field, and
+        `project_proposal_confirm` for explicit acceptance. Tweak requires the
+        current immutable target and `change: { field, value }` (`name`, `roles`,
+        `fleet`, `workerCap`, or `tracker`); it returns a fresh proposal target
+        without saving project/tracker settings. Accepting an old target refuses.
+        These operations require the original owner; captain bearers and
+        preference answers cannot save a project. Acceptance uses the durable
+        CREATE boundary, saves confirmed roles, and never hires workers.
         The `autonomy` command `set_goal` activates an owner-authored goal;
         `accept_goal` confirms an inactive model proposal. Service goals default
         to a finite 1,000,000-token budget and refuse activation for native heads.

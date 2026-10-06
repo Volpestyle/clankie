@@ -1483,7 +1483,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   );
   conversations.onRoomHandoffChange = () => fleetChanges.touch();
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
-  conversations.projectOnboarding = projectOnboarding(settingsStore);
+  conversations.projectOnboarding = projectOnboarding(settingsStore, () => options.fleetResources?.status());
   conversations.questionEligible = (id) =>
     !conversations.hasNativeSeat(id) &&
     !conversations.nativeSource(id) &&

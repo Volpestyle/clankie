@@ -48,6 +48,7 @@ export type DeviceConversationRequest = Extract<
       | "input_cancel"
       | "project_proposal_get"
       | "project_proposal_confirm"
+      | "project_proposal_tweak"
       | "work_item_write"
       | "work_item_write_receipt";
   }
@@ -85,6 +86,7 @@ export function createDeviceConversationDispatch(options: {
         "input_cancel",
         "project_proposal_get",
         "project_proposal_confirm",
+        "project_proposal_tweak",
         "work_item_write",
         "work_item_write_receipt",
       ].includes(request.op)

@@ -3592,17 +3592,45 @@ An existing convention or changed workspace, parent directory, owner authority
 or project revision refuses initialization. It chooses no account and creates
 no provider project or label.
 
-In an unassigned owner workspace conversation, Clankie receives the onboarding
-opportunity and can read the repo, ask about tracking, propose useful roles and
-ask about fleet size through the existing dialog questions. Answers are context;
-`propose_project_create` puts their complete configuration into the existing
-explicit CREATE review. Confirmation consumes that proposal once. Tracker and
-project settings are two file writes: a failure after tracker save can leave
-only the tracker. An uncertain confirmation stays uncertain and is checked
-with the original proposal target, never replayed. See the
-[closure evidence](testing/2026-10-05-project-onboarding/README.md) for source
-checks and the remaining live acceptance. Project village visuals belong to
-VUH-1710.
+In an unassigned owner workspace conversation, Clankie offers one “here's what
+I picked” proposal through `propose_project_defaults`. He follows saved tracking
+first, then detects Linear from repo links, branches and commits, GitHub issues,
+or an existing file tracker; no tracker defaults to local work records. Competing
+trackers or missing Linear scope produce one question. Builder and reviewer are
+the baseline; an app UI adds designer, and a test suite adds tester. Each role
+has a one-line reason in the proposal evidence.
+
+Fleet size defaults to `small` (two workers). Repos with at least 1,000 source
+files and 50 commits in the last 14 days can propose `large` (four). The numeric
+worker cap never exceeds the observed resource governor's heavy capacity;
+pressure or missing observations propose zero workers and `solo`. These are
+reviewed defaults, not resource permits; the live governor still admits hires.
+
+`project_proposal_get` returns the single proposal object and its exact target.
+`project_proposal_confirm` accepts it through the existing durable save.
+`project_proposal_tweak` takes that target plus one `change: { field, value }`,
+where `field` is `name`, `roles`, `fleet`, `workerCap`, or `tracker`. A tracker
+value contains `trackerRef` and optional `trackerSetup`. A tweak saves no project
+or tracker: it creates a fresh proposal/hash/revision for review. Accepting an
+old target is refused. Confirmed project roles become the station definitions;
+the app's presentation and confirm card remain part of its redesign.
+
+The CLI exposes the same operations:
+
+```sh
+clankie conversations project-proposal ID --request UUID --incarnation UUID
+clankie conversations accept-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA
+printf '%s' '"My project"' | clankie conversations tweak-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA --field name --value-stdin
+```
+
+`confirm-project` remains an alias for acceptance. `propose_project_create`
+allows a custom proposal after an ambiguous answer or a requested choice.
+Preference answers alone never save settings. Confirmation consumes the proposal
+once. Tracker and project settings are two file writes: a failure after tracker
+save can leave only the tracker. An uncertain confirmation or tweak is checked
+with the original locator, never replayed. No provider project, label or account
+is created, and no workers are hired by acceptance. Project village visuals
+belong to VUH-1710.
 
 ### `project list`, `project settings` and `project update`
 

@@ -1,0 +1,7 @@
+heavy: waiting for a slot (62172 rhea-vuh-1538: clankie heavy -- env PROJECT_TRACKER_LIVE=1 pnpm exec vites;19166 integrate-pc-sender: env -u CLANKIE_DIRECT_CONTROL_PLANE_URL -u CLANKIE_RE;)
+Scope: 5 of 32 workspace projects
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json

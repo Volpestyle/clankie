@@ -324,6 +324,40 @@ it("relay refuses chat-only/different owner/wrong signer and never substitutes c
   }
   expect(f.writeSettings).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  "single-field tweak roundtrip preserves original device authority hosted=%s",
+  async (hosted) => {
+    const f = await fixture(hosted);
+    await f.send();
+    const before = await f.target();
+    const result = await f.client().projectProposalTweak!({
+      ...before,
+      change: { field: "name", value: "Reviewed name" },
+    });
+    expect(result.status).toBe("pending");
+    expect(result.proposal!.command.name).toBe("Reviewed name");
+    expect(result.proposal!.target.proposalId).not.toBe(before.proposalId);
+    expect(f.writeSettings).not.toHaveBeenCalled();
+    const denied = await f.raw(
+      {
+        op: "project_proposal_tweak",
+        schemaVersion: 1,
+        ...result.proposal!.target,
+        change: { field: "name", value: "Other" },
+      },
+      f.tokens.read!,
+    );
+    expect(denied.status).toBe(403);
+    expect((await f.client().projectProposalConfirm!(before)).status).toBe("refused");
+    expect((await f.client().projectProposalConfirm!(result.proposal!.target)).status).toBe("created");
+    expect(f.writeSettings).toHaveBeenCalledTimes(1);
+    const dispatches = f.seen.filter(
+      (s) => s.path === "/operator/v1/dispatch" || s.path === "/v1/hosted/operator",
+    );
+    expect(dispatches.every((d) => d.token === `Bearer ${f.tokens.control}`)).toBe(true);
+  },
+);
 it("revocation between relay admission and owner dispatch prevents CREATE", async () => {
   const f = await fixture();
   await f.send();

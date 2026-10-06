@@ -1,0 +1,9 @@
+heavy: waiting for a slot (22047 ash-vuh-1743-linear-wakes: clankie heavy -- pnpm exec vitest run apps/clan;19166 integrate-pc-sender: env -u CLANKIE_DIRECT_CONTROL_PLANE_URL -u CLANKIE_RE;)
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/rhea-vuh-1538
+
+
+ Test Files  2 passed (2)
+      Tests  33 passed (33)
+   Start at  08:40:50
+   Duration  5.75s (transform 1.09s, setup 18ms, import 1.63s, tests 3.97s, environment 0ms)

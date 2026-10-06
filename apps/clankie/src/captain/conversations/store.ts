@@ -156,6 +156,7 @@ import {
   invalidateQuestionPrincipal,
   projectProposalOperation,
   proposeProjectCreate,
+  proposeProjectDefaults,
   publishQuestionResolution,
   questionOperation,
   questionResult,
@@ -555,6 +556,7 @@ export class ConversationStore {
     switch (request.op) {
       case "project_proposal_get":
       case "project_proposal_confirm":
+      case "project_proposal_tweak":
         return {
           op: request.op,
           schemaVersion: 1,
@@ -2687,6 +2689,13 @@ export class ConversationStore {
     return requestQuestion(this, conversationId, draft, context, projectDraft);
   }
 
+  public async proposeProjectDefaults(
+    conversationId: string,
+    context: ConversationTurnContext,
+  ): Promise<ConversationQuestionResult | ProjectProposalResult> {
+    return proposeProjectDefaults(this, conversationId, context);
+  }
+
   public async proposeProjectCreate(
     conversationId: string,
     draft: ProjectProposalDraft,
@@ -2696,7 +2705,10 @@ export class ConversationStore {
   }
 
   private async projectProposalOperation(
-    request: Extract<ConversationServiceRequest, { op: "project_proposal_get" | "project_proposal_confirm" }>,
+    request: Extract<
+      ConversationServiceRequest,
+      { op: "project_proposal_get" | "project_proposal_confirm" | "project_proposal_tweak" }
+    >,
     authority: QuestionAuthority | undefined,
   ): Promise<ProjectProposalResult> {
     return projectProposalOperation(this, request, authority);
