@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -442,7 +442,11 @@ async function fixture(options: { tailMaxPages?: number } = { tailMaxPages: 1 })
           },
         })),
       ];
-      await writeFile(path, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+      // A selected native source is a complete rollout. Publish replacements
+      // atomically so a concurrent reader cannot observe writeFile's truncation.
+      const replacement = `${path}.next`;
+      await writeFile(replacement, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+      await rename(replacement, path);
       store.setLiveDraft(conversationId, `source-change-${++changes}`);
     }
     texts = ["Native one", "Native two", "Native three"];
