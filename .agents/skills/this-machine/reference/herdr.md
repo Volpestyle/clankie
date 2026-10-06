@@ -1,6 +1,6 @@
 # Machines and Herdr workspaces
 
-Which Herdr session Clankie uses and how to change it.
+Machines and devices, which Herdr session Clankie uses and how to change it, messages to external Codex sessions, and delivery receipt stages.
 
 ## Machines and devices
 
@@ -16,6 +16,13 @@ connections apply live. `machines remove NAME` detaches its connections without
 stopping workers. Historical connection IDs, transcript references and grants
 keep their meaning. `herdr add/remove/fleets`, `runtime connect` and `agents hosts`
 remain aliases. Only a changed default workspace needs `clankie restart captain`.
+
+The console's `/machines` lists discovered machines and their Herdr sessions
+before asking for typed names. Named connections apply live. Its session details
+manage workspace grants and capacity; choose native harnesses per hire. The
+`/herdr` default workspace choice still requires a restart. `/setup rooms` offers that
+choice only after doctor finds installed Herdr with running sessions, explaining
+that leading the owner's session means seeing and messaging every pane.
 
 ## Herdr runtime
 
@@ -66,27 +73,6 @@ needed for follow-up or requested by your person; leave borrowed or repurposed
 panes and operator drafts alone. Your own finished-worker cleanup is already
 authorized.
 
-Voice model selection preserves the configured voice ID and providers. Explicit
-`eleven_v4_turbo` uses Text to Dialogue WebSockets; an unset model retains Flash
-v2.5. `voice status` reports stored/effective settings and environment overrides.
-`voice model clear` restores an originally unset model; restore any explicit
-previous model with `voice model set ID`. The launcher does not restart for these
-writes. When authorized, `clankie restart` reloads the service and its
-dependent bodies. Older installations have only the console `/voice` wizard.
-A readiness check skips paid ElevenLabs synthesis: separate offline tests, real
-provider audio, and actual Discord audibility when reporting verification.
-
-### OpenCode operator seat
-
-Use `clankie opencode --conversation ID --dry-run` to inspect the
-native launch before sitting as Clankie; `--resume` binds the exact saved native
-session. It is an operator seat, not an OpenCode `hire_agent` adapter. Native
-wakes use the bound session API, wait while busy, and never type into an owner's
-draft. Permissions stay with the owner. Uncertain delivery blocks every retry, including explicit retries, until its
-original native receipt is reconciled. A service restart
-does not reattach from a saved ID. See `integrations/opencode-plugin/README.md`
-for per-launch MCP isolation, settings, version checks and current live gaps.
-
 ## Messages to external Codex sessions
 
 `message_seat` first tries the existing Codex app-server proxy on the selected
@@ -112,7 +98,8 @@ Native queues count as consumed even while waiting for an active turn or goal;
 this never means model-seen or completed work. `unavailable`, `expired`, and
 `rejected` say where delivery stopped. `uncertain` blocks every retry and every
 fallback until the original receipt is reconciled, including after restart.
-Keep the native queue/steer state and detail when reporting to James.
+
+Keep the native queue/steer state and detail when reporting to the owner.
 
 For inbound `message_clankie`, `stored` is retained conversation acceptance,
 not proof Clankie read it or completed work. Both `mcp --seat` and `mcp --fleet`

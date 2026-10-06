@@ -5,9 +5,9 @@ Open Clankie's operator seat with `clankie claude`, `clankie codex`, or
 
 ## Launch and resume
 
-`clankie claude2` selects the owner's `claude2` account command. Numbered
-Claude commands resolve aliases and functions through the interactive `$SHELL`
-and accept the same seat flags.
+Numbered commands select other accounts. `clankie claude<N>` runs the owner's
+matching `claude<N>` shell command; numbered Claude commands resolve aliases and
+functions through the interactive `$SHELL` and accept the same seat flags.
 
 `clankie claude` opens Claude Code as you, on your person's own plan, with your
 tools over the `clankie` MCP server, your persona and memory card injected by
@@ -60,8 +60,8 @@ binding it. Codex's `/model` selects the seat brain. Its resume record is separa
 from Claude's. For a live check, create a scratch conversation and close your own
 seat afterward; never use the owner's global-default thread.
 
-`clankie codex2` selects the registered account labelled exactly `codex2`:
-`clankie accounts codex add /absolute/CODEX_HOME --label codex2` registers it.
+`clankie codex<N>` selects the registered account labelled exactly `codex<N>`:
+`clankie accounts codex add /absolute/CODEX_HOME --label codex2` registers `codex2`.
 The number is part of the label, never an account-list position. Unknown labels
 fail without selecting another account. The launcher captures the canonical home
 for native discovery, the app-server and TUI. Numbered commands keep separate
@@ -82,10 +82,10 @@ and project instructions follow that conversation. Fresh Codex seats also get
 separate chats; their resume record remains independent of Claude's.
 
 Eligible signed Linear activity uses the existing seat channel of one configured
-ordinary global chat, `global-default` by default. The lead receives the compact
-wake and chooses any delegation. `clankie linear target show` identifies the
-chat; `linear target set ID` changes it. Follow and the VUH-1549 actor/type rules
-still gate wakes. No per-issue owner route or inbox handoff is involved.
+ordinary global chat, `global-default` by default; the lead receives the compact
+wake and chooses any delegation. Target, follow and wake rules are in
+[Linear activity and wakes](linear.md).
+
 The launched Claude seat projects its settled transcript into the selected
 conversation even outside Herdr or with `--plugin-dir`. `clankie seat-sync` is the
 plugin hook; do not change its session binding to copy a transcript between rooms.
@@ -101,21 +101,8 @@ link (`clankie herdr prepare FLEET`); `runtime list` reports `linkState`.
 The paired app exposes execution and account inventory in Settings → Connection.
 Load `lead` for leadership and the fleet reference for native delivery.
 
-Workers' `message_clankie` reports reach the conversation that hired them.
-Messaging a worker with `message_seat` adopts it under the sending conversation;
-its reports and completion watches then follow that lead. The service resolves
-this persisted route, including remote fleet seats; the worker never chooses it.
-Without persisted adoption, the host uses the exact census parent/launcher pane
-and native occupant to reach its attached conversation or existing native
-channel. Explicit adoption wins. With no eligible parent (or a removed adopted
-conversation), `global-default` receives a report tagged `unadopted` with its
-reason and parent pane when known. Read `workerReportRouting` on the roster and
-durable accepted turn; `clankie doctor` names parent panes lacking an observed
-bridge in `linkedSession.parentLeads`. Names, tabs and report text prove no
-ownership, and bridge process observations prove neither tools nor delivery.
-Revoked room grants or missing original room proof remain a refusal. Reconcile
-the original receipt after uncertainty; adoption, detach and restart never
-redirect an accepted report ID.
+Worker reports reach the conversation that hired them; routing and adoption are
+in [worker report routing](fleet-tools.md#worker-report-routing).
 
 Native projection carries these reports as `kind="message"`, framed as
 untrusted agent output, never an instruction from the owner. Completion harvests
@@ -124,36 +111,19 @@ the retained owner route nor receipt semantics. A room-owned worker message
 still needs the existing `reply` with its `event_id` to return a correlated answer
 through that room's original actor, route and mouth checks.
 
-For shared Linear tools, inspect `clankie access linear`; verify an API-key
-or OAuth connection with `clankie access linear verify` and check the intended automation identity.
-Admitted fleet members discover connected tools with `clankie_tools` and invoke
-qualified names with `clankie_call`. The setting `fleet.tools` defaults to
-`connected`; `clankie fleet set --tools off` stops new standing tool admissions.
-Calls already past their last asynchronous check can still dispatch afterward;
-VUH-1585's strict refusal guarantee remains unmet (ADR 0217).
-Projects keep hiring, roles, caps and tracker policy, independently of tools.
-Unverified accounts and persona-bound worker publishing are excluded. For an individual
-manual grant, `clankie access issue REQUEST.json --out GRANT.json` creates a
-private file for `clankie mcp --grant FILE`; tokens last at most 15 minutes.
-Use `access list` and `access revoke ID` to inspect or revoke.
-Never share operator bearers or grant contents in transcripts. Exact
-`tools[].arguments` and `forbiddenArguments` enforce resource restrictions.
-Worker publishing grants must pin the exact `personaId`. Read
-`docs/worker-access.md` under `repoRoot` for the contract.
+Connected fleet tools and manual access grants are in
+[worker bridges and fleet tools](fleet-tools.md).
 
-The worker bridge gives its first `tools/list` up to 20 seconds to retry with
-backoff while native pane membership settles, including any stalled HTTP lookup.
-Fleet admission and the connected-tools setting must permit discovery; otherwise
-only `message_clankie` remains. Later lists and every call still check current
-access. Codex currently keeps its initial catalog despite
-`notifications/tools/list_changed`; after an access change, an owner may need to
-reconnect MCP or restart that native pane. New calls from a displayed stale catalog are checked live; this is not a promise
-that calls already past a final asynchronous check cannot dispatch after revocation.
-Missing tools do not authorize another connector or an operator lane.
-Native identity checks for worker messages, peer delivery and project assignments
-remain separate from connected-tool admission. Connected tools require the linked
-fleet and verified account, not a project or cwd proof (ADR 0217). Inspect the
-specific refusal instead of treating every missing capability as a project grant.
+### OpenCode operator seat
+
+Use `clankie opencode --conversation ID --dry-run` to inspect the
+native launch before sitting as Clankie; `--resume` binds the exact saved native
+session. It is an operator seat, not an OpenCode `hire_agent` adapter. Native
+wakes use the bound session API, wait while busy, and never type into an owner's
+draft. Permissions stay with the owner. Uncertain delivery blocks every retry, including explicit retries, until its
+original native receipt is reconciled. A service restart
+does not reattach from a saved ID. See `integrations/opencode-plugin/README.md`
+for per-launch MCP isolation, settings, version checks and current live gaps.
 
 OpenCode seats use the same isolation contract: a fresh `clankie opencode` creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.

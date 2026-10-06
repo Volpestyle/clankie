@@ -1,6 +1,6 @@
 # Hosted Clankie
 
-Hosted deployment, managed bodies, managed Discord, and a Mac connected to a hosted Clankie.
+Hosted deployment, managed bodies, managed Discord, a Mac connected to a hosted Clankie, and customer support access.
 
 ## Hosted deployment
 
@@ -83,6 +83,18 @@ Message Content access, unmentioned follow-ups and ping-disabled replies may
 need a mention or DM. A failed delivery marked interrupted was admitted before
 a restart: inspect effects before explicitly retrying it.
 
+Hosted directory pages come from the managed provider and are restricted to the
+bound server/current installation. Inspect `managedPolicy` before claiming a
+saved policy reached the edge; pending or unavailable is not an acknowledgement.
+The account dashboard uses a Discord-only owner permit. Disconnect/reinstall
+revokes that connection grant; it does not create a terminal or paired-device grant.
+For a managed Discord call, inspect the current connection and voice status;
+the managed connection owns media and credentials. The tenant body receives only
+sealed briefing, attributed captain handoff and voice self-tool callbacks.
+Use the existing server/role and voice settings; a hosted customer supplies no
+bot token or provider key. Report a pending wake or unavailable call as observed,
+and keep live voice verification separate from a successful policy save.
+
 ## A Mac connected to hosted Clankie
 
 `clankie login` signs in by email code. An account with a hosted Clankie pairs a
@@ -114,3 +126,15 @@ hosted access. Local sockets, lifecycle, `seat`, `mcp` and shell escapes refuse.
 `/remote-access` is self-hosted Remote access for this Mac (`/gateway` alias),
 and checks for an existing hosted tenant before configuring a doorway.
 Matching deployments and a real Mac/phone rehearsal are separate gates.
+
+## Customer support access
+
+The customer chooses Read state or Shell, a support reference and at most 72
+hours in the hosted app or web account page. An owner can use the same body API
+through `clankie support` or `/support`; see `docs/cli.md` for exact arguments.
+Captain authority cannot issue grants. Read state includes conversation history
+and Clankie state but excludes mutations and terminal output. Its pairing offer
+mints a read-only device bound to the live grant, including during streams;
+revocation or expiry ends access. Shell also permits commands and the content
+they can read while its window is open. Treat the grant as the authority to
+inspect a customer's body; ordinary fleet health access does not supply it.
