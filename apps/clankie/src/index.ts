@@ -948,7 +948,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     captain
       .notifyFleetHealthAlert(
         pane,
-        `Fleet proof refusals exceeded 1% over 5 minutes: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
+        `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
       )
       .then(() => undefined),
 });
