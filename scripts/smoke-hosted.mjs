@@ -299,7 +299,6 @@ async function outside() {
             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
           },
         },
-        relay: { healthcheck: { interval: "1s" } },
       },
     }),
   );

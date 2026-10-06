@@ -64,8 +64,8 @@ and credentials. No owner machine names or personal remote-control skills ship.
 
 ## Remote portals and lifecycle
 
-Captain and relay listen on loopback inside their shared network namespace. Compose
-publishes no host ports. Run `clankie` through SSH/Compose for administrative access;
+One container runs the whole body under the launcher (`clankie-body`): Clankie
+and its relay listen on loopback inside it. Compose publishes no host ports. Run `clankie` through SSH/Compose for administrative access;
 configure `/gateway` in that TUI for the existing app pairing and outbound gateway
 connection. Gateway provisioning lives in the private `clankie-ops` repository and is
 independent of this deployment; see [the repository boundary](../../docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md). Pairing, provider logins and actual remote-app traffic require
@@ -79,9 +79,8 @@ docker compose -p my-clankie -f infra/hosted/compose.yaml restart
 docker compose -p my-clankie -f infra/hosted/compose.yaml down
 ```
 
-A VM that runs one owner's body without Compose can run the whole stack in one
-container under the launcher, which starts Clankie and its relay and keeps
-them healthy:
+A VM that runs one owner's body without Compose runs the same single container,
+whose launcher starts Clankie and its relay and keeps them healthy:
 
 ```sh
 docker run -d --init --name clankie --cap-drop ALL --security-opt no-new-privileges \
@@ -96,7 +95,17 @@ tunnel, which would keep a body busy without a paired device asking for
 anything. Set it to another comma-separated list of service ids to widen it.
 
 `down` preserves named volumes; adding `--volumes` destroys that owner's stored
-work and credentials. Upgrade with `up -d --build --wait`. Back up both volumes
+work and credentials.
+
+The body updates itself to official releases (ADR 0237). The image's
+`/opt/clankie` is a seed: at start the entrypoint copies it to
+`/state/install/releases/<version>` and points `/state/install/current` at the
+newer of the seed and any release the body already installed, keeping one
+previous release for rollback. The service then checks hourly and installs the
+latest official `clankie-linux-<arch>` release while idle, with the same health
+rollback as a Mac install; `clankie update auto off` leaves installs to
+`clankie update`. Rebuilding the image (`up -d --build --wait`) still updates the
+base system, Node tooling and global harnesses, and a newer seed takes over. Back up both volumes
 with the deployment stopped. Replacing a container ends its live processes;
 persisted tasks and dispatch intents require reconciliation, not blind reassignment.
 This is different from restarting only the captain while Herdr remains alive.
@@ -138,7 +147,7 @@ wire schemas live in the private repository.
 This is the headless coding bundle. Browser/tldraw hosts are disabled by default;
 Vox, screen capture and media binaries are not included. Discord body
 processes require their own configured deployment; the image retains compiled
-entrypoints but the base Compose file starts captain and relay only. Additional
+entrypoints but the image's loadout starts Clankie and its relay only. Additional
 capabilities need their actual executables and platform support.
 
 ```sh

@@ -39,10 +39,15 @@ const archiveName = `clankie-${target}.tar.gz`;
 const archivePath = join(outputDir, archiveName);
 const checksumPath = `${archivePath}.sha256`;
 const nodeVersion = "24.20.0";
-const nodeArchiveName = `node-v${nodeVersion}-darwin-arm64.tar.gz`;
+const nodeDistribution = `node-v${nodeVersion}-${target}`;
+const nodeArchiveName = `${nodeDistribution}.tar.gz`;
 const nodeBaseUrl = `https://nodejs.org/dist/v${nodeVersion}`;
 const packageMetadata = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
 const releaseVersion = `v${packageMetadata.version}`;
+// A body only installs a release its runtime provider serves (ADR 0237).
+const runtimeProviderApi = JSON.parse(
+  await readFile(join(repoRoot, "apps/clankie/src/runtime-provider-api.json"), "utf8"),
+).version;
 const entrypoints = [
   "apps/tui/bin/clankie.ts",
   "apps/tui/bin/release-update-helper.ts",
@@ -126,11 +131,10 @@ try {
   await copyRuntimeAssets(releaseRoot);
   await copyDynamicRuntimePackages(releaseRoot, metafile);
   if (hosted) {
-    await mkdir(join(releaseRoot, "libexec"), { recursive: true });
-    await symlink(process.execPath, join(releaseRoot, "libexec/node"));
+    // A self-installed release brings its own Node, so it never depends on the image's.
+    await installNodeRuntime(releaseRoot, temporaryRoot);
     await buildHerdr(join(releaseRoot, "libexec/herdr"));
-    await mkdir(join(releaseRoot, "licenses/node"), { recursive: true });
-    await copyFile("/usr/local/LICENSE", join(releaseRoot, "licenses/node/LICENSE"));
+    await installHostedLauncher(releaseRoot);
   } else {
     await installNodeRuntime(releaseRoot, temporaryRoot);
     await installNativeBinaries(releaseRoot);
@@ -151,6 +155,7 @@ try {
         target,
         ...(hosted ? {} : { minimumMacOSVersion: "14.0" }),
         nodeVersion,
+        runtimeProviderApi,
         herdr: herdrPin,
         revision: gitRevision(),
       },
@@ -167,17 +172,17 @@ try {
     // relocating it; cp otherwise points them into the deleted temporary root.
     await cp(releaseRoot, destination, { recursive: true, verbatimSymlinks: true });
     process.stdout.write(`${destination}\n`);
-  } else {
-    await rm(archivePath, { force: true });
-    await rm(checksumPath, { force: true });
-    run("tar", ["-czf", archivePath, "-C", temporaryRoot, "clankie"], {
-      ...process.env,
-      COPYFILE_DISABLE: "1",
-    });
-    const digest = await sha256File(archivePath);
-    await writeFile(checksumPath, `${digest}  ${archiveName}\n`);
-    process.stdout.write(`${archivePath}\n${checksumPath}\n`);
   }
+  // Every target publishes an archive; hosted bodies install theirs like a Mac does.
+  await rm(archivePath, { force: true });
+  await rm(checksumPath, { force: true });
+  run("tar", ["-czf", archivePath, "-C", temporaryRoot, "clankie"], {
+    ...process.env,
+    COPYFILE_DISABLE: "1",
+  });
+  const digest = await sha256File(archivePath);
+  await writeFile(checksumPath, `${digest}  ${archiveName}\n`);
+  process.stdout.write(`${archivePath}\n${checksumPath}\n`);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }
@@ -258,13 +263,31 @@ async function installNodeRuntime(targetRoot, scratchRoot) {
   const extracted = join(scratchRoot, "node");
   await mkdir(extracted);
   run("tar", ["-xzf", archive, "-C", extracted]);
-  const distribution = join(extracted, `node-v${nodeVersion}-darwin-arm64`);
+  const distribution = join(extracted, nodeDistribution);
   await mkdir(join(targetRoot, "libexec"), { recursive: true });
   await copyFile(join(distribution, "bin", "node"), join(targetRoot, "libexec", "node"));
   await chmod(join(targetRoot, "libexec", "node"), 0o755);
   await mkdir(join(targetRoot, "licenses", "node"), { recursive: true });
   await copyFile(join(distribution, "LICENSE"), join(targetRoot, "licenses", "node", "LICENSE"));
-  requireArm64(join(targetRoot, "libexec", "node"));
+  if (hosted) requireLinux(join(targetRoot, "libexec", "node"));
+  else requireArm64(join(targetRoot, "libexec", "node"));
+}
+
+/** The hosted counterpart of clankie-launcher.c: this release's own Node and entrypoint. */
+async function installHostedLauncher(targetRoot) {
+  const launcher = join(targetRoot, "bin", "clankie");
+  await mkdir(dirname(launcher), { recursive: true });
+  await writeFile(
+    launcher,
+    `#!/bin/sh
+set -eu
+CLANKIE_LAUNCHER_PATH=$(readlink -f "$0")
+CLANKIE_INSTALL_ROOT=$(dirname "$(dirname "$CLANKIE_LAUNCHER_PATH")")
+export CLANKIE_INSTALL_ROOT CLANKIE_LAUNCHER_PATH
+exec "$CLANKIE_INSTALL_ROOT/libexec/node" "$CLANKIE_INSTALL_ROOT/apps/tui/bin/clankie.js" "$@"
+`,
+  );
+  await chmod(launcher, 0o755);
 }
 
 async function copyDynamicRuntimePackages(targetRoot, metafilePath) {
@@ -324,6 +347,14 @@ async function installNativeBinaries(targetRoot) {
   run("codesign", ["--force", "--sign", "-", launcher]);
   requireArm64(launcher);
   await symlink("clankie", join(targetRoot, "bin", "clankie-herdr"));
+}
+
+function requireLinux(path) {
+  const description = output("file", ["-L", path]);
+  const machine = process.arch === "arm64" ? "ARM aarch64" : "x86-64";
+  if (!description.includes("ELF 64-bit") || !description.includes(machine)) {
+    throw new Error(`${path} is not a Linux ${process.arch} executable: ${description}`);
+  }
 }
 
 function requireArm64(path) {

@@ -4,10 +4,13 @@ Hosted deployment, managed bodies, managed Discord, a Mac connected to a hosted 
 
 ## Hosted deployment
 
-In the hosted coding image, `/opt/clankie` is the immutable install, `/workspace`
-is persistent project storage, and `/state` holds the owner home/settings/broker.
-Use the existing CLI and skill roots. Compose owns process restarts; replacing a
-container ends live workers, so reconcile persisted intents before reassigning.
+In the hosted coding image, `/opt/clankie` is the immutable seed and the body runs
+`/state/install/current`, which it updates to official releases itself (ADR 0237;
+see [updating the runtime](launcher.md#updating-the-runtime)). `/workspace` is
+persistent project storage, and `/state` holds the owner home/settings/broker.
+Use the existing CLI and skill roots. The whole body runs under the launcher
+(`clankie-body`); replacing a container ends live workers, so reconcile persisted
+intents before reassigning.
 The gateway is only a portal. Managed bodies configure their included model
 automatically; a funded first conversation requires no model login, API key,
 Mac installation, or infrastructure setup. At the AI-credit limit, direct the
