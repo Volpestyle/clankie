@@ -3085,7 +3085,7 @@ export class DiscordVoiceSession {
     }
     const lease = this.bodyLease;
     const conversation = this.conversation;
-    const actorId = exchange?.speakerId;
+    const actorId = exchange?.speakerId ?? lease?.stay.target.actorId;
     const isCurrent = (): boolean =>
       generation === this.sessionGeneration &&
       this.bodyLease === lease &&
@@ -3101,7 +3101,7 @@ export class DiscordVoiceSession {
         return false;
       }
     };
-    if (!isCurrent() || (lease !== undefined && !(await guardCurrent()))) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3137,7 +3137,7 @@ export class DiscordVoiceSession {
         code = "self_tool_failed";
       }
     }
-    if (!isCurrent() || (lease !== undefined && !(await guardCurrent()))) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3370,7 +3370,7 @@ export class DiscordVoiceSession {
         return false;
       }
     };
-    if (!isCurrent() || (lease !== undefined && !(await guardCurrent()))) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }
@@ -3476,7 +3476,7 @@ export class DiscordVoiceSession {
     } catch {
       // The session must not hang on a captain failure: a short fixed
       // sentence goes back so the model can close the exchange.
-      if (!isCurrent() || (lease !== undefined && !(await guardCurrent()))) {
+      if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
         this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
         return;
       }
@@ -3508,7 +3508,7 @@ export class DiscordVoiceSession {
       }
     }
     const handoffMs = this.clock() - startedAtMs;
-    if (!isCurrent() || (lease !== undefined && !(await guardCurrent()))) {
+    if ((lease !== undefined && !(await guardCurrent())) || !isCurrent()) {
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
       return;
     }

@@ -1220,16 +1220,18 @@ describe("awaited voice callback authority", () => {
     },
   );
 
-  it.each([
-    { action: "handoff", fails: false },
-    { action: "handoff", fails: true },
-    { action: "self_tool", fails: false },
-    { action: "self_tool", fails: true },
-  ])(
-    "discards a late $action result/fallback (fails=$fails) after its participant departs while the tenant lease stays current, without replay",
-    async ({ action, fails }) => {
+  it.each(
+    ["handoff", "self_tool"].flatMap((action) =>
+      [false, true].flatMap((fails) =>
+        ["body_result", "guard_completion"].map((boundary) => ({ action, fails, boundary })),
+      ),
+    ),
+  )(
+    "discards a late $action result/fallback (fails=$fails, boundary=$boundary) after its participant departs while the tenant lease stays current, without replay",
+    async ({ action, fails, boundary }) => {
       const occupants = [{ userId: ALICE, displayName: "Alice" }];
       const checkedActors: Array<string | undefined> = [];
+      let revokeOnGuard = false;
       let entered!: () => void;
       let release!: () => void;
       const ready = new Promise<void>((resolve) => {
@@ -1247,11 +1249,20 @@ describe("awaited voice callback authority", () => {
       };
       const h = await joinedHarness({
         occupants,
-        bodyLease: admission(async (actorId) => {
-          checkedActors.push(actorId);
-          if (actorId === ALICE && !occupants.some((occupant) => occupant.userId === actorId))
-            throw new Error("actor departed");
-        }),
+        bodyLease: admission(
+          async (actorId) => {
+            checkedActors.push(actorId);
+            if (actorId === ALICE && !occupants.some((occupant) => occupant.userId === actorId))
+              throw new Error("actor departed");
+            if (actorId === ALICE && revokeOnGuard) {
+              revokeOnGuard = false;
+              // The helper's current check sees valid authority; its caller's
+              // await resumes after the native actor observation changes.
+              queueMicrotask(() => queueMicrotask(() => occupants.pop()));
+            }
+          },
+          (actorId) => actorId !== ALICE || occupants.some((occupant) => occupant.userId === actorId),
+        ),
         captain: async () => {
           await callback();
           return settledResult("private-result", "Revoked private result");
@@ -1295,7 +1306,8 @@ describe("awaited voice callback authority", () => {
       const actorChecksBefore = checkedActors.filter((actorId) => actorId === ALICE).length;
       const frames = socket.sent.length;
       const stay = h.session.status().stayId;
-      occupants.pop();
+      if (boundary === "body_result") occupants.pop();
+      else revokeOnGuard = true;
       release();
       await flush();
       expect(h.session.status().stayId).toBe(stay);
@@ -1314,6 +1326,79 @@ describe("awaited voice callback authority", () => {
       await h.session.dispose();
     },
   );
+
+  it("fences a membership self-tool's admitted owner without inventing a spoken speaker", async () => {
+    let present = true;
+    let entered!: () => void;
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requests: import("../src/voice-session.ts").VoiceSelfToolCall[] = [];
+    const checkedActors: Array<string | undefined> = [];
+    const lease = admission(
+      async (actorId) => {
+        checkedActors.push(actorId);
+        if (actorId === OWNER && !present) throw new Error("admitted owner departed");
+      },
+      (actorId) => actorId !== OWNER || present,
+    );
+    const h = buildHarness({
+      selfTool: async (request) => {
+        requests.push(request);
+        entered();
+        await wait;
+        return "Private membership result";
+      },
+    });
+    const socket = new VoiceRecoverySocket();
+    h.ports.openConversation = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: h.timers,
+      socketFactory: async () => socket,
+    }).openConversation;
+    await h.session.join({ guildId: GUILD, channelId: CHANNEL, invokingUserId: OWNER, bodyLease: lease });
+    await expect.poll(() => socket.creates().length).toBe(1);
+    socket.emit({ type: "response.created", response: { id: "membership-self" } });
+    socket.emit({
+      type: "response.output_item.done",
+      response_id: "membership-self",
+      item: {
+        type: "function_call",
+        call_id: "membership-tool",
+        name: "get_self_state",
+        arguments: "{}",
+      },
+    });
+    await ready;
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.speakerId).toBeUndefined();
+    const before = socket.sent.length;
+    present = false;
+    release();
+    await expect
+      .poll(() =>
+        h
+          .ofType("realtime_tool")
+          .some((event) => event.callId === "membership-tool" && event.phase === "dropped"),
+      )
+      .toBe(true);
+    expect(lease.current()).toBe(true);
+    expect(checkedActors.at(-1)).toBe(OWNER);
+    expect(socket.sent.slice(before)).toEqual([]);
+    expect(requests).toHaveLength(1);
+    expect(
+      h
+        .ofType("realtime_tool")
+        .filter((event) => event.callId === "membership-tool")
+        .every((event) => event.userId === undefined),
+    ).toBe(true);
+    await h.session.dispose();
+  });
 });
 
 describe("consent boundary", () => {
