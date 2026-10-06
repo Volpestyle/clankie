@@ -50,8 +50,8 @@ removes the underlying eyes and cheeks. Only existing face palette keys
 `c`, `d`, `e`, and `p` appear; there are no added colors.
 
 These tags are appended after `drop`, leaving all 85 existing main-sheet
-indices, crops, durations and body sources unchanged. The mini outputs are
-unchanged. Each first frame is a distinct static expression for Reduce Motion;
+indices, crops, durations and body sources unchanged. The face additions leave mini source grids unchanged; the later stem palette
+polish also recolors their rendered stems. Each first frame is a distinct static expression for Reduce Motion;
 the remaining frames make only small screen changes, with no body motion in
 the overlays.
 
@@ -79,6 +79,9 @@ offset at the same integer scale as the body.
 | `lead`              | 1, 0, 1, 0                          |
 | `alert`             | 1, −2, −1                           |
 | `hop`               | 2, −3, −6, 2                        |
+| `conduct`           | 1, 0, 1, 0                          |
+| `wilt`              | 0, 0, 0                             |
+| `wait`              | 0 for all 5 frames                  |
 
 All other body tags are absent from this map. In particular, do not apply a
 front-facing overlay to walk, run, sleep or offline artwork. The builder
@@ -146,7 +149,7 @@ toward the travel direction while the torso and the stride stay centered.
 | `.` | —         | transparent                              |
 | `L` | `#c6d668` | leaf light                               |
 | `l` | `#7d8f41` | leaf dark                                |
-| `s` | `#6f5f36` | stem                                     |
+| `s` | `#9e8b57` | stem; lighter on a dark desktop          |
 | `f` | `#806440` | frame                                    |
 | `o` | `#503b2c` | outline                                  |
 | `c` | `#f2e5c8` | face                                     |
@@ -206,6 +209,35 @@ decides what follows them.
 | `drop`        | 83–84  | 160, 160                                                           | loop  | Dragged down: arms up and wide eyes (`catch`), sprout streaming up in a V (`alert`) that flutters                                                                                                                                                                                                                                                                          |
 | `mini_idle`   | 0–1    | 450, 450                                                           | loop  | Breathing                                                                                                                                                                                                                                                                                                                                                                  |
 | `mini_walk`   | 2–5    | 120 ×4                                                             | loop  | Front-facing shuffle, direction-neutral, so no mirroring is needed                                                                                                                                                                                                                                                                                                         |
+
+### Run and fleet beats (VUH-1681 / VUH-1680)
+
+The seven additions start at frame 100, preserving earlier tag indices and
+timings. The six-frame runs have two airborne poses and two contact squashes
+per 450 ms cycle. They are editable candidates for James's run refinement;
+the app's existing sideways drag still uses the authored walk. A separate
+after-drop squash remains optional and is not included here.
+
+| Tag            | Frames  | Duration                  | Playback                                             |
+| -------------- | ------- | ------------------------- | ---------------------------------------------------- |
+| `run_left`     | 100–105 | 90, 65, 75, 90, 65, 75 ms | loop                                                 |
+| `run_right`    | 106–111 | 90, 65, 75, 90, 65, 75 ms | loop                                                 |
+| `seed`         | 112–117 | 1030 ms                   | once; seed toss, then a small sproutling             |
+| `conduct`      | 118–121 | 1360 ms                   | once; alternate raised leaves and directing arms     |
+| `read_message` | 122–125 | 1140 ms                   | once; catch and inspect an envelope                  |
+| `wilt`         | 126–128 | 1080 ms                   | once; drooping sprout with the awake screen retained |
+| `wait`         | 129–133 | 730 ms                    | once; a short foot tap                               |
+
+The app consumes fresh event IDs from an opted-in `presence` read for the seed
+and report beats. Conduct, wait and wilt follow newly observed fleet, question
+and continuous thinking transitions. They settle after one play; the working
+or attention screen can remain. First reads, reconnects, suppressed events
+and bursts do not become a queued dance. See [ADR 0220](../../docs/adr/0220-clankie-has-one-present-tense.md).
+
+The lighter stem changes its palette pixels in existing hero and mini frames,
+so their sheets and GIF previews must be regenerated together. Review every
+new frame on both backgrounds in [the polish sheet](preview/polish-review.png)
+and motion in its corresponding `preview/<tag>.gif`.
 
 ### `think` timing
 

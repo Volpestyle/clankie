@@ -92,13 +92,20 @@ export interface CreateOperatorServiceContext {
     | { objective: string; updatedAt: string; issue?: { repoId: string; itemId: string } | undefined }
     | undefined;
   readonly validateConversationOwner: (owner: ConversationOwner) => Promise<boolean>;
-  readonly reportSummaries: (conversationId?: string, native?: HerdrAgentSnapshot) => WorkerReportSummary[];
+  readonly reportSummaries: (
+    conversationId?: string,
+    native?: HerdrAgentSnapshot,
+    includeRead?: boolean,
+    acceptedAfterMs?: number,
+  ) => WorkerReportSummary[];
   readonly goalExecutionReason: (conversationId: string) => string | undefined;
 }
 
 export function createOperatorService(
   ctx: CreateOperatorServiceContext,
 ): CaptainPort["serveOperatorConversation"] {
+  let reportCursor: string | undefined;
+  let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
   return async function serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
@@ -282,6 +289,31 @@ export function createOperatorService(
           const inVoice = voice.some(
             (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
           );
+          const beatsEnabled = request.includeBeats === true && !(await ctx.desktop.beatsAreQuiet());
+          const hire = beatsEnabled ? ctx.desktop.recentHire() : undefined;
+          const now = Date.now();
+          const currentReportCursor = ctx.fleetChanges.current();
+          if (beatsEnabled && reportCursor !== currentReportCursor) {
+            recentReport = undefined;
+            for (const item of ctx.reportSummaries(undefined, undefined, true, now - 10_000)) {
+              const acceptedAt = Date.parse(item.acceptedAt);
+              const age = now - acceptedAt;
+              if (
+                (item.state === "delivered" || item.state === "read") &&
+                age >= 0 &&
+                age < 10_000 &&
+                (recentReport === undefined || acceptedAt > Date.parse(recentReport.acceptedAt))
+              )
+                recentReport = { deliveryId: item.deliveryId, acceptedAt: item.acceptedAt };
+            }
+            reportCursor = currentReportCursor;
+          }
+          const reportAge =
+            recentReport === undefined ? undefined : now - Date.parse(recentReport.acceptedAt);
+          const report =
+            beatsEnabled && reportAge !== undefined && reportAge >= 0 && reportAge < 10_000
+              ? recentReport
+              : undefined;
           return projectPresence(
             {
               expression: await ctx.desktop.current(),
@@ -296,8 +328,21 @@ export function createOperatorService(
               ...(nativeSubagents === undefined ? {} : { nativeSubagents }),
               pendingOwnerItem: ctx.conversations.pendingPresenceOwnerItem(),
               ...ctx.conversations.recentPresenceActivity(),
+              beats: [
+                ...(hire ? [hire] : []),
+                ...(report
+                  ? [
+                      {
+                        id: report.deliveryId,
+                        kind: "worker_report" as const,
+                        at: new Date(report.acceptedAt).toISOString(),
+                      },
+                    ]
+                  : []),
+              ],
             },
             request.includeFace === true,
+            request.includeBeats === true,
           );
         },
         request.cursor,
