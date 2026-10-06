@@ -372,8 +372,36 @@ export async function pumpSeatEvents(
           },
         },
       });
-      if (upstream.acknowledge !== undefined && !(await upstream.acknowledge(event.id)))
-        throw new Error("The bridge notification was sent but its receipt could not be reconciled.");
+      if (upstream.acknowledge !== undefined)
+        await acknowledgeSeatEvent(upstream.acknowledge.bind(upstream), event.id, signal, retryMs, options);
+    }
+  }
+}
+
+/**
+ * Settle one notified event's receipt without ever ending the pump. A failed
+ * acknowledgment retries the same receipt (the service reconciles it even
+ * after the take window lapses); a refusal is reported once and polling
+ * continues, because a bridge that stops polling unbinds the whole seat.
+ */
+async function acknowledgeSeatEvent(
+  acknowledge: (eventId: string) => Promise<boolean>,
+  eventId: string,
+  signal: AbortSignal,
+  retryMs: number,
+  options: { readonly onError?: (error: unknown) => void },
+): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      if (!(await acknowledge(eventId)))
+        options.onError?.(
+          new Error(`The notification ${eventId} was sent but the service no longer holds its receipt.`),
+        );
+      return;
+    } catch (error) {
+      if (signal.aborted) return;
+      options.onError?.(error);
+      await delay(retryMs, signal);
     }
   }
 }
@@ -990,7 +1018,13 @@ export async function runMcpCommand(
               `clankie mcp: outbox poll failed (${error instanceof Error ? error.message : String(error)}); retrying\n`,
             );
           },
-        }).catch(() => undefined)
+        }).catch((error: unknown) => {
+          // The seat is unbound from here on; never let that pass silently.
+          if (!closing.signal.aborted)
+            stderr.write(
+              `clankie mcp: outbox pump stopped (${error instanceof Error ? error.message : String(error)})\n`,
+            );
+        })
       : Promise.resolve();
   // The harness owns this process: when it closes stdin the bridge is done.
   await closed;

@@ -519,31 +519,60 @@ describe("operator bridge restart recovery", () => {
   });
 });
 
-it("acknowledges only after notification persistence and stops on a lost receipt without replay", async () => {
+it("acknowledges only after notification persistence and reconciles a lost receipt without replay or unbinding", async () => {
   const order: string[] = [];
+  const errors: unknown[] = [];
   const event = wakeEvent();
-  await expect(
-    pumpSeatEvents(
-      {
-        notification: async () => {
-          order.push("notification-persisted");
-        },
+  const stop = new AbortController();
+  let acks = 0;
+  let polls = 0;
+  await pumpSeatEvents(
+    {
+      notification: async () => {
+        order.push("notification-persisted");
       },
-      {
-        pollEvents: async () => {
-          order.push("poll");
-          return [event];
-        },
-        acknowledge: async (id) => {
-          order.push(`ack:${id}`);
-          throw new Error("lost acknowledgment");
-        },
+    },
+    {
+      pollEvents: async () => {
+        polls += 1;
+        order.push("poll");
+        if (polls === 2) stop.abort();
+        return polls === 1 ? [event] : [];
       },
-      new AbortController().signal,
-      { waitMs: 0 },
-    ),
-  ).rejects.toThrow("lost acknowledgment");
-  expect(order).toEqual(["poll", "notification-persisted", `ack:${event.id}`]);
+      acknowledge: async (id) => {
+        acks += 1;
+        order.push(`ack:${id}`);
+        if (acks === 1) throw new Error("lost acknowledgment");
+        return true;
+      },
+    },
+    stop.signal,
+    { waitMs: 0, retryMs: 1, onError: (error) => errors.push(error) },
+  );
+  // The same receipt is retried, the event is never notified twice, and the seat keeps polling.
+  expect(order).toEqual(["poll", "notification-persisted", `ack:${event.id}`, `ack:${event.id}`, "poll"]);
+  expect(errors).toHaveLength(1);
+});
+
+it("keeps polling after the service refuses a receipt it no longer holds", async () => {
+  const errors: unknown[] = [];
+  const stop = new AbortController();
+  let polls = 0;
+  await pumpSeatEvents(
+    { notification: async () => undefined },
+    {
+      pollEvents: async () => {
+        polls += 1;
+        if (polls === 2) stop.abort();
+        return polls === 1 ? [wakeEvent()] : [];
+      },
+      acknowledge: async () => false,
+    },
+    stop.signal,
+    { waitMs: 0, onError: (error) => errors.push(error) },
+  );
+  expect(polls).toBe(2);
+  expect(String(errors[0])).toContain("no longer holds its receipt");
 });
 
 it.each(["stored", "lost"] as const)(
