@@ -99,6 +99,51 @@ export function remoteHerdrCommand(fleet: HerdrFleet, args: readonly string[]): 
 }
 
 /**
+ * The resident observer decodes EncodedCommand and runs it inside its own
+ * PowerShell host. Return captured text through the pipeline: its stdout is
+ * reserved for relay frames, and a native child's exit must not exit the host.
+ */
+function remoteHerdrObservation(fleet: HerdrFleet, args: readonly string[], timeoutMs: number): string {
+  assertRemoteHerdrArgs(args);
+  const commandLine = Buffer.from(
+    ["--session", fleet.session, ...args].map(windowsArgument).join(" "),
+    "utf8",
+  ).toString("base64");
+  const childTimeoutMs = Math.max(1, Math.min(2_147_483_647, Math.floor(timeoutMs * 0.9)));
+  return powershellScriptCommand(
+    [
+      "$ErrorActionPreference = 'Stop'",
+      "$child = $null",
+      '$failure = \'{"error":{"code":"fleet_command_failed","message":"Native Herdr observation failed"}}\'',
+      "$result = $failure",
+      "try {",
+      "$start = New-Object System.Diagnostics.ProcessStartInfo",
+      "$start.FileName = (Get-Command herdr -CommandType Application | Select-Object -First 1).Source",
+      `$start.Arguments = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${commandLine}'))`,
+      "$start.UseShellExecute = $false",
+      "$start.RedirectStandardOutput = $true",
+      "$start.RedirectStandardError = $true",
+      "$start.StandardOutputEncoding = New-Object Text.UTF8Encoding $false",
+      "$start.StandardErrorEncoding = New-Object Text.UTF8Encoding $false",
+      "$child = [System.Diagnostics.Process]::Start($start)",
+      "$output = $child.StandardOutput.ReadToEndAsync()",
+      "$errors = $child.StandardError.ReadToEndAsync()",
+      `if (-not $child.WaitForExit(${childTimeoutMs})) { throw 'Native Herdr observation timed out' }`,
+      "$text = $output.GetAwaiter().GetResult()",
+      "$null = $errors.GetAwaiter().GetResult()",
+      // Preserve a native JSON error envelope on nonzero exit. Other failures
+      // return a fixed envelope instead of leaking stderr into the census.
+      "$json = $text | ConvertFrom-Json -ErrorAction Stop",
+      "if ($child.ExitCode -eq 0 -or $null -ne $json.error) { $result = $text }",
+      "} catch { $result = $failure } finally {",
+      "if ($null -ne $child) { if (-not $child.HasExited) { $child.Kill() }; $child.Dispose() }",
+      "}",
+      "$result",
+    ].join("; "),
+  );
+}
+
+/**
  * One program with an exact argv on the remote shell. PowerShell never parses
  * the arguments: they travel as one base64 command line handed to
  * `ProcessStartInfo`, the child inherits stdin, and its stdout and stderr bytes
@@ -372,7 +417,7 @@ export function createHerdrFleetRun(fleet: HerdrFleet, options: FleetCommandOpti
         (args[0] === "api" && args[1] === "snapshot"));
     const observer = read && !signal && fleet.ssh.shell === "powershell" ? options.observer?.() : undefined;
     if (observer) {
-      const stdout = await observer(command, timeoutMs);
+      const stdout = await observer(remoteHerdrObservation(fleet, args, timeoutMs), timeoutMs);
       const reported = herdrError(stdout);
       if (reported !== undefined) throw reported;
       return stdout;
