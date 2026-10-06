@@ -437,7 +437,8 @@ service next starts, and again before the next update, once three facts hold: it
 helper wrote that final result as its last log line, the pin is a clean detached
 worktree at the old or new commit, and the running service booted from that exact
 pin. The result gains `reconciled` (time, commit, instance) and the lock is kept
-beside the operation as `active.reconciled-ID-TIME`. Anything else, such as a
+beside the operation as `active.reconciled-ID-TIME`. A deploy hold the canary
+armed for that operation before it could begin is then released as well. Anything else, such as a
 missing or edited pin, still needs the owner and is never repaired automatically.
 
 The operator API is `POST /v1/runtime-update` with optional `{ "ref": "main" }`

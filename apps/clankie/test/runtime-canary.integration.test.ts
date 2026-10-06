@@ -461,6 +461,17 @@ it.each(["failed", "stop-unconfirmed"] as const)(
     expect(recovered.holds.map((hold) => hold.id)).toEqual([f.id]);
     await expect(previous.call("landing")).rejects.toThrow("Deploy held");
     expect(await alerts(f.root)).toEqual([]);
+    // Once the running runtime reconciles the ending, the never-started canary's hold goes.
+    await stop(previous.child);
+    const directory = join(f.updates, f.id);
+    writeRuntimeUpdate(directory, {
+      ...readRuntimeUpdate(directory),
+      reconciled: { at: new Date().toISOString(), commit: "a".repeat(40), instanceId: randomUUID() },
+    });
+    const reconciled = await start(f.root, "idle", "a".repeat(40));
+    expect((await reconciled.status()).holds).toEqual([]);
+    await expect(reconciled.call("landing")).resolves.toBeDefined();
+    await stop(reconciled.child);
   },
 );
 

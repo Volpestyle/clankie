@@ -192,7 +192,7 @@ export class RuntimeCanary {
   async recover(): Promise<void> {
     const result = this.latest();
     if (!result) return;
-    if (result.phase === "rolled-back") {
+    if (["rolled-back", "failed", "stop-unconfirmed"].includes(result.phase)) {
       await this.releasePrehealthyRollback(result);
       return;
     }
@@ -290,7 +290,7 @@ export class RuntimeCanary {
 
   private async tick(): Promise<void> {
     let result = this.latest();
-    if (result?.phase === "rolled-back") {
+    if (result !== undefined && ["rolled-back", "failed", "stop-unconfirmed"].includes(result.phase)) {
       await this.releasePrehealthyRollback(result);
       return;
     }
@@ -435,12 +435,10 @@ export class RuntimeCanary {
   }
 
   private async releasePrehealthyRollback(result: RuntimeUpdateResult): Promise<void> {
-    if (
-      result.rollbackHealthy !== true ||
-      result.oldCommit !== this.options.runtime.commit ||
-      result.canary?.state === "failed" ||
-      result.canary?.state === "passed"
-    )
+    // A confirmed rollback, or an uncertain ending this running runtime reconciled.
+    const restored = result.rollbackHealthy === true && result.oldCommit === this.options.runtime.commit;
+    const reconciled = result.reconciled?.commit === this.options.runtime.commit;
+    if ((!restored && !reconciled) || result.canary?.state === "failed" || result.canary?.state === "passed")
       return;
     const path = join(this.options.updatesDirectory, result.id, "canary-policy.json");
     if (!existsSync(path)) return;
@@ -455,11 +453,13 @@ export class RuntimeCanary {
       existing.seat
     )
       return;
-    // The existing helper restored and verified its old runtime before a canary ever began.
+    // No canary began: the helper restored its old runtime, or the service reconciled the ending.
     await this.options.holds.release(
       wanted.id,
       HOLDER,
-      "Pre-canary cutover restored its confirmed previous runtime",
+      restored
+        ? "Pre-canary cutover restored its confirmed previous runtime"
+        : "Pre-canary cutover ended uncertain and this runtime reconciled it",
       wanted,
     );
   }
