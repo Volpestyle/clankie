@@ -49,3 +49,25 @@ Say what you closed and why in the conversation you are working in, and offer
 the returned undo IDs and deadlines. Name any panes you left because of a
 refusal or uncertainty, and the remaining worktree candidates. If the owner
 stops the turn, stop tidying.
+
+For an authorized owned cleanup, use `prune_tidy_worktree({repository, path})`
+(or `clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE`). It
+fetches `origin/main`, verifies a registered linked-worktree root, copies ignored
+`.local` evidence to `~/.herdr-handoffs/worktree-evidence/`, then freshly checks
+merge, cleanliness and every live local pane's cwd and foreground cwd. It uses
+`git worktree remove` without force and deletes only a merged local branch.
+Managed runtime pins and owner main checkouts are protected. Never treat a
+removal refusal as permission to force it. Keep live workers' owned trees even
+when their pane still reports the main checkout as its cwd. The read-only list
+is a candidate inventory, not ownership proof.
+
+After an integrator confirms a push, run `clankie checkouts sync` for registered
+local owner repositories (or select one with `--repository`). It fetches main
+and fast-forwards only an owner checkout on `main` with no local commits and no
+edits overlapping incoming paths. Disjoint local edits survive. `blocked`
+results name files and their age; preserve those files and report the blocker.
+`clankie checkouts status`, doctor, and roster checkout cards use cached
+`origin/main` and say so; sync and hire admission require a successful fetch.
+New hires need a clean checkout containing fetched `origin/main`, on that
+machine. Create a fresh owned deliverable worktree rather than using stale
+local main. Resuming a saved session keeps its exact directory.

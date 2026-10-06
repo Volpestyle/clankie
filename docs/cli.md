@@ -4761,3 +4761,38 @@ media never appears on the self-hosted public legacy stream.
 
 See [Activity sharing](activity.md) and the
 [wire reference](../apps/discord-activity/README.md#scoped-general-media-core).
+
+### Owner checkout freshness
+
+`clankie checkouts status` reports each registered local owner's checkout:
+branch, HEAD, cached `origin/main`, ahead/behind, dirty state, and linked/stale
+worktree counts. Doctor and local roster cards include these observations.
+Cached refs are explicitly identified; status never fetches or edits a checkout.
+Roster/fleet requests opt into checkout cards with `includeCheckouts: true`;
+older callers keep their original response shape. Roster observations may be
+cached for 30 seconds.
+
+`clankie checkouts sync [--repository OWNER_CHECKOUT]` fetches `origin/main`
+and fast-forwards an owner checkout on `main` only when it has no local commits
+and no local edits overlapping incoming paths. Disjoint staged and unstaged
+edits survive. A refusal lists blocking files with their modification age in
+seconds. No stash, reset, rebase, force, or automatic commit is used. Confirmed
+`clankie integrate` pushes run the same sync and retain its result in the batch;
+updates targeting `origin/main` also run it and retain the result. Manual
+integrators run sync after each confirmed push. A blocked owner checkout does
+not undo a successful push or prevent the fetched runtime from updating.
+
+`clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE` removes
+one landed, clean, inactive linked worktree in an enrolled worktree root. The
+Tidy up skill uses the equivalent `prune_tidy_worktree` tool after preserving
+its result. The service fetches main, copies ignored `.local` evidence, then
+rechecks Git and every live local pane's cwd and foreground cwd. Main checkouts,
+managed runtime worktrees, locked, dirty, unmerged, and live trees stay. Git
+removal is never forced; local branches are deleted only if merged. Evidence
+is retained under `~/.herdr-handoffs/worktree-evidence/`.
+
+New local and SSH hires fetch and verify their start checkout on that machine.
+Dirty checkouts, missing remote main, failed fetches and a HEAD that does not
+contain fetched `origin/main` refuse admission before launch. Clean topic
+branches based on current main are valid. Non-Git workspaces remain usable for
+other tasks; saved-session resumes keep the exact saved cwd.

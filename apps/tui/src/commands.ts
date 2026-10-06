@@ -1,3 +1,4 @@
+import { runCheckoutsCommand } from "./command/checkouts.ts";
 import { runDesktopCommand } from "./command/desktop.ts";
 import { runWorkerToolRefreshCommand, runWorkerToolRestartCommand } from "./command/harness.ts";
 import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
@@ -196,6 +197,24 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     });
 
+  commands.push({
+    name: "checkouts",
+    aliases: [],
+    description: "Inspect owner checkouts, safely sync main, or prune a landed worktree",
+    argumentHint: "status | sync [--repository PATH] | prune --repository PATH --path WORKTREE",
+    takesArgument: true,
+    async run(argument, shell) {
+      try {
+        shell.insertCommandResult(
+          "/checkouts",
+          JSON.stringify(await runCheckoutsCommand(splitQuotedArguments(argument)), null, 2),
+          "success",
+        );
+      } catch (error) {
+        shell.insertCommandResult("/checkouts", String(error), "error");
+      }
+    },
+  });
   commands.push({
     name: "update",
     aliases: [],

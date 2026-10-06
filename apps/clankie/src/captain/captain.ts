@@ -1,3 +1,13 @@
+import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
+import {
+  inspectCheckout,
+  ownerCheckout,
+  syncOwnerCheckout,
+  verifyHireCheckout,
+  projectPathContains,
+  checkoutGit,
+} from "@clankie/settings";
+import { pruneTidyWorktree } from "./prune-worktree.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
 import { effectiveFleetAutonomy } from "@clankie/settings";
@@ -1537,6 +1547,61 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   }
 
+  const checkoutRepositories = async () => {
+    const current = await settings();
+    const paths = current.projects.projects.flatMap((project) => [
+      ...project.workspaces
+        .filter((workspace) => workspace.machineId === "local")
+        .map((workspace) => workspace.path),
+      ...project.worktreeRoots.filter((root) => root.machineId === "local").map((root) => root.repoPath),
+    ]);
+    const owners = await Promise.all(
+      [...new Set(paths)].map((path) => ownerCheckout(path).catch(() => path)),
+    );
+    return [...new Set(owners)];
+  };
+  const checkoutReport = async () => ({
+    observedAt: new Date().toISOString(),
+    refFreshness: "cached-origin/main" as const,
+    checkouts: await Promise.all((await checkoutRepositories()).map(inspectCheckout)),
+  });
+  const syncCheckouts = async (repository?: string) => {
+    const repositories = await checkoutRepositories();
+    if (repository !== undefined && !repositories.includes(repository))
+      throw Error("Select a registered owner checkout");
+    return Promise.all((repository === undefined ? repositories : [repository]).map(syncOwnerCheckout));
+  };
+  const pruneWorktree = async (
+    repository: string,
+    path: string,
+    guard: () => Promise<void> = async () => {},
+  ) => {
+    const current = await settings();
+    const platform = process.platform === "win32" ? "windows" : "posix";
+    const roots = current.projects.projects
+      .flatMap((project) => project.worktreeRoots)
+      .filter((root) => root.machineId === "local");
+    if (!roots.some((root) => root.repoPath === repository && projectPathContains(root.path, path, platform)))
+      throw Error("Select a linked worktree in a registered root; managed runtime trees are protected");
+    for (const owner of await checkoutRepositories()) {
+      const raw = await checkoutGit(owner, ["worktree", "list", "--porcelain", "-z"]);
+      if (raw.split("\0").some((field) => field.startsWith(`worktree ${path}/`)))
+        throw Error("Nested registered worktree is still present; keep the parent");
+    }
+    return pruneTidyWorktree(
+      repository,
+      path,
+      join(homedir(), ".herdr-handoffs", "worktree-evidence"),
+      herdrRunner,
+      async () => {
+        await guard();
+        const latest = await settings();
+        if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
+          throw Error("Project enrollment changed");
+      },
+    );
+  };
+
   // One hire path for the compose page and the captain's own `hire_agent`
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
   // persona thread created through `create` is — otherwise its first reply
@@ -1579,6 +1644,32 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           detail: error instanceof Error ? error.message : String(error),
         };
       }
+    }
+    if (resume === undefined) {
+      const remote = remoteFleets.find((fleet) => fleet.id === request.fleet);
+      const shell = remote && deps.fleets?.shell?.(remote);
+      const freshness = remote
+        ? shell
+          ? await verifyRemoteHireCheckout(remote, shell, request.workingDirectory)
+          : {
+              outcome: "refused" as const,
+              path: request.workingDirectory,
+              reason: "Remote checkout observer unavailable",
+            }
+        : await verifyHireCheckout(request.workingDirectory);
+      if (freshness.outcome === "refused")
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: freshness.reason ?? "Checkout freshness unverified",
+        };
+      if (freshness.outcome === "fresh")
+        brief = [
+          brief,
+          `Start checkout verified against fetched origin/main: HEAD ${freshness.head}, origin/main ${freshness.remoteMain}. Keep new work based on current origin/main.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
     }
     if (request.harness === "claude" && namedLocal.some((entry) => entry.id === request.fleet))
       return {
@@ -1675,6 +1766,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const paneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
+    prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
     close: (seatId, guard, nativeOnly) => herdrWatches.closeSeat(seatId, guard, nativeOnly),
@@ -2176,6 +2268,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
+  const checkoutStatusCache = new Map<
+    string,
+    { expires: number; pending: Promise<import("@clankie/protocol").CheckoutStatus> }
+  >();
   async function observeFleetProjection(): Promise<readonly OperatorFleetSeat[]> {
     await personas.ready(settingsStore);
     const fleet = await observeFleet();
@@ -2290,6 +2386,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrWatches.trackSeat(seat.seatId);
     }
     liveSeats = seats;
+    const rosterOwnerPaths = new Map<string, Promise<string>>();
     const projected = await Promise.all(
       seats.map(async (seat) => {
         // A lapsed stance simply is not here, so no surface has to reason about
@@ -2348,8 +2445,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             /* Conflicting historical claims confer no inspection attribution. */
           }
         }
+        let checkout: import("@clankie/protocol").CheckoutStatus | undefined;
+        if (seat.fleet === undefined && seat.workingDirectory) {
+          let owner = rosterOwnerPaths.get(seat.workingDirectory);
+          if (!owner) {
+            owner = ownerCheckout(seat.workingDirectory);
+            rosterOwnerPaths.set(seat.workingDirectory, owner);
+          }
+          checkout = await owner
+            .then((path) => {
+              let cached = checkoutStatusCache.get(path);
+              if (!cached || cached.expires < Date.now()) {
+                cached = { expires: Date.now() + 30_000, pending: inspectCheckout(path) };
+                checkoutStatusCache.set(path, cached);
+              }
+              return cached.pending;
+            })
+            .catch(() => undefined);
+        }
         const result: OperatorFleetSeat = {
           ...seat,
+          ...(checkout ? { checkout } : {}),
           conversationId: conversations.conversationIdForPersona(seat.personaId),
           ...(stance === undefined ? {} : { stance }),
           ...(activity === undefined ? {} : { activity }),
@@ -3884,7 +4000,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         review,
       );
     },
-    tidyWorktrees: (repository, mergedInto) => paneTidy.worktrees(repository, mergedInto),
+    checkoutReport,
+    syncCheckouts,
+    pruneWorktree,
+    tidyWorktrees: (repository, mergedInto) => paneTidy.worktreeReport(repository, mergedInto),
     restartWorkerTools: async (input, authority) => {
       const owner = { conversationId: conversations.defaultGlobalConversationId() };
       await authority.guard();

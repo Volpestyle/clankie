@@ -73,6 +73,14 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     ...workerTools,
     ...workerReports,
     ...resources,
+    ...(report.checkouts && "checkouts" in report.checkouts
+      ? report.checkouts.checkouts.map(
+          (entry) =>
+            `  ${entry.outcome === "observed" && !entry.behind ? "✓" : "○"} Checkout ${clean(entry.path)} · ${entry.outcome === "unavailable" ? "unavailable" : `${entry.behind} behind / ${entry.ahead} ahead · ${entry.dirty ? "dirty" : "clean"} · ${entry.staleWorktrees} stale / ${entry.linkedWorktrees} linked worktrees`} · cached origin/main`,
+        )
+      : report.checkouts
+        ? [`  ○ Checkouts · ${clean(report.checkouts.detail)}`]
+        : []),
     ...(report.fleetHealthMetrics?.windows.map(
       (window) =>
         `  Fleet failures ${window.minutes}m · proof ${(window.proofRefusalRate * 100).toFixed(2)}% (${window.proof.refusals}/${window.proof.attempts}, ${window.proofRefusalsPerMinute.toFixed(2)}/min) · reports ${(window.reportFailureRate * 100).toFixed(2)}% (${window.reports.failures}/${window.reports.attempts}, ${window.reportFailuresPerMinute.toFixed(2)}/min)`,

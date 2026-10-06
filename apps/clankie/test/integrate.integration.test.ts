@@ -148,7 +148,12 @@ it("composes in order on fresh origin, installs real siblings, gates privately a
   }
   expect(await readFile(join(batch.repos[0]!.directory, "first"), "utf8")).toBe("one");
   expect(await f.queue.start(request, guard)).toMatchObject({ id: request.id, state: "passed" });
-  expect((await f.queue.land(request.id, [], guard)).state).toBe("pushed");
+  const landed = await f.queue.land(request.id, [], guard);
+  expect(landed.state).toBe("pushed");
+  expect(landed.repos[0]!.ownerCheckoutSync).toMatchObject({
+    outcome: "blocked",
+    reason: expect.stringContaining("local commits"),
+  });
   for (const repo of batch.repos)
     expect(await git(repo.source, "ls-remote", "origin", "refs/heads/main")).toContain(repo.head);
 });
@@ -364,4 +369,26 @@ it("records core landed/app pending on app rejection and retries only app", asyn
   expect(await readFile(count, "utf8")).toBe("landed\n");
   expect(landed.repos[0]!.push).toEqual(partial.repos[0]!.push);
   expect(await git(f.app!.source, "ls-remote", "origin", "refs/heads/main")).toContain(landed.repos[1]!.head);
+});
+
+it("a confirmed integration push fast-forwards clean owner main and persists the sync receipt", async () => {
+  const f = await fixture();
+  await git(f.core.source, "switch", "-c", "worker");
+  const approved = await commit(f.core.source, "new-feature", "approved");
+  await git(f.core.source, "switch", "main");
+  const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [approved] });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const landed = await f.queue.land(request.id, [], guard);
+  expect(landed.state).toBe("pushed");
+  expect(landed.repos[0]!.ownerCheckoutSync).toMatchObject({
+    outcome: "updated",
+    path: f.core.source,
+    before: f.core.base,
+    after: landed.repos[0]!.head,
+  });
+  expect(await git(f.core.source, "rev-parse", "HEAD")).toBe(landed.repos[0]!.head);
+  expect((await f.queue.status(request.id)).repos[0]!.ownerCheckoutSync).toEqual(
+    landed.repos[0]!.ownerCheckoutSync,
+  );
 });

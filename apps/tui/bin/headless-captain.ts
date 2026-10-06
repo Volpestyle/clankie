@@ -1,3 +1,4 @@
+import { runCheckoutsCommand } from "../src/command/checkouts.ts";
 import { runComputerCommand } from "../src/command/computer.ts";
 import { runShareCommand } from "../src/command/share.ts";
 import { runDesktopCommand } from "../src/command/desktop.ts";
@@ -208,6 +209,10 @@ export async function runHeadlessCaptainCommand(
       });
       if (json) outputJson(stdout, result);
       else stdout.write(`${formatDoctorSummary(result)}\n`);
+      return 0;
+    }
+    if (command === "checkouts") {
+      outputJson(stdout, await runCheckoutsCommand(rest, options));
       return 0;
     }
     if (command === "update") {

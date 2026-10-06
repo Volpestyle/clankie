@@ -29,7 +29,7 @@ import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { HireSeat } from "./port.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { paneDraftState } from "./pane-draft.ts";
-import { listTidyWorktrees, type TidyWorktreesResult } from "./tidy-worktrees.ts";
+import { describeRetainedWorktrees, listTidyWorktrees, type TidyWorktreesResult } from "./tidy-worktrees.ts";
 
 const UNDO_MS = 5 * 60_000;
 const EntrySchema = ClosedWorkerPaneSchema.extend({
@@ -96,6 +96,11 @@ export class PaneTidy {
   private readonly path: string;
   private readonly ports: {
     runner: HerdrWatchRunner;
+    prune?(
+      repository: string,
+      path: string,
+      guard: () => Promise<void>,
+    ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
     ownerValid(owner: ConversationOwner): Promise<boolean>;
     close(seatId: string, guard: () => Promise<void>, nativeOnly?: boolean): Promise<boolean>;
@@ -121,6 +126,16 @@ export class PaneTidy {
   /** List merged, clean, unused linked worktrees; never remove one. */
   worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {
     return listTidyWorktrees(repositoryPath, mergedInto, this.ports.runner);
+  }
+  async worktreeReport(repository: string, mergedInto = "origin/main") {
+    const result = await this.worktrees(repository, mergedInto);
+    return { ...result, retained: await describeRetainedWorktrees(result, this.ports.runner) };
+  }
+  async pruneWorktree(repository: string, path: string, source: ConversationAuthority) {
+    const authority = captureConversationAuthority(source);
+    await this.authority(authority);
+    if (!this.ports.prune) throw Error("Worktree pruning unavailable");
+    return this.ports.prune(repository, path, () => this.authority(authority));
   }
   private now(): number {
     return this.ports.now?.() ?? Date.now();

@@ -11,6 +11,12 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["checkouts"],
+    lines: [
+      "  checkouts status | sync [--repository OWNER_CHECKOUT] | prune --repository OWNER_CHECKOUT --path WORKTREE  Inspect, safely fast-forward, or tidy local repositories (JSON)",
+    ],
+  },
+  {
     nouns: ["integrate"],
     lines: [
       "  integrate SHA... [--app SHA]... [--push] | status UUID | push UUID | revert UUID | holds | hold | release  Compose, isolate the full gate, and land approved commits (JSON)",
@@ -42,7 +48,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["update"],
     lines: [
-      "  update [--ref REF] | status  Stage local main, detach safe restart, or read durable result (JSON)",
+      "  update [--ref REF] | status  Fetch origin/main, safely sync owner main, detach safe restart, or read durable result (JSON)",
       "  update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets (CPU is advisory)",
     ],
   },

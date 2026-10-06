@@ -282,7 +282,10 @@ export function createOperatorService(
       };
     }
     if (request.op === "roster") {
-      const seats = await ctx.refreshFleet();
+      const observed = await ctx.refreshFleet();
+      const seats = request.includeCheckouts
+        ? observed
+        : observed.map(({ checkout: _checkout, ...seat }) => seat);
       return {
         op: "roster",
         schemaVersion: 1,
@@ -379,7 +382,16 @@ export function createOperatorService(
     }
     if (request.op === "fleet") {
       await ctx.fleetChanges.wait(request.cursor, request.waitMs ?? 0);
-      const snapshot = await ctx.fleetSnapshot();
+      const observed = await ctx.fleetSnapshot();
+      const snapshot = request.includeCheckouts
+        ? observed
+        : {
+            ...observed,
+            snapshot: {
+              ...observed.snapshot,
+              seats: observed.snapshot.seats.map(({ checkout: _checkout, ...seat }) => seat),
+            },
+          };
       const { closedPanes: _closed, ...withoutHistory } = snapshot.snapshot;
       const full = request.includeClosedPanes ? snapshot : { ...snapshot, snapshot: withoutHistory };
       const { goals: _goals, assignments: _assignments, ...legacy } = full.snapshot;

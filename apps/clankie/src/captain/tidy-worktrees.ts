@@ -89,7 +89,7 @@ function worktrees(raw: string): GitWorktree[] {
     });
   if (
     records.length === 0 ||
-    records.length > 256 ||
+    records.length > 4096 ||
     new Set(records.map((record) => record.path)).size !== records.length
   )
     throw new Error("Incomplete worktree inventory");
@@ -106,6 +106,11 @@ async function paneDirectories(runner: Pick<HerdrWatchRunner, "list">): Promise<
     const path = await realpath(pane.workingDirectory);
     if (!(await stat(path)).isDirectory()) throw new Error("Unknown pane directory");
     paths.push(path);
+    if (pane.foregroundWorkingDirectory) {
+      const foreground = await realpath(pane.foregroundWorkingDirectory);
+      if (!(await stat(foreground)).isDirectory()) throw new Error("Unknown foreground directory");
+      paths.push(foreground);
+    }
   }
   return [...new Set(paths)].sort();
 }
@@ -206,4 +211,32 @@ export async function listTidyWorktrees(
   } catch {
     return unavailable("inventory_unavailable");
   }
+}
+
+/** Reporting only: registration age and observed pane owners never authorize deletion. */
+export async function describeRetainedWorktrees(
+  result: TidyWorktreesResult,
+  runner: Pick<HerdrWatchRunner, "list">,
+) {
+  const panes = await runner.list?.().catch(() => []);
+  return Promise.all(
+    result.excluded.map(async (entry) => {
+      const metadata = await stat(join(entry.path, ".git")).catch(() => undefined);
+      const owners = (panes ?? []).filter((pane) =>
+        [pane.workingDirectory, pane.foregroundWorkingDirectory].some(
+          (path) => path && projectPathContains(entry.path, path, platform),
+        ),
+      );
+      return {
+        ...entry,
+        owner: owners.length ? owners.map((pane) => pane.name ?? pane.paneId).join(", ") : "unattributed",
+        ...(metadata
+          ? {
+              ageSeconds: Math.max(0, Math.floor((Date.now() - metadata.birthtimeMs) / 1000)),
+              ageKind: "worktree-registration" as const,
+            }
+          : {}),
+      };
+    }),
+  );
 }

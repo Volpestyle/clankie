@@ -77,6 +77,7 @@ interface HerdrPluginReport {
 
 export interface InstallDoctorReport {
   readonly ok: true;
+  readonly checkouts?: import("@clankie/protocol").CheckoutReport | { status: "unavailable"; detail: string };
   readonly resources?: FleetResourceSnapshot | { readonly status: "unavailable"; readonly detail: string };
   readonly kind: InstallKind;
   readonly version: string;

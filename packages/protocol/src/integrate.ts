@@ -1,3 +1,4 @@
+import { CheckoutSyncResultSchema } from "./checkouts.ts";
 import { z } from "zod";
 
 export const INTEGRATE_PATH = "/v1/integrate";
@@ -66,6 +67,7 @@ const CommandRecordSchema = z.object({
 const IntegrationRepoSchema = z.object({
   name: z.enum(["core", "app"]),
   source: z.string(),
+  ownerCheckoutSync: CheckoutSyncResultSchema.optional(),
   origin: z.string(),
   base: Sha,
   directory: z.string(),

@@ -1,3 +1,4 @@
+import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, open } from "node:fs/promises";
@@ -353,6 +354,7 @@ export class IntegrationQueue {
                     `${repo.name}: previous push unconfirmed; inspect origin and start a fresh batch`,
                   );
                 repo.push.state = "confirmed";
+                repo.ownerCheckoutSync = await syncOwnerCheckout(repo.source);
                 await this.save(recorded);
               }
               if (repo.push?.state === "confirmed") {
@@ -405,6 +407,7 @@ export class IntegrationQueue {
               if (landed !== repo.head)
                 throw Error(`${repo.name}: push ${repo.push.state}; no automatic retry (see ${log})`);
               repo.push.state = "confirmed";
+              repo.ownerCheckoutSync = await syncOwnerCheckout(repo.source);
               await this.save(recorded);
             }
             recorded.state = "pushed";

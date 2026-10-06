@@ -161,6 +161,12 @@ export interface CaptainPort {
     conversationId: string,
     review?: import("./fleet-efficiency-tools.ts").FleetEfficiencyReview,
   ): Promise<{ conversationId: string; seats: readonly import("@clankie/protocol").OperatorFleetSeat[] }>;
+  checkoutReport?(): Promise<import("@clankie/protocol").CheckoutReport>;
+  syncCheckouts?(repository?: string): Promise<import("@clankie/settings").CheckoutSyncResult[]>;
+  pruneWorktree?(
+    repository: string,
+    path: string,
+  ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
   tidyWorktrees?(
     repository: string,
     mergedInto?: string,

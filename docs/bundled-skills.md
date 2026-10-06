@@ -91,6 +91,10 @@ James's global `herdr` skill may remain for plain harnesses and should likewise
 mirror the resolved `herdr --skill`. A runtime upgraded beyond the packaged pin
 owns its current reference through `herdr --skill`.
 
+The owned `tidy` and `lead` sources teach safe owner-checkout sync, fetched-main
+hire admission and exact-worktree pruning. Update these sources directly; no
+personal skills export or vendor manifest is part of this catalog.
+
 ## Quick-action declarations
 
 A skill can expose a normal Clankie turn through this optional frontmatter:

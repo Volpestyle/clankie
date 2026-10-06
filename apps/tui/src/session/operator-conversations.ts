@@ -88,6 +88,7 @@ export function createCaptainRouteClient(input: {
 export function createCaptainOperatorConversationClient(
   fetcher: CaptainRouteFetcher,
   ownerFetcher?: CaptainRouteFetcher,
+  options: { includeCheckouts?: boolean } = {},
 ): OperatorConversationClient {
   const dispatch: OperatorConversationServiceDispatch = async (request, signal) => {
     const ownerError =
@@ -138,7 +139,7 @@ export function createCaptainOperatorConversationClient(
       );
     }
   };
-  return createOperatorConversationServiceClient(dispatch);
+  return createOperatorConversationServiceClient(dispatch, options);
 }
 
 /** A display-safe client error whose message never contains a response body. */
