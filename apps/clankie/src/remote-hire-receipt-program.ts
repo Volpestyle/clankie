@@ -64,6 +64,9 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
                 write({ claim, hostIdentity: identity, openedAt: Date.now(), state: "reserved" }, true);
             return { reserved: true };
         }
+        const unknownRecovery = request.op === "recover" && request.recovery?.disposition === "abandoned-unknown";
+        if (unknownRecovery && !fs.existsSync(file))
+            throw new Error("Unknown abandonment requires the existing original launch journal");
         const record = request.op === "recover" && !fs.existsSync(file)
             ? { claim, hostIdentity: identity, openedAt: Date.now(), state: "recovered" } : read();
         if (request.op === "launch") {
@@ -76,6 +79,20 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
             return record.evidence;
         if (request.op !== "recover" && record.state !== "reserved")
             throw new Error("Host history crossed the launch boundary");
+        const priorUnknown = record.recoveries?.at(-1);
+        if (priorUnknown?.request?.disposition === "abandoned-unknown" &&
+            (!unknownRecovery || !isDeepStrictEqual(priorUnknown.request, request.recovery)))
+            throw new Error("Original unknown abandonment has a different retained disposition");
+        if (unknownRecovery &&
+            ((record.state !== "launching" && !(record.state === "recovered" && priorUnknown?.request?.disposition === "abandoned-unknown")) ||
+                request.recovery.paneId !== undefined || request.recovery.message !== undefined || request.recovery.beforeIds !== undefined))
+            throw new Error("Unknown abandonment requires unmapped original launching history");
+        if (unknownRecovery) {
+            const originalKey = JSON.parse(claim.receiptKey);
+            if (!Array.isArray(originalKey) || originalKey[0] !== claim.target.fleet ||
+                originalKey[1] !== "codex" || originalKey[2] !== request.recovery.cwd || originalKey[3] !== "new" || request.recovery.harness !== "codex")
+                throw new Error("Unknown abandonment requires the exact fresh Codex launch identity");
+        }
         const run = (program, argv) => child.execFileSync(program, argv, {
             encoding: "utf8",
             timeout: 15_000,
@@ -121,9 +138,11 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
 
         if (request.op === "recover") {
             const recovery = request.recovery;
-            if (!recovery || !["delivered", "abandoned"].includes(recovery.disposition))
+            if (!recovery || !["delivered", "abandoned", "abandoned-unknown"].includes(recovery.disposition))
                 throw new Error("Invalid recovery disposition");
-            const rawPane = recovery.paneId.slice(claim.target.fleet.length + 1);
+            if (!unknownRecovery && (typeof recovery.paneId !== "string" || !recovery.paneId.startsWith(claim.target.fleet + "/") || recovery.paneId.length <= claim.target.fleet.length + 1))
+                throw new Error("Original recovery allocation is incomplete");
+            const rawPane = unknownRecovery ? undefined : recovery.paneId.slice(claim.target.fleet.length + 1);
             const allocationPane = panes.find(pane => pane.pane_id === rawPane);
             const allocation = { paneId: recovery.paneId, present: !!allocationPane,
                 ...(allocationPane ? { terminalId: claim.target.fleet + "/" + allocationPane.terminal_id,
@@ -221,12 +240,15 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
             }
             const after = inventory("pane", "panes");
             if (digest(panes.map(pane => [pane.pane_id,pane.terminal_id,pane.agent_session]).sort()) !== digest(after.map(pane => [pane.pane_id,pane.terminal_id,pane.agent_session]).sort())) throw new Error("Native allocation changed during recovery");
+            const observedAt = Date.now();
             const proof = { receiptId: claim.receiptId, receiptKey: claim.receiptKey,
                 fingerprint: claim.fingerprint, target: claim.target, hostIdentity: identity,
-                census: { observedAt: Date.now(), panes: panes.length, processes: processes.length,
+                census: { observedAt, panes: panes.length, processes: processes.length,
                     sessions: agents.filter(agent => agent.agent_session != null).length,
                     sha256: digest([panes,agents,processes]) },
-                journal: "authenticated-recovery", disposition: recovery.disposition, allocation,
+                journal: "authenticated-recovery", disposition: recovery.disposition,
+                allocation: unknownRecovery ? {outcome:"unknown", launchHistory:"launching",
+                    openedAt:record.openedAt, abandonedAt:observedAt, freshIntentAllowed:true} : allocation,
                 ...(delivery ? {delivery} : {}) };
             write({...record, state:"recovered", recoveries:[...(record.recoveries ?? []),{request:recovery,evidence:proof}]}, !fs.existsSync(file));
             return proof;

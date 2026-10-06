@@ -98,6 +98,15 @@ channel remains. James's independent Swarm fleet and installs are unaffected.
 - Fenced task claims between agents go away in phase 3. Work ownership already
   lives in the tracker.
 
+Operator receipt recovery distinguishes a mapped abandonment from
+`abandoned-unknown`. The latter requires an existing authenticated fresh Codex
+launch journal and a complete current host census, retains unknown allocation
+fate and permanently fences the original. Choosing it explicitly permits
+separately new work through fresh-intent admission; it cannot prove no launch or
+grant ownership of an observed pane. Every new UUID, brief, owner, project and
+target check still applies. See [receipt recovery](../cli.md)
+for the operator commands.
+
 ## Local fleet authority (VUH-1548)
 
 The VUH-1527 fleet grant also covers `default`, Clankie's connected local Herdr

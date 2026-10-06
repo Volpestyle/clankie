@@ -173,11 +173,21 @@ export class DeliveryFence {
     const previous = this.records.get(key);
     const proof = HireRecoveryEvidenceSchema.parse(evidence);
     const channel = proof.disposition === "delivered" && proof.delivery?.receiptId === messageId;
+    const unknown = proof.disposition === "abandoned-unknown";
     if (
       this.unreadable ||
       previous?.messageId !== messageId ||
       previous.settlement ||
       proof.fingerprint !== previous.fingerprint ||
+      (unknown &&
+        (!previous.remoteAdmission ||
+          !previous.remoteLaunchCommitted ||
+          !previous.recoveryRequested ||
+          previous.paneId ||
+          previous.sessionId ||
+          previous.occupantId ||
+          previous.completed ||
+          !isDeepStrictEqual(proof.target, previous.remoteAdmission.target))) ||
       (!channel && (proof.receiptId !== messageId || proof.receiptKey !== key))
     )
       throw new Error("Recovery does not match the retained original receipt");

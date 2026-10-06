@@ -19,6 +19,8 @@ const live = JSON.parse(
   ),
 );
 const proof = HireRecoveryEvidenceSchema.parse(live.evidence);
+if (!("paneId" in proof.allocation)) throw new Error("PC golden must retain its mapped original allocation");
+const originalPane = proof.allocation.paneId;
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
@@ -31,7 +33,7 @@ async function fixture() {
   fence.begin(proof.receiptKey, {
     messageId: proof.receiptId,
     fingerprint: proof.fingerprint,
-    paneId: proof.allocation.paneId,
+    paneId: originalPane,
     remoteLaunchCommitted: true,
   });
   fence.settleRecovery(proof.receiptKey, proof.receiptId, proof);

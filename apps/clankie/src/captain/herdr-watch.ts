@@ -2227,7 +2227,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public async settleHireReceipt(
     receiptId: string,
     guard?: () => Promise<void>,
-    disposition: "not-launched" | "delivered" | "abandoned" = "not-launched",
+    disposition: "not-launched" | "delivered" | "abandoned" | "abandoned-unknown" = "not-launched",
   ): Promise<HireReceiptSettlement> {
     const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
     if (!guard) return refused("Operator settlement authority is required; nothing settled.");
@@ -2276,10 +2276,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private async recoverHireReceipt(
     receiptId: string,
     guard: () => Promise<void>,
-    disposition: "delivered" | "abandoned",
+    disposition: "delivered" | "abandoned" | "abandoned-unknown",
   ): Promise<HireReceiptSettlement> {
     const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
     try {
+      if (this.closed) return refused("Native hire service is closed; original remains fenced.");
+      const unknown = disposition === "abandoned-unknown";
       const channel = disposition === "delivered" ? await this.channelReceipt?.(receiptId) : undefined;
       if (disposition === "delivered" && !channel)
         return refused("Exact original channel receipt is unavailable.");
@@ -2296,7 +2298,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const originals = this.hireReceipts
         .entries()
         .filter(([, receipt]) =>
-          disposition === "abandoned"
+          disposition !== "delivered"
             ? receipt.messageId === receiptId
             : receipt.fingerprint === channel!.receipt.fingerprint &&
               splitFleetQualified(receipt.paneId ?? "")?.fleet ===
@@ -2305,15 +2307,30 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (originals.length !== 1 || !this.remoteHireReceipts)
         return refused("Original allocated remote hire is missing or ambiguous.");
       const [key, receipt] = originals[0]!;
-      if (!receipt.paneId || this.activeHires.has(key))
+      if ((!unknown && !receipt.paneId) || this.activeHires.has(key))
         return refused("Original allocation is missing or still active.");
-      const [fleet, harness, cwd] = JSON.parse(key) as string[];
-      if (!fleet || !harness || !cwd || splitFleetQualified(receipt.paneId)?.fleet !== fleet)
+      const [fleet, harness, cwd, nativeSession] = JSON.parse(key) as string[];
+      if (!fleet || !harness || !cwd || (!unknown && splitFleetQualified(receipt.paneId!)?.fleet !== fleet))
         return refused("Original remote allocation identity is incomplete.");
+      if (
+        unknown &&
+        (harness !== "codex" ||
+          nativeSession !== "new" ||
+          !receipt.remoteAdmission ||
+          !receipt.remoteLaunchCommitted ||
+          receipt.remoteAdmission.target.fleet !== fleet ||
+          receipt.paneId ||
+          receipt.sessionId ||
+          receipt.occupantId)
+      )
+        return refused("Unknown abandonment requires an unmapped original fresh Codex launch claim.");
       let claim = this.remoteClaim(key, receipt);
+      // Unknown recovery must fence the original before any further authority/host await.
+      if (unknown) this.hireReceipts.update(key, receipt.messageId, { recoveryRequested: true });
       await guard();
-      if (this.activeHires.has(key)) return refused("Original hire is active; recovery cannot begin.");
-      this.hireReceipts.update(key, receipt.messageId, { recoveryRequested: true });
+      if (this.closed || this.activeHires.has(key))
+        return refused("Original hire is active or service closed; recovery cannot begin.");
+      if (!unknown) this.hireReceipts.update(key, receipt.messageId, { recoveryRequested: true });
       if (!claim) {
         claim = await this.remoteHireReceipts.claim(fleet, {
           receiptId: receipt.messageId,
@@ -2329,12 +2346,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
         });
       }
       await guard();
+      if (this.closed || this.activeHires.has(key))
+        return refused("Original hire is active or service closed; recovery cannot begin.");
       const evidence = await this.remoteHireReceipts.recover(claim, {
         disposition,
-        paneId: receipt.paneId,
+        ...(unknown ? {} : { paneId: receipt.paneId! }),
         cwd,
         harness,
-        ...(receipt.beforeIds ? { beforeIds: receipt.beforeIds } : {}),
+        ...(!unknown && receipt.beforeIds ? { beforeIds: receipt.beforeIds } : {}),
         ...(channel
           ? {
               message: {
@@ -2346,7 +2365,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           : {}),
       });
       await guard();
-      if (this.activeHires.has(key)) return refused("Original hire became active; receipt remains fenced.");
+      if (this.closed || this.activeHires.has(key))
+        return refused("Original hire became active or service closed; receipt remains fenced.");
+      if (evidence.disposition !== disposition)
+        return refused("Host recovery disposition changed; original remains fenced.");
       if (channel) channel.settle(evidence);
       else this.hireReceipts.settleRecovery(key, receiptId, evidence);
       return { state: disposition === "delivered" ? "settled-delivered" : "abandoned", receiptId, evidence };

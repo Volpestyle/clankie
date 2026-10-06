@@ -100,6 +100,13 @@ Managed PC Codex hires set their assigned worker name on the fresh native thread
 before briefing it. A native naming refusal prevents the brief; inspect the
 original hire receipt and do not replay it. Resumed sessions keep their names.
 
+With authorized operator access, `clankie hire-receipt settle ORIGINAL_ID
+abandoned-unknown` records an explicit decision to abandon an unmapped fresh
+remote Codex launch and permit separately new intent. It requires the original
+authenticated launch journal and fresh census; allocation fate stays unknown.
+The original is never retried. It grants no pane ownership, close or adoption
+authority. Known allocations use the ordinary recovery disposition instead.
+
 The bridge observes schemas and authenticated runtime revisions every five
 seconds. Deploys schedule local managed Codex refresh through its original
 controller, private config version and loaded root/descendant inventory, at
