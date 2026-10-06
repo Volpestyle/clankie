@@ -11,7 +11,7 @@ import {
 } from "@clankie/protocol";
 import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 
-export function runtimeHealthSnapshot(
+function runtimeHealthSnapshot(
   settings: ClankieSettings,
   observation: RuntimeHealthObservation,
 ): RuntimeHealthSnapshot {

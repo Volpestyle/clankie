@@ -21,7 +21,7 @@ interface Grant extends FixtureIdentity {
   access: string;
   refresh: string;
 }
-export interface GoogleFixtureRequest {
+interface GoogleFixtureRequest {
   path: string;
   method: string;
   authorization?: string;
