@@ -106,6 +106,44 @@ The harness observer now also uses bounded fresh native HTTP, preserving its
 two-second GET/five-second POST timeouts and observation cadence. The exact
 cause of that observer timeout was not traced independently.
 
+## Default five-minute passage
+
+The corrected actual `index.ts` run on committed, unmodified
+`2774834030c5d588f8726d9e7020efb108059cd6` passed the unconfigured runtime
+defaults: 300,000 ms window, 10,000 ms interval, 10% one-core CPU and 250 ms
+health p95. No warmup, profiler, histogram or comparative client was enabled.
+The policy file was absent. Its 31 samples spanned 300.646 seconds, with
+0.6145% mean CPU and 3.1647 ms health p95. All 31 passive HTTP observations
+used fresh sockets; the largest full HTTP latency was 53.1659 ms.
+
+The canary released its own hold, retained the independent reviewer hold and
+advanced the healthy checkpoint to the tested commit. Runtime and process
+health boot identities stayed unchanged. The child exited on the harness's
+SIGTERM with code 143, its private HOME was removed, and the fleet slot was
+released. The preceding helper cutover and prior checkpoint were seeded; this
+proves the full-service default canary, not execution of the updater helper.
+It exercises no model, provider, Discord, browser, Herdr fleet or AWS workload.
+
+The [passing artifact](default-five-minute-pass.json) retains initial/final
+status, the checkpoint, passive HTTP observations, policy source, exact source
+digests and the raw receipt SHA256. All seven source digests were verified
+again before packaging; the final evidence commit changes only documentation.
+
+Manual proof command, run from the owned worktree:
+
+```sh
+~/.herdr-handoffs/clankie-backlog-20261003/bin/heavy env -u NODE_PATH node \
+  --import ./apps/clankie/node_modules/tsx/dist/loader.mjs \
+  apps/clankie/scripts/runtime-canary-live-proof.ts --run --healthy \
+  --output .local/runtime-canary-health-latency-default-300s-native-observer.json
+```
+
+Validation: 28 focused real HTTP/policy/real-child canary tests passed, including
+the CPU-burning failure and deploy-hold paths. Clankie typecheck passed after
+the observer correction, and scoped lint/format plus `git diff --check` passed.
+Every test, typecheck and owned runtime lifetime used the fleet limiter. The
+full integrator gate was not run here.
+
 ## Separate CPU and alerting work
 
 The observed live commit does not contain VUH-1699's
@@ -113,8 +151,11 @@ The observed live commit does not contain VUH-1699's
 proof work during peer-roster discovery; it does not change the health handler.
 These observations do not establish whether its idle CPU fix works.
 
-Oren's VUH-1702 candidate exists on his branch but was not in the fetched
-`origin/main` or the observed live pin. A native alert receipt must be verified
+During this investigation Pell updated the live runtime. At 04:47:52 UTC on
+October 6, the closing read-only `/health` observation was on
+`2c96dd84a13886a02d161de1f39f9d8e47f2e26f`, PID 10835, also the fetched
+`origin/main`. It exposed neither `runtimeHealth` nor `processHealth`.
+Oren's VUH-1702 candidate was still absent. A native alert receipt must be verified
 after that integration; this investigation cannot claim delivery from an absent
 hook. The managed collector's fetch transport also warrants review against its
 own deployed Node version; the local Node reproduction does not prove an AWS
