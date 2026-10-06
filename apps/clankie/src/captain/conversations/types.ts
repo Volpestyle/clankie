@@ -38,6 +38,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "connections" }
   | { op: "work_repos" }
   | { op: "work_items" }
+  | { op: "work_project" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
@@ -69,6 +70,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "connections" }
   | { op: "work_repos" }
   | { op: "work_items" }
+  | { op: "work_project" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }

@@ -1,3 +1,4 @@
+import { legacyWorkItem } from "@clankie/protocol/work-items";
 import {
   CAPTAIN_LANE_OBSERVATION_PATH,
   CAPTAIN_TURN_METRICS_PATH,
@@ -362,6 +363,30 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         repos: "repos" in result ? result.repos : [],
       });
     }
+    if (parsed.data.op === "work_project") {
+      try {
+        if (!ctx.dependencies.workItems) throw new Error("Work tracking is not running on this host");
+        const result = await ctx.dependencies.workItems.handle(
+          { action: "project", repo: parsed.data.repoId },
+          false,
+        );
+        if (!("releaseSource" in result)) throw new Error("Unexpected project work result");
+        return context.json({
+          op: "work_project",
+          schemaVersion: 1,
+          result: { outcome: "ready", ...result },
+        });
+      } catch {
+        return context.json({
+          op: "work_project",
+          schemaVersion: 1,
+          result: {
+            outcome: "unavailable",
+            message: "This project’s saved work tracker can’t be read here. Read the work again.",
+          },
+        });
+      }
+    }
     if (parsed.data.op === "work_items") {
       const repoId = parsed.data.repoId;
       if (ctx.dependencies.workItems === undefined)
@@ -380,7 +405,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return context.json({
           op: "work_items",
           schemaVersion: 1,
-          result: { outcome: "ready", repo: result.repo, items: result.items },
+          result: {
+            outcome: "ready",
+            repo: result.repo,
+            items: parsed.data.statusVersion === 2 ? result.items : result.items.map(legacyWorkItem),
+          },
         });
       } catch (error) {
         if (error instanceof WorkRequestError && error.code === "needs_decision") {

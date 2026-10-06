@@ -34,6 +34,8 @@ import {
   WorkSignalSchema,
   WorkReposResultSchema,
   WorkItemsResultSchema,
+  WorkProjectResultSchema,
+  type WorkProjectResult,
 } from "./work-items.ts";
 import {
   WorkItemWriteRequestSchema,
@@ -353,9 +355,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     })
     .strict(),
   z
+    .object({ op: z.literal("work_project"), schemaVersion: z.literal(1), repoId: WorkRepoSchema.shape.id })
+    .strict(),
+  z
     .object({
       op: z.literal("work_items"),
       schemaVersion: z.literal(1),
+      statusVersion: z.literal(2).optional(),
       repoId: WorkRepoSchema.shape.id,
       /** Only items carrying this label, case-insensitively (a role station's backlog). */
       label: WorkItemLabelSchema.optional(),
@@ -565,6 +571,10 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
 export type OperatorConversationServiceRequest = z.infer<typeof OperatorConversationServiceRequestSchema>;
 
 /** A repo's work items as a device sees them (ADR 0191). */
+export type OperatorWorkProjectOutcome =
+  | (WorkProjectResult & { readonly outcome: "ready" })
+  | { readonly outcome: "unavailable"; readonly message: string };
+
 export type OperatorWorkItemsOutcome =
   | (WorkItemsResult & { readonly outcome: "ready" })
   | {
@@ -759,6 +769,16 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("work_repos"),
       schemaVersion: z.literal(1),
       repos: WorkReposResultSchema.shape.repos,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_project"),
+      schemaVersion: z.literal(1),
+      result: z.discriminatedUnion("outcome", [
+        WorkProjectResultSchema.extend({ outcome: z.literal("ready") }).strict(),
+        z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
+      ]),
     })
     .strict(),
   z
@@ -1075,7 +1095,11 @@ export interface OperatorConversationServiceClient {
   /** Repos registered for work tracking on this machine (ADR 0191). */
   workRepos?(): Promise<readonly WorkRepo[]>;
   /** One repo's work items, or why they cannot be read yet. */
-  workItems?(repoId: string, options?: { readonly label?: string }): Promise<OperatorWorkItemsOutcome>;
+  workProject?(repoId: string): Promise<OperatorWorkProjectOutcome>;
+  workItems?(
+    repoId: string,
+    options?: { readonly label?: string; readonly statusVersion?: 2 },
+  ): Promise<OperatorWorkItemsOutcome>;
   /** One owner-authorized intent; transport loss returns its original ID without replay. */
   workItemWrite?(input: WorkItemWriteRequest): Promise<WorkItemWriteReceipt>;
   /** Read the original intent's receipt; never dispatch or retry a mutation. */
@@ -1381,12 +1405,18 @@ export function createOperatorConversationServiceClient(
       if (result.op !== "work_repos") throw new Error(`Unexpected ${result.op} result for work_repos`);
       return result.repos;
     },
+    async workProject(repoId) {
+      const result = await dispatch({ op: "work_project", schemaVersion: 1, repoId });
+      if (result.op !== "work_project") throw new Error(`Unexpected ${result.op} result for work_project`);
+      return result.result;
+    },
     async workItems(repoId, options) {
       const result = await dispatch({
         op: "work_items",
         schemaVersion: 1,
         repoId,
         ...(options?.label === undefined ? {} : { label: options.label }),
+        ...(options?.statusVersion === undefined ? {} : { statusVersion: options.statusVersion }),
       });
       if (result.op !== "work_items") throw new Error(`Unexpected ${result.op} result for work_items`);
       return result.result;

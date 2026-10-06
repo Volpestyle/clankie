@@ -16,6 +16,7 @@ import { runRivalsMenu } from "./rivals-menu.ts";
 import { onOff, runSettingsMenu } from "./settings-menu.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
+import { runWorkCommand } from "./command/work.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runAgentsCommand, splitQuotedArguments } from "./command/agents.ts";
 import { runAccountsCommand } from "./command/accounts.ts";
@@ -341,6 +342,24 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult(
           "/evaluator",
           result.ok ? formatEvaluatorStatus(result.evaluator) : result.error,
+          result.ok ? "success" : "error",
+        );
+      },
+    },
+    {
+      name: "work",
+      aliases: [],
+      description: "Read project work, releases and goals; set the repo tracker",
+      argumentHint: "[project|list|init --release-source tags|milestones|both --release-lane NAME]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        const result = await runWorkCommand(
+          splitQuotedArguments(argument),
+          context.repoRoot ? { cwd: context.repoRoot } : {},
+        );
+        shell.insertCommandResult(
+          "/work",
+          JSON.stringify(result.body, null, 2),
           result.ok ? "success" : "error",
         );
       },

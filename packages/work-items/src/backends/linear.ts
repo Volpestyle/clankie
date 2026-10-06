@@ -66,6 +66,8 @@ interface LinearIssue {
   readonly parent?: { readonly identifier?: string; readonly id?: string } | null;
   readonly title: string;
   readonly priority?: number | { readonly value?: number };
+  readonly milestone?: { readonly id: string; readonly name: string } | null;
+  readonly projectMilestone?: { readonly id: string; readonly name: string } | null;
   readonly state?: string;
   readonly description?: string | null;
   readonly owner?: string;
@@ -95,7 +97,7 @@ interface LinearStatus {
   readonly type: string;
 }
 
-const FIELDS = [
+export const LINEAR_WORK_ITEM_FIELDS = [
   "title",
   "description",
   "status",
@@ -105,6 +107,7 @@ const FIELDS = [
   "updatedAt",
   "labels",
   "parentId",
+  "milestone",
 ];
 const PAGE_SIZE = 50;
 
@@ -129,9 +132,11 @@ function statusType(issue: LinearIssue): string {
 }
 
 export function linearStatusOf(type: string, name: string): WorkItemStatus {
+  if (type === "backlog" || type === "triage") return "backlog";
   if (type === "completed") return "done";
   if (type === "canceled" || type === "duplicate") return "canceled";
   if (type === "started") return /review/iu.test(name) ? "in_review" : "in_progress";
+  if (/^(backlog|triage)$/iu.test(name)) return "backlog";
   if (/^done|completed|closed$/iu.test(name)) return "done";
   if (/^cancel/iu.test(name)) return "canceled";
   if (/review/iu.test(name)) return "in_review";
@@ -146,15 +151,17 @@ export function pickLinearState(statuses: readonly LinearStatus[], status: WorkI
     list.find((entry) => pattern.test(entry.name));
   const started = ofType("started");
   const choice =
-    status === "done"
-      ? (named(ofType("completed"), /^done$/iu) ?? ofType("completed")[0])
-      : status === "canceled"
-        ? (named(ofType("canceled"), /^cancel/iu) ?? ofType("canceled")[0])
-        : status === "in_review"
-          ? (named(started, /review/iu) ?? started[0])
-          : status === "in_progress"
-            ? (named(started, /^in progress$/iu) ?? started.find((entry) => !/review/iu.test(entry.name)))
-            : (named(ofType("unstarted"), /^todo$/iu) ?? ofType("unstarted")[0] ?? ofType("backlog")[0]);
+    status === "backlog"
+      ? (named(ofType("backlog"), /^backlog$/iu) ?? ofType("backlog")[0] ?? ofType("triage")[0])
+      : status === "done"
+        ? (named(ofType("completed"), /^done$/iu) ?? ofType("completed")[0])
+        : status === "canceled"
+          ? (named(ofType("canceled"), /^cancel/iu) ?? ofType("canceled")[0])
+          : status === "in_review"
+            ? (named(started, /review/iu) ?? started[0])
+            : status === "in_progress"
+              ? (named(started, /^in progress$/iu) ?? started.find((entry) => !/review/iu.test(entry.name)))
+              : (named(ofType("unstarted"), /^todo$/iu) ?? ofType("unstarted")[0] ?? ofType("backlog")[0]);
   if (choice === undefined) throw new Error(`The Linear team has no state for ${status}`);
   return choice.name;
 }
@@ -224,6 +231,9 @@ export function createLinearBackend(
       id: issue.identifier ?? issue.id,
       ...(parent == null ? {} : { parent }),
       title: issue.title.slice(0, 200),
+      ...((issue.milestone ?? issue.projectMilestone) == null
+        ? {}
+        : { milestone: issue.milestone ?? issue.projectMilestone }),
       status: linearStatusOf(statusType(issue), statusName(issue)),
       priority: typeof issue.priority === "number" ? issue.priority : (issue.priority?.value ?? 0),
       ...(parsed.owner === undefined && issue.owner === undefined
@@ -297,7 +307,7 @@ export function createLinearBackend(
           ...(options.label === undefined ? {} : { label: options.label }),
           limit: Math.min(PAGE_SIZE, limit - items.length),
           ...(cursor === undefined ? {} : { cursor }),
-          fields: FIELDS,
+          fields: LINEAR_WORK_ITEM_FIELDS,
         })) as { issues?: LinearIssue[]; hasNextPage?: boolean; cursor?: string } | LinearIssue[];
         const issues = Array.isArray(result) ? result : (result.issues ?? []);
         for (const issue of issues) {

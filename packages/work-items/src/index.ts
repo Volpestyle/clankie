@@ -18,3 +18,5 @@ export {
   pickLinearState,
   type LinearToolCall,
 } from "./backends/linear.ts";
+
+export { readProjectWork } from "./project-read.ts";
