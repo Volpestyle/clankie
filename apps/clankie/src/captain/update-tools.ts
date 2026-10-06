@@ -21,7 +21,7 @@ export function runtimeUpdateTools(updater: RuntimeUpdater | undefined, turn: Tu
       name: "update_runtime",
       label: "Update Clankie",
       description:
-        "Fetch and install origin/main (or an explicit branch, SHA or refs/tags/... ref), then detach a guarded restart. The result names the exact target commit and warns of rollback or divergence. Accepted means pending, not healthy. Read runtime_update_status on the next turn; never repeat an uncertain request.",
+        "Update this install, then detach a guarded restart: a source checkout fetches origin/main (or an explicit branch, SHA or refs/tags/... ref); a release install takes the latest official release (or ref vX.Y.Z) and reports upToDate when already current. The result names the exact target commit and warns of rollback or divergence. Accepted means pending, not healthy. Read runtime_update_status on the next turn; never repeat an uncertain request.",
       parameters: Type.Object(
         { ref: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) },
         { additionalProperties: false },

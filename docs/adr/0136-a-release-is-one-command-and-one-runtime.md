@@ -140,3 +140,22 @@ to kill an unowned process. Result readers tolerate unknown optional evidence;
 malformed known records report reconciliation as JSON without retiring locks.
 Tests use actual Git remotes, HTTP CLI calls and isolated native supervisor
 processes. Integration into the live pin belongs to the fleet integrator.
+
+## Release installs update to official releases (2026-10-06)
+
+A source checkout updates to `origin/main`; the owner develops there. A release
+install had no update path: `clankie update` and `update_runtime` were
+unavailable, and rerunning the installer only switched `current` without stopping,
+restarting or verifying anything. Users, and Clankie on their machines, now update
+to the latest official release through the same command and journal. The service
+resolves the release tag and its commit through the GitHub API, then a helper
+bundled in the running release (`apps/tui/bin/release-update-helper.js`) downloads
+and verifies the archive as `install.sh` does, requires its manifest to name the
+accepted version and commit, and unpacks it into `releases/<version>`. It stops
+services through the old release's launcher, switches `current` atomically and
+starts them through the new release's launcher, which must report the new
+revision; otherwise `current` switches back and the old release restarts. The
+old release stays in place throughout, so the helper runs from it without a copy.
+Status, the health canary, the restart guard and self-healing reconciliation are
+shared with checkouts. A release that predates this helper cannot update itself;
+its owner runs the installer once.

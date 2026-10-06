@@ -49,6 +49,9 @@ the console, and `/setup` walks you through the rest:
 3. **Services and a first agent.** Connect accounts with `/connect`, then give a
    first agent a folder and a task. Clankie handles the hire.
 
+Run `clankie update` later to move to the latest release; Clankie can update
+himself the same way.
+
 Everything after the model is optional. Escape or `/cancel` leaves setup;
 `/setup` resumes from the actual device and agent state, and `/setup rooms`
 lists the other settings.

@@ -300,7 +300,7 @@ export function createRuntimeUpdateRoutes(options: {
             deploy,
           )
         : await deploy();
-      return context.json(result, result.accepted ? 202 : 409);
+      return context.json(result, result.accepted ? 202 : result.upToDate ? 200 : 409);
     } catch (error) {
       return context.json(
         { error: authority.current() ? "update_refused" : "operator_revoked", detail: String(error) },

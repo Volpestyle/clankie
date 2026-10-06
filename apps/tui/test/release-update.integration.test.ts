@@ -1,0 +1,164 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, expect, it } from "vitest";
+import { createReleaseUpdater } from "../bin/release-updater.ts";
+import { readRuntimeUpdate, writeRuntimeUpdate, type RuntimeUpdateResult } from "../bin/runtime-update.ts";
+
+const cleanup: Array<() => void> = [];
+afterEach(() => cleanup.splice(0).forEach((step) => step()));
+const authority = { guard: async () => {}, current: () => true };
+const helperPath = resolve(import.meta.dirname, "../bin/release-update-helper.ts");
+
+/** A release whose own `bin/clankie` answers the supervisor calls an update makes. */
+function writeRelease(root: string, version: string, revision: string, restart: "ok" | "fail" = "ok") {
+  mkdirSync(join(root, "bin"), { recursive: true });
+  writeFileSync(join(root, "VERSION"), `${version}\n`);
+  writeFileSync(join(root, "release.json"), JSON.stringify({ schemaVersion: 1, version, revision }));
+  const launcher = join(root, "bin", "clankie");
+  writeFileSync(
+    launcher,
+    `#!${process.execPath}
+const { appendFileSync, realpathSync } = require("node:fs");
+const { dirname, join } = require("node:path");
+const { randomUUID } = require("node:crypto");
+const root = realpathSync(join(dirname(realpathSync(process.argv[1])), ".."));
+const [action, target] = process.argv.slice(2);
+appendFileSync(process.env.RELEASE_CALLS, JSON.stringify({ root, action, target, operation: process.env.CLANKIE_UPDATE_OPERATION }) + "\\n");
+const print = (value, code = 0) => { process.stdout.write(JSON.stringify(value)); process.exitCode = code; };
+if (action === "update") print({ runtime: { root, commit: ${JSON.stringify(revision)}, instanceId: randomUUID(), pid: process.pid } });
+else if (action === "harness") print({ ok: true });
+else if (action === "restart" && ${JSON.stringify(restart)} === "fail") print({ ok: false, services: [{ id: target, label: target, ok: false, error: "fixture restart failed" }] }, 1);
+else print({ ok: true, services: [{ id: target, label: target, ok: true, state: action === "down" ? "unreachable" : "healthy" }] });
+`,
+  );
+  chmodSync(launcher, 0o755);
+}
+
+async function fixture(input: { readonly restart?: "ok" | "fail"; readonly badChecksum?: boolean } = {}) {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
+  cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+  const install = join(home, "install");
+  const old = join(install, "releases", "v1.0.0");
+  writeRelease(old, "v1.0.0", "a".repeat(40));
+  symlinkSync(join("releases", "v1.0.0"), join(install, "current"));
+  mkdirSync(join(home, ".clankie"), { mode: 0o700 });
+  // The published archive, exactly as install.sh downloads and verifies it.
+  const published = join(home, "published");
+  writeRelease(join(published, "clankie"), "v1.1.0", "b".repeat(40), input.restart);
+  const archive = join(home, "clankie-darwin-arm64.tar.gz");
+  execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
+  const digest = input.badChecksum
+    ? "0".repeat(64)
+    : createHash("sha256").update(readFileSync(archive)).digest("hex");
+  const server: Server = createServer((request, response) => {
+    const send = (status: number, body: string | Buffer) => {
+      response.writeHead(status);
+      response.end(body);
+    };
+    if (request.url === "/api/releases/latest") return send(200, JSON.stringify({ tag_name: "v1.1.0" }));
+    if (request.url === "/api/commits/v1.1.0") return send(200, JSON.stringify({ sha: "b".repeat(40) }));
+    if (request.url === "/download/v1.1.0/clankie-darwin-arm64.tar.gz")
+      return send(200, readFileSync(archive));
+    if (request.url === "/download/v1.1.0/clankie-darwin-arm64.tar.gz.sha256")
+      return send(200, `${digest}  clankie-darwin-arm64.tar.gz\n`);
+    send(404, "missing");
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  cleanup.push(() => server.close());
+  const port = (server.address() as { port: number }).port;
+  const env = { HOME: home, PATH: process.env.PATH, RELEASE_CALLS: join(home, "calls.jsonl") };
+  const updater = (releaseRoot: string) =>
+    createReleaseUpdater({
+      releaseRoot,
+      env,
+      helperPath,
+      source: { api: `http://127.0.0.1:${port}/api`, download: `http://127.0.0.1:${port}/download` },
+    });
+  const settled = async (id: string): Promise<RuntimeUpdateResult> => {
+    const directory = join(home, ".clankie", "updates", id);
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      const result = readRuntimeUpdate(directory);
+      if (!["scheduled", "installing", "stopping", "activating", "restarting"].includes(result.phase))
+        return result;
+      await new Promise((done) => setTimeout(done, 100));
+    }
+    throw Error(`Release update did not settle:\n${readFileSync(join(directory, "helper.log"), "utf8")}`);
+  };
+  const calls = () =>
+    existsSync(env.RELEASE_CALLS)
+      ? readFileSync(env.RELEASE_CALLS, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+      : [];
+  return { home, install, old, updater, settled, calls };
+}
+
+it("updates a release install to the latest official release and then reports it current", async () => {
+  const f = await fixture();
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(accepted).toMatchObject({
+    accepted: true,
+    latest: {
+      ref: "latest",
+      oldCommit: "a".repeat(40),
+      newCommit: "b".repeat(40),
+      versions: { old: "v1.0.0", new: "v1.1.0" },
+    },
+  });
+  const result = await f.settled(accepted.pending!);
+  expect(result).toMatchObject({ phase: "healthy", healthy: true, canary: { state: "pending" } });
+  expect(result.harnessRefresh?.ok).toBe(true);
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.1.0"));
+  const next = realpathSync(join(f.install, "releases", "v1.1.0"));
+  expect(JSON.parse(readFileSync(join(next, "release.json"), "utf8")).revision).toBe("b".repeat(40));
+  // The old release stops through its own launcher; the new one starts through its own.
+  const calls = f.calls();
+  expect(
+    calls.filter((call) => call.action === "down").every((call) => call.root === realpathSync(f.old)),
+  ).toBe(true);
+  expect(calls.filter((call) => call.action === "restart").every((call) => call.root === next)).toBe(true);
+  expect(calls.every((call) => call.operation === accepted.pending)).toBe(true);
+  // Once its canary passes, the new release is already the latest official one.
+  writeRuntimeUpdate(join(f.home, ".clankie", "updates", accepted.pending!), {
+    ...result,
+    canary: { state: "passed", holdReleased: true },
+  });
+  expect(await f.updater(next).request("main", authority)).toMatchObject({ accepted: false, upToDate: true });
+});
+
+it("restores the previous release when the new one fails to come up", async () => {
+  const f = await fixture({ restart: "fail" });
+  const accepted = await f.updater(f.old).request("main", authority);
+  const result = await f.settled(accepted.pending!);
+  expect(result).toMatchObject({ phase: "rolled-back", reason: "cutover-failed", rollbackHealthy: true });
+  expect(result.error).toContain("failed health checks");
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+  expect(f.calls().at(-1)).toMatchObject({ action: "update", root: realpathSync(f.old) });
+});
+
+it("refuses an archive whose checksum does not verify before stopping anything", async () => {
+  const f = await fixture({ badChecksum: true });
+  const accepted = await f.updater(f.old).request("main", authority);
+  const result = await f.settled(accepted.pending!);
+  expect(result).toMatchObject({ phase: "failed", reason: "pre-cutover-failed" });
+  expect(result.error).toContain("checksum");
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+  expect(existsSync(join(f.install, "releases", "v1.1.0"))).toBe(false);
+  expect(f.calls()).toEqual([]);
+});
