@@ -1,0 +1,4 @@
+Execution record on deployed source 7ee4da048fe40682d54e013591032ec06e28f727
+Command: pnpm exec oxlint --deny-warnings apps/clankie/src/remote-codex-seats.ts apps/clankie/src/project-process-proof.ts apps/clankie/src/captain/herdr-watch.ts apps/clankie/test/remote-native-sender.integration.test.ts apps/clankie/test/remote-codex-seats.test.ts apps/clankie/test/herdr-watch.test.ts
+Exit code: 0
+Diagnostics: none

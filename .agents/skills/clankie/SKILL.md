@@ -96,6 +96,9 @@ The bridge keeps that ID even when the HTTP reply is lost. Receipt lookup proves
 current admission, tool grant and account binding and never dispatches a write.
 A `No durable native binding` receipt
 means no new message was sent; report the pane and inspect its native binding.
+Managed PC Codex hires set their assigned worker name on the fresh native thread
+before briefing it. A native naming refusal prevents the brief; inspect the
+original hire receipt and do not replay it. Resumed sessions keep their names.
 
 The bridge observes schemas and authenticated runtime revisions every five
 seconds. Deploys schedule local managed Codex refresh through its original

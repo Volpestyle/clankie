@@ -1,17 +1,21 @@
 # Remote native channels and authenticated receipt recovery (VUH-1527)
 
-The [sender and completion repair candidate](sender-completion/CHECKS.md) fixes
-permanent original-registration loss after unavailable native inventory reads,
-requires the visible remote TUI to use its original backend, preserves the hired
-persona through fleet census, and automatically harvests accepted Codex follow-up
-turns once. Source checks and security review are recorded there; deployment and
-a fresh owned-pane PC acceptance remain required before closure.
+Current live result on runtime `7ee4da04`: a new owned PC Codex hire received its
+brief and native follow-up, completed both turns, and woke the original lead for
+the exact follow-up turn. Connected Linear reading and tracker isolation passed;
+loss of the hire's dedicated SSH forward returned explicit unavailable delivery
+without another launch. Hired-worker reports and peer discovery still reject
+native binding. A hand-started `--no-daemon` Codex report stored successfully, but
+its native Queue reply returned `seat_offline` while the TUI remained live.
+VUH-1527 stays open; see the [current acceptance and exact gaps](live/7ee4da04/README.md).
 
-Current live result on runtime `4124acab`: the pane-address repair passed; a new
-owned Codex hire received its brief and native lead follow-up, completed both
-turns, and read Linear through Clankie's isolated bridge. Worker reports and peer
-discovery still refuse native sender binding. VUH-1527 remains open; see the
-[current acceptance and gaps](#deployed-4124acab-pc-acceptance-native-sender-refusal).
+A [fresh-root naming and catalog repair](sender-naming/CHECKS.md) now prevents native automatic title helpers from revoking managed remote sender authority without granting those helpers an exception. Both fixes passed native security review; deployed PC acceptance remains pending.
+
+The deployed [sender and completion repair](sender-completion/CHECKS.md) adds
+original-registration retention after unavailable native inventory reads,
+original-backend proof, shared fleet-qualified persona identity, and exact
+Codex follow-up harvests. Source checks and native security review passed; the
+remaining live failures above still require repair before closure.
 
 The [pane-address repair](pane-address/CHECKS.md) now accepts the same-fleet bare
 or qualified address, keeps kernel/private-seat queries host-local, and resolves

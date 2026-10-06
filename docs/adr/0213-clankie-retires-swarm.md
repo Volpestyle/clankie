@@ -118,6 +118,8 @@ caller confer nothing. Unsupported platforms and shared-daemon Codex processes
 fail closed. This protects against forged local HTTP/env claims, not malicious
 code already controlling the same OS account, Herdr or the service files.
 
+Fresh managed Windows Codex roots receive their assigned worker name through the native metadata API before the first brief. This prevents Codex's automatic title helper from creating a second thread on the private server; strict single-thread sender proof remains. Resumes and existing names are preserved, and an unconfirmed native name stops startup before input. The dedicated server's controller owns startup catalog evidence; its lifecycle hook does not replace it with an embedded-session warning.
+
 Only that listener may place a request identity into the in-memory WeakMap read
 by the application. A temporary per-request proof stays inside the service and
 binds MCP sessions to one pane; no credential is delivered to the worker. The

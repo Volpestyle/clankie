@@ -584,6 +584,8 @@ export async function startCodexAppServerSeat(options: {
   /** Native TOML key=value overrides, applied to server and interactive client. */
   config?: readonly string[];
   resumeThreadId?: string;
+  /** Display name for a fresh managed remote root, before its first input. */
+  threadName?: string;
   /** Operator seats may need time for native hook trust before thread creation. */
   threadStartTimeoutMs?: number;
   /** Report a pending native prompt and keep waiting on the same live server. */
@@ -887,6 +889,24 @@ export async function startCodexAppServerSeat(options: {
     const thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
     if (thread.id !== threadId) throw new Error("Native thread/read identity changed");
+    // Codex 0.160 generates titles by loading an ephemeral second thread when
+    // an unnamed TUI receives its first input. Name our newly allocated root
+    // through the native API before that input; preserve the single-writer
+    // guard rather than treating an analytics tag as sender authority.
+    if (
+      server.remoteRegistration &&
+      !options.resumeThreadId &&
+      !(typeof thread.name === "string" && thread.name.trim())
+    ) {
+      const name = (options.threadName?.trim() || "Clankie worker").slice(0, 128);
+      await client.request("thread/name/set", { threadId, name });
+      options.signal?.throwIfAborted();
+      const named = record(
+        record(await client.request("thread/read", { threadId, includeTurns: false })).thread,
+      );
+      if (named.id !== threadId || named.name !== name)
+        throw new Error("Native worker name was not confirmed; no brief was sent");
+    }
     client.hydrateQuestions(threadId, result);
     server.remoteRegistration?.bindThread(threadId, async () => {
       if (closed || stopped || server.failure()) return false;

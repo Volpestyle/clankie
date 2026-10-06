@@ -28,6 +28,8 @@ export async function codex0160Protocol(
     historicalQuestion?: { callId: string; title: string };
     /** Replay an observed thread identity across native RPC and host-proof goldens. */
     threadId?: string;
+    threadName?: string;
+    rejectName?: boolean;
   } = {},
 ) {
   const threadId = options.threadId ?? randomUUID();
@@ -44,6 +46,7 @@ export async function codex0160Protocol(
   const server = new WebSocketServer({ server: http });
   let peer: WebSocket | undefined;
   let loaded = false;
+  let threadName = options.threadName;
   let nextLoadedInventory: unknown;
   let closed = false;
   let omitUserReceipt = false;
@@ -82,6 +85,7 @@ export async function codex0160Protocol(
     preview: "",
     projectId: null,
     source: "cli",
+    name: threadName ?? null,
     status: active() ? { type: "active", activeFlags: [] } : { type: "idle" },
   });
   const recordReply = (turn: Turn, request: Rpc) => {
@@ -129,6 +133,17 @@ export async function codex0160Protocol(
               return;
             }
             result = { thread: thread() };
+            break;
+          case "thread/name/set":
+            if (
+              request.params.threadId !== threadId ||
+              typeof request.params.name !== "string" ||
+              options.rejectName
+            )
+              throw new Error("Native thread name was rejected");
+            threadName = request.params.name;
+            result = {};
+            notify("thread/name/updated", { threadId, threadName });
             break;
           case "thread/turns/list":
             if (

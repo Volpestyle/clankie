@@ -1,0 +1,25 @@
+{
+  "observedAt": "2026-10-06T12:47:18Z",
+  "runtime": "7ee4da04",
+  "codexVersion": "0.160.1",
+  "ownedPane": "pc/wG:p2",
+  "loaded": {
+    "data": ["01a1113f-9598-7f32-b00e-f5fadb832890", "01a11140-2c16-7761-acd9-387b5fa7e9f9"],
+    "nextCursor": null
+  },
+  "helper": {
+    "id": "01a11140-2c16-7761-acd9-387b5fa7e9f9",
+    "ephemeral": true,
+    "threadSource": "thread_title",
+    "status": {
+      "type": "idle"
+    },
+    "path": null,
+    "parentThreadId": null,
+    "forkedFromId": null,
+    "environments": [],
+    "turns": [],
+    "name": null
+  },
+  "scope": "Read-only RPC on the service-created dedicated SSH forward. These recorded facts grant no current process authority."
+}

@@ -1,0 +1,1 @@
+PASS: exact deployed runtime; unique fresh admission; two original-session native completions; two exact retained harvest claims and completed lead wakes; no SSH-loss turn; no hand-started reply turn; shared fleet ready; five original panes; 26 owned PIDs absent; config hash unchanged.

@@ -162,6 +162,9 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
   const { fleet, shell } = options;
   return async (input) => {
     const launchEnv = { ...input.env };
+    const catalogObserved =
+      options.privateSeat !== undefined && launchEnv.CLANKIE_CODEX_CATALOG_OBSERVED === "1";
+    if (catalogObserved) delete launchEnv.CLANKIE_CODEX_CATALOG_OBSERVED;
     // The catalog is already carried in the dedicated bridge's scoped config.
     // It is controller metadata, not a host environment or account override.
     const catalog = launchEnv.CLANKIE_EXPECTED_TOOL_NAMES;
@@ -196,6 +199,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
                 args: [...input.configArgs, "app-server", "--listen", `ws://127.0.0.1:${remotePort}`],
                 id,
                 bridge: bridge!,
+                catalogObserved,
               })
             : powershellScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id }))
           : posixScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id })),
