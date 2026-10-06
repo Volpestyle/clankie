@@ -1615,6 +1615,71 @@ paths:
         "404": { description: Unknown repo or work item }
         "409": { description: The repo needs its convention decided, or its recorded backend is unavailable }
         "502": { description: The backend refused or failed the request }
+  /v1/linear/routes:
+    get:
+      tags: [Operator]
+      operationId: inspectLinearProjectChats
+      summary: Inspect configured Linear project lead chats
+      security:
+        - operatorBearer: []
+      responses:
+        "200":
+          description: Project destinations; unconfigured projects use global-default with their name
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, projectChats]
+                properties:
+                  schemaVersion: { type: integer, const: 1 }
+                  projectChats: { $ref: "#/components/schemas/LinearProjectChats" }
+        "401": { description: Operator authentication required }
+    put:
+      tags: [Operator]
+      operationId: setLinearProjectChats
+      summary: Replace Linear project destinations with existing ordinary global chats
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectChats]
+              properties:
+                projectChats: { $ref: "#/components/schemas/LinearProjectChats" }
+      responses:
+        "200":
+          description: Saved project destinations
+        "400":
+          description: Malformed or duplicate project destinations
+        "409":
+          description: A destination is not an existing ordinary global chat
+        "401": { description: Operator authentication required }
+  /v1/linear/deliveries:
+    get:
+      tags: [Operator]
+      operationId: inspectLinearWakeDeliveries
+      summary: Inspect offered Linear wake batches, destinations and target consumption receipts
+      description: Offered batches may have failed before delivery. receivedAt is set only by the target chat confirming its original wake; native transport ACKs alone do not mark Linear notifications read.
+      security:
+        - operatorBearer: []
+      responses:
+        "200":
+          description: Up to 100 recent offered batches and receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, deliveries]
+                properties:
+                  schemaVersion: { type: integer, const: 1 }
+                  deliveries:
+                    type: array
+                    items: { type: object }
+        "401": { description: Operator authentication required }
   /v1/linear/target:
     get:
       tags: [Operator]
@@ -5795,6 +5860,17 @@ components:
               owner: { type: string, description: Native pane name or unattributed }
               ageSeconds: { type: number }
               ageKind: { type: string, enum: [worktree-registration] }
+    LinearProjectChats:
+      type: array
+      maxItems: 100
+      items:
+        type: object
+        additionalProperties: false
+        required: [projectId, name, conversationId]
+        properties:
+          projectId: { type: string, format: uuid }
+          name: { type: string, minLength: 1, maxLength: 256 }
+          conversationId: { type: string, pattern: "^[a-zA-Z0-9_-]{1,256}$" }
     LinearWakeRules:
       type: object
       additionalProperties: false

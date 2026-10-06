@@ -62,8 +62,21 @@ export interface LinearActivityEvent {
   readonly organizationId?: string | undefined;
   /** Canonical issue UUID from signed resource data or its retained signed URL mapping. */
   readonly issueId?: string | undefined;
-  /** Context read from the verified connection; never actor, routing, or wake-rule authority. */
-  readonly issueContext?: { readonly id: string; readonly identifier?: string; readonly title: string };
+  /** Context read for the signed issue UUID through the verified workspace connection. */
+  readonly issueContext?: {
+    readonly id: string;
+    readonly identifier?: string;
+    readonly title: string;
+    readonly project?: { readonly id: string; readonly name: string };
+  };
+  readonly projectContext?: { readonly id: string; readonly name: string };
+  /** Host-selected destination, retained with this signed activity. */
+  readonly routing?: {
+    readonly conversationId: string;
+    readonly reason: "project_lead" | "project_fallback" | "default";
+  };
+  readonly notificationReceiver?: { readonly userId: string; readonly workspaceId: string };
+  readonly notificationTypes?: readonly string[];
   /** Host admission retained by an exact write receipt, never a provider-supplied owner. */
   readonly conversationOwner?: ConversationOwner | undefined;
   /** When the host admitted this saved revision; delayed echoes cannot renew ownership. */
@@ -174,6 +187,36 @@ export function linearActivityIssueId(
       record(activity.data.issue).id,
       ...(activity.type === "Reaction" ? [record(activity.data.comment).issueId] : []),
     ]);
+}
+
+/** Exact signed project UUIDs, or the project read for a verified signed issue. */
+export function linearActivityProject(
+  activity: LinearActivityEvent,
+): { id: string; name?: string } | undefined {
+  const issue = activity.type === "Issue" ? activity.data : record(activity.data.issue);
+  const update = activity.type === "ProjectUpdate" ? activity.data : record(activity.data.projectUpdate);
+  const project = activity.type === "Project" ? activity.data : record(activity.data.project);
+  const id = consistentUuid([
+    activity.type === "Project" ? activity.data.id : undefined,
+    activity.data.projectId,
+    project.id,
+    issue.projectId,
+    record(issue.project).id,
+    update.projectId,
+    record(update.project).id,
+    activity.issueContext?.project?.id,
+    activity.projectContext?.id,
+  ]);
+  if (!id) return;
+  const names = [
+    project.name,
+    record(issue.project).name,
+    record(update.project).name,
+    activity.issueContext?.project?.name,
+    activity.projectContext?.id === id ? activity.projectContext.name : undefined,
+  ];
+  const name = names.find((name): name is string => typeof name === "string" && name.trim().length > 0);
+  return { id, ...(name === undefined ? {} : { name: name.slice(0, 256) }) };
 }
 
 /** A signed comment's full parent UUID, never a title or abbreviated URL fragment. */
@@ -713,6 +756,10 @@ export function linearActivityPrompt(activity: LinearActivityEvent): string {
       issue.title ?? (activity.issueId ? "Title unavailable" : linearSubject(activity.type, activity.data)),
     ),
     resource: activity.type,
+    ...(linearActivityProject(activity) ? { project: linearActivityProject(activity) } : {}),
+    ...(activity.routing
+      ? { destination: activity.routing.conversationId, route: activity.routing.reason }
+      : {}),
     action: activity.action,
     ...(changed.length ? { changed } : {}),
     ...(activity.type === "Comment" ? { comment: compact(activity.data.body, 600) } : {}),

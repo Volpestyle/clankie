@@ -7,16 +7,24 @@ Amended by James in [VUH-1678](https://linear.app/vuhlp/issue/VUH-1678),
 [ADR 0218's Linear work-routing extension](0218-native-seats-drive-their-attached-conversation.md#extension--linear-work-ownership-2026-10-04)
 and the separate inbox protocol. Amends
 [ADR 0189 (Linear echoes)](0189-his-own-linear-activity-does-not-wake-him.md).
+Amended by James in [VUH-1743](https://linear.app/vuhlp/issue/VUH-1743),
+2026-10-06: project activity goes to its configured lead chat, otherwise
+`global-default` with the project named; provider notifications are marked read
+only after that target chat confirms receipt of the original wake.
 
 ## Amendment — one ordinary chat receives signed Linear activity, 2026-10-04
 
 Verified webhook activity is the input to the existing VUH-1549 actor/type rule
-engine. A qualifying event wakes one configured ordinary global conversation;
-`linearWebhook.wakeConversationId` defaults to `global-default`. The lead
-conversation chooses any delegation. An owner who prefers a Linear place can
-select an ordinary owner-openable chat. Issue ownership, parent-update authors,
-and native worker recipients do not select a wake destination. A selected chat's
-existing native operator seat can receive the wake through its normal channel.
+engine. Each qualifying event wakes one ordinary global conversation. Explicit
+`linearWebhook.projectChats` entries map verified Linear project UUIDs to existing
+lead chats. Unconfigured projects and removed lead chats go to `global-default`
+with the project named. Nonproject activity uses `linearWebhook.wakeConversationId`,
+default `global-default`. The lead chooses any delegation. Assignees, parent-update
+authors and native workers do not select destinations. Signed project fields or
+bounded connected reads of the exact signed issue/update parent supply project
+context; URL slugs cannot establish project identity. The external journal and
+delivery history record the project and selected destination. A chat's attached
+native operator receives the wake through its existing channel.
 
 The compact event carries the issue ID and title where available, what changed,
 who acted, and the Linear link. A Comment hook can contain only the issue UUID.
@@ -26,15 +34,37 @@ signed actor/resource/change authority. If the title remains unavailable, the
 event says `Title unavailable` and retains its signed UUID/link; it is not dropped.
 Bursts coalesce into one wake. Nonmatching signed
 activity remains visible in the normal chat without starting a turn. The special
-Linear inbox conversation, read/ack/handoff protocol, and notification checkpoint
+Linear inbox conversation, inbox handoff protocol, and old notification checkpoint
 are retired. Upgrade drops retained unread inbox items once with a log entry;
 old inbox state never schedules a fresh turn.
 
+The 2026-10-06 read-status amendment gives each offered batch a host-issued
+original wake ID and an exact native fingerprint/recipient receipt prepared
+before delivery. The target chat confirms its original through
+`linear_wake({ action: "received", wakeId })`. The tool derives the chat from live
+conversation authority and verifies the current native recipient and exact
+outbox original. Another chat or changed occupant cannot confirm it; a transport
+ACK alone leaves notifications unread. Pi conversations use their own admitted
+turn receipt. Only events actually included in the batch are eligible.
+
+After confirmation, a bounded reader correlates inbox notifications with signed
+event identities. Unique full or eight-character comment anchors permit delayed
+inbox creation. Resource-only assignment/reaction matches retain conservative
+action-time checks; unknown or ambiguous matches stay unread. Read claims persist
+before dispatch. Lost/error responses remain uncertain and settle by read-only
+inbox observation, without repeating the mutation. The reader uses the shared
+background request budget, scans at most 20 pages and retries delayed notifications
+for ten minutes. Durable references resume that bounded window after restart.
+It never generates wakes or replays native delivery.
+
 Rules and the target are non-secret settings that Clankie can change himself
-through `linear_wake`, the `clankie linear wake` / `linear target` CLI, and their
-authenticated API. The Follow Linear menu exposes both. Defaults select only
-signed comments and mentions from James (`ownerUserEmails: ["volpestyle@gmail.com"]`)
-with actor selector `owner`; additional owner IDs remain configurable. This
+through `linear_wake`, the `clankie linear wake` / `linear target` / `linear routes`
+CLI, and their authenticated API. Follow Linear exposes rules, the default chat
+and project lead chats. `linear deliveries` records destinations and consumption
+receipts. Defaults select signed comments, mentions, assignment/delegation to
+the connected app and reactions on its comments with actor selector `owner`.
+New installs start with empty owner ID/email lists; existing configured identities
+remain. Signed owner identity must be configured before the selector can match. This
 changes the earlier default of an empty owner list and all nonexcluded types.
 Signed user ID/email evidence identifies the human. Display names and notification
 subtitles do not. Own-write suppression takes precedence over the selectors;
@@ -60,14 +90,23 @@ flowchart TD
     Dedupe -->|No| Quiet[No wake]
     Dedupe -->|Yes| Own{Exact own-write echo?}
     Own -->|Yes| Quiet
-    Own -->|No| History[External activity in selected ordinary chat]
+    Own -->|No| Route{Verified project with configured lead chat?}
+    Route -->|Yes| Project[Select project lead chat]
+    Route -->|No| Default[Select fallback chat; name project]
+    Project --> History[External activity in selected ordinary chat]
+    Default --> History
     History --> Identity{Connected account identity matches workspace?}
     Identity -->|No| Quiet
     Identity -->|Yes| Rules{Following, known actor and VUH-1549 rules match?}
     Rules -->|No| Quiet
     Rules -->|Yes| Coalesce[Coalesce compact events]
-    Coalesce --> Wake[Wake configured chat: global-default by default]
+    Coalesce --> Wake[Wake selected chat through its existing receiver]
     Wake --> Lead[Lead decides and delegates]
+    Wake --> Receipt{Target confirms original wake?}
+    Receipt -->|No| Unread[Leave notifications unread]
+    Receipt -->|Yes| Match{Unique signed notification match?}
+    Match -->|No| Unread
+    Match -->|Yes| Read[Persist read claim, then mark read; no uncertain replay]
 ```
 
 ## Historical decision — 2026-10-02

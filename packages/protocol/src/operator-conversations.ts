@@ -1528,6 +1528,13 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
         notification: z.boolean().optional(),
         conversationId: OperatorConversationIdSchema,
         following: z.boolean(),
+        project: z
+          .object({ id: z.string().uuid(), name: z.string().max(256).optional() })
+          .strict()
+          .optional(),
+        route: z.enum(["project_lead", "project_fallback", "default"]).optional(),
+        receiver: z.object({ userId: z.string().uuid(), workspaceId: z.string().uuid() }).strict().optional(),
+        notificationTypes: z.array(z.string().min(1).max(128)).max(32).optional(),
       })
       .strict()
       .optional(),

@@ -29,7 +29,7 @@
     {
       "pattern": "\\blinear inbox (read|ack|handoff)\\b",
       "adr": "0214 (VUH-1678 amendment)",
-      "now": "Signed Linear activity appears in one ordinary configured chat; use normal conversation history without a read/ack/handoff protocol."
+      "now": "Signed Linear activity appears in its project lead chat or fallback; normal conversation history and linear_wake consumption receipts replace the separate inbox protocol."
     },
     {
       "pattern": "\\blinear work (bind|unbind)\\b",

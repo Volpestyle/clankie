@@ -368,6 +368,7 @@ export interface CaptainPort {
   ): Promise<WorkerWriteAuthority | undefined>;
   /** True for an existing ordinary global chat that may receive Linear wakes. */
   linearWakeTargetAllowed(conversationId: string): boolean;
+  linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
   /** Append verified external context to the selected ordinary chat and optionally wake it. */
   receiveLinearActivity(
     activity: LinearActivityEvent,
@@ -471,6 +472,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
     linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
+    linearWakeDeliveries: () => [],
     receiveLinearActivity: () => true,
     fleetConversationAuthority: async () => undefined,
     fleetWriteAuthority: async () => undefined,

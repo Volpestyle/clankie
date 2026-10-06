@@ -164,7 +164,7 @@ management across conversations is in [launcher details](reference/launcher.md#m
   updates and canary, restart, reset, models and voice, Discord setup, devices,
   pairing and sleep, memory, `clankie send`, `/setup`, games, conflicts.
 - [Linear activity and wakes](reference/linear.md): Follow Linear, wake rules,
-  the wake chat, request budget.
+  project lead chats, wake consumption receipts, request budget.
 - [Leading work](reference/work.md): wakes and long-horizon loops, lead review
   rounds, watching workers, cost evidence, `work-on`, service goals, tidying,
   project onboarding and worktree roots.

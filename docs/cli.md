@@ -948,9 +948,11 @@ credential refresh is counted.
 
 ### `linear status` / `linear follow on|off`
 
-A verified Linear webhook stores a compact **External activity** message in one
-ordinary Clankie chat. `linearWebhook.wakeConversationId` selects that chat;
-`global-default`, the lead conversation, is the default. Open it with
+A verified Linear webhook stores a compact **External activity** message in its
+selected ordinary Clankie chat. `linearWebhook.projectChats` maps verified project
+UUIDs to existing lead chats. Unconfigured projects and removed lead chats go to
+`global-default` with the project named. Nonproject activity uses
+`linearWebhook.wakeConversationId`, default `global-default`. Open it with
 `clankie --chat global-default`, or use the configured ID. A chat named for Linear
 has the same conversation controls and history as any other chat.
 
@@ -965,16 +967,44 @@ Unknown or ambiguous actors stay quiet. Production wakes also require the
 connected Linear account identity to match the signed event's workspace. An
 unavailable identity or workspace mismatch keeps activity passive, logged as
 `identity_unavailable` or `account_workspace_mismatch`; local `active` readiness
-alone does not prove this identity lookup succeeded. No connected-account
-notification poll, separate inbox, read/ack protocol, or issue-owner route
-participates in delivery.
+alone does not prove this identity lookup succeeded. Signed webhooks drive wakes;
+the separate inbox and issue-owner routing are retired.
+
+After a wake arrives, its target chat confirms the host-issued original ID through
+`linear_wake({ action: "received", wakeId: "seat-…" })`. The tool derives the chat
+from its current host authority and verifies the original native recipient and
+fingerprint. A different chat, replaced occupant or untaken wake cannot confirm
+it. A native transport ACK alone leaves provider notifications unread.
+Only unique signed notification matches for events included in the received batch
+are marked read. Comment UUID anchors permit delayed inbox creation; ambiguous
+matches remain unread. Read claims persist before mutation. Uncertain writes are
+held and settle through read-only observation, without replaying the mutation.
+The shared background request budget applies to bounded scans and the ten-minute
+delayed-notification retry window, including service reload.
 
 A Comment webhook may carry only `issueId`, without an issue title. Missing
 display context is filled from retained signed Issue history or a native
-connected `get_issue` lookup bounded to one second. That read supplies the identifier/title only; signed
+connected `get_issue` lookup bounded to one second. Its exact project UUID/name
+can select a configured lead chat. Sparse project-update comments resolve only
+their signed parent update UUID through `get_status_updates`. URL slugs do not
+prove project identity. These reads supply context; signed
 actor, resource and changes remain the authority for wake rules. If title lookup
 is unavailable, the compact event says `Title unavailable` and keeps its signed
 issue UUID and link rather than dropping the event.
+
+### `linear routes show|set --json-stdin` / `linear deliveries`
+
+`clankie linear routes show` lists project destinations. Replace the array through
+`linear routes set --json-stdin`, or use `linear_wake({ action: "set", projectChats: […] })`.
+Each entry is `{ projectId: "full UUID", name: "Project name", conversationId: "existing global chat ID" }`.
+Duplicate projects or missing/worker chats are refused. `/linear` → **Project lead chats**
+edits one entry. No live app registration changes are needed.
+
+`GET/PUT /v1/linear/routes` reads/replaces `{ projectChats }` with operator
+authentication. `clankie linear deliveries` reads `GET /v1/linear/deliveries`:
+offered wake ID, conversation ID, included event IDs/projects/routes, native
+original receipt, and `receivedAt` when the target confirms. An offered batch
+can have failed before delivery; `offeredAt` is not a consumption receipt.
 
 | Following     | Chat history                   | Automatic model turns                  |
 | ------------- | ------------------------------ | -------------------------------------- |

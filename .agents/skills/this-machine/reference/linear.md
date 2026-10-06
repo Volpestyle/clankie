@@ -5,9 +5,11 @@ Follow Linear, wake rules and the wake chat, the tracker identity, and request b
 ## Following
 
 Follow Linear is off by default and changes live without restart. Verified
-signed activity is retained as **External activity** in one ordinary global
-chat, selected by `linearWebhook.wakeConversationId`; the default is
-`global-default`. `clankie linear target show` identifies it and
+signed activity is retained as **External activity** in its selected ordinary
+global chat. `linearWebhook.projectChats` maps verified Linear project UUIDs to
+lead chats. Unconfigured projects go to `global-default` with the project named.
+Nonproject activity uses `linearWebhook.wakeConversationId`, default
+`global-default`. `clankie linear target show` identifies that default and
 `clankie linear target set ID` changes it. Open the chat with `clankie --chat ID`
 or read it with `clankie conversations show ID --limit 20`. A chat named for
 Linear has ordinary conversation history and controls.
@@ -18,8 +20,8 @@ wake with issue IDs/titles,
 changes, actors and links. The lead chooses any delegation from there. Events
 that do not match stay visible without a model turn. Own-write echoes and
 activity from the connected account or attributed workers never wake him;
-unknown or ambiguous authors stay quiet. There is no notification poll,
-separate inbox, read/ack protocol, or per-issue route. On upgrade, old unread
+unknown or ambiguous authors stay quiet. There is no separate inbox or per-issue
+owner route. On upgrade, old unread
 inbox items are dropped once with a service log entry rather than replayed.
 
 If the native receiver is unavailable before taking a wake, its signed activity
@@ -29,6 +31,21 @@ suppresses pending wakes. A connected MCP tool bank alone does not prove the
 seat's channel is polling. An interrupted offered wake without a definite
 unavailable receipt keeps its cursor across shutdown, cancellation and restart;
 inspect its retained history and exact native receipt before any recovery.
+
+After this chat receives a Linear wake, confirm its host-issued original ID with
+`linear_wake({ action: "received", wakeId: "seat-…" })`. Another chat or changed
+native recipient cannot confirm it; a transport ACK alone leaves notifications
+unread. Only matching signed notifications for events included in that batch
+are marked read. Delayed inbox creation is retried for ten minutes; uncertain
+read mutations settle by read-only observation, without another write or wake.
+`clankie linear deliveries` records destinations and consumption receipts.
+
+Use `linear_wake({ action: "set", projectChats: [{ projectId: "UUID", name: "Project name", conversationId: "CHAT_ID" }] })`
+or `clankie linear routes set --json-stdin` with the array to replace destinations.
+`linear routes show` lists them; `/linear` → **Project lead chats** edits one.
+Targets must be existing ordinary global chats. Sparse signed issue or update
+IDs can acquire project context through bounded verified reads. Missing context
+never selects a lead by guessing from an abbreviated URL slug.
 
 Following requires the stored webhook URL (`linearWebhook.url`) and broker-held
 signing secret. Setup lives under `/connect linear` → **Follow Linear** →

@@ -203,7 +203,7 @@ export function captainTools(
     ...(deps.activitySharing && (lane === "operator" || lane.startsWith("discord_"))
       ? activityTools(deps.activitySharing, turn)
       : []),
-    ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake) : []),
+    ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake, turn) : []),
     ...(deps.bodyLeases === undefined
       ? []
       : [
@@ -737,20 +737,39 @@ export function captainTools(
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
 }
 
-function linearWakeTools(port: NonNullable<CaptainDeps["linearWake"]>): ToolDefinition[] {
+export function linearWakeTools(
+  port: NonNullable<CaptainDeps["linearWake"]>,
+  turn: TurnContext,
+): ToolDefinition[] {
   const strings = () => Type.Array(Type.String({ minLength: 1, maxLength: 320 }), { maxItems: 100 });
   return [
     defineTool({
       name: "linear_wake",
       label: "Set your Linear wake rules",
       description:
-        "Read or change your non-secret Linear wake rules and one ordinary global chat target. " +
-        "Defaults wake global-default for James's comments and mentions. Set partial rule fields; omitted fields stay unchanged. " +
+        "Read or change your non-secret Linear wake rules and project lead chats. " +
+        "Defaults select owner comments and mentions, assignments/delegations to you and reactions on your comments; configure owner identity first. Set partial rule fields; omitted fields stay unchanged. " +
         "An empty notificationTypes array selects all event kinds; exclusions win. Own writes always remain quiet. " +
-        "conversationId must name an existing ordinary global chat. Changes apply to new signed webhook events without restarting.",
+        "conversationId and projectChats targets must name existing ordinary global chats. Unconfigured projects go to global-default, named in the wake. " +
+        "After receiving a Linear wake in this chat, use action received with its host-issued wakeId to mark matching notifications read. A transport ACK alone leaves them unread. " +
+        "Changes apply to new signed webhook events without restarting.",
       parameters: Type.Object(
         {
-          action: StringEnum(["show", "set"]),
+          action: StringEnum(["show", "set", "received"]),
+          wakeId: Type.Optional(Type.String({ pattern: "^seat-[a-f0-9-]{36}$" })),
+          projectChats: Type.Optional(
+            Type.Array(
+              Type.Object(
+                {
+                  projectId: Type.String({ format: "uuid" }),
+                  name: Type.String({ minLength: 1, maxLength: 256 }),
+                  conversationId: Type.String({ pattern: "^[a-zA-Z0-9_-]{1,256}$" }),
+                },
+                { additionalProperties: false },
+              ),
+              { maxItems: 100 },
+            ),
+          ),
           conversationId: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9_-]{1,256}$" })),
           wake: Type.Optional(
             Type.Object(
@@ -772,8 +791,26 @@ function linearWakeTools(port: NonNullable<CaptainDeps["linearWake"]>): ToolDefi
       ),
       executionMode: "sequential",
       execute: async (_id, input) => {
-        if (input.action === "show" && (input.wake !== undefined || input.conversationId !== undefined))
+        if (input.action === "received") {
+          if (!input.wakeId || input.wake || input.conversationId || input.projectChats)
+            throw new Error("Use action received with only the original wakeId");
+          const authority = captureConversationAuthority(turn.conversationAuthority);
+          await assertConversationAuthority(authority);
+          if (!port.received) throw new Error("Linear wake consumption receipts are unavailable");
+          return json(await port.received(authority.owner.conversationId, input.wakeId));
+        }
+        if (input.wakeId !== undefined) throw new Error("wakeId is only used with action received");
+        if (
+          input.action === "show" &&
+          (input.wake !== undefined || input.conversationId !== undefined || input.projectChats !== undefined)
+        )
           throw new Error("Use action set to change Linear wake settings");
+        const projectChats =
+          input.projectChats === undefined
+            ? undefined
+            : LinearWebhookSettingsSchema.shape.projectChats.parse(input.projectChats);
+        if (projectChats?.some((route) => !port.targetAllowed(route.conversationId)))
+          throw new Error("Every project lead target must be an existing ordinary global chat");
         if (input.conversationId !== undefined) {
           LinearWebhookSettingsSchema.shape.wakeConversationId.parse(input.conversationId);
           if (!port.targetAllowed(input.conversationId))
@@ -787,12 +824,14 @@ function linearWakeTools(port: NonNullable<CaptainDeps["linearWake"]>): ToolDefi
                 linearWebhook: {
                   ...value.linearWebhook,
                   ...(input.conversationId === undefined ? {} : { wakeConversationId: input.conversationId }),
+                  ...(projectChats === undefined ? {} : { projectChats }),
                   wake: LinearWakeSettingsSchema.parse({ ...value.linearWebhook.wake, ...input.wake }),
                 },
               }));
         return json({
           wake: current.linearWebhook.wake,
           wakeConversationId: current.linearWebhook.wakeConversationId,
+          projectChats: current.linearWebhook.projectChats,
         });
       },
     }),

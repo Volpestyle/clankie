@@ -21,7 +21,7 @@ import {
 } from "@clankie/settings";
 
 const LINEAR_USAGE =
-  "Usage: clankie linear [status] | budget | read TOOL --json-stdin [--background] | post comment|issue --json-stdin | follow on|off | target [show|set CONVERSATION_ID] | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear";
+  "Usage: clankie linear [status] | budget | deliveries | routes [show|set --json-stdin] | read TOOL --json-stdin [--background] | post comment|issue --json-stdin | follow on|off | target [show|set CONVERSATION_ID] | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear";
 
 function publishingResult(result: Awaited<ReturnType<LaneToolUpstream["callTool"]>>) {
   // Lane tools wrap the host result as JSON text. A refused host call is not
@@ -108,6 +108,19 @@ export async function runLinearCommand(
     return response.json();
   };
   const settings = options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+  if (args[0] === "deliveries") {
+    if (args.length !== 1) throw new Error(LINEAR_USAGE);
+    return request("/v1/linear/deliveries");
+  }
+  if (args[0] === "routes") {
+    if (args.length === 1 || (args.length === 2 && args[1] === "show"))
+      return { ok: true, projectChats: (await settings.load()).linearWebhook.projectChats };
+    if (args.length !== 3 || args[1] !== "set" || args[2] !== "--json-stdin") throw new Error(LINEAR_USAGE);
+    const projectChats = LinearWebhookSettingsSchema.shape.projectChats.parse(
+      JSON.parse(await text(options.stdin ?? process.stdin)),
+    );
+    return request("/v1/linear/routes", "PUT", { projectChats });
+  }
   if (args[0] === "budget") {
     if (args.length !== 1) throw new Error(LINEAR_USAGE);
     return LinearRequestBudgetReportSchema.parse(await request(LINEAR_REQUEST_BUDGET_PATH));
@@ -187,6 +200,7 @@ export async function runLinearCommand(
         following: value.linearWebhook.following,
         wakeConversationId: value.linearWebhook.wakeConversationId,
         wake: value.linearWebhook.wake,
+        projectChats: value.linearWebhook.projectChats,
       },
     }));
   } else {

@@ -152,6 +152,7 @@ import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { retireLinearNotifications } from "./linear-notifications.ts";
+import { LinearWakeReadReceipts } from "./linear-wake-read.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
@@ -1189,6 +1190,7 @@ const captain = createCaptain(
     settings: settingsStore,
     personaImages,
     linearFollowing,
+    linearWakeReceived: (references) => linearWakeReads.received(references),
     deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
     // The same trusted module that owns the bot token owns making a channel's
@@ -1222,6 +1224,12 @@ async function linearFollowing(): Promise<boolean> {
 }
 
 const linearAttribution = new LinearAttributionJournal(join(stateRoot, "linear-attribution.json"));
+const linearWakeReads = new LinearWakeReadReceipts({
+  path: join(stateRoot, "linear-wake-read-receipts.json"),
+  attribution: linearAttribution,
+  host: mcpHost,
+  ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
+});
 retireLinearNotifications(join(stateRoot, "linear-notifications.json"), (message) => logger.info(message));
 // VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
 fleetProjectMembership = new FleetProjectMembership({
@@ -1640,6 +1648,7 @@ const clankie = await createClankieApp({
       discordTracking.record(activity);
     },
     issueContext: (activity) => linearAttribution.issueContext(activity, mcpHost),
+    projectContext: (activity) => linearAttribution.projectContext(activity, mcpHost),
     // Verified own-account identity suppresses its activity independently of rules.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },
@@ -1852,6 +1861,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await discordTracking.close();
     await runtimeCanary?.close();
+    linearWakeReads.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
