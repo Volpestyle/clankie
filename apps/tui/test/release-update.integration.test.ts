@@ -25,7 +25,13 @@ const authority = { guard: async () => {}, current: () => true };
 const helperPath = resolve(import.meta.dirname, "../bin/release-update-helper.ts");
 
 /** A release whose own `bin/clankie` answers the supervisor calls an update makes. */
-function writeRelease(root: string, version: string, revision: string, restart: "ok" | "fail" = "ok") {
+function writeRelease(
+  root: string,
+  version: string,
+  revision: string,
+  restart: "ok" | "fail" = "ok",
+  replaceCurrentOnDown = false,
+) {
   mkdirSync(join(root, "bin"), { recursive: true });
   writeFileSync(join(root, "VERSION"), `${version}\n`);
   writeFileSync(join(root, "release.json"), JSON.stringify({ schemaVersion: 1, version, revision }));
@@ -33,13 +39,18 @@ function writeRelease(root: string, version: string, revision: string, restart: 
   writeFileSync(
     launcher,
     `#!${process.execPath}
-const { appendFileSync, realpathSync } = require("node:fs");
+const { appendFileSync, realpathSync, rmSync, symlinkSync } = require("node:fs");
 const { dirname, join } = require("node:path");
 const { randomUUID } = require("node:crypto");
 const root = realpathSync(join(dirname(realpathSync(process.argv[1])), ".."));
 const [action, target] = process.argv.slice(2);
 appendFileSync(process.env.RELEASE_CALLS, JSON.stringify({ root, action, target, operation: process.env.CLANKIE_UPDATE_OPERATION }) + "\\n");
 const print = (value, code = 0) => { process.stdout.write(JSON.stringify(value)); process.exitCode = code; };
+if (action === "down" && ${JSON.stringify(replaceCurrentOnDown)}) {
+  const current = join(dirname(dirname(root)), "current");
+  rmSync(current);
+  symlinkSync(join("releases", "v1.2.0"), current);
+}
 if (action === "update") print({ runtime: { root, commit: ${JSON.stringify(revision)}, instanceId: randomUUID(), pid: process.pid } });
 else if (action === "harness") print({ ok: true });
 else if (action === "restart" && ${JSON.stringify(restart)} === "fail") print({ ok: false, services: [{ id: target, label: target, ok: false, error: "fixture restart failed" }] }, 1);
@@ -49,17 +60,30 @@ else print({ ok: true, services: [{ id: target, label: target, ok: true, state: 
   chmodSync(launcher, 0o755);
 }
 
-async function fixture(input: { readonly restart?: "ok" | "fail"; readonly badChecksum?: boolean } = {}) {
+async function fixture(
+  input: {
+    readonly restart?: "ok" | "fail";
+    readonly badChecksum?: boolean;
+    readonly replaceCurrentOnDown?: "old" | "new";
+  } = {},
+) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const install = join(home, "install");
   const old = join(install, "releases", "v1.0.0");
-  writeRelease(old, "v1.0.0", "a".repeat(40));
+  writeRelease(old, "v1.0.0", "a".repeat(40), "ok", input.replaceCurrentOnDown === "old");
+  writeRelease(join(install, "releases", "v1.2.0"), "v1.2.0", "c".repeat(40));
   symlinkSync(join("releases", "v1.0.0"), join(install, "current"));
   mkdirSync(join(home, ".clankie"), { mode: 0o700 });
   // The published archive, exactly as install.sh downloads and verifies it.
   const published = join(home, "published");
-  writeRelease(join(published, "clankie"), "v1.1.0", "b".repeat(40), input.restart);
+  writeRelease(
+    join(published, "clankie"),
+    "v1.1.0",
+    "b".repeat(40),
+    input.restart,
+    input.replaceCurrentOnDown === "new",
+  );
   const archive = join(home, "clankie-darwin-arm64.tar.gz");
   execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
   const digest = input.badChecksum
@@ -161,4 +185,56 @@ it("refuses an archive whose checksum does not verify before stopping anything",
   expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
   expect(existsSync(join(f.install, "releases", "v1.1.0"))).toBe(false);
   expect(f.calls()).toEqual([]);
+});
+
+it.each(["guard rejects", "authority expires"])(
+  "cleans unaccepted release preparation when %s",
+  async (failure) => {
+    const f = await fixture();
+    const updater = f.updater(f.old);
+    let guards = 0;
+    await expect(
+      updater.request("main", {
+        guard: async () => {
+          guards += 1;
+          if (guards === 2 && failure === "guard rejects") throw Error("revoked preparation");
+        },
+        current: () => !(guards === 2 && failure === "authority expires"),
+      }),
+    ).rejects.toThrow(failure === "guard rejects" ? "revoked preparation" : "authority expired");
+    expect(existsSync(join(f.home, ".clankie", "updates", "active"))).toBe(false);
+    expect(updater.status().pending).toBeUndefined();
+    expect(f.calls()).toEqual([]);
+    expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+    const accepted = await updater.request("main", authority);
+    expect(accepted.accepted).toBe(true);
+    expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
+  },
+);
+
+it("retains another release selected while the old services stop", async () => {
+  const f = await fixture({ replaceCurrentOnDown: "old" });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "refused",
+    reason: "current-release-changed",
+  });
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.2.0"));
+  expect(f.calls().filter((call) => call.action === "restart")).toEqual([]);
+});
+
+it("retains another release selected while the failed new services stop", async () => {
+  const f = await fixture({ restart: "fail", replaceCurrentOnDown: "new" });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "refused",
+    reason: "current-release-changed",
+  });
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.2.0"));
+  expect(
+    f
+      .calls()
+      .filter((call) => call.action === "restart")
+      .map((call) => call.root),
+  ).toEqual([realpathSync(join(f.install, "releases", "v1.1.0"))]);
 });

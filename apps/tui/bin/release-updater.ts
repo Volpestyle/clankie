@@ -1,7 +1,7 @@
 /** Release installs update to official releases; a checkout follows origin/main (runtime-updater.ts). */
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, realpathSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, realpathSync, rmSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -129,49 +129,61 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
       mkdirSync(lock, { mode: 0o700 });
       writePrivateJson(join(lock, "operation.json"), { id });
       mkdirSync(directory, { mode: 0o700 });
-      writePrivateJson(join(directory, "plan.json"), plan);
-      await authority.guard();
-      if (!authority.current()) throw Error("Update authority expired");
-      const result: RuntimeUpdateResult = {
-        id,
-        ref: plan.ref,
-        oldCommit: plan.oldCommit,
-        newCommit: plan.newCommit,
-        resolvedRef: `refs/tags/${plan.newVersion}`,
-        versions: { old: plan.oldVersion, new: plan.newVersion },
-        ...(plan.warning === undefined ? {} : { warning: plan.warning }),
-        initiator,
-        phase: "scheduled",
-        updatedAt: new Date().toISOString(),
-      };
-      writeRuntimeUpdate(directory, result);
-      writePrivateJson(join(updates, "latest.json"), { id });
-      const log = openSync(join(directory, "helper.log"), "ax", 0o600);
+      let accepted = false;
       try {
-        writeSync(log, `${JSON.stringify({ event: "release-update-accepted", ...result })}\n`);
-        const helperEnv: NodeJS.ProcessEnv = { ...env };
-        for (const name of [
-          "PI_SESSION_FILE",
-          "PI_SESSION_ID",
-          "NODE_OPTIONS",
-          "NODE_PATH",
-          "CLANKIE_LAUNCHER_PATH",
-        ])
-          delete helperEnv[name];
-        const child = (options.spawnHelper ?? spawn)(process.execPath, [helperPath, directory], {
-          cwd: directory,
-          env: helperEnv,
-          detached: true,
-          stdio: ["ignore", log, log],
-        });
-        child.on("error", () => {
-          /* Acceptance is durable; an uncertain spawn is never resent. */
-        });
-        child.unref();
-      } finally {
-        closeSync(log);
+        writePrivateJson(join(directory, "plan.json"), plan);
+        await authority.guard();
+        if (!authority.current()) throw Error("Update authority expired");
+        const result: RuntimeUpdateResult = {
+          id,
+          ref: plan.ref,
+          oldCommit: plan.oldCommit,
+          newCommit: plan.newCommit,
+          resolvedRef: `refs/tags/${plan.newVersion}`,
+          versions: { old: plan.oldVersion, new: plan.newVersion },
+          ...(plan.warning === undefined ? {} : { warning: plan.warning }),
+          initiator,
+          phase: "scheduled",
+          updatedAt: new Date().toISOString(),
+        };
+        writeRuntimeUpdate(directory, result);
+        writePrivateJson(join(updates, "latest.json"), { id });
+        accepted = true;
+        const log = openSync(join(directory, "helper.log"), "ax", 0o600);
+        try {
+          writeSync(log, `${JSON.stringify({ event: "release-update-accepted", ...result })}\n`);
+          const helperEnv: NodeJS.ProcessEnv = { ...env };
+          for (const name of [
+            "PI_SESSION_FILE",
+            "PI_SESSION_ID",
+            "NODE_OPTIONS",
+            "NODE_PATH",
+            "CLANKIE_LAUNCHER_PATH",
+          ])
+            delete helperEnv[name];
+          const child = (options.spawnHelper ?? spawn)(process.execPath, [helperPath, directory], {
+            cwd: directory,
+            env: helperEnv,
+            detached: true,
+            stdio: ["ignore", log, log],
+          });
+          child.on("error", () => {
+            /* Acceptance is durable; an uncertain spawn is never resent. */
+          });
+          child.unref();
+        } finally {
+          closeSync(log);
+        }
+        return { ...status(), accepted: true };
+      } catch (error) {
+        if (!accepted) {
+          // No helper was scheduled; only this preparation owns this lock.
+          if (journal.activeId() === id) rmSync(lock, { recursive: true });
+          rmSync(directory, { recursive: true });
+          throw error;
+        }
+        return { ...status(), accepted: true, needsReconciliation: true };
       }
-      return { ...status(), accepted: true };
     },
   };
 }

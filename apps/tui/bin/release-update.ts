@@ -231,6 +231,8 @@ export async function executeReleaseUpdate(
     if (!(await service(plan.oldRelease, "down", plan.oldCommit)))
       return persist("stop-unconfirmed", { reason: "old-services-stop-unconfirmed" });
     oldStopped = true;
+    if (currentRelease(plan.installRoot) !== plan.oldRelease)
+      return persist("refused", { reason: "current-release-changed" });
     persist("activating");
     switchCurrent(plan.installRoot, target);
     switched = true;
@@ -267,6 +269,8 @@ export async function executeReleaseUpdate(
             error,
             healthy: false,
           });
+        if (currentRelease(plan.installRoot) !== target)
+          return persist("refused", { reason: "current-release-changed", error, healthy: false });
         switchCurrent(plan.installRoot, plan.oldRelease);
       }
       if (currentRelease(plan.installRoot) !== plan.oldRelease)
