@@ -127,7 +127,7 @@ export interface InboundReport extends InboundAcceptance {
   readonly reportDelivery: z.infer<typeof InboundReportDeliverySchema>;
 }
 
-export interface ServiceHandoffSpan {
+interface ServiceHandoffSpan {
   /** Exclusive log cursor: the harness already holds everything up to here. */
   fromCursor: string;
   /** `attempting` is persisted before transport; restart turns it into `unresolved`. */

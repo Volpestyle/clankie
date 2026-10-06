@@ -12,7 +12,7 @@ const short = (value: unknown) => (typeof value === "string" ? value.slice(0, 8)
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** `Running 0b9d486d · last update main 887e07f6 → cc9727b9 healthy`. */
-export function formatUpdateState(state: unknown): string {
+function formatUpdateState(state: unknown): string {
   const runtime = record(record(state).runtime);
   const latest = record(record(state).latest ?? record(state).operation);
   const running = `Running ${short(runtime.commit)}`;

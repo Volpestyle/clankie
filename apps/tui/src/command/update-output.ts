@@ -30,6 +30,7 @@ interface View {
   needsReconciliation?: boolean;
   appliesTo?: string;
 }
+// oxlint-disable-next-line no-control-regex -- terminal output must strip every C0/C1 control
 const clean = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ");
 const short = (sha: string) => sha.slice(0, 8);
 const causes: Record<string, string> = {
