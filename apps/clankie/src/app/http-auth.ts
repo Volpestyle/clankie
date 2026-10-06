@@ -23,7 +23,7 @@ export async function authenticateCaptain(
 
 export async function authenticateOperator(
   request: Request,
-  dependencies: ClankieAppDependencies,
+  dependencies: Pick<ClankieAppDependencies, "authenticateOperator">,
 ): Promise<TrustedOperatorIdentity | "unavailable" | undefined> {
   if (!dependencies.authenticateOperator) return "unavailable";
   return dependencies.authenticateOperator(request);

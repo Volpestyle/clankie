@@ -960,6 +960,13 @@ The authenticated local operator API exposes `GET /v1/linear/follow` and
 configured `wakeConversationId`; PUT without webhook prerequisites returns 409.
 Changing the local switch does not change which events Linear sends.
 
+An unavailable native receiver leaves matched activity pending. Its next poll
+retries the compact wake without starting a second lead in the service. Confirmed
+or uncertain native takes are never replayed. Following off suppresses pending
+wakes. `linear.webhook` receipts in the service log record admission and the rule
+decision; the chat's subsequent turn and native receipt establish delivery.
+These receipts are not written to the domain event journal.
+
 #### `linear target show|set CONVERSATION_ID`
 
 ```sh
@@ -1005,11 +1012,20 @@ omitted fields. Malformed rules fail without writing. The result contains `ok`,
 | `--exclude-types`     | `excludedNotificationTypes` | Exclusions always win; default `issueSubscribed`          |
 
 The default included types are `issueNewComment`, `issueCommentMention`,
-`issueMention`, `projectUpdateNewComment`, `projectUpdateMention`,
+`issueMention`, `issueAssignedToYou`, `issueCommentReaction`,
+`projectUpdateNewComment`, `projectUpdateMention`,
 `initiativeUpdateNewComment`, `initiativeUpdateMention`, `documentNewComment`,
 and `documentMention`. The existing VUH-1549 rule engine classifies signed
 webhook activity using these types. A newly added Linear issue/profile/resource
 link in signed `body`, `description`, or `content` counts as a mention.
+Signed `Issue.assigneeId` and `Issue.delegateId` changes count as
+`issueAssignedToYou` only for assignment/delegation to the connected app actor.
+A signed `Reaction` create counts as `issueCommentReaction` only when its
+embedded comment author or retained exact comment write proves that actor.
+Enable the `Issue`, `Comment`, and `Reaction` data-change webhook categories.
+The separate `AppUserNotification` and `AgentSessionEvent` webhook envelopes are
+not consumed by this data-change receiver; full Linear agent-session lifecycle
+support remains separate from waking the chat on delegation.
 
 Legacy owner-only filters migrate to the new comment/mention defaults when
 `ownerUserEmails` is absent and the saved filters match the old defaults:

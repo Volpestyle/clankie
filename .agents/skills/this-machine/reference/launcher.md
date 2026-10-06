@@ -64,6 +64,12 @@ unknown or ambiguous authors stay quiet. There is no notification poll,
 separate inbox, read/ack protocol, or per-issue route. On upgrade, old unread
 inbox items are dropped once with a service log entry rather than replayed.
 
+If the native receiver is unavailable before taking a wake, its signed activity
+stays pending. The next poll for that chat retries it as one compact wake;
+confirmed or uncertain native takes are never replayed. Following off still
+suppresses pending wakes. A connected MCP tool bank alone does not prove the
+seat's channel is polling.
+
 Use the operator-only `linear_wake({ action: "show" })` or authenticated
 `clankie linear wake show` to inspect rules. These are your non-secret settings:
 you can set them yourself from an operator conversation through
@@ -71,7 +77,8 @@ you can set them yourself from an operator conversation through
 or `clankie linear wake set`. The tool patches supplied rule fields and can
 change the target. The CLI patches named flags; `--json-stdin` replaces rules.
 Defaults select `owner`, with `ownerUserEmails: ["volpestyle@gmail.com"]`, and
-only comment/mention types. `ownerUserIds` starts empty and can add exact owner
+comment/mention types, assignment/delegation to the connected app actor, and
+reactions on its comments. `ownerUserIds` starts empty and can add exact owner
 IDs. Signed email/ID proof is required; a display name or subtitle is not identity.
 
 ```sh
@@ -83,7 +90,13 @@ clankie linear wake set --types issueNewComment,issueCommentMention,issueMention
 `--user-ids`. Own-write suppression remains in force. `--types` selects activity
 types and `--exclude-types` vetoes them. Comma-separated lists accept `none` to
 clear one. Defaults include issue, project-update, initiative-update and document
-comments/mentions and exclude `issueSubscribed`. Legacy owner-only filters with
+comments/mentions, `issueAssignedToYou`, and `issueCommentReaction`, and exclude
+`issueSubscribed`. Assignment/delegation maps signed `Issue.assigneeId` or
+`Issue.delegateId` changes to `issueAssignedToYou` only when the new recipient is
+the connected app actor. Signed `Reaction` creates map to `issueCommentReaction`
+only when the comment author is that actor, proved by its embedded user ID or
+an exact retained write receipt. Keep the `Issue`, `Comment`, and `Reaction`
+data-change webhook categories enabled in Linear. Legacy owner-only filters with
 no saved `ownerUserEmails` migrate from the old defaults (empty `userIds`/types,
 excluded `issueSubscribed`) to these comment/mention defaults; configured owner
 IDs are kept. Edited selectors/types/exclusions remain. An empty type list saved

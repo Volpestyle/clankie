@@ -45,6 +45,15 @@ history or changing the target does not admit an event again.
 `clankie linear status` reports webhook readiness, following and the selected
 wake chat. Only rule-matched signed events wake it; defaults select James's
 comments/mentions by signed email `volpestyle@gmail.com`. Own writes stay quiet.
+Assignment/delegation to the app actor and reactions to its comments are also
+selected by default. In `~/.local/state/clankie/clankie.log`, `linear.webhook`
+records acceptance, target and rule decision; webhook deliveries are not domain
+events in `~/.clankie/events.jsonl`. Join the receipt's `eventId` to the external
+message's `linear.eventId`, then inspect the following `turn` and delivery stage.
+`decision: wake` proves admission, not a native handoff. An unavailable receiver
+retains the wake until that chat polls again; an uncertain take requires receipt
+reconciliation and is never replayed automatically. CLI `trace` is not a command;
+the TUI's `/trace` is a different room-trail view.
 The attribution journal and write receipts retain signature-based provenance
 and exact-echo suppression; a shared Linear account name is not human proof.
 The special inbox conversation, read/ack cursors and
