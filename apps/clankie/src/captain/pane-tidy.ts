@@ -126,9 +126,12 @@ export class PaneTidy {
   }
   /** List merged, clean, unused linked worktrees; never remove one. */
   worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {
-    return listTidyWorktrees(repositoryPath, mergedInto, this.ports.runner, {
-      ...(this.ports.runtimeRoot ? { runtimeRoot: this.ports.runtimeRoot } : {}),
-    });
+    return listTidyWorktrees(
+      repositoryPath,
+      mergedInto,
+      this.ports.runner,
+      this.ports.runtimeRoot ? { runtimeRoot: this.ports.runtimeRoot } : {},
+    );
   }
   async worktreeReport(repository: string, mergedInto = "origin/main") {
     const result = await this.worktrees(repository, mergedInto);

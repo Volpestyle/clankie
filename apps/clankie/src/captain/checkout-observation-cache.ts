@@ -3,17 +3,18 @@ import { inspectCheckout, ownerCheckout } from "@clankie/settings";
 
 /** Opted-in reads share the complete Git observation, including owner discovery. */
 export class CheckoutObservationCache {
+  private readonly capacity: number;
+  private readonly ttlMs: number;
   private readonly entries = new Map<
     string,
     { expires: number; pending: Promise<CheckoutStatus | undefined> }
   >();
 
-  constructor(
-    private readonly capacity = 128,
-    private readonly ttlMs = 30_000,
-  ) {
+  constructor(capacity = 128, ttlMs = 30_000) {
     if (!Number.isSafeInteger(capacity) || capacity < 1 || ttlMs < 1)
       throw Error("Invalid checkout observation cache bounds");
+    this.capacity = capacity;
+    this.ttlMs = ttlMs;
   }
 
   observe(path: string): Promise<CheckoutStatus | undefined> {

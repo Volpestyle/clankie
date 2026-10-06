@@ -481,4 +481,3 @@ it.each([false, true])(
     expect(f.git(f.runtime, "rev-parse", "HEAD")).toBe(f.old);
   },
 );
-

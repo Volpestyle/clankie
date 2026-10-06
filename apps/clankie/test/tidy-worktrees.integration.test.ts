@@ -435,7 +435,7 @@ it("prune refuses evidence aliases, an archive inside the retiring tree, and cop
   const origin = join(f.root, "origin.git");
   await git(f.repo, ["clone", "--bare", f.repo, origin]);
   await git(f.repo, ["remote", "add", "origin", origin]);
-  await writeFile(join(f.repo, ".git", "info", "exclude"), ".local/\n");
+  await writeFile(join(f.repo, ".git", "info", "exclude"), ".local\n");
   const path = await f.worktree("evidence-refusal");
   const outside = join(f.root, "evidence-source");
   await mkdir(outside);

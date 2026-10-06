@@ -63,9 +63,17 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
       repoRoot: owner,
       stateDir: join(root, "state"),
       settings: new SettingsStore(join(root, "settings.json")),
-      nativeHerdrRunner: createHerdrWatchRunner(undefined, async () =>
-        JSON.stringify({ result: { panes: [row], agent: row } }),
-      ),
+      nativeHerdrRunner: createHerdrWatchRunner(undefined, async (args, signal) => {
+        if (args[0] === "agent" && args[1] === "wait") {
+          // A native changed-status wait must park while this fixture remains idle.
+          return new Promise<string>((_resolve, reject) => {
+            const cancel = () => reject(signal?.reason ?? Error("Aborted"));
+            if (signal?.aborted) cancel();
+            else signal?.addEventListener("abort", cancel, { once: true });
+          });
+        }
+        return JSON.stringify({ result: { panes: [row], agent: row } });
+      }),
       nativeCensusRunner: async () => {
         censusReads++;
         return {
@@ -81,6 +89,23 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
         };
       },
     });
+    // Initial native admission captures its own commit baseline once. Measure
+    // checkout reads after that existing work has reached the detached-HEAD refusal.
+    await captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+    for (let reads = 0; reads < 500; reads++) {
+      const admission = await readFile(trace, "utf8");
+      if (
+        admission.includes('"symbolic-ref","--quiet","HEAD"') &&
+        admission.includes('"rev-parse","--verify","HEAD"')
+      )
+        break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const admission = await readFile(trace, "utf8");
+    expect(admission).toContain('"symbolic-ref","--quiet","HEAD"');
+    expect(admission).toContain('"rev-parse","--verify","HEAD"');
+    expect(admission).not.toContain('"worktree","list"');
+    await writeFile(trace, "");
     for (const op of ["roster", "fleet"] as const) {
       const result = await captain.serveOperatorConversation({ schemaVersion: 1, op });
       const seats =
