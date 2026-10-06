@@ -16,6 +16,44 @@ import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 const nativeIt = it.skipIf(process.platform !== "darwin" || process.env.FLEET_PROOF_NATIVE_TEST !== "1");
 const exec = promisify(execFile);
 
+nativeIt(
+  "refuses a surviving socket inheritor when a previously observed socket sharer exits",
+  async () => {
+    const directory = resolve(".local/admission-churn", "shared-handoff");
+    await mkdir(directory, { recursive: true });
+    const helper = join(directory, "scheduled-handoff");
+    await exec("cc", [
+      "-std=c11",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-mmacosx-version-min=14.0",
+      "-lproc",
+      ...(process.env.FLEET_PROOF_BASELINE_SOURCE
+        ? [`-DFLEET_PROOF_SOURCE=${JSON.stringify(process.env.FLEET_PROOF_BASELINE_SOURCE)}`]
+        : []),
+      "apps/clankie/test/helpers/native-proof-churn/scheduled.c",
+      "-o",
+      helper,
+    ]);
+    const result = await exec(helper, ["--shared-handoff"], { timeout: 1_000 }).then(
+      (reply) => ({ ...reply, code: 0 }),
+      (error: Error & { code: number; stdout: string; stderr: string }) => error,
+    );
+    const kernel = JSON.parse(await readFile(`${helper}.handoff.kernel.jsonl`, "utf8"));
+    // These are actual observations before owned child cleanup. The vanished
+    // co-owner is not the risk: its new, unlisted successor still holds the FD.
+    expect(kernel).toMatchObject({ handoff: true, successorLive: true, successorOwnsSocket: true });
+    await writeFile(join(directory, "evidence.json"), JSON.stringify({ kernel, result }, null, 2) + "\n");
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain('"reason":"process_changed"');
+    expect(result.stderr).toContain('"reason":"multiple_owners"');
+  },
+  10_000,
+);
+
 nativeIt.each(["census", "fd", "exit"])(
   "admits a real pane client within the existing budget during scheduled %s churn",
   async (mode) => {

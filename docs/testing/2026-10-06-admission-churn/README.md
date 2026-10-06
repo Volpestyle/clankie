@@ -14,8 +14,10 @@ birth/closure. The recorded production failures exhausted 32 attempts.
 The helper now inspects the bounded, sorted union of all three PID lists, so a
 new candidate cannot hide a second socket owner. A transient PID/FD race repeats
 only that process's complete observation. Each retry discards that candidate;
-only agreeing before/after identities contribute ownership. Confirmed exits are
-skipped; unavailable live same-user observations still fail closed. The selected
+only agreeing before/after identities contribute ownership. Once a matching
+socket has been observed, instability requires a new whole census within the
+same budget so a newly born inheritor cannot hide outside the earlier lists.
+Confirmed unrelated exits are skipped; unavailable live same-user observations still fail closed. The selected
 owner, socket, ancestry, expected lifetime, current Herdr pane and private-seat
 registration retain their final checks.
 
@@ -105,3 +107,21 @@ Linear reads are baseline-runtime observations. The supplied historical
 `integrate-update-ref/.local/bridge-refusal-diagnostic/REPORT.md` was absent, so
 the production timing and seven exhaustion events come from the issue comments.
 No production attribution beyond those comments is claimed. No decision is open.
+
+## Integration review boundary
+
+The additional scheduled native fixture covers a target-socket sharer exiting
+after all PID lists and handing its descriptor to a live new child. The helper
+requires a fresh bounded census rather than forgetting the partial socket
+owner. The fixture records the successor's actual kernel lifetime and socket
+ownership before cleaning up only its owned children. This direct helper check
+does not claim a demonstrated full HTTP dual-checkpoint exploit or live fleet
+acceptance. Pell records its baseline and corrected run in the integration
+evidence.
+
+Pell reproduced the direct-helper boundary on the original `537f68a7`
+implementation: the successor was kernel-observed live and holding the socket,
+but the helper exited 0. The corrected scan restarts its bounded census and
+refuses the new co-owner. This is a direct native-proof regression, not a claim
+of a reproduced complete authenticated HTTP admission. Logs remain under
+`.local/odo-review/` in the integration worktree.

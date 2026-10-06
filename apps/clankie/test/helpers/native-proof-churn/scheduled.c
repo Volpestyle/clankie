@@ -30,7 +30,8 @@ static int scheduled_pidfdinfo(int pid, int fd, int flavor, void *buffer, int si
 #undef proc_pidfdinfo
 #undef proc_listpids
 
-static int census_churn, exit_churn;
+static int census_churn, exit_churn, handoff_churn, handoff_done, child_matched;
+static uint16_t target_client, target_server;
 static char observation_path[PATH_MAX];
 static pid_t child_pid;
 static int child_fd;
@@ -75,7 +76,7 @@ static void start_child(void) {
 }
 
 static int scheduled_listpids(uint32_t type, uint32_t typeinfo, void *buffer, int size) {
-  if (type == PROC_ALL_PIDS) {
+  if (type == PROC_ALL_PIDS && !(handoff_churn && handoff_done)) {
     stop_child();
     if (!census_churn) start_child();
   }
@@ -89,6 +90,14 @@ static int scheduled_listpids(uint32_t type, uint32_t typeinfo, void *buffer, in
 }
 
 static int scheduled_pidinfo(int pid, int flavor, uint64_t arg, void *buffer, int size) {
+  if (handoff_churn && !handoff_done && child_matched && pid == child_pid &&
+      flavor == PROC_PIDTBSDINFO) {
+    /* A matching co-owner really exits after all lists and socket inspection.
+     * Another owned child inherits the same client FD and remains alive. */
+    handoff_done = 1;
+    stop_child();
+    start_child();
+  }
   int departed = exit_churn && pid == child_pid && flavor == PROC_PIDLISTFDS;
   if (departed) stop_child(); /* real BSD read succeeded; the FD-list target now exits */
   int result = proc_pidinfo(pid, flavor, arg, buffer, size);
@@ -104,19 +113,23 @@ static int scheduled_pidinfo(int pid, int flavor, uint64_t arg, void *buffer, in
 }
 
 static int scheduled_pidfdinfo(int pid, int fd, int flavor, void *buffer, int size) {
-  if (!census_churn && pid == child_pid && fd == child_fd && !closed_socket) {
+  if (!census_churn && !handoff_churn && pid == child_pid && fd == child_fd && !closed_socket) {
     char reply;
     if (write(commands, "c", 1) != 1 || read(replies, &reply, 1) != 1 || reply != 'c') abort();
     closed_socket = 1;
     /* LISTFDS really contained this socket. The live child now has closed it.
      * Darwin supplies the actual ESRCH/EBADF; no errno or record is fabricated. */
   }
-  return proc_pidfdinfo(pid, fd, flavor, buffer, size);
+  int result = proc_pidfdinfo(pid, fd, flavor, buffer, size);
+  if (handoff_churn && !handoff_done && pid == child_pid &&
+      flavor == PROC_PIDFDSOCKETINFO && result == sizeof(struct socket_fdinfo) &&
+      matches((const struct socket_fdinfo *)buffer, target_client, target_server)) child_matched = 1;
+  return result;
 }
 
 /* A new child inherits the real client FD after ALL_PIDS. Only the later
  * UID/RUID lists expose that second owner. Reconciliation must inspect it. */
-static int shared_census(void) {
+static int shared_census(int handoff) {
   int listener = socket(AF_INET, SOCK_STREAM, 0);
   struct sockaddr_in address = {0};
   address.sin_family = AF_INET;
@@ -133,16 +146,36 @@ static int shared_census(void) {
   snprintf(server_port, sizeof(server_port), "%u", (unsigned)ntohs(address.sin_port));
   if (getsockname(client, (struct sockaddr *)&address, &size)) abort();
   snprintf(client_port, sizeof(client_port), "%u", (unsigned)ntohs(address.sin_port));
+  target_client = (uint16_t)strtoul(client_port, NULL, 10);
+  target_server = (uint16_t)strtoul(server_port, NULL, 10);
   char *args[] = {"scheduled-census", client_port, server_port, "--diagnostics", NULL};
-  census_churn = 1;
+  census_churn = !handoff;
+  handoff_churn = handoff;
   int result = proof_main(4, args);
+  if (handoff) {
+    struct socket_fdinfo socket;
+    int live = child_pid > 1 && kill(child_pid, 0) == 0;
+    int inherited = proc_pidfdinfo(child_pid, client, PROC_PIDFDSOCKETINFO,
+                                   &socket, sizeof(socket)) == sizeof(socket) &&
+                    matches(&socket, target_client, target_server);
+    FILE *log = fopen(observation_path, "w");
+    if (log == NULL) abort();
+    fprintf(log, "{\"handoff\":%s,\"successorLive\":%s,\"successorOwnsSocket\":%s,\"proofExit\":%d}\n",
+            handoff_done ? "true" : "false", live ? "true" : "false", inherited ? "true" : "false", result);
+    if (fclose(log)) abort();
+  }
   stop_child();
   close(client); close(server); close(listener);
   return result;
 }
 
 int main(int argc, char **argv) {
-  if (argc == 2 && strcmp(argv[1], "--shared-census") == 0) return shared_census();
+  if (argc == 2 && strcmp(argv[1], "--shared-census") == 0) return shared_census(0);
+  if (argc == 2 && strcmp(argv[1], "--shared-handoff") == 0) {
+    if (snprintf(observation_path, sizeof(observation_path), "%s.handoff.kernel.jsonl", argv[0]) >=
+        (int)sizeof(observation_path)) abort();
+    return shared_census(1);
+  }
   census_churn = strstr(argv[0], "census") != NULL;
   exit_churn = strstr(argv[0], "exit") != NULL;
   if (snprintf(observation_path, sizeof(observation_path), "%s.kernel.jsonl", argv[0]) >=

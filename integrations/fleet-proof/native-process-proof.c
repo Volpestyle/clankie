@@ -678,8 +678,8 @@ static int merge_pids(pid_t *all, int *count, const pid_t *extra, int extra_coun
 }
 
 /* One PID-local transaction. Only a stable before/after lifetime contributes
- * an owner. A stale descriptor or changing process retries this PID, with its
- * partial candidate discarded; other processes' completed reads survive. */
+ * an owner. Unrelated churn retries this PID. Once a target socket was seen,
+ * instability returns 3: only a fresh census can find a new FD inheritor. */
 static int scan_process(pid_t pid, int same_uid, struct proc_fdinfo *fds,
                         uint16_t client, uint16_t server, struct owner *candidate) {
   *candidate = (struct owner){0};
@@ -712,11 +712,16 @@ static int scan_process(pid_t pid, int same_uid, struct proc_fdinfo *fds,
     struct socket_fdinfo socket;
     if (!socket_info(pid, fds[j].proc_fd, &socket)) {
       error = errno;
-      if (exited(pid)) { *candidate = (struct owner){0}; return 0; }
+      if (exited(pid)) {
+        int restart = candidate->process.pid != 0;
+        *candidate = (struct owner){0};
+        if (restart) diagnostic("process", "process_changed", 0, 1);
+        return restart ? 3 : 0;
+      }
       if (!same_uid && (error == EPERM || error == EACCES)) continue;
       int retry = error == ESRCH || error == EBADF || error == ENOENT || error == ENOTSOCK;
       diagnostic("fd_socket", "socket_unavailable", error, retry);
-      return retry ? 2 : refuse();
+      return retry ? (candidate->process.pid != 0 ? 3 : 2) : refuse();
     }
     if (!matches(&socket, client, server)) continue;
     if (before.uid != getuid()) return refuse_at("socket_owner", "owner_mismatch", 0);
@@ -729,16 +734,21 @@ static int scan_process(pid_t pid, int same_uid, struct proc_fdinfo *fds,
                                socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt};
   }
   observed = observe(pid, &after);
-  if (observed == 0) { *candidate = (struct owner){0}; return 0; }
+  if (observed == 0) {
+    int restart = candidate->process.pid != 0;
+    *candidate = (struct owner){0};
+    if (restart) diagnostic("process", "process_changed", 0, 1);
+    return restart ? 3 : 0;
+  }
   if (observed != 1 || !same_process(&before, &after)) {
     diagnostic("process", "process_changed", observed == 1 ? 0 : errno, 1);
-    return 2;
+    return candidate->process.pid != 0 ? 3 : 2;
   }
   return 0;
 }
 
-/* An expired scan may restart within the existing overall cap. PID-local churn
- * never restarts the global census or lends a partial owner to admission. */
+/* Expiry or instability after a target-socket observation restarts within the
+ * existing overall cap. Unrelated PID-local churn retains completed reads. */
 static int prove(int argc, char **argv) {
   if (argc != 3 && argc != 6 && argc != 7)
     return refuse_at("arguments", "invalid_arguments", 0);
@@ -798,6 +808,7 @@ static int prove(int argc, char **argv) {
     owner = candidate;
   }
   free(fds);
+  if (result == 3) return 2;
   if (result != 0) return budget_expired ? 2 : 1;
   if (owner.process.pid <= 1) return refuse_at("socket_owner", "owner_not_found", 0);
   if (!within_budget()) return refuse_at("completion", "budget_exhausted", 0);

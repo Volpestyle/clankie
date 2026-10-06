@@ -107,10 +107,11 @@ at shutdown. Refusals emit `fleet.local_proof.refused` with a fixed reason;
 `fleet.local_proof.diagnostic` records fixed kernel or transport details.
 Neither event contains PIDs, paths, argv or caller headers. The helper reconciles
 changing PID lists by inspecting their bounded union.
-Transient PID/descriptor races repeat only the affected process observation,
+Unrelated transient PID/descriptor races repeat only the affected process observation,
 with its partial owner discarded. These local retries use 1–8 ms jitter and at
 most 32 attempts per PID within the unchanged 200 ms scan and 600 ms job caps.
-Only an expired scan restarts the entire census. Unknown live ownership,
+An expired scan, or instability after observing a matching socket, restarts the
+entire bounded census to inspect newly born inheritors. Unknown live ownership,
 owner/ancestor changes and shared descriptors remain refused; persistent
 uncertainty or exceeded bounds can still refuse admission.
 

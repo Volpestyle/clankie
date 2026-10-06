@@ -125,7 +125,9 @@ never authorize deleting receipts or replaying reports.
 
 Native `process_census_changed` with `retry: false` can accompany a successful
 admission: changing PID lists are reconciled and every candidate is inspected.
-Descriptor/process races retry that PID within the existing job budget. Read the
+Unrelated descriptor/process races retry that PID within the existing job budget.
+Instability after a matching socket observation requests a fresh bounded census
+to include new inheritors. Read the
 terminal proof reason and refusal rate before treating a churn counter as lost
 membership. A pre-dispatch `local_process_membership_required` 403 permits a
 fresh request; an earlier uncertain call still requires its original receipt.

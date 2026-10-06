@@ -28,9 +28,12 @@ real-user PID lists. A process born between list calls is inspected, including
 its sockets; it does not invalidate the entire census. A confirmed exit can be
 skipped. An inaccessible live same-user process still refuses the proof.
 
-Stale descriptors or a changed process lifetime retry only that PID. Each local
+Unrelated stale descriptors or a changed process lifetime retry only that PID. Each local
 retry discards its partial owner and repeats the complete process/FD observation.
-Only agreeing before/after lifetimes contribute an owner. Completed observations
+Once a target socket was observed, an unstable or exited candidate instead
+requires a fresh whole census within the same bounds, so a new socket inheritor
+cannot hide outside the earlier PID lists. Only agreeing before/after lifetimes
+contribute an owner. Completed observations
 of other processes survive this local retry, while the chosen owner, socket and
 ancestry retain their final rechecks. There are at most 32 local attempts per
 PID, within the unchanged 200 ms scan and 600 ms job caps; a scan whose budget
