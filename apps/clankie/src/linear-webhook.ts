@@ -169,7 +169,11 @@ export function linearActivityIssueId(
 ): string | undefined {
   if (activity.type === "Issue") return consistentUuid([activity.data.id]);
   if (activity.type === "Comment" || activity.type === "Reaction")
-    return consistentUuid([activity.data.issueId, record(activity.data.issue).id]);
+    return consistentUuid([
+      activity.data.issueId,
+      record(activity.data.issue).id,
+      ...(activity.type === "Reaction" ? [record(activity.data.comment).issueId] : []),
+    ]);
 }
 
 /** A signed comment's full parent UUID, never a title or abbreviated URL fragment. */
