@@ -14,7 +14,7 @@ import providerApi from "./runtime-provider-api.json" with { type: "json" };
  * The provider contract this runtime implements. A release records it in
  * release.json; a body only installs a release its provider serves (ADR 0237).
  */
-export const RUNTIME_PROVIDER_API: number = providerApi.version;
+const RUNTIME_PROVIDER_API: number = providerApi.version;
 
 type RuntimeAuthorization = (request: Request) => Promise<true | "authentication_required" | "forbidden">;
 
