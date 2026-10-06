@@ -59,7 +59,9 @@ JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 
 ## Updating the runtime
 
-On a release install (`clankie doctor` says `kind: release`), `update_runtime` or
+A hosted image (`/opt/clankie`) never updates itself: its deployment replaces the
+image, so there is no update tool. On a Mac release install (`clankie doctor`
+says `kind: release`), `update_runtime` or
 `clankie update` moves to the latest official release, or `--ref vX.Y.Z`, and
 answers `upToDate` when already current; read status the same way. The rest of
 this section is a source checkout.
@@ -135,8 +137,10 @@ installs a local commit without pushing; no ref takes fetched `origin/main`.
 Update performs the guarded restart, so do not also run `clankie restart`.
 Finish the turn, then report `clankie update status` and the canary next turn.
 Plain `clankie restart` is for a wedged process or changed config with no code
-change. On another install kind there is no source to change: give your person
-or the project tracker the trace evidence instead.
+change. This loop is for self-hosted contributors. A Mac release install has
+no source: update to a newer release, or offer your person a source checkout
+(`CONTRIBUTING.md`) to fix it there. A hosted body never changes its own code;
+give your person the trace evidence instead.
 
 ## Restarting yourself
 

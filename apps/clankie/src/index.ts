@@ -949,13 +949,16 @@ minecraftCapture = new MinecraftCapture({
     ),
   onError: () => logger.warn({ event: "minecraft.capture_unavailable" }, "Minecraft capture unavailable"),
 });
-// A checkout follows origin/main; a release install follows official releases.
+// A checkout follows origin/main; a Mac release install follows official releases.
+// A hosted image is replaced whole by its deployment, so it never updates itself.
+const releaseManifestPath = join(repoRoot, "release.json");
 const runtimeUpdater =
   hostedBody !== undefined
     ? undefined
     : existsSync(join(repoRoot, ".git"))
       ? createRuntimeUpdater({ repoRoot })
-      : existsSync(join(repoRoot, "release.json"))
+      : existsSync(releaseManifestPath) &&
+          String(JSON.parse(readFileSync(releaseManifestPath, "utf8")).target).startsWith("darwin-")
         ? createReleaseUpdater({ releaseRoot: repoRoot })
         : undefined;
 try {
