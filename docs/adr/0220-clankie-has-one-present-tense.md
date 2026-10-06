@@ -66,6 +66,29 @@ with per-frame timings. Motion feel, such as the spinner easing in `think`, live
 in those timings, so every client plays it the same way. No frame comes from a
 Codex pet.
 
+**Concurrent activity labels are opt-in (VUH-1754).** `includeActivities: true`
+adds an optional `activities` array of at most three `{label, kind, since}`
+items. Labels are at most 80 characters and come from fixed public activity
+facts: working, leading workers, voice, play, and waiting for the owner. Raw
+prompts, tool inputs, conversation titles and credentials never enter them.
+Unknown start times stay null; polling does not invent a fresh timestamp.
+Legacy requests omit the array, preserving strict older snapshot readers.
+A working local native captain also projects thinking rather than idle.
+
+The app rotates authored work loops on its own visible sprite clock. Every
+busy mood has at least three poses; a seeded tour avoids adjacent repeats,
+finishes whole loops, and holds ordinary work for roughly eight to fourteen
+seconds plus the final loop remainder. Short directing fidgets finish once.
+Reduce Motion uses the mood's first static pose.
+
+The seven new work loops preserve their authored eye directions by skipping
+routine working/voice face overlays; error, needs-you and new-message overlays
+still convey explicit attention signals through validated screen geometry.
+The activity strip consumes these labels, falls back to `detail` on older
+services, and hides for idle or unreachable presence. Its pixels are excluded
+from the native mouse mask;
+visible hover controls retain their own interactive rectangles below it.
+
 ## Alternatives
 
 - **A separate HTTP presence route.** Rejected. It wouldn't reach hosted

@@ -36,6 +36,7 @@ it("serves live fleet and Discord sources through the strict operator operation"
   try {
     const first = await captain.serveOperatorConversation({ op: "presence", schemaVersion: 1 });
     expect(first).toMatchObject({ op: "presence", snapshot: { mood: "idle", activeSeats: 0, since: null } });
+    expect(first).not.toHaveProperty("snapshot.activities");
     playing = true;
     expect(await captain.serveOperatorConversation({ op: "presence", schemaVersion: 1 })).toMatchObject({
       snapshot: { mood: "playing" },
@@ -43,6 +44,16 @@ it("serves live fleet and Discord sources through the strict operator operation"
     voice = [{ gatewayConnected: true, voiceGuildIds: ["guild"] } as DiscordPresenceSessionRecord];
     expect(await captain.serveOperatorConversation({ op: "presence", schemaVersion: 1 })).toMatchObject({
       snapshot: { mood: "in_voice" },
+    });
+    expect(
+      await captain.serveOperatorConversation({ op: "presence", schemaVersion: 1, includeActivities: true }),
+    ).toMatchObject({
+      snapshot: {
+        activities: [
+          { kind: "voice", label: "In a voice chat", since: null },
+          { kind: "playing", label: "Playing", since: null },
+        ],
+      },
     });
     voice = [{ gatewayConnected: false, voiceGuildIds: ["guild"] } as DiscordPresenceSessionRecord];
     expect(await captain.serveOperatorConversation({ op: "presence", schemaVersion: 1 })).toMatchObject({
