@@ -1,4 +1,4 @@
-# Remote native channels and guarded no-launch settlement (VUH-1527)
+# Remote native channels and authenticated receipt recovery (VUH-1527)
 
 Audit base: `origin/main` `8fcf47a5`, 2026-10-06. Linear issue and its five newest
 comments were read, including the 2026-10-05 PC live acceptance and added peer
@@ -57,55 +57,66 @@ even while CLI fleet status reported peer messages enabled. A handoff to Pell
 requires fresh proven seat discovery; `pell-f996` was not returned in the earlier
 same-fleet inventory, which exposed native `term_*` recipient IDs.
 
-## Remaining acceptance and recovery
+## Legacy boundary
 
-The latest retained PC acceptance in Linear reports a Claude brief delivered to
-its original pane followed by expired login. Original acknowledgement
-`seat-71022bcd-8afe-44cd-9d83-bd71d1ceab42` remains uncertain. Do not resend that
-brief or claim follow-up/completion until the same receipt is reconciled.
-
-The original remote Codex hire `9a42ada0-5111-497e-b43c-25881932778c` failed
-preflight. Its empty allocation was closed by its owner, but the durable native
-hire fence remains. Current `performSpawnSeat` releases an absent **local** pane;
-it does not release a remote pane, where a detached backend can outlive the TUI.
-Its exact-session recovery requires original occupant/session and transcript
-proof. A missing remote pane alone is insufficient. The MCP wrapper's
-`reconcile_seat_call` is a separate read-only ledger, not a native-fence cancellation.
-
-The new mechanism refuses both legacy native hires, which lack a recorded window
-and already have allocated panes. [Exact-byte legacy refusal](settlement/legacy-refusal.json)
-records the current originals evaluated in an isolated copy, with the real journal
-hash unchanged. Claude's native hire UUID is `e70fd47b-264a-42c3-aac9-7f25b6636a4f`;
-`seat-71022bcd…` is its message acknowledgement, not a native hire UUID, and the
-brief was visibly delivered. It cannot truthfully become settled-not-launched.
-Codex's closed shell also fails Clankie's literal no-pane condition. Neither old
-receipt was changed or resent. No cwd/key substitution or replacement hire ran.
-
-The lead needs positive-delivery recovery for the delivered Claude original and
-a separately reviewed disposition for the legacy Codex allocation. Once those
-originals are resolved and Claude login is repaired, verify native
-Codex and Claude brief/follow-up/completion, actual inherited connector isolation,
-and an owned link-loss outcome. The peer exchange added by Clankie needs two
-owned panes in a confirmed connected PC fleet. An inactive named `kh2` session
-must not be started or replaced as an incidental diagnostic.
-
-No acceptance criteria are marked complete by this candidate. No accounts,
-configuration, grants, existing panes or desktop controls changed. PC launcher/
-plugin update still waits for Pell to land `9ab0e1af` on main and deploy; latest
-observed `origin/main` remains `8fcf47a5`. VUH-1563's James check is already posted.
+The original Codex hire `9a42ada0-5111-497e-b43c-25881932778c` allocated a shell
+before preflight failed. Claude native hire `e70fd47b-264a-42c3-aac9-7f25b6636a4f`
+allocated a pane and inserted its brief before expired login stopped work. Neither
+legacy record has a historical host reservation. The [exact-byte no-launch
+refusal](settlement/legacy-refusal.json) correctly refuses both; current absence
+cannot prove they never launched. The positive-delivery and abandonment paths
+below address those distinct dispositions without reclassifying them as no-launch.
 
 ## Focused verification
 
-Real independent `pnpm install --frozen-lockfile`; no shared-tree dependency or
-cache symlinks. Five focused suites passed, 117 tests: remote Claude isolation,
-remote Codex registry/app-server, Claude worker channel, and harness profiles.
-Clankie and TUI typechecks passed. Scoped lint for the affected native channel,
-app-server and receipt code passed; changed-file formatting and diff checks passed.
-For the recovery change, 81 focused tests across six suites passed, including the
-manual native integration with an isolated real Herdr server and OS census. It
-covers retained host/state evidence, late-launch refusal, revoked authority, denied
-preparation after launch commitment, no retry, original-key tombstones, legacy
-refusal and non-API HTTP refusal. One additional CLI test passed over real HTTP,
-checking the exact original-ID request and typed refusal with no redispatch.
-Clankie/TUI typechecks, scoped lint and changed-file formatting/diff checks passed.
-No full `pnpm check`, eval, login, original settlement or new PC hire ran.
+The worktree has a real independent frozen-lockfile installation, with no shared
+dependency/cache symlinks. The final delta passed 98 focused tests in seven service
+suites, including a real isolated Herdr server, OS census, host journal transitions,
+PC-grounded native channel goldens, corrupt/conflicting mailbox journals, forged
+metadata, duplicate attributes/events, invalid session IDs, sidechains, redirected
+files, truncated histories, irreversible recovery and original-key retention.
+Three CLI cases passed over real HTTP for no-launch, delivered and abandoned
+requests, checking exact identity/disposition and refusal without redispatch.
+Clankie/TUI typechecks, scoped lint, formatting, diff and documentation links passed.
+No full `pnpm check`, eval, account login or production settlement ran.
+
+## Follow-up recovery candidate
+
+`clankie hire-receipt settle seat-71022bcd-8afe-44cd-9d83-bd71d1ceab42 delivered`
+now has a supported operator-only path. It resolves the exact retained original
+mailbox identity, authenticates a fresh host census, reads the original workspace's
+native Claude history and attaches unique native channel-origin evidence. Historical
+insertion is delivery; the login error does not establish completed work.
+
+`clankie hire-receipt settle NATIVE_HIRE_UUID abandoned` records explicit operator
+abandonment of an allocation, retaining prior uncertainty and current census proof.
+Both commands retain all originals/evidence and block dispatch/adoption of those
+intents. Recovery never closes panes, registers controllers or creates watches.
+Normal exact-session recovery is fenced while operator recovery is in progress.
+
+[Native security approval](settlement/SECURITY-REVIEW.md) covers the final delta.
+[Authenticated PC program proof](settlement/pc-recovery-proof.json) recovered the
+exact real event and recorded abandonment under an isolated test receipt. The host
+had five panes, four native sessions and a complete process census. Both old
+`pc/wA:p2` and `pc/wA:p3` are absent; no old pane was closed or adopted. Production
+native receipts and the existing delivered ACK remain unchanged.
+
+The [real operator API probe](settlement/production-api-refusal.json) returned
+HTTP 400 for the new recovery request. Deploy this branch before settling the
+production originals; do not write the journals behind the running service.
+Then record delivered for the original channel event and abandoned for native
+hires `9a42ada0-5111-497e-b43c-25881932778c` and
+`e70fd47b-264a-42c3-aac9-7f25b6636a4f` through the supported CLI.
+
+Fresh PC hire → brief → follow-up → peer acceptance remains unrun because the
+requested original settlements need that deployed API. Claude's read-only auth
+status reports `loggedIn:false`. James's exact login ask: on supedupsilly open a
+new Claude terminal, run `claude`, then `/login` and complete personal sign-in;
+tell Clankie when done. Use Codex for acceptance while Claude is signed out.
+No accounts/configuration, existing panes or desktop controls changed.
+
+VUH-1709 normal PC update still needs confirmation that Pell landed and deployed
+`9ab0e1af`. VUH-1563's three-step James check is already on its ticket. Linear
+issue reads and comment writes now return fleet-tool HTTP 403; no connector
+substitution was used. `message_clankie` remains fenced by its original uncertain
+receipt; reports are visible in Tess's pane for Clankie to relay.

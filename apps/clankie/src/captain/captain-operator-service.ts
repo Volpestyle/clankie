@@ -531,8 +531,10 @@ export function createOperatorService(
       return {
         op: "settle_hire_receipt",
         schemaVersion: 1,
-        result: await ctx.herdrWatches.settleHireReceipt(request.receiptId, () =>
-          authorizeQuestion(authority),
+        result: await ctx.herdrWatches.settleHireReceipt(
+          request.receiptId,
+          () => authorizeQuestion(authority),
+          request.disposition,
         ),
       };
     }

@@ -361,8 +361,28 @@ prevent a late dispatch or a reset host journal from granting settlement.
 Legacy receipts without that recorded window, already allocated panes, attempted
 launches, incomplete census, changed connection or revoked authority are refused.
 Current absence cannot reconstruct history. Receipts and evidence are retained;
-the original key stays blocked permanently and no request is resent. This does
-not authorize another hire under the same key or bypass a pending message receipt.
+the original key stays blocked permanently and no request is resent.
+
+`clankie hire-receipt settle seat-ORIGINAL_UUID delivered` records historical
+native insertion through the same authenticated host census. The service resolves
+that exact event in its canonical mailbox journal and uniquely links its fingerprint
+to the allocated remote hire. It requires the original native channel event ID,
+recipient conversation, complete body hash, canonical cwd, native channel-origin
+metadata, and session UUID derived from both the confined transcript filename and
+metadata. A legacy event without a stored recipient binding also needs its exact
+retained bridge acknowledgement. The evidence explicitly labels the historical
+binding reconstruction; it does not adopt the old session or claim work completed.
+Ambiguous, forged, truncated, redirected or changed histories refuse.
+
+`clankie hire-receipt settle ORIGINAL_NATIVE_HIRE_UUID abandoned` records the
+operator's explicit disposition of a legacy allocation with current authenticated
+pane/process/session census. It preserves uncertainty about prior launches and
+keeps the original key blocked permanently. It does not close panes. Close an old
+allocation only with owner authorization and fresh proof of its exact ownership,
+idle state and empty draft; otherwise list it for the owner. New acceptance work
+needs separately authorized fresh intent, not a replay or an automatic key change.
+All original receipts, bridge acknowledgements and host recovery history remain
+retained. Neither recovery command sends, relaunches or adopts an original.
 An abandoned host-operation lock is a refusal, never an invitation to delete it.
 The host OS and configured SSH principal are trusted; a compromised host cannot
 attest its own history. The journal covers service-authorized effects, not arbitrary

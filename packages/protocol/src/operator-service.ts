@@ -4,7 +4,7 @@ import {
   type WorkerReportPage,
 } from "./worker-reports.ts";
 import { ClosedWorkerPaneSchema } from "./operator-conversations.ts";
-import { HireReceiptSettlementSchema } from "./hire-receipts.ts";
+import { HireReceiptIdSchema, HireReceiptSettlementSchema } from "./hire-receipts.ts";
 import { z } from "zod";
 import {
   ProjectProposalLocatorSchema,
@@ -486,7 +486,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("settle_hire_receipt"),
       schemaVersion: z.literal(1),
-      receiptId: z.string().uuid(),
+      receiptId: HireReceiptIdSchema,
+      disposition: z.enum(["not-launched", "delivered", "abandoned"]).optional(),
     })
     .strict(),
   /**

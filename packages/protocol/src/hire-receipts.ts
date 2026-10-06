@@ -32,14 +32,66 @@ export const HireNoLaunchEvidenceSchema = z
   .strict();
 export type HireNoLaunchEvidence = z.infer<typeof HireNoLaunchEvidenceSchema>;
 
+export const HireReceiptIdSchema = z
+  .string()
+  .regex(/^(?:seat-)?[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u);
+/** Historical delivery and explicit abandonment do not assert a no-launch window. */
+export const HireRecoveryEvidenceSchema = HireNoLaunchEvidenceSchema.omit({ window: true, journal: true })
+  .extend({
+    disposition: z.enum(["delivered", "abandoned"]),
+    journal: z.literal("authenticated-recovery"),
+    allocation: z
+      .object({
+        paneId: z.string(),
+        present: z.boolean(),
+        terminalId: z.string().optional(),
+        sessionId: z.string().optional(),
+        status: z.string().optional(),
+      })
+      .strict(),
+    delivery: z
+      .object({
+        receiptId: HireReceiptIdSchema,
+        seatId: z.string(),
+        sessionId: z.string().uuid(),
+        entryId: z.string().uuid(),
+        binding: z.enum(["historical-native-event", "original-native-binding"]),
+        transcriptSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+        at: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine((proof, ctx) => {
+    if (proof.disposition === "delivered" && !proof.delivery)
+      ctx.addIssue({ code: "custom", message: "Delivered recovery needs the original native channel event" });
+  });
+export type HireRecoveryEvidence = z.infer<typeof HireRecoveryEvidenceSchema>;
+export const RetainedHireEvidenceSchema = z.union([HireNoLaunchEvidenceSchema, HireRecoveryEvidenceSchema]);
+export type RetainedHireEvidence = z.infer<typeof RetainedHireEvidenceSchema>;
 export const HireReceiptSettlementSchema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("settled-not-launched"),
-      receiptId: z.string().uuid(),
+      receiptId: HireReceiptIdSchema,
       evidence: HireNoLaunchEvidenceSchema,
     })
     .strict(),
-  z.object({ state: z.literal("refused"), receiptId: z.string().uuid(), detail: z.string() }).strict(),
+  z
+    .object({
+      state: z.literal("settled-delivered"),
+      receiptId: HireReceiptIdSchema,
+      evidence: HireRecoveryEvidenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal("abandoned"),
+      receiptId: HireReceiptIdSchema,
+      evidence: HireRecoveryEvidenceSchema,
+    })
+    .strict(),
+  z.object({ state: z.literal("refused"), receiptId: HireReceiptIdSchema, detail: z.string() }).strict(),
 ]);
 export type HireReceiptSettlement = z.infer<typeof HireReceiptSettlementSchema>;

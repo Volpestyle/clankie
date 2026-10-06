@@ -39,3 +39,34 @@ old originals: Claude `seat-71022bcd…` was delivered, while Codex
 `9a42ada0…` allocated a shell and lacks a recorded window. Neither is eligible.
 Independent future hires require an explicit new-intent mechanism; changing a
 title, brief or cwd cannot escape the original fence.
+
+## Positive delivery and legacy abandonment (follow-up)
+
+Native subagent `/root/receipt_security` reviewed the final source delta and
+approved it on 2026-10-06, with no remaining security blocker. Approval covers
+historical native insertion as delivered and explicit retained abandonment; it
+does not authorize a no-launch reclassification, relaunch or adoption.
+
+The review required and verified:
+
+- Exact canonical mailbox original/ACK identity; corrupt or conflicting journals
+  refuse, including competing mailbox files. Missing legacy bindings require the
+  retained exact bridge ACK and unique historical native event corroboration.
+- Native channel-origin metadata, exact event ID/recipient/body/cwd, independently
+  derived session UUID, canonical baseline IDs and unambiguous native attributes.
+- Confined original workspace/profile traversal, bounded no-follow FD reads,
+  bigint file identity/time comparisons and path identity checks. Windows path
+  stats report `dev=0`; handles report the real volume. Path comparisons retain
+  exact bigint inode/size/times; FD comparisons also retain device identity.
+- Fresh authenticated census on every unsettled attempt, final native allocation
+  identity recheck after transcript observation, and retained host recovery history.
+- A durable irreversible recovery barrier before asynchronous observation,
+  original-hire activity fencing, and no ordinary adoption, completion, reconciliation
+  or replay of an intent under explicit recovery.
+
+[Real PC program proof](pc-recovery-proof.json) uses an isolated test receipt and
+the retained real `seat-71022bcd` native event. It proves Windows compatibility
+and historical insertion; production originals are unchanged. The live operator
+API still [returns HTTP 400](production-api-refusal.json) before deployment.
+Focused checks must pass before handoff; production settlement and fresh-pane
+acceptance remain gated on integrator deployment.

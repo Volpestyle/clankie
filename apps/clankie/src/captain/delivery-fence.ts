@@ -5,6 +5,10 @@ import { z } from "zod";
 import {
   DeliveryStageSchema,
   HireNoLaunchEvidenceSchema,
+  HireRecoveryEvidenceSchema,
+  RetainedHireEvidenceSchema,
+  type HireRecoveryEvidence,
+  type RetainedHireEvidence,
   type HireNoLaunchEvidence,
 } from "@clankie/protocol";
 
@@ -22,7 +26,9 @@ export const ReceiptSchema = z
       .optional(),
     /** Irreversible service-owned barrier; a remote journal reset cannot erase launch intent. */
     remoteLaunchCommitted: z.literal(true).optional(),
-    settlement: HireNoLaunchEvidenceSchema.optional(),
+    /** Operator recovery permanently excludes ordinary launch/adoption/reconciliation. */
+    recoveryRequested: z.literal(true).optional(),
+    settlement: RetainedHireEvidenceSchema.optional(),
     sessionId: z.string().optional(),
     /** Original native occupant observed by the host, never inferred from pane/name. */
     occupantId: z.string().optional(),
@@ -87,10 +93,36 @@ export class DeliveryFence {
     return !this.unreadable && receipt?.settlement ? receipt : undefined;
   }
 
-  public settlement(messageId: string): HireNoLaunchEvidence | undefined {
+  public settlement(messageId: string): RetainedHireEvidence | undefined {
     return this.unreadable
       ? undefined
       : [...this.records.values()].find((receipt) => receipt.messageId === messageId)?.settlement;
+  }
+
+  public all(): readonly (readonly [string, UncertainReceipt])[] {
+    if (this.unreadable) throw new Error("Original receipt journal is unreadable");
+    return [...this.records.entries()];
+  }
+
+  public settleRecovery(key: string, messageId: string, evidence: HireRecoveryEvidence): void {
+    const previous = this.records.get(key);
+    const proof = HireRecoveryEvidenceSchema.parse(evidence);
+    const channel = proof.disposition === "delivered" && proof.delivery?.receiptId === messageId;
+    if (
+      this.unreadable ||
+      previous?.messageId !== messageId ||
+      previous.settlement ||
+      proof.fingerprint !== previous.fingerprint ||
+      (!channel && (proof.receiptId !== messageId || proof.receiptKey !== key))
+    )
+      throw new Error("Recovery does not match the retained original receipt");
+    this.records.set(key, { ...previous, settlement: proof });
+    try {
+      this.save();
+    } catch (error) {
+      this.records.set(key, previous);
+      throw error;
+    }
   }
 
   public completed(key: string): UncertainReceipt | undefined {
@@ -137,7 +169,13 @@ export class DeliveryFence {
     delivery: Omit<NonNullable<UncertainReceipt["completed"]>, "at">,
   ): void {
     const previous = this.records.get(key);
-    if (this.unreadable || previous?.messageId !== messageId || previous.completed || previous.settlement)
+    if (
+      this.unreadable ||
+      previous?.messageId !== messageId ||
+      previous.completed ||
+      previous.settlement ||
+      previous.recoveryRequested
+    )
       throw new Error("Missing original delivery receipt");
     this.records.set(key, { ...previous, completed: { at: Date.now(), ...delivery } });
     try {
@@ -154,6 +192,9 @@ export class DeliveryFence {
       this.unreadable ||
       previous?.messageId !== messageId ||
       previous.settlement ||
+      (previous.recoveryRequested &&
+        Object.hasOwn(fields, "recoveryRequested") &&
+        fields.recoveryRequested !== true) ||
       (previous.remoteLaunchCommitted &&
         Object.hasOwn(fields, "remoteLaunchCommitted") &&
         fields.remoteLaunchCommitted !== true)
@@ -177,6 +218,7 @@ export class DeliveryFence {
       previous?.messageId !== messageId ||
       !previous.remoteAdmission ||
       previous.remoteLaunchCommitted ||
+      previous.recoveryRequested ||
       previous.paneId ||
       previous.sessionId ||
       previous.occupantId ||
@@ -205,7 +247,8 @@ export class DeliveryFence {
     if (
       this.unreadable ||
       this.records.get(key)?.messageId !== messageId ||
-      this.records.get(key)?.settlement
+      this.records.get(key)?.settlement ||
+      this.records.get(key)?.recoveryRequested
     )
       return false;
     const previous = this.records.get(key)!;

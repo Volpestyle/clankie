@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { deflateRawSync } from "node:zlib";
-import { HireNoLaunchEvidenceSchema, type HireNoLaunchEvidence } from "@clankie/protocol";
+import {
+  HireNoLaunchEvidenceSchema,
+  HireRecoveryEvidenceSchema,
+  type HireRecoveryEvidence,
+  type HireNoLaunchEvidence,
+} from "@clankie/protocol";
 import { remoteProgramCommand, type FleetShellRun, type HerdrFleet } from "./herdr-fleet.ts";
 import { REMOTE_HIRE_RECEIPT_PROGRAM } from "./remote-hire-receipt-program.ts";
 
@@ -12,6 +17,14 @@ export interface RemoteHireClaim {
   target: HireNoLaunchEvidence["target"];
   nonce: string;
 }
+export interface RemoteHireRecovery {
+  disposition: "delivered" | "abandoned";
+  paneId: string;
+  cwd: string;
+  harness: string;
+  beforeIds?: string[];
+  message?: { receiptId: string; seatId: string; binding?: string };
+}
 export interface RemoteHireReceipts {
   claim(
     fleet: string,
@@ -20,12 +33,17 @@ export interface RemoteHireReceipts {
   reserve(claim: RemoteHireClaim): Promise<void>;
   launch(claim: RemoteHireClaim): Promise<void>;
   seal(claim: RemoteHireClaim): Promise<HireNoLaunchEvidence>;
+  recover(claim: RemoteHireClaim, recovery: RemoteHireRecovery): Promise<HireRecoveryEvidence>;
 }
 
 /** Self-contained host program. Only service-authored arguments cross configured SSH. */
 
-export function remoteHireReceiptCommand(claim: RemoteHireClaim, op: "reserve" | "launch" | "seal"): string {
-  const script = `Promise.resolve().then(()=>(${REMOTE_HIRE_RECEIPT_PROGRAM})(${JSON.stringify({ op, claim })})).then(value=>process.stdout.write(JSON.stringify(value)+'\\n')).catch(error=>{process.stderr.write(error.message+'\\n');process.exitCode=1})`;
+export function remoteHireReceiptCommand(
+  claim: RemoteHireClaim,
+  op: "reserve" | "launch" | "seal" | "recover",
+  recovery?: RemoteHireRecovery,
+): string {
+  const script = `Promise.resolve().then(()=>(${REMOTE_HIRE_RECEIPT_PROGRAM})(${JSON.stringify({ op, claim, ...(recovery ? { recovery } : {}) })})).then(value=>process.stdout.write(JSON.stringify(value)+'\\n')).catch(error=>{process.stderr.write(error.message+'\\n');process.exitCode=1})`;
   const compressed = deflateRawSync(Buffer.from(script)).toString("base64");
   const command = remoteProgramCommand(claim.target.shell, "node", [
     "-e",
@@ -48,11 +66,24 @@ export function createRemoteHireReceipts(options: {
     session: fleet.session,
     shell: fleet.ssh.shell,
   });
-  const operation = async (claim: RemoteHireClaim, op: "reserve" | "launch" | "seal") => {
+  const operation = async (
+    claim: RemoteHireClaim,
+    op: "reserve" | "launch" | "seal" | "recover",
+    recovery?: RemoteHireRecovery,
+  ) => {
     const fleet = await options.fleet(claim.target.fleet);
     if (!fleet || !isDeepStrictEqual(target(fleet), claim.target))
       throw new Error("Original remote hire target changed or disconnected");
-    const output = await options.shell(fleet)(remoteHireReceiptCommand(claim, op), 45_000);
+    const output = await options
+      .shell(fleet)(remoteHireReceiptCommand(claim, op, recovery), 45_000)
+      .catch((error: unknown) => {
+        const stderr = (error as { stderr?: unknown })?.stderr;
+        const detail =
+          error instanceof Error && error.name === "HerdrFleetError"
+            ? error.message.slice(0, 2000)
+            : "Authenticated host operation failed; inspect the original host receipt";
+        throw new Error(typeof stderr === "string" && stderr.trim() ? stderr.trim().slice(-2000) : detail);
+      });
     const current = await options.fleet(claim.target.fleet);
     if (!current || !isDeepStrictEqual(target(current), claim.target))
       throw new Error("Remote hire target changed during observation");
@@ -74,6 +105,22 @@ export function createRemoteHireReceipts(options: {
     async launch(claim) {
       if (((await operation(claim, "launch")) as { launchCommitted?: unknown })?.launchCommitted !== true)
         throw new Error("Host launch barrier was not acknowledged");
+    },
+    async recover(claim, recovery) {
+      const proof = HireRecoveryEvidenceSchema.parse(await operation(claim, "recover", recovery));
+      if (
+        proof.receiptId !== claim.receiptId ||
+        proof.receiptKey !== claim.receiptKey ||
+        proof.fingerprint !== claim.fingerprint ||
+        !isDeepStrictEqual(proof.target, claim.target) ||
+        proof.disposition !== recovery.disposition ||
+        proof.allocation.paneId !== recovery.paneId ||
+        (recovery.message &&
+          (proof.delivery?.receiptId !== recovery.message.receiptId ||
+            proof.delivery.seatId !== recovery.message.seatId))
+      )
+        throw new Error("Host recovery did not match the original receipt");
+      return proof;
     },
     async seal(claim) {
       const proof = HireNoLaunchEvidenceSchema.parse(await operation(claim, "seal"));

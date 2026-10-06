@@ -50,7 +50,7 @@ import {
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
@@ -464,6 +464,37 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             shell: (fleet) => deps.fleets!.shell!(fleet),
           }),
         }),
+    channelReceipt: async (id) => {
+      const directory = join(options.stateDir, "delivery-receipts", "fleet");
+      const ids = new Set(fleetMailboxes.keys());
+      if (existsSync(directory))
+        for (const file of readdirSync(directory)) {
+          const name = file.endsWith(".json.delivered")
+            ? file.slice(0, -15)
+            : file.endsWith(".json")
+              ? file.slice(0, -5)
+              : undefined;
+          if (name !== undefined) {
+            const seatId = decodeURIComponent(name);
+            if (encodeURIComponent(seatId) !== name) throw new Error("Mailbox receipt path is noncanonical");
+            ids.add(seatId);
+          }
+        }
+      const matches = [...ids]
+        .map((seatId) => {
+          const mailbox = fleetSeatMailbox(fleetMailboxes, seatId, directory);
+          return { seatId, mailbox, receipt: mailbox.recoveryReceipt(id) };
+        })
+        .filter((item) => item.receipt !== undefined);
+      if (matches.length !== 1) return undefined;
+      const original = matches[0]!;
+      return {
+        seatId: original.seatId,
+        receipt: original.receipt!,
+        acknowledged: original.mailbox.recoveryAcknowledged(id),
+        settle: (evidence) => original.mailbox.settleRecoveredDelivery(id, evidence),
+      };
+    },
     ...(options.fleetHireTools ? { fleetHireTools: options.fleetHireTools } : {}),
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},

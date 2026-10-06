@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
+import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { HerdrWatchStore, createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import {
   createRemoteHireReceipts,
@@ -103,7 +104,7 @@ it("operator request accepts only the original UUID, never supplied evidence or 
       ...request,
       receiptId: "seat-71022bcd-8afe-44cd-9d83-bd71d1ceab42",
     }).success,
-  ).toBe(false);
+  ).toBe(true);
 });
 
 it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST !== "1")(
@@ -259,6 +260,166 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
       } finally {
         denied.close();
       }
+      // Golden metadata/body shape is grounded in the real PC channel insertion
+      // for seat-71022bcd (2026-10-05), with IDs and content reduced for this fixture.
+      const legacy = claim();
+      const eventId = `seat-${randomUUID()}`;
+      const sessionId = randomUUID();
+      const entryId = randomUUID();
+      const seatId = "pc/term_original";
+      const content = `<channel source="plugin:clankie-worker:clankie" kind="message" conversation="${seatId}" source="captain" event_id="${eventId}" created_at="2026-10-05T03:45:39.633Z">\noriginal brief\n</channel>`;
+      const row = {
+        type: "user",
+        message: { role: "user", content },
+        isSidechain: false,
+        isMeta: true,
+        promptSource: "system",
+        origin: { kind: "channel", server: "plugin:clankie-worker:clankie" },
+        cwd: home,
+        sessionId,
+        uuid: entryId,
+        timestamp: "2026-10-05T03:45:39.657Z",
+      };
+      const project = join(home, ".claude/projects", home.replace(/[^a-zA-Z0-9]/gu, "-"));
+      await mkdir(project, { recursive: true });
+      const transcript = join(project, `${sessionId}.jsonl`);
+      const recoveryPath = join(home, "recovery-watches.json");
+      const legacyFence = new DeliveryFence(`${recoveryPath}.hire-receipts.json`);
+      legacy.receiptKey = JSON.stringify(["pc", "claude", home, "new"]);
+      legacyFence.begin(legacy.receiptKey, {
+        messageId: legacy.receiptId,
+        fingerprint: legacy.fingerprint,
+        paneId: "pc/absent-original",
+        beforeIds: [],
+      });
+      const mailboxPath = join(home, "original-mailbox.json");
+      new DeliveryFence(`${mailboxPath}.delivered`).begin(eventId, {
+        messageId: eventId,
+        fingerprint: legacy.fingerprint,
+      });
+      const mailbox = new SeatOutbox({ uncertaintyPath: mailboxPath });
+      const recoveryStore = new HerdrWatchStore(recoveryPath, {
+        remoteHireReceipts: native,
+        channelReceipt: async (id) => {
+          const receipt = mailbox.recoveryReceipt(id);
+          return receipt
+            ? {
+                seatId,
+                receipt,
+                acknowledged: mailbox.recoveryAcknowledged(id),
+                settle: (evidence) => mailbox.settleRecoveredDelivery(id, evidence),
+              }
+            : undefined;
+        },
+      });
+      try {
+        const authorized = async () => {};
+        await writeFile(transcript, JSON.stringify({ ...row, isMeta: false }) + "\n");
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("native channel origin"),
+        });
+        await writeFile(
+          transcript,
+          JSON.stringify(row) + "\n" + JSON.stringify({ ...row, uuid: randomUUID() }) + "\n",
+        );
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("ambiguous"),
+        });
+        await writeFile(
+          transcript,
+          JSON.stringify({
+            ...row,
+            message: {
+              role: "user",
+              content: content.replace(
+                `event_id="${eventId}"`,
+                `event_id="${eventId}" event_id="${eventId}"`,
+              ),
+            },
+          }) + "\n",
+        );
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("Ambiguous channel attributes"),
+        });
+        await writeFile(transcript, JSON.stringify({ ...row, sessionId: randomUUID() }) + "\n");
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("identity or content"),
+        });
+        await writeFile(transcript, JSON.stringify({ ...row, isSidechain: true }) + "\n");
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("native channel origin"),
+        });
+        const outside = join(home, "outside.jsonl");
+        await writeFile(outside, JSON.stringify(row) + "\n");
+        await rm(transcript);
+        await symlink(outside, transcript);
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("symlink"),
+        });
+        await rm(transcript);
+        await writeFile(transcript, JSON.stringify(row));
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("incomplete"),
+        });
+        await writeFile(transcript, JSON.stringify(row) + "\n");
+        const delivered = await recoveryStore.settleHireReceipt(eventId, authorized, "delivered");
+        expect(delivered).toMatchObject({
+          state: "settled-delivered",
+          evidence: {
+            disposition: "delivered",
+            delivery: { receiptId: eventId, seatId, sessionId, entryId, binding: "historical-native-event" },
+            allocation: { present: false },
+          },
+        });
+        expect(await recoveryStore.settleHireReceipt(eventId, authorized, "delivered")).toEqual(delivered);
+        expect(new SeatOutbox({ uncertaintyPath: mailboxPath }).recoveryReceipt(eventId)?.settlement).toEqual(
+          "evidence" in delivered ? delivered.evidence : undefined,
+        );
+        expect(
+          await recoveryStore.settleHireReceipt(legacy.receiptId, authorized, "abandoned"),
+        ).toMatchObject({
+          state: "abandoned",
+          evidence: { disposition: "abandoned", allocation: { present: false } },
+        });
+        expect(() =>
+          new DeliveryFence(`${recoveryPath}.hire-receipts.json`).update(
+            legacy.receiptKey,
+            legacy.receiptId,
+            { recoveryRequested: undefined },
+          ),
+        ).toThrow();
+        const retained = new DeliveryFence(`${recoveryPath}.hire-receipts.json`);
+        expect(retained.settled(legacy.receiptKey)?.messageId).toBe(legacy.receiptId);
+        expect(retained.reconcile(legacy.receiptKey, legacy.receiptId)).toBe(false);
+        expect(() => retained.begin(legacy.receiptKey, { fingerprint: "replacement" })).toThrow();
+        expect(() =>
+          retained.update(legacy.receiptKey, legacy.receiptId, { settlement: undefined }),
+        ).toThrow();
+        const conflict = join(home, "conflicting-mailbox.json");
+        new DeliveryFence(conflict).begin(eventId, { messageId: eventId, fingerprint: legacy.fingerprint });
+        new DeliveryFence(`${conflict}.delivered`).begin(eventId, {
+          messageId: eventId,
+          fingerprint: "conflicting-original",
+        });
+        expect(() => new SeatOutbox({ uncertaintyPath: conflict }).recoveryReceipt(eventId)).toThrow(
+          /conflicts/u,
+        );
+        await writeFile(conflict, "corrupt");
+        expect(() => new SeatOutbox({ uncertaintyPath: conflict }).recoveryReceipt(eventId)).toThrow(
+          /unreadable/u,
+        );
+      } finally {
+        recoveryStore.close();
+        mailbox.close();
+      }
+
       // A corrupt restart never turns retained uncertainty into launch permission.
       await writeFile(file, "corrupt");
       expect(() =>
