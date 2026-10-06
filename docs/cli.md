@@ -3241,7 +3241,7 @@ control remains available; normal agent messages do not use it. See
 
 <a id="seat-commands"></a>
 
-### `claude[N] | codex[N] | opencode [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
+### `claude[N] | codex[N] | opencode [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]`
 
 Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 `clankie claude` opens this seat with `claude`; `clankie claude2` uses your
@@ -3269,18 +3269,23 @@ session, and enables `clankie@inline` with the development channel flag for that
 same identity. This also prevents a stale marketplace copy from restoring pruned
 or disabled skills. Keep any marketplace seat plugin disabled globally, since
 its forced output style makes every session answer as him when enabled there.
-With `--conversation global-default`, inside the service's herdr fleet it names
+When the seat holds the global chat, inside the service's herdr fleet it names
 that pane `clankie` once Claude Code
 is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
 
-Every fresh Claude launch starts a new Claude Code session under a recorded id and creates
-a separate workspace chat through `POST /v1/captain/seat-context`, rooted at the
-launch directory. Multiple launches in the same directory or account each get
-their own chat, transcript, tool context and wake channel. The chat is available
-in the app and `clankie conversations list`. A running service and operator
-credential are required; failure to create the chat stops the launch.
+Every fresh Claude launch starts a new Claude Code session under a recorded id.
+Without a selection it takes the shared global chat (`global-default`) while no
+live seat holds it: `GET /v1/captain/seat-context` reports `occupied` while a
+seat's channel is polling that chat. If one does, or with `--new`, the launch
+creates a separate workspace chat through `POST /v1/captain/seat-context`, rooted
+at the launch directory, with its own transcript, tool context and wake channel.
+Two launches started within seconds of each other can both find the global chat
+free, because a seat holds it only once its channel starts polling; use `--new`
+for the second. Every chat is available in the app and `clankie conversations list`.
+A running service and operator credential are required, including for
+`--dry-run` without `--new`; failure to resolve or create the chat stops the launch.
 `--resume` reopens the last seat for that Claude command and its chat. The
 conversation selection is retained on resume, and a different `--conversation` is refused.
 Skill selection is reapplied at launch, but resumed history can still contain previously loaded guidance.
@@ -3290,8 +3295,9 @@ opens the selected harness there. That
 workspace must exist on the native host. The prompt includes its agent
 instructions and the owner's persona/fleet preferences. The MCP bank and channel
 share its conversation. Inherited worker capabilities and conversation
-selections do not select the seat. Use `--conversation global-default` to select
-the shared global chat. Workspace seats do not rename themselves as the global Herdr head.
+selections do not select the seat. `--conversation global-default` selects the
+shared global chat even while another seat holds it. Workspace seats do not rename
+themselves as the global Herdr head.
 
 While its channel is live, the seat receives that conversation's worker reports,
 escalations, wakes and watches instead of starting a service model turn. Closing
@@ -3374,7 +3380,7 @@ The launch plan includes a typed `hook_trust_required` owner step: review the
 plugin in Codex's `/hooks`, then exit and launch the seat again. The launcher never
 bypasses hook trust. Wakes bind only after trusted session hooks succeed.
 `--resume` retains the last Codex thread and conversation independently of the
-Claude seat. Fresh Codex launches also create their own workspace chat.
+Claude seat. Fresh Codex launches choose their chat the same way.
 Both harnesses use the same service prompt, memory card, tool bank,
 redacted transcript endpoint and conversation outbox.
 
@@ -4276,8 +4282,9 @@ goals. Native goal state remains separate from turn activity.
 `clankie opencode --conversation ID --dry-run` reviews the native
 launch, installed version, skill selection and required owner steps. Remove
 `--dry-run` to launch; `--resume` uses the exact recorded session and chat.
-Without `--conversation ID`, each fresh launch creates a separate workspace
-chat; dry-run creates none. `/opencode`
+Without `--conversation ID`, a fresh launch takes the global chat while no live
+seat holds it and otherwise (or with `--new`) creates a separate workspace chat;
+dry-run creates none. `/opencode`
 in the console reviews the same plan. Installation, per-launch settings,
 removal, native delivery semantics and current verification limits are in the
 [OpenCode seat guide](../integrations/opencode-plugin/README.md).
@@ -4291,7 +4298,8 @@ Grok Build 1.0.46 on PATH, an existing Grok sign-in, and Clankie's operator
 credential. It uses the current `GROK_HOME` (otherwise `~/.grok`); it never
 changes accounts or signs in. `/grok` reviews the same plan in the console.
 
-Each fresh launch creates a separate workspace chat. `--conversation ID`
+A fresh launch takes the global chat while no live seat holds it and otherwise
+(or with `--new`) creates a separate workspace chat. `--conversation ID`
 selects an existing conversation; `--resume` retains its exact native session,
 profile and chat after a confirmed exit. An uncertain prior exit or delivery
 refuses another launch until the original TUI and receipts are inspected.

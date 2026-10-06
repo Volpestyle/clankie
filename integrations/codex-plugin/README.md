@@ -26,9 +26,9 @@ Changed hook definitions require review again. The launcher reports this as
 writes Codex's trust records. An untrusted seat does not bind the wake outbox.
 
 Use an existing conversation ID from `clankie conversations list`. Omission
-creates a separate workspace chat for each fresh launch. `--dry-run` describes
-that chat without creating it. `--conversation global-default` selects the
-shared global chat. Live verification must select a new scratch
+takes the shared global chat while no live seat holds it, and otherwise (or with
+`--new`) creates a separate workspace chat. `--dry-run` describes that chat without
+creating it. `--conversation global-default` selects the shared global chat. Live verification must select a new scratch
 conversation and close its own seat afterward. Codex and Claude maintain
 separate resume records; resume cannot rebind a thread to another conversation.
 

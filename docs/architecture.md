@@ -212,11 +212,12 @@ persisting a second world projection
 
 ### Native operator seats
 
-Each fresh Claude, Codex or OpenCode launch creates a separate workspace chat at its launch
-directory. Multiple native seats keep separate transcripts, tools and outboxes,
-even in the same directory or account. `--resume` retains the last seat's binding;
-`--conversation ID` selects an existing chat, including `global-default` for the
-shared global head. Dry runs create no conversation.
+A fresh Claude, Codex, OpenCode or Grok launch without a selection takes the shared
+global head (`global-default`) while no live seat's channel is polling it. If one
+is, or with `--new`, the launch creates a separate workspace chat at its launch
+directory, with its own transcript, tools and outbox. `--resume` retains the last
+seat's binding; `--conversation ID` selects an existing chat. Dry runs create no
+conversation.
 
 A seat can also select a canonical Discord room. Its live conversation channel
 receives worker reports, escalations, wakes, watches and room turns through the

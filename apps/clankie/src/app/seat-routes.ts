@@ -84,7 +84,10 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     if ("denial" in auth) return auth.denial;
     if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
     const binding = seatBinding(context, auth.lane);
-    return "denial" in binding ? binding.denial : context.json(binding);
+    if ("denial" in binding) return binding.denial;
+    // A launcher without --conversation takes the global chat only while no live seat holds it.
+    const occupied = ctx.dependencies.captain.operatorSeatReady?.(binding.conversationId) === true;
+    return context.json({ ...binding, occupied });
   });
 
   // Native seats use the same registry as the app, with a fresh workspace chat

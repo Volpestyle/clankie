@@ -3357,15 +3357,18 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 256 }
       responses:
         "200":
-          description: The service-owned conversationId and cwd
+          description: The service-owned conversationId, cwd, and whether a live native seat holds it
           content:
             application/json:
               schema:
                 type: object
-                required: [conversationId, cwd]
+                required: [conversationId, cwd, occupied]
                 properties:
                   conversationId: { type: string }
                   cwd: { type: string }
+                  occupied:
+                    type: boolean
+                    description: A native seat's channel is polling this conversation now
         "400":
           description: Invalid conversation ID
         "403":

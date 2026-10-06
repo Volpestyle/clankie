@@ -77,8 +77,8 @@ older installed `clankie@clankie` for this session, enables the projected
 `clankie@inline`, and addresses that identity with the development channel flag.
 Claude's [session plugin identity and precedence](https://code.claude.com/docs/en/plugins/loading)
 keep the old marketplace skill catalog from leaking into this seat. It starts
-with `--name Clankie`. An explicit `--conversation global-default` names the
-Herdr pane `clankie` inside the service's fleet.
+with `--name Clankie`. A seat on the global chat names the Herdr pane
+`clankie` inside the service's fleet.
 `--plugin-dir` chooses the component source; the projection still supplies the
 shipped skills. `--dry-run` shows the plugin projection and catalog.
 
@@ -86,13 +86,14 @@ shipped skills. `--dry-run` shows the plugin projection and catalog.
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
 binds the prompt, MCP tools and channel to that conversation. The selected
 workspace must exist on the native host. `--resume` retains the binding and
-refuses a different ID. Without a selection, each fresh launch creates its own
-workspace chat through `POST /v1/captain/seat-context`, even when several seats
-use the same directory or Claude account. Its transcript, tools and wake channel
-belong to that chat. `--resume` reopens the last seat and its chat for the selected
-Claude command; `--conversation global-default` explicitly selects the shared
-global chat. Workspace seats do not claim the global Herdr head name.
-`--dry-run` describes the new conversation without creating it.
+refuses a different ID. Without a selection, a fresh launch takes the shared
+global chat while no live seat holds it (`GET /v1/captain/seat-context` reports
+`occupied`); otherwise, or with `--new`, it creates its own workspace chat through
+`POST /v1/captain/seat-context`. Its transcript, tools and wake channel belong to
+that chat. `--resume` reopens the last seat and its chat for the selected Claude
+command; `--conversation global-default` selects the shared global chat even while
+another seat holds it. Workspace seats do not claim the global Herdr head name.
+`--dry-run` describes the chosen or new conversation without creating it.
 
 The launcher sets `CLANKIE_CONVERSATION_ID` for the plugin's hooks and MCP bridge;
 inherited selections and worker capabilities are cleared. The prompt adds

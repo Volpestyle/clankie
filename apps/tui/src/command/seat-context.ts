@@ -15,9 +15,21 @@ export interface NewSeatConversation {
   readonly title: string;
 }
 
-/** Each new native seat owns a chat; planning a launch never creates one. */
+export const GLOBAL_CONVERSATION_ID = "global-default";
+
+/**
+ * A new native seat without a selection takes the global chat while no live
+ * seat holds it, and otherwise owns a fresh workspace chat; `fresh` asks for
+ * the workspace chat outright. Planning a launch never creates one.
+ */
 export async function resolveSeatContext(
-  input: { conversationId?: string | undefined; cwd: string; command: string; dryRun: boolean },
+  input: {
+    conversationId?: string | undefined;
+    fresh?: boolean;
+    cwd: string;
+    command: string;
+    dryRun: boolean;
+  },
   options: SeatCommandOptions,
 ): Promise<{ conversationId?: string; cwd: string; newConversation?: NewSeatConversation }> {
   const newConversation: NewSeatConversation = {
@@ -26,12 +38,29 @@ export async function resolveSeatContext(
     scope: { kind: "workspace", workspaceId: input.cwd },
     title: `Clankie ${input.command} · ${basename(input.cwd).slice(0, 64)} · ${new Date().toISOString()}`,
   };
-  if (input.conversationId === undefined && input.dryRun) return { cwd: input.cwd, newConversation };
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
     env,
     ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
   });
+  if (input.conversationId === undefined && !input.fresh) {
+    if (credential === undefined)
+      throw new Error("No operator credential is available; start Clankie first.");
+    const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
+    url.searchParams.set("conversationId", GLOBAL_CONVERSATION_ID);
+    const response = await (options.fetchImpl ?? fetch)(url, {
+      headers: { authorization: `Bearer ${credential.token}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
+    const global = (await response.json()) as { conversationId?: unknown; cwd?: unknown; occupied?: unknown };
+    if (global.conversationId !== GLOBAL_CONVERSATION_ID || typeof global.cwd !== "string" || !global.cwd)
+      throw new Error("Invalid service seat context");
+    // A service that cannot report occupancy keeps the separate-chat behavior.
+    if (global.occupied === false) return { conversationId: GLOBAL_CONVERSATION_ID, cwd: global.cwd };
+  }
+  if (input.conversationId === undefined && input.dryRun) return { cwd: input.cwd, newConversation };
   if (credential === undefined) throw new Error("No operator credential is available; start Clankie first.");
   const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
   if (input.conversationId !== undefined) url.searchParams.set("conversationId", input.conversationId);

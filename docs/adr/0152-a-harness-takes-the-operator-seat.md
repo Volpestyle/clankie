@@ -107,9 +107,10 @@ flowchart LR
   time: the newest seat wins, a second pane claiming the name stays an ordinary
   fleet agent with a warning, and the TUI operator lane is the head again the
   moment no seat is open.
-- **Seats bind a service conversation.** Each fresh native launch creates its
-  own workspace chat, even for simultaneous launches in the same directory or
-  account. Dry runs create nothing. `--conversation ID` selects an existing
+- **Seats bind a service conversation.** A fresh native launch takes the global
+  head while no live seat holds it; otherwise, or with `--new`, it creates its
+  own workspace chat (amended 2026-10-06: the owner's plain `clankie claude2`
+  should reach Clankie himself, not a new side chat). Dry runs create nothing. `--conversation ID` selects an existing
   global/workspace conversation and its working directory; resume retains that
   binding. Prompt assembly loads its workspace instructions, MCP sessions pin
   its tools/Swarm actor, and polls/replies use its own outbox. See

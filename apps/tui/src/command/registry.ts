@@ -443,12 +443,13 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["claude", "claude2", "codex", "opencode", "grok"],
     lines: [
-      "  claude[N]               Open a separate chat using claude or a numbered shell account command (e.g. claude2)",
+      "  claude[N]               Open Clankie in claude or a numbered shell account command (e.g. claude2)",
       "  codex[N]                Open Codex; a numbered command selects its exact registered account label",
-      "  opencode                Open a separate Clankie chat in OpenCode (TTY)",
-      "  grok                    Open a separate Clankie chat in Grok Build (TTY; macOS, 1.0.46)",
-      "    [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
-      "                           Grok accepts --resume, --conversation and --dry-run; no --plugin-dir",
+      "  opencode                Open Clankie in OpenCode (TTY)",
+      "  grok                    Open Clankie in Grok Build (TTY; macOS, 1.0.46)",
+      "    [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]",
+      "                           Without a selection: the global chat while no live seat holds it, else a new chat; --new forces one",
+      "                           Grok accepts --resume, --conversation, --new and --dry-run; no --plugin-dir",
       "                           --dry-run prints a plan without creating a chat",
     ],
   },

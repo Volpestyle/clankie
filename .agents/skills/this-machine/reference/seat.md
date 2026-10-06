@@ -19,14 +19,13 @@ the plugin's hooks, and these skills as `/clankie:this-machine` and
 independent tracker connectors. This avoids routine tool prompts; it does not
 expand the selected conversation's authority. Folder/hook/channel trust remains
 the owner's decision. The seat's own brain is Claude Code's `/model`;
-`clankie model` changes the service lanes. Each fresh launch creates a separate
-workspace chat, including multiple launches in the same directory or account.
-Its transcript appears in that chat in the app; tools, self-wakes and herdr
+`clankie model` changes the service lanes. A fresh launch takes the shared global
+chat while no live seat holds it; otherwise, or with `--new`, it creates a
+separate workspace chat. Its transcript appears in that chat in the app; tools, self-wakes and herdr
 watches follow its conversation as `<channel source="clankie">` events.
 `--resume` retains the last seat's chat for the selected Claude command.
-`--dry-run` creates no chat. With `--conversation global-default`, a seat inside
-the service's herdr fleet claims the agent name `clankie` and becomes the shared
-global head.
+`--dry-run` creates no chat. A seat on the global chat inside the service's
+herdr fleet claims the agent name `clankie` and becomes the shared global head.
 
 Find the selected conversation with `clankie conversations list`; native
 `--conversation` accepts its stable ID, exact title or unambiguous Discord
@@ -77,9 +76,10 @@ exist only when doctor says `kind: checkout`.
 
 Use the `clankie` MCP server for service tools. Select a project with
 `clankie claude --conversation ID` to reuse an existing chat. A fresh launch without
-that flag creates its own chat rooted at the launch directory. Owner preferences
-and project instructions follow that conversation. Fresh Codex seats also get
-separate chats; their resume record remains independent of Claude's.
+that flag takes the global chat when it is free, else creates its own chat rooted
+at the launch directory (`--new` always does). Owner preferences and project
+instructions follow that conversation. Codex seats choose the same way; their
+resume record remains independent of Claude's.
 
 Eligible signed Linear activity uses the existing seat channel of one configured
 ordinary global chat, `global-default` by default; the lead receives the compact
@@ -125,7 +125,7 @@ original native receipt is reconciled. A service restart
 does not reattach from a saved ID. See `integrations/opencode-plugin/README.md`
 for per-launch MCP isolation, settings, version checks and current live gaps.
 
-OpenCode seats use the same isolation contract: a fresh `clankie opencode` creates a separate workspace chat; `--conversation ID` reuses one,
+OpenCode seats use the same contract: a fresh `clankie opencode` takes the free global chat or creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.
 See [the OpenCode seat guide](../../../../integrations/opencode-plugin/README.md).
 

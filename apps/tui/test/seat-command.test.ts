@@ -76,6 +76,9 @@ function fakeExec(input: {
 describe("clankie seat", () => {
   it("parses its flags and refuses anything else", () => {
     expect(parseSeatArgs([])).toEqual({ resume: false, dryRun: false });
+    expect(parseSeatArgs(["--new"])).toEqual({ resume: false, dryRun: false, newConversation: true });
+    expect(() => parseSeatArgs(["--new", "--conversation", "global-default"])).toThrow("Usage");
+    expect(() => parseSeatArgs(["--new", "--resume"])).toThrow("Usage");
     expect(parseSeatArgs(["--resume", "--dry-run", "--plugin-dir", "/p"])).toEqual({
       resume: true,
       dryRun: true,
@@ -88,7 +91,7 @@ describe("clankie seat", () => {
   it("projects every shipped skill into the seat plugin and keeps channels", async () => {
     const env = await stateEnv();
     const plan = await planSeat(
-      { resume: false, dryRun: true },
+      { resume: false, dryRun: true, newConversation: true },
       { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: true }] }) },
     );
     expect(plan.plugin.source).toBe("plugin-dir");
@@ -111,7 +114,7 @@ describe("clankie seat", () => {
     await mkdir(join(env.CLAUDE_CONFIG_DIR!, "skills", "lead"), { recursive: true });
     await writeFile(join(env.CLAUDE_CONFIG_DIR!, "skills", "lead", "SKILL.md"), "---\nname: lead\n---\n");
     const plan = await planSeat(
-      { resume: false, dryRun: true },
+      { resume: false, dryRun: true, newConversation: true },
       { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: true }] }) },
     );
     const names = await readdir(join(plan.plugin.path, "skills"));
@@ -138,7 +141,7 @@ describe("clankie seat", () => {
   it("prints the plan on --dry-run through the dispatcher without launching anything", async () => {
     const env = await stateEnv();
     const stdout = outputBuffer();
-    const exit = await runHeadlessCaptainCommand(["seat", "--dry-run"], {
+    const exit = await runHeadlessCaptainCommand(["seat", "--new", "--dry-run"], {
       repoRoot,
       env,
       execFileImpl: fakeExec({}),
@@ -303,6 +306,8 @@ it("selects service project context, preserves it on resume and strips inherited
     fetchImpl: (async (url: URL, init?: RequestInit) => {
       if (init?.method === "POST")
         return Response.json({ conversationId: "fresh-seat", cwd: process.cwd() }, { status: 201 });
+      if (url.searchParams.get("conversationId") === "global-default")
+        return Response.json({ conversationId: "global-default", cwd: process.cwd(), occupied: true });
       requests.push(url.searchParams.get("conversationId")!);
       return Response.json({ conversationId: "project-a", cwd: "/selected/project-a" });
     }) as typeof fetch,
@@ -341,7 +346,7 @@ it.each(["claude", "claude2", "claude3"])(
     const env = await stateEnv();
     const stdout = outputBuffer();
     const calls: string[][] = [];
-    const exit = await runHeadlessCaptainCommand([command, "--dry-run"], {
+    const exit = await runHeadlessCaptainCommand([command, "--new", "--dry-run"], {
       repoRoot,
       env,
       stdout: stdout.stream,
@@ -366,7 +371,7 @@ it("resolves a numbered Claude shell function and preserves launch arguments", a
   );
   env.LAUNCH_RESULT = result;
   expect(
-    await runSeatCommand([], {
+    await runSeatCommand(["--new"], {
       repoRoot,
       env,
       claudeCommand: "claude2",

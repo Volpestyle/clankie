@@ -19,7 +19,7 @@ test("OpenCode plan discovers capabilities and exact resume refuses conversation
   const root = await mkdtemp(join(tmpdir(), "opencode-plan-"));
   const env = { XDG_STATE_HOME: root, CLANKIE_SETTINGS_FILE: join(root, "settings.json") };
   try {
-    const flags = parseSeatArgs(["--harness", "opencode", "--dry-run"]);
+    const flags = parseSeatArgs(["--harness", "opencode", "--new", "--dry-run"]);
     const plan = await planSeat(flags, { repoRoot, env, execFileImpl });
     expect(plan.command).toBe("opencode");
     expect(plan.args).not.toContain("--auto");
@@ -161,7 +161,7 @@ test("launcher bridge authenticates and binds one session without copying operat
   const output: string[] = [];
   try {
     await runOpenCodeSeat(
-      { resume: false, dryRun: false },
+      { resume: false, dryRun: false, newConversation: true },
       {
         repoRoot,
         env,

@@ -19,7 +19,13 @@ import { resolveSeatContext } from "./seat-context.ts";
 
 const exec = promisify(execCallback);
 const SESSION = /^ses_[A-Za-z0-9]{8,128}$/u;
-type Flags = { resume: boolean; dryRun: boolean; conversationId?: string; pluginDir?: string };
+type Flags = {
+  resume: boolean;
+  dryRun: boolean;
+  conversationId?: string;
+  newConversation?: boolean;
+  pluginDir?: string;
+};
 type Binding = { sessionId: string; conversationId?: string; cwd: string };
 type Event = { id: string; content: string; meta: unknown };
 const recordPath = (env: NodeJS.ProcessEnv) => join(clankieStateHome(env), "clankie", "opencode-seat.json");
@@ -71,6 +77,7 @@ export async function planOpenCodeSeat(
     {
       conversationId:
         previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
+      fresh: flags.newConversation === true,
       cwd: previous?.cwd ?? process.cwd(),
       command: "opencode",
       dryRun: true,
@@ -149,7 +156,10 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
   };
   config.autoupdate = false;
   if (plan.newConversation !== undefined) {
-    const context = await resolveSeatContext({ cwd: plan.cwd, command: "opencode", dryRun: false }, options);
+    const context = await resolveSeatContext(
+      { cwd: plan.cwd, command: "opencode", fresh: true, dryRun: false },
+      options,
+    );
     plan = { ...plan, ...context, args: [context.cwd, ...plan.args.slice(1)] };
   }
   const stop = new AbortController();

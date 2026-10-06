@@ -14,12 +14,13 @@ it.each([
   ["opencode", "named"],
   ["opencode", "legacy"],
 ] as const)(
-  "overlapping %s %s launches in one workspace get separate app chats and resume their binding",
+  "%s %s launches take the free global chat, else separate app chats, and resume their binding",
   async (harness, route) => {
     const seatArgs = route === "legacy" ? ["--harness", harness] : [];
     const root = await mkdtemp(join(tmpdir(), "clankie-seat-isolation-"));
     const conversations = new ConversationStore(join(root, "conversations"), async () => {});
     const launches: Array<{ conversationId: string; sessionId: string; cwd: string }> = [];
+    const occupied = new Set<string>();
     const token = `clankie_op_${"a".repeat(43)}`;
     const clankie = await createClankieApp({
       captain: createStubCaptain({
@@ -36,6 +37,7 @@ it.each([
                 cwd: conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : process.cwd(),
               };
         },
+        operatorSeatReady: (id = "global-default") => occupied.has(id),
         syncSeatTranscript: (id, upload) =>
           conversations.syncNativeSeatTranscript(id, upload.sessionId, upload.entries, upload.activity),
       }),
@@ -105,6 +107,13 @@ it.each([
       stderr: { write: () => {} },
     };
     try {
+      const free = await planSeat({ harness, resume: false, dryRun: true }, options);
+      expect(free.conversationId).toBe("global-default");
+      expect(free.newConversation).toBeUndefined();
+      await runSeatCommand(seatArgs, options);
+      expect(launches.splice(0)).toMatchObject([{ conversationId: "global-default" }]);
+      // A live seat's channel holds the global chat; later launches get their own.
+      occupied.add("global-default");
       const dry = await planSeat({ harness, resume: false, dryRun: true }, options);
       expect(dry.newConversation?.scope).toEqual({ kind: "workspace", workspaceId: process.cwd() });
       expect(dry.herdrPaneId).toBeUndefined();
@@ -174,6 +183,13 @@ it.each([
       );
       expect(codex.conversationId).toBeUndefined();
       expect(codex.newConversation?.scope).toEqual({ kind: "workspace", workspaceId: process.cwd() });
+      occupied.clear();
+      await runSeatCommand([...seatArgs, "--new"], options);
+      expect(launches.at(-1)?.conversationId).not.toBe("global-default");
+      expect(conversations.conversation(launches.at(-1)!.conversationId)?.scope).toEqual({
+        kind: "workspace",
+        workspaceId: process.cwd(),
+      });
       const beforeFailure = launches.length;
       await expect(
         runSeatCommand(seatArgs, {
