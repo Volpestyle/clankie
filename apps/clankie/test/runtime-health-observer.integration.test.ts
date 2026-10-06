@@ -65,13 +65,15 @@ it("real busy process and slow HTTP sustain one alarm, recover once with duratio
     const spool = createBodyTelemetry({dir:process.argv[3],writer:'runtime-test'});
     const stopHot = Date.now()+1800;
     const output = (value) => process.stdout.write(JSON.stringify(value)+'\\n');
-    let notices=0,healthySamples=0;
+    let notices=0;
+    // Fail against the live snapshot if the required recovery never arrives.
     const deadline=setTimeout(()=>{monitor.stop();output({final:monitor.snapshot()});},6000);
     const monitor = new RuntimeHealthObserver({
       settings:async()=>({enabled:true,cpuPercent:30,healthLatencyMs:100,sustainedMs:400,sampleIntervalMs:100,cooldownMs:60000}),
       healthUrl:process.argv[2],
       notify:async(text)=>{notices++;output({notice:text});return true},
-      observed:(observation)=>{output({observation});spool.emit({event:'body.runtime_health',state:observation.state,cpuPercent:observation.cpuPercent,healthLatencyMs:observation.healthLatencyMs,durationMs:observation.durationMs,reasons:observation.reasons});healthySamples=notices===2&&observation.state==='healthy'?healthySamples+1:0;if(healthySamples===3){monitor.stop();clearTimeout(deadline);output({final:monitor.snapshot()})}},
+      // Capture the recovery transition, before a later independent sample can start another incident.
+      observed:(observation)=>{output({observation});spool.emit({event:'body.runtime_health',state:observation.state,cpuPercent:observation.cpuPercent,healthLatencyMs:observation.healthLatencyMs,durationMs:observation.durationMs,reasons:observation.reasons});if(notices===2&&observation.state==='healthy'&&observation.lastRecoveryAt){monitor.stop();clearTimeout(deadline);output({final:monitor.snapshot()})}},
     });
     function busy(){if(Date.now()>=stopHot)return;const until=performance.now()+25;let total=0;while(performance.now()<until){for(let i=0;i<10000;i++)total+=Math.sqrt(i)};if(!Number.isFinite(total))throw Error('loop');setImmediate(busy)}
     monitor.start();busy();output({started:true});
@@ -119,7 +121,20 @@ it("real busy process and slow HTTP sustain one alarm, recover once with duratio
   expect(notices[0]).toContain("Runtime health alarm: cpu and health");
   expect(notices[1]).toMatch(/Runtime health recovered after \d+ms/u);
   const final = rows.find((row) => row.final)?.final;
+  const observations = rows.flatMap((row) => (row.observation ? [row.observation] : []));
+  const recoveryIndex = observations.findIndex(
+    (observation) => observation.state === "healthy" && observation.lastRecoveryAt !== undefined,
+  );
+  expect(recoveryIndex).toBeGreaterThan(
+    observations.findIndex((observation) => observation.state === "alarm"),
+  );
+  expect(final, JSON.stringify(observations)).toEqual(observations[recoveryIndex]);
   expect(final?.state).toBe("healthy");
+  expect(final?.reasons).toEqual([]);
+  expect(final?.healthAvailable).toBe(true);
+  expect(final?.delivery).toBe("accepted");
+  expect(final?.cpuPercent).toBeLessThanOrEqual(30);
+  expect(final?.healthLatencyMs).toBeLessThanOrEqual(100);
   expect(final?.lastIncidentDurationMs).toBeGreaterThanOrEqual(400);
   expect(notices[1]).toContain(`after ${final?.lastIncidentDurationMs}ms`);
   expect(final?.lastRecoveryAt).toBeDefined();
