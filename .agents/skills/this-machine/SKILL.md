@@ -69,8 +69,10 @@ broker, never flags or chat.
 ## Recovering a body
 
 A body lease marked `recovery_required` is still held. The service retries its
-verified stop-check after the holder's turn and body operations end, at boot
-and with 5–60 second backoff. Never infer release from expiry or a failed close.
+verified stop-check after a known service-owned holder's turn and body
+operations end, at boot and with 5–60 second backoff. Missing or unreadable
+holders and native-owned turns stay held for explicit owner recovery; display
+activity is not native completion proof. Never infer release from expiry or a failed close.
 If it persists, an authorized owner can inspect `clankie body status` and use
 `clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'`
 from an existing writable conversation. Computer recovery uses its own contract.
@@ -88,8 +90,8 @@ For agents, add `--json` (piped output is also JSON). A terminal shows the
 live and target commits and groups deploy holds by cause. An authenticated
 owner may explicitly use `clankie update --override-holds --reason TEXT`;
 every hold gets an audited override with the server-derived owner identity.
-Never override without the owner's reviewed reason. Older verified canary
-holds clear only after a newer runtime passes its full observation window.
+Never override without the owner's reviewed reason. Overrides retain the holds;
+only an explicit owner release clears historical holds.
 
 When a restart is authorized, run `clankie restart` from your own bash tool.
 `status: "scheduled"` means queued until your current turn finishes, not healthy;

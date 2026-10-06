@@ -61,7 +61,9 @@ independent transport-owned voice stay needs its own exact conversation binding.
 The [VUH-1752](https://linear.app/vuhlp/issue/VUH-1752) recovery amendment
 (2026-10-06) permits the service to retry the same verified stop-check at boot
 and on 5–60 second backoff. Automatic admission requires `recovery_required`,
-an ended holder turn/driver, and no live body operation. All three remain
+usable metadata for a service-owned holder, an ended turn/driver, and no live
+body operation. Missing/unreadable holders and native-owned turns require explicit
+owner recovery: display activity is not native completion proof. These conditions remain
 fenced to the exact lease incarnation across awaited checks. Only confirmed
 termination releases it; a refused or unavailable proof retains the claim.
 This cleanup does not replay a Discord send or grant another conversation

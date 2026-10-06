@@ -6,6 +6,12 @@ import type { RuntimeCanaryResult } from "../../bin/runtime-update.ts";
 import type { DeployHold } from "@clankie/protocol/integrate";
 
 type Hold = DeployHold & { candidate?: string; canary?: RuntimeCanaryResult };
+type CpuComparison = {
+  cpuMeanPercent?: number;
+  advisoryPercent: number;
+  previous?: { commit: string; cpuMeanPercent: number };
+  ratioToPrevious?: number;
+};
 interface View {
   runtime?: { commit: string };
   target?: { newCommit: string; ref: string; commitCount: number; summary: string[]; warning?: string };
@@ -14,7 +20,10 @@ interface View {
   canary?: RuntimeCanaryResult;
   policy?: RuntimeCanaryResult["policy"];
   canaryPolicy?: RuntimeCanaryResult["policy"];
+  canaryCpu?: CpuComparison | null;
+  cpu?: CpuComparison | null;
   accepted?: boolean;
+  upToDate?: boolean;
   pending?: string;
   error?: string;
   detail?: string;
@@ -24,7 +33,7 @@ interface View {
 const clean = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ");
 const short = (sha: string) => sha.slice(0, 8);
 const causes: Record<string, string> = {
-  "runtime-canary-cpu-budget-exceeded": "CPU canary",
+  "runtime-canary-cpu-budget-exceeded": "historical CPU canary",
   "runtime-canary-latency-budget-exceeded": "health latency canary",
   "runtime-canary-health-unavailable": "canary could not verify runtime health",
   "runtime-canary-runtime-changed": "canary runtime changed during observation",
@@ -44,7 +53,7 @@ function measurements(canaries: RuntimeCanaryResult[]): string {
     canaries.map((c) => c.cpuMeanPercent),
     "%",
   );
-  const cpuBudget = range(
+  const cpuAdvisory = range(
     canaries.map((c) => c.policy?.cpuPercent),
     "%",
   );
@@ -55,7 +64,7 @@ function measurements(canaries: RuntimeCanaryResult[]): string {
   const fine = canaries.every(
     (c) => c.healthP95Ms !== undefined && c.policy && c.healthP95Ms <= c.policy.healthLatencyMs,
   );
-  return `CPU mean ${cpu} vs ${cpuBudget} budget; health p95 ${health}${fine ? ", fine" : ""}`;
+  return `CPU mean ${cpu} vs ${cpuAdvisory} advisory; health p95 ${health}${fine ? ", fine" : ""}`;
 }
 export function formatUpdateOutput(input: unknown): string {
   const view = input as View;
@@ -80,9 +89,20 @@ export function formatUpdateOutput(input: unknown): string {
   const policy = view.policy ?? view.canaryPolicy;
   if (policy)
     lines.push(
-      `Canary budgets: ${policy.cpuPercent}% CPU (one core), ${policy.healthLatencyMs} ms health p95; ${policy.windowMs / 1000}s window, every ${policy.sampleIntervalMs / 1000}s`,
+      `Canary policy: ${policy.cpuPercent}% CPU advisory (one core; never holds), ${policy.healthLatencyMs} ms health p95 budget; ${policy.windowMs / 1000}s window, every ${policy.sampleIntervalMs / 1000}s`,
     );
   if (view.appliesTo === "next_canary") lines.push("Settings apply to the next canary.");
+  const cpu = view.canaryCpu ?? view.cpu;
+  if (cpu?.cpuMeanPercent !== undefined) {
+    lines.push(
+      `CPU advisory observation: ${cpu.cpuMeanPercent.toFixed(2)}% vs ${cpu.advisoryPercent}% advisory; CPU never holds deploys.`,
+    );
+    if (cpu.previous) {
+      lines.push(
+        `Previous CPU: ${cpu.previous.cpuMeanPercent.toFixed(2)}% (${short(cpu.previous.commit)})${cpu.ratioToPrevious === undefined ? "" : `; ${cpu.ratioToPrevious.toFixed(2)}× previous`}`,
+      );
+    }
+  }
   const groups = new Map<string, Hold[]>();
   for (const hold of view.holds ?? []) {
     const cause =
@@ -104,10 +124,11 @@ export function formatUpdateOutput(input: unknown): string {
       'Review the holds, then as owner run: clankie update --override-holds --reason "why proceeding is safe"',
     );
     lines.push(
-      "Each hold gets its own audited override. Older canary holds clear after a newer runtime passes its full canary.",
+      "Each hold gets its own audited override and remains recorded. Historical holds require an explicit owner release.",
     );
   }
-  if (view.accepted)
+  if (view.upToDate) lines.push("Already running the requested official release. No update was scheduled.");
+  else if (view.accepted)
     lines.push(
       "Update accepted. Finish this turn, then run clankie update status to check health and canary.",
     );
@@ -168,5 +189,5 @@ export async function runUpdateCli(
   }
   const result = (await runUpdateCommand(updateArgs, options)) as View;
   stdout.write(`${formatUpdateOutput(result)}\n`);
-  return result.error || result.accepted === false ? 1 : 0;
+  return result.error || (result.accepted === false && !result.upToDate) ? 1 : 0;
 }

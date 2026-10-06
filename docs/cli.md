@@ -1899,8 +1899,10 @@ silently retries a Discord send.
 
 For `recovery_required` browser, voice, play and Discord mouth leases, the
 service tries the same verified stop-check automatically at boot, then retries
-with backoff from 5 seconds up to 60 seconds. It waits until the holder's turn
-and body operations have ended, and checks both again across awaited work.
+with backoff from 5 seconds up to 60 seconds. It requires a known service-owned
+holder whose turn and body operations have ended, and checks both again across
+awaited work. Missing or unreadable holder metadata and native-owned turns
+require explicit owner recovery; native display activity does not prove completion.
 Only confirmed termination releases the exact lease incarnation. Refused or
 unavailable stop proof keeps the lease held; computer recovery stays in its
 separate contract. If recovery persists, the owner can inspect `clankie body

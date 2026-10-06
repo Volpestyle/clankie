@@ -4,6 +4,7 @@ import {
   fleetDeliveryStage,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_LIST_MAX,
+  OperatorConversationSchema,
   RoomHandoffMetadataSchema,
   CaptainChannelTurnResultSchema,
   type CaptainChannelTurnResult,
@@ -829,8 +830,18 @@ export class ConversationStore {
 
   /** Host-only stop admission: includes queued runs and drivers still settling after their last event. */
   public turnIdle(conversationId: string): boolean {
+    const meta = this.metas.get(conversationId);
+    // Missing metadata and native display activity cannot prove an ended holder turn.
+    // Native-owned bodies retain explicit, host-verified operator recovery.
+    if (
+      meta === undefined ||
+      meta.conversationId !== conversationId ||
+      !OperatorConversationSchema.safeParse(publicConversation(meta)).success ||
+      this.hasNativeSeat(conversationId)
+    )
+      return false;
     return (
-      this.metas.get(conversationId)?.sessionState !== "active" &&
+      meta.sessionState !== "active" &&
       (this.runCounts.get(conversationId) ?? 0) === 0 &&
       (this.activeInvocations.get(conversationId) ?? 0) === 0 &&
       (this.serviceDrives.get(conversationId)?.size ?? 0) === 0 &&

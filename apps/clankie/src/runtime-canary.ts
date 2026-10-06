@@ -429,10 +429,9 @@ export class RuntimeCanary {
 
   private async releasePassed(result: RuntimeUpdateResult): Promise<void> {
     if (!result.canary || result.canary.state !== "passed") return;
+    if (result.canary.holdReleased === true) return;
     if (result.newCommit !== this.options.runtime.commit)
       throw Error("Passed runtime canary does not match the running commit");
-    await this.releaseSuperseded(result);
-    if (result.canary.holdReleased === true) return;
     const wanted = this.hold(result, this.previousHealthy(result));
     const existing = (await this.options.holds.list()).find((hold) => hold.id === wanted.id);
     if (existing) {
@@ -454,43 +453,6 @@ export class RuntimeCanary {
       commit: result.newCommit,
     });
     await this.save(result, { ...result.canary, holdReleased: true });
-  }
-
-  private async releaseSuperseded(passed: RuntimeUpdateResult): Promise<void> {
-    const completed = Date.parse(passed.canary?.completedAt ?? "");
-    if (!Number.isFinite(completed)) return;
-    for (const hold of await this.options.holds.list()) {
-      if (
-        hold.id === passed.id ||
-        hold.holder !== HOLDER ||
-        hold.pane ||
-        hold.seat ||
-        Date.parse(hold.createdAt) >= completed
-      )
-        continue;
-      let older: RuntimeUpdateResult;
-      try {
-        older = readRuntimeUpdate(join(this.options.updatesDirectory, operationId(hold.id)));
-      } catch {
-        continue;
-      }
-      if (
-        older.id !== hold.id ||
-        older.phase !== "healthy" ||
-        !older.canary ||
-        !["pending", "failed"].includes(older.canary.state)
-      )
-        continue;
-      const wanted = this.hold(older, this.previousHealthy(older));
-      if (hold.holder !== wanted.holder || hold.reason !== wanted.reason) continue;
-      // A full newer canary supersedes this observation; the old failed record and release audit survive.
-      await this.options.holds.release(
-        hold.id,
-        HOLDER,
-        `Superseded by passed runtime canary ${passed.id} for ${passed.newCommit}`,
-        wanted,
-      );
-    }
   }
 
   private async releasePrehealthyRollback(result: RuntimeUpdateResult): Promise<void> {

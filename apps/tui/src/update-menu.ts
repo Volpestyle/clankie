@@ -129,12 +129,13 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
       ]);
     }
     const accepted = record(staged).accepted === true;
+    const upToDate = record(staged).upToDate === true;
     shell.insertCommandResult(
       "/update",
       accepted
         ? `Staged ${ref}. ${formatUpdateState(staged)}\n/update status follows it.`
         : formatUpdateOutput(staged),
-      accepted ? "success" : "error",
+      accepted || upToDate ? "success" : "error",
     );
   } catch (error) {
     shell.insertCommandResult("/update", message(error), "error");

@@ -171,7 +171,10 @@ async function alerts(root: string): Promise<{ text: string }[]> {
     : [];
 }
 
-async function olderFailedHold(f: { root: string; updates: string }) {
+async function olderFailedHold(
+  f: { root: string; updates: string },
+  error = "runtime-canary-cpu-budget-exceeded",
+) {
   const id = randomUUID();
   await mkdir(join(f.updates, id), { mode: 0o700 });
   writeRuntimeUpdate(join(f.updates, id), {
@@ -184,7 +187,7 @@ async function olderFailedHold(f: { root: string; updates: string }) {
     canary: {
       state: "failed",
       previousHealthyCommit: "a".repeat(40),
-      error: "runtime-canary-cpu-budget-exceeded",
+      error,
     },
   });
   await new DeployHolds(join(f.root, "integration")).acquire({
@@ -199,6 +202,7 @@ it("samples a real candidate process and loopback health for a full window befor
   const f = await fixture();
   const holds = new DeployHolds(join(f.root, "integration"));
   const older = await olderFailedHold(f);
+  const olderHealth = await olderFailedHold(f, "runtime-canary-latency-budget-exceeded");
   const unverified = {
     id: randomUUID(),
     holder: "Clankie runtime canary",
@@ -232,19 +236,25 @@ it("samples a real candidate process and loopback health for a full window befor
     previousHealthyCommit: "a".repeat(40),
   });
   expect(result.result.canary!.samples).toBeGreaterThanOrEqual(2);
-  expect(result.holds.map((hold) => hold.id)).toEqual([unverified.id, other.id]);
+  expect(result.holds.map((hold) => hold.id)).toEqual([older, olderHealth, unverified.id, other.id]);
   const registry = JSON.parse(await readFile(join(f.root, "integration/holds.json"), "utf8"));
-  expect(registry.events).toContainEqual(
-    expect.objectContaining({
-      action: "release",
-      hold: expect.objectContaining({ id: older }),
-      reason: expect.stringContaining(`Superseded by passed runtime canary ${f.id}`),
-    }),
-  );
+  expect(registry.events.filter((event: { action: string }) => event.action === "release")).toEqual([
+    expect.objectContaining({ action: "release", hold: expect.objectContaining({ id: f.id }) }),
+  ]);
   expect(readRuntimeUpdate(join(f.updates, older)).canary?.state).toBe("failed");
+  expect(readRuntimeUpdate(join(f.updates, olderHealth)).canary?.state).toBe("failed");
   expect(result.checkpoint).toEqual({ commit: "b".repeat(40) });
   expect(await alerts(f.root)).toEqual([]);
-  await expect(service.call("landing")).rejects.toThrow("Independent live check");
+  await expect(service.call("landing")).rejects.toThrow("Deploy held");
+  await stop(service.child);
+  const restarted = await start(f.root);
+  expect((await restarted.status()).holds.map((hold) => hold.id)).toEqual([
+    older,
+    olderHealth,
+    unverified.id,
+    other.id,
+  ]);
+  await expect(restarted.call("landing")).rejects.toThrow("Deploy held");
 });
 
 it("records a real CPU burn beside the previous runtime's mean without holding deploys", async () => {

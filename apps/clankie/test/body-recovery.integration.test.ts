@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import type { BodyResource } from "@clankie/protocol";
 import { BodyLeaseStore } from "../src/body-leases.ts";
 import { BodyLeaseRouter } from "../src/body-lease-router.ts";
 import { BodyLeaseRecovery } from "../src/body-lease-recovery.ts";
@@ -30,27 +31,58 @@ async function until(check: () => boolean, description: string) {
 }
 
 // No mocked timers, process host, lease persistence, turn tracking or recovery router.
-async function fixture(reboot = false) {
+async function fixture(
+  reboot = false,
+  options: {
+    resource?: "browser" | "play";
+    holderEvidence?: "missing" | "unreadable" | "native_responding";
+  } = {},
+) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-body-recovery-")));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const entered = deferred(),
     finished = deferred();
-  const conversations = new ConversationStore(join(root, "conversations"), async () => {
-    entered.resolve();
-    await finished.promise;
-  });
+  const createConversations = () =>
+    new ConversationStore(join(root, "conversations"), async () => {
+      entered.resolve();
+      await finished.promise;
+    });
+  let conversations = createConversations();
   cleanup.push(async () => {
     finished.resolve();
     await conversations.close();
   });
+  const resource = options.resource ?? "browser";
+  let conversationId = "global-default";
+  if (options.holderEvidence) {
+    const created = await conversations.serve({
+      schemaVersion: 1,
+      op: "create",
+      scope: { kind: "workspace", workspaceId: root },
+      title: "Recovery holder",
+    });
+    if (created.op !== "create") throw Error("No fixture holder");
+    conversationId = created.conversation.conversationId;
+    if (options.holderEvidence === "native_responding") {
+      if (!conversations.syncNativeSeatTranscript(conversationId, "body-native-session", [], "responding"))
+        throw Error("No fixture native holder");
+    }
+  }
   let store = new BodyLeaseStore(join(root, "leases"));
-  const held = store.acquire("browser", "global-default", 300000);
+  const held = store.acquire(resource, conversationId, 300000);
   if (held.outcome !== "acquired") throw Error("No fixture lease");
   const operation = store.begin(held.lease);
   if (operation.outcome !== "admitted") throw Error("No fixture operation");
   store.finish(held.lease, operation.operationId, "uncertain");
   if (reboot) {
     store.close();
+    if (options.holderEvidence) {
+      await conversations.close();
+      const holderRoot = join(root, "conversations", conversationId);
+      if (options.holderEvidence === "missing") await rm(holderRoot, { recursive: true });
+      if (options.holderEvidence === "unreadable") await writeFile(join(holderRoot, "meta.json"), "{");
+      conversations = createConversations();
+    }
     store = new BodyLeaseStore(join(root, "leases"));
   }
   cleanup.push(async () => {
@@ -73,6 +105,20 @@ async function fixture(reboot = false) {
   const host = `http://127.0.0.1:${ready.port}`;
   const attempts: number[] = [];
   let beforeStop: (() => Promise<void>) | undefined;
+  const confirmStopped = async (_resource: BodyResource, guard: () => Promise<void>) => {
+    attempts.push(Date.now());
+    await guard();
+    await beforeStop?.();
+    await guard();
+    const response = await fetch(`${host}/stop`);
+    const proof = (await response.json()) as { stopped: boolean };
+    if (proof.stopped) {
+      if (child.exitCode === null) await once(child, "exit");
+      await guard();
+      return child.exitCode === 0;
+    }
+    return false;
+  };
   const recovery = new BodyLeaseRecovery({
     store,
     router,
@@ -80,20 +126,7 @@ async function fixture(reboot = false) {
     maxRetryMs: 80,
     current: () => true,
     holderTurnEnded: (id) => conversations.turnIdle(id),
-    confirmStopped: async (_resource, guard) => {
-      attempts.push(Date.now());
-      await guard();
-      await beforeStop?.();
-      await guard();
-      const response = await fetch(`${host}/stop`);
-      const proof = (await response.json()) as { stopped: boolean };
-      if (proof.stopped) {
-        if (child.exitCode === null) await once(child, "exit");
-        await guard();
-        return child.exitCode === 0;
-      }
-      return false;
-    },
+    confirmStopped,
   });
   cleanup.push(async () => {
     recovery.close();
@@ -115,21 +148,86 @@ async function fixture(reboot = false) {
   };
   return {
     root,
+    resource,
+    conversationId,
     store,
     router,
     conversations,
     recovery,
     attempts,
-    held: store.recoveryReference("browser")!,
+    held: store.recoveryReference(resource)!,
     child,
     host,
     turn,
     allowStop,
+    confirmStopped,
     beforeStop: (hook: () => Promise<void>) => {
       beforeStop = hook;
     },
   };
 }
+
+it.each([
+  { resource: "browser", holderEvidence: "missing" },
+  { resource: "play", holderEvidence: "missing" },
+  { resource: "browser", holderEvidence: "unreadable" },
+  { resource: "play", holderEvidence: "unreadable" },
+  { resource: "browser", holderEvidence: "native_responding" },
+  { resource: "play", holderEvidence: "native_responding" },
+] as const)(
+  "never automatically stops a restored $resource with $holderEvidence holder evidence",
+  async (options) => {
+    const f = await fixture(true, options);
+    const restored = f.store.recoveryReference(f.resource);
+    const durableClaim = await readFile(join(f.root, "leases/body-leases.json"), "utf8");
+    if (options.holderEvidence === "native_responding") {
+      expect(f.conversations.hasNativeSeat(f.conversationId)).toBe(true);
+      expect(f.conversations.conversation(f.conversationId)?.sessionState).not.toBe("active");
+      const replay = await f.conversations.serve({
+        op: "replay",
+        schemaVersion: 1,
+        replay: {
+          schemaVersion: 1,
+          conversationId: f.conversationId,
+          surfaceClientId: "body-recovery-proof",
+        },
+      });
+      if (replay.op !== "replay" || replay.result.status !== "page") throw Error("No native activity proof");
+      expect(replay.result.events).toContainEqual(
+        expect.objectContaining({ type: "activity", phase: "responding" }),
+      );
+    } else {
+      expect(f.conversations.has(f.conversationId)).toBe(false);
+    }
+    expect(f.conversations.turnIdle(f.conversationId)).toBe(false);
+    await f.allowStop();
+    f.recovery.start();
+    await pause(120);
+    f.recovery.close();
+    await f.recovery.settled();
+    expect(f.attempts).toEqual([]);
+    expect(f.child.exitCode).toBeNull();
+    expect(f.child.signalCode).toBeNull();
+    expect(f.store.status(f.resource)?.state).toBe("recovery_required");
+    expect(f.store.recoveryReference(f.resource)).toEqual(restored);
+    expect(await readFile(join(f.root, "leases/body-leases.json"), "utf8")).toBe(durableClaim);
+    if (options.holderEvidence === "native_responding") {
+      const manual = await f.router.recover(
+        {
+          conversationId: f.conversationId,
+          current: () => true,
+          authorize: async () => true,
+        },
+        f.resource,
+        (guard) => f.confirmStopped(f.resource, guard),
+      );
+      expect(manual).toEqual({ outcome: "released" });
+      expect(f.child.exitCode).toBe(0);
+      expect(f.attempts).toHaveLength(1);
+      expect(f.store.recoveryReference(f.resource)).toBeUndefined();
+    }
+  },
+);
 
 it("automatically recovers a boot-restored idle lease only after the real host confirms stop, with capped backoff", async () => {
   const f = await fixture(true);

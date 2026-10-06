@@ -5,8 +5,10 @@ No live body lease, browser session or deployment was changed.
 
 The service sweeps at boot and retries failed stop proof with backoff from
 5 seconds up to 60 seconds. It only attempts recovery for a lease marked
-`recovery_required`, after its holder's turn/driver has ended and all body
-operations have settled. Every awaited boundary checks the exact lease token,
+`recovery_required`, after a known service-owned holder's turn/driver has ended
+and all body operations have settled. Missing/unreadable holders and native-owned
+turns require explicit owner recovery; the automatic path does not infer native
+completion from display activity. Every awaited boundary checks the exact lease token,
 turn state and operation pins again. It uses the same guarded `confirmBodyStopped`
 callback as operator recovery. Computer sessions retain their separate contract.
 Shutdown withdraws check authority and waits for the original check to settle
@@ -19,7 +21,7 @@ termination and exits. Short fixture intervals exercise the same capped retry
 mechanism without waiting several production minutes. No model, browser or
 lease-store behavior is mocked.
 
-Observed boundaries:
+Original producer observations before integration corrections:
 
 - Restarted idle lease stays held across refused stop checks, then releases on
   acknowledged host exit; the durable registry contains no claim afterward.
@@ -44,5 +46,14 @@ repository. In `clankie-app/packages/command-center/src/body/leaseStatus.ts:14`,
 `leaseLabel` still returns only “stuck …”. Proposed text: “checking recovery;
 if it persists, ask the owner to recover the body”, or an owner recover action.
 The lead was notified of the exact source; `clankie-app` was not edited.
+
+Integration corrections add six browser/play cases using restored persistent
+claims, missing/unreadable holder metadata and native responding events through
+the real conversation transcript API. They require zero stop-check calls, a live
+body child and the unchanged exact restored claim/token. Native-owned cases also
+retain a positive manual recovery check using the original real child. This is native ownership
+bookkeeping coverage, not a live native harness idle/completion proof. The new
+cases and corrected source have not been run yet: the integrator is honoring
+the exclusive fleet resource window.
 
 Full gate, integration and live recovery acceptance remain with the lead.

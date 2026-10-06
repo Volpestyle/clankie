@@ -611,8 +611,9 @@ Parallel conversations belong to one Clankie and arbitrate the shared
 incarnation tokens fence stale operations; viewing a resource does not acquire
 it, and a lease never adds authority. Uncertain operations remain held until
 the host verifies stop. [Automatic recovery](../apps/clankie/src/body-lease-recovery.ts)
-checks at boot and retries with a 5–60 second backoff after the holder's turn
-and body operations end. It uses the operator recovery proof and fences the
+checks at boot and retries with a 5–60 second backoff after a known service-owned
+holder's turn and body operations end. Missing/unreadable holders and native-owned
+turns remain held for explicit owner recovery. It uses the operator recovery proof and fences the
 exact incarnation across every await; expiry alone never releases a body.
 Computer sessions keep their separate adapter recovery. The
 [router](../apps/clankie/src/body-lease-router.ts) preserves the original machine

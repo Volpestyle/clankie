@@ -8,13 +8,14 @@ private update records and the deploy hold store. It seeds seven CPU observation
 from the ticket's 12–16% range. An unfinished fixture transaction prevents any
 helper dispatch or runtime restart, even after an override is admitted.
 
-Observed terminal excerpt (fixture SHAs and UUIDs omitted):
+Expected terminal excerpt after integration corrections (not yet executed;
+fixture SHAs and UUIDs omitted):
 
 ```text
 Live: <old SHA>
 Target: main <new SHA> (1 new commit)
   <new SHA> Explain held updates
-7 CPU canary holds: CPU mean 12.0–16.0% vs 10.0% budget; health p95 1.3 ms, fine
+7 historical CPU canary holds: CPU mean 12.0–16.0% vs 10.0% advisory; health p95 1.3 ms, fine
 Review the holds, then as owner run: clankie update --override-holds --reason "why proceeding is safe"
 ```
 
@@ -24,10 +25,12 @@ server-derived audit actors, seven separate audit events, confirmation, refusal,
 and a new hold acquired after preview continuing to block.
 
 `runtime-canary.integration.test.ts` observes real processes for complete windows.
-A newer pass clears an older verified failed hold, preserves its failed record
-and release audit, and keeps unrelated/unverified holds. Pending and failed newer
-observations retain the old hold. Existing restart, health identity, rollback and
-foreign ownership checks also passed.
+Integration corrections preserve older CPU and health holds after a newer pass;
+only the new observation's own hold clears. Explicit overrides retain all holds,
+with a separate audit per hold. CPU is advisory in new observations, while health,
+identity and sampling failures retain their blocking behavior. These corrected
+inputs still require the integrator's checks; the original branch checks below
+covered the earlier automatic-retirement behavior, which is not being shipped.
 
 Checks (all through `clankie heavy --`):
 
