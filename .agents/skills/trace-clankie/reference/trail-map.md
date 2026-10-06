@@ -43,8 +43,9 @@ in `~/.clankie/captain/conversations/linear-event-receipts.json`, so pruning
 history or changing the target does not admit an event again.
 
 `clankie linear status` reports webhook readiness, following and the selected
-wake chat. Only rule-matched signed events wake it; defaults select James's
-comments/mentions by signed email `volpestyle@gmail.com`. Own writes stay quiet.
+wake chat. Only rule-matched signed events wake it; defaults select the owner's
+comments/mentions by signed `ownerUserIds` / `ownerUserEmails`, which start
+empty, so nothing wakes until one is set. Own writes stay quiet.
 Assignment/delegation to the app actor and reactions to its comments are also
 selected by default. In `~/.local/state/clankie/clankie.log`, `linear.webhook`
 records acceptance, target and rule decision; webhook deliveries are not domain

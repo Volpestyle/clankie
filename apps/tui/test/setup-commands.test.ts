@@ -40,7 +40,7 @@ const report: InstallDoctorReport = {
   },
   voice: { realtimeProvider: "openai", ttsProvider: "openai" },
   gameplay: { pokeagentMmoEnabled: false },
-  skills: { selection: { opinionated: true, exclude: [] }, catalog: [] },
+  skills: { catalog: [] },
   emailConfigured: false,
   mcpServers: [],
   credentials: [{ id: "openai", type: "api" }],

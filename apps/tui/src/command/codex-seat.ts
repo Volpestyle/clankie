@@ -4,7 +4,7 @@ import { realpath, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { bundledSkills, codexAccounts, defaultSettingsPath, SettingsStore } from "@clankie/settings";
+import { bundledSkills, codexAccounts } from "@clankie/settings";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { clankieStateHome } from "../state-home.ts";
 import { commandHost, outputJson } from "./io.ts";
@@ -109,11 +109,7 @@ async function planSelectedCodexSeat(
     options,
   );
   const { conversationId, cwd } = context;
-  const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
-  const skills = bundledSkills(options.repoRoot, selection);
-  const excluded = skills
-    .filter((skill) => !skill.included)
-    .flatMap((skill) => [skill.name, `clankie:${skill.name}`]);
+  const skills = bundledSkills(options.repoRoot);
   // His Linear writes go through the connected account, not an inherited connector.
   const trackerOverrides = await (options.trackerOverrides ?? codexTrackerOverrides)(cwd, env);
   return {
@@ -125,12 +121,6 @@ async function planSelectedCodexSeat(
       `marketplaces.clankie-seat={source_type="local",source=${JSON.stringify(source)}}`,
       "-c",
       `plugins.${JSON.stringify(PLUGIN)}.enabled=true`,
-      ...(excluded.length
-        ? [
-            "-c",
-            `skills.config=[${excluded.map((name) => `{name=${JSON.stringify(name)},enabled=false}`).join(",")}]`,
-          ]
-        : []),
     ],
     plugin: { source: "plugin-dir", path: source },
     skills,

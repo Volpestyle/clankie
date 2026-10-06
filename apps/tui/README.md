@@ -206,9 +206,8 @@ credential holder.
   the skill picker. The transcript records a compact `skill loaded` receipt.
 - `/activity` shows the current goal, commentary, intent, observed outcome, and
   the loopback watch URL without controlling the body.
-- `/skills` opens the working-skill picker (also in `/setup rooms`). Opinionated skills
-  default on; product/tool skills always stay on. `/skills opinionated off` and
-  `/skills exclude NAME` apply to new sessions and local hires.
+- `/skills` lists the skills shipped with Clankie. Every shipped skill is always
+  on for sessions and local hires.
 - `/accounts codex list` shows local Codex homes and observed quota headroom.
   `/accounts codex add HOME --label LABEL` registers an owner-signed-in home;
   `/accounts codex remove LABEL` forgets it without deleting credentials.

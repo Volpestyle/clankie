@@ -61,8 +61,8 @@ instanceId, region}}` with owner-supplied identifiers. Required groundwork is
   an SSM-managed guest, trusted source-IP proxy, private Paper/RCON, independent
   idle/uptime shutdown, EC2 stop fallback and the roughly $10/month budget alert.
   The checkout helpers in `integrations/minecraft-mcp/scripts/aws/` prepare an
-  existing instance; they do not create one. Guided provisioning is VUH-1643,
-  still pending. Explain missing prerequisites and use the existing operator
+  existing instance; they do not create one, and guided provisioning does not
+  exist yet. Explain missing prerequisites and use the existing operator
   workflow; do not promise that choosing AWS provisions it.
 - **An existing server:** obtain the owner's host, port, supported Java version
   and a non-premium bot username. Read `minecraft_configuration`, then use

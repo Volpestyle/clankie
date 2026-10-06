@@ -1370,20 +1370,12 @@ describe("hiring a seat", () => {
     return join(root, "herdr-watches.json");
   }
 
-  it.each([
-    { opinionated: true, override: undefined, mode: "bundled", lead: true },
-    { opinionated: false, override: undefined, mode: "plain", lead: false },
-    { opinionated: true, override: "plain" as const, mode: "plain", lead: false },
-    { opinionated: false, override: "bundled" as const, mode: "bundled", lead: true },
-  ])("records the hire's skill condition: %j", async (condition) => {
+  it("gives a local hire every shipped skill", async () => {
     const path = await storePath();
-    const startAgent = vi.fn(async () => {});
+    const startAgent = vi.fn(async (_options: { args?: readonly string[] }) => {});
+    const repoRoot = join(import.meta.dirname, "../../..");
     const store = new HerdrWatchStore(path, {
-      skillBundle: {
-        repoRoot: join(import.meta.dirname, "../../.."),
-        stateDir: path + ".state",
-        settings: async () => ({ opinionated: condition.opinionated, exclude: ["reflect"] }),
-      },
+      skillBundle: { repoRoot, stateDir: path + ".state" },
       runner: {
         get: async () => ({
           ...hired,
@@ -1401,27 +1393,12 @@ describe("hiring a seat", () => {
       harness: "pi",
       title: "Test skills",
       workingDirectory: tmpdir(),
-      ...(condition.override ? { skills: condition.override } : {}),
     });
     expect(result.outcome).toBe("spawned");
-    if (result.outcome === "spawned") {
-      expect(result.skills).toMatchObject({
-        mode: condition.mode,
-        source: condition.override ? "override" : "setting",
-        applied: true,
-      });
-      expect(result.skills!.included.includes("lead")).toBe(condition.lead);
-      expect(result.skills!.included).toContain("this-machine");
-      expect(result.skills!.excluded).toContain("reflect");
-    }
-    const refused = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "grok",
-      title: "Test",
-      workingDirectory: tmpdir(),
-      skills: "plain",
-    });
-    expect(refused).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    expect(result).not.toHaveProperty("skills");
+    const args = startAgent.mock.calls[0]?.[0].args ?? [];
+    for (const name of ["lead", "shared-checkout", "this-machine"])
+      expect(args).toContain(join(repoRoot, ".agents/skills", name));
     store.close();
   });
 

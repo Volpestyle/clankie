@@ -92,11 +92,7 @@ describe("hired worker skill discovery", () => {
     expect(config).toContain("[other]\nvalue = 1");
   });
 
-  it.each([
-    { opinionated: true, exclude: [], lead: true, reflect: true },
-    { opinionated: false, exclude: [], lead: false, reflect: false },
-    { opinionated: true, exclude: ["lead"], lead: false, reflect: true },
-  ])("filters every worker loader: %j", async (selection) => {
+  it("gives every worker loader every shipped skill and no merged names", async () => {
     const repo = join(import.meta.dirname, "../../..");
     const state = await realpath(await mkdtemp(join(tmpdir(), "worker-skills-")));
     roots.push(state);
@@ -104,7 +100,7 @@ describe("hired worker skill discovery", () => {
     for (const name of ["lead", "swarm-lead", "herdr-lead"])
       await mkdir(join(home, "skills", name), { recursive: true });
     for (const harness of ["claude", "pi", "codex"]) {
-      const launch = await workerSkills(harness, repo, state, home, selection, repo);
+      const launch = await workerSkills(harness, repo, state, home, repo);
       let names: string[];
       if (harness === "claude") {
         names = await readdir(join(launch.args[1]!, "skills"));
@@ -123,14 +119,9 @@ describe("hired worker skill discovery", () => {
       } else {
         names = await readdir(join(launch.env!.CODEX_HOME!, "skills"));
       }
-      expect(names.includes("lead"), harness).toBe(selection.lead);
-      expect(names.includes("reflect"), harness).toBe(selection.reflect);
-      expect(names, harness).toContain("this-machine");
       expect(names, harness).not.toContain("swarm-lead");
       expect(names, harness).not.toContain("herdr-lead");
-      for (const skill of bundledSkills(repo, selection)) {
-        expect(names.includes(skill.name), `${harness}: ${skill.name}`).toBe(skill.included);
-      }
+      for (const skill of bundledSkills(repo)) expect(names, harness).toContain(skill.name);
     }
   });
 });

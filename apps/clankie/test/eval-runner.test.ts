@@ -46,7 +46,7 @@ afterEach(() => {
 it("requires an explicit larger call budget for a matrix and rejects typos", () => {
   expect(plan([]).matrix).toHaveLength(15);
   expect(() => plan(["--cases", "all"])).toThrow("raise --max-runs");
-  expect(plan(["--cases", "memory-card", "--configs", "current,plain,trimmed"]).matrix).toHaveLength(15);
+  expect(plan(["--cases", "memory-card", "--configs", "current,pre-1456,trimmed"]).matrix).toHaveLength(15);
   expect(() => plan(["--configs", "typo"])).toThrow("Unknown configuration");
   expect(() => plan(["--max-runs", "NaN"])).toThrow();
   expect(() => plan(["--rework", "3"])).toThrow();
@@ -156,7 +156,7 @@ it("plans Terminal-Bench trials and maps Harbor results into report rows", () =>
   });
   const current = layer(
     "codex",
-    { skills: "plain", instructions: "apps/clankie/src/captain/instructions.md" },
+    { skills: "bundled", instructions: "apps/clankie/src/captain/instructions.md" },
     root,
   );
   expect(current.kwargs.config.developer_instructions).toContain("Clankie");
@@ -453,8 +453,8 @@ describe.skipIf(process.platform !== "darwin")("OS isolation", () => {
     const root = fixture();
     rmSync(join(root, "worktree"), { recursive: true });
     const test = cases.find((c: { id: string }) => c.id === "memory-card");
-    const condition = prepare(root, test, { skills: "plain", instructions: "scripts/evals/trimmed.md" });
-    expect(condition.skills.every((s: { class: string }) => s.class === "product")).toBe(true);
+    const condition = prepare(root, test, { skills: "bundled", instructions: "scripts/evals/trimmed.md" });
+    expect(condition.skills.map((s: { name: string }) => s.name)).toContain("lead");
     expect(readFileSync(join(root, "worktree", ".git"), "utf8")).toContain(join(root, "seed", ".git"));
     expect(readFileSync(join(root, "worktree", "AGENTS.md"), "utf8")).toBe(
       readFileSync(join(root, "worktree", ".eval-instructions.md"), "utf8"),
@@ -572,7 +572,7 @@ it("pins selected instructions, configuration, full skills, images and harness a
   expect(validate).not.toThrow();
   writeFileSync(
     configPath,
-    JSON.stringify({ ...definitions, unused: { skills: "plain", instructions: null } }),
+    JSON.stringify({ ...definitions, unused: { skills: "bundled", instructions: null } }),
   );
   expect(validate).not.toThrow();
   for (const [path, original] of [

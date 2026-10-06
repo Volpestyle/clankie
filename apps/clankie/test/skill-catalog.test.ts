@@ -132,13 +132,6 @@ it("refreshes real session resources without losing history, tools or skill excl
     };
     await mkdir(cwd, { recursive: true });
     await mkdir(agentDir, { recursive: true });
-    await mkdir(join(repoRoot, "vendor"), { recursive: true });
-    await writeFile(
-      join(repoRoot, "vendor", "opinionated-skills.json"),
-      JSON.stringify({ skills: { reflect: "source" } }),
-    );
-    await writeSkill(join(repoRoot, ".agents", "skills", "reflect"), "reflect", "Excluded bundled skill");
-    await writeSkill(join(personal, "reflect"), "reflect", "Excluded personal copy");
     await writeSkill(join(personal, "existing"), "existing", "Original procedure");
     await writeFile(join(cwd, "AGENTS.md"), "Original workspace rule");
     const quieted = new Set<string>();
@@ -150,7 +143,6 @@ it("refreshes real session resources without losing history, tools or skill excl
       agentDir,
       settingsManager,
       quieted,
-      skills: { opinionated: true, exclude: ["reflect"] },
       noExtensions: true,
       noSkills: true,
       noPromptTemplates: true,

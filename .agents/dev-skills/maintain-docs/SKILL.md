@@ -25,9 +25,9 @@ and the docs site links to them rather than copying policy text (ADR 0155).
 Hosted, business, and launch facts stay in `clankie-ops`; never move them into
 this public repo or the landing page's source comments.
 
-Skills are also product surfaces: edit `.agents/skills` here, reusable process
-skills in Volpestyle/skills, then refresh the committed export via
-`vendor/opinionated-skills.json` and `docs/bundled-skills.md`. The Herdr skill is
+Skills are also product surfaces: every shipped skill is authored in
+`.agents/skills` here ([ADR 0236](../../../docs/adr/0236-clankie-owns-the-skills-he-ships.md)),
+and `docs/bundled-skills.md` lists them. The Herdr skill is
 binary-generated; `pnpm herdr:skill:check` verifies it. Native seat instructions
 come from their build scripts; never repair only a generated projection.
 

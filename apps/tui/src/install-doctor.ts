@@ -104,7 +104,6 @@ export interface InstallDoctorReport {
     readonly pokeagentMmoEnabled: boolean;
   };
   readonly skills: {
-    readonly selection: { readonly opinionated: boolean; readonly exclude: readonly string[] };
     readonly catalog: readonly ReturnType<typeof bundledSkills>[number][];
   };
   readonly emailConfigured: boolean;
@@ -332,7 +331,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     gameplay: {
       pokeagentMmoEnabled: settings.gameplay.pokeagentMmoEnabled,
     },
-    skills: { selection: settings.skills, catalog: bundledSkills(options.repoRoot, settings.skills) },
+    skills: { catalog: bundledSkills(options.repoRoot) },
     emailConfigured:
       settings.email.username !== undefined ||
       settings.email.fromAddress !== undefined ||

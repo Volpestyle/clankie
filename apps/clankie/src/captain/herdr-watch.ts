@@ -42,12 +42,10 @@ import type {
 } from "@clankie/agent-hosts";
 import type { OpenCodeCommandTab } from "./opencode-native-host.ts";
 import {
-  bundledSkills,
   codexAccounts,
   projectsRevision,
   selectLiveCodexAccount,
   type CodexAccount,
-  type SkillsSettings,
 } from "@clankie/settings";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -810,9 +808,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     | ((fleet: string) => ReadonlyMap<string, HarnessSeatAdapter> | undefined)
     | undefined;
   private readonly seatControl: ReturnType<typeof createFleetSeatControl>;
-  private readonly skillBundle:
-    | { repoRoot: string; stateDir: string; settings?: () => Promise<SkillsSettings> }
-    | undefined;
+  private readonly skillBundle: { repoRoot: string; stateDir: string } | undefined;
   private readonly controllers = new Map<string, AbortController>();
   private readonly seatControllers = new Map<string, AbortController>();
   private readonly seatStatuses = new Map<string, string>();
@@ -856,7 +852,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly skillBundle?: {
         readonly repoRoot: string;
         readonly stateDir: string;
-        readonly settings?: () => Promise<SkillsSettings>;
       };
       readonly runner?: HerdrWatchRunner;
       readonly available?: () => boolean;
@@ -2439,12 +2434,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           live.status === "offline"
         )
           throw new Error(`Pane ${live.paneId} has uncertain native identity; inspect it before resuming`);
-        if (
-          input.model !== undefined ||
-          input.effort !== undefined ||
-          input.skills !== undefined ||
-          input.chrome !== undefined
-        )
+        if (input.model !== undefined || input.effort !== undefined || input.chrome !== undefined)
           throw new Error(
             "The saved session is already live; its launch settings cannot be changed by resuming",
           );
@@ -2576,7 +2566,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
           live.paneId,
           live.name ?? live.terminalId,
           { ...input, workingDirectory: live.workingDirectory ?? input.workingDirectory },
-          undefined,
           account,
         );
       }
@@ -2705,37 +2694,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
       seat: structuredClone(input),
       resumed: resume !== undefined,
     });
-    const canApplySkills =
-      prepared === undefined &&
-      remote === undefined &&
-      this.skillBundle !== undefined &&
-      ["claude", "pi", "codex", "grok"].includes(input.harness);
-    if (input.skills !== undefined && !canApplySkills && prepared === undefined) {
-      return {
-        outcome: "failed",
-        reason: "harness_unavailable",
-        detail: "Skill overrides require a local Claude, Pi, Codex or Grok hire.",
-      };
-    }
-    const configuredSkills =
-      prepared === undefined
-        ? ((await this.skillBundle?.settings?.()) ?? { opinionated: true, exclude: [] })
-        : { opinionated: false, exclude: [] };
-    const selectedSkills = {
-      ...configuredSkills,
-      opinionated: input.skills === undefined ? configuredSkills.opinionated : input.skills === "bundled",
-    };
-    const catalog = canApplySkills ? bundledSkills(this.skillBundle!.repoRoot, selectedSkills) : [];
-    const skillCondition: Extract<OperatorSeatSpawnResult, { outcome: "spawned" }>["skills"] =
-      this.skillBundle === undefined
-        ? undefined
-        : {
-            mode: selectedSkills.opinionated ? "bundled" : "plain",
-            source: input.skills === undefined ? "setting" : "override",
-            applied: canApplySkills,
-            included: catalog.filter((skill) => skill.included).map((skill) => skill.name),
-            excluded: catalog.filter((skill) => !skill.included).map((skill) => skill.name),
-          };
     let account: CodexAccount | undefined = prepared?.account;
     if (
       input.account !== undefined &&
@@ -2791,7 +2749,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
           this.skillBundle.repoRoot,
           this.skillBundle.stateDir,
           account?.home,
-          selectedSkills,
           input.workingDirectory,
         );
       }
@@ -3133,7 +3090,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             finalNativeProof,
           );
           return {
-            ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
+            ...spawnedSeat(agent, paneId, subject, input, account),
             control,
           };
         }
@@ -3183,7 +3140,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       await this.observeHireIdentity(receiptKey, agent, input, authority);
       return {
-        ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
+        ...spawnedSeat(agent, paneId, subject, input, account),
         control,
       };
     } catch (caught) {
@@ -4087,12 +4044,10 @@ function spawnedSeat(
   paneId: string,
   subject: string,
   input: SpawnOperatorSeat,
-  skills: Extract<OperatorSeatSpawnResult, { outcome: "spawned" }>["skills"],
   account?: CodexAccount,
 ): Extract<HerdrSeatSpawnResult, { outcome: "spawned" }> {
   return {
     outcome: "spawned",
-    ...(skills === undefined ? {} : { skills }),
     seat: {
       ...(account ? { account } : {}),
       seatId: agent.terminalId,

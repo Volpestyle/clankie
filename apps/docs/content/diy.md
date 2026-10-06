@@ -99,10 +99,9 @@ Add your own `SKILL.md` under `~/.agents/skills/my-skill/`, or a project's
 skills are found with `skill_search` when a task needs them rather than listed
 every turn.
 
-Bundled opinionated working skills are on by default. `/skills` (or
-[`clankie skills`](/cli/#skill-setup)) turns the whole set off or excludes one
-by name; product skills stay on. Start a fresh session to drop guidance already
-loaded. The [bundled-skills guide](https://github.com/Volpestyle/clankie/blob/main/docs/bundled-skills.md)
+Every bundled skill, from leading hired agents to tidying finished panes, is
+always on. `/skills` (or [`clankie skills`](/cli/#skill-setup)) lists them. The
+[bundled-skills guide](https://github.com/Volpestyle/clankie/blob/main/docs/bundled-skills.md)
 explains discovery.
 
 <a id="hang-out-and-play"></a>

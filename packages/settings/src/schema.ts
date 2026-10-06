@@ -607,7 +607,7 @@ export const LinearWakeSettingsSchema = z
   .object({
     ownerUserIds: z.array(z.string().min(1).max(256)).max(100).default([]),
     /** Matched only against verified webhook actor email, never display names. */
-    ownerUserEmails: z.array(z.email().max(320)).max(100).default(["volpestyle@gmail.com"]),
+    ownerUserEmails: z.array(z.email().max(320)).max(100).default([]),
     actors: z
       .array(z.enum(["owner", "human", "self", "users"]))
       .max(4)
@@ -704,15 +704,6 @@ export const AgentHostConnectionSchema = z
   })
   .strict();
 export type AgentHostConnection = z.infer<typeof AgentHostConnectionSchema>;
-
-/** Product/tool skills are always available; this selection controls the opinionated bundle. */
-export const SkillsSettingsSchema = z
-  .object({
-    opinionated: z.boolean().default(true),
-    exclude: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/u)).default([]),
-  })
-  .strict();
-export type SkillsSettings = z.infer<typeof SkillsSettingsSchema>;
 
 export const ClankieSettingsSchema = z
   .object({
@@ -821,7 +812,6 @@ export const ClankieSettingsSchema = z
       )
       .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
-    skills: SkillsSettingsSchema.default(() => SkillsSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     autonomy: AutonomySettingsSchema.default(() => AutonomySettingsSchema.parse({})),
     projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
@@ -921,8 +911,10 @@ export function migrateLegacyFleetWorkingPreferences(parsed: unknown): unknown {
  *
  * - `linear`: a default team id, back when a hand-written GraphQL port needed
  *   one. Linear is reached over MCP now and its server resolves the team.
+ * - `skills`: the opinionated-skill switch and exclusions. Every shipped skill
+ *   is now an ordinary always-on product skill.
  */
-const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear", "swarm"];
+const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear", "swarm", "skills"];
 const RETIRED_DISCORD_SETTINGS_KEYS: readonly string[] = ["possessorVoiceEnabled"];
 const RETIRED_GAMEPLAY_SETTINGS_KEYS: readonly string[] = ["pokemonEmulatorEnabled"];
 

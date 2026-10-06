@@ -338,7 +338,7 @@ function pinSeat(campaign, claude, checkout) {
     args,
     bin: join(pin, "bin"),
     plugin,
-    skills: plan.skills.filter((s) => s.included).map((s) => s.name),
+    skills: plan.skills.map((s) => s.name),
     pluginSha256: hash(files(plugin).join("\n")),
     outputStyleChars: readFileSync(join(plugin, "output-styles", "clankie.md"), "utf8").length,
   };

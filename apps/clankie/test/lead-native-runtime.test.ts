@@ -124,7 +124,6 @@ it("refuses foreign fleets/resumes before owner checks and refuses boolean attac
     workingDirectory: f.allocations[0]!.hostCwd,
     account: "one",
     harness: "codex",
-    skills: "plain",
     model: "fixture-model",
     effort: "medium",
   };

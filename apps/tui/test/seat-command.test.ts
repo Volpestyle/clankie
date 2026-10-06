@@ -1,4 +1,3 @@
-import { SettingsStore } from "@clankie/settings";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -86,23 +85,15 @@ describe("clankie seat", () => {
     expect(() => parseSeatArgs(["status"])).toThrow("Usage: clankie claude|codex|opencode");
   });
 
-  it.each([
-    { opinionated: true, exclude: [], lead: true },
-    { opinionated: false, exclude: [], lead: false },
-    { opinionated: true, exclude: ["lead"], lead: false },
-  ])("selects the seat plugin and keeps channels with %j", async (selection) => {
+  it("projects every shipped skill into the seat plugin and keeps channels", async () => {
     const env = await stateEnv();
-    await new SettingsStore(env.CLANKIE_SETTINGS_FILE!).update((current) => ({
-      ...current,
-      skills: { opinionated: selection.opinionated, exclude: selection.exclude },
-    }));
     const plan = await planSeat(
       { resume: false, dryRun: true },
       { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: true }] }) },
     );
     expect(plan.plugin.source).toBe("plugin-dir");
     const names = await readdir(join(plan.plugin.path, "skills"));
-    expect(names.includes("lead")).toBe(selection.lead);
+    expect(names).toContain("lead");
     expect(names).toContain("this-machine");
     expect(names).not.toContain("linear-write");
     expect(plan.channel).toBe(true);

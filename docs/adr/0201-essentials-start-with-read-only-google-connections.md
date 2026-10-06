@@ -179,10 +179,9 @@ Other tenant brokers are unaffected. See the
 
 ## Four original playbooks
 
-The ordinary shipped skill root contains [inbox triage](../../.agents/skills/inbox-triage/SKILL.md),
-[daily digest](../../.agents/skills/daily-digest/SKILL.md),
-[trip planning](../../.agents/skills/trip-planning/SKILL.md) and
-[comparison shopping](../../.agents/skills/comparison-shopping/SKILL.md).
+The ordinary shipped skill root contained inbox triage, daily digest, trip
+planning and comparison shopping (removed 2026-10-06 by
+[ADR 0236](0236-clankie-owns-the-skills-he-ships.md)).
 They use existing email/browser tools and discover connected MCP schemas. They
 make no scheduling, booking or Google-connection claim. Inbox and digest become
 Google consumers only after that connection is actually available. These are

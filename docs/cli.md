@@ -85,7 +85,7 @@ Do not edit `~/.config/clankie/clankie.json`,
 | [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`                 |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                            |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`                                      |
-| [Choose working skills](#skill-setup)                  | `skills`                                                |
+| [List shipped skills](#skill-setup)                    | `skills`                                                |
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`         |
 | [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr` |
 | [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`               |
@@ -925,9 +925,11 @@ issue UUID and link rather than dropping the event.
 | Off (default) | Accepted events remain visible | None from incoming events              |
 | On            | Accepted events remain visible | One coalesced wake for eligible events |
 
-The default rules wake only for comments or mentions by James, identified by the
-signed user email `volpestyle@gmail.com`. Other actors and other changes stay
-quiet. The connected tracker account remains Clankie's and his fleet's publishing
+The default rules wake only for comments or mentions by the owner, identified by
+a signed Linear user ID or email in `ownerUserIds` / `ownerUserEmails`. Both
+start empty, so a new install wakes on nothing until the owner sets one; while
+following is on, `clankie linear status` and `clankie doctor` warn about the
+missing owner identity. Other actors and other changes stay quiet. The connected tracker account remains Clankie's and his fleet's publishing
 identity; it does not become the human owner. Display names and notification
 subtitles do not prove authorship. A wake supplies context, never new permission.
 [ADR 0214](adr/0214-linear-wakes-require-attribution-and-rules.md) records the
@@ -1007,7 +1009,7 @@ following must still be active.
 
 ```sh
 clankie linear wake show
-clankie linear wake set --owner-user-emails volpestyle@gmail.com --actors owner
+clankie linear wake set --owner-user-emails owner@example.com --actors owner
 clankie linear wake set --types issueNewComment,issueCommentMention,issueMention
 clankie linear wake set --exclude-types issueSubscribed
 ```
@@ -1020,7 +1022,7 @@ omitted fields. Malformed rules fail without writing. The result contains `ok`,
 | Flag                  | JSON field                  | Meaning / default                                         |
 | --------------------- | --------------------------- | --------------------------------------------------------- |
 | `--owner-user-ids`    | `ownerUserIds`              | Additional explicit owner Linear IDs; initially empty     |
-| `--owner-user-emails` | `ownerUserEmails`           | Signed owner user emails; default `volpestyle@gmail.com`  |
+| `--owner-user-emails` | `ownerUserEmails`           | Signed owner user emails; initially empty                 |
 | `--actors`            | `actors`                    | Any of `owner`, `human`, `self`, `users`; default `owner` |
 | `--user-ids`          | `userIds`                   | Exact IDs selected by `users`; initially empty            |
 | `--types`             | `notificationTypes`         | Included activity types; empty allows all                 |
@@ -2323,7 +2325,7 @@ account overrides remain unsupported. Profile selection confers no grants.
 same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the
 defaults and effective project role profiles. The hire result's `profile` shows
 the effective launch preferences. These settings affect new hires, not running
-agents. James's global agent instructions remain owner-authored.
+agents. The owner's global agent instructions remain owner-authored.
 
 `clankie agents rename NAME|PERSONA_ID NEW_NAME` changes an agent's saved display
 name. Quote names containing spaces. `/agents rename NAME "NEW NAME"` is the
@@ -3060,45 +3062,30 @@ retried from the same cursor. See [hosted bodies](../infra/hosted/README.md#body
 
 <a id="skill-setup"></a>
 
-### `skills [opinionated on|off | exclude NAME | include NAME]`
+### `skills`
 
-The selected `tidy` skill exposes `/tidy` in the console. It starts an ordinary
+List the skills shipped with this body as JSON (`name` and `path`). Every skill
+authored in `.agents/skills` ships and is always on; there is no selection to
+change. `/skills` lists the same catalog in the console, and `clankie doctor`
+includes it.
+
+```bash
+clankie skills
+```
+
+The shipped `tidy` skill exposes `/tidy` in the console. It starts an ordinary
 visible, stoppable Clankie turn to inspect, harvest and close finished hired
 panes with reasons. Output and saved reports remain in roster history, with a
 five-minute reopen/resume Undo. Optional context can be passed as
 `/tidy selection=w1:p1`. See [bundled skill declarations](bundled-skills.md#quick-action-declarations).
 
-List the bundled skill catalog as JSON, with `class` (`product` or `opinionated`)
-and `included` for each skill. `clankie doctor` includes the same selection.
-
-```bash
-clankie skills
-clankie skills opinionated off
-clankie skills opinionated on
-clankie skills exclude reflect
-clankie skills include reflect
-```
-
-`skills.opinionated` defaults to `true`; `skills.exclude` defaults to `[]`.
-Product/tool and repo-authored skills always stay on; excluding one is refused.
-`include` removes an exclusion and leaves the class switch unchanged. The console
-has the same controls in `/skills` and `/setup rooms` → Working skills.
-
-Changes apply to new service sessions, local hires and Claude seats; existing
-context is not erased. Reset a service conversation or start a fresh seat after
-changing the selection, and reopen the console for its initial autocomplete.
-No service restart is needed for selection changes once this code is running.
-
 Existing service conversations discover added, changed or removed skill files and
-workspace instructions before their next turn, keeping their history and selected
-skill exclusions. Native seats keep their harness's own resource-loading behavior.
+workspace instructions before their next turn, keeping their history. Native
+seats keep their harness's own resource-loading behavior.
 
-`hire_agent` accepts `skills: "bundled" | "plain"` for one local Claude, Pi or
-Codex hire; omission follows the owner setting. `bundled` still honors exclusions.
-The result records the condition and supplied names. Unsupported/remote routes
-cannot honor an explicit override and refuse it. Independent global or project
-skills can still be discovered by Claude/Codex; this switch does not rewrite
-owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
+Local Claude, Pi, Codex and Grok hires receive every shipped skill. Independent
+global or project skills can still be discovered by Claude/Codex; owner-global
+selection is untouched. See [how harnesses receive them](bundled-skills.md).
 
 Local briefed Codex hires use a dedicated app-server with a native Codex TUI in
 Herdr. Briefs and `message_seat` use protocol receipts; completion comes from turn
@@ -4456,7 +4443,7 @@ setup script on that remote machine. Select it explicitly; Clankie never writes
 through the config symlink:
 
 ```sh
-clankie herdr prepare pc --codex-source-setup 'C:\Users\volpe\dotfiles\scripts\codex-worker-setup.py'
+clankie herdr prepare studio --codex-source-setup 'C:\Users\me\dotfiles\scripts\codex-worker-setup.py'
 ```
 
 For owner mode or a new source setup, add `--approve` and confirm interactively.
@@ -4640,7 +4627,7 @@ delta. Typing requires verified focus; clear-and-type and guessed element IDs
 refuse. Dispatch or a changed PNG alone cannot confirm an effect. Windows
 input rechecks host Win32 person activity before each dispatch, requires a two-second
 quiet margin and refuses shell/system targets and system-switching shortcuts.
-Any native error retires the host. Release remains gated on James's W8 live
+Any native error retires the host. Release remains gated on owner-run live
 stop evidence; fixtures do not prove native interrupt behavior. Windows
 setup is in [desktop control](desktop-control.md#windows-observation-host).
 A host without an attached adapter returns `computer_body_unavailable`.

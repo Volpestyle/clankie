@@ -559,7 +559,6 @@ function createNativeRuntime({ container, allocation, ownerAttachment, sharedAdm
             seat.workingDirectory !== hostCwd ||
             seat.account !== accountLabel ||
             seat.chrome ||
-            seat.skills !== "plain" ||
             seat.model !== model ||
             seat.effort !== effort
           )

@@ -71,7 +71,7 @@ describe("canonical owner command layer", () => {
       },
       voice: { realtimeProvider: "openai", ttsProvider: "openai" },
       gameplay: { pokeagentMmoEnabled: true },
-      skills: { selection: { opinionated: true, exclude: [] }, catalog: [] },
+      skills: { catalog: [] },
       emailConfigured: false,
       mcpServers: [],
       credentials: [],

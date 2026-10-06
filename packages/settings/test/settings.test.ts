@@ -48,6 +48,7 @@ describe("settings store", () => {
       JSON.stringify({
         schemaVersion: 1,
         swarm: { enabled: true },
+        skills: { opinionated: false, exclude: ["reflect"] },
         execution: {
           workerMode: "interactive",
           workerHarness: "codex",
@@ -67,6 +68,7 @@ describe("settings store", () => {
     );
     const loaded = await store.load();
     expect(loaded).not.toHaveProperty("swarm");
+    expect(loaded).not.toHaveProperty("skills");
     expect(loaded.execution).toEqual({
       connections: [
         {

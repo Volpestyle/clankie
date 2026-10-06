@@ -217,7 +217,7 @@ export function renderComputerUseReach(harnesses: readonly ComputerUseHarness[])
     "These configured harnesses are on this machine or its linked fleets. Configuration does not prove app grants or successful input:",
     ...lines,
     "",
-    "For a hard computer or browser task they are usually stronger than your own browser: hire one with `hire_agent`, brief it, and watch it (the `computer-use-delegation` skill has the pattern). It works in your person's own sessions, so stop it for sign-ins, codes, payments or anything that changes an account, and don't drive while they are using the machine. Each run spends their plan for that harness. Your own browser is still yours for your accounts and quick lookups. `clankie browser harnesses` re-checks.",
+    "For a hard computer or browser task they are usually stronger than your own browser: hire one with `hire_agent`, brief it, and watch it (the `desktop-control` skill's delegation reference has the pattern). It works in your person's own sessions, so stop it for sign-ins, codes, payments or anything that changes an account, and don't drive while they are using the machine. Each run spends their plan for that harness. Your own browser is still yours for your accounts and quick lookups. `clankie browser harnesses` re-checks.",
   ].join("\n");
 }
 

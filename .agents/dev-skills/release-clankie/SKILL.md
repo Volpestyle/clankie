@@ -43,9 +43,8 @@ and the files being changed before editing. The active implementation lives in:
   workers. A neighboring working tree is never a release input. Keep its native license
   inventory, including libghostty-vt, in the bundle. Cloudflared and optional
   machine integrations remain external.
-- Product skills come from this repo; opinionated skills are a committed,
-  manifest-pinned export of Volpestyle/skills. Preserve the license and relative
-  links. The generated Herdr skill must match the checksum-verified binary.
+- Every shipped skill comes from this repo's `.agents/skills`. The generated
+  Herdr skill must match the checksum-verified binary.
   Rebuild native seat projections from source; never package stale copied skills.
 - Evals are manual-only, including releases. The full repository check excludes
   them; do not add instruction comparisons or live assessments to that gate.

@@ -31,14 +31,11 @@ it("loads the canonical Clankie skill through the native Pi parser", async () =>
   expect(result.skills.map((skill) => skill.name)).toEqual(["clankie"]);
 });
 
-it("assembles only selected skills in all release projections, with no checkout dependencies", async () => {
+it("assembles every shipped skill in all release projections, with no checkout dependencies", async () => {
   const repo = join(import.meta.dirname, "../../..");
   const release = await mkdtemp(join(tmpdir(), "release-skills-"));
   roots.push(release);
   await copySkillAssets(repo, release);
-  await cp(join(repo, "vendor/opinionated-skills.json"), join(release, "vendor/opinionated-skills.json"), {
-    recursive: true,
-  });
   const selected = bundledSkills(repo).map((skill) => skill.name);
   for (const directory of [
     ".agents/skills",
@@ -59,7 +56,7 @@ it("assembles only selected skills in all release projections, with no checkout 
     ])
       expect(selected).not.toContain(name);
     expect(await readFile(join(release, directory, "lead/SKILL.md"), "utf8")).toBe(
-      await readFile(join(repo, "vendor/opinionated-skills/agent/lead/SKILL.md"), "utf8"),
+      await readFile(join(repo, ".agents/skills/lead/SKILL.md"), "utf8"),
     );
   }
   const canonical = await readFile(join(repo, ".agents/skills/clankie/SKILL.md"), "utf8");
@@ -196,12 +193,5 @@ it("assembles only selected skills in all release projections, with no checkout 
   await writeFile(claudeManifest, JSON.stringify({ ...claudeMetadata, version: "old" }));
   await expect(prepareWorkerSkill(worker)).rejects.toThrow("stale");
 
-  const off = bundledSkills(release, { opinionated: false, exclude: [] });
-  expect(off.find((skill) => skill.name === "lead")?.included).toBe(false);
-  expect(off.find((skill) => skill.name === "herdr")?.included).toBe(true);
-  expect(
-    bundledSkills(release, { opinionated: true, exclude: ["reflect"] }).find(
-      (skill) => skill.name === "reflect",
-    )?.included,
-  ).toBe(false);
+  expect(bundledSkills(release).map((skill) => skill.name)).toEqual(selected);
 });

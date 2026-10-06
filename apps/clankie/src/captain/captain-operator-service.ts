@@ -196,7 +196,6 @@ export function createOperatorService(
           schemaVersion: 1,
           catalog: composerCatalogResponse(
             captainComposerCatalog({
-              skills: (await ctx.settings()).skills,
               cwd:
                 conversation.scope.kind === "workspace"
                   ? conversation.scope.workspaceId

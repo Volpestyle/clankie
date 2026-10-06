@@ -377,7 +377,6 @@ async function fixture() {
           account: "fixture",
           model,
           effort: "medium",
-          skills: "plain",
         },
         undefined,
         "Implement the fixture task",

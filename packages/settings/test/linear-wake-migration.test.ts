@@ -41,9 +41,12 @@ it.each([{ ownerUserIds: [] }, { ownerUserIds: ["configured-owner"] }])(
     expect(fenced.settings.linearWebhook.wake).toEqual(expected);
     expect(() => fenced.assertCurrent()).not.toThrow();
     expect(await readFile(store.path, "utf8")).toBe(original);
-    const james = { id: "james", email: "volpestyle@gmail.com" };
-    expect(linearWakeMatches(expected, "issueNewComment", james, "app")).toBe(true);
-    expect(linearWakeMatches(expected, "issueStatusChanged", james, "app")).toBe(false);
+    // No owner email is assumed: only a saved owner ID identifies the owner.
+    const owner = { id: "configured-owner", email: "owner@example.test" };
+    const configured = ownerUserIds.length > 0;
+    expect(expected.ownerUserEmails).toEqual([]);
+    expect(linearWakeMatches(expected, "issueNewComment", owner, "app")).toBe(configured);
+    expect(linearWakeMatches(expected, "issueStatusChanged", owner, "app")).toBe(false);
 
     // A normal settings write persists the new shape, so an intentional later
     // all-types setting is not mistaken for the legacy saved default again.
@@ -58,7 +61,9 @@ it.each([{ ownerUserIds: [] }, { ownerUserIds: ["configured-owner"] }])(
     }));
     const reloaded = await new SettingsStore(store.path).load();
     expect(reloaded.linearWebhook.wake).toEqual({ ...expected, notificationTypes: [] });
-    expect(linearWakeMatches(reloaded.linearWebhook.wake, "issueStatusChanged", james, "app")).toBe(true);
+    expect(linearWakeMatches(reloaded.linearWebhook.wake, "issueStatusChanged", owner, "app")).toBe(
+      configured,
+    );
   },
 );
 
@@ -69,7 +74,7 @@ it.each([
   { notificationTypes: ["issueStatusChanged"] },
   { excludedNotificationTypes: [] },
   { excludedNotificationTypes: ["issueSubscribed", "issueNewComment"] },
-  { ownerUserEmails: ["volpestyle@gmail.com"] },
+  { ownerUserEmails: ["owner@example.test"] },
   { ownerUserEmails: [] },
 ])("preserves owner-edited rules %j", async (patch) => {
   const wake = { ...legacyDefaults, ...patch };

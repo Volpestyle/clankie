@@ -32,13 +32,13 @@ plugin can uniquely declare. Everything else lives in the service and the
 
 ## What the plugin carries
 
-| Piece                                                                                                                                                                              | File                       | What it does                                                                                                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Output style `Clankie`                                                                                                                                                             | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`.                                                |
-| `SessionStart` hook                                                                                                                                                                | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,address,model --harness claude`: the owner persona, reach, address, model card, and only the project instructions Claude Code does not load itself |
-| `UserPromptSubmit` hook                                                                                                                                                            | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card once per session, then only its new notes                                                                                              |
-| MCP server `clankie`                                                                                                                                                               | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                                                                              |
-| Skills `/clankie:clankie`, `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                                                                           |
+| Piece                                                                                                                                                                      | File                       | What it does                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Output style `Clankie`                                                                                                                                                     | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`.                                                |
+| `SessionStart` hook                                                                                                                                                        | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,address,model --harness claude`: the owner persona, reach, address, model card, and only the project instructions Claude Code does not load itself |
+| `UserPromptSubmit` hook                                                                                                                                                    | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card once per session, then only its new notes                                                                                              |
+| MCP server `clankie`                                                                                                                                                       | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                                                                              |
+| Skills `/clankie:clankie`, `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:desktop-control`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                                                                           |
 
 The output style is generated: edit `apps/clankie/src/captain/instructions.md`
 and run `node integrations/claude-plugin/build.mjs`. `node
@@ -67,27 +67,20 @@ Numbered Claude commands load your interactive
 
 `clankie claude` needs Claude Code on `PATH` and a TTY. It projects this plugin into
 a fresh private directory, linking the same identity, hooks and MCP config with
-only skills included by `skills.opinionated` and `skills.exclude`. A bundled skill
-whose name is already installed in the Claude profile's own `skills/` is left
-out too, so the owner's copy wins and each skill is listed once (plain `claude`
-only; a numbered command's profile is not visible to the launcher). This supports
-arbitrary exclusions as well as a product-only seat without generating a separate
-build for every combination. The output-style generator remains the single source
-for both settings.
+every shipped skill. A bundled skill whose name is already installed in the
+Claude profile's own `skills/` is left out, so the owner's copy wins and each
+skill is listed once (plain `claude` only; a numbered command's profile is not
+visible to the launcher).
 
 The launcher passes the permission allowlist for `clankie` commands, disables an
 older installed `clankie@clankie` for this session, enables the projected
 `clankie@inline`, and addresses that identity with the development channel flag.
 Claude's [session plugin identity and precedence](https://code.claude.com/docs/en/plugins/loading)
-keep the old marketplace skill catalog from leaking into this seat. The session
-keeps its MCP tools, hooks and wake channel with either skill setting. It starts
+keep the old marketplace skill catalog from leaking into this seat. It starts
 with `--name Clankie`. An explicit `--conversation global-default` names the
 Herdr pane `clankie` inside the service's fleet.
-`--plugin-dir` chooses the component source while retaining skill filtering.
-
-Use `clankie skills opinionated off` or `/skills` to change the selection.
-`--dry-run` shows the plugin projection and catalog; start a fresh session when
-changing conditions because resumed history can contain previously loaded skills.
+`--plugin-dir` chooses the component source; the projection still supplies the
+shipped skills. `--dry-run` shows the plugin projection and catalog.
 
 `--conversation ID` resolves an existing global/workspace or Discord room conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and

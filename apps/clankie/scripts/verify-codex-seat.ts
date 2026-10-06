@@ -52,7 +52,6 @@ try {
     title: "VUH1459 verification",
     workingDirectory: cwd,
     model: "gpt-6-astra",
-    skills: "plain",
     brief: "Reply with exactly VUH1459_CAPTAIN_HIRE_OK. Do not use tools.",
   });
   evidence.hire = hire;
