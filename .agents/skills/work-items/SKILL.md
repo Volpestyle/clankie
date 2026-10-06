@@ -30,7 +30,7 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | Finished                       | `clankie work close ID` (`--canceled` if dropped)             |
 | Evidence                       | `clankie work attach ID --url URL --caption "what it proves"` |
 
-Statuses: `todo`, `in_progress`, `in_review`, `done`, `canceled`. Items carry
+Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`. Items carry
 the backend's `labels` (Linear, GitHub, or Markdown `labels:` front matter);
 label an item with a role name (`designer`, `builder`, …) to put it on that
 role's station in the owner's world. Criterion numbers are 1-based.
@@ -59,6 +59,31 @@ direct `show ID` reads are unchanged. Choose an existing label under the owner's
 authorization; the command never creates labels or selects another account.
 Edits and attachments keep existing labels and uploaded media; an ambiguous
 Evidence heading is refused rather than replaced.
+
+## Project facts for the world
+
+`clankie work project` reads planned milestones, shipped versions and Linear
+initiative goals through the saved tracker. The device op is `work_project`;
+its repo id has the same registered/project binding as `work_items`.
+`/work project` opens the same read in the TUI. To select release facts, use
+`clankie work init --release-source tags|milestones|both --release-lane NAME`;
+this preserves an existing tracker. Both is the default, and `repository` is
+an explicit unspecified-platform lane until the owner names `macos`, `mobile`,
+or another lane. Separate repos carry separate lanes.
+
+Backlog stays distinct from todo: Linear backlog/triage, GitHub's explicit
+`status: backlog` label, and Markdown `status: backlog`. Device item reads
+opt in with `statusVersion: 2`; older reads project backlog to todo. Items may
+state `milestone: {id, name}`; Markdown supplies both `milestone_id` and
+`milestone_name`. Priority is the native optional 0–4 projection.
+
+Read the `unavailable` entries before describing releases or goals. A completed
+milestone is not shipment; version-tag dates state their `dateKind`. Local tags
+are read without a fetch. GitHub published releases take precedence for the same
+tag. Store builds and release item membership remain unstated unless the source
+supplies them. GitHub/Markdown have no initiative goals; Markdown has no planned
+milestone collection. Device renders use the shared host snapshots, never a
+separate provider poller.
 
 ## Rules
 

@@ -25,7 +25,7 @@ const uuid = (value: unknown) =>
   typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value);
 const PAGE = "pageInfo { hasNextPage endCursor }";
 const ISSUE =
-  "id identifier title description priority url createdAt updatedAt dueDate estimate team { id name key } project { id name } state { id name type } assignee { id name email } parent { id identifier } labels { nodes { id name } }";
+  "id identifier title description priority url createdAt updatedAt dueDate estimate team { id name key } project { id name } state { id name type } assignee { id name email } projectMilestone { id name } parent { id identifier } labels { nodes { id name } }";
 const PROJECT =
   "id name identifier slugId description content priority url createdAt updatedAt startDate targetDate status { id name type } lead { id name email } teams { nodes { id name key } } labels { nodes { id name } } lastUpdate { id body health createdAt updatedAt url }";
 const USER = "id name displayName email";
@@ -277,6 +277,7 @@ export function createLinearApiTracker(options: {
     projectId: issue.project ? record(issue.project).id : null,
     status: issue.state ? record(issue.state).name : undefined,
     statusType: issue.state ? record(issue.state).type : undefined,
+    milestone: issue.projectMilestone ?? null,
     parentId: issue.parent ? record(issue.parent).id : null,
     labels: nodes(issue.labels).map((label) => label.name),
   });
@@ -383,6 +384,38 @@ export function createLinearApiTracker(options: {
       );
       return name === "get_project" ? expandedProject(value, args) : value;
     }
+    if (name === "list_initiatives") {
+      const result = await page(
+        "initiatives",
+        "InitiativeFilter",
+        "id name status targetDate",
+        args,
+        args.query ? { name: { containsIgnoreCase: args.query } } : {},
+      );
+      for (const initiative of result.nodes) {
+        if (!args.includeProjects) continue;
+        const projects: RecordValue[] = [];
+        const seen = new Set<string>();
+        let cursor: string | undefined;
+        for (;;) {
+          const data = await graphql(
+            `query TrackerGoalProjects($id: String!, $after: String) { initiative(id: $id) { projects(first: 250, after: $after) { nodes { id name progress status { name } } ${PAGE} } } }`,
+            { id: initiative.id, after: cursor ?? null },
+          );
+          const connection = record(record(data.initiative).projects);
+          const info = record(connection.pageInfo);
+          projects.push(...nodes(connection));
+          if (projects.length > 25_000) throw new LinearApiTrackerError("invalid_response");
+          if (info.hasNextPage === false) break;
+          if (info.hasNextPage !== true || typeof info.endCursor !== "string" || seen.has(info.endCursor))
+            throw new LinearApiTrackerError("invalid_response");
+          cursor = info.endCursor;
+          seen.add(cursor);
+        }
+        initiative.projects = projects;
+      }
+      return { initiatives: result.nodes, hasNextPage: result.hasNextPage, cursor: result.cursor };
+    }
     const lists = {
       list_users: ["users", "UserFilter", USER, "users"],
       list_teams: ["teams", "TeamFilter", TEAM, "teams"],
@@ -399,7 +432,10 @@ export function createLinearApiTracker(options: {
     if (name in lists) {
       const [field, filterType, selection, key] = lists[name as keyof typeof lists];
       const filter: RecordValue = {};
-      if (args.query ?? args.name) filter.name = { containsIgnoreCase: args.query ?? args.name };
+      if (args.query ?? args.name) {
+        if (field === "projects" && uuid(args.query)) filter.id = { eq: args.query };
+        else filter.name = { containsIgnoreCase: args.query ?? args.name };
+      }
       if (args.team && field !== "projectStatuses")
         filter[field === "projects" ? "accessibleTeams" : "team"] =
           field === "projects"

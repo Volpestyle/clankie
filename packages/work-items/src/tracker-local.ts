@@ -1011,6 +1011,8 @@ async function dispatch(
         name,
       );
     }
+    case "list_initiatives":
+      return { initiatives: [], hasNextPage: false };
     case "list_milestones":
       findProject(store, args.project as string);
       return { milestones: [], hasNextPage: false };

@@ -304,6 +304,11 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     ["name"],
   ),
   tool(
+    "list_initiatives",
+    "List Linear initiatives (goals). includeProjects carries native project progress; the local subset has no goals.",
+    { ...pagination, query: string, includeProjects: boolean, includeArchived: boolean, fields: strings },
+  ),
+  tool(
     "list_milestones",
     "List project milestones. The local subset currently has no milestones.",
     { ...pagination, project: string },

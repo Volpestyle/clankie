@@ -333,6 +333,7 @@ export {
   OperatorConversationServiceRequestSchema,
   type OperatorConversationServiceRequest,
   type OperatorWorkItemsOutcome,
+  type OperatorWorkProjectOutcome,
   OperatorConversationServiceResultSchema,
   type OperatorConversationServiceResult,
   type OperatorConversationServiceDispatch,
@@ -694,3 +695,5 @@ export {
 } from "./operator-conversations.ts";
 
 export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";
+
+export * from "./work-items.ts";

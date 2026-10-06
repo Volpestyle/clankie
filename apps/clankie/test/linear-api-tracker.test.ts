@@ -558,3 +558,113 @@ describe("registered Linear OAuth through real broker and hosted tracker", () =>
     expect(await store.get("linear-api")).toBeUndefined();
   });
 });
+
+it("serves project facts from shared Linear snapshots, then round-trips backlog after a write", async () => {
+  const { host, provider, directory } = await setup();
+  const repo = join(directory, "world-repo");
+  const service = createWorkItemsService({
+    stateDirectory: join(directory, "world-state"),
+    workspace: () => repo,
+    mcpHost: host,
+    run: async () => "v1.0\tcommit\t2026-10-05T02:00:00+00:00\n",
+  });
+  await service.handle(
+    { action: "init", repo: "workspace", backend: "linear", linearTeam: "VUH", linearProject: "Clankie" },
+    true,
+  );
+  const before = provider.seen.length;
+  const reads = await Promise.all(
+    Array.from({ length: 40 }, () => service.handle({ action: "project", repo: "workspace" }, false)),
+  );
+  for (const read of reads)
+    expect(read).toMatchObject({
+      releaseSource: "both",
+      planned: [{ name: "Ship", itemIds: ["VUH-1383"] }],
+      shipped: [{ version: "v1.0", lane: "repository", dateKind: "commit", itemIds: [] }],
+      goals: [
+        {
+          name: "Useful work",
+          status: "Active",
+          targetDate: "2026-12-01",
+          projects: [{ id: PROJECT_ID, progress: 0.4 }],
+        },
+      ],
+      unavailable: [],
+    });
+  const pages = provider.seen.length - before;
+  console.info(
+    `Project read cache: 80 logical reads, ${pages} provider requests for the initial shared snapshot.`,
+  );
+  expect(pages).toBeGreaterThan(0);
+  expect(pages).toBeLessThanOrEqual(12);
+  for (let i = 0; i < 40; i++) await service.handle({ action: "project", repo: "workspace" }, false);
+  expect(provider.seen.length - before).toBe(pages);
+  const backlog = {
+    id: "00000000-0000-4000-8000-000000000010",
+    name: "Backlog",
+    type: "backlog",
+    team: { id: TEAM_ID },
+  };
+  provider.rows.workflowStates!.push(backlog);
+  const updated = await service.handle(
+    { action: "update", repo: "workspace", id: "VUH-1383", status: "backlog" },
+    true,
+  );
+  expect(updated).toMatchObject({
+    item: { status: "backlog", priority: 1, milestone: { id: "milestone", name: "Ship" } },
+  });
+  expect(await service.handle({ action: "list", repo: "workspace" }, false)).toMatchObject({
+    items: [{ status: "backlog" }],
+  });
+  await service.handle(
+    { action: "init", repo: "workspace", releaseSource: "tags", releaseLane: "mobile" },
+    true,
+  );
+  expect(await service.handle({ action: "discover", repo: "workspace" }, true)).toMatchObject({
+    convention: {
+      backend: "linear",
+      linear: { team: "VUH", project: "Clankie" },
+      releases: { source: "tags", lane: "mobile" },
+    },
+  });
+  expect(provider.validationErrors).toEqual([]);
+});
+
+it("paginates milestone and goal-project facts completely and invalidates metadata on webhook notification", async () => {
+  const { host, provider } = await setup();
+  for (let n = 1; n <= 250; n++)
+    provider.rows.projectMilestones!.push({
+      id: `m-${n}`,
+      name: `Milestone ${n}`,
+      targetDate: null,
+      project: { id: PROJECT_ID },
+    });
+  const goal = provider.rows.initiatives![0]!;
+  const members = (goal.projects as { nodes: Record<string, unknown>[] }).nodes;
+  for (let n = 1; n <= 250; n++)
+    members.push({ id: `p-${n}`, name: `Project ${n}`, progress: 0.5, status: { name: "Started" } });
+  const call = (tool: string, args: Record<string, unknown>) =>
+    host.call({ server: "linear", lane: "operator", tool, arguments: args, resultMode: "data" });
+  const first = await call("list_milestones", { project: PROJECT_ID, limit: 250 });
+  if (first.outcome !== "ok") throw new Error(first.detail);
+  const page = JSON.parse(first.content);
+  expect(page.milestones).toHaveLength(250);
+  expect(page.hasNextPage).toBe(true);
+  const next = await call("list_milestones", { project: PROJECT_ID, limit: 250, cursor: page.cursor });
+  if (next.outcome !== "ok") throw new Error(next.detail);
+  expect(JSON.parse(next.content).milestones).toHaveLength(1);
+  expect(JSON.parse(next.content).hasNextPage).toBe(false);
+  const goals = await call("list_initiatives", { includeProjects: true });
+  if (goals.outcome !== "ok") throw new Error(goals.detail);
+  expect(JSON.parse(goals.content).initiatives[0].projects).toHaveLength(251);
+  const count = provider.seen.length;
+  await call("list_initiatives", { includeProjects: true });
+  expect(provider.seen.length).toBe(count);
+  goal.name = "Changed by owner";
+  host.invalidateTrackerReads?.();
+  const updated = await call("list_initiatives", { includeProjects: true });
+  if (updated.outcome !== "ok") throw new Error(updated.detail);
+  expect(JSON.parse(updated.content).initiatives[0].name).toBe("Changed by owner");
+  expect(provider.seen.length).toBeGreaterThan(count);
+  expect(provider.validationErrors).toEqual([]);
+});
