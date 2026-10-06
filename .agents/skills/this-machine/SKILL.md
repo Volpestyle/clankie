@@ -223,7 +223,7 @@ index). Configure through the headless CLI:
 | Herdr session                          | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                                                                                    |
 | His working directory                  | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                                                                                      |
 | State your assignment (for agents)     | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`                                                                           |
-| Say what you are doing (for agents)    | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                                                                                    |
+| Say what you are doing (for agents)    | `clankie stance working --activity testing --for 60` (`reading`, `editing`, `testing`, `planning`, `waiting`; optional note)                                       |
 | Public doorway                         | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                                                                             |
 | Pick up model/provider config          | `clankie restart`                                                                                                                                                  |
 | Machines / discovery / sessions        | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                             |
@@ -597,3 +597,10 @@ FLEET_ID`. Hiring does not rewrite the remote profile. The first brief waits for
 plus `message_clankie`. Changed native project/admission state still prevents hire
 dispatch; account checks apply when a provider tool is called. An unbound server
 confers no native hire or mailbox authority. An uncertain hire is not permission to retry or type into its pane.
+
+For the World work-kind bubble, read `seat.activity.kind` from roster/fleet;
+`source` distinguishes a native tool observation from an expiring agent statement.
+Never derive it from `doing`, a note or shell command text. Use `clankie stance
+working --activity testing --for 60` to state work a generic shell cannot describe.
+A replacement stance without `--activity` clears it; an idle/offline seat or a
+changed occupying session has no activity. Unknown means no bubble.

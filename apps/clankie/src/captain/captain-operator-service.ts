@@ -434,8 +434,8 @@ export function createOperatorService(
           result: { outcome: "unseated", herdrPaneId: request.stance.herdrPaneId },
         };
       }
-      const standing = ctx.stances.read(seat.seatId);
-      const stance = ctx.stances.state(seat.seatId, request.stance);
+      const standing = ctx.stances.read(seat.seatId, seat.occupantId);
+      const stance = ctx.stances.state(seat.seatId, request.stance, seat.occupantId);
       // The ship is the moment it says it landed something, not the whole
       // time the statement stands: restating a standing celebration is the
       // same landing, and counting it twice would be the host inflating it.
@@ -661,7 +661,7 @@ export function createOperatorService(
           result: { outcome: "failed", reason: "harness_unavailable", detail: seat.harness },
         };
       }
-      const standing = ctx.stances.read(seat.seatId);
+      const standing = ctx.stances.read(seat.seatId, seat.occupantId);
       const remainingMs = standing === undefined ? 0 : Date.parse(standing.expiresAt) - Date.now();
       const role = ctx.personas
         .all(ctx.liveSeats, () => undefined)
@@ -691,12 +691,16 @@ export function createOperatorService(
       ctx.herdrWatches.trackSeat(rehired.seatId);
       rehired.conversationId = ctx.conversations.conversationIdForPersona(rehired.personaId);
       if (standing !== undefined && remainingMs > 0) {
-        ctx.stances.state(rehired.seatId, {
-          herdrPaneId: moved.seat.paneId,
-          pose: standing.pose,
-          ...(standing.note === undefined ? {} : { note: standing.note }),
-          ttlMs: remainingMs,
-        });
+        ctx.stances.state(
+          rehired.seatId,
+          {
+            herdrPaneId: moved.seat.paneId,
+            pose: standing.pose,
+            ...(standing.note === undefined ? {} : { note: standing.note }),
+            ttlMs: remainingMs,
+          },
+          rehired.occupantId,
+        );
       }
       ctx.fleetChanges.touch();
       return { op: "move_seat", schemaVersion: 1, result: { outcome: "moved", seat: rehired } };

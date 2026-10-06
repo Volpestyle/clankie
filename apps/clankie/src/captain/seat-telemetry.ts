@@ -5,6 +5,11 @@ import { homedir } from "node:os";
 import { isAbsolute, relative, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { parseHerdrSeatTranscript } from "@clankie/agent-transcript";
+import type {
+  OperatorAgentActivity,
+  OperatorAgentActivityKind,
+  OperatorAgentStance,
+} from "@clankie/protocol";
 import { z } from "zod";
 import type { ObservedFleetSeat } from "./herdr-census.ts";
 
@@ -26,6 +31,68 @@ const MAX_TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const execFileAsync = promisify(execFile);
 const CACHE_LIMIT = 256;
+/** A bounded observation, not evidence that a forgotten tool is still running. */
+const ACTIVITY_MAX_AGE_MS = 5 * 60_000;
+const TOOL_KINDS = new Map<string, OperatorAgentActivityKind>([
+  ...["Read", "Grep", "Glob", "read", "read_file", "search_query", "web_search", "WebSearch", "WebFetch"].map(
+    (name) => [name, "reading"] as const,
+  ),
+  ...["Edit", "MultiEdit", "Write", "edit", "write", "apply_patch"].map((name) => [name, "editing"] as const),
+  ...["run_tests", "typecheck", "build"].map((name) => [name, "testing"] as const),
+  ...["update_plan", "EnterPlanMode", "ExitPlanMode"].map((name) => [name, "planning"] as const),
+  ...["AskUserQuestion", "request_user_input", "request_user_input_async"].map(
+    (name) => [name, "waiting"] as const,
+  ),
+]);
+
+function nativeActivity(
+  harness: "codex" | "claude",
+  records: Record<string, unknown>[],
+): OperatorAgentActivity | undefined {
+  // A native turn boundary cancels any unmatched call from the preceding turn.
+  const boundary = records.findLastIndex((entry) =>
+    harness === "codex"
+      ? entry.type === "event_msg" &&
+        ["task_started", "task_complete", "task_completed", "turn_aborted", "turn_interrupted"].includes(
+          String(object(entry.payload).type),
+        )
+      : entry.type === "assistant" && object(entry.message).stop_reason === "end_turn",
+  );
+  const active = new Map<string, Extract<OperatorAgentActivity, { source: "native_tool" }> | undefined>();
+  for (const entry of parseHerdrSeatTranscript(
+    harness,
+    records
+      .slice(boundary + 1)
+      .map((row) => JSON.stringify(row))
+      .join("\n"),
+  )) {
+    if (entry.type === "message" && entry.role === "operator" && !entry.internal) active.clear();
+    if (entry.type !== "tool") continue;
+    if (entry.phase !== "started") {
+      active.delete(entry.toolCallId);
+      continue;
+    }
+    // Only native qualified namespaces are accepted, never a suffix guessed from MCP names.
+    const name = entry.name.replace(/^(?:functions|tools)\./u, "");
+    const kind = TOOL_KINDS.get(name);
+    const at = timestamp(entry.occurredAt);
+    active.set(
+      entry.toolCallId,
+      kind === undefined || at === undefined
+        ? undefined
+        : {
+            source: "native_tool",
+            kind,
+            toolName: entry.name,
+            startedAt: at,
+          },
+    );
+  }
+  const calls = [...active.values()];
+  // Parallel unknown or conflicting calls do not establish a single work kind.
+  const first = calls[0];
+  return first && calls.every((call) => call?.kind === first.kind) ? first : undefined;
+}
 const NativeId = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const preparedPaths = new Map<string, Promise<string | undefined>>();
 const resolvedPaths = new Map<string, string | undefined>();
@@ -272,7 +339,12 @@ function parseSeatTelemetry(harness: "codex" | "claude", raw: string, sessionId?
 
 type FileIdentity = { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint };
 const fileStamp = (value: FileIdentity) => `${value.dev}:${value.ino}:${value.size}:${value.mtimeNs}`;
-type NativeSnapshot = { stamp: string; sessionId?: string; telemetry?: SeatTelemetry };
+type NativeSnapshot = {
+  stamp: string;
+  sessionId?: string;
+  telemetry?: SeatTelemetry;
+  activity?: OperatorAgentActivity;
+};
 const nativeSnapshots = new Map<string, NativeSnapshot>();
 const nativeReads = new Map<string, Promise<NativeSnapshot | undefined>>();
 const smallFiles = new Map<string, { stamp: string; value: string }>();
@@ -328,17 +400,28 @@ async function nativeSnapshot(
     if (from > 0) raw = raw.slice(raw.indexOf("\n") + 1);
     const parsed = parseSeatTelemetry(harness, raw, id);
     if (parsed.reportFailureIds) Object.freeze(parsed.reportFailureIds);
-    return { stamp, sessionId: id, telemetry: Object.freeze(parsed) };
+    const records = rows(raw).filter((entry) =>
+      harness === "claude"
+        ? entry.isSidechain !== true && (entry.sessionId === undefined || entry.sessionId === id)
+        : object(entry.payload).thread_id === undefined || object(entry.payload).thread_id === id,
+    );
+    const activity = nativeActivity(harness, records);
+    return {
+      stamp,
+      sessionId: id,
+      telemetry: Object.freeze(parsed),
+      ...(activity === undefined ? {} : { activity: Object.freeze(activity) }),
+    };
   } finally {
     await handle.close();
   }
 }
 
 /** Refresh reads metadata and cached snapshots, never account-directory discovery. */
-async function readNativeSeatTelemetry(
+async function readNativeSeatSnapshot(
   observed: ObservedFleetSeat,
   transcriptPath?: string,
-): Promise<SeatTelemetry | undefined> {
+): Promise<NativeSnapshot | undefined> {
   if (
     observed.fleet !== undefined ||
     !["codex", "claude"].includes(observed.harness) ||
@@ -378,10 +461,32 @@ async function readNativeSeatTelemetry(
       boundedSet(nativeSnapshots, key, snapshot);
     }
     if (!snapshot || (session.kind === "id" && snapshot.sessionId !== session.value)) return undefined;
-    return snapshot.telemetry;
+    return snapshot;
   } catch {
     return undefined;
   }
+}
+
+/** Latest read only: unsupported/idle/offline seats carry no activity fact. */
+export async function readSeatActivity(
+  observed: ObservedFleetSeat,
+  status: string,
+  stance?: OperatorAgentStance,
+): Promise<OperatorAgentActivity | undefined> {
+  if (status !== "working" && status !== "blocked") return undefined;
+  const activity = status === "working" ? (await readNativeSeatSnapshot(observed))?.activity : undefined;
+  if (activity?.source === "native_tool") {
+    const age = Date.now() - Date.parse(activity.startedAt);
+    if (age >= 0 && age < ACTIVITY_MAX_AGE_MS) return activity;
+  }
+  if (stance?.activityKind !== undefined && Date.parse(stance.expiresAt) > Date.now())
+    return {
+      source: "stated",
+      kind: stance.activityKind,
+      statedAt: stance.statedAt,
+      expiresAt: stance.expiresAt,
+    };
+  return undefined;
 }
 
 /** Fresh branch claims use small cached metadata, never Git processes or discovery. */
@@ -516,7 +621,7 @@ export async function readSeatTelemetry(
   } = {},
 ): Promise<SeatTelemetry | undefined> {
   const [native, lastCommitAt] = await Promise.all([
-    readNativeSeatTelemetry(observed, options.transcriptPath),
+    readNativeSeatSnapshot(observed, options.transcriptPath).then((snapshot) => snapshot?.telemetry),
     readCommitAt(observed, options.commitBaseline),
   ]);
   if (native === undefined && lastCommitAt === undefined) return undefined;
