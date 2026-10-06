@@ -1410,7 +1410,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   public projectHireMembershipCandidate(fleet: string, pane: string) {
-    return this.projectHires.membershipCandidate(fleet, pane);
+    const address = projectHirePane(fleet, pane);
+    if (address === undefined) return { state: "none" as const };
+    const candidate = this.projectHires.membershipCandidate(fleet, address);
+    return candidate.state === "none" && this.legacyProjectHire(fleet, address)
+      ? { state: "unconfirmed" as const }
+      : candidate;
   }
   public confirmedProjectHireAssignment(
     fleet: string,
@@ -1418,11 +1423,37 @@ export class HerdrWatchStore implements HerdrWatchPort {
     revision: string,
     proof: ProjectHireProcessProof,
   ) {
-    return this.projectHires.confirmedAssignment(fleet, pane, revision, proof);
+    const address = projectHirePane(fleet, pane);
+    const current = address === undefined ? undefined : this.projectHireProof(fleet, address, proof);
+    return address === undefined || current === undefined
+      ? { state: "invalid" as const }
+      : this.projectHires.confirmedAssignment(fleet, address, revision, current);
   }
 
   public projectHireAssignment(fleet: string, pane: string, proof?: ProjectHireProcessProof) {
-    return this.projectHires.assignment(fleet, pane, proof);
+    const address = projectHirePane(fleet, pane);
+    if (address === undefined) return { state: "invalid" as const };
+    const assignment = this.projectHires.assignment(
+      fleet,
+      address,
+      this.projectHireProof(fleet, address, proof),
+    );
+    return assignment.state === "none" && this.legacyProjectHire(fleet, address)
+      ? { state: "invalid" as const }
+      : assignment;
+  }
+
+  /** A legacy bare allocation is still a hire, never an owner-started workspace fallback. */
+  private legacyProjectHire(fleet: string, pane: string) {
+    const qualified = splitFleetQualified(pane);
+    return (
+      qualified !== undefined && this.projectHires.membershipCandidate(fleet, qualified.id).state !== "none"
+    );
+  }
+
+  private projectHireProof(fleet: string, pane: string, proof?: ProjectHireProcessProof) {
+    if (proof?.fleet !== fleet || projectHirePane(fleet, proof.pane) !== pane) return undefined;
+    return { ...proof, pane };
   }
 
   public async spawnSeat(
@@ -3719,6 +3750,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     renameSync(temporary, this.path);
     this.stateUnreadable = false;
   }
+}
+
+/** Remote allocations retain fleet-qualified keys; native census addresses are host-local. */
+function projectHirePane(fleet: string, pane: string): string | undefined {
+  const qualified = splitFleetQualified(pane);
+  if (fleet === "default") return qualified === undefined ? pane : undefined;
+  if (qualified && qualified.fleet !== fleet) return undefined;
+  const id = qualified?.id ?? pane;
+  return /^w[\w]+:p[\w]+$/u.test(id) ? `${fleet}/${id}` : undefined;
 }
 
 function watchPrompt(

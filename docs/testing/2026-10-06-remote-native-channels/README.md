@@ -5,6 +5,12 @@ owned PC Codex pane, but its project/native process binding refused before brief
 delivery. The failed fresh receipt is retained as abandoned after cleanup.
 VUH-1527 remains open; see the [current live blocker](#deployed-2e1c08be-pc-acceptance-process-proof-refusal).
 
+The [pane-address repair](pane-address/CHECKS.md) now accepts the same-fleet bare
+or qualified address, keeps kernel/private-seat queries host-local, and resolves
+native membership against the original qualified hire allocation. Its
+[native security review](pane-address/SECURITY-REVIEW.md) is approved. Source
+verification passed; deployment and a new-intent PC acceptance remain required.
+
 Audit base: `origin/main` `8fcf47a5`, 2026-10-06. Linear issue and its five newest
 comments were read, including the 2026-10-05 PC live acceptance and added peer
 exchange criterion. The initial `13b1e445` audit corrected marketplace Swarm
