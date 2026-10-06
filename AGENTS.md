@@ -45,7 +45,9 @@ This repository is public. Both neighbors are private and consume
   product skills (ADR 0152). `clankie seat` launches it; it carries only what
   a plugin can uniquely declare, like the herdr plugin.
 - `.agents/skills` — product skills shipped with every install (`this-machine`,
-  `trace-clankie`). Checkout-only skills live in `.agents/dev-skills`. He also
+  `trace-clankie`). They teach Clankie, his seat and his workers his own
+  capabilities; general-purpose skills are the user's or the harness's
+  ([ADR 0236](docs/adr/0236-clankie-owns-the-skills-he-ships.md)). Checkout-only skills live in `.agents/dev-skills`. He also
   reads the workspace's own `.agents/skills`, Pi's agent directory, and
   `~/.agents/skills`, the roots he shares with every other agent on the
   machine; `clankieSkillRoots` in `@clankie/settings` is the one list, so what

@@ -25,7 +25,6 @@ it("ships every repo-owned skill, leadership included, without retired names", (
     "research-team",
     "desktop-control",
     "herdr",
-    "trip-planning",
   ])
     expect(names).toContain(name);
 });

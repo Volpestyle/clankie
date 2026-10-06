@@ -13,12 +13,11 @@ install and is always on. There is one class and no selection setting:
 `clankie doctor` includes it. Checkout-only skills live in `.agents/dev-skills`
 and do not ship.
 
-The catalog holds 19 skills: leadership and process skills (`lead`,
+The catalog holds 15 skills: leadership and process skills (`lead`,
 `shared-checkout`, `tidy`, `linear-issues`, `linear-orient`) beside product and
 tool skills (`clankie`, `this-machine`, `trace-clankie`, `work-items`,
 `research-team`, `desktop-control`, `herdr`, `fleet-resources`, `pokeagents`,
-`minecraft`) and errands (`comparison-shopping`, `daily-digest`, `inbox-triage`,
-`trip-planning`). The directory listing is the authoritative inventory.
+`minecraft`). The directory listing is the authoritative inventory.
 
 The `lead` and `linear-issues` skills read the current effective
 `fleet.closure` and `fleet.machineSetup`, including project overrides. Defaults
@@ -148,6 +147,8 @@ native input evidence, refusal reasons and the remaining read/close race.
   - `c`: 51 worker sessions, 1 from Clankie, 1 owner-typed `/c`.
   - `p`: 34 worker sessions, none from Clankie.
   - `solution-space`: 38 worker sessions, 1 from Clankie.
+  - `trip-planning`, `comparison-shopping`, `daily-digest`, `inbox-triage`:
+    at most one load each in nine days; the owner dropped the errand set.
 
   Folded: `computer-use-delegation` (3 loads in 383 listings, none from Clankie)
   into `desktop-control`'s delegation reference, and `browser-use` (4 loads in
