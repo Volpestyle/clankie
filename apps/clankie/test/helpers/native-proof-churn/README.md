@@ -58,7 +58,9 @@ manual `fleet-final-os-native.integration.test.ts` checks its baseline, then
 denies only those IDs for an owned helper invocation. Bounded real process
 churn makes a fresh helper observation retry; the OS refuses that retry wait
 and the unchanged helper emits `clock_unavailable`. The clock itself remains
-available. No libc function, kernel observation or helper allocation is replaced.
+available. Main's helper merges census changes instead of retrying them, so only a
+scanned PID changing mid-observation forces the wait (about one helper run in 30
+here); the test uses a 30-second owned churn window and at most 512 runs. No libc function, kernel observation or helper allocation is replaced.
 
 ```sh
 clankie heavy -- node scripts/build-fleet-proof.mjs
@@ -86,4 +88,7 @@ PPIDs; the production helper sees and refuses the cycle. Detach plus `SIGCONT`
 resumes that same still-live target. The untraced supervisor survives reparenting
 and reaps its original child after the detach receipt. A high-level wait during
 reparenting can return `ECHILD` without exit, so it is not used as that receipt.
-No existing process or proof-helper code is addressed by the debugger.
+No existing process or proof-helper code is addressed by the debugger. If the
+tracer dies before detaching, the supervisor continues only that same original
+lifetime once it is reparented back, and after ten seconds kills its own child and
+fails instead of leaving a stopped process holding the heavy permit.
