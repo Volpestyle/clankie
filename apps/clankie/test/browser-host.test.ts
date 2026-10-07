@@ -6,6 +6,8 @@ import { BrowserUse, CDP, Page, CellError, type BrowserUseOptions } from "@brows
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
 import { startBrowserRecording } from "../src/browser-recording.ts";
+import { BodyLeaseStore } from "../src/body-leases.ts";
+import { BodyLeaseRouter } from "../src/body-lease-router.ts";
 
 vi.mock("../src/browser-recording.ts", () => ({ startBrowserRecording: vi.fn() }));
 
@@ -146,6 +148,42 @@ describe("browser host", () => {
     expect(BrowserUse.create).toHaveBeenLastCalledWith(
       expect.objectContaining({ browser: expect.objectContaining({ headless: true }) }),
     );
+  });
+  it("releases a held browser lease once idle close stops the burst, but never under a live call", async () => {
+    const store = new BodyLeaseStore(join(stateRoot, "leases"));
+    const router = new BodyLeaseRouter(store);
+    const released: string[] = [];
+    host = await createBrowserHost({
+      stateRoot,
+      attachmentRoot: stateRoot,
+      logger,
+      idleMs: 20,
+      onIdleClosed: () => {
+        const held = store.recoveryReference("browser");
+        if (held !== undefined) released.push(store.reconcileStopped(held).outcome);
+      },
+    });
+    const seat = { conversationId: "native-seat", current: () => true, authorize: async () => true };
+    const read = { schemaVersion: 1 as const, tool: "browser_use_tabs", arguments: {} };
+    const ran = await router.run(seat, "browser", (guard) => host!.call(read, undefined, { guard }), {
+      lifetime: "session",
+    });
+    expect(ran).toMatchObject({ outcome: "completed" });
+    expect(store.status("browser")).toMatchObject({ conversationId: "native-seat", state: "active" });
+    await vi.waitFor(() => expect(store.status("browser")).toBeUndefined());
+    expect(released).toEqual(["released"]);
+    expect(close).toHaveBeenCalledTimes(1);
+
+    const held = store.acquire("browser", "native-seat", 60_000);
+    if (held.outcome !== "acquired") throw Error("No lease");
+    const live = store.begin(held.lease);
+    if (live.outcome !== "admitted") throw Error("No operation");
+    await host.call(open());
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(released).toEqual(["released", "rejected"]));
+    expect(store.recoveryReference("browser")).toEqual(held.lease);
+    store.finish(held.lease, live.operationId, "settled");
+    store.close();
   });
   it("drains accepted calls before shutdown and rejects later calls", async () => {
     const current = await build();

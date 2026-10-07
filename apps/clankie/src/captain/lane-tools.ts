@@ -136,7 +136,8 @@ function serviceDirectoryTools(
       description:
         `Find tools on his connected services (${servers}) beyond the ones listed. ` +
         "Search with query for names and one-line summaries, then pass names for full input schemas. " +
-        "Use this before saying a service cannot do something.",
+        "Use this before saying a service cannot do something. " +
+        "It never searches the web: web, image and listing searches go through his browser.",
       inputSchema: {
         type: "object",
         properties: {

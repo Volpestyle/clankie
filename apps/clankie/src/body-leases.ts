@@ -51,7 +51,7 @@ const StateSchema = z.strictObject({
   claims: z.array(ClaimSchema),
   requests: z.array(RequestSchema).default([]),
 });
-type LeaseRef = Pick<Claim, "resource" | "conversationId" | "token">;
+export type LeaseRef = Pick<Claim, "resource" | "conversationId" | "token">;
 type LeaseView = Pick<Claim, "resource" | "conversationId" | "expiresAt"> & {
   state: "active" | "recovery_required";
 };

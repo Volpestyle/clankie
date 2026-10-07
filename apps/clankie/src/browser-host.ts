@@ -90,6 +90,8 @@ export interface BrowserHostOptions {
   blockedTools?: readonly string[];
   recordSessions?: () => Promise<boolean>;
   idleMs?: number;
+  /** Runs inside the call queue after an idle close stopped the burst, before any later call. */
+  onIdleClosed?: () => void;
 }
 export interface BrowserHost {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
@@ -174,12 +176,15 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   function armIdle() {
     clearTimeout(idle);
     idle = setTimeout(() => {
-      tail = tail.then(finishBurst).catch((error: unknown) => {
-        options.logger.warn(
-          { event: "browser.burst.close_failed", detail: errorText(error) },
-          "browser cleanup failed",
-        );
-      });
+      tail = tail
+        .then(finishBurst)
+        .then(() => options.onIdleClosed?.())
+        .catch((error: unknown) => {
+          options.logger.warn(
+            { event: "browser.burst.close_failed", detail: errorText(error) },
+            "browser cleanup failed",
+          );
+        });
     }, options.idleMs ?? IDLE_MS);
     idle.unref();
   }

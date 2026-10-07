@@ -401,6 +401,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           router: dependencies.bodyLeases.router,
           holderTurnEnded: (id) => dependencies.captain.conversationTurnIdle(id),
           confirmStopped: confirmBodyStopped,
+          remindHolder: async (held, guard) =>
+            dependencies.captain.conversationHasNativeSeat(held.conversationId) &&
+            dependencies.captain.wakeConversation(
+              { conversationId: held.conversationId },
+              [
+                `Your ${held.resource} lease expired and is held for recovery, so no other conversation (Discord rooms included) can use the ${held.resource}.`,
+                `If you are finished with it, recover it; the host confirms it stopped before releasing:`,
+                `clankie body request '${JSON.stringify({ action: "recover", resource: held.resource, conversationId: held.conversationId })}'`,
+              ].join("\n"),
+              guard,
+              "machine",
+              false,
+            ),
           current: () => bodyRequestsOpen,
           onError: (error) => logger.warn({ error }, "Body recovery check failed; lease remains held"),
         });

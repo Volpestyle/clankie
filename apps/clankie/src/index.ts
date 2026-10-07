@@ -542,6 +542,20 @@ if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
       logger,
       environment: process.env,
       recordSessions: async () => (await settingsStore.load()).browser.recordSessions,
+      // The host just stopped the burst itself, so the lease covers nothing; a live operation keeps it.
+      onIdleClosed: () => {
+        const held = bodyLeaseStore.recoveryReference("browser");
+        if (held === undefined) return;
+        const result = bodyLeaseStore.reconcileStopped(held);
+        logger.info(
+          {
+            event: "browser.lease.idle_release",
+            conversationId: held.conversationId,
+            outcome: result.outcome,
+          },
+          "browser lease reconciled after idle close",
+        );
+      },
     });
     logger.info({ event: "browser.capability.enabled" }, "in-process browser host started");
   } catch (error) {

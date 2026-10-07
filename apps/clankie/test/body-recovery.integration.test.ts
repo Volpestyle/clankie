@@ -119,6 +119,7 @@ async function fixture(
     }
     return false;
   };
+  const reminders: Array<{ conversationId: string; token: string }> = [];
   const recovery = new BodyLeaseRecovery({
     store,
     router,
@@ -127,6 +128,12 @@ async function fixture(
     current: () => true,
     holderTurnEnded: (id) => conversations.turnIdle(id),
     confirmStopped,
+    remindHolder: async (held, guard) => {
+      if (!conversations.hasNativeSeat(held.conversationId)) return false;
+      await guard();
+      reminders.push({ conversationId: held.conversationId, token: held.token });
+      return true;
+    },
   });
   cleanup.push(async () => {
     recovery.close();
@@ -155,6 +162,7 @@ async function fixture(
     conversations,
     recovery,
     attempts,
+    reminders,
     held: store.recoveryReference(resource)!,
     child,
     host,
@@ -228,6 +236,27 @@ it.each([
     }
   },
 );
+
+it("reminds a native holder once that its expired browser blocks others, without stopping it", async () => {
+  const f = await fixture(true, { resource: "browser", holderEvidence: "native_responding" });
+  await f.allowStop();
+  f.recovery.start();
+  await pause(150);
+  f.recovery.close();
+  await f.recovery.settled();
+  expect(f.reminders).toEqual([{ conversationId: f.conversationId, token: f.held.token }]);
+  expect(f.attempts).toEqual([]);
+  expect(f.child.exitCode).toBeNull();
+  expect(f.store.recoveryReference("browser")).toEqual(f.held);
+});
+
+it("never reminds a service-owned holder the sweep can recover itself", async () => {
+  const f = await fixture(true);
+  await f.allowStop();
+  f.recovery.start();
+  await until(() => f.store.status("browser") === undefined, "confirmed body release");
+  expect(f.reminders).toEqual([]);
+});
 
 it("automatically recovers a boot-restored idle lease only after the real host confirms stop, with capped backoff", async () => {
   const f = await fixture(true);

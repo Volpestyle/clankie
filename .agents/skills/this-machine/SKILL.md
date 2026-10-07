@@ -73,6 +73,9 @@ verified stop-check after a known service-owned holder's turn and body
 operations end, at boot and with 5–60 second backoff. Missing or unreadable
 holders and native-owned turns stay held for explicit owner recovery; display
 activity is not native completion proof. Never infer release from expiry or a failed close.
+A native seat holding an expired lease with no live operation is woken once
+with the exact recover command; recover it promptly when finished, because
+every other conversation, Discord rooms included, waits behind it.
 If it persists, an authorized owner can inspect `clankie body status` and use
 `clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'`
 from an existing writable conversation. Computer recovery uses its own contract.

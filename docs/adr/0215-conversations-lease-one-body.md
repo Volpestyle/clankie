@@ -54,7 +54,8 @@ Uncertain sends keep the resource blocked until reconciled; lease handling never
 retries delivery. Voice covers the complete joined stay, including speech and
 stream changes. Play covers start through confirmed terminal session state.
 Browser covers a browsing burst through confirmed close, including the REPL,
-selected page and recording. Only the owner can renew or request ordinary stop;
+selected page and recording. An idle close by the browser host is that confirmed close:
+it releases the claim unless a body operation is still pinned. Only the owner can renew or request ordinary stop;
 owner-authorized recovery is explicit and records the original claimant. An
 independent transport-owned voice stay needs its own exact conversation binding.
 
@@ -63,7 +64,10 @@ The [VUH-1752](https://linear.app/vuhlp/issue/VUH-1752) recovery amendment
 and on 5–60 second backoff. Automatic admission requires `recovery_required`,
 usable metadata for a service-owned holder, an ended turn/driver, and no live
 body operation. Missing/unreadable holders and native-owned turns require explicit
-owner recovery: display activity is not native completion proof. These conditions remain
+owner recovery: display activity is not native completion proof. The sweep wakes
+such a native holder once per lease incarnation, with no live operation, telling
+it the expired claim blocks others and naming its recover command; the wake
+grants nothing and releases nothing. These conditions remain
 fenced to the exact lease incarnation across awaited checks. Only confirmed
 termination releases it; a refused or unavailable proof retains the claim.
 This cleanup does not replay a Discord send or grant another conversation
