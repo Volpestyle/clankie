@@ -19,6 +19,10 @@ passed on this change before landing:
 - Local documentation links: 493 Markdown files checked, all resolved.
 - Retired claims check and `git diff --check`: passed.
 
+After rebasing cleanly onto `9779305fcf718922f2733f15d422cbb7065df0e2`, the
+same 11 files and 191 tests passed again in 8.04 seconds with main's updated
+Vitest setup. The evidence link check then covered 495 Markdown files.
+
 The final Vitest selection was `ask-mailbox.integration`,
 `conversation-question-auth`, `conversation-questions`, `lane-mcp`,
 `question-tool-schemas`, `codex-app-server`, `codex-seat-adapter`, and
