@@ -84,9 +84,12 @@ body's broker or bootstrap. Do not start a local official bridge with that token
 Remote addressed text reaches the same Discord captain through the sealed
 `/v1/discord/ingress` connection API (`docs/discord-ingress.md`); it accepts neither
 an operator bearer nor arbitrary grants. Mentions, DMs, replies and commands
-can wake a sleeping body; other channel chatter is not replayed later. Without
-Message Content access, unmentioned follow-ups and ping-disabled replies may
-need a mention or DM. A failed delivery marked interrupted was admitted before
+can wake a sleeping body. Channels in `discord.ambientChannelIds` (opted in by a
+server admin; none by default) keep a short encrypted buffer of recent chat that
+arrives as context with the next wake; buffered chat alone never wakes or bills
+the body. `discord.wakeTrigger` decides what wakes him: `addressed` (hosted
+default), `name`, or `any`. Without Message Content access on the official app,
+nothing is buffered and ping-disabled replies may need a mention or DM. A failed delivery marked interrupted was admitted before
 a restart: inspect effects before explicitly retrying it.
 
 Hosted directory pages come from the managed provider and are restricted to the

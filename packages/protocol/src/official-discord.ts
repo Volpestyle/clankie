@@ -98,6 +98,12 @@ export const OfficialDiscordStatusSchema = z
         guildName: z.string().max(100).optional(),
         channelIds: z.array(DiscordIdSchema).max(25).optional(),
         ambientChannelIds: z.array(DiscordIdSchema).max(25).optional(),
+        /** Writable text channels in the connected server, for the account page's picker. */
+        availableChannels: z
+          .array(z.object({ id: DiscordIdSchema, name: z.string().max(100) }).strict())
+          .max(500)
+          .nullable()
+          .optional(),
         wakeTrigger: DiscordWakeTriggerSchema.optional(),
         since: z.string().optional(),
       })
