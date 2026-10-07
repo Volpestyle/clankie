@@ -2,6 +2,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { OperatorSeatEvent } from "@clankie/protocol";
+import { execFile } from "node:child_process";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -9,12 +14,15 @@ import {
   connectLaneUpstream,
   createFleetSeatBridge,
   createSeatBridge,
+  parentArgvIsOperatorHarness,
   parentArgvLoadsFleetChannel,
   parseMcpArgs,
   pumpSeatEvents,
   runMcpCommand,
   type LaneToolUpstream,
 } from "../src/command/mcp.ts";
+
+const execFileAsync = promisify(execFile);
 
 const ChannelEventSchema = z.object({
   method: z.literal(CHANNEL_NOTIFICATION_METHOD),
@@ -97,6 +105,41 @@ describe("clankie mcp", () => {
     expect(() => parseMcpArgs(["--seat", "--lane", "operator"])).toThrow("Usage: clankie mcp");
     expect(() => parseMcpArgs(["--lane", "operator", "--seat"])).toThrow("Usage: clankie mcp");
     expect(() => parseMcpArgs(["--seat", "--lane"])).toThrow("Usage: clankie mcp");
+  });
+
+  it("admits the operator lane only under a native harness parent", () => {
+    // Parent argv observed with `ps` on the owner's Mac (2026-10-05).
+    for (const harness of [
+      `/Users/james/.local/bin/claude --name Clankie --settings {"enabledPlugins":{"clankie@inline":true}}`,
+      `codex -c mcp_servers.linear.enabled=false -c mcp_servers.clankie.enabled=true`,
+      "/Users/james/.opencode/bin/opencode",
+      "/Users/james/.local/bin/grok",
+      "node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+      undefined,
+    ])
+      expect(parentArgvIsOperatorHarness(harness)).toBe(true);
+    for (const agentShell of [
+      "-zsh",
+      "/bin/zsh -c clankie mcp --lane operator",
+      "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -I mcp.py list.json",
+      "node -e require('child_process').spawn('clankie')",
+    ])
+      expect(parentArgvIsOperatorHarness(agentShell)).toBe(false);
+  });
+
+  it("refuses to open the operator lane from an agent's own process without a token", async () => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      XDG_CONFIG_HOME: await mkdtemp(join(tmpdir(), "clankie-mcp-guard-")),
+    };
+    delete env.CLANKIE_OPERATOR_TOKEN;
+    const result = await execFileAsync(
+      process.execPath,
+      [resolve(import.meta.dirname, "../bin/clankie.ts"), "mcp", "--lane", "operator"],
+      { env },
+    ).catch((error: { code: number; stdout: string; stderr: string }) => error);
+    expect(result).toMatchObject({ code: 1, stdout: "" });
+    expect(result.stderr).toContain("Missing worker tools do not authorize his lane");
   });
 
   it("polls the fleet mailbox only when the parent argv loaded this server as a channel", () => {

@@ -268,6 +268,24 @@ function parentArgvLoadsChannel(argv: string | undefined, entry: string): boolea
   return false;
 }
 
+const OPERATOR_SEAT_HARNESSES = new Set(["claude", "codex", "opencode", "grok"]);
+const SCRIPT_RUNTIMES = new Set(["node", "bun"]);
+
+/**
+ * Whether a native harness launched this operator bridge as its MCP server.
+ * The bridge reads Clankie's own bearer from the broker, so an agent's shell,
+ * script or interpreter must not open it in place of a worker's grant. An
+ * unobserved parent (no `ps`) is not proof either way and stays allowed.
+ */
+export function parentArgvIsOperatorHarness(argv: string | undefined): boolean {
+  if (argv === undefined) return true;
+  const [command, script] = argv.trim().split(/\s+/u);
+  const name = (path: string | undefined) => path?.split("/").at(-1) ?? "";
+  if (OPERATOR_SEAT_HARNESSES.has(name(command))) return true;
+  if (!SCRIPT_RUNTIMES.has(name(command))) return false;
+  return /(?:claude-code|@openai\/codex|opencode)/u.test(script ?? "");
+}
+
 async function defaultReadParentArgv(): Promise<string | undefined> {
   const ppid = process.ppid;
   if (!Number.isInteger(ppid) || ppid <= 1) return undefined;
@@ -1251,6 +1269,13 @@ export async function runMcpCommand(
     if (input.lane !== "operator") {
       throw new Error(
         `The ${input.lane} lane has no bearer on this side; the seat serves the operator lane.`,
+      );
+    }
+    if (env.CLANKIE_OPERATOR_TOKEN === undefined && !parentArgvIsOperatorHarness(parentArgv)) {
+      throw new Error(
+        "clankie mcp --lane operator is Clankie's own seat and runs only as a native harness's MCP server " +
+          "(claude, codex, opencode, grok). Missing worker tools do not authorize his lane: " +
+          "use clankie_tools/clankie_call from the worker plugin, or tell Clankie with message_clankie.",
       );
     }
     const credential = await resolveOperatorCredential({

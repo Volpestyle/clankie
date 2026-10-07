@@ -3796,6 +3796,16 @@ stderr, and the process ends when the harness closes stdin. `--conversation ID`
 or the launcher-set `CLANKIE_CONVERSATION_ID` binds tools, polls and replies to
 one service conversation; the API rejects a changed binding within an MCP session.
 
+Before reading the bearer from the broker it checks its parent process: only a
+native harness (`claude`, `codex`, `opencode`, `grok`, or their Node entry
+points) may open the lane. Started from an agent's shell or script it exits 1,
+because missing worker tools never authorize Clankie's own lane; the worker
+uses its granted `clankie_tools`/`clankie_call` or tells him with
+`message_clankie`. An explicit `CLANKIE_OPERATOR_TOKEN` (the Grok seat and
+verification scripts) skips the check, as does a parent `ps` cannot observe.
+This stops a well-behaved agent from escalating; it is not a security boundary
+against a process that can already read the owner's Keychain.
+
 It is also his channel. While it runs it long-polls `/v1/seat/events` and
 pushes worker reports, self-wakes, herdr completion watches and room escalations into the
 session as `<channel source="clankie" kind="message|wake|watch|escalation"
