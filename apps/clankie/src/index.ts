@@ -1168,6 +1168,17 @@ const captain = createCaptain(
     ...(bodyTelemetry === undefined
       ? {}
       : { onTurnSettled: (metrics) => bodyTelemetry.emit(turnTelemetry(metrics)) }),
+    ...(hostedBody === undefined
+      ? {}
+      : {
+          modelCredentialsOperatorManaged: true,
+          onModelCredentialRejection: ({ providerId, outcome }) => {
+            const fields = { event: "model.credential_rejected", providerId, outcome };
+            if (outcome === "operator_required")
+              logger.warn(fields, "Hosted model credential rejection requires service operator review");
+            else logger.info(fields, "Hosted model credential recovery result");
+          },
+        }),
     herdrAvailable: herdr.available,
     agentSessions,
     runtimes,

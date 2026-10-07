@@ -106,6 +106,7 @@ export interface CaptainOptions {
 }
 
 export interface LaneSession {
+  readonly credentialRecovery?: import("./owner-credential-recovery.ts").OwnerCredentialRecovery;
   readonly session: AgentSession;
   readonly capture: TurnContext;
   /** Machine-wide skills left out of the listing; `/name` still expands them. */

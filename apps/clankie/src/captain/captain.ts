@@ -1,3 +1,7 @@
+import {
+  ownerCredentialRecoveryExtension,
+  type OwnerCredentialRecovery,
+} from "./owner-credential-recovery.ts";
 import { escalateWorkerQuestion } from "./worker-question-escalation.ts";
 import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
@@ -1201,6 +1205,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (await prepare("persona images", personaImages)).images.length > 0;
     const piSettings = options.evalSessionBoundary?.settings() ?? SettingsManager.inMemory();
     const quietSkills = new Set<string>();
+    const credentialRecovery: OwnerCredentialRecovery = {};
     const loader: ResourceLoader =
       options.evalSessionBoundary?.resources(cwd) ??
       new CaptainResourceLoader({
@@ -1212,6 +1217,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
         noExtensions: true,
         extensionFactories: [
+          ...(lane === "operator" ? [ownerCredentialRecoveryExtension(credentialRecovery)] : []),
           ...(systemTools
             ? [
                 captainFleetSettingsExtension({
@@ -1314,6 +1320,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         session,
         capture,
         quietSkills,
+        credentialRecovery,
         purpose,
         route,
         budget,
@@ -1473,12 +1480,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const rejectedProviders = new Set(
     Object.keys(readModelCredentialHealth(credentialHealthPath)?.providers ?? {}),
   );
-  async function credentialRejected(providerId: string, detail: string) {
-    const refreshed = await (await runtime()).refreshRejectedCredential?.(providerId);
-    if (refreshed === undefined) return undefined;
-    const outcome = refreshed === "refreshed" ? ("refreshed" as const) : ("reconnect_required" as const);
+  async function credentialRejected(providerId: string, detail: string, allowRefresh = true) {
+    const refreshed = allowRefresh
+      ? await runtime()
+          .then((models) => models.refreshRejectedCredential?.(providerId))
+          .catch(() => "failed" as const)
+      : "failed";
+    if (refreshed === undefined && deps.modelCredentialsOperatorManaged !== true) return undefined;
+    const outcome =
+      refreshed === "refreshed"
+        ? ("refreshed" as const)
+        : deps.modelCredentialsOperatorManaged === true
+          ? ("operator_required" as const)
+          : ("reconnect_required" as const);
     credentialHealth.rejected(providerId, outcome, detail);
     rejectedProviders.add(providerId);
+    try {
+      deps.onModelCredentialRejection?.({ providerId, outcome });
+    } catch {
+      /* Operator diagnostics cannot fail recovery. */
+    }
     return outcome;
   }
   function credentialAccepted(providerId: string): void {

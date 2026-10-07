@@ -133,7 +133,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
     ...Object.entries(report.credentialRejections ?? {}).map(
       ([providerId, rejection]) =>
-        `  ${rejection.state === "refreshed" ? "○" : "✗"} ${clean(providerId)} sign-in · rejected by the provider at ${clean(rejection.at)} · ${rejection.state === "refreshed" ? "refreshed; next turn will tell" : "reconnect required"}`,
+        `  ${rejection.state === "refreshed" ? "○" : "✗"} ${clean(providerId)} sign-in · rejected by the provider at ${clean(rejection.at)} · ${rejection.state === "refreshed" ? "refreshed; next turn will tell" : rejection.state === "operator_required" ? "service operator repair required" : "reconnect required"}`,
     ),
     ...(report.tracker
       ? [

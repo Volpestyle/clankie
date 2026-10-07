@@ -91,6 +91,18 @@ Do not infer the historic sender from today's connected processes. Retain actual
 PID/pane/socket details privately and publish sanitized counts and stages. See
 `docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.
 
+For a model credential rejection, inspect doctor's `credentialRejections` and
+the original conversation receipt. Owner-typed Pi turns force one OAuth refresh
+and continue only on success, within the same run. Pi's context edit hides the
+rejected assistant from active context without deleting its audit record; it
+does not append the owner's input again or replay completed tools. A second
+rejection or cancellation stops continuation. Hosted `operator_required` means
+service-owned credential repair: inspect `model.credential_rejected` operator
+logs and the existing failed-turn telemetry. Never tell a hosted customer to run
+`/auth`; no dedicated credential-escalation acknowledgment is implied. Local
+`reconnect_required` retains the console reconnect path. See `docs/cli.md` under
+doctor for the states. Do not run a paid model probe just to refresh diagnostics.
+
 ## Read next, only for the question at hand
 
 - [Captain turns and Discord text](reference/captain-and-discord.md): replies

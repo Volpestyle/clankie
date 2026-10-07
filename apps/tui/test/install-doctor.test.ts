@@ -391,12 +391,45 @@ describe("install doctor", () => {
     expect(report.remediations).toContainEqual(
       expect.stringContaining("openai-codex rejected Clankie's saved sign-in"),
     );
+    expect(report.remediations.join("\n")).toContain("`/auth openai-codex`");
     expect(formatDoctorReport(report)).toContain("✗ openai-codex sign-in · rejected by the provider");
 
     health.succeeded("openai-codex");
     const after = await inspect();
     expect(after.credentialRejections).toBeUndefined();
     expect(after.remediations.join("\n")).not.toContain("rejected Clankie's saved sign-in");
+  });
+
+  it("keeps hosted credential repair with the service operator even when the selected key is missing", async () => {
+    const root = await installRoot();
+    const state = join(root, "state");
+    const configHome = join(root, "config");
+    await mkdir(join(configHome, "clankie"), { recursive: true });
+    await writeFile(join(configHome, "clankie", "clankie.json"), JSON.stringify({ model: "openai/gpt-4.1" }));
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    const health = new ModelCredentialHealthLog(modelCredentialHealthPath(join(state, "captain")));
+    health.rejected("openai", "operator_required", "401 unauthorized; run /auth");
+    const inspect = () =>
+      inspectInstall({
+        repoRoot: root,
+        env: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome, CLANKIE_STATE: state },
+        settings,
+        credentialStore: store,
+        execFileImpl: missing,
+        fetchImpl: offline,
+      });
+    const report = await inspect();
+    expect(report.credentialRejections).toMatchObject({ openai: { state: "operator_required" } });
+    expect(report.captain).toMatchObject({ ready: false, reason: "no_credential", providerId: "openai" });
+    expect(report.remediations).toContainEqual(
+      expect.stringContaining("the service operator needs to repair the model connection"),
+    );
+    expect(report.remediations.join("\n")).not.toContain("/auth");
+    expect(formatDoctorReport(report)).toContain("service operator repair required");
+    expect(formatDoctorReport(report)).not.toContain("/auth");
+    health.succeeded("openai");
+    expect((await inspect()).credentialRejections).toBeUndefined();
   });
 
   describe("the selected model", () => {

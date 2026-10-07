@@ -102,7 +102,7 @@ interface Script {
   /** Pi's recorded error when the provider refuses the turn. */
   providerError?: string;
   /** What the captain's credential recovery reports for a rejected credential. */
-  credentialRecovery?: "refreshed" | "reconnect_required";
+  credentialRecovery?: "refreshed" | "reconnect_required" | "operator_required";
   gate: () => Promise<void>;
 }
 
@@ -744,6 +744,10 @@ it("runs a wake once more after Clankie refreshes the credential the provider re
   const failed = events.filter((event) => event.type === "turn" && event.phase === "failed");
   expect(failed).toHaveLength(1);
   expect(failed[0]).toMatchObject({ summary: expect.stringContaining("Clankie refreshed it") });
+  expect(failed[0]).toMatchObject({
+    summary: expect.stringContaining("the interrupted turn did not complete"),
+  });
+  expect(JSON.stringify(failed)).not.toContain("send the message again");
   expect(events.filter((event) => event.type === "turn" && event.phase === "completed")).toHaveLength(1);
   expect(
     events.filter(
@@ -764,4 +768,19 @@ it("tells the owner to reconnect when the rejected credential cannot be refreshe
   expect(failed).toMatchObject([
     { summary: expect.stringContaining("Reconnect scripted with `/auth scripted` in the console") },
   ]);
+});
+
+it("reports hosted credential repair as service operator work without console auth instructions", async () => {
+  const f = fixture();
+  f.script.providerError = "401 unauthorized; run /auth to replace the rejected key";
+  f.script.credentialRecovery = "operator_required";
+  const turn = f.conversations.submitInternal(ID, "Wake H check in", "wake");
+  if (turn.status !== "accepted") throw new Error("Expected wake");
+  expect(await f.conversations.awaitRunResult(turn.runId)).toBe(false);
+  const failed = f.events(ID).filter((event) => event.type === "turn" && event.phase === "failed");
+  expect(failed).toMatchObject([
+    { summary: expect.stringContaining("The service operator needs to repair the model connection") },
+  ]);
+  expect(JSON.stringify(failed)).not.toContain("/auth");
+  expect(JSON.stringify(failed)).not.toContain("notified");
 });

@@ -14,8 +14,8 @@ const ModelCredentialHealthSchema = z
       z.string(),
       z
         .object({
-          /** `refreshed`: rejected, then refreshed. `reconnect_required`: refreshing failed or was impossible. */
-          state: z.enum(["refreshed", "reconnect_required"]),
+          /** Hosted failures need the service operator; local failures may need owner reconnection. */
+          state: z.enum(["refreshed", "reconnect_required", "operator_required"]),
           at: z.string(),
           detail: z.string().max(512),
         })

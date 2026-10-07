@@ -1,3 +1,4 @@
+import type { OwnerCredentialTurn } from "./owner-credential-recovery.ts";
 import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   type CaptainSessionLaneV2,
@@ -96,6 +97,7 @@ export interface CreateConversationRunnerContext {
   readonly credentialRejected?: (
     providerId: string,
     detail: string,
+    allowRefresh?: boolean,
   ) => Promise<CredentialRecovery["outcome"] | undefined>;
   /** A turn on this provider succeeded, so a recorded rejection is over. */
   readonly credentialAccepted?: (providerId: string) => void;
@@ -532,7 +534,13 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 context.draft(undefined);
                 drafts.reset();
                 const said = assistantText(event.message).trim();
-                if (said.length > 0)
+                if (
+                  said.length > 0 &&
+                  !(
+                    event.message.stopReason === "error" &&
+                    new PiRunError(event.message.errorMessage ?? "").credentialRejected
+                  )
+                )
                   publish({ type: "message", role: "captain", text: said, streaming: false });
                 const usage = lane.session.getContextUsage();
                 if (usage !== undefined) {
@@ -545,6 +553,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             });
         let settled: TurnSettledOutcome | undefined;
         let admitted = false;
+        const ownerRecovery: OwnerCredentialTurn | undefined =
+          context.internal !== true && ctx.credentialRejected !== undefined
+            ? {
+                signal: run.signal,
+                recover: ctx.credentialRejected,
+                retrying: () => publishActivity("retrying"),
+              }
+            : undefined;
         try {
           ctx.shutdown.signal.throwIfAborted();
           if (
@@ -641,6 +657,10 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
                 onAdmitted: (state) => {
                   admitted = true;
+                  if (state === "started" && lane.credentialRecovery !== undefined) {
+                    if (ownerRecovery === undefined) delete lane.credentialRecovery.current;
+                    else lane.credentialRecovery.current = ownerRecovery;
+                  }
                   context.deliveryOutcome?.({ state });
                 },
                 ...(context.inputAnswer
@@ -697,19 +717,23 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
           // Failure before Pi took the input is a definite non-dispatch.
           if (!admitted && !context.signal.aborted) context.deliveryReceipt?.("unavailable");
+          const failure = ownerRecovery?.failure ?? error;
           const providerId = lane.session.model?.provider;
           if (
-            error instanceof PiRunError &&
-            error.credentialRejected &&
-            error.credentialRecovery === undefined &&
+            ownerRecovery?.attempted !== true &&
+            failure instanceof PiRunError &&
+            failure.credentialRejected &&
+            failure.credentialRecovery === undefined &&
             providerId !== undefined &&
             ctx.credentialRejected !== undefined
           ) {
-            const outcome = await ctx.credentialRejected(providerId, error.message).catch(() => undefined);
-            if (outcome !== undefined) throw new PiRunError(error.message, { providerId, outcome });
+            const outcome = await ctx.credentialRejected(providerId, failure.message).catch(() => undefined);
+            if (outcome !== undefined) throw new PiRunError(failure.message, { providerId, outcome });
           }
-          throw error;
+          throw failure;
         } finally {
+          if (lane.credentialRecovery?.current === ownerRecovery && lane.credentialRecovery !== undefined)
+            delete lane.credentialRecovery.current;
           releaseGoalBudget();
           run.signal.removeEventListener("abort", onInterrupt);
           unsubscribeProgress();

@@ -323,15 +323,22 @@ turn at all ([ADR 0190](adr/0190-setup-asks-one-question-then-clankie-takes-over
 one is chosen. A chosen model with nothing to sign it in earns a remediation.
 Credential entries are ids and types, never secrets. A provider can reject a
 stored credential before its recorded expiry: on such a rejection in a real
-turn the service forces one OAuth refresh (a self-wake then runs once more), and
-the failed turn says either that the sign-in was refreshed or to reconnect it
-with `/auth PROVIDER`. `credentialRejections` (present only when there is one)
-records that per provider as `{ "state": "refreshed" | "reconnect_required",
-"at", "detail" }`, read from the service's last real failure, never a new paid
-probe; `reconnect_required` earns a remediation, and the next successful turn on
-that provider clears it. `commands` currently
-probes `herdr`, `ffmpeg`, `yt-dlp` (version strings) and `herdr-lead`, `codex`,
-`claude` (PATH only — never execute `herdr-lead --version`).
+turn the service forces one OAuth refresh. An owner-typed Pi turn continues
+once after a successful refresh, within its original run and receipt. Pi omits
+the rejected assistant reply from active context while retaining the append-only
+failure record; the owner's message, attachments and completed tools are not
+replayed. A second credential rejection is terminal and does not force another
+refresh. Cancellation prevents continuation. A self-wake retains its existing
+one-time recovery. Failed local refresh asks the operator to reconnect with
+`/auth PROVIDER`; hosted credentials instead require service operator repair,
+with an operator diagnostic and the existing failed-turn telemetry, never a
+customer `/auth` step. `credentialRejections` (present only when there is one)
+records `{ "state": "refreshed" | "reconnect_required" | "operator_required",
+"at", "detail" }` per provider from a real failure, never a new paid probe.
+Doctor distinguishes local reconnect from service operator repair; the next
+successful turn on that provider clears the entry. `commands` currently probes
+`herdr`, `ffmpeg`, `yt-dlp` (version strings) and `herdr-lead`, `codex`, `claude`
+(PATH only — never execute `herdr-lead --version`).
 `laneTools` names the streamable-HTTP MCP route that serves a lane's tool bank
 ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)); `reachable` is
 true when it answers an unauthenticated probe with 401, so the route is served

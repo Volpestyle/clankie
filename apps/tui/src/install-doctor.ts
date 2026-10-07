@@ -600,6 +600,11 @@ function collectRemediations(input: {
   readonly linear: ReturnType<typeof linearFollowStatus>;
 }): string[] {
   const remediations: string[] = [];
+  const operatorRepairProviders = new Set(
+    Object.entries(input.credentialRejections ?? {})
+      .filter(([, rejection]) => rejection.state === "operator_required")
+      .map(([providerId]) => providerId),
+  );
   if (input.linear.wakeWarning !== null) {
     remediations.push(
       `${input.linear.wakeWarning} Set owner IDs or emails with \`clankie linear wake set --owner-user-emails EMAILS\`.`,
@@ -609,12 +614,21 @@ function collectRemediations(input: {
     remediations.push("Pick a captain model with `clankie model set provider/model` or `/setup`.");
   }
   for (const [providerId, rejection] of Object.entries(input.credentialRejections ?? {})) {
-    if (rejection.state === "reconnect_required")
+    if (rejection.state === "operator_required")
+      remediations.push(
+        `${providerId} rejected Clankie's model credentials at ${rejection.at}; the service operator needs to repair the model connection.`,
+      );
+    else if (rejection.state === "reconnect_required")
       remediations.push(
         `${providerId} rejected Clankie's saved sign-in at ${rejection.at} and it could not be refreshed; reconnect it with \`/auth ${providerId}\` in the console.`,
       );
   }
-  if (!input.captain.ready && input.captain.reason === "no_credential") {
+  if (
+    !input.captain.ready &&
+    input.captain.reason === "no_credential" &&
+    input.captain.providerId !== undefined &&
+    !operatorRepairProviders.has(input.captain.providerId)
+  ) {
     remediations.push(
       `Every turn on ${input.captain.model} fails until ${input.captain.providerId} is signed in; run \`/setup\` or \`/auth\` in the console.`,
     );
@@ -627,7 +641,11 @@ function collectRemediations(input: {
         `Start the runtime behind ${endpoint.baseURL}; every captain turn on ${input.selectedModel?.ref} fails until it answers.`,
       );
     }
-    if (endpoint.authRequired && !endpoint.credentialStored) {
+    if (
+      endpoint.authRequired &&
+      !endpoint.credentialStored &&
+      !operatorRepairProviders.has(selectedProvider)
+    ) {
       remediations.push(
         `${endpoint.baseURL} requires a key and none is stored for ${selectedProvider}; add it with \`/auth ${selectedProvider}\`.`,
       );

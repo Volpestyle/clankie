@@ -65,6 +65,12 @@ export interface CaptainDeps {
     owner: import("./conversation-owner.ts").ConversationOwner,
   ) => boolean;
   readonly bodyLeases?: BodyLeaseRouter;
+  /** Trusted hosted body: provider credentials are repaired by the service operator. */
+  readonly modelCredentialsOperatorManaged?: boolean;
+  readonly onModelCredentialRejection?: (event: {
+    providerId: string;
+    outcome: "refreshed" | "reconnect_required" | "operator_required";
+  }) => void;
   /** Called once per settled turn with its bounded metrics. */
   readonly onTurnSettled?: (metrics: CaptainTurnSettledMetrics) => void;
   /** Execution is optional; checked again when a terminal tool is called. */

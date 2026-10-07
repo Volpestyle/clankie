@@ -76,7 +76,7 @@ function providerRejectedCredentials(message: string): boolean {
 export interface CredentialRecovery {
   readonly providerId: string;
   /** `refreshed`: a new token is stored, so the turn may run again. */
-  readonly outcome: "refreshed" | "reconnect_required";
+  readonly outcome: "refreshed" | "reconnect_required" | "operator_required";
 }
 
 /**
@@ -96,8 +96,10 @@ export class PiRunError extends Error {
       credentialRecovery === undefined
         ? (included?.message ?? message)
         : credentialRecovery.outcome === "refreshed"
-          ? `${credentialRecovery.providerId} rejected Clankie's saved sign-in (${message}). Clankie refreshed it; send the message again.`
-          : `${credentialRecovery.providerId} rejected Clankie's saved sign-in (${message}) and Clankie could not refresh it. Reconnect ${credentialRecovery.providerId} with \`/auth ${credentialRecovery.providerId}\` in the console.`,
+          ? `${credentialRecovery.providerId} rejected Clankie's saved sign-in (${message}). Clankie refreshed it, but the interrupted turn did not complete.`
+          : credentialRecovery.outcome === "operator_required"
+            ? `${credentialRecovery.providerId} rejected Clankie's model credentials. The service operator needs to repair the model connection before this work can continue.`
+            : `${credentialRecovery.providerId} rejected Clankie's saved sign-in (${message}) and Clankie could not refresh it. Reconnect ${credentialRecovery.providerId} with \`/auth ${credentialRecovery.providerId}\` in the console.`,
     );
     this.credentialRecovery = credentialRecovery;
     this.credentialRejected =
