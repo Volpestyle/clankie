@@ -1,0 +1,122 @@
+{
+  "baseline": {
+    "clockResult": 0,
+    "waitResult": 0,
+    "waitErrno": 0,
+    "waitSyscalls": [334, 423]
+  },
+  "denied": {
+    "clockResult": 0,
+    "waitResult": -1,
+    "waitErrno": 22,
+    "waitSyscalls": [334, 423]
+  },
+  "evidence": [
+    {
+      "attempt": 0,
+      "refused": true,
+      "events": [
+        {
+          "schemaVersion": 1,
+          "stage": "census",
+          "reason": "process_census_changed",
+          "errno": 0,
+          "attempt": 1,
+          "retry": true
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "startup",
+          "reason": "clock_unavailable",
+          "errno": 22,
+          "attempt": 1,
+          "retry": false
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "completion",
+          "reason": "attempts_exhausted",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "schemaVersion": 1,
+    "startedAt": "2026-10-06T23:42:29.852Z",
+    "observedAt": "2026-10-06T23:42:30.074Z",
+    "totals": {
+      "proof": {
+        "attempts": 0,
+        "refusals": 0,
+        "byReason": {}
+      },
+      "reports": {
+        "attempts": 0,
+        "failures": 0,
+        "byReason": {}
+      },
+      "nativeDiagnostics": {
+        "process_census_changed": 1,
+        "clock_unavailable": 1,
+        "attempts_exhausted": 1
+      },
+      "transportDiagnostics": {}
+    },
+    "windows": [
+      {
+        "minutes": 5,
+        "proof": {
+          "attempts": 0,
+          "refusals": 0,
+          "byReason": {}
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "process_census_changed": 1,
+          "clock_unavailable": 1,
+          "attempts_exhausted": 1
+        },
+        "transportDiagnostics": {},
+        "proofRefusalRate": 0,
+        "proofRefusalsPerMinute": 0,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      },
+      {
+        "minutes": 60,
+        "proof": {
+          "attempts": 0,
+          "refusals": 0,
+          "byReason": {}
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "process_census_changed": 1,
+          "clock_unavailable": 1,
+          "attempts_exhausted": 1
+        },
+        "transportDiagnostics": {},
+        "proofRefusalRate": 0,
+        "proofRefusalsPerMinute": 0,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      }
+    ]
+  },
+  "helper": {
+    "buildHash": "c151386ee70267534333a5f89918ff0c172e948deacf2bc423295b7f3f267ada",
+    "binaryHash": "d5a2bbdc78c9a7bca6099c9c535600f8834d623f744dac9ccbe390895014cd94"
+  },
+  "scope": "Actual production helper, real OS retry-wait denial, TCP and process churn; direct diagnostics, not HTTP admission or owner-TUI acceptance."
+}

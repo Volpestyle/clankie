@@ -63,38 +63,57 @@ reason. These vocabulary samples are contract inputs, not claims that the OS
 produced every possible failure. Native diagnostics never add terminal proof
 attempts or inflate the refusal denominator.
 
-The additional manual `fleet-additional-os-native.integration.test.ts` uses the
-unchanged production helper and real owned kernel transitions to produce
-`executable_unavailable`, `fd_list_bounds`, `executable_changed`, `argv_changed`,
-`process_changed`, `ancestry_unavailable`, and `ancestry_changed`. Six checks
-cover those seven reasons; direct helper refusals enter the production schema
-and collector. [Actual redacted events and scope](../../docs/testing/2026-10-06-additional-defensive-os/README.md)
-distinguish these observations from full HTTP admission proofs. The earlier
-[four defensive producers](https://github.com/Volpestyle/clankie/blob/e8a7b71e/docs/testing/2026-10-06-proof-alert-defensive-os/README.md)
-cover `ancestry_bounds`, `process_census_unavailable`, `fd_list_unavailable`, and
-`argv_unavailable` separately.
+## Additional defensive OS evidence
+
+The [four-producer evidence](../../docs/testing/2026-10-06-proof-alert-defensive-os/README.md)
+and the [seven-producer evidence](../../docs/testing/2026-10-06-additional-defensive-os/README.md)
+(manual `fleet-additional-os-native.integration.test.ts`) establish eleven of the
+sixteen formerly unmet reasons. Those owned workloads
+cover `ancestry_bounds`, `process_census_unavailable`, `fd_list_unavailable`,
+`argv_unavailable`, `executable_unavailable`, `fd_list_bounds`,
+`executable_changed`, `argv_changed`, `process_changed`,
+`ancestry_unavailable` and `ancestry_changed`. These direct helper observations
+are distinct from full HTTP admission proofs and do not claim a deployed check.
+
+`fleet-final-os-native.integration.test.ts` adds a real `clock_unavailable`
+producer. The unchanged helper runs under a policy denying only its libc retry
+wait syscalls, on actual owned TCP sockets with bounded process churn. A native
+baseline verifies that the monotonic clock remains available while the wait
+is denied. The helper refuses after its real retry wait fails. Its actual fixed
+reason reaches the production schema, aggregate counter and five/sixty-minute
+windows without adding terminal proof attempts. See the
+[actual capture and limitations](../../docs/testing/2026-10-06-final-defensive-os/README.md).
+The same file proves `ancestry_cycle` from an owned child debugger tracing its
+parent, with actual reciprocal kernel PPIDs. A stable untraced supervisor reaps
+the original target after detach/continue; ordinary high-level exit waits during
+reparenting do not prove exit. Only owned debug-signed fixture processes are
+addressed. The production helper and its kernel observations are not replaced.
+Pure final-check budget expiration still reports `budget_exhausted` without
+inventing a socket mismatch.
 
 ## Explicit OS coverage limits
 
-The following defensive or race-dependent branches are not forced by these
-fixtures. Their tokens are covered by the vocabulary contract above.
+One real OS producer remains unproved: `allocation_failed`.
+The lead's revised acceptance classifies `fd_record_invalid` and
+`socket_identity_invalid` as **defensive, not producible** through supported APIs
+on the reviewed ABI. The same manual test compiles the production guard and
+diagnostic implementations directly, checks negative/valid FD records and each
+missing/complete Unix/TCP identity field, then checks the production schema,
+collector and both windows. These explicitly supplied direct guard inputs are
+not records claimed to come from the OS. The kernel/ABI review and direct tests
+satisfy the revised guard acceptance; vocabulary/schema inputs alone do not.
+Actual failed candidate probes and the [pinned Apple API review](../../docs/testing/2026-10-06-final-defensive-os/kernel-audit.md)
+are distinguished from successful native diagnostics.
 
-| Condition                           | Unexercised reasons                            |
-| ----------------------------------- | ---------------------------------------------- |
-| Timing or allocation failure        | `clock_unavailable`, `allocation_failed`       |
-| Malformed FD or socket observations | `fd_record_invalid`, `socket_identity_invalid` |
-| Cyclic ancestry                     | `ancestry_cycle`                               |
-
-A healthy kernel does not return negative FD records or a cyclic process parent
-tree. Those checks remain useful fail-closed guards against incompatible or
-inconsistent observations; removing them because a fixture cannot produce them
-would weaken validation. Clock and allocation failures would require disrupting
-the OS or injecting failures. The manual race workloads above bound repeated
-fresh observations; their success on this host does not promise an event at a
-specific attempt elsewhere.
-`clock_unavailable` also covers a failure in the bounded monotonic retry wait.
-Pure final-check budget expiration reports `budget_exhausted` without inventing
-a socket mismatch.
+Supported FD operations have not supplied negative descriptor records, and no
+supported per-process operation was found that zeros a matched socket's opaque
+identity. These fail-closed guards stay intact. Published debugger attach paths
+can alter process parentage, so a blanket assertion that kernel observations
+cannot be cyclic is not sufficient evidence. The successful owned debugger
+workload above proves cyclic parentage on this host; its earlier denied attach
+did not. Allocation-limit setup failures and loader exits before the helper's allocation are likewise not `allocation_failed` events.
+No existing fleet process, host-wide policy or proof response is changed to
+manufacture a diagnostic.
 
 ## Worker receipt failures
 
