@@ -18,6 +18,15 @@ const theme = {
   },
 };
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
+/** The dock as ↓ shows it: the whole fleet, one row per seat. */
+const expandedRows = (strip: LiveAgentStrip, width: number) => {
+  const selected = strip.selectedItem()?.id;
+  strip.focus();
+  const rows = plain(strip.render(width));
+  strip.blur();
+  if (selected !== undefined) strip.select(selected);
+  return rows;
+};
 
 const agent = (id: string, remote = false): LiveAgent => ({
   name: `Worker ${id}`,
@@ -74,12 +83,17 @@ it("prioritizes active handoffs in the dock and keeps finished results selectabl
   });
   vi.spyOn(shell.tui, "start").mockImplementation(() => {});
   shell.start();
+  const ui = shell as unknown as { routeInput(data: string): unknown };
+  // Collapsed, the dock only counts; ↓ from the empty prompt lists the jobs.
+  expect(plain(shell.tui.render(180))).toContain("Agents · 1 · 1 running · ↓ open");
+  expect(plain(shell.tui.render(180))).not.toContain("Check the bakery hours");
+  ui.routeInput("\x1b[B");
   const rows = plain(shell.tui.render(180));
   expect(rows).toContain("↳ Clankie · Check the bakery hours");
   expect(rows).toContain("Asked by James · running");
   expect(rows).not.toContain("Asked by Mira · completed");
   expect(rows).not.toContain("The last train leaves at 10.");
-  const ui = shell as unknown as { routeInput(data: string): unknown };
+  ui.routeInput("\x1b");
   const showPicker = vi.spyOn(shell, "showModalOverlay");
   ui.routeInput("\x07");
   expect(showPicker).toHaveBeenCalledOnce();
@@ -93,8 +107,8 @@ it("prioritizes active handoffs in the dock and keeps finished results selectabl
 
   const seats = [agent("working")];
   const strip = new LiveAgentStrip(() => seats, theme, { roomHandoffs: () => handoffs });
-  expect(plain(strip.render(180))).toContain("Worker working");
-  expect(plain(strip.render(180))).not.toContain("completed");
+  expect(expandedRows(strip, 180)).toContain("Worker working");
+  expect(expandedRows(strip, 180)).not.toContain("completed");
   strip.select("handoff:text-child");
   const pickerOpen = vi.fn();
   const picker = new LiveAgentPicker(() => seats, strip, theme, {
@@ -117,7 +131,7 @@ it("prioritizes active handoffs in the dock and keeps finished results selectabl
   }
 });
 
-it("lists up to three seats that want attention and expands to the whole fleet in place", () => {
+it("counts the fleet on one line and expands to the whole fleet in place", () => {
   const status = (id: string, value: string, remote = false): LiveAgent => ({
     ...agent(id, remote),
     seat: {
@@ -133,15 +147,19 @@ it("lists up to three seats that want attention and expands to the whole fleet i
     status("idle-2", "idle"),
   ];
   const strip = new LiveAgentStrip(() => agents, theme, { maxRows: () => 3 });
-  const collapsed = plain(strip.render(120)).split("\n");
-  // Blocked first, then working, then done; idle seats only count.
-  expect(collapsed.slice(1).map((row) => row.split(" · ")[0])).toEqual([
+  expect(plain(strip.render(120)).split("\n")).toEqual([
+    "Agents · 5 · 1 blocked · 1 working · 1 done · 2 idle · ↓ open",
+  ]);
+  // Expanded: blocked first, then working, then done, then idle.
+  const ordered = expandedRows(new LiveAgentStrip(() => agents, theme), 120).split("\n");
+  expect(ordered.slice(1).map((row) => row.replace(/^[› ]+/u, "").split(" · ")[0])).toEqual([
     "● Worker blocked",
     "● Worker working",
     "● Worker done",
+    "● Worker idle-1",
+    "● Worker idle-2",
   ]);
-  expect(collapsed[2]).toContain("Office PC");
-  expect(plain(strip.render(120))).not.toContain("Worker idle");
+  expect(ordered[2]).toContain("Office PC");
   for (const width of [1, 24, 32, 80, 120])
     expect(strip.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
 
@@ -176,6 +194,7 @@ it("uses theme colors for each status, harness and machine and suppresses repeat
   }));
   const strip = new LiveAgentStrip(() => agents, theme);
   const summary = strip.render(160)[0]!;
+  strip.focus();
   expect(summary).toContain(ansi.accent("1 working"));
   expect(summary).toContain(ansi.yellow("1 idle"));
   expect(summary).toContain(ansi.green("1 done"));
@@ -203,7 +222,7 @@ it("uses theme colors for each status, harness and machine and suppresses repeat
     ],
     theme,
   );
-  expect(plain(dock.render(180)).split(repeated.seat.title)).toHaveLength(2);
+  expect(expandedRows(dock, 180).split(repeated.seat.title)).toHaveLength(2);
 });
 
 it.each([32, 120])("scrolls through the entire fleet with full selected details at width %i", (width) => {
@@ -416,7 +435,7 @@ it("flags a missing bridge and reveals the entire selected fix within narrow wid
     },
   ];
   const strip = new LiveAgentStrip(() => agents, theme);
-  expect(plain(strip.render(120))).toContain("bridge missing");
+  expect(expandedRows(strip, 120)).toContain("bridge missing");
   const picker = new LiveAgentPicker(() => agents, strip, theme, {
     maxHeight: () => 30,
     onOpen: () => {},
@@ -455,7 +474,7 @@ it("shows an older operator bridge separately from a healthy worker and reveals 
     },
   ];
   const strip = new LiveAgentStrip(() => agents, theme);
-  expect(plain(strip.render(150))).toContain("seat bridge older than runtime");
+  expect(expandedRows(strip, 150)).toContain("seat bridge older than runtime");
   const picker = new LiveAgentPicker(() => agents, strip, theme, {
     maxHeight: () => 30,
     onOpen: () => {},
@@ -479,7 +498,7 @@ it("shows an older operator bridge separately from a healthy worker and reveals 
       },
     },
   };
-  expect(plain(new LiveAgentStrip(() => [unknown], theme).render(150))).not.toContain("older than runtime");
+  expect(expandedRows(new LiveAgentStrip(() => [unknown], theme), 150)).not.toContain("older than runtime");
 });
 
 it.each(["current", "unknown"] as const)(
@@ -511,10 +530,10 @@ it.each(["current", "unknown"] as const)(
       onClose: () => {},
       onRender: () => {},
     });
-    for (const rows of [strip.render(150), picker.render(150)]) {
-      expect(plain(rows)).not.toContain("older than runtime");
-      expect(plain(rows)).not.toContain("restart the seat");
-      expect(plain(rows)).not.toContain("Fix:");
+    for (const rows of [expandedRows(strip, 150), plain(picker.render(150))]) {
+      expect(rows).not.toContain("older than runtime");
+      expect(rows).not.toContain("restart the seat");
+      expect(rows).not.toContain("Fix:");
     }
   },
 );
@@ -547,8 +566,8 @@ it.each(["worker", "both"])("shows the seat restart action when %s bridge proces
     },
   ];
   const strip = new LiveAgentStrip(() => agents, theme);
-  expect(plain(strip.render(150))).toContain("seat bridge older than runtime");
-  expect(plain(strip.render(150))).not.toContain("bridge missing");
+  expect(expandedRows(strip, 150)).toContain("seat bridge older than runtime");
+  expect(expandedRows(strip, 150)).not.toContain("bridge missing");
   const picker = new LiveAgentPicker(() => agents, strip, theme, {
     maxHeight: () => 30,
     onOpen: () => {},
@@ -592,7 +611,7 @@ it.each(["mismatch", "unverified"] as const)(
     ];
     const strip = new LiveAgentStrip(() => agents, theme);
     expect(strip.selected()?.seat.seatId).toBe("native-gap");
-    expect(plain(strip.render(120))).toContain(`Clankie tools ${status}`);
+    expect(expandedRows(strip, 120)).toContain(`Clankie tools ${status}`);
     const picker = new LiveAgentPicker(() => agents, strip, theme, {
       maxHeight: () => 30,
       onOpen() {},
@@ -664,4 +683,31 @@ it("prioritizes efficiency concerns and shows every plain flag in narrow selecte
   const rendered = plain(picker.render(40));
   for (const flag of flagged.seat.efficiency.flags) expect(rendered).toContain(flag);
   expect(picker.render(40).every((line) => visibleWidth(line) <= 40)).toBe(true);
+});
+
+it("keeps dock rows to what needs a look and leaves healthy, unknown and report state to the detail", () => {
+  const quiet = agent("quiet");
+  quiet.seat.status = "idle";
+  quiet.seat.workerTools = { status: "ready", reason: "Catalog served." } as LiveAgent["seat"]["workerTools"];
+  quiet.seat.workerReports = [{ state: "pending" }] as LiveAgent["seat"]["workerReports"];
+  quiet.seat.efficiency = {
+    checkedAt: "2026-10-05T12:00:00.000Z",
+    ownerConversationId: "global-default",
+    flags: ["idle", "no progress in 2h"],
+  };
+  const strip = new LiveAgentStrip(() => [quiet], theme);
+  const row = expandedRows(strip, 200).split("\n")[1]!;
+  expect(row).toContain("codex · idle · no progress in 2h");
+  for (const noise of ["catalog served", "report unknown", "report not delivered", "idle · idle"])
+    expect(row).not.toContain(noise);
+  const picker = new LiveAgentPicker(() => [quiet], strip, theme, {
+    maxHeight: () => 40,
+    onOpen: () => {},
+    onClose: () => {},
+    onRender: () => {},
+  });
+  const detail = plain(picker.render(200));
+  expect(detail).toContain("report not delivered");
+  expect(detail).toContain("tools catalog served");
+  expect(detail).toContain("report unknown");
 });

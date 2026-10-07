@@ -195,8 +195,9 @@ it("preserves observed missing/stalled/unknown tools through real HTTP, the publ
   expect(strip.selected()?.seat.workerTools?.status).toBe("missing");
   const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
   const dock = plain(strip.render(220));
-  for (const status of ["missing", "stalled", "unknown", "pending", "catalog served"])
-    expect(dock).toContain(`tools ${status}`);
+  // Dock rows name only tool states that need a look; the detail keeps the rest.
+  for (const status of ["missing", "stalled", "pending"]) expect(dock).toContain(`tools ${status}`);
+  for (const status of ["unknown", "catalog served"]) expect(dock).not.toContain(`tools ${status}`);
   strip.select("pc/stalled");
   const picker = new LiveAgentPicker(() => agents, strip, theme, {
     maxHeight: () => 24,

@@ -1,4 +1,3 @@
-import type { WorkerReportSummary } from "@clankie/protocol";
 /**
  * The Clankie face shell: pi's interactive chat surface wearing Clankie's
  * chrome. The renderer is pi's fullscreen mode — a TuiAltScreen whose
@@ -85,6 +84,7 @@ import { OperatorConversationSendError } from "../session/operator-conversations
 import { clankieSlashSkillSuffix, resolveClankieSlashSkill } from "../skill-catalog.ts";
 import { ClankieCommandTextResultComponent, type CommandLogTone } from "./command-log.ts";
 import { ClankieExternalActivityComponent } from "./external-activity.ts";
+import { ClankieFreshPage } from "./fresh-page.ts";
 import { createFaceThemeBundle, type FaceThemeBundle } from "./theme.ts";
 import { ClankieFooterComponent, displayHomePath, type ClankieFooterData } from "./footer.ts";
 import { clankieModalOverlayOptions, createSetupFlow, type SetupFlowController } from "./setup-flow.ts";
@@ -136,7 +136,6 @@ export interface FaceShellOptions {
   /** Fetch one older conversation window when the owner scrolls towards its start. */
   readonly onLoadOlderHistory?: () => Promise<void>;
   readonly liveAgents?: () => readonly LiveAgent[];
-  readonly workerReports?: () => readonly WorkerReportSummary[];
   readonly roomHandoffs?: () => readonly import("@clankie/protocol").OperatorConversation[];
   readonly onOpenLiveAgent?: (agent: LiveAgent) => Promise<void>;
   readonly onOpenRoomHandoff?: (
@@ -297,6 +296,11 @@ export class ClankieFaceShell {
   private readonly chat = new Container();
   private readonly transcriptScrollView: ScrollView;
   private historyGeneration = 0;
+  /** The TUI opens on a blank page; only the first restored history gets one. */
+  private freshPageOnOpen = true;
+  private freshPage: ClankieFreshPage | undefined;
+  /** Holds the fresh page's blank rows after the transcript; history can arrive before start(). */
+  private readonly freshPageTail = new Container();
   private historyLoading = false;
   private readonly statusContainer = new Container();
   private readonly editor: Editor;
@@ -417,7 +421,6 @@ export class ClankieFaceShell {
     this.liveAgents = new LiveAgentStrip(() => this.options.liveAgents?.() ?? [], this.theme, {
       roomHandoffs: () => this.options.roomHandoffs?.() ?? [],
       maxRows: () => Math.max(3, Math.floor(this.tui.terminal.rows * 0.5)),
-      reports: () => this.options.workerReports?.() ?? [],
     });
     this.conversationHeader = new ConversationHeader(this.theme, () => {
       const name = this.options.expandedAgent?.();
@@ -478,6 +481,7 @@ export class ClankieFaceShell {
     // pinned to the bottom of the terminal.
     this.document.addChild(this.banner);
     this.document.addChild(this.chat);
+    this.document.addChild(this.freshPageTail);
     for (const component of [
       this.conversationHeader,
       this.document,
@@ -543,6 +547,7 @@ export class ClankieFaceShell {
     if (!this.uiReady) return "";
     try {
       const width = Math.max(20, this.tui.terminal.columns);
+      if (this.freshPage) this.freshPage.padded = false;
       return this.document
         .render(width)
         .map((line) => line.trimEnd())
@@ -776,6 +781,7 @@ export class ClankieFaceShell {
     if (position === "replace") {
       this.clearTranscript();
       render();
+      this.openOnFreshPage();
       this.transcriptScrollView.scrollToEnd();
       return;
     }
@@ -803,6 +809,44 @@ export class ClankieFaceShell {
     if (following) scroll.scrollToEnd();
     else scroll.scrollTo(top + addedRows, { disableFollow: true });
     this.requestRender();
+  }
+
+  /** Restored history waits above the first screen instead of filling it. */
+  private openOnFreshPage(): void {
+    if (!this.freshPageOnOpen) return;
+    this.freshPageOnOpen = false;
+    if (this.chat.children.length === 0) return;
+    const page = new ClankieFreshPage({
+      dim: this.theme.ansi.dim,
+      viewportHeight: () => this.transcriptViewportRows(),
+      after: () => {
+        const index = this.chat.children.indexOf(page);
+        return index < 0 ? undefined : this.chat.children.slice(index + 1);
+      },
+    });
+    this.freshPage = page;
+    this.freshPageTail.clear();
+    this.freshPageTail.addChild(page.tail);
+    this.appendChatBlock(page);
+  }
+
+  /**
+   * The rows the transcript gets this frame. pi lays content out before it
+   * tells the ScrollView its height, so its viewportHeight is a frame late
+   * (zero on the first frame); measure the chrome around it instead.
+   */
+  private transcriptViewportRows(): number {
+    const width = Math.max(1, this.tui.terminal.columns);
+    const chrome = [
+      this.conversationHeader,
+      this.statusContainer,
+      this.pendingPrompts,
+      this.editor,
+      this.commandTypeaheadPanel,
+      this.liveAgents,
+      this.footer,
+    ].reduce((rows, component) => rows + component.render(width).length, 0);
+    return Math.max(1, this.tui.terminal.rows - chrome);
   }
 
   private loadOlderHistory(): void {

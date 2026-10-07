@@ -33,8 +33,8 @@ the launcher starts the service if needed and opens the existing main **Clankie*
 conversation, regardless of the launch directory. It does not create a chat.
 Use `--chat ID` for another retained conversation, `/new` for a fresh chat,
 or `/cd PATH` to select a project conversation.
-The console opens at the latest messages; scrolling up loads older retained
-history in pages without moving the text you are reading. Live messages continue
+The console opens on a blank page with the latest messages just above it;
+scrolling up loads older retained history in pages without moving the text you are reading. Live messages continue
 to arrive while older history loads. This applies to local and hosted consoles.
 An unknown command exits 1 without starting anything. Common near-misses name
 the real command: `clankie up` suggests `clankie start`.

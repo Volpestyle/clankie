@@ -1,4 +1,3 @@
-import type { WorkerReportSummary } from "@clankie/protocol";
 import {
   Key,
   matchesKey,
@@ -90,33 +89,52 @@ function workerToolsText({ seat }: LiveAgent, { ansi }: AgentTheme): string {
   }
 }
 
+/** Tool states a dock row names; healthy or unobserved tools stay in the detail. */
+const LOUD_TOOLS = new Set(["missing", "stalled", "pending"]);
+
 function workerToolsBroken({ seat }: LiveAgent): boolean {
   return seat.workerTools?.status === "missing" || seat.workerTools?.status === "stalled";
 }
 
-function agentMetadata(agent: LiveAgent, theme: AgentTheme, showEfficiency = true): string {
+/**
+ * One seat's status line. The dock shows only what needs a look; the picker's
+ * detail (`detail`) also names healthy and unobserved state, and lists
+ * efficiency flags on their own lines.
+ */
+function agentMetadata(agent: LiveAgent, theme: AgentTheme, detail = false): string {
   const { seat } = agent;
+  const tools = workerToolsText(agent, theme);
+  const loudTools = !!seat.workerTools?.restartNeeded || LOUD_TOOLS.has(seat.workerTools?.status ?? "");
   const harness = clean(seat.harness);
   const paintHarness = harness === "claude" ? theme.ansi.yellow : theme.ansi.blue;
   return [
     paintHarness(harness),
+    detail &&
     seat.workerReports?.some(
       (report) => report.state === "pending" || report.state === "uncertain" || report.state === "attempting",
     )
       ? theme.ansi.red(`${seat.status === "done" ? "done, " : ""}report not delivered`)
-      : seat.workerReports?.length
+      : detail && seat.workerReports?.length
         ? theme.ansi.yellow("report unread")
         : statusText(seat.status, clean(seat.status), theme),
     // This Mac is the default; only a seat on another machine names where it is.
     seat.fleet === undefined ? undefined : theme.ansi.dim(clean(seat.machine ?? seat.fleet)),
     bridgeWarning(agent, theme),
-    workerToolsText(agent, theme),
-    seat.workerReportBridge
+    detail || loudTools ? tools : undefined,
+    seat.workerReportBridge && (detail || seat.workerReportBridge.outcome !== "stored")
       ? (seat.workerReportBridge.outcome === "stored" ? theme.ansi.dim : theme.ansi.red)(
           `report ${seat.workerReportBridge.outcome} · ${clean(seat.workerReportBridge.observedAt)} · ${seat.workerReportBridge.reason}`,
         )
-      : theme.ansi.dim("report unknown"),
-    ...(showEfficiency ? (seat.efficiency?.flags.map((flag) => theme.ansi.red(clean(flag))) ?? []) : []),
+      : detail
+        ? theme.ansi.dim("report unknown")
+        : undefined,
+    // A flag that only repeats the status ("idle") adds nothing to the row.
+    ...(detail
+      ? []
+      : (seat.efficiency?.flags
+          .map(clean)
+          .filter((flag) => flag !== clean(seat.status))
+          .map((flag) => theme.ansi.red(flag)) ?? [])),
   ]
     .filter((part): part is string => part !== undefined)
     .join(theme.ansi.dim(" · "));
@@ -125,7 +143,6 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, showEfficiency = tru
 /** Blocked or broken first, then running, then finished; idle seats only count. */
 function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
   if (
-    agent.seat.workerReports?.length ||
     agent.seat.efficiency?.flags.length ||
     agent.seat.status === "blocked" ||
     bridgeWarning(agent, theme) !== undefined ||
@@ -178,7 +195,10 @@ function dockItems(
         id: `handoff:${conversation.conversationId}`,
         name: `↳ Clankie · ${clean(handoff.request)}`,
         status: handoff.state,
-        metadata: `${handoff.source} · Asked by ${clean(handoff.actorName ?? handoff.actorId)} · ${handoff.state} · ${handoff.host}`,
+        // A bare platform ID says nothing on a dock row; the picker detail keeps it.
+        metadata: [handoff.actorName ? `Asked by ${clean(handoff.actorName)}` : undefined, handoff.state]
+          .filter((part): part is string => part !== undefined)
+          .join(" · "),
         ...(handoff.result || handoff.doing ? { step: clean(handoff.result || handoff.doing!) } : {}),
         handoff: conversation,
       },
@@ -201,15 +221,11 @@ function dockItems(
   ];
 }
 
-/** Collapsed, the dock shows at most this many seats that want attention. */
-const COLLAPSED_ROWS = 3;
-
 export type LiveAgentStripInput = "open" | "leave" | "consumed" | "pass";
 
 /**
- * The dock under the prompt. Collapsed it lists the seats that want attention;
- * ↓ from an empty prompt focuses it and it expands in place to the whole
- * fleet. The modal shares its selection, a qualified seat identity, never a row index.
+ * The dock under the prompt. Collapsed it is one counting line; ↓ from an
+ * empty prompt focuses it and it expands in place to the whole fleet. The modal shares its selection, a qualified seat identity, never a row index.
  */
 export class LiveAgentStrip implements Component {
   private selectedId: string | undefined;
@@ -217,7 +233,6 @@ export class LiveAgentStrip implements Component {
   private readonly agents: () => readonly LiveAgent[];
   private readonly theme: AgentTheme;
   private readonly maxRows: () => number;
-  private readonly reports: () => readonly WorkerReportSummary[];
   private readonly readHandoffs: () => readonly OperatorConversation[];
 
   constructor(
@@ -225,14 +240,12 @@ export class LiveAgentStrip implements Component {
     theme: AgentTheme,
     options: {
       readonly maxRows?: () => number;
-      readonly reports?: () => readonly WorkerReportSummary[];
       readonly roomHandoffs?: () => readonly OperatorConversation[];
     } = {},
   ) {
     this.agents = agents;
     this.theme = theme;
     this.maxRows = options.maxRows ?? (() => 12);
-    this.reports = options.reports ?? (() => []);
     this.readHandoffs = options.roomHandoffs ?? (() => []);
   }
 
@@ -317,38 +330,31 @@ export class LiveAgentStrip implements Component {
 
   render(width: number): string[] {
     const agents = this.ordered(false);
-    const reports = this.reports();
-    const reportRows = [...new Set(reports.map((report) => report.paneId))].slice(0, 3).map((pane) => {
-      const pending = reports.some((report) => report.paneId === pane && report.state !== "delivered");
-      return this.theme.ansi.yellow(`${clean(pane)} · ${pending ? "report not delivered" : "report unread"}`);
-    });
-    const reportNotice = reports.length
-      ? [
-          this.theme.ansi.bold(`Worker reports · ${reports.length} unread`),
-          ...reportRows,
-          this.theme.ansi.dim("/agents reports --conversation ID · read, then acknowledge"),
-        ]
-      : [];
-    if (agents.length === 0) {
-      this.expanded = false;
-      return reportNotice.map((line) => truncateToWidth(line, Math.max(1, width), "…"));
-    }
-    const counts = new Map<string, number>();
-    for (const item of agents) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
-    const summary = [...counts].map(([status, count]) =>
-      statusText(status, `${count} ${status}`, this.theme),
-    );
     const { ansi } = this.theme;
     const fit = (line: string) => truncateToWidth(line, Math.max(1, width), "…");
+    if (agents.length === 0) {
+      this.expanded = false;
+      return [];
+    }
     if (!this.expanded) {
+      const counts = new Map<string, number>();
+      for (const item of agents) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+      // Blocked seats are already counted by status; the rest that want a look are named once.
       const attention = agents.filter(
-        (item) => item.handoff !== undefined || (item.agent && attentionRank(item.agent, this.theme) < 3),
-      );
+        (item) => item.agent && item.status !== "blocked" && attentionRank(item.agent, this.theme) === 0,
+      ).length;
       return [
-        `${ansi.bold(`Agents · ${agents.length}`)}${ansi.dim(" · ↓ list · ctrl+g")}${ansi.dim(" · ")}${summary.join(ansi.dim(" · "))}`,
-        ...attention.slice(0, COLLAPSED_ROWS).map((agent) => this.row(agent, "")),
-        ...reportNotice,
-      ].map(fit);
+        fit(
+          [
+            ansi.bold(`Agents · ${agents.length}`),
+            ...[...counts].map(([status, count]) => statusText(status, `${count} ${status}`, this.theme)),
+            attention ? ansi.red(`${attention} ${attention === 1 ? "needs" : "need"} a look`) : undefined,
+            ansi.dim("↓ open"),
+          ]
+            .filter((part): part is string => part !== undefined)
+            .join(ansi.dim(" · ")),
+        ),
+      ];
     }
     const selected = this.selectedItem(false);
     const index = Math.max(
@@ -452,7 +458,7 @@ export class LiveAgentPicker implements Component {
     const details = selected
       ? [
           this.theme.ansi.bold(clean(selected.name)),
-          `${agentMetadata(selected, this.theme, false)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
+          `${agentMetadata(selected, this.theme, true)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
           ...(selected.seat.efficiency?.flags.map((flag) => this.theme.ansi.red(clean(flag))) ?? []),
           step ?? this.theme.ansi.dim("Step unavailable"),
           ...shownCatalogDetail,
@@ -479,7 +485,7 @@ export class LiveAgentPicker implements Component {
       : handoff?.roomHandoff
         ? [
             this.theme.ansi.bold("Clankie handoff"),
-            `Asked by: ${clean(handoff.roomHandoff.actorName ?? handoff.roomHandoff.actorId)} · ${handoff.roomHandoff.source}`,
+            `Asked by: ${clean(handoff.roomHandoff.actorName ?? handoff.roomHandoff.actorId)} · ${handoff.roomHandoff.source} · ${handoff.roomHandoff.host}`,
             `Job: ${clean(handoff.roomHandoff.request)}`,
             `Status: ${handoff.roomHandoff.state}`,
             ...(handoff.roomHandoff.doing ? [`Doing: ${clean(handoff.roomHandoff.doing)}`] : []),

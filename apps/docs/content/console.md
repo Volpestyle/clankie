@@ -14,10 +14,12 @@ the [CLI](/cli/) is the headless equivalent.
 
 ## Live agents
 
-While agents are working, a dock under the editor counts them and shows up to
-three that want attention: blocked or disconnected first, then working, then
-done. Agents on another machine are labeled with it. Expand the dock or open
-`Ctrl+G` (see [Keys](#keys)) to pick one and open its conversation.
+While agents are working, a one-line dock under the editor counts them by
+status and how many need a look. `↓` from an empty prompt expands it to the
+whole fleet, blocked or disconnected first, then working, done and idle; agents
+on another machine are labeled with it. Rows name only what needs a look; the
+`Ctrl+G` picker (see [Keys](#keys)) shows each agent's full detail and opens its
+conversation.
 
 An agent's conversation shows its newest 20 turns and then follows live
 (`clankie conversations show ID` reads older ones). A bar above the transcript

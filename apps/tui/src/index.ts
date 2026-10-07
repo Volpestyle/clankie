@@ -551,7 +551,6 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
   onLoadOlderHistory: () => conversationPrompt.loadOlderHistory(conversationShellSink()),
   onHerdrJump: jumpToFleetAgent,
   liveAgents: () => herdrRoster.snapshot().liveAgents ?? [],
-  workerReports: () => herdrRoster.snapshot().workerReports ?? [],
   roomHandoffs: () => herdrRoster.snapshot().roomHandoffs ?? [],
   onOpenRoomHandoff: async (conversation) => {
     await conversationsContext.select(conversation.conversationId);

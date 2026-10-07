@@ -38,8 +38,8 @@ user's Clankie homes — load `trace-clankie`. Those paths exist on every instal
 Plain `clankie` opens the existing main Clankie conversation from any directory.
 Use `clankie --chat ID` for another thread, `/new` for a fresh chat, or `/cd PATH`
 for a workspace conversation. Reopening the TUI does not reset model context.
-The console opens at the latest messages. Scroll up to load older retained
-history; loading a page preserves the visible text and does not pause live events.
+The console opens on a blank page; the latest messages wait just above it.
+Scroll up to load older retained history; loading a page preserves the visible text and does not pause live events.
 
 ## Configure through the CLI
 

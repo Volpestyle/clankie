@@ -335,8 +335,9 @@ it("opens the production console at the latest first frame, lazily anchors older
       () => frames.screens.length > 0,
       () => frames.raw + serviceLog,
     );
-    expect(frames.screens[0]!.join("\n")).toContain("history-0349 row-5");
-    expect(frames.screens[0]!.join("\n")).not.toContain("history-0000");
+    // The console opens on a blank page; restored history waits above it.
+    expect(frames.screens[0]!.join("\n")).toContain("↑ scroll up for earlier messages");
+    expect(frames.screens[0]!.join("\n")).not.toContain("history-0349");
     await until(
       () => frames.latest().includes("live-during-open-A"),
       () => frames.latest(),
@@ -454,7 +455,14 @@ it("opens the production console at the latest first frame, lazily anchors older
       () => frames.screens.length > resumedAt,
       () => frames.raw + serviceLog,
     );
-    expect(frames.screens[resumedAt]!.join("\n")).toContain("live-during-backfill-C");
+    // A reopened console starts on a blank page again; the last message waits just above it.
+    expect(frames.screens[resumedAt]!.join("\n")).toContain("↑ scroll up for earlier messages");
+    expect(frames.screens[resumedAt]!.join("\n")).not.toContain("live-during-backfill-C");
+    input("\x1b[5~");
+    await until(
+      () => frames.latest().includes("live-during-backfill-C"),
+      () => frames.latest(),
+    );
     expect(await readFile(link)).toEqual(linkBefore);
   } finally {
     releaseSnapshot.release();
