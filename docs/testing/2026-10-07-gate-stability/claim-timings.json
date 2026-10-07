@@ -1,0 +1,17 @@
+{
+  "before": {
+    "passed": 7,
+    "failed": 0,
+    "testSeconds": 46.98574462890625
+  },
+  "after": {
+    "passed": 7,
+    "failed": 0,
+    "testSeconds": 0.73,
+    "vitestSeconds": 1.19
+  },
+  "beforeSource": "original baseline test with package imports resolved to same source exports",
+  "afterSource": "landed cc8b0527",
+  "evalsRun": false,
+  "retries": 0
+}

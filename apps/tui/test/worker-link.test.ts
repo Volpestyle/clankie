@@ -1497,8 +1497,9 @@ it("returns a connected-call auth refusal with its real reason and no replay", a
   expect(JSON.parse(refused.result.content[0]!.text)).toEqual({
     outcome: "refused",
     reason:
-      "Fleet tools answered 403: The admitted seat has no current native binding: worker_grant_unavailable",
-    detail: "The service refused current access. Nothing was resubmitted.",
+      "Fleet tools answered 403: The admitted seat has no current native binding: worker_grant_unavailable. Ask Clankie to confirm admission for this native seat; repeated retries cannot grant access.",
+    detail:
+      "The service refused current access. Ask Clankie to confirm this native seat is admitted; repeated retries cannot grant access. Nothing was resubmitted.",
   });
   expect(refused.result.isError).toBe(true);
   expect(service.connectedDispatches()).toBe(0);

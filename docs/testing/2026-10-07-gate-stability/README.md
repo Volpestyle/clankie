@@ -19,6 +19,17 @@ The assigned baseline is `4b9c935fe0ecf711ae41be7673c302479380dada`.
   fixed by `4b9c935f`; its unchanged current suite passes 17/17.
 - The first current gate stopped at formatting errors in the docs builder and
   remote-hire evidence. Those are fixed without semantic changes.
+- Later main changes exposed two static-boundary omissions: the root profiling
+  launcher resolved the service's `tsx` loader, but knip attributed it to the
+  root package; its implementation now belongs to the service workspace with
+  the same root CLI. The shipped worker admission declaration is registered as
+  an entry point, matching the existing worker declaration entries.
+- The first test attempt stopped after two deterministic fixture failures. The
+  profiler fixture now copies both the root launcher and its relocated helper,
+  preserving real `tsx` startup, signal forwarding and CPU-profile flush checks.
+  The connected-call refusal fixture expects the newly shipped admission
+  guidance exactly, retaining zero dispatch and no replay assertions. Both
+  complete files passed 127/127 after these fixes.
 - Minecraft claim integration coverage drives its existing poll timers instead
   of sleeping through each three-second interval. HTTP and credential persistence
   remain real. All seven outcomes and exact request counts, cancellation, expiry,
@@ -34,6 +45,7 @@ The assigned baseline is `4b9c935fe0ecf711ae41be7673c302479380dada`.
 | Historical whole gate                              | 1,264.34 s          | First landed two-fork candidate: 781 s    |
 | Historical Vitest                                  | 1,243.79 s          | First landed two-fork candidate: 720.83 s |
 | Same four representative suites, 55/55 passed each | Two forks: 79.642 s | Four forks: 46.003 s                      |
+| Same seven tunnel claim outcomes, test execution   | 46.986 s            | 0.730 s                                   |
 
 The representative selection is `linear-wake-receipts.integration.test.ts`,
 `opencode-fleet-lifecycle.integration.test.ts`, `hired-catalog-bridge.test.ts` and

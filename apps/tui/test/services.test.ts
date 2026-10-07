@@ -1355,6 +1355,7 @@ describe("captain credential injection", () => {
     const app = join(root, "apps/clankie");
     const profiles = join(root, "profiles");
     await mkdir(scripts, { recursive: true });
+    await mkdir(join(app, "scripts"), { recursive: true });
     await mkdir(join(app, "src"), { recursive: true });
     await mkdir(profiles);
     await writeFile(join(app, "package.json"), '{"type":"module"}');
@@ -1368,6 +1369,10 @@ describe("captain credential injection", () => {
     await writeFile(
       join(scripts, "profile-clankie.mjs"),
       await readFile(join(import.meta.dirname, "../../../scripts/profile-clankie.mjs")),
+    );
+    await writeFile(
+      join(app, "scripts/profile-clankie.mjs"),
+      await readFile(join(import.meta.dirname, "../../clankie/scripts/profile-clankie.mjs")),
     );
     const builder = pathToFileURL(join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")).href;
     await writeFile(
