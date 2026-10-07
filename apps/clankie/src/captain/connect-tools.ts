@@ -48,7 +48,8 @@ export function connectionTools(deps: CaptainDeps, lane: CaptainSessionLaneV2): 
       label: "List recent mail",
       description:
         "List recent messages in a mailbox folder (default INBOX). Operator console only — never read mail into Discord. " +
-        "'refused' with credential_unavailable means nobody has connected email yet (/connect email).",
+        "'refused' with credential_unavailable means nobody has connected email yet (/connect email); " +
+        "sign_in_rejected means the mail server refused the stored sign-in, so the owner has to reconnect it.",
       parameters: Type.Object({
         folder: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         limit: Type.Optional(Type.Number({ minimum: 1, maximum: 25 })),

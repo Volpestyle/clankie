@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createGoogleAccounts, type GoogleAccountsOptions } from "./google-accounts.ts";
+import type { EmailPort } from "./email.ts";
 import { z } from "zod";
 import {
   connectLinearApp,
@@ -85,6 +86,8 @@ export interface AccountsOptions {
   /** Derived from the active hosted body runtime; developer OAuth secrets are self-hosted only. */
   readonly hosted?: boolean;
   readonly store: CredentialStore;
+  /** His mailbox (`/connect email`); listed with its last observed sign-in. */
+  readonly mailbox?: Pick<EmailPort, "status" | "disconnect">;
   /** Read for every request, so a client ID set with the CLI applies without a restart. */
   readonly apps: () => Promise<OauthApps>;
   readonly fetch?: typeof fetch;
@@ -115,6 +118,30 @@ export function oauthAppsFrom(
       clientId: pick("CLANKIE_LINEAR_OAUTH_CLIENT_ID", settings.linear?.clientId),
       redirectUri: pick("CLANKIE_LINEAR_OAUTH_REDIRECT_URI", settings.linear?.redirectUri),
     },
+  };
+}
+
+async function mailboxConnection(mailbox: Pick<EmailPort, "status">): Promise<AccountConnection> {
+  const catalog = {
+    provider: "email" as const,
+    name: "Email",
+    group: "Mail",
+    description: "His own mailbox: read, search and send from the operator console.",
+    access: "Read and send mail as the connected address.",
+    readOnly: false,
+    scopes: [] as string[],
+  };
+  const status = await mailbox.status();
+  if (status.state === "not_connected") return { ...catalog, status: "not_connected" as const };
+  return {
+    ...catalog,
+    account: status.address,
+    lastCheckedAt: status.checkedAt,
+    ...(status.state === "connected"
+      ? { status: "connected" as const }
+      : status.state === "sign_in_rejected"
+        ? { status: "reconnect_required" as const, reason: "sign_in_rejected" as const }
+        : { status: "unavailable" as const, reason: "provider_unavailable" as const }),
   };
 }
 
@@ -340,6 +367,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
             readOnly: false,
           },
           ...(await google.list()),
+          ...(options.mailbox === undefined ? [] : [await mailboxConnection(options.mailbox)]),
         ],
       };
     },
@@ -529,6 +557,13 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
     },
 
     async disconnect(provider, guard) {
+      if (provider === "email") {
+        if (options.mailbox === undefined) return { ok: false, error: "unconfigured" };
+        await guard?.();
+        await options.mailbox.disconnect();
+        // Nothing to revoke: an app password is withdrawn at the provider.
+        return { ok: true, revoked: false };
+      }
       if (provider !== "github" && provider !== "linear") return google.disconnect(provider, guard);
       const apps = await options.apps();
       if (provider === "github") {

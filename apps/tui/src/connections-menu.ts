@@ -215,6 +215,16 @@ export async function providerAccountsSection(
       flow.renderLine("The OAuth application has not been configured for this Clankie.", "info");
       continue;
     }
+    if (connection.provider === "email" && connection.status !== "connected") {
+      // A mailbox signs in with its own host and password, not a consent link.
+      flow.renderLine(
+        connection.reason === "sign_in_rejected"
+          ? "The mail server rejected the stored sign-in. Run /connect email to sign in again."
+          : "Run /connect email to connect his mailbox.",
+        "info",
+      );
+      continue;
+    }
     const action = await flow.readSelect({
       message:
         connection.name ??

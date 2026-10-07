@@ -19,7 +19,13 @@ export const ACCOUNT_GOOGLE_CHECK_PATH = "/v1/accounts/google/check";
 
 export const GoogleAccountProviderSchema = z.enum(["google-gmail", "google-calendar", "google-drive"]);
 export type GoogleAccountProvider = z.infer<typeof GoogleAccountProviderSchema>;
-export const AccountProviderSchema = z.enum(["github", "linear", ...GoogleAccountProviderSchema.options]);
+/** `email`: his own mailbox, signed in over IMAP/SMTP (`/connect email`), not an OAuth grant. */
+export const AccountProviderSchema = z.enum([
+  "github",
+  "linear",
+  ...GoogleAccountProviderSchema.options,
+  "email",
+]);
 export type AccountProvider = z.infer<typeof AccountProviderSchema>;
 
 const FlowIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u);
@@ -74,7 +80,14 @@ export const AccountConnectionSchema = z
       .max(100)
       .optional(),
     reason: z
-      .enum(["invalid_grant", "scope_required", "provider_unavailable", "revocation_pending"])
+      .enum([
+        "invalid_grant",
+        "scope_required",
+        "provider_unavailable",
+        "revocation_pending",
+        /** The mail server refused the stored mailbox sign-in. */
+        "sign_in_rejected",
+      ])
       .optional(),
     account: z.string().max(320).optional(),
     actor: z.enum(["user", "app"]).optional(),
