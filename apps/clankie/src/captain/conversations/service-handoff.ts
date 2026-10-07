@@ -1,4 +1,4 @@
-import type { OperatorConversationStreamEvent } from "@clankie/protocol";
+import { OPERATOR_CONVERSATION_TEXT_MAX, type OperatorConversationStreamEvent } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
 import type { ConversationStore } from "./store.ts";
 import type { ConversationMeta } from "./types.ts";
@@ -20,6 +20,8 @@ import type { ConversationMeta } from "./types.ts";
 
 /** Character budget for any projection (roughly 6k tokens). */
 export const CONVERSATION_PROJECTION_BUDGET = 24_000;
+/** A handoff is one seat channel event; its header and note fit the remainder. */
+const HANDOFF_PROJECTION_BUDGET = OPERATOR_CONVERSATION_TEXT_MAX - 1_024;
 const PROJECTED_EVENT_MAX = 4_000;
 const TOOL_DETAIL_MAX = 400;
 
@@ -235,7 +237,10 @@ export function claimServiceHandoff(
   if (span.state === "unresolved" && span.text !== undefined && span.spanId !== undefined)
     return { kind: "reconcile", spanId: span.spanId, text: span.text };
   if (span.state !== "open") return undefined;
-  const projection = projectConversation(ctx["readEvents"](conversationId), { after: span.fromCursor });
+  const projection = projectConversation(ctx["readEvents"](conversationId), {
+    after: span.fromCursor,
+    budget: HANDOFF_PROJECTION_BUDGET,
+  });
   if (projection.included === 0 || projection.through === undefined) {
     delete meta.serviceHandoff;
     ctx["saveMeta"](meta);

@@ -11,6 +11,7 @@
  */
 import { randomUUID } from "node:crypto";
 import {
+  OPERATOR_CONVERSATION_TEXT_MAX,
   headSeatDeliveryStage,
   type HireRecoveryEvidence,
   type DeliveryStage,
@@ -19,6 +20,19 @@ import {
 } from "@clankie/protocol";
 
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+
+const CLIPPED_NOTE_MAX = 200;
+
+/**
+ * Keep every event inside the bridge's wire contract. A bridge drops a page it
+ * cannot parse, which would leave its events taken but never shown (2026-10-06:
+ * a 24k service handoff). The note says plainly what did not reach the seat.
+ */
+export function fitSeatChannel(content: string): string {
+  if (content.length <= OPERATOR_CONVERSATION_TEXT_MAX) return content;
+  const kept = OPERATOR_CONVERSATION_TEXT_MAX - CLIPPED_NOTE_MAX;
+  return `${content.slice(0, kept)}\n\n[Clipped to the seat channel's ${String(OPERATOR_CONVERSATION_TEXT_MAX)}-character limit: the last ${String(content.length - kept)} characters were not delivered.]`;
+}
 
 /** Covers the millisecond gap between a poll returning and the live bridge asking again. */
 const BOUND_GRACE_MS = 2_000;
@@ -71,6 +85,8 @@ interface ParkedPoller {
 }
 
 interface Pending {
+  /** The original content's fingerprint; the wire event may carry a clipped copy. */
+  readonly fingerprint: string;
   readonly holdUntilTurnEnd: boolean;
   readonly exactRecipient: boolean;
   readonly onAdmitted?: SeatDeliveryInput["onAdmitted"];
@@ -235,6 +251,7 @@ export class SeatOutbox {
     if (!this.bound()) return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
     if (input.signal?.aborted === true)
       return Promise.resolve({ outcome: "aborted", deliveryStage: "expired" });
+    const fingerprint = deliveryFingerprint(input.content);
     return new Promise((resolve, reject) => {
       const event: OperatorSeatEvent = {
         schemaVersion: 1,
@@ -242,17 +259,17 @@ export class SeatOutbox {
         kind: input.kind,
         conversationId: input.conversationId,
         source: input.source,
-        content: input.content,
+        content: fitSeatChannel(input.content),
         createdAt: new Date(this.now()).toISOString(),
       };
       input.original?.prepare({
         messageId: event.id,
-        fingerprint: deliveryFingerprint(input.content),
+        fingerprint,
         ...(input.recipientBinding === undefined ? {} : { recipientBinding: input.recipientBinding }),
       });
       this.fence.begin(event.id, {
         messageId: event.id,
-        fingerprint: deliveryFingerprint(input.content),
+        fingerprint,
         ...(input.original === undefined
           ? input.recipientBinding === undefined
             ? {}
@@ -274,6 +291,7 @@ export class SeatOutbox {
               : { outcome: "aborted" },
         );
       const pending: Pending = {
+        fingerprint,
         holdUntilTurnEnd: input.delivery === "queue",
         exactRecipient: input.original !== undefined,
         ...(input.onAdmitted === undefined ? {} : { onAdmitted: input.onAdmitted }),
@@ -419,7 +437,7 @@ export class SeatOutbox {
       if (
         !pending.taken ||
         !this.matchesRecipient(pending, original.recipientBinding) ||
-        deliveryFingerprint(pending.event.content) !== original.fingerprint
+        pending.fingerprint !== original.fingerprint
       )
         return false;
     } else {
@@ -468,7 +486,7 @@ export class SeatOutbox {
       if (!this.delivered.pending(pending.event.id))
         this.delivered.begin(pending.event.id, {
           messageId: pending.event.id,
-          fingerprint: deliveryFingerprint(pending.event.content),
+          fingerprint: pending.fingerprint,
           ...(pending.exactRecipient
             ? { sessionId: pending.recipientBinding ?? "" }
             : pending.recipientBinding === undefined

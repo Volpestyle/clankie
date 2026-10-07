@@ -413,6 +413,24 @@ it("lets a fresh seat's SessionStart projection cover pending service turns inst
   expect(parsed.content).not.toContain("Wake A review the queue");
 });
 
+it("keeps a long service handoff inside the seat channel's wire contract", async () => {
+  const f = fixture();
+  f.conversations.rememberNativeHead(ID, "claude-lead");
+  for (const letter of "ABCDEFGH") {
+    const wake = f.conversations.submitInternal(ID, `Wake ${letter} ${"y".repeat(3_500)}`, "wake");
+    if (wake.status !== "accepted") throw new Error("Expected wake");
+    await settled(f, wake.runId);
+  }
+  const [handoff] = await f.pollSeat(ID, 60_000);
+  // The bridge parses every page with this schema; a page it cannot parse is
+  // taken but never shown (2026-10-06).
+  const parsed = OperatorSeatEventSchema.parse(handoff);
+  expect(parsed.source).toBe("service-handoff");
+  expect(parsed.content).toContain("captain: Service handled: Wake H");
+  expect(parsed.content).toContain("earlier events omitted");
+  expect(parsed.content).not.toContain("were not delivered");
+});
+
 it("keeps failed service wakes on exponential backoff instead of a retry storm", async () => {
   // Timers are simulated; service I/O stays real. Freeze the clock until each
   // failure settles, because backoff starts then rather than at admission.

@@ -3613,6 +3613,9 @@ pump diagnostics live in the state home's `clankie/seat-bridges/<pid>.jsonl`
 hash captured at module load, stage and event ID. A live tool connection alone
 does not prove a running receiver. A failed channel write remains uncertain;
 the bridge stops polling rather than implicitly acknowledging an unseen take.
+The service keeps every event inside the channel's 16,384-character limit: a
+service handoff projects at most that much, and any longer event is clipped
+with a note saying how many characters did not reach the seat.
 An installed update affects newly loaded bridges; recovery of an existing
 stopped receiver must preserve its original harness session and delivery fences.
 

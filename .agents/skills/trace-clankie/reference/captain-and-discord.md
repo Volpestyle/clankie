@@ -99,6 +99,11 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   takes. Installing newer source on disk does not revive an already loaded
   stopped pump. Recover only the original harness session under the lead's
   operational authority; never substitute a route or replay uncertain input.
+  A `pump_error` with `errorName: "ZodError"` means the bridge dropped a page
+  it could not parse; the service had already taken those events, so they stay
+  `uncertain` (2026-10-06: a 24k service handoff, before events were bounded to
+  the channel limit). A pump logging nothing after `pump_started` is polling;
+  look for the missing deliveries in the service's receipts, not the bridge.
 
 - **An `accepted` receipt establishes admission, not execution or liveness.**
   The input may be queued, preparing, executing or awaiting native delivery.

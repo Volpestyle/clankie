@@ -27,14 +27,14 @@ async function until(check: () => boolean | Promise<boolean>, timeout = 1500) {
   }
 }
 
-async function fixture(fault: "outage" | "lost-response" | "refused") {
+async function fixture(fault: "outage" | "lost-response" | "refused" | "none") {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-pump-"));
   const bearer = randomUUID();
   const binding = "a".repeat(64);
   const uncertaintyPath = join(root, "original.json");
   // Leave room for real Node HTTP scheduling (a failed response can take a
   // few hundred milliseconds). Production's binding grace is 45 seconds.
-  const outbox = new SeatOutbox({ uncertaintyPath, boundGraceMs: 1_000 });
+  let outbox = new SeatOutbox({ uncertaintyPath, boundGraceMs: 1_000 });
   const app = new Hono();
   let faults = true;
   let ackRequests = 0;
@@ -128,7 +128,14 @@ async function fixture(fault: "outage" | "lost-response" | "refused") {
   return {
     client,
     received,
-    outbox,
+    get outbox() {
+      return outbox;
+    },
+    /** The service's mailbox restarts from its persisted receipts; the bridge process lives on. */
+    restartOutbox: () => {
+      outbox.close();
+      outbox = new SeatOutbox({ uncertaintyPath, boundGraceMs: 1_000 });
+    },
     taken,
     root,
     journal,
@@ -208,3 +215,40 @@ it.each(["outage", "lost-response", "refused"] as const)(
     }
   },
 );
+
+// 2026-10-06: a 24,249-character service handoff failed this bridge's page
+// schema (ZodError at 21:21:46Z). The service had already taken it, so it was
+// never shown or acknowledged, and its unresolved receipt then refused every
+// later delivery to the seat as `uncertain` across service restarts.
+it("keeps an oversized event parseable by a real bridge, before and after a service restart", async () => {
+  const f = await fixture("none");
+  try {
+    const pid = f.pid();
+    const wake = f.deliver("signed owner comment before the restart");
+    await until(() => f.received.length === 1);
+    expect(await wake).toMatchObject({ outcome: "delivered", deliveryStage: "delivered" });
+
+    // The service's mailbox restarts from its receipts beneath the same bridge.
+    f.restartOutbox();
+    await until(() => f.outbox.bound(), 3_000);
+    const handoff = f.deliver(`Service handoff ${"x".repeat(24_232)}`);
+    await until(() => f.received.length === 2, 3_000);
+    expect(await handoff).toMatchObject({ outcome: "delivered", deliveryStage: "delivered" });
+    expect(f.pid()).toBe(pid);
+    const clipped = f.received[1]!.params.content;
+    expect(clipped.length).toBeLessThanOrEqual(16_384);
+    expect(clipped).toMatch(/the last \d+ characters were not delivered/u);
+    expect(f.outbox.uncertain()).toBe(false);
+
+    const ids = f.received.map((event) => event.params.meta.event_id);
+    expect(new Set(ids).size).toBe(2);
+    expect(Object.keys(await f.receipts()).sort()).toEqual([...ids].sort());
+    const log = await f.journal();
+    expect(log.filter((event) => event.event === "pump_error")).toEqual([]);
+    expect(log.filter((event) => event.event === "notification_sent").map((event) => event.eventId)).toEqual(
+      ids,
+    );
+  } finally {
+    await f.close();
+  }
+});
