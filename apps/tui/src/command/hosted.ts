@@ -23,10 +23,20 @@ import { outputJson, type Writable } from "./io.ts";
 export const NO_HOSTED_CLANKIE_MESSAGE =
   "This account has no hosted Clankie. Run `clankie login` to sign this Mac in for remote access to your own Clankie, or add a hosted Clankie from your account page.";
 
+/** Why the hosted lookup failed, in the owner's words rather than "no hosted Clankie". */
+export function hostedLookupFailedMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(401|unauthorized)\b/u.test(message)
+    ? "The hosted service didn't accept this sign-in, so it couldn't look up your hosted Clankie. Try `clankie login` again; if it keeps happening, contact support."
+    : `Couldn't reach your hosted Clankie's account service (${message}). Try again in a minute.`;
+}
+
 /** The fleet answers a bare `not_found` for an account with no hosted body. */
 function explainNoHostedClankie(error: unknown): unknown {
   const message = error instanceof Error ? error.message : "";
-  return message === "Hosted account: not_found" || message === "No hosted machine on this account"
+  return message === "Hosted account: not_found" ||
+    message === "Hosted Clankie: not_found" ||
+    message === "No hosted machine on this account"
     ? new Error(NO_HOSTED_CLANKIE_MESSAGE)
     : error;
 }
@@ -41,15 +51,31 @@ export async function routeSignedInAccount(input: {
   readonly settings: SettingsStore;
   readonly fetchImpl?: typeof fetch;
 }): Promise<{ readonly kind: "hosted" } | { readonly kind: "this-mac"; readonly output: unknown }> {
-  // The tenant lookup is a convenience. Whatever it says (not_found, a 401 for
-  // this client's token, an outage), it must never lock a self-hosted Mac out of
-  // signing in, so any failure reads as "no hosted Clankie".
+  // The tenant lookup is a convenience for `clankie login`. Whatever it says
+  // (not_found, a 401 for this client's token, an outage), it must never lock a
+  // self-hosted Mac out of signing in, so any failure reads as "no hosted
+  // Clankie" there. Asking for the hosted Clankie by name is different: only a
+  // real "no hosted Clankie" answer may say so, and a failed lookup says why.
+  let lookupError: unknown;
   const hasHosted =
     input.target === "this-mac"
       ? false
-      : await accountHasHostedClankie(input.gatewayUrl, input.credential, input.fetchImpl).catch(() => false);
+      : await accountHasHostedClankie(input.gatewayUrl, input.credential, input.fetchImpl).catch(
+          (error: unknown) => {
+            lookupError = error;
+            return false;
+          },
+        );
   if (hasHosted) return { kind: "hosted" };
-  if (input.target === undefined) throw new Error(NO_HOSTED_CLANKIE_MESSAGE);
+  if (input.target === undefined) {
+    const explained = lookupError === undefined ? undefined : explainNoHostedClankie(lookupError);
+    if (
+      explained === undefined ||
+      (explained instanceof Error && explained.message === NO_HOSTED_CLANKIE_MESSAGE)
+    )
+      throw new Error(NO_HOSTED_CLANKIE_MESSAGE);
+    throw new Error(hostedLookupFailedMessage(lookupError));
+  }
   const enabled = await gatewayEnableWithAccount(
     { gatewayUrl: input.gatewayUrl, credential: input.credential },
     { env: input.env, settings: input.settings, credentials: input.store },
