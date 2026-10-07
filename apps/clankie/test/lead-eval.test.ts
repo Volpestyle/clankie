@@ -98,6 +98,35 @@ it("plans equal tasks and budgets, rotates arms and never implies run approval",
   );
 });
 
+it("reports implemented verifier source while refusing the unwired native campaign", () => {
+  const readiness = lead.nativeReadiness();
+  const bridge = readiness.engineeringGaps.find(
+    (gap: { code: string }) => gap.code === "terminal-bench-native-bridge-unavailable",
+  );
+  expect(bridge).toMatchObject({ source: "scripts/evals/lead-manual-bootstrap.mjs" });
+  expect(bridge.detail).toMatch(/artifact-only verifier source is implemented/u);
+  expect(bridge.detail).toMatch(/native fleet execution remains unwired/u);
+  expect(bridge.detail).toMatch(/descendant, account, isolation and stop acceptance remains unproved/u);
+  expect(readiness).toMatchObject({
+    status: "refused-engineering-incomplete",
+    ownerRunDecision: "separate-hold",
+    agentsLaunched: false,
+  });
+  expect(readiness.engineeringGaps.map((gap: { code: string }) => gap.code)).toEqual([
+    "claude-stop-unavailable",
+    "descendant-inventory-incomplete",
+    "account-window-telemetry-unavailable",
+    "isolated-real-hire-unwired",
+    "terminal-bench-native-bridge-unavailable",
+  ]);
+  const prepared = plan();
+  expect(prepared.nativeReadiness).toEqual(readiness);
+  expect(prepared.blockers).toContain(bridge.detail);
+  expect(prepared.results).toEqual([]);
+  expect(() => refuseRun()).toThrow("not implemented");
+  expect(sandbox).not.toHaveBeenCalled();
+});
+
 it("exports a history-free replay and distinct worker indexes, with no held-out tests", () => {
   const task = loadTasks().historical[2];
   const root = join(scratch(), "replay");

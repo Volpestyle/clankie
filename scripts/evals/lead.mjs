@@ -791,9 +791,9 @@ export function nativeReadiness() {
       },
       {
         code: "terminal-bench-native-bridge-unavailable",
-        source: "scripts/evals/lead-tasks.json",
+        source: "scripts/evals/lead-manual-bootstrap.mjs",
         detail:
-          "Official source pins are retained; native interactive fleet/container and separate official verifier integration is not established",
+          "Official task/environment and separate artifact-only verifier source is implemented; this campaign's native fleet execution remains unwired and native descendant, account, isolation and stop acceptance remains unproved",
       },
     ],
   };
