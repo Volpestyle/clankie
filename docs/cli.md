@@ -482,6 +482,12 @@ private `~/.clankie/updates/<operation-id>/` directories and survive the old
 service exiting. A nonterminal operation or uncertain shutdown blocks another
 schedule; inspect/reconcile that operation rather than retrying or deleting its
 lock. PIDs alone are never proof that an abandoned operation is safe to repeat.
+The helper runs from private copies in the operation directory that import only
+Node builtins and each other. One that stops before claiming its operation, for
+example because it cannot load, has changed nothing: it records `failed` with
+`pre-cutover-failed`, and the next update retires the lock. If it could not record
+even that, an operation still `scheduled` and unclaimed ten minutes after
+acceptance is recorded the same way when the service next starts or admits an update.
 An operation that ended `stop-unconfirmed` or `failed` reconciles itself when the
 service next starts, and again before the next update, once three facts hold: its
 helper wrote that final result as its last log line, the pin is a clean detached

@@ -1,5 +1,8 @@
-import { CheckoutSyncResultSchema } from "@clankie/protocol";
-/** Detached update transaction. Only the helper executes this engine; imports do not install or restart. */
+/**
+ * Detached update transaction. Only the helper executes this engine; imports do not install or restart.
+ * The helper runs a private copy of this file beside `pinned-runtime.ts` and `update-files.ts`, outside
+ * any workspace, so it may import only `node:` builtins and those copies.
+ */
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -31,10 +34,58 @@ export interface RuntimeUpdatePlan {
   readonly oldCommit: string;
   readonly newCommit: string;
   readonly oldInstanceId: string;
-  readonly ownerCheckoutSync?: import("@clankie/settings").CheckoutSyncResult;
+  readonly ownerCheckoutSync?: CheckoutSyncResult;
   readonly resolvedRef?: string;
   readonly warning?: RuntimeUpdateResult["warning"];
   readonly initiator?: RuntimeUpdateInitiator;
+}
+/** `@clankie/settings` CheckoutSyncResult, restated here because the copied helper cannot import packages. */
+export interface CheckoutSyncResult {
+  readonly path: string;
+  readonly outcome: "current" | "updated" | "blocked" | "unavailable";
+  readonly before?: string | undefined;
+  readonly after?: string | undefined;
+  readonly reason?: string | undefined;
+  readonly blockers: readonly { readonly path: string; readonly ageSeconds?: number | undefined }[];
+}
+/** Mirrors `CheckoutSyncResultSchema` in `@clankie/protocol` (strict keys, same fields). */
+export function parseCheckoutSyncResult(input: unknown): CheckoutSyncResult {
+  const value = object(input);
+  const text = (key: string) => {
+    if (typeof value[key] !== "string") throw Error("Invalid owner checkout sync");
+    return value[key] as string;
+  };
+  if (
+    Object.keys(value).some(
+      (key) => !["path", "outcome", "before", "after", "reason", "blockers"].includes(key),
+    ) ||
+    !["current", "updated", "blocked", "unavailable"].includes(String(value.outcome)) ||
+    !Array.isArray(value.blockers)
+  )
+    throw Error("Invalid owner checkout sync");
+  return {
+    path: text("path"),
+    outcome: value.outcome as CheckoutSyncResult["outcome"],
+    ...Object.fromEntries(
+      (["before", "after", "reason"] as const)
+        .filter((key) => value[key] !== undefined)
+        .map((key) => [key, text(key)]),
+    ),
+    blockers: (value.blockers as unknown[]).map((entry) => {
+      const blocker = object(entry);
+      const ageSeconds = blocker.ageSeconds;
+      if (
+        Object.keys(blocker).some((key) => key !== "path" && key !== "ageSeconds") ||
+        typeof blocker.path !== "string" ||
+        (ageSeconds !== undefined && (typeof ageSeconds !== "number" || !(ageSeconds >= 0)))
+      )
+        throw Error("Invalid owner checkout blocker");
+      return {
+        path: blocker.path,
+        ...(ageSeconds === undefined ? {} : { ageSeconds: ageSeconds as number }),
+      };
+    }),
+  };
 }
 export interface RuntimeUpdateInitiator {
   /** `schedule` is a hosted body's own idle install (ADR 0237). */
@@ -162,7 +213,7 @@ export interface RuntimeUpdateResult {
   readonly serviceReceipts?: readonly RuntimeServiceReceipt[];
   readonly harnessRefresh?: { readonly ok: boolean; readonly result?: unknown; readonly error?: string };
   readonly canary?: RuntimeCanaryResult;
-  readonly ownerCheckoutSync?: import("@clankie/settings").CheckoutSyncResult;
+  readonly ownerCheckoutSync?: CheckoutSyncResult;
   readonly resolvedRef?: string;
   readonly warning?: "older-than-current-pin" | "diverged-from-current-pin";
   readonly initiator?: RuntimeUpdateInitiator;
@@ -260,7 +311,7 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
     updatedAt: boundedString(value.updatedAt, 64),
     ...(value.ownerCheckoutSync === undefined
       ? {}
-      : { ownerCheckoutSync: CheckoutSyncResultSchema.parse(value.ownerCheckoutSync) }),
+      : { ownerCheckoutSync: parseCheckoutSyncResult(value.ownerCheckoutSync) }),
     ...(value.resolvedRef === undefined ? {} : { resolvedRef: boundedString(value.resolvedRef, 512) }),
     ...(value.warning === undefined
       ? {}

@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
   mkdtempSync,
@@ -17,7 +17,11 @@ import { join } from "node:path";
 import { createServer } from "node:net";
 import { afterEach, expect, it } from "vitest";
 import { createServer as createHttpServer } from "node:http";
-import { createRuntimeUpdater, updateHoldingServices } from "../bin/runtime-updater.ts";
+import {
+  createRuntimeUpdater,
+  UNSTARTED_HELPER_GRACE_MS,
+  updateHoldingServices,
+} from "../bin/runtime-updater.ts";
 import { writeRuntimeUpdate, runtimeUpdateServices } from "../bin/runtime-update.ts";
 import { createRuntimeUpdateRoutes } from "../../clankie/src/runtime-update-routes.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
@@ -481,3 +485,90 @@ it.each([false, true])(
     expect(f.git(f.runtime, "rev-parse", "HEAD")).toBe(f.old);
   },
 );
+function runCopiedHelper(directory: string, env: NodeJS.ProcessEnv) {
+  // The copies run where the updater left them, outside any workspace or node_modules.
+  return spawnSync(process.execPath, [join(directory, "runtime-update-helper.mjs")], {
+    cwd: directory,
+    env: { PATH: process.env.PATH, ...env },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+}
+it("the copied helper imports only builtins and its fellow copies, and runs from its operation directory", async () => {
+  const f = fixture();
+  const accepted = await f.updater.request("main", authority);
+  const directory = join(f.home, ".clankie/updates", accepted.pending!);
+  // The live main update carries the owner checkout sync the helper must accept.
+  expect(accepted.latest?.ownerCheckoutSync).toBeDefined();
+  const copies = Object.keys(JSON.parse(readFileSync(join(directory, "helper.json"), "utf8")).files);
+  for (const name of copies) {
+    const source = readFileSync(join(directory, name), "utf8");
+    for (const [, specifier] of source.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*["']([^"']+)["']/gu))
+      expect(
+        specifier!.startsWith("node:") || copies.map((copy) => `./${copy}`).includes(specifier!),
+        `${name} imports ${specifier}`,
+      ).toBe(true);
+  }
+  const run = runCopiedHelper(directory, { HOME: f.home });
+  expect(run.stderr).not.toContain("ERR_MODULE_NOT_FOUND");
+  // The fixture target is not a Clankie checkout, so the real engine refuses it before any service stop.
+  expect(f.updater.status().latest).toMatchObject({
+    id: accepted.pending,
+    phase: "refused",
+    reason: "target-update-status-unsupported",
+    ownerCheckoutSync: accepted.latest?.ownerCheckoutSync,
+  });
+  expect(existsSync(join(directory, "claimed"))).toBe(true);
+  expect(f.git(f.runtime, "rev-parse", "HEAD")).toBe(f.old);
+}, 60_000);
+it("a helper that stops before its claim records a terminal failure and frees the next update", async () => {
+  const f = fixture();
+  const accepted = await f.updater.request("main", authority);
+  const directory = join(f.home, ".clankie/updates", accepted.pending!);
+  const run = runCopiedHelper(directory, {
+    HOME: f.home,
+    CLANKIE_RUNTIME_DIR: join(f.home, "elsewhere"),
+  });
+  expect(run.status).toBe(1);
+  expect(run.stderr).toContain("Update path binding changed");
+  const latest = f.updater.status().latest;
+  expect(latest).toMatchObject({ phase: "failed", reason: "pre-cutover-failed" });
+  expect(latest?.error).toContain("Update path binding changed");
+  // As after a run, its final result is the last stdout line.
+  expect(JSON.parse(run.stdout.trimEnd().split("\n").at(-1)!)).toEqual(latest);
+  // One-shot: a second invocation cannot claim again or rewrite the outcome.
+  expect(runCopiedHelper(directory, { HOME: f.home }).status).toBe(1);
+  expect(f.updater.status().latest).toEqual(latest);
+  expect(f.git(f.runtime, "rev-parse", "HEAD")).toBe(f.old);
+  expect((await f.updater.request("main", authority)).accepted).toBe(true);
+}, 60_000);
+it("a scheduled operation its helper never claimed is retired once the start grace has passed", async () => {
+  const f = fixture();
+  const accepted = await f.updater.request("main", authority);
+  const directory = join(f.home, ".clankie/updates", accepted.pending!);
+  const booted = () =>
+    createRuntimeUpdater({
+      repoRoot: f.runtime,
+      env: { HOME: f.home },
+      spawnHelper: () => Object.assign(new EventEmitter(), { unref() {} }) as ChildProcess,
+    });
+  // A helper may still be starting.
+  expect(booted().reconcile!()).toBeUndefined();
+  expect((await booted().request("main", authority)).accepted).toBe(false);
+  const stale = new Date(Date.now() - UNSTARTED_HELPER_GRACE_MS - 1000).toISOString();
+  writeRuntimeUpdate(directory, { ...accepted.latest!, updatedAt: stale });
+  // A claimed operation belongs to its running helper, however long it takes.
+  writeFileSync(join(directory, "claimed"), "", { mode: 0o600 });
+  expect(booted().reconcile!()).toBeUndefined();
+  rmSync(join(directory, "claimed"));
+  const service = booted();
+  expect(service.reconcile!()).toMatchObject({
+    id: accepted.pending,
+    phase: "failed",
+    reason: "pre-cutover-failed",
+  });
+  // The claim now fences a helper that starts late.
+  expect(runCopiedHelper(directory, { HOME: f.home }).status).toBe(1);
+  expect(service.status().latest).toMatchObject({ phase: "failed", reason: "pre-cutover-failed" });
+  expect((await service.request("main", authority)).accepted).toBe(true);
+}, 60_000);

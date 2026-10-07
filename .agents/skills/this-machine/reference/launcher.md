@@ -87,6 +87,11 @@ records return a JSON reconciliation error without changing the journal or lock.
 `/update status`. Never repeat an uncertain update; inspect its existing operation.
 An uncertain ending your restarted service can prove (helper finished, clean pin,
 booted from it) retires itself and shows `latest.reconciled`; then update again.
+An update that never left `scheduled` because its helper crashed on start (no
+`claimed` file beside `helper.log`) changed nothing; the helper, or the service ten
+minutes later, records it `failed` with `pre-cutover-failed`, and the next update
+proceeds. A runtime whose own copied helper cannot start cannot repair itself this
+way; that needs an owner reinstall of a fixed pin.
 Do not run `clankie restart` while an update is mid-cutover: it refuses, and the
 update restarts services itself.
 A dirty pin or failed install leaves the old runtime untouched.

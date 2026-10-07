@@ -174,6 +174,8 @@ export function verifyUpdateHelper(directory: string, files: Readonly<Record<str
       throw Error("Materialized update helper changed");
   }
 }
+/** How long an accepted operation may stay unclaimed before its helper is known not to have started. */
+export const UNSTARTED_HELPER_GRACE_MS = 10 * 60_000;
 /** The install the running service booted from, proven intact; throws when it cannot be. */
 export interface ActiveInstall {
   readonly root: string;
@@ -238,6 +240,32 @@ export function createUpdateJournal(home: string, boot: RuntimeBootIdentity, act
       return { runtime: boot, needsReconciliation: true, error: "update_record_unreadable" };
     }
   };
+  /**
+   * A helper claims its operation before any effect, within seconds of being spawned. One still
+   * unclaimed long after acceptance never started (it crashed on load, or was never spawned), so
+   * nothing changed: take the claim ourselves, which fences a late helper, and record the terminal
+   * pre-cutover failure the helper could not. The next admission then retires the lock.
+   */
+  const retireUnstarted = (
+    directory: string,
+    result: RuntimeUpdateResult,
+  ): RuntimeUpdateResult | undefined => {
+    if (Date.now() - Date.parse(result.updatedAt) < UNSTARTED_HELPER_GRACE_MS) return undefined;
+    try {
+      closeSync(openSync(join(directory, "claimed"), "wx", 0o600));
+    } catch {
+      return undefined;
+    }
+    const failed: RuntimeUpdateResult = {
+      ...result,
+      phase: "failed",
+      reason: "pre-cutover-failed",
+      error: "Update helper never started; nothing was changed",
+      updatedAt: new Date().toISOString(),
+    };
+    writeRuntimeUpdate(directory, failed);
+    return failed;
+  };
   const reconcile = (): RuntimeUpdateResult | undefined => {
     const id = activeId();
     if (id === undefined) return undefined;
@@ -245,6 +273,7 @@ export function createUpdateJournal(home: string, boot: RuntimeBootIdentity, act
     // A request still preparing has no result yet; there is nothing to prove.
     if (!existsSync(join(directory, "result.json"))) return undefined;
     const result = readRuntimeUpdate(directory);
+    if (result.id === id && result.phase === "scheduled") return retireUnstarted(directory, result);
     if (result.id !== id || !["stop-unconfirmed", "failed"].includes(result.phase) || safeTerminal(result))
       return undefined;
     if (!helperFinished(directory, result)) return undefined;
