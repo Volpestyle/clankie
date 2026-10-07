@@ -1,11 +1,13 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createServer } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createProjectProcessObserver,
   harnessReleaseSibling,
   HarnessBinaryObservations,
+  type ProjectProcessRefusal,
 } from "../src/project-process-proof.ts";
 import { projectProcessFixture, processFixtureStart } from "./helpers/local-fleet-process.ts";
 
@@ -14,10 +16,13 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-function fixture() {
+function fixture(report?: (event: ProjectProcessRefusal) => void) {
+  const refusals: ProjectProcessRefusal[] = [];
+  let processReads = 0;
+  let nativeReads = 0;
   const state = {
     shell: 30,
-    agent: 40,
+    agent: 40 as number | undefined,
     command: "/usr/local/bin/codex",
     binding: "/host/socket",
     start: "Sat Oct  3 10:00:00 2026",
@@ -27,18 +32,35 @@ function fixture() {
     harness: "codex",
     mapped: "/trusted/codex",
     argv: "",
+    hasBinding: true,
+    hasLauncher: true,
+    unavailableProcess: "",
   };
   const observe = createProjectProcessObserver({
     platform: "darwin",
-    launcher: async (harness) =>
-      harness === "pi"
-        ? { executable: "/trusted/node", script: "/trusted/pi/cli.js" }
-        : { executable: `/trusted/${harness}` },
+    refusal: (event) => {
+      refusals.push(event);
+      report?.(event);
+    },
+    launcher: async (harness) => {
+      if (state.change === "launcher-error") throw Error("private installation path");
+      return !state.hasLauncher
+        ? undefined
+        : harness === "pi"
+          ? { executable: "/trusted/node", script: "/trusted/pi/cli.js" }
+          : { executable: `/trusted/${harness}` };
+    },
     canonical: async (path) => path,
     herdrBinary: "herdr",
-    binding: async () => ({ runtime: "external", socketPath: state.binding, session: "default" }),
+    binding: async () =>
+      state.hasBinding ? { runtime: "external", socketPath: state.binding, session: "default" } : undefined,
     run: async (command, args) => {
       if (command === "herdr" && args[0] === "agent") {
+        nativeReads++;
+        if (state.change === "transport") throw Error("private transport address");
+        if (state.change === "malformed-native")
+          return JSON.stringify({ result: { agent: { agent: state.harness } } });
+        if (state.change === "final-native-malformed" && nativeReads > 1) return "{";
         if (state.change === "session" && ++state.calls > 1) state.native = "replacement";
         return JSON.stringify({
           result: {
@@ -54,6 +76,8 @@ function fixture() {
         });
       }
       if (args[0] === "--processes") {
+        processReads++;
+        if (state.unavailableProcess === (processReads === 1 ? "initial" : "final")) return "{}";
         if (state.change === "process" && ++state.calls > 1) state.start = "Sat Oct  3 10:00:01 2026";
         return projectProcessFixture(Number(args[1]), Number(args[2]), {
           start: state.start,
@@ -75,7 +99,7 @@ function fixture() {
       });
     },
   });
-  return { state, observe };
+  return { state, observe, refusals };
 }
 it("captures the actual native foreground process and shell lifetimes", async () => {
   const f = fixture();
@@ -84,6 +108,7 @@ it("captures the actual native foreground process and shell lifetimes", async ()
     processes: [{ pid: 40, startTime: processFixtureStart(f.state.start) }],
     shell: { pid: 30 },
   });
+  expect(f.refusals).toEqual([]);
 });
 it("proves a hand-started native process before Herdr reports its session", async () => {
   const f = fixture();
@@ -118,8 +143,93 @@ it.each(["process", "pane", "binding", "session"])(
     const f = fixture();
     f.state.change = change;
     expect(await f.observe("default", "w1:p1")).toBeUndefined();
+    expect(f.refusals).toEqual([
+      {
+        reason: change === "pane" ? "process_changed" : `${change}_changed`,
+        checkpoint: {
+          process: "final_process",
+          pane: "final_pane",
+          binding: "final_binding",
+          session: "final_native",
+        }[change],
+      },
+    ]);
   },
 );
+
+it.each([
+  ["binding", "binding_unavailable", "binding"],
+  ["harness", "native_harness_unavailable", "initial_native"],
+  ["launcher", "launcher_unavailable", "launcher"],
+  ["foreground-missing", "foreground_missing", "initial_pane"],
+  ["foreground-invalid", "foreground_invalid", "initial_pane"],
+  ["initial", "native_initial_unavailable", "initial_process"],
+  ["final", "native_final_unavailable", "final_process"],
+  ["launcher-mismatch", "launcher_mismatch", "initial_process"],
+  ["malformed-native", "malformed_observation", "initial_native"],
+  ["final-native-malformed", "malformed_observation", "final_native"],
+  ["transport", "transport_failure", "initial_native"],
+  ["launcher-error", "observation_failure", "launcher"],
+])(
+  "reports the fixed %s refusal without leaking observation details",
+  async (scenario, reason, checkpoint) => {
+    const f = fixture();
+    if (scenario === "binding") f.state.hasBinding = false;
+    else if (scenario === "harness") f.state.harness = "unknown";
+    else if (scenario === "launcher") f.state.hasLauncher = false;
+    else if (scenario === "foreground-missing") f.state.agent = undefined;
+    else if (scenario === "foreground-invalid") f.state.agent = f.state.shell;
+    else if (scenario === "initial" || scenario === "final") f.state.unavailableProcess = scenario;
+    else if (scenario === "launcher-mismatch") f.state.mapped = "/untrusted/codex";
+    else f.state.change = scenario;
+    expect(await f.observe("default", "w1:p1")).toBeUndefined();
+    expect(f.refusals).toEqual([{ reason, checkpoint }]);
+  },
+);
+
+it.each([
+  ["pane_not_found", "pane_unavailable"],
+  ["permission_denied", "transport_failure"],
+])("classifies the real native %s response without copying upstream text", async (code, reason) => {
+  const dir = await mkdtemp(join(tmpdir(), "pane-not-found-"));
+  const socketPath = join(dir, "herdr.sock");
+  const server = createServer((socket) => {
+    let frame = "";
+    socket.on("data", (data) => {
+      frame += data.toString();
+      if (!frame.includes("\n")) return;
+      const request = JSON.parse(frame);
+      socket.end(
+        `${JSON.stringify({ id: request.id, error: { code, message: "private upstream text" } })}\n`,
+      );
+    });
+  });
+  cleanups.push(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  const refusals: ProjectProcessRefusal[] = [];
+  const observe = createProjectProcessObserver({
+    platform: "darwin",
+    herdrBinary: "herdr",
+    binding: async () => ({ runtime: "external", socketPath, session: "default" }),
+    refusal: (event) => {
+      refusals.push(event);
+    },
+  });
+  expect(await observe("default", "w1:p1")).toBeUndefined();
+  expect(refusals).toEqual([{ reason, checkpoint: "initial_native" }]);
+});
+
+it("keeps refusing when the diagnostic observer throws", async () => {
+  const f = fixture(() => {
+    throw Error("diagnostic unavailable");
+  });
+  f.state.mapped = "/untrusted/codex";
+  expect(await f.observe("default", "w1:p1")).toBeUndefined();
+  expect(f.refusals).toEqual([{ reason: "launcher_mismatch", checkpoint: "initial_process" }]);
+});
 it("denies wrappers, shells, remote fleets and malformed pane claims", async () => {
   const f = fixture();
   for (const name of ["/bin/zsh", "/bin/bash", "/usr/bin/node", "/usr/bin/sleep"]) {

@@ -4,11 +4,34 @@ import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
 import type { HerdrBinding } from "@clankie/protocol";
+import { z } from "zod";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import {
   FleetAdmissionUnavailableError,
   fleetAdmissionUnavailableResponse,
 } from "./local-fleet-admission.ts";
+
+/** Diagnostic attribution only; none of these fields grants admission. */
+export interface LocalFleetProofRequestContext {
+  readonly requestId: string;
+  readonly connectionId: string;
+  readonly route:
+    | "mcp"
+    | "events"
+    | "ack"
+    | "hook"
+    | "messages"
+    | "peers"
+    | "peer-messages"
+    | "tool-catalog"
+    | "receipt";
+  readonly method: "GET" | "POST" | "other";
+  readonly bridgeId?: string;
+  /** Internal observation input, never serialized into diagnostics. */
+  readonly socket: Socket;
+}
+
+const bridgeUuid = z.string().uuid();
 
 export interface LocalFleetIdentity {
   readonly fleet?: string;
@@ -31,16 +54,23 @@ export interface LocalFleetIdentity {
  */
 export class LocalFleetLink {
   private readonly identities = new WeakMap<Request, LocalFleetIdentity>();
+  private readonly connections = new WeakMap<Socket, string>();
   private open = true;
   private published: string | undefined;
   private readonly options: {
     directory: string;
     binding(): Promise<HerdrBinding | undefined>;
-    prove(socket: Socket, pane: string, signal?: AbortSignal): Promise<boolean>;
+    prove(
+      socket: Socket,
+      pane: string,
+      signal?: AbortSignal,
+      context?: LocalFleetProofRequestContext,
+    ): Promise<boolean>;
     projectProof?(
       socket: Socket,
       pane: string,
       signal?: AbortSignal,
+      context?: LocalFleetProofRequestContext,
     ): Promise<ProjectProcessProof | undefined>;
   };
   constructor(options: LocalFleetLink["options"]) {
@@ -55,19 +85,42 @@ export class LocalFleetLink {
   fetch(forward: (request: Request) => Response | Promise<Response>) {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const path = new URL(request.url).pathname;
-      const seat =
-        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|tool-catalog)$/u.exec(
+      const seatRoute =
+        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|tool-catalog)$/u.exec(path);
+      const receipt =
+        request.method === "GET" &&
+        /^\/v1\/fleet\/seats\/([^/]+)\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
           path,
-        ) ||
-        (request.method === "GET" &&
-          /^\/v1\/fleet\/seats\/([^/]+)\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
-            path,
-          )) ||
-        (request.method === "POST" && /^\/v1\/fleet\/seats\/([^/]+)\/events\/[^/]+\/ack$/u.exec(path));
+        );
+      const ack =
+        request.method === "POST" && /^\/v1\/fleet\/seats\/([^/]+)\/events\/[^/]+\/ack$/u.exec(path);
+      const seat = seatRoute || receipt || ack;
       if (path !== "/v1/fleet/mcp" && !seat) return Response.json({ error: "not_found" }, { status: 404 });
       const pane = request.headers.get("x-clankie-pane") ?? "";
       if (seat && decodeURIComponent(seat[1]!) !== pane)
         return Response.json({ error: "local_pane_required" }, { status: 403 });
+      const socket = env.incoming.socket;
+      let connectionId = this.connections.get(socket);
+      if (connectionId === undefined) {
+        connectionId = randomUUID();
+        this.connections.set(socket, connectionId);
+      }
+      const bridgeId = bridgeUuid.safeParse(request.headers.get("x-clankie-bridge-id"));
+      const context: LocalFleetProofRequestContext = {
+        requestId: randomUUID(),
+        connectionId,
+        route:
+          path === "/v1/fleet/mcp"
+            ? "mcp"
+            : receipt
+              ? "receipt"
+              : ack
+                ? "ack"
+                : (seatRoute![2] as LocalFleetProofRequestContext["route"]),
+        method: request.method === "GET" || request.method === "POST" ? request.method : "other",
+        ...(bridgeId.success ? { bridgeId: bridgeId.data } : {}),
+        socket,
+      };
       const current = () => this.open && env.incoming.socket.destroyed !== true;
       const cancellation = (signal?: AbortSignal) =>
         signal ? AbortSignal.any([request.signal, signal]) : request.signal;
@@ -79,7 +132,7 @@ export class LocalFleetLink {
           const cancelled = cancellation(signal);
           cancelled.throwIfAborted();
           if (!current()) throw new FleetAdmissionUnavailableError("Local fleet connection is unavailable");
-          const admitted = await this.options.prove(env.incoming.socket, pane, cancelled);
+          const admitted = await this.options.prove(socket, pane, cancelled, context);
           cancelled.throwIfAborted();
           if (!current()) throw new FleetAdmissionUnavailableError("Local fleet connection changed");
           return admitted;
@@ -88,7 +141,7 @@ export class LocalFleetLink {
           const cancelled = cancellation(signal);
           cancelled.throwIfAborted();
           const proof = this.open
-            ? await this.options.projectProof?.(env.incoming.socket, pane, cancelled)
+            ? await this.options.projectProof?.(socket, pane, cancelled, context)
             : undefined;
           cancelled.throwIfAborted();
           return proof;
@@ -97,7 +150,7 @@ export class LocalFleetLink {
           const cancelled = cancellation(signal);
           cancelled.throwIfAborted();
           if (!current()) return undefined;
-          const proof = await this.options.projectProof?.(env.incoming.socket, pane, cancelled);
+          const proof = await this.options.projectProof?.(socket, pane, cancelled, context);
           cancelled.throwIfAborted();
           return current() ? proof : undefined;
         },

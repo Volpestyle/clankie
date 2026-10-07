@@ -3263,6 +3263,21 @@ its original acknowledgment before starting that cooldown. Unavailable delivery
 may retry after one minute. Native retries are counted separately from terminal
 refusals. Metrics restart with the service and state their coverage start.
 
+Private service logs explain local proof refusals without expanding metric labels.
+Join `fleet.local_proof.refusal_context` to project-stage
+`fleet.local_proof.diagnostic` records by server-generated `requestId`.
+The context includes `operation` (fleet or project), a fixed route and method,
+`connectionId`, and validated pane/bridge claims. Caller PID and process birth
+come from kernel observations: `kernel_observed` is a refusal-time sample;
+`previous_kernel_observation` includes its earlier observation time;
+`unknown` means attribution was unavailable. Claims and previous observations
+never grant admission. Cold caller sampling is limited to one per connection,
+12 new connections per minute and two concurrent reads. Healthy requests add
+no attribution reads. Paths, argv, request bodies and credentials are excluded.
+Project `pane_unavailable` now requires an actual native pane-not-found result;
+other failures retain their specific observation stage in the private log.
+Keep process and pane details in private evidence when publishing aggregate rates.
+
 ### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
 
 Per-issue and per-worker measurements from the service's existing records,

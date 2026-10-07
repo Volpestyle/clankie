@@ -7,7 +7,11 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
-import { LocalFleetLink, type LocalFleetIdentity } from "../src/local-fleet-link.ts";
+import {
+  LocalFleetLink,
+  type LocalFleetIdentity,
+  type LocalFleetProofRequestContext,
+} from "../src/local-fleet-link.ts";
 import { fleetLinkFetch } from "../src/fleet-link.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 import type { PeerSeatAuthority } from "../src/captain/peer-seat-messages.ts";
@@ -32,6 +36,7 @@ it.each(["default", "pc"])(
     let live = true;
     let current = proof(fleet);
     const identities = new WeakMap<Request, LocalFleetIdentity>();
+    const projectContexts: LocalFleetProofRequestContext[] = [];
     const identity: LocalFleetIdentity = {
       fleet,
       pane,
@@ -49,7 +54,11 @@ it.each(["default", "pc"])(
       directory: "/unused",
       binding: async () => undefined,
       prove: async (_socket, requested) => live && requested === pane,
-      projectProof: async () => current,
+      projectProof: async (_socket, _pane, _signal, context) => {
+        if (!context) throw new Error("Missing project request attribution");
+        projectContexts.push(context);
+        return current;
+      },
     });
     const service = await createClankieApp({
       captain: createStubCaptain({ listFleetPeerSeats: list }),
@@ -76,6 +85,11 @@ it.each(["default", "pc"])(
       }
       expect(response.status).toBe(403); // Stub refuses catalog; proof reached the captain once.
       expect(list).toHaveBeenCalledTimes(1);
+      if (fleet === "default") {
+        expect(projectContexts).toHaveLength(3);
+        expect(projectContexts.every((context) => context === projectContexts[0])).toBe(true);
+        expect(projectContexts[0]).toMatchObject({ route: "peers", method: "GET" });
+      }
       live = false;
       const gone = request();
       identities.set(gone, identity);
@@ -138,8 +152,12 @@ it("allows only original UUID receipt reads and the new peer paths through fleet
   const local = new LocalFleetLink({
     directory: "/unused",
     binding: async () => undefined,
-    prove: async () => true,
+    prove: async (_socket, _pane, _signal, context) => {
+      contexts.push(context!);
+      return true;
+    },
   });
+  const contexts: LocalFleetProofRequestContext[] = [];
   const fetch = local.fetch(inner);
   const id = randomUUID();
   for (const path of ["peers", "peer-messages", `peer-messages/${id}`]) {
@@ -148,6 +166,42 @@ it("allows only original UUID receipt reads and the new peer paths through fleet
     });
     expect((await remote(request)).status).toBe(200);
     expect((await fetch(request, { incoming: { socket: {} } } as HttpBindings)).status).toBe(200);
+  }
+  expect(contexts.map((context) => context.route)).toEqual(["peers", "peer-messages", "receipt"]);
+  for (const [path, method] of [
+    ["events", "GET"],
+    ["events/original/ack", "POST"],
+    ["hook", "POST"],
+    ["messages", "POST"],
+    ["tool-catalog", "POST"],
+    ["messages", "DELETE"],
+  ] as const) {
+    const request = new Request(
+      `http://localhost/v1/fleet/seats/${encodeURIComponent(pane)}/${path}?private=not-for-diagnostics`,
+      {
+        method,
+        headers: {
+          "x-clankie-pane": pane,
+          "x-clankie-bridge-id": "invalid-not-for-diagnostics",
+          "x-clankie-request-id": "caller-cannot-choose-this",
+          authorization: "Bearer not-for-diagnostics",
+        },
+      },
+    );
+    expect((await fetch(request, { incoming: { socket: {} } } as HttpBindings)).status).toBe(200);
+  }
+  expect(contexts.slice(3).map(({ route, method }) => ({ route, method }))).toEqual([
+    { route: "events", method: "GET" },
+    { route: "ack", method: "POST" },
+    { route: "hook", method: "POST" },
+    { route: "messages", method: "POST" },
+    { route: "tool-catalog", method: "POST" },
+    { route: "messages", method: "other" },
+  ]);
+  for (const { socket: _socket, ...attribution } of contexts.slice(3)) {
+    expect(Object.keys(attribution).sort()).toEqual(["connectionId", "method", "requestId", "route"]);
+    expect(JSON.stringify(attribution)).not.toContain("not-for-diagnostics");
+    expect(attribution.requestId).not.toBe("caller-cannot-choose-this");
   }
   for (const path of ["peer-messages/not-a-uuid", `peer-messages/${id}/again`, "peers/other"]) {
     const request = new Request(`http://localhost/v1/fleet/seats/${encodeURIComponent(pane)}/${path}`, {

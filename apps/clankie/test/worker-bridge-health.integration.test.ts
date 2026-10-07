@@ -113,12 +113,14 @@ async function fixture(
   let mailboxPolls = 0;
   let mailboxAcks = 0;
   let requests = 0;
+  const requestAttributions: { path: string; bridgeId: string | null }[] = [];
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: async (request) => {
       requests++;
       const path = new URL(request.url).pathname;
+      requestAttributions.push({ path, bridgeId: request.headers.get("x-clankie-bridge-id") });
       if (mailbox && (path.endsWith("/events") || path.endsWith("/ack"))) {
         if (path.endsWith("/ack")) mailboxAcks++;
         else mailboxPolls++;
@@ -230,6 +232,7 @@ async function fixture(
     mailboxPolls: () => mailboxPolls,
     mailboxAcks: () => mailboxAcks,
     requests: () => requests,
+    requestAttributions: () => requestAttributions,
     bindingGets: () => bindingGets,
     messagePosts: () => messagePosts,
     validations: () => validations,
@@ -322,6 +325,10 @@ it("records a real subprocess binding timeout independently of its healthy tool 
   expect(f.status().status).toBe("ready");
   expect(f.bindingGets()).toBe(1);
   expect(f.messagePosts()).toBe(0);
+  expect(f.requestAttributions().some(({ path }) => path.endsWith("/messages"))).toBe(true);
+  const bridgeIds = f.requestAttributions().map(({ bridgeId }) => bridgeId);
+  expect(new Set(bridgeIds).size).toBe(1);
+  expect(bridgeIds[0]).toMatch(/^[a-f0-9-]{36}$/u);
   expect(JSON.stringify(f.reportStatus())).not.toContain("private report body");
   expect(f.metrics.snapshot().totals.reports).toEqual({
     attempts: 1,
@@ -694,6 +701,9 @@ it.each([false, true])(
     expect(f.requests()).toBe(before);
     expect(f.mailboxPolls()).toBe(1);
     expect(f.mailboxAcks()).toBe(ack ? 1 : 0);
+    const bridgeIds = f.requestAttributions().map(({ bridgeId }) => bridgeId);
+    expect(new Set(bridgeIds).size).toBe(1);
+    expect(bridgeIds[0]).toMatch(/^[a-f0-9-]{36}$/u);
     const result = await call("tools/call", {
       name: "message_clankie",
       arguments: { text: "report after admission loss" },

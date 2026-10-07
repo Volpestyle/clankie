@@ -5,7 +5,7 @@ import { access, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { OPERATOR_SEAT_HARNESSES, type HerdrBinding } from "@clankie/protocol";
-import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
+import { HerdrAgentResponseError, parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession, recoverLocalCodexSession } from "./captain/herdr-census.ts";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import {
@@ -15,7 +15,7 @@ import {
   type NativeProcessDiagnostic,
 } from "./local-fleet-process.ts";
 import type { NativeTransportReason } from "./native-process-transport.ts";
-import { nativeRequest } from "./herdr-native-request.ts";
+import { NativePaneNotFoundError, nativeRequest } from "./herdr-native-request.ts";
 
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
 const exec = promisify(execFile);
@@ -134,6 +134,47 @@ export interface ProjectProcessProof {
   readonly shell: { readonly pid: number; readonly startTime: string };
 }
 
+type ProjectProcessRefusalReason =
+  | "unsupported_scope"
+  | "binding_unavailable"
+  | "pane_unavailable"
+  | "native_harness_unavailable"
+  | "launcher_unavailable"
+  | "foreground_missing"
+  | "foreground_invalid"
+  | "native_initial_unavailable"
+  | "native_final_unavailable"
+  | "launcher_mismatch"
+  | "process_changed"
+  | "session_changed"
+  | "binding_changed"
+  | "malformed_observation"
+  | "transport_failure"
+  | "observation_failure";
+type ProjectProcessCheckpoint =
+  | "scope"
+  | "binding"
+  | "initial_native"
+  | "launcher"
+  | "initial_pane"
+  | "initial_process"
+  | "final_pane"
+  | "final_native"
+  | "final_process"
+  | "final_binding";
+/** Fixed vocabulary only: native process details and upstream error text stay private. */
+export interface ProjectProcessRefusal {
+  readonly reason: ProjectProcessRefusalReason;
+  readonly checkpoint: ProjectProcessCheckpoint;
+}
+class ProjectProcessRefusalError extends Error {
+  readonly refusal: ProjectProcessRefusal;
+  constructor(refusal: ProjectProcessRefusal) {
+    super("Project process observation refused");
+    this.refusal = refusal;
+  }
+}
+
 /** Host observation only. A foreground shell/wrapper is not an actual agent occupant. */
 export function createProjectProcessObserver(options: {
   binding(): Promise<HerdrBinding | undefined>;
@@ -148,34 +189,70 @@ export function createProjectProcessObserver(options: {
   nativeTransportDiagnostics?(reason: NativeTransportReason, pane: string): void;
   /** Every completed proof reports whether its seat runs a superseded harness release. */
   harnessBinary?(pane: string, occupantId: string, update: HarnessUpdate | undefined): void;
+  /** One terminal refusal per proof; reporting never changes admission. */
+  refusal?(event: ProjectProcessRefusal, pane: string): void;
 }) {
   const execute = options.run ?? run;
   const canonical = options.canonical ?? realpath;
   return async (fleet: string, pane: string): Promise<ProjectProcessProof | undefined> => {
+    let checkpoint: ProjectProcessCheckpoint = "scope";
+    const refuse = (reason: ProjectProcessRefusalReason, at = checkpoint) => {
+      try {
+        void Promise.resolve(options.refusal?.({ reason, checkpoint: at }, pane)).catch(() => {});
+      } catch {
+        // Diagnostics never change proof or admission.
+      }
+      return undefined;
+    };
+    const failure = (error: unknown, at = checkpoint) =>
+      error instanceof ProjectProcessRefusalError
+        ? refuse(error.refusal.reason, error.refusal.checkpoint)
+        : refuse(
+            error instanceof NativePaneNotFoundError
+              ? "pane_unavailable"
+              : error instanceof SyntaxError || error instanceof HerdrAgentResponseError
+                ? "malformed_observation"
+                : "observation_failure",
+            at,
+          );
     if (
       fleet !== "default" ||
       (options.platform ?? process.platform) !== "darwin" ||
       !/^w[\w]+:p[\w]+$/u.test(pane)
     )
-      return undefined;
+      return refuse("unsupported_scope");
     try {
+      checkpoint = "binding";
       const binding = await options.binding();
-      if (!binding) return undefined;
-      const read = async (method: string, params: unknown, args: string[]) =>
-        options.run
-          ? JSON.parse(
-              await execute(
-                options.herdrBinary,
-                args,
-                pinHerdrEnvironment({ ...process.env }, binding.socketPath),
-              ),
-            )
-          : await nativeRequest(binding, method, params, {
-              timeoutMs: 5_000,
-              ...(options.signal ? { signal: options.signal } : {}),
-            });
-      const info = async () => {
-        const response = (await read("pane.process_info", { pane_id: pane }, [
+      if (!binding) return refuse("binding_unavailable");
+      const read = async (at: ProjectProcessCheckpoint, method: string, params: unknown, args: string[]) => {
+        try {
+          return options.run
+            ? JSON.parse(
+                await execute(
+                  options.herdrBinary,
+                  args,
+                  pinHerdrEnvironment({ ...process.env }, binding.socketPath),
+                ),
+              )
+            : await nativeRequest(binding, method, params, {
+                timeoutMs: 5_000,
+                ...(options.signal ? { signal: options.signal } : {}),
+              });
+        } catch (error) {
+          throw new ProjectProcessRefusalError({
+            reason:
+              error instanceof NativePaneNotFoundError
+                ? "pane_unavailable"
+                : error instanceof SyntaxError
+                  ? "malformed_observation"
+                  : "transport_failure",
+            checkpoint: at,
+          });
+        }
+      };
+      const info = async (at: "initial_pane" | "final_pane") => {
+        const response = (await read(at, "pane.process_info", { pane_id: pane }, [
           "pane",
           "process-info",
           "--pane",
@@ -186,15 +263,31 @@ export function createProjectProcessObserver(options: {
           };
         };
         const value = response?.result?.process_info;
-        if (value?.pane_id !== pane) throw new Error("Pane changed");
+        if (value?.pane_id !== pane)
+          throw new ProjectProcessRefusalError({
+            reason:
+              at === "final_pane" && value?.pane_id !== undefined
+                ? "process_changed"
+                : "malformed_observation",
+            checkpoint: at,
+          });
         return value;
       };
-      const native = async () => {
-        const agent = parseHerdrAgentResult(
-          JSON.stringify(await read("agent.get", { target: pane }, ["agent", "get", pane])),
-        );
-        if (agent.paneId !== pane || !OPERATOR_SEAT_HARNESSES.some((harness) => harness === agent.agent))
-          throw new Error("Native harness unavailable");
+      const native = async (at: "initial_native" | "final_native") => {
+        let agent: ReturnType<typeof parseHerdrAgentResult>;
+        try {
+          agent = parseHerdrAgentResult(
+            JSON.stringify(await read(at, "agent.get", { target: pane }, ["agent", "get", pane])),
+          );
+        } catch (error) {
+          if (error instanceof HerdrAgentResponseError)
+            throw new ProjectProcessRefusalError({ reason: "malformed_observation", checkpoint: at });
+          throw error;
+        }
+        if (agent.paneId !== pane)
+          throw new ProjectProcessRefusalError({ reason: "session_changed", checkpoint: at });
+        if (!OPERATOR_SEAT_HARNESSES.some((harness) => harness === agent.agent))
+          throw new ProjectProcessRefusalError({ reason: "native_harness_unavailable", checkpoint: at });
         const session =
           agent.session ??
           (await recoverLocalCodexSession(agent, {
@@ -205,7 +298,7 @@ export function createProjectProcessObserver(options: {
             runCommand: async (command, args) => ({
               stdout:
                 command === "herdr" && args[0] === "pane" && args[1] === "process-info"
-                  ? JSON.stringify(await read("pane.process_info", { pane_id: pane }, [...args]))
+                  ? JSON.stringify(await read(at, "pane.process_info", { pane_id: pane }, [...args]))
                   : await execute(
                       command,
                       [...args],
@@ -220,15 +313,18 @@ export function createProjectProcessObserver(options: {
           harness: agent.agent,
         };
       };
-      const nativeInitial = await native();
+      checkpoint = "initial_native";
+      const nativeInitial = await native("initial_native");
+      checkpoint = "launcher";
       const launcher = await (options.launcher ?? installedLauncher)(nativeInitial.harness);
-      if (!launcher) return undefined;
-      const initial = await info();
+      if (!launcher) return refuse("launcher_unavailable");
+      checkpoint = "initial_pane";
+      const initial = await info("initial_pane");
       const shellPid = initial.shell_pid;
       const agentPid = initial.foreground_process_group_id;
-      if (shellPid === undefined || agentPid === undefined) return undefined;
+      if (shellPid === undefined || agentPid === undefined) return refuse("foreground_missing");
       if (![shellPid, agentPid].every((pid) => Number.isSafeInteger(pid) && pid > 1) || shellPid === agentPid)
-        return undefined;
+        return refuse("foreground_invalid");
       const snapshot = (checkpoint: "initial" | "final") =>
         observeNativeProcesses(
           shellPid,
@@ -240,8 +336,9 @@ export function createProjectProcessObserver(options: {
           options.nativeTransportDiagnostics &&
             ((reason) => options.nativeTransportDiagnostics!(reason, pane)),
         );
+      checkpoint = "initial_process";
       const initialProcesses = await snapshot("initial");
-      if (!initialProcesses) return undefined;
+      if (!initialProcesses) return refuse("native_initial_unavailable");
       const [shell, agent] = initialProcesses.processes;
       // The installed executable, or an earlier/later release beside it that a
       // harness auto-update left running. A superseded release may already be
@@ -270,37 +367,36 @@ export function createProjectProcessObserver(options: {
         return update(interpreterRelease ?? executable);
       };
       const initialMatch = shell && agent ? await matchesLauncher(agent) : false;
-      if (!shell || !agent || !initialMatch) return undefined;
+      if (!shell || !agent) return refuse("native_initial_unavailable");
+      if (!initialMatch) return refuse("launcher_mismatch");
       // Keep a roster read's permit until every owned native child has closed,
       // even when another observation fails or cancellation arrives first.
       const [paneRead, nativeRead, processRead] = await Promise.allSettled([
-        info(),
-        native(),
+        info("final_pane"),
+        native("final_native"),
         snapshot("final"),
       ]);
-      if (
-        paneRead.status !== "fulfilled" ||
-        nativeRead.status !== "fulfilled" ||
-        processRead.status !== "fulfilled"
-      )
-        return undefined;
+      if (paneRead.status !== "fulfilled") return failure(paneRead.reason, "final_pane");
+      if (nativeRead.status !== "fulfilled") return failure(nativeRead.reason, "final_native");
+      if (processRead.status !== "fulfilled") return failure(processRead.reason, "final_process");
       const latest = paneRead.value;
       const latestNative = nativeRead.value;
       const finalProcesses = processRead.value;
+      checkpoint = "final_process";
       const finalMatch = finalProcesses ? await matchesLauncher(finalProcesses.processes[1]!) : false;
-      if (
-        !finalProcesses ||
-        !finalMatch ||
-        JSON.stringify(finalMatch) !== JSON.stringify(initialMatch) ||
-        JSON.stringify(latestNative) !== JSON.stringify(nativeInitial) ||
-        latest.shell_pid !== shellPid ||
-        latest.foreground_process_group_id !== agentPid ||
-        JSON.stringify(finalProcesses) !== JSON.stringify(initialProcesses)
-      )
-        return undefined;
+      if (!finalProcesses) return refuse("native_final_unavailable");
+      if (!finalMatch || JSON.stringify(finalMatch) !== JSON.stringify(initialMatch))
+        return refuse("launcher_mismatch");
+      if (JSON.stringify(latestNative) !== JSON.stringify(nativeInitial))
+        return refuse("session_changed", "final_native");
+      if (latest.shell_pid !== shellPid || latest.foreground_process_group_id !== agentPid)
+        return refuse("process_changed", "final_pane");
+      if (JSON.stringify(finalProcesses) !== JSON.stringify(initialProcesses))
+        return refuse("process_changed");
+      checkpoint = "final_binding";
       const current = await options.binding();
       if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
-        return undefined;
+        return refuse("binding_changed");
       const nativeOccupantId =
         nativeInitial.nativeOccupantId ??
         `process-${createHash("sha256")
@@ -328,8 +424,8 @@ export function createProjectProcessObserver(options: {
         // identity and keys derived from it do not change when the harness updates.
         processes: [{ pid: agent.pid, startTime: nativeProcessStart(agent.birth) }],
       };
-    } catch {
-      return undefined;
+    } catch (error) {
+      return failure(error);
     }
   };
 }

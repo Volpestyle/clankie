@@ -424,11 +424,13 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   };
   const refusedMembershipResponse = () =>
     Response.json({ error: "local_process_membership_required" }, { status: 403 });
+  const bridgeId = randomUUID();
+  const linkHeaders = () => ({ ...authorization(link), "x-clankie-bridge-id": bridgeId });
   const granted = fleetTools(
     () => link,
     refresh,
     requestTimeoutMs,
-    randomUUID(),
+    bridgeId,
     stopMembership,
     () => membershipStopped,
   );
@@ -444,7 +446,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           () =>
             fetch(`${seatRoute(link, paneId, route)}${suffix}`, {
               ...init,
-              headers: { ...authorization(link), "content-type": "application/json" },
+              headers: { ...linkHeaders(), "content-type": "application/json" },
               signal: deadline,
             }),
           deadline,
@@ -455,7 +457,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       // admission refusal permits the one POST retry above.
       if (refused(error) && refresh() && !init)
         return fetch(`${seatRoute(link, paneId, route)}${suffix}`, {
-          headers: authorization(link),
+          headers: linkHeaders(),
           signal: deadline,
         });
       throw error;
@@ -737,7 +739,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       let receiptUnresolved = false;
       try {
         const response = await fetch(`${seatRoute(link, paneId, "events")}?wait=${String(WAIT_MS)}`, {
-          headers: authorization(link),
+          headers: linkHeaders(),
           signal: AbortSignal.timeout(WAIT_MS + 10_000),
         });
         await checkFleetMembership(response);
@@ -774,7 +776,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
             `${seatRoute(link, paneId, "events")}/${encodeURIComponent(event.id)}/ack`,
             {
               method: "POST",
-              headers: authorization(link),
+              headers: linkHeaders(),
               signal: AbortSignal.timeout(10_000),
             },
           );
@@ -816,7 +818,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
             () =>
               fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
                 ...init,
-                headers: { ...authorization(link), "content-type": "application/json" },
+                headers: { ...linkHeaders(), "content-type": "application/json" },
                 signal: deadline,
               }),
             deadline,
@@ -828,7 +830,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         // Only the explicit admission refusal permits the retry above.
         if (refused(error) && refresh() && !init)
           return fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
-            headers: authorization(link),
+            headers: linkHeaders(),
             signal: AbortSignal.timeout(Math.min(20_000, requestTimeoutMs)),
           });
         throw error;

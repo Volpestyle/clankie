@@ -7,7 +7,12 @@ import type { FleetProofRefusalReason } from "@clankie/protocol";
 import { nativeRequest, NativePaneNotFoundError } from "./herdr-native-request.ts";
 import type { NativeTransportReason } from "./native-process-transport.ts";
 import { FleetAdmissionUnavailableError } from "./local-fleet-admission.ts";
-import { createProjectProcessObserver, type ProjectProcessProof } from "./project-process-proof.ts";
+import {
+  createProjectProcessObserver,
+  type ProjectProcessProof,
+  type ProjectProcessRefusal,
+} from "./project-process-proof.ts";
+import type { LocalFleetProofRequestContext } from "./local-fleet-link.ts";
 import {
   fleetProcessHelper,
   observeSocketProcess,
@@ -83,11 +88,17 @@ export interface LocalFleetProofOptions extends Pick<
   /** Server-owned additional lifetime pin. It can refuse, never grant admission. */
   expectedOwner?(socket: Socket): NativeSocketOwner | undefined;
   /** Server-owned opt-in diagnostics; fixed stages only, never caller authority. */
-  diagnostics?(event: LocalFleetProofDiagnostic, pane?: string): void;
+  diagnostics?(
+    event: LocalFleetProofDiagnostic,
+    pane?: string,
+    context?: LocalFleetProofRequestContext,
+  ): void;
 }
 
 export type LocalFleetProofDiagnostic =
   | { source: "proof_success" }
+  | { source: "socket_owner"; owner: NativeSocketOwner }
+  | { source: "project"; event: ProjectProcessRefusal }
   | { source: "native"; checkpoint: "initial" | "final"; event: NativeProcessDiagnostic }
   | { source: "transport"; reason: NativeTransportReason }
   | {
@@ -95,9 +106,14 @@ export type LocalFleetProofDiagnostic =
       reason: FleetProofRefusalReason;
     };
 
-function diagnostic(options: LocalFleetProofOptions, event: LocalFleetProofDiagnostic, pane?: string) {
+function diagnostic(
+  options: LocalFleetProofOptions,
+  event: LocalFleetProofDiagnostic,
+  pane?: string,
+  context?: LocalFleetProofRequestContext,
+) {
   try {
-    void Promise.resolve(options.diagnostics?.(event, pane)).catch(() => {});
+    void Promise.resolve(options.diagnostics?.(event, pane, context)).catch(() => {});
   } catch {
     /* Observation never changes admission. */
   }
@@ -117,11 +133,17 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
   const execute = options.run ?? run;
   const observe = options.observeSocket;
   const owners = new WeakMap<Socket, NativeSocketOwner>();
-  return async (socket: Socket, pane: string, signal?: AbortSignal): Promise<boolean> => {
+  return async (
+    socket: Socket,
+    pane: string,
+    signal?: AbortSignal,
+    context?: LocalFleetProofRequestContext,
+  ): Promise<boolean> => {
+    const emit = (event: LocalFleetProofDiagnostic) => diagnostic(options, event, pane, context);
     signal?.throwIfAborted();
     let refusalRecorded = false;
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
-      diagnostic(options, { source: "proof", reason }, pane);
+      emit({ source: "proof", reason });
       refusalRecorded = true;
       if (
         admission &&
@@ -143,8 +165,8 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
             expected,
             options.diagnostics === undefined
               ? undefined
-              : (event) => diagnostic(options, { source: "native", checkpoint, event }, pane),
-            (reason) => diagnostic(options, { source: "transport", reason }, pane),
+              : (event) => emit({ source: "native", checkpoint, event }),
+            (reason) => emit({ source: "transport", reason }),
             signal,
           );
     if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
@@ -167,6 +189,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       const initial = await snapshot("initial", options.expectedOwner?.(socket) ?? owners.get(socket));
       signal?.throwIfAborted();
       if (!initial) return refuse("native_initial_unavailable");
+      emit({ source: "socket_owner", owner: initial.owner });
       if (!alive()) return refuse("closed_socket");
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
       const paneInfo = async () => {
@@ -229,12 +252,12 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       // Pin only an admitted connection's identity. Every later check still
       // observes OS ownership, ancestry, the linked pane and registry afresh.
       owners.set(socket, initial.owner);
-      diagnostic(options, { source: "proof_success" }, pane);
+      emit({ source: "proof_success" });
       return true;
     } catch (error) {
       signal?.throwIfAborted();
       if (error instanceof FleetAdmissionUnavailableError) {
-        if (!refusalRecorded) diagnostic(options, { source: "proof", reason: "observation_failed" }, pane);
+        if (!refusalRecorded) emit({ source: "proof", reason: "observation_failed" });
         throw error;
       }
       return refuse("observation_failed");
@@ -250,6 +273,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     pane: string,
     expected?: NativeSocketOwner,
     signal?: AbortSignal,
+    context?: LocalFleetProofRequestContext,
   ) =>
     options.observeSocket !== undefined
       ? options.observeSocket(socket, expected, signal)
@@ -259,8 +283,8 @@ export function localProjectProof(options: LocalFleetProofOptions) {
           expected,
           options.diagnostics === undefined
             ? undefined
-            : (event) => diagnostic(options, { source: "native", checkpoint, event }, pane),
-          (reason) => diagnostic(options, { source: "transport", reason }, pane),
+            : (event) => diagnostic(options, { source: "native", checkpoint, event }, pane, context),
+          (reason) => diagnostic(options, { source: "transport", reason }, pane, context),
           signal,
         );
   const owners = new WeakMap<Socket, NativeSocketOwner>();
@@ -268,10 +292,17 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     socket: Socket,
     pane: string,
     signal?: AbortSignal,
+    context?: LocalFleetProofRequestContext,
   ): Promise<ProjectProcessProof | undefined> => {
+    const emit = (event: LocalFleetProofDiagnostic) => diagnostic(options, event, pane, context);
+    let projectRefusal: ProjectProcessRefusal | undefined;
     signal?.throwIfAborted();
     const observe = createProjectProcessObserver({
       ...options,
+      refusal: (event) => {
+        projectRefusal = event;
+        emit({ source: "project", event });
+      },
       ...(signal ? { signal } : {}),
       ...(options.diagnostics === undefined
         ? {}
@@ -280,13 +311,13 @@ export function localProjectProof(options: LocalFleetProofOptions) {
               event: NativeProcessDiagnostic,
               checkpoint: "initial" | "final",
               pane: string,
-            ) => diagnostic(options, { source: "native", checkpoint, event }, pane),
+            ) => diagnostic(options, { source: "native", checkpoint, event }, pane, context),
             nativeTransportDiagnostics: (reason: NativeTransportReason, pane: string) =>
-              diagnostic(options, { source: "transport", reason }, pane),
+              diagnostic(options, { source: "transport", reason }, pane, context),
           }),
     });
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
-      diagnostic(options, { source: "proof", reason }, pane);
+      emit({ source: "proof", reason });
       return undefined;
     };
     if ((options.platform ?? process.platform) !== "darwin") return refuse("unsupported_platform");
@@ -311,16 +342,18 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       // those socket checkpoints bracket the private-registry checks below.
       const proof = await observe("default", pane);
       signal?.throwIfAborted();
-      if (!proof) return refuse("pane_unavailable");
+      if (!proof) return refuse(projectRefusalReason(projectRefusal));
       const initial = await observeSocket(
         socket,
         "initial",
         pane,
         options.expectedOwner?.(socket) ?? owners.get(socket),
         signal,
+        context,
       );
       signal?.throwIfAborted();
       if (!initial) return refuse("native_initial_unavailable");
+      emit({ source: "socket_owner", owner: initial.owner });
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
       if (!alive()) return refuse("closed_socket");
       if (
@@ -356,7 +389,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         (await options.privateProjectSeat?.(chain, pane, binding, proof, signal)) === true;
       signal?.throwIfAborted();
       if (!direct && !privateSeat) return refuse("not_member");
-      const final = await observeSocket(socket, "final", pane, initial.owner, signal);
+      const final = await observeSocket(socket, "final", pane, initial.owner, signal, context);
       signal?.throwIfAborted();
       if (!final) return refuse("native_final_unavailable");
       const finalProof = await observe("default", pane);
@@ -387,11 +420,32 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
         return refuse("binding_changed");
       owners.set(socket, initial.owner);
-      diagnostic(options, { source: "proof_success" }, pane);
+      emit({ source: "proof_success" });
       return privateSeat ? { ...proof, privateSeat: true } : proof;
     } catch {
       signal?.throwIfAborted();
       return refuse("observation_failed");
     }
   };
+}
+
+function projectRefusalReason(event: ProjectProcessRefusal | undefined): FleetProofRefusalReason {
+  switch (event?.reason) {
+    case "pane_unavailable":
+      return "pane_unavailable";
+    case "binding_unavailable":
+      return "missing_binding";
+    case "native_initial_unavailable":
+      return "native_initial_unavailable";
+    case "native_final_unavailable":
+      return "native_final_unavailable";
+    case "process_changed":
+      return "snapshot_changed";
+    case "session_changed":
+      return "pane_changed";
+    case "binding_changed":
+      return "binding_changed";
+    default:
+      return "observation_failed";
+  }
 }

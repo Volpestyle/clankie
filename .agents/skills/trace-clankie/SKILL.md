@@ -78,6 +78,19 @@ message `stored`, delete runtime state, or send a replacement to bypass this gap
 Shapes, retention and the Discord media and Linear activity details are in
 [the trail map](reference/trail-map.md).
 
+For fleet proof alerts, start with `clankie metrics --fleet` and its coverage
+start; compare rates only within a settled runtime. In the private service log,
+join `fleet.local_proof.refusal_context` and project-stage diagnostics by
+`requestId`. The fixed route and `operation` distinguish fleet admission from
+project membership. `claimedPane` and `claimedBridgeId` are caller claims;
+`callerPid` plus `callerBirth` comes from a kernel observation. Check
+`callerAttribution` and `callerObservedAt`: a previous observation is historical,
+and `unknown` does not identify a sender. A project pane-not-found is distinct
+from harness, launcher, foreground, process/session/binding and transport failures.
+Do not infer the historic sender from today's connected processes. Retain actual
+PID/pane/socket details privately and publish sanitized counts and stages. See
+`docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.
+
 ## Read next, only for the question at hand
 
 - [Captain turns and Discord text](reference/captain-and-discord.md): replies
