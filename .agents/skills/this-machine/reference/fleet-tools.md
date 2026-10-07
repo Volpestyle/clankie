@@ -201,6 +201,18 @@ error exit, prefixed by `×` on Windows or `✘` on macOS. Preparation accepts o
 regular profile still enables the plugin; other errors or changed links remain
 failures. A setup result is never live tool or socket acceptance.
 
+## Harness auto-updates
+
+Local native proof accepts the installed harness executable, or another release
+of the same install that an auto-update left running: the paths differ only in
+one version-named directory or file with the same suffix
+(`…/releases/0.160.0-aarch64-apple-darwin/bin/codex` beside `0.160.1-…`).
+Anything else, such as a different build suffix, install root or file name,
+still refuses. A seat on an older release keeps fleet tools and peer messaging.
+Its roster and doctor `workerTools` entry shows `harnessUpdate` (`running`,
+`installed`, `observedAt`) and a remediation from its last process proof. Resume
+the same thread when it is idle to run the current release.
+
 ## Windows fleets
 
 A configured Windows fleet uses a service-owned SSH relay to admit its live

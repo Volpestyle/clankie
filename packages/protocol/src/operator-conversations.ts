@@ -789,6 +789,20 @@ export const WorkerBridgeStatusSchema = z
     remediation: z.string().min(1).max(2048).optional(),
     runtimeRevision: z.string().min(1).max(256).optional(),
     expectedRuntimeRevision: z.string().min(1).max(256).optional(),
+    /**
+     * Host-observed at the seat's last process proof: it still runs an earlier
+     * harness release than the installed launcher. Messaging keeps working;
+     * resuming the same thread picks up the current release.
+     */
+    harnessUpdate: z
+      .object({
+        harness: z.string().min(1).max(80),
+        running: z.string().min(1).max(64),
+        installed: z.string().min(1).max(64),
+        observedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type WorkerBridgeStatus = z.infer<typeof WorkerBridgeStatusSchema>;
