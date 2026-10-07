@@ -92,6 +92,10 @@ async function fixture(
     return fetch(providerOrigin + url.pathname, init);
   };
   let releaseCommit!: () => void;
+  let reachedCommit!: () => void;
+  const commitReached = new Promise<void>((resolve) => {
+    reachedCommit = resolve;
+  });
   const committed = options.holdCommit
     ? new Promise<void>((resolve) => {
         releaseCommit = resolve;
@@ -102,7 +106,10 @@ async function fixture(
     store,
     env,
     cwd: dir,
-    onModelChanged: () => committed,
+    onModelChanged: () => {
+      reachedCommit();
+      return committed;
+    },
     subscriptionLogin: { browserPort: 0, fetchImpl: transport, timeoutMs: options.timeoutMs ?? 3000 },
   });
   const captain = createStubCaptain();
@@ -116,7 +123,23 @@ async function fixture(
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
   });
-  cleanup.push(() => app.close());
+  const principals = new Map<string, string>();
+  const sessions: { sessionId: string; principal: string }[] = [];
+  cleanup.push(async () => {
+    await app.close();
+    release?.();
+    releaseCommit?.();
+    // close cancels pending logins, but admitted broker/config writes finish.
+    // Observe their terminal state before removing the fixture they still own.
+    for (const { sessionId, principal } of sessions) {
+      for (let i = 0; ; i++) {
+        const value = models.subscriptionStatus!(sessionId, principal);
+        if (!value.ok || value.state !== "committing") break;
+        if (i === 150) throw Error("admitted subscription did not settle before fixture cleanup");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+  });
   const call = (path: string, body?: unknown, token = "owner") =>
     app.app.request(path, {
       method: body === undefined ? "GET" : "POST",
@@ -131,9 +154,11 @@ async function fixture(
         device: { name: "Mac pet", platform: "macos" },
       })
     ).json();
-    return (
+    const paired = await (
       await call("/v1/pairing/complete", { completionToken: pending.completionToken, acceptedGrants: grants })
     ).json();
+    principals.set(paired.deviceToken, `device:${paired.deviceId}`);
+    return paired;
   };
   const catalog = await models.list();
   const model = (providerId: string) =>
@@ -164,6 +189,7 @@ async function fixture(
     expect(response.status).toBe(200);
     expect(value.ok).toBe(true);
     if (!value.ok) throw Error(value.error);
+    sessions.push({ sessionId: value.sessionId, principal: principals.get(token) ?? "operator:owner" });
     return value;
   };
   const callback = async (url: string) => {
@@ -188,6 +214,7 @@ async function fixture(
     callback,
     release: () => release?.(),
     releaseCommit: () => releaseCommit?.(),
+    commitReached,
     exchanges: () => exchanges,
   };
 }
@@ -211,7 +238,11 @@ describe("device subscription setup", () => {
     foreign.searchParams.set("code", "foreign");
     expect((await fetch(foreign)).status).toBe(400);
     expect((await f.callback(interaction.url)).status).toBe(200);
-    const done = await f.wait(login.sessionId, device.deviceToken, (v) => v.ok && v.state !== "pending");
+    const done = await f.wait(
+      login.sessionId,
+      device.deviceToken,
+      (v) => v.ok && v.state !== "pending" && v.state !== "committing",
+    );
     expect(done).toMatchObject({ ok: true, state: "complete" });
     expect(done).not.toHaveProperty("url");
     for (const token of ["owner", device.deviceToken]) {
@@ -336,7 +367,11 @@ describe("device subscription setup", () => {
     ).toMatchObject({ state: "cancelled" });
     const second = await f.start(device.deviceToken);
     expect(
-      await f.wait(second.sessionId, device.deviceToken, (v) => v.ok && v.state !== "pending"),
+      await f.wait(
+        second.sessionId,
+        device.deviceToken,
+        (v) => v.ok && v.state !== "pending" && v.state !== "committing",
+      ),
     ).toMatchObject({ state: "expired" });
     expect(await f.store.get("openai-codex")).toBeUndefined();
   });
@@ -375,6 +410,9 @@ describe("device subscription setup", () => {
     expect(
       await f.wait(login.sessionId, device.deviceToken, (v) => v.ok && v.state === "committing"),
     ).toMatchObject({ state: "committing" });
+    // Admission precedes the broker write; this real callback is reached only
+    // after both credentials and model selection are durable.
+    await f.commitReached;
     expect(
       await (
         await f.call(
@@ -387,7 +425,11 @@ describe("device subscription setup", () => {
     expect((await f.store.get("openai-codex"))?.type).toBe("oauth");
     f.releaseCommit();
     expect(
-      await f.wait(login.sessionId, device.deviceToken, (v) => v.ok && v.state === "complete"),
+      await f.wait(
+        login.sessionId,
+        device.deviceToken,
+        (v) => v.ok && v.state !== "pending" && v.state !== "committing",
+      ),
     ).toMatchObject({ state: "complete" });
   });
 
@@ -396,7 +438,11 @@ describe("device subscription setup", () => {
     const device = await f.pair();
     const login = await f.start(device.deviceToken, "xai", "device");
     expect(
-      await f.wait(login.sessionId, device.deviceToken, (v) => v.ok && v.state !== "pending"),
+      await f.wait(
+        login.sessionId,
+        device.deviceToken,
+        (v) => v.ok && v.state !== "pending" && v.state !== "committing",
+      ),
     ).toMatchObject({ state: "complete" });
     expect((await f.store.get("xai"))?.type).toBe("oauth");
     expect((await (await f.call("/v1/captain/readiness", undefined, device.deviceToken)).json()).ready).toBe(

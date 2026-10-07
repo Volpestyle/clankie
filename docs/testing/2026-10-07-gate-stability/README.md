@@ -80,3 +80,39 @@ compiler contention for little benefit.
 Raw focused evidence is retained in this worktree under `.local/vuh1762/`:
 `timing/{two,four}.json`, `isolation/{before,after}.log`, `claim/` and `narrow.log`.
 Full gates and their per-step receipts are recorded after landing on main.
+
+## First complete pair attempt
+
+The first clean full gate on `350b74125c5c67c56925a04dccb8f10d9d72e0f1`
+passed every step in 535.58 seconds (8m56s). Vitest took 424.83 seconds:
+796 passing files, 7,322 passing tests and 49 existing manual skips. Vox passed
+124 tests and the native IPC smoke check. Typecheck passed all 29 packages in
+79.30 seconds with 8 cache hits. This is 58% less whole-gate execution time than
+the historical 1,264.34-second baseline, despite a larger current selection.
+
+The next gate fetched current main `d57b74c288c08763cac942acbbcd6fa3ed303fa0`.
+It failed in 509.38 seconds: Vitest took 422.50 seconds, with 7,329 passes,
+three failures and 49 existing manual skips. Static checks and all 29 typechecks
+passed (76.49 seconds, 8 cache hits). Vox and IPC were not reached.
+This breaks the required consecutive clean pair.
+
+All three failures were in `device-subscriptions.integration.test.ts`: terminal
+assertions saw `committing` before credential/config persistence completed, and
+cleanup raced an unfinished write (`ENOTEMPTY`). The failures were reported at
+20:48:14Z, before the owner started deploying at about 20:50Z. The fixture uses
+an in-process app, a provider bound to loopback port zero and a browser callback
+on port zero; it does not contact the live service on port 4310. These were
+premature state assertions, not timeout failures. No contemporaneous machine
+load sample establishes whether load exposed the race.
+
+[Per-step receipts and raw log hashes](initial-full-gates.json) preserve both
+results. Commands execute the complete `pnpm check` selection, serializing
+multi-package compilers inside one heavy permit. Admission waiting is excluded.
+Raw logs and JUnit reports remain in `.local/vuh1762/final-gate-{1,2}/`.
+
+The subscription fixture repair waits past both `pending` and `committing` for
+terminal assertions. Its existing `onModelChanged` callback supplies an explicit
+barrier after durable broker/config writes for the admitted-cancellation case.
+Teardown cancels pending work, releases held provider/commit work and observes
+admitted sessions settle before deleting their files. No production code,
+timeout, retry count or provider/authority assertion changes.
