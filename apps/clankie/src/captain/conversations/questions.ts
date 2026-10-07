@@ -87,7 +87,29 @@ export async function requestQuestion(
   )
     throw new Error("question_turn_unavailable");
   ctx["validQuestionState"](meta);
-  const pending = meta.questions?.records.find((r) => r.question.status === "pending");
+  const matchingPending = () =>
+    meta.questions?.records.find((record) => {
+      if (record.question.status !== "pending") return false;
+      if (workspaceBound) return !!record.projectCreation || record.question.purpose === "preference";
+      if (record.projectCreation || record.question.workerQuestion || input.workerQuestion) return false;
+      if (!isDeepStrictEqual(record.workspace, context.questionBinding?.workspace)) return false;
+      const q = record.question;
+      return isDeepStrictEqual(
+        {
+          purpose: q.purpose,
+          kind: q.kind,
+          prompt: q.prompt,
+          options: q.options.map(({ optionId: _id, ...option }) => option),
+          allowFreeform: q.allowFreeform,
+          ...(q.recommendation ? { recommendation: q.recommendation } : {}),
+          ...(q.waitingOn ? { waitingOn: q.waitingOn } : {}),
+          ...(q.steps ? { steps: q.steps } : {}),
+          ...(q.gate ? { gate: q.gate } : {}),
+        },
+        { ...input, allowFreeform: input.kind === "text" || input.allowFreeform },
+      );
+    });
+  const pending = matchingPending();
   if (pending) return ctx["questionResult"](meta, pending, "ready", "already_pending");
   if (input.purpose === "approval" && !(await ctx["questionGate"]?.(conversationId, input.gate!)))
     return ctx["questionResult"](meta, undefined, "refused", "approval_not_owner_reserved");
@@ -127,7 +149,7 @@ export async function requestQuestion(
     ctx["metas"].get(conversationId) !== meta
   )
     throw new Error("question_turn_unavailable");
-  const concurrent = meta.questions?.records.find((r) => r.question.status === "pending");
+  const concurrent = matchingPending();
   if (concurrent) return ctx["questionResult"](meta, concurrent, "ready", "already_pending");
   meta.questions ??= { incarnationId: randomUUID(), records: [] };
   const record: QuestionRecord = {
@@ -154,7 +176,7 @@ export async function requestQuestion(
     },
   };
   ctx["assertQuestionContext"](meta, record);
-  const existing = meta.questions!.records.find((r) => r.question.status === "pending");
+  const existing = matchingPending();
   if (existing) return ctx["questionResult"](meta, existing, "ready", "already_pending");
   if (meta.questions!.records.some((r) => r.projectCreation?.status === "committing"))
     throw new Error("project_confirmation_consumed");
@@ -191,7 +213,9 @@ export async function requestQuestion(
       context.questionCurrent?.() === false ||
       ctx["runControllers"].get(context.runId)?.conversationId !== conversationId ||
       meta.questions!.records.some(
-        (r) => r.question.status === "pending" || r.projectCreation?.status === "committing",
+        (r) =>
+          (r.question.status === "pending" && (r.projectCreation || r.question.purpose === "preference")) ||
+          r.projectCreation?.status === "committing",
       )
     )
       throw new Error("project_proposal_context_changed");
@@ -222,7 +246,12 @@ export async function requestQuestion(
   const recent = recentLimit ? settled.filter((r) => !protectedClaims.includes(r)).slice(-recentLimit) : [];
   const next = {
     ...previous!,
-    records: [...protectedClaims, ...recent, record],
+    records: [
+      ...previous!.records.filter(
+        (r) => r.question.status === "pending" || protectedClaims.includes(r) || recent.includes(r),
+      ),
+      record,
+    ],
   };
   // Pure validation before publishing the in-memory slot: bounded-state refusal has no IO.
   QuestionStateSchema.parse(next);
@@ -277,7 +306,9 @@ export async function proposeProjectDefaults(
   if (!meta || !context.questionBinding || !ctx["projectOnboarding"])
     throw new Error("project_onboarding_unavailable");
   ctx["validQuestionState"](meta);
-  const existing = meta.questions?.records.find((r) => r.question.status === "pending");
+  const existing = meta.questions?.records.find(
+    (r) => r.question.status === "pending" && (r.projectCreation || r.question.purpose === "preference"),
+  );
   if (existing)
     return existing.projectCreation
       ? ctx["projectProposalOperation"](
@@ -520,20 +551,25 @@ export function cancelPendingQuestion(
   conversationId: string,
   reason: string,
   originRunId?: string,
+  requestId?: string,
 ): void {
   const meta = ctx["metas"].get(conversationId);
   if (!meta) return;
   ctx["validQuestionState"](meta);
-  const record = meta.questions?.records.find(
-    (r) =>
-      r.question.status === "pending" &&
-      (originRunId === undefined || r.question.originRunId === originRunId),
-  );
-  if (!record) return;
+  const records =
+    meta.questions?.records.filter(
+      (r) =>
+        r.question.status === "pending" &&
+        (originRunId === undefined || r.question.originRunId === originRunId) &&
+        (requestId === undefined || r.question.requestId === requestId),
+    ) ?? [];
+  if (!records.length) return;
   const before = structuredClone(meta);
-  record.question.status = "cancelled";
-  record.question.reason = reason;
-  record.question.resolvedAt = new Date().toISOString();
+  for (const record of records) {
+    record.question.status = "cancelled";
+    record.question.reason = reason;
+    record.question.resolvedAt = new Date().toISOString();
+  }
   meta.revision += 1;
   try {
     ctx["saveQuestionMeta"](meta);
@@ -541,18 +577,25 @@ export function cancelPendingQuestion(
     if (!(error instanceof QuestionCommitError && error.committed)) Object.assign(meta, before);
     throw error;
   }
-  ctx["questionIssuers"].delete(record.question.requestId);
-  ctx["publishQuestionResolution"](meta, record);
+  for (const record of records) {
+    ctx["questionIssuers"].delete(record.question.requestId);
+    ctx["publishQuestionResolution"](meta, record);
+  }
 }
 
 export function invalidateQuestionPrincipal(ctx: ConversationStore, deviceId: string): void {
   for (const meta of ctx["metas"].values()) {
-    if (
-      meta.questions?.records.some(
+    const owned =
+      meta.questions?.records.filter(
         (r) => r.question.status === "pending" && r.issuer?.kind === "device" && r.issuer.id === deviceId,
-      )
-    )
-      ctx["cancelPendingQuestion"](meta.conversationId, "owner_context_lost");
+      ) ?? [];
+    for (const record of owned)
+      ctx["cancelPendingQuestion"](
+        meta.conversationId,
+        "owner_context_lost",
+        undefined,
+        record.question.requestId,
+      );
   }
 }
 
@@ -590,7 +633,14 @@ export async function questionOperation(
     (await ctx["reconcileWorkerQuestion"](record.question)) === "resolved"
   ) {
     await authorizeQuestion(authority);
-    ctx["resolveWorkerQuestionElsewhere"](meta, record, authority!);
+    if (
+      ctx["metas"].get(meta.conversationId) === meta &&
+      meta.questions?.records.includes(record) &&
+      record.question.status === "pending" &&
+      !record.workerDelivery &&
+      !ctx["workerAnswerInFlight"].has(record.question.requestId)
+    )
+      ctx["resolveWorkerQuestionElsewhere"](meta, record, authority!);
   }
   if (record?.question.status === "pending") {
     const checkedRequestId = record.question.requestId;
@@ -617,7 +667,12 @@ export async function questionOperation(
     if (record && record.question.requestId !== checkedRequestId)
       return ctx["questionResult"](meta, undefined, "refused", "context_changed");
     if (lost && record?.question.status === "pending")
-      ctx["cancelPendingQuestion"](meta.conversationId, "owner_context_lost");
+      ctx["cancelPendingQuestion"](
+        meta.conversationId,
+        "owner_context_lost",
+        undefined,
+        record.question.requestId,
+      );
   }
   if (request.op === "input_get")
     return ctx["questionResult"](meta, record, "ready", record ? undefined : "unknown_request");
@@ -638,13 +693,23 @@ export async function questionOperation(
   try {
     ctx["assertQuestionContext"](meta, record);
   } catch {
-    ctx["cancelPendingQuestion"](meta.conversationId, "owner_context_lost");
+    ctx["cancelPendingQuestion"](
+      meta.conversationId,
+      "owner_context_lost",
+      undefined,
+      record.question.requestId,
+    );
     return ctx["questionResult"](meta, record, "refused", "owner_context_lost");
   }
   if (request.expectedRevision !== meta.revision)
     return ctx["questionResult"](meta, record, "revision_conflict");
   if (request.op === "input_cancel") {
-    ctx["cancelPendingQuestion"](meta.conversationId, "owner_cancelled");
+    ctx["cancelPendingQuestion"](
+      meta.conversationId,
+      "owner_cancelled",
+      undefined,
+      record.question.requestId,
+    );
     return ctx["questionResult"](meta, record, "resolved");
   }
   const answer = request.answer;

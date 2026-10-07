@@ -25,5 +25,5 @@ export async function escalateWorkerQuestion(
     admission,
   );
   if (result.status !== "ready" || result.question?.workerQuestion?.requestId !== question.requestId)
-    throw new Error("Owner ask unavailable or another question is already pending");
+    throw new Error("Owner ask unavailable or native question identity changed");
 }

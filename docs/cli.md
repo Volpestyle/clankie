@@ -4036,7 +4036,13 @@ ask but cannot read the owner's private worker questions.
 
 HTTP clients use `POST /operator/v1/dispatch` with `schemaVersion: 1` and
 `op: "input_list"`, optionally `status` and `conversationId`. The result is
-`{questions: [ConversationQuestionResult, ...]}`. `input_get`, `input_answer` and
+`{questions: [ConversationQuestionResult, ...]}`, newest first. A conversation
+can have several open asks, each with its own `waitingOn` and immutable ID.
+Answering or cancelling one leaves the others open. Revision is shared by the
+conversation: after `revision_conflict`, refresh and answer the same request ID.
+Pending asks and uncertain native claims are protected; creation refuses at
+256 records or 512,000 serialized bytes per conversation instead of evicting them.
+`input_get`, `input_answer` and
 `input_cancel` keep their existing immutable target. All four operations require
 an authenticated operator or an active device with `terminalControl`; a captain
 bearer alone cannot read the owner mailbox or answer. Hosted devices use the same

@@ -619,18 +619,27 @@ export class ConversationStore {
         for (const meta of this.metas.values()) {
           if (request.conversationId && request.conversationId !== meta.conversationId) continue;
           this.validQuestionState(meta);
-          const record = meta.questions?.records.find(
-            (r) => r.question.status === "pending" && r.question.workerQuestion && !r.workerDelivery,
-          );
-          if (
-            record &&
-            !this.workerAnswerInFlight.has(record.question.requestId) &&
-            this.reconcileWorkerQuestion &&
-            (await this.reconcileWorkerQuestion(record.question)) === "resolved"
-          ) {
-            await authorizeQuestion(authority);
-            this.resolveWorkerQuestionElsewhere(meta, record, authority!);
-          }
+          const pending =
+            meta.questions?.records.filter(
+              (r) => r.question.status === "pending" && r.question.workerQuestion && !r.workerDelivery,
+            ) ?? [];
+          for (const record of pending)
+            if (
+              record &&
+              !this.workerAnswerInFlight.has(record.question.requestId) &&
+              this.reconcileWorkerQuestion &&
+              (await this.reconcileWorkerQuestion(record.question)) === "resolved"
+            ) {
+              await authorizeQuestion(authority);
+              if (
+                this.metas.get(meta.conversationId) === meta &&
+                meta.questions?.records.includes(record) &&
+                record.question.status === "pending" &&
+                !record.workerDelivery &&
+                !this.workerAnswerInFlight.has(record.question.requestId)
+              )
+                this.resolveWorkerQuestionElsewhere(meta, record, authority!);
+            }
         }
         await authorizeQuestion(authority);
         const questions = [...this.metas.values()]
@@ -638,10 +647,15 @@ export class ConversationStore {
           .flatMap((meta) => {
             this.validQuestionState(meta);
             return (meta.questions?.records ?? [])
+              .toReversed()
               .filter((record) => record.question.status === (request.status ?? "pending"))
               .map((record) => this.questionResult(meta, record, "ready"));
           });
-        questions.sort((a, b) => b.question!.createdAt.localeCompare(a.question!.createdAt));
+        questions.sort(
+          (a, b) =>
+            b.question!.createdAt.localeCompare(a.question!.createdAt) ||
+            a.conversationId.localeCompare(b.conversationId),
+        );
         return { op: "input_list", schemaVersion: 1, result: { questions: questions.slice(0, 1000) } };
       }
       case "input_get":
@@ -1982,13 +1996,20 @@ export class ConversationStore {
       };
     }
     let questionBinding: ConversationTurnContext["questionBinding"];
-    if (
-      !authority &&
-      meta.questions?.records.some(
-        (r) => r.question.status === "pending" && (r.projectCreation || r.question.purpose === "preference"),
-      )
-    )
-      this.cancelPendingQuestion(meta.conversationId, "owner_context_lost");
+    if (!authority) {
+      const legacyPending =
+        meta.questions?.records.filter(
+          (r) =>
+            r.question.status === "pending" && (r.projectCreation || r.question.purpose === "preference"),
+        ) ?? [];
+      for (const record of legacyPending)
+        this.cancelPendingQuestion(
+          meta.conversationId,
+          "owner_context_lost",
+          undefined,
+          record.question.requestId,
+        );
+    }
     if (
       authority &&
       meta.scope.kind === "workspace" &&
@@ -2925,7 +2946,12 @@ export class ConversationStore {
     authority: QuestionAuthority,
   ): void {
     if (record.question.status !== "pending") return;
-    this.cancelPendingQuestion(meta.conversationId, "worker_question_resolved");
+    this.cancelPendingQuestion(
+      meta.conversationId,
+      "worker_question_resolved",
+      undefined,
+      record.question.requestId,
+    );
     this.enqueue(
       meta,
       `Native worker question ${record.question.workerQuestion?.requestId} resolved elsewhere or its original occupant changed. The native answer is unknown; this is an observed outcome, not an owner answer.`,
@@ -3007,8 +3033,13 @@ export class ConversationStore {
     return questionResult(this, meta, record, status, reason);
   }
 
-  public cancelPendingQuestion(conversationId: string, reason: string, originRunId?: string): void {
-    return cancelPendingQuestion(this, conversationId, reason, originRunId);
+  public cancelPendingQuestion(
+    conversationId: string,
+    reason: string,
+    originRunId?: string,
+    requestId?: string,
+  ): void {
+    return cancelPendingQuestion(this, conversationId, reason, originRunId, requestId);
   }
 
   public invalidateQuestionPrincipal(deviceId: string): void {

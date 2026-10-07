@@ -148,11 +148,13 @@ const RecordSchema = z
   });
 export type QuestionRecord = z.infer<typeof RecordSchema>;
 export const QuestionStateSchema = z
-  .object({ incarnationId: z.string().uuid(), records: z.array(RecordSchema).max(33) })
+  .object({ incarnationId: z.string().uuid(), records: z.array(RecordSchema).max(256) })
   .strict()
   .superRefine((state, ctx) => {
     if (
-      state.records.filter((r) => r.question.status === "pending").length > 1 ||
+      state.records.filter(
+        (r) => r.question.status === "pending" && (r.projectCreation || r.question.purpose === "preference"),
+      ).length > 1 ||
       new Set(state.records.map((r) => r.question.requestId)).size !== state.records.length ||
       state.records.some((r) => r.question.incarnationId !== state.incarnationId) ||
       Buffer.byteLength(JSON.stringify(state)) > 512_000

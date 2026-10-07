@@ -139,7 +139,11 @@ your source conversation with the outcome. Never retype or resend it yourself.
 For your own asks use `purpose: decision` with options and recommendation,
 `approval` with the owner-reserved gate, or `owner_action` with exact steps.
 Delegated gates do not raise an owner ask; settings never grant credentials.
-Keep a pending or uncertain ask and reconcile its original ID.
+Several independent asks can stay open in one conversation. Keep each pending
+or uncertain ask and reconcile its original ID. Answer or cancel only that ID;
+a sibling answer can change the conversation revision, so refresh on conflict
+without substituting another ask. Capacity refusal does not evict pending asks
+or uncertain claims.
 
 An uncertain hire, message or answer may already have taken effect. Reconcile
 its original receipt and bound session. Never re-hire, switch bridges, resend

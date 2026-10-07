@@ -65,6 +65,30 @@ retain their original live-owner and workspace identity fences. Pending asks
 protect their source from normal retention pruning. Resolution publishes the
 existing conversation events, so every portal reads the same state.
 
+## Multiple pending asks (2026-10-07)
+
+Each conversation holds several independent pending asks from Clankie and native
+workers. Repeated exact drafts reconcile; different options, `waitingOn`, or
+source workspace remain distinct. Native identity deduplication still spans all
+conversations and preserves the original source and authority. The legacy
+preference/project slot keeps its live-owner and workspace fences.
+
+`input_list` lists every matching ask newest first, retaining `waitingOn` on each
+card. Equal timestamps use newest insertion first within a conversation and
+conversation ID order across conversations. Answer and cancel target only the
+immutable request/incarnation pair. The revision remains conversation-wide:
+a changed sibling card can cause `revision_conflict`; refresh the list and use
+the same request ID, never substitute another ask. Native reconciliation checks
+all pending asks; source reset cancels all affected asks.
+
+Retain all pending asks and submitted/uncertain native claims even beyond the
+32-record settled-history window. Bound each conversation to 256 total records
+and 512,000 serialized bytes, refusing new asks at capacity instead of evicting
+protected records. Each ask keeps its own claim, original source continuation
+authority, idempotent answer, and uncertain-receipt rules across restart. This
+extends the existing app contract without changing its wire shape or adding a
+second mailbox store.
+
 ## Gates and scope
 
 Use the effective global/project `autonomy.fleet` leaves from
