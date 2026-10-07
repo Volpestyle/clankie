@@ -3,11 +3,14 @@ export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
 import { OperatorConversationServiceRequestSchema } from "./index.ts";
 import { FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
 import { RUNTIME_HEALTH_PATH } from "./runtime-health.ts";
+import { OFFICIAL_DISCORD_BODY_PATH } from "./official-discord.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
   if (hostedDiscordAllows(method, path)) return true;
+  // A self-hosted machine's free official bot (VUH-1766); never the edge's web permits.
+  if (path === OFFICIAL_DISCORD_BODY_PATH) return method === "GET" || method === "POST";
   // Only this explicit projection query is supported. Unknown, duplicated or
   // encoded queries never acquire authority through URL normalization.
   if (path === `${PROJECTS_PATH}?includeAutonomy=true`) return method === "GET";

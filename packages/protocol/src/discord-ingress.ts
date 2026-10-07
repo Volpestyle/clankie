@@ -5,11 +5,13 @@ import {
   DiscordPresenceAttachmentSchema,
   DiscordPresenceChannelTurnRequestSchema,
 } from "./index.ts";
+import { DiscordIdSchema } from "./discord-ids.ts";
+
+export { DiscordIdSchema, DiscordWakeTriggerSchema, type DiscordWakeTrigger } from "./discord-ids.ts";
 
 /** Trusted connection ingress, never an operator or general-purpose captain bearer. */
 export const DISCORD_INGRESS_PATH = "/v1/discord/ingress";
 export const DISCORD_INGRESS_DOMAIN = "clankie-discord-ingress-v1";
-export const DiscordIdSchema = z.string().regex(/^[0-9]{1,20}$/u);
 /** Recent channel messages a connection buffered before the trigger (VUH-1765). */
 export const DISCORD_INGRESS_CONTEXT_MAX = 20;
 export const DISCORD_INGRESS_CONTEXT_BODY_MAX = 2_000;
@@ -22,13 +24,6 @@ export const DiscordIngressContextMessageSchema = z
   })
   .strict();
 export type DiscordIngressContextMessage = z.infer<typeof DiscordIngressContextMessageSchema>;
-/**
- * What wakes a body for ordinary channel chat (VUH-1765): `addressed` is a
- * mention, DM, reply or slash command; `name` adds his name in a message;
- * `any` lets every admitted message reach him so he decides for himself.
- */
-export const DiscordWakeTriggerSchema = z.enum(["addressed", "name", "any"]);
-export type DiscordWakeTrigger = z.infer<typeof DiscordWakeTriggerSchema>;
 const Encoded32 = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 /** Connection-owned voice RPCs carry no credential or general operator authority. */
 export const DiscordIngressVoiceSchema = z.discriminatedUnion("action", [

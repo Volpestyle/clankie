@@ -142,6 +142,8 @@ export interface ClankieAppDependencies {
   pluginVersionInstalled?: (version: string) => void;
   refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
   discordIngress?: DiscordIngressPort;
+  /** The free official bot on a self-hosted machine (VUH-1766): live status and on/off. */
+  officialDiscord?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["officialBot"];
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
   /** Durable operator MCP hire/delivery receipts, retained across service restarts. */

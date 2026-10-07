@@ -33,7 +33,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Discord picker directory               | `clankie discord directory [servers\|channels\|roles\|people] --server ID` (omit server for servers; inspect state/reason before claiming coverage)                |
 | Shared Discord settings definition     | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)                                                                   |
 | Discord server setup                   | `clankie discord setup`, `… connect --server NAME --role participant\|admin`, `… fleet --enabled on\|off`, `… tracking --level LEVEL` (see `docs/cli.md`)          |
-| Free official Clankie bot              | `clankie discord official [status\|on\|off]` (needs `remote-access on`; Add to Discord finishes on the account page; status names limits and any block)            |
+| Free official Clankie bot              | `clankie discord official [status\|on\|off]` (needs `remote-access on`; no restart; Add to Discord on the account page; status names limits and any block)         |
 | Non-secret Discord setup               | `clankie discord status`, `clankie discord set --active-body bot …`                                                                                                |
 | Explicit Discord test post             | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe                                                              |
 | Desktop expressions / quiet hours      | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`                                                                |
@@ -220,8 +220,9 @@ lets Clankie choose that representation before the first event.
 Managed (hosted) Discord connections are in [Hosted Clankie](hosted.md#managed-discord-connection).
 
 A self-hosted machine can use the free official Clankie bot instead of its own
-(`clankie discord official on`, then restart and Add to Discord from the account
-page). The hosted edge keeps the official token and delivers sealed messages to
+(`clankie discord official on`, then Add to Discord from the account page; no
+restart, and the app's Settings → Discord uses the same `/v1/discord/official`
+route). The hosted edge keeps the official token and delivers sealed messages to
 this machine through its signed-in account connection; replies, tools and
 authority still come from this machine's settings, so the edge's owner flag
 grants nothing. Limits apply per account and per server; a refusal or block

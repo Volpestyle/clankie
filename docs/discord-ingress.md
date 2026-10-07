@@ -60,7 +60,10 @@ P-256 ingress key in its credential broker and registers it at
 `POST /fleet/v1/self-hosted/discord/register` with the account bearer. The
 fleet answers with the route id the permits name and its public Ed25519 permit
 keys. The edge then delivers through the public gateway to the machine's
-account-derived host. Until registration succeeds, the route answers 503.
+account-derived host. Until registration succeeds, the route answers 503, and
+while the official bot is off it answers 404. `GET`/`POST /v1/discord/official`
+reports and changes this in the running service, without a restart
+([CLI and route contract](cli.md#discord-official-statusonoff)).
 The edge's `owner` flag grants nothing on this route: the machine's own Discord
 settings decide authority, exactly as for a bring-your-own bot. Contracts are in
 `@clankie/protocol/official-discord`.

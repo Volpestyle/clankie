@@ -16,6 +16,12 @@ import {
   type SupportGrantListResponse,
 } from "@clankie/protocol/support-access";
 export * from "./discord-setup.ts";
+import {
+  OFFICIAL_DISCORD_BODY_PATH,
+  OfficialDiscordBodyStatusSchema,
+  OfficialDiscordBodyUpdateSchema,
+  type OfficialDiscordBodyStatus,
+} from "@clankie/protocol/official-discord";
 import { createDiscordSetupApi } from "./discord-api.ts";
 import {
   ACTIVITY_SHARES_PATH,
@@ -595,6 +601,25 @@ export class ClankieApiClient {
       headers: this.captainHeaders(),
       body: JSON.stringify(input),
     });
+  }
+  /** The free official bot's live status on this machine (VUH-1766). */
+  public async discordOfficial(): Promise<OfficialDiscordBodyStatus> {
+    return parseProtocolResponse(
+      OfficialDiscordBodyStatusSchema,
+      await this.request(OFFICIAL_DISCORD_BODY_PATH, { headers: this.operatorHeaders(), redirect: "error" }),
+    );
+  }
+  /** Turns the official bot on or off without a restart; a refusal throws with its code. */
+  public async setDiscordOfficial(enabled: boolean): Promise<OfficialDiscordBodyStatus> {
+    return parseProtocolResponse(
+      OfficialDiscordBodyStatusSchema,
+      await this.request(OFFICIAL_DISCORD_BODY_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        body: JSON.stringify(OfficialDiscordBodyUpdateSchema.parse({ enabled })),
+        redirect: "error",
+      }),
+    );
   }
   public async discordRoomVoice() {
     return parseProtocolResponse(

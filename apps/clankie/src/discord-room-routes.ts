@@ -24,6 +24,12 @@ import {
   DiscordSetupTestPostRequestSchema,
   DISCORD_SETUP_TEST_POST_PATH,
 } from "@clankie/protocol";
+import {
+  OFFICIAL_DISCORD_BODY_PATH,
+  OfficialDiscordBodyUpdateSchema,
+  type OfficialDiscordBodyRefusal,
+  type OfficialDiscordBodyStatus,
+} from "@clankie/protocol/official-discord";
 import type { ClankieSettings } from "@clankie/settings";
 import { resolveDiscordSettings } from "@clankie/settings";
 import type { CaptainPort } from "./captain/port.ts";
@@ -53,6 +59,14 @@ export interface DiscordRoomRoutesOptions {
   ): Promise<DiscordDirectorySnapshot>;
   environment?: NodeJS.ProcessEnv;
   policy?: Pick<ManagedDiscord, "sync" | "status" | "invitationApplicationId">;
+  /** The free official bot on a self-hosted machine (VUH-1766); absent on a hosted body. */
+  officialBot?: {
+    status(): Promise<OfficialDiscordBodyStatus>;
+    setEnabled(
+      enabled: boolean,
+      guard: () => Promise<void>,
+    ): Promise<OfficialDiscordBodyStatus | OfficialDiscordBodyRefusal>;
+  };
   authorize(request: Request, access: RoomAccess): Promise<RoomAuthorization | undefined>;
   captain: Pick<CaptainPort, "serveOperatorConversation">;
   observations: DiscordRoomObservations;
@@ -213,6 +227,39 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
       revision: discordSettingsRevision(settings),
       ...metadata,
     });
+  });
+  app.get(OFFICIAL_DISCORD_BODY_PATH, async (context) => {
+    const authority = await options.authorize(context.req.raw, "observe");
+    if (!authority) return context.json({ error: "room_observe_required" }, 403);
+    if (!options.officialBot) return context.json({ error: "official_bot_unavailable" }, 404);
+    const status = await options.officialBot.status();
+    await authority.guard();
+    if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
+    context.header("cache-control", "no-store");
+    return context.json(status);
+  });
+  app.post(OFFICIAL_DISCORD_BODY_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
+    const authority = await options.authorize(context.req.raw, "settings");
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    if (!options.officialBot) return context.json({ error: "official_bot_unavailable" }, 404);
+    const parsed = OfficialDiscordBodyUpdateSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_official_bot_request" }, 400);
+    const guard = async () => {
+      await authority.guard();
+      if (!authority.current()) throw new Error("operator_revoked");
+    };
+    let result: OfficialDiscordBodyStatus | OfficialDiscordBodyRefusal;
+    try {
+      await guard();
+      result = await options.officialBot.setEnabled(parsed.data.enabled, guard);
+    } catch (error) {
+      if (error instanceof Error && /revoked/u.test(error.message))
+        return context.json({ error: "operator_revoked" }, 403);
+      throw error;
+    }
+    context.header("cache-control", "no-store");
+    if ("error" in result) return context.json(result, result.error === "fleet_unavailable" ? 502 : 409);
+    return context.json(result);
   });
   app.get(DISCORD_DIRECTORY_PATH, async (context) => {
     const authority = await options.authorize(context.req.raw, "observe");

@@ -49,7 +49,7 @@ import { createHostPowerMonitor } from "./host-power.ts";
 import { createFleetResourceRuntime } from "./fleet-resource-runtime.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress, createHostedDiscordVoiceCallback } from "./discord-ingress.ts";
-import { OfficialDiscordIngress } from "./official-discord.ts";
+import { OfficialDiscordControl, OfficialDiscordIngress } from "./official-discord.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
@@ -1332,17 +1332,23 @@ const hostedDiscord =
         ),
       });
 // VUH-1766: the official bot through the signed-in account, beside any bring-your-own bot.
+// The control turns it on and off without a restart (`/v1/discord/official`).
 const officialDiscord =
-  hostedBody === undefined && accountGatewayRoute !== undefined && startupSettings.discord.officialBotEnabled
-    ? new OfficialDiscordIngress({
-        ...accountGatewayRoute,
-        store: operatorCredentialStore,
-        statePath: join(stateRoot, "discord-official-ingress.json"),
-        captain,
-        onCode: (code) => logger.info({ event: "discord.official", code }, "official Discord route"),
+  hostedBody === undefined
+    ? new OfficialDiscordControl({
+        settings: settingsStore,
+        ...(accountGatewayRoute === undefined ? {} : { account: accountGatewayRoute }),
+        open: (account) =>
+          new OfficialDiscordIngress({
+            ...account,
+            store: operatorCredentialStore,
+            statePath: join(stateRoot, "discord-official-ingress.json"),
+            captain,
+            onCode: (code) => logger.info({ event: "discord.official", code }, "official Discord route"),
+          }),
       })
     : undefined;
-officialDiscord?.start();
+await officialDiscord?.start();
 async function linearFollowing(): Promise<boolean> {
   const current = await settingsStore.load();
   const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
@@ -1637,7 +1643,7 @@ const clankie = await createClankieApp({
   ...(hostedDiscord === undefined
     ? officialDiscord === undefined
       ? {}
-      : { discordIngress: officialDiscord }
+      : { discordIngress: officialDiscord, officialDiscord }
     : { discordIngress: hostedDiscord.ingress, hostedDiscordOperator: hostedDiscord.operator }),
   accounts: createAccounts({
     hosted: hostedBody !== undefined,

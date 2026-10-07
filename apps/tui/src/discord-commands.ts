@@ -464,7 +464,7 @@ export async function runDiscordAdvancedWizard(
         continue;
       }
       if (choice === "official") {
-        await editOfficialBot(shell, services);
+        await editOfficialBot(shell);
         continue;
       }
       if (choice === "primer") {
@@ -496,26 +496,28 @@ export async function runDiscordAdvancedWizard(
 }
 
 /** The free official bot through the Clankie account (VUH-1766); same API as `clankie discord official`. */
-async function editOfficialBot(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+async function editOfficialBot(shell: ClankieFaceShell): Promise<void> {
   const show = async (args: string[]) => {
     try {
-      const result = await runDiscordOfficialCommand(args, { settings: services.settings });
+      const result = await runDiscordOfficialCommand(args);
       shell.insertCommandResult("/discord", formatDiscordOfficial(result).join("\n"), "success");
+      return result;
     } catch (error) {
       shell.insertCommandResult("/discord", error instanceof Error ? error.message : String(error), "error");
+      return undefined;
     }
   };
-  await show(["status"]);
-  const enabled = (await services.settings.load()).discord.officialBotEnabled;
+  const current = await show(["status"]);
+  if (current === undefined) return;
   const choice = await shell.setupFlow.readSelect({
     message: "Official Clankie bot",
-    options: enabled
+    options: current.enabled
       ? [
           { value: "keep", label: "Keep it on" },
           { value: "off", label: "Turn it off", hint: "removes the server connection" },
         ]
       : [
-          { value: "on", label: "Turn it on", hint: "then restart and Add to Discord" },
+          { value: "on", label: "Turn it on", hint: "then Add to Discord" },
           { value: "keep", label: "Leave it off" },
         ],
     allowBack: true,

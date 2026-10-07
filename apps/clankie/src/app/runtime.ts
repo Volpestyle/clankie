@@ -879,6 +879,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         ...(dependencies.discordPermissions ? { permissions: dependencies.discordPermissions } : {}),
         ...(dependencies.discordTestPost ? { testPost: dependencies.discordTestPost } : {}),
         ...(dependencies.managedDiscord ? { policy: dependencies.managedDiscord } : {}),
+        ...(dependencies.officialDiscord ? { officialBot: dependencies.officialDiscord } : {}),
         authorize: authorizeRoom,
         captain: dependencies.captain,
         observations: dependencies.roomObservations,

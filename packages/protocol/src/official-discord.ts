@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DiscordIdSchema, DiscordWakeTriggerSchema } from "./discord-ingress.ts";
+import { DiscordIdSchema, DiscordWakeTriggerSchema } from "./discord-ids.ts";
 
 /**
  * The free official-bot route for a self-hosted install (VUH-1766). A machine
@@ -112,3 +112,48 @@ export const OfficialDiscordStatusSchema = z
   })
   .strict();
 export type OfficialDiscordStatus = z.infer<typeof OfficialDiscordStatusSchema>;
+
+/**
+ * This machine's official-bot route, served by the body (VUH-1766). The app and
+ * `clankie discord official` read and change it here: GET with observe access,
+ * POST with operator (Take Control) access. Node-free, so the app can import it.
+ */
+export const OFFICIAL_DISCORD_BODY_PATH = "/v1/discord/official";
+
+export const OfficialDiscordBodyStatusSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    /** The saved `discord.officialBotEnabled` setting. */
+    enabled: z.boolean(),
+    /** Registered with the account and accepting deliveries in this running service. */
+    running: z.boolean(),
+    /** This machine is signed in to a Clankie account (`clankie remote-access on`). */
+    signedIn: z.boolean(),
+    /** Where to finish Add to Discord, in a browser signed in to the same account. */
+    installUrl: z.string().url().optional(),
+    /** What the hosted fleet reports: registration, server, block and usage against limits. */
+    official: OfficialDiscordStatusSchema.optional(),
+    /** Why the fleet's report is missing, such as `not_signed_in` or the fleet's error code. */
+    fleetError: z.string().min(1).max(200).optional(),
+    /** The owner's next step, in plain words. */
+    next: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+export type OfficialDiscordBodyStatus = z.infer<typeof OfficialDiscordBodyStatusSchema>;
+
+export const OfficialDiscordBodyUpdateSchema = z.object({ enabled: z.boolean() }).strict();
+export type OfficialDiscordBodyUpdate = z.infer<typeof OfficialDiscordBodyUpdateSchema>;
+
+/** Why turning the official bot on was refused; nothing was changed. */
+export const OfficialDiscordBodyRefusalSchema = z
+  .object({
+    error: z.enum([
+      "not_signed_in",
+      /** This machine's own Discord bot is the official application: one gateway connection per token. */
+      "official_application_is_local_bot",
+      "fleet_unavailable",
+    ]),
+    detail: z.string().min(1).max(500),
+  })
+  .strict();
+export type OfficialDiscordBodyRefusal = z.infer<typeof OfficialDiscordBodyRefusalSchema>;

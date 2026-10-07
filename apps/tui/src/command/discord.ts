@@ -273,7 +273,7 @@ export async function runDiscordCommand(
   if (verb === "official")
     return await runDiscordOfficialCommand(args.slice(1), {
       ...(options.env === undefined ? {} : { env: options.env }),
-      ...(options.settings === undefined ? {} : { settings: options.settings }),
+      ...(options.host === undefined ? {} : { host: options.host }),
       ...(options.operatorCredentialStore === undefined
         ? {}
         : { credentials: options.operatorCredentialStore }),

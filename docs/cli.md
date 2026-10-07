@@ -4062,27 +4062,42 @@ overrides, whose variable names appear in `overriddenByEnvironment`.
 ### `discord official [status|on|off]`
 
 The free official Clankie bot through the signed-in Clankie account
-(VUH-1766). `on` requires `clankie remote-access on`, refuses when this
-machine's own bot is the official application, and sets
-`discord.officialBotEnabled`; after `clankie restart` the service registers an
-ingress key with the account and the owner chooses Add to Discord at
-`installUrl`. `status` returns the fleet's route (`registered`, `discord`,
-`usage` per named limit, and `blocked` with its scope and reason). `off` clears
-the setting and removes the route, which disconnects the server.
+(VUH-1766). The command calls the running service's `/v1/discord/official`
+route, the same one the app uses, so on and off take effect without a restart.
+`on` requires `clankie remote-access on`, refuses when this machine's own bot is
+the official application, sets `discord.officialBotEnabled` and registers an
+ingress key with the account; the owner then chooses Add to Discord at
+`installUrl`. `status` returns the setting, whether this service is
+`running` the route, and the fleet's report (`registered`, `discord`, `usage`
+per named limit, and `blocked` with its scope and reason). `off` clears the
+setting, stops the route and removes it from the account, which disconnects the
+server.
 
 ```json
 {
   "ok": true,
+  "schemaVersion": 1,
   "enabled": true,
+  "running": true,
+  "signedIn": true,
+  "installUrl": "https://api.clankie.bot/fleet/account/?discord=self-hosted",
   "official": {
     "registered": true,
     "installUrl": "https://api.clankie.bot/fleet/account/?discord=self-hosted",
     "discord": { "connected": true, "guildName": "Studio" },
     "usage": [{ "limit": "account_messages_per_day", "used": 12, "max": 500, "resetsAtMs": 1791417600000 }]
-  },
-  "installUrl": "https://api.clankie.bot/fleet/account/?discord=self-hosted"
+  }
 }
 ```
+
+`GET /v1/discord/official` (observe access) returns that status without `ok`;
+`POST /v1/discord/official` with `{"enabled": true|false}` (operator access,
+Take Control in the app) changes it and returns the new status. A refused `on`
+changes nothing and answers 409 `{error, detail}` with `not_signed_in` or
+`official_application_is_local_bot`, or 502 `fleet_unavailable`. The app reaches
+both through the hosted operator bridge. A hosted body answers 404
+`official_bot_unavailable`; it already uses the official bot. Contracts are in
+`@clankie/protocol/official-discord`.
 
 ### `discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]`
 

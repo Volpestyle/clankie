@@ -111,8 +111,8 @@ explains discovery.
 “Hang out in our server, but only jump in when we address you.” `/discord`
 connects a server with a **Participant** or **Admin** role and picks his rooms.
 The quickest way in is the free **official Clankie bot**: sign in with
-`clankie remote-access on`, run `clankie discord official on` and
-`clankie restart`, then choose **Add to Discord** on your account page. No
+`clankie remote-access on`, run `clankie discord official on` (or turn it on in
+the app's Discord settings), then choose **Add to Discord** on your account page. No
 developer portal, bot token or intents setup; Clankie still runs on your
 machine with your own keys. The official bot has fair-use limits per account
 and per server, and `clankie discord official` shows them. Creating your own

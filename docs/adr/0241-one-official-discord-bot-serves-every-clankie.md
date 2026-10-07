@@ -38,6 +38,10 @@ and [ADR 0227](0227-discord-connects-a-server-with-a-role.md).
 
 - `@clankie/protocol/official-discord` carries the registration and status
   contract; `discord-ingress` gains the `message` kind and bounded `context`.
+- The body's `GET`/`POST /v1/discord/official` reports the fleet's status and
+  turns the route on and off without a restart. The app and
+  `clankie discord official` both use it; the contract stays node-free so the app
+  can import it.
 - Message Content is privileged: past 100 servers the official app needs Discord
   verification and approval for the intent, which is James's step and not
   guaranteed. Without it ambient buffering is inert; addressed chat is unaffected.
