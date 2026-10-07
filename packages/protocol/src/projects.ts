@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HireProfileSchema, HireEffortSchema } from "./hire-profile.ts";
+import { HireProfileSchema, HireEffortSchema, withoutNoPreference } from "./hire-profile.ts";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
 import {
   AutonomySettingsWireSchema,
@@ -234,9 +234,12 @@ export const CreateProjectSettingsSchema = z
     workspacePath: z.string().min(1).max(4096),
     roles: z
       .array(
-        ProjectRoleSchema.extend({
-          concurrencyCap: ProjectRoleSchema.shape.concurrencyCap.unwrap().nullable().optional(),
-        }).strict(),
+        z.preprocess(
+          withoutNoPreference,
+          ProjectRoleSchema.extend({
+            concurrencyCap: ProjectRoleSchema.shape.concurrencyCap.unwrap().nullable().optional(),
+          }).strict(),
+        ),
       )
       .max(256)
       .optional(),
@@ -342,7 +345,8 @@ export const UpdateProjectSettingsSchema = z
     changes: z
       .object({
         name: z.string().trim().min(1).max(100).optional(),
-        roles: z.array(ProjectRoleSchema).max(256).optional(),
+        /** `auto` model/effort (or subagent model/effort) means no preference: saved unset. */
+        roles: z.array(z.preprocess(withoutNoPreference, ProjectRoleSchema)).max(256).optional(),
         workerCap: z.number().int().min(0).max(1000).nullable().optional(),
         autonomy: ProjectAutonomyPatchSchema.optional(),
         trackerRef: z

@@ -7,6 +7,7 @@ import {
   formatFleetAutonomyGuidance,
   type FleetAutonomy,
   FleetResourcePolicySchema,
+  withoutNoPreference,
 } from "@clankie/protocol";
 import { createResourceGovernor, type FleetResourceGovernor } from "@clankie/fleet-resources";
 import { projectRolePolicy } from "@clankie/protocol/projects";
@@ -223,7 +224,7 @@ async function parseSet(
     } else if (flag === "--hire-profile" && change.hire === undefined) {
       const text = await readFile(value, "utf8");
       if (Buffer.byteLength(text) > 16 * 1024) throw new Error("Hire profile is too large");
-      change.hire = HireProfileSchema.parse(JSON.parse(text));
+      change.hire = HireProfileSchema.parse(withoutNoPreference(JSON.parse(text)));
     } else if (flag === "--notes" && change.notes === undefined) {
       if (value.length > 4_000) throw new Error("Keep --notes under 4000 characters.");
       change.notes = value;

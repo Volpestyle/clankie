@@ -17,7 +17,8 @@ names are registry-validated and refuse when missing or retired. Project and
 role caps count starting, live and uncertain seats, and a finished turn still
 holds its pane and slot. `clankie fleet status` shows effective profiles; the
 owner edits them with `clankie agents role ROLE --project PROJECT` or
-`/agents roles`.
+`/agents roles`, where `auto` model or effort means no preference. With no
+preference, pass a model or effort only when you choose one for that task.
 
 Changing `clankie model` or `clankie effort` tunes Clankie's own turns, not an
 external worker. A pane label or a brief asking for effort is not

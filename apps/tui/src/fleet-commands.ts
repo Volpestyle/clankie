@@ -369,13 +369,13 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
   }
 }
 
-/** `codex · gpt-6 · high · subagents gpt-6-mini` — the fields a role actually sets. */
+/** `codex · gpt-6 · high · subagents gpt-6-mini` — the fields a role sets; an unset model or effort is Clankie's choice per hire. */
 function hireProfileLine(profile: Record<string, unknown>): string {
   const subagents = profile.subagents as { model?: string; effort?: string } | null | undefined;
   return [
     profile.harness,
-    profile.model,
-    profile.effort,
+    profile.model ?? "model: no preference",
+    profile.effort ?? "effort: no preference",
     profile.delegation,
     profile.placement,
     profile.account === undefined ? undefined : `account ${String(profile.account)}`,

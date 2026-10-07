@@ -68,9 +68,9 @@ Size toward the owner's targets in "Your fleet" (`clankie fleet status`):
 
 `optimal` uses the strongest model at the effort each job needs; `efficient`
 the smallest that meets acceptance. Targets are not caps, but every worker must
-own a separable result, no budget removes a required review, and security,
-concurrency and shared integration keep a top model at high effort unless the
-owner chooses otherwise.
+own a separable result and no budget removes a required review. There is no
+fixed model or effort rule: where the owner set no preference, choose them for
+the task or omit them and let the harness decide.
 
 ## Brief an owned result
 

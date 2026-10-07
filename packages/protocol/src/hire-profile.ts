@@ -23,6 +23,26 @@ export const HireProfileSchema = z
   })
   .strict();
 export type HireProfile = z.infer<typeof HireProfileSchema>;
+/**
+ * The owner's "no preference" spelling for a launch field. It is never stored:
+ * the field stays unset, so the next layer or Clankie decides per hire.
+ */
+export const HIRE_NO_PREFERENCE = "auto";
+/** Drops `auto` harness, model, effort and subagent model/effort from a profile-shaped value. */
+export function withoutNoPreference(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const profile: Record<string, unknown> = { ...value };
+  for (const key of ["harness", "model", "effort"])
+    if (profile[key] === HIRE_NO_PREFERENCE) delete profile[key];
+  const subagents = profile.subagents;
+  if (typeof subagents === "object" && subagents !== null && !Array.isArray(subagents)) {
+    const child: Record<string, unknown> = { ...subagents };
+    for (const key of ["model", "effort"]) if (child[key] === HIRE_NO_PREFERENCE) delete child[key];
+    if (Object.keys(child).length) profile.subagents = child;
+    else delete profile.subagents;
+  }
+  return profile;
+}
 export type EffectiveHireProfile = HireProfile & { harness: (typeof OPERATOR_SEAT_HARNESSES)[number] };
 
 /** Explicit hire fields win, then role fields, then fleet defaults. Nested fields inherit independently. */

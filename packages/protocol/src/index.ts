@@ -4,7 +4,9 @@ export * from "./discord-server.ts";
 export {
   HireEffortSchema,
   HireProfileSchema,
+  HIRE_NO_PREFERENCE,
   effectiveHireProfile,
+  withoutNoPreference,
   type HireProfile,
   type EffectiveHireProfile,
 } from "./hire-profile.ts";

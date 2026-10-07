@@ -465,8 +465,7 @@ export const FLEET_SIZE_GUIDANCE: Readonly<Record<FleetSize, string>> = {
 /** How a model and effort are chosen per job under each mode. */
 export const FLEET_MODEL_GUIDANCE: Readonly<Record<FleetModelMode, string>> = {
   optimal: "Pick the strongest model and the effort each job needs; cost is not a reason to downgrade a job.",
-  efficient:
-    "Pick the smallest model and the lowest effort that still meet each job's acceptance; keep the top model for consequential boundaries (safety, data integrity, live surfaces, a disputed review).",
+  efficient: "Pick the smallest model and the lowest effort that still meet each job's acceptance.",
 };
 
 export const FleetSettingsSchema = z

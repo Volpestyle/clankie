@@ -2228,10 +2228,10 @@ An owner who wants a thousand agents picks `max` or says so in the notes.
 | `small`         | one mid-tier plan, about $100/month                                | one or two workers at a time; the rest sequenced                                                                                             |
 | `solo`          | pay-per-token API use                                              | no standing workers: he works himself or through short native subagents, and asks before a long or parallel run                              |
 
-| `--models`          | Picks per job                                                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `optimal` (default) | the strongest model and the effort the job needs; cost is not a reason to downgrade                                                                                                   |
-| `efficient`         | the smallest model and lowest effort that still meet the job's acceptance; the top model stays on consequential boundaries (safety, data integrity, live surfaces, a disputed review) |
+| `--models`          | Picks per job                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `optimal` (default) | the strongest model and the effort the job needs; cost is not a reason to downgrade |
+| `efficient`         | the smallest model and lowest effort that still meet the job's acceptance           |
 
 **The default notes are empty**, and empty means he picks a harness per job on his
 own. Nothing here ships with an opinion; this is where you add one.
@@ -2259,7 +2259,7 @@ clankie fleet set --notes "codex is the workhorse. claude when it needs skills o
 clankie fleet set --size small --models efficient
 clankie fleet set --peer-messages off
 clankie fleet set --harness codex --model gpt-6.1-sol --effort xhigh
-clankie fleet set --effort auto
+clankie fleet set --model auto --effort auto
 clankie fleet set --closure owner --machine-setup owner
 clankie fleet set --commit lead --push lead --release owner
 clankie fleet set --verification review_and_seal --report-style "Short and plain."
@@ -2463,11 +2463,17 @@ current saved role, including a cleared role.
 its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
 `--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,
 `--account LABEL`, `--placement new-tab|split`, `--cap N` and `--naming TEXT`.
-`inherit` clears one preference; omitted fields remain unchanged. The console's
-`/agents roles` menu sets the same fields.
+`auto` for harness, model, effort, subagent model or subagent effort means no
+preference: the field is saved unset, so the fleet default applies and, with
+none, Clankie chooses per hire or leaves it to the harness. `inherit` clears any
+field; omitted fields remain unchanged. The console's `/agents roles` menu sets
+the same fields and shows unset launch fields as "no preference". A
+`project update` changes file may carry `"model": "auto"` or `"effort": "auto"`
+in a role, with the same result as omitting the field.
 
 ```sh
 clankie agents role implementer --project clankie --harness codex --model "sol 6.1" --effort xhigh --subagent-model "sol 6.1" --subagent-effort medium --delegation native-first --placement new-tab
+clankie agents role implementer --project clankie --model auto --effort auto --subagent-model auto --subagent-effort auto
 ```
 
 Explicit hire fields expressing the owner's words win over the role, then

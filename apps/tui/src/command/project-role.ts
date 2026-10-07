@@ -1,4 +1,4 @@
-import { effectiveHireProfile } from "@clankie/protocol";
+import { HIRE_NO_PREFERENCE, effectiveHireProfile } from "@clankie/protocol";
 import { ProjectRoleSchema, projectRolePolicy } from "@clankie/protocol/projects";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { runProjectSettingsCommand } from "./project-settings.ts";
@@ -11,7 +11,7 @@ export async function runProjectRoleCommand(
   const role = args[0];
   if (!role || args.length < 3 || args.length % 2 !== 1)
     throw new Error(
-      "Usage: clankie agents role ROLE --project PROJECT [--model NAME ...]; inherit clears a field",
+      "Usage: clankie agents role ROLE --project PROJECT [--model NAME|auto ...]; auto means no preference for harness, model and effort, inherit clears any field",
     );
   const flags = new Map<string, string>();
   const fields = [
@@ -41,15 +41,18 @@ export async function runProjectRoleCommand(
   if (!project) throw new Error("Unknown project");
   const prior = projectRolePolicy(project, role);
   const value: Record<string, unknown> = { ...prior, role };
+  // `auto` is no preference: unset, like the fleet's own `auto`, so Clankie decides per hire.
+  const clears = (key: string, v: string | undefined) =>
+    v === "inherit" || (v === HIRE_NO_PREFERENCE && /(^|-)(harness|model|effort)$/u.test(key));
   for (const key of ["harness", "model", "effort", "delegation", "account", "placement"]) {
     const v = flags.get(key);
-    if (v === "inherit") delete value[key];
+    if (clears(key, v)) delete value[key];
     else if (v !== undefined) value[key] = v;
   }
   const subagents: Record<string, unknown> = { ...prior?.subagents };
   for (const key of ["model", "effort"]) {
     const v = flags.get(`subagent-${key}`);
-    if (v === "inherit") delete subagents[key];
+    if (clears(`subagent-${key}`, v)) delete subagents[key];
     else if (v !== undefined) subagents[key] = v;
   }
   if (Object.keys(subagents).length) value.subagents = subagents;

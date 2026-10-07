@@ -22,7 +22,11 @@ const ROLE_FIELDS: readonly {
   { flag: "cap", label: "Concurrency cap", read: (p) => p.concurrencyCap },
   { flag: "naming", label: "Hire naming", read: (p) => p.hireNaming },
 ];
-const shown = (value: unknown) => (value === undefined || value === null ? "inherit" : String(value));
+/** Launch choices where unset is the owner's "no preference": Clankie decides per hire. */
+const PREFERENCE_FIELDS = new Set(["harness", "model", "effort", "subagent-model", "subagent-effort"]);
+const unset = (value: unknown) => value === undefined || value === null;
+const shown = (flag: string, value: unknown) =>
+  unset(value) ? (PREFERENCE_FIELDS.has(flag) ? "no preference" : "inherit") : String(value);
 
 /** One-line role summary: only the fields the owner actually set. */
 function roleSummary(policy: RolePolicy | undefined): string {
@@ -97,21 +101,26 @@ async function editRole(shell: ClankieFaceShell, projectId: string, role: string
       options: ROLE_FIELDS.map((entry) => ({
         value: entry.flag,
         label: entry.label,
-        hint: shown(entry.read(policy)),
+        hint: shown(entry.flag, entry.read(policy)),
       })),
       allowBack: true,
     });
     if (!field) return;
     const current = ROLE_FIELDS.find((entry) => entry.flag === field)?.read(policy);
+    const preference = PREFERENCE_FIELDS.has(field);
     const value = await flow.readText({
-      message: `${role} ${field} (inherit clears it)`,
-      ...(current === undefined || current === null ? {} : { defaultValue: String(current) }),
+      message: preference
+        ? `${role} ${field} (auto: no preference, Clankie decides per hire)`
+        : `${role} ${field} (inherit clears it)`,
+      ...(unset(current) ? (preference ? { defaultValue: "auto" } : {}) : { defaultValue: String(current) }),
       placeholder:
         field === "delegation"
           ? "native-first or panes"
           : field === "placement"
             ? "new-tab or split"
-            : "friendly model, level or label",
+            : preference
+              ? "auto, or a friendly model, level or harness"
+              : "friendly model, level or label",
       allowBack: true,
     });
     if (!value?.trim()) continue;
