@@ -164,6 +164,8 @@ try {
     )}\n`,
   );
 
+  // Releases are readable, not private: a hosted body copies its seed as another user.
+  run("chmod", ["-R", "a+rX", releaseRoot]);
   await mkdir(outputDir, { recursive: true });
   if (hosted) {
     const destination = join(outputDir, "hosted");
