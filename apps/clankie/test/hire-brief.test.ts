@@ -125,7 +125,7 @@ test.each([
     vi.spyOn(HerdrWatchStore.prototype, "awaitPickup").mockResolvedValue("working");
     // This fixture isolates outbound receipt projection; exact native adoption
     // and its persisted lead route are covered by worker-lead-routing.test.ts.
-    vi.spyOn(HerdrWatchStore.prototype, "adoptSeat").mockResolvedValue();
+    vi.spyOn(HerdrWatchStore.prototype, "adoptSeat").mockResolvedValue({ adopted: true });
     const send = vi.spyOn(HerdrWatchStore.prototype, "deliverToSeat").mockResolvedValue(delivery);
     try {
       const bank = await captain.laneToolBank("operator", "global-default");

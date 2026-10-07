@@ -164,7 +164,35 @@ it("forwards question text and exact answer address to the hiring conversation, 
   await vi.waitFor(() => expect(f.wake.mock.calls.flat().join(" ")).toContain("finished after answer"));
 });
 
-it.each(["owner", "occupant", "grant"])(
+it("another lead's answer reaches the question and the hire keeps its lead (VUH-1763)", async () => {
+  const owner = authority();
+  const f = await fixture(owner);
+  f.question();
+  await vi.waitFor(() => expect(f.wake).toHaveBeenCalled());
+  const answer = { requestId: "question-1", answers: { scope: { answers: ["clankie"] } } };
+  expect(await f.store.adoptSeat("term_test", authority("lead-b"))).toEqual({
+    adopted: false,
+    ownerConversationId: "lead-a",
+  });
+  expect(await f.store.answerSeatQuestion("term_test", answer, authority("lead-b"))).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "responded",
+  });
+  expect(f.answerQuestion).toHaveBeenCalledWith(answer, expect.any(Function));
+  expect(f.store.nativeOwner(f.agent)).toEqual({ conversationId: "lead-a" });
+  f.wake.mockClear();
+  f.emit("turn/completed", {
+    id: "turn",
+    status: "completed",
+    items: [{ type: "agentMessage", text: "finished after answer" }],
+  });
+  await vi.waitFor(() => expect(f.wake.mock.calls.flat().join(" ")).toContain("finished after answer"));
+  const woken = (f.wake.mock.calls as unknown as unknown[][]).map((call) => call[0]);
+  expect(woken).toContain("lead-a");
+  expect(woken).not.toContain("lead-b");
+});
+
+it.each(["occupant", "grant"])(
   "refuses an answer when the %s changes before native dispatch",
   async (changed) => {
     let allowed = true;
@@ -172,7 +200,6 @@ it.each(["owner", "occupant", "grant"])(
     const f = await fixture(owner);
     f.question();
     await vi.waitFor(() => expect(f.wake).toHaveBeenCalled());
-    if (changed === "owner") await f.store.adoptSeat("term_test", authority("lead-b"));
     if (changed === "occupant") f.replaceOccupant();
     if (changed === "grant") allowed = false;
     const promise = f.store.answerSeatQuestion(

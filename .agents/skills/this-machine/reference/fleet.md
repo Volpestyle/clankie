@@ -154,11 +154,12 @@ example are in `docs/cli.md` under `hire-receipt` recovery.
 
 Each hire belongs to the conversation that hired it. `clankie herdr agent list`
 shows every worker's `owner` conversation (or `unowned`) and, from a seat with
-`CLANKIE_CONVERSATION_ID`, `mine: true|false`. Steer only your own: `message_seat`
-or `close_worker_pane` on another lead's hire returns `not_owner` naming its
-`ownerConversationId`. Coordinate with that lead or the owner instead; reading,
-`agent read` and observing stay open. A hire whose lead conversation is gone,
-or a hand-started seat, can still be adopted by messaging it.
+`CLANKIE_CONVERSATION_ID`, `mine: true|false`. You may message another lead's
+hire: `message_seat` delivers, names its `ownerConversationId`, and the hire
+keeps its lead, so its reports go there, not to you. Only that lead closes it:
+`close_worker_pane` on another lead's hire returns `not_owner`. A hire whose
+lead conversation is gone, or a hand-started seat, is adopted by the
+conversation that messages it.
 
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion

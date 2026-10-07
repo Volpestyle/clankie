@@ -7,7 +7,6 @@ import { ConversationStore } from "../src/captain/conversations.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import {
   HerdrWatchStore,
-  SeatOwnedElsewhereError,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
@@ -86,16 +85,17 @@ it.each([undefined, "away"])(
 );
 
 it.each([undefined, "away"])(
-  "refuses another lead steering a %s hire, naming its owner, while the owner and unowned seats proceed",
+  "another lead messaging a %s hire leaves its lead in place, while unowned seats are adopted",
   async (fleet) => {
     const f = fixture(fleet, true);
     const store = new HerdrWatchStore(f.path, { runner: f.runner, validateOwner: async () => true });
     expect(store.seatClaim(f.agent)).toEqual({ owner: { conversationId: "lead-a" }, hired: true });
-    const refused = store.adoptSeat(f.agent.terminalId, authority("lead-b"));
-    await expect(refused).rejects.toBeInstanceOf(SeatOwnedElsewhereError);
-    await expect(refused).rejects.toMatchObject({ code: "not_owner", ownerConversationId: "lead-a" });
-    expect(store.nativeOwner(f.agent)).toEqual({ conversationId: "lead-a" });
-    await store.adoptSeat(f.agent.terminalId, authority("lead-a"));
+    expect(await store.adoptSeat(f.agent.terminalId, authority("lead-b"))).toEqual({
+      adopted: false,
+      ownerConversationId: "lead-a",
+    });
+    expect(store.seatClaim(f.agent)).toEqual({ owner: { conversationId: "lead-a" }, hired: true });
+    expect(await store.adoptSeat(f.agent.terminalId, authority("lead-a"))).toEqual({ adopted: true });
     expect(store.seatClaim(f.agent)).toEqual({ owner: { conversationId: "lead-a" }, hired: true });
     // Reading and observing another lead's hire stays allowed.
     expect(store.nativeOwner(f.agent)).toEqual({ conversationId: "lead-a" });

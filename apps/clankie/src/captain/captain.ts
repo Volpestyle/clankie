@@ -165,7 +165,6 @@ import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
   createHerdrWatchRunner,
   HerdrWatchStore,
-  SeatOwnedElsewhereError,
   type DiscordWatchOrigin,
   type HerdrAgentSnapshot,
 } from "./herdr-watch.ts";
@@ -1951,17 +1950,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
     const seatId = seat?.seatId ?? seatByPersona.get(target);
     if (seatId === undefined) return { outcome: "unknown_seat", seat: target, deliveryStage: "unavailable" };
+    let ownerConversationId: string | undefined;
     try {
-      await herdrWatches.adoptSeat(seatId, authority);
+      const adoption = await herdrWatches.adoptSeat(seatId, authority);
+      if (!adoption.adopted) ownerConversationId = adoption.ownerConversationId;
     } catch (error) {
-      if (error instanceof SeatOwnedElsewhereError)
-        return {
-          outcome: "not_owner",
-          seatId,
-          ownerConversationId: error.ownerConversationId,
-          deliveryStage: "rejected",
-          detail: error.message,
-        };
       return {
         outcome: "undelivered",
         seatId,
@@ -1979,11 +1972,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (delivery.outcome === "offline")
       return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
-    if (seat) seatEfficiency.assign(seat.occupantId, { owner: authority.owner });
-    if (questionAnswer !== undefined) return { ...delivery, seatId, status: "answered" };
+    // Another lead's hire keeps its lead: its reports and wakes still go there.
+    const led = ownerConversationId === undefined ? {} : { ownerConversationId };
+    if (seat && ownerConversationId === undefined)
+      seatEfficiency.assign(seat.occupantId, { owner: authority.owner });
+    if (questionAnswer !== undefined) return { ...delivery, seatId, status: "answered", ...led };
     if (delivery.state === "queued" && delivery.detail !== undefined)
-      return { ...delivery, seatId, status: "queued_until_turn_end" };
-    return { ...delivery, seatId, status: await herdrWatches.awaitPickup(seatId) };
+      return { ...delivery, seatId, status: "queued_until_turn_end", ...led };
+    return { ...delivery, seatId, status: await herdrWatches.awaitPickup(seatId), ...led };
   };
 
   const roomConversations = new RoomConversations(conversations);

@@ -444,14 +444,14 @@ it("an app built before `owner` existed still reads the owner-bearing roster and
   }
 });
 
-it("the census names a hire's lead and message_seat from another lead is refused naming it", async () => {
+it("the census names a hire's lead; another lead's message_seat delivers and the hire keeps its lead", async () => {
   const f = await fixture();
-  const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
-  if (roster.op !== "roster") throw new Error("roster missing");
-  expect(roster.seats.find((seat) => seat.seatId === f.agent.terminalId)?.owner).toEqual({
-    conversationId: f.leads[0],
-    hired: true,
-  });
+  const owner = async () => {
+    const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+    if (roster.op !== "roster") throw new Error("roster missing");
+    return roster.seats.find((seat) => seat.seatId === f.agent.terminalId)?.owner;
+  };
+  expect(await owner()).toEqual({ conversationId: f.leads[0], hired: true });
   const call = async (lead: string, text: string) => {
     const bank = await f.captain.laneToolBank("operator", lead);
     const sent = await bank.tools
@@ -460,18 +460,30 @@ it("the census names a hire's lead and message_seat from another lead is refused
     const part = sent.content.find((item) => item.type === "text");
     return JSON.parse(part?.type === "text" ? part.text : "null");
   };
-  expect(await call(f.leads[1]!, "Take over this assignment")).toMatchObject({
-    outcome: "not_owner",
-    seatId: f.agent.terminalId,
-    ownerConversationId: f.leads[0],
-    deliveryStage: "rejected",
-  });
-  expect(HerdrWatchStore.prototype.deliverToSeat).not.toHaveBeenCalled();
-  expect(await call(f.leads[0]!, "Owner follow-up")).toMatchObject({
+  expect(await call(f.leads[1]!, "Also check the docs")).toMatchObject({
     outcome: "delivered",
     seatId: f.agent.terminalId,
+    ownerConversationId: f.leads[0],
   });
   expect(HerdrWatchStore.prototype.deliverToSeat).toHaveBeenCalledOnce();
+  expect(await owner()).toEqual({ conversationId: f.leads[0], hired: true });
+  // The worker's next report still reaches its own lead, not the one that messaged it.
+  const poll = f.captain.pollSeatEvents(2000, undefined, f.leads[0]);
+  expect(
+    await f.captain.receiveFleetSeatMessage(
+      f.agent.paneId,
+      "Docs checked",
+      await delivery(f.captain, f.agent.paneId),
+    ),
+  ).toMatchObject({ received: true });
+  const [event] = await poll;
+  expect(event).toMatchObject({ conversationId: f.leads[0] });
+  await f.captain.acknowledgeSeatEvent(event!.id, f.leads[0]);
+  expect(await f.captain.pollSeatEvents(0, undefined, f.leads[1])).toEqual([]);
+  const own = await call(f.leads[0]!, "Owner follow-up");
+  expect(own).toMatchObject({ outcome: "delivered", seatId: f.agent.terminalId });
+  expect(own).not.toHaveProperty("ownerConversationId");
+  expect(HerdrWatchStore.prototype.deliverToSeat).toHaveBeenCalledTimes(2);
 });
 
 it("message_seat adopts another conversation's adopted worker before its immediate report and persists it across restart", async () => {

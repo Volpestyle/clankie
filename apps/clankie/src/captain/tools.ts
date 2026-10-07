@@ -1033,11 +1033,11 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
       "Send a Herdr seat you hired a message down its conversation lane, the way the operator's DM reaches " +
       "it: a follow-up, a correction, an answer to its question. seat is the seatId, personaId or " +
       "conversationId hire_agent returned. Outcomes: delivered (with the seat's status once it picked the " +
-      "message up), unconfirmed, undelivered, seat_offline, unknown_seat, not_owner (another conversation hired " +
-      "this seat; ownerConversationId names that lead, and nothing was sent). Delivery uses the harness " +
+      "message up), unconfirmed, undelivered, seat_offline, unknown_seat. Delivery uses the harness " +
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
       "guidance reached the active turn, not an after-turn queue. deliveryStage reports stored, delivered, consumed or responded; native queue acceptance is consumed, never model-seen. Uncertain blocks every retry until the original receipt is reconciled. " +
-      "A seat this conversation hired, or an unowned one, is adopted with this conversation as its lead; its future message_clankie reports return here. " +
+      "An unowned seat, or a hire whose lead conversation is gone, is adopted with this conversation as its lead; its future message_clankie reports return here. " +
+      "Another lead's live hire still receives the message but keeps its lead: the result names ownerConversationId, and its reports and completion go there. " +
       "To answer an observed native Codex question, supply questionAnswer with its exact requestId and an answers map keyed by question ID ({answers: [text]} per ID), and omit message. Sync answers use the existing request and native first-answer arbitration. Async requestId is the function call_id; answers use attributed native user input, steering the active turn without interruption or starting its reply when idle. Async receipts prove acceptance, not first-answer arbitration. Resolved IDs are refused, and uncertain acceptance must not be retried or replaced with an ordinary message. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({

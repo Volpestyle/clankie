@@ -345,23 +345,6 @@ export class HerdrAgentResponseError extends Error {
   }
 }
 
-/** Steering a seat another conversation hired; reading and observing it stay allowed. */
-export class SeatOwnedElsewhereError extends Error {
-  public readonly code = "not_owner";
-  public readonly seatId: string;
-  public readonly ownerConversationId: string;
-
-  public constructor(seatId: string, ownerConversationId: string) {
-    super(
-      `Seat ${seatId} was hired by conversation ${ownerConversationId}; only that lead steers it. ` +
-        "Coordinate with that lead instead of messaging its worker.",
-    );
-    this.name = "SeatOwnedElsewhereError";
-    this.seatId = seatId;
-    this.ownerConversationId = ownerConversationId;
-  }
-}
-
 function snapshotOf(value: unknown): HerdrAgentSnapshot {
   if (!isRecord(value)) throw new HerdrAgentResponseError("Herdr response did not include an agent");
   const paneId = value.pane_id;
@@ -1169,6 +1152,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     await assertConversationAuthority(authority);
     const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) return { outcome: "offline", detail: "The exact native seat is unavailable." };
+    // Another lead may answer (VUH-1763); the seat's own lead stays its lead.
+    let owner: ConversationOwner | undefined;
+    try {
+      owner = this.nativeOwner(agent);
+    } catch {
+      /* A replaced occupant fails the dispatch guard below; nothing is sent. */
+    }
     const control = await this.seatControl.attach(agent);
     if (!control?.answerQuestion)
       return {
@@ -1183,14 +1173,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         current.paneId !== agent.paneId ||
         current.agent !== agent.agent ||
         nativeSessionId(current) !== nativeSessionId(agent) ||
-        !isDeepStrictEqual(this.nativeOwner(current), authority.owner)
+        owner === undefined ||
+        !isDeepStrictEqual(this.nativeOwner(current), owner)
       )
-        throw new Error("The answering conversation or native occupant changed; no answer was sent.");
+        throw new Error("The seat's lead or native occupant changed; no answer was sent.");
       await assertConversationAuthority(authority);
     };
     const result = await control.answerQuestion(answer, guard);
     if (result.outcome === "answered") {
-      this.watchHiredSeat(seatId, occupantIdForHerdrSession(agent.session), authority.owner);
+      this.watchHiredSeat(seatId, occupantIdForHerdrSession(agent.session), owner!);
       return {
         outcome: "delivered",
         deliveryStage: "responded",
@@ -1340,7 +1331,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /** Persist adoption before native delivery so an immediate report sees its new lead. */
-  public async adoptSeat(seatId: string, source: ConversationAuthority): Promise<void> {
+  /**
+   * Make this conversation the seat's lead before it messages the seat. A live
+   * hire another conversation leads keeps that lead (VUH-1763): the message
+   * still goes, and the result names the lead so reports keep returning there.
+   */
+  public async adoptSeat(
+    seatId: string,
+    source: ConversationAuthority,
+  ): Promise<{ adopted: true } | { adopted: false; ownerConversationId: string }> {
     const authority = captureConversationAuthority(source);
     if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
     await assertConversationAuthority(authority);
@@ -1348,16 +1347,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (!isMessageableSeat(agent) || agent.session === undefined || agent.terminalId !== seatId)
       throw new Error("Exact native session attribution is unavailable");
     this.nativeOwner(agent);
-    // A seat Clankie hired steers only from its hiring conversation; another
-    // lead reads and observes it, but cannot take it over by messaging (VUH-1763).
-    // A hire whose lead conversation no longer exists stays adoptable, so it is never stranded.
+    // Another lead may message a seat Clankie hired, but does not take it over
+    // (VUH-1763). A hire whose lead conversation no longer exists is adopted, so
+    // it is never stranded; hand-started seats are adopted as before.
     const claim = this.seatClaim(agent);
     if (
       claim?.hired === true &&
       claim.owner.conversationId !== authority.owner.conversationId &&
       (this.validateOwner === undefined || (await this.validateOwner(claim.owner)))
     )
-      throw new SeatOwnedElsewhereError(seatId, claim.owner.conversationId);
+      return { adopted: false, ownerConversationId: claim.owner.conversationId };
     await assertConversationAuthority(authority);
     const latest = await this.runner.resolveTerminal(seatId);
     if (
@@ -1379,6 +1378,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ? undefined
         : JSON.stringify([splitFleetQualified(latest.paneId)?.fleet ?? "local", latest.agent, sessionId]),
     );
+    return { adopted: true };
   }
 
   /** Repair a legitimate reattachment only under the thread's existing owning conversation. */
