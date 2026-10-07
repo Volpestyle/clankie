@@ -182,7 +182,7 @@ import {
 } from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { loadRuntimeProvider } from "./runtime-provider.ts";
-import { startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
+import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { createWorkItemsService } from "./work-items.ts";
@@ -988,15 +988,18 @@ const scheduledUpdates =
             deployHolds.landing(`runtime-schedule:${ref}`, [], () => runtimeUpdater.request(ref, authority)),
         },
         enabled: async () => hostedBody !== undefined || (await settingsStore.load()).host.autoUpdate,
-        idle: async () => {
-          const { turns, sharing } = bodyActivity();
-          if (turns > 0 || sharing) return false;
-          for (const fleet of await runtimes.fleets()) {
-            const panes = parseHerdrPaneList(await runtimes.fleetRun(fleet)(["pane", "list"]), true);
-            if (panes.some((pane) => pane.agent !== "unknown")) return false;
-          }
-          return true;
-        },
+        idle: bodyIdleCheck({
+          activity: bodyActivity,
+          voiceHeld: () => bodyLeaseStore.status("voice") !== undefined,
+          agentPanes: async () => {
+            let agents = 0;
+            for (const fleet of await runtimes.fleets())
+              agents += parseHerdrPaneList(await runtimes.fleetRun(fleet)(["pane", "list"]), true).filter(
+                (pane) => pane.agent !== "unknown",
+              ).length;
+            return agents;
+          },
+        }),
         logger,
       })
     : undefined;

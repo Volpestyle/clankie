@@ -64,7 +64,7 @@ On a release install (`clankie doctor` says `kind: release`), `update_runtime` o
 answers `upToDate` when already current; read status the same way. A hosted body
 is a release install too: it runs `/state/install/current`, seeded from the
 image's `/opt/clankie`, and also installs official releases on its own while
-idle (no turn, activity share or hired worker), hourly. A managed body installs
+idle (no turn, activity share, voice call or hired worker), hourly. A managed body installs
 nothing newer than its fleet-approved release: "holding releases" or "not
 approved" is the fleet's decision, not a fault, so report it and wait. Self-run
 owners switch idle installs with `clankie update auto on|off`. The rest of this

@@ -15,7 +15,7 @@ export interface ScheduledUpdateOptions {
   readonly updater: RuntimeUpdater;
   /** The owner's choice; a managed body passes a constant `true`. */
   readonly enabled: () => Promise<boolean>;
-  /** No captain turn, activity share or hired worker is running. */
+  /** No captain turn, activity share, voice call or hired worker is running. */
   readonly idle: () => Promise<boolean>;
   readonly logger: {
     info(fields: Record<string, unknown>, message: string): void;
@@ -79,6 +79,23 @@ export function startScheduledUpdates(options: ScheduledUpdateOptions): {
       clearTimeout(initial);
       clearInterval(timer);
     },
+  };
+}
+
+/**
+ * Idle means nothing a restart would cut: no captain turn or activity share, no
+ * live call holding the voice body (between utterances no turn runs), and no
+ * hired agent pane in any fleet.
+ */
+export function bodyIdleCheck(deps: {
+  readonly activity: () => BodyActivity;
+  readonly voiceHeld: () => boolean;
+  readonly agentPanes: () => Promise<number>;
+}): () => Promise<boolean> {
+  return async () => {
+    const { turns, sharing } = deps.activity();
+    if (turns > 0 || sharing || deps.voiceHeld()) return false;
+    return (await deps.agentPanes()) === 0;
   };
 }
 
