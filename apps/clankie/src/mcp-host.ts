@@ -66,6 +66,15 @@ import { GoogleAccountProviderSchema, type GoogleAccountProvider } from "@clanki
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
 import { compactLinearWrite } from "./linear-write-receipt.ts";
+import {
+  executeLinearGraphql,
+  LINEAR_GRAPHQL_RECONNECT,
+  LINEAR_GRAPHQL_TOOL,
+  linearGraphqlCredential,
+  LinearGraphqlRefusal,
+  planLinearGraphql,
+  type LinearGraphqlPlan,
+} from "./linear-graphql.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
@@ -163,7 +172,9 @@ type McpRefusalReason =
   | "server_unavailable"
   | "result_too_large"
   | "linear_request_budget"
-  | "body_owned";
+  | "body_owned"
+  | "invalid_arguments"
+  | "confirmation_required";
 
 /** In-process service capability; HTTP/model arguments can never construct this symbol. */
 export const MINECRAFT_BODY_ACCESS = Symbol("minecraft-body-access");
@@ -401,8 +412,18 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   const localBinding = createHash("sha256")
     .update(JSON.stringify(["local-tracker", options.trackerIdentity ?? "service-tracker"]))
     .digest("hex");
-  const canonicalTrackerCatalog = (): McpToolDescriptor[] =>
-    trackerCatalog.map((tool) => ({
+  // The GraphQL escape hatch is independent of the MCP transport and of the
+  // tracker backend; the call decides whether a connected app can run it.
+  const graphqlDescriptor = (): McpToolDescriptor => ({
+    ...LINEAR_GRAPHQL_TOOL,
+    inputSchema: LINEAR_GRAPHQL_TOOL.inputSchema as Record<string, unknown>,
+    server: "linear",
+    qualifiedName: `linear_${LINEAR_GRAPHQL_TOOL.name}`,
+    initial: false,
+  });
+  const canonicalTrackerCatalog = (): McpToolDescriptor[] => [
+    graphqlDescriptor(),
+    ...trackerCatalog.map((tool) => ({
       ...tool,
       server: "linear",
       qualifiedName: `linear_${tool.name}`,
@@ -418,7 +439,8 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           },
         },
       },
-    }));
+    })),
+  ];
 
   /**
    * The servers in play right now: curated ones whose credential exists, plus
@@ -791,6 +813,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         })),
       );
     }
+    if (
+      server.id === "linear" &&
+      (options.localTracker || options.linearApiTracker) &&
+      !projected.some((tool) => tool.name === LINEAR_GRAPHQL_TOOL.name)
+    )
+      projected.push(graphqlDescriptor());
     state.tools = projected;
     return projected;
   }
@@ -948,10 +976,29 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           }
         : undefined;
       let dispatched = false;
+      const graphqlCall =
+        input.server === "linear" &&
+        input.tool === LINEAR_GRAPHQL_TOOL.name &&
+        (options.localTracker !== undefined || options.linearApiTracker !== undefined);
       const perform = async (): Promise<McpCallResult> => {
+        let graphqlPlan: LinearGraphqlPlan | undefined;
+        if (graphqlCall) {
+          try {
+            graphqlPlan = planLinearGraphql(input.arguments);
+          } catch (error) {
+            if (!(error instanceof LinearGraphqlRefusal)) throw error;
+            return {
+              outcome: "refused",
+              reason: error.reason,
+              possiblyDispatched: false,
+              detail: error.message,
+            };
+          }
+        }
         // Read discovery never needs a publishing author. This classification
         // only controls optional attribution; fleet/account admission is unchanged.
-        const publicationCall = !isReadTool(input.tool);
+        // GraphQL runs as the app itself; it carries no worker author.
+        const publicationCall = !isReadTool(input.tool) && !graphqlCall;
         const providedSource =
           publicationCall && input.conversationAuthority
             ? captureConversationAuthority(input.conversationAuthority)
@@ -992,6 +1039,25 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             detail: `${server.id} stays at the console. Ask from the operator TUI, not from this room.`,
           };
         }
+        if (graphqlPlan?.mutation && input.lane !== "operator") {
+          return {
+            outcome: "refused",
+            reason: "lane_denied",
+            possiblyDispatched: false,
+            detail: "Linear GraphQL mutations run only from operator tools; this lane may run queries.",
+          };
+        }
+        if (graphqlCall && isLocalTracker(server)) {
+          return {
+            outcome: "refused",
+            reason: "server_unavailable",
+            possiblyDispatched: false,
+            detail: `linear_graphql requires connected Linear; the tracker is using the durable local store. ${LINEAR_GRAPHQL_RECONNECT}`,
+          };
+        }
+        // Only an operation that can change Linear retires cached tracker lists.
+        const linearWrite =
+          server.id === "linear" && (graphqlPlan ? graphqlPlan.mutation : !isReadTool(input.tool));
         const google = googleProvider(server);
         if (
           google !== undefined &&
@@ -1059,7 +1125,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               };
             }
           }
-          const client = repositoryCall ? undefined : await connection(server, state, now);
+          const client = repositoryCall || graphqlCall ? undefined : await connection(server, state, now);
           const connectedAccount =
             input.delegation !== undefined || options.observeCall !== undefined
               ? await account(server, state.credential).catch((error: unknown) => {
@@ -1069,6 +1135,25 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               : undefined;
           if (input.delegation !== undefined && connectedAccount?.binding !== input.delegation.binding)
             throw new Error("Delegated account binding changed; a new grant is required");
+          let graphqlAccess: { bearer: string; credential: ProviderCredential } | undefined;
+          if (graphqlCall) {
+            const selected = await linearGraphqlCredential(options.credentials);
+            const bearer =
+              selected &&
+              (await resolveProviderBearer(selected.id, options.credentials, Date.now(), {
+                fetch: options.linearFetch ?? fetch,
+              }));
+            // Budget accounting and redaction use the refreshed stored credential.
+            const refreshed = selected && (await linearGraphqlCredential(options.credentials));
+            if (!bearer || refreshed?.id !== selected?.id)
+              return {
+                outcome: "refused",
+                reason: "server_unavailable",
+                possiblyDispatched: false,
+                detail: LINEAR_GRAPHQL_RECONNECT,
+              };
+            graphqlAccess = { bearer, credential: refreshed!.credential };
+          }
           await assertCurrent(server, state);
           const workerPost =
             server.id === "linear" && server.credential !== undefined && isLinearWorkerTool(input.tool);
@@ -1133,7 +1218,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               // Synchronous receipt persistence may consume the remaining budget.
               assertDispatch();
               dispatched = true;
-              if (server.id === "linear" && !isReadTool(input.tool)) trackerReads.invalidate();
+              if (linearWrite) trackerReads.invalidate();
             }
           };
           const publication = {
@@ -1209,81 +1294,112 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                   ),
                   isError: false,
                 }
-              : isApiTracker(server) && !workerPost
-                ? collection !== undefined
-                  ? await callCachedLinearCollection(
-                      trackerReads,
-                      input.arguments,
-                      async (args) => {
-                        await assertCurrent(server, state!);
-                        current?.();
-                        providerPages += 1;
-                        return {
-                          content: JSON.stringify(
-                            await options.linearApiTracker!.call(upstreamTool, args, publication),
-                          ),
-                          isError: false,
-                        };
-                      },
-                      JSON.stringify([connectedAccount?.binding, state!.configuration, state!.credential]),
-                      collection,
-                    )
-                  : {
-                      content: JSON.stringify(
-                        await options.linearApiTracker!.call(input.tool, input.arguments, publication),
-                      ),
-                      isError: false,
-                    }
-                : isLocalTracker(server)
-                  ? {
-                      content: JSON.stringify(
-                        await options.localTracker!.call(input.tool, input.arguments, publication),
-                      ),
-                      isError: false,
-                    }
-                  : workerPost
-                    ? await publishLinearWorker({
-                        tool: input.tool,
-                        args: input.arguments,
-                        credential,
-                        author: options.linearAuthor ?? (async () => undefined),
-                        signal,
-                        beforeDispatch: notifyDispatch,
-                        beforeWrite: async () => {
-                          await refreshAttribution();
-                          commitCurrent = await input.fence?.();
+              : graphqlAccess
+                ? await executeLinearGraphql({
+                    plan: graphqlPlan!,
+                    bearer: graphqlAccess.bearer,
+                    credential: graphqlAccess.credential,
+                    signal,
+                    dispatch: () => {
+                      notifyDispatch();
+                      if (graphqlPlan!.destructive.length > 0)
+                        options.logger.info(
+                          {
+                            event: "mcp.host.linear_graphql.destructive",
+                            fields: graphqlPlan!.destructive.map((entry) => entry.field),
+                            targets: graphqlPlan!.destructive.flatMap((entry) => entry.targets),
+                            lane: input.lane,
+                            ...(input.delegation === undefined
+                              ? {}
+                              : {
+                                  worker: {
+                                    grantId: input.delegation.grantId,
+                                    principalId: input.delegation.principalId,
+                                    workId: input.delegation.workId,
+                                  },
+                                }),
+                          },
+                          "linear graphql destructive mutation dispatched",
+                        );
+                    },
+                    ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                    ...(options.linearRequestBudget ? { requestBudget: options.linearRequestBudget } : {}),
+                  })
+                : isApiTracker(server) && !workerPost
+                  ? collection !== undefined
+                    ? await callCachedLinearCollection(
+                        trackerReads,
+                        input.arguments,
+                        async (args) => {
                           await assertCurrent(server, state!);
-                          assertDispatch();
+                          current?.();
+                          providerPages += 1;
+                          return {
+                            content: JSON.stringify(
+                              await options.linearApiTracker!.call(upstreamTool, args, publication),
+                            ),
+                            isError: false,
+                          };
                         },
-                        ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
-                        ...(options.linearRequestBudget
-                          ? { requestBudget: options.linearRequestBudget }
-                          : {}),
-                      })
-                    : await dispatchFence.run(notifyDispatch, () => {
-                        const callUpstream = async (args: Record<string, unknown>) => {
-                          await assertCurrent(server, state!);
-                          assertDispatch();
-                          if (!client!.dispatchesAtWire) notifyDispatch();
-                          if (priorityRead) providerPages += 1;
-                          // Observe the admitted original response under the existing
-                          // provider cap, even after the caller's shorter deadline.
-                          return client!.callTool(upstreamTool, args, REQUEST_TIMEOUT_MS);
-                        };
-                        return options.localTracker && server.id === "linear" && collection !== undefined
-                          ? callCachedLinearCollection(
-                              trackerReads,
-                              input.arguments,
-                              callUpstream,
-                              JSON.stringify([
-                                connectedAccount?.binding,
-                                state!.configuration,
-                                state!.credential,
-                              ]),
-                              collection,
-                            )
-                          : callUpstream(input.arguments);
-                      });
+                        JSON.stringify([connectedAccount?.binding, state!.configuration, state!.credential]),
+                        collection,
+                      )
+                    : {
+                        content: JSON.stringify(
+                          await options.linearApiTracker!.call(input.tool, input.arguments, publication),
+                        ),
+                        isError: false,
+                      }
+                  : isLocalTracker(server)
+                    ? {
+                        content: JSON.stringify(
+                          await options.localTracker!.call(input.tool, input.arguments, publication),
+                        ),
+                        isError: false,
+                      }
+                    : workerPost
+                      ? await publishLinearWorker({
+                          tool: input.tool,
+                          args: input.arguments,
+                          credential,
+                          author: options.linearAuthor ?? (async () => undefined),
+                          signal,
+                          beforeDispatch: notifyDispatch,
+                          beforeWrite: async () => {
+                            await refreshAttribution();
+                            commitCurrent = await input.fence?.();
+                            await assertCurrent(server, state!);
+                            assertDispatch();
+                          },
+                          ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                          ...(options.linearRequestBudget
+                            ? { requestBudget: options.linearRequestBudget }
+                            : {}),
+                        })
+                      : await dispatchFence.run(notifyDispatch, () => {
+                          const callUpstream = async (args: Record<string, unknown>) => {
+                            await assertCurrent(server, state!);
+                            assertDispatch();
+                            if (!client!.dispatchesAtWire) notifyDispatch();
+                            if (priorityRead) providerPages += 1;
+                            // Observe the admitted original response under the existing
+                            // provider cap, even after the caller's shorter deadline.
+                            return client!.callTool(upstreamTool, args, REQUEST_TIMEOUT_MS);
+                          };
+                          return options.localTracker && server.id === "linear" && collection !== undefined
+                            ? callCachedLinearCollection(
+                                trackerReads,
+                                input.arguments,
+                                callUpstream,
+                                JSON.stringify([
+                                  connectedAccount?.binding,
+                                  state!.configuration,
+                                  state!.credential,
+                                ]),
+                                collection,
+                              )
+                            : callUpstream(input.arguments);
+                        });
             if (priorityRead) {
               // A shared/cached read never borrows the first caller's grant. Every
               // waiter rechecks its own revocation and account/config generation.
@@ -1292,7 +1408,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               assertDispatch();
             }
           } finally {
-            if (dispatched && server.id === "linear" && !isReadTool(input.tool)) trackerReads.invalidate();
+            if (dispatched && linearWrite) trackerReads.invalidate();
             selected.activeCalls -= 1;
             // Provider settlement releases the connection; receipt observers
             // can still await without retaining an obsolete transport.
@@ -1380,6 +1496,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           if (
             dispatched &&
             !confirmed &&
+            !graphqlCall &&
             !(error instanceof DispatchRefused) &&
             !(error instanceof LinearRequestBudgetRefused) &&
             state !== undefined &&

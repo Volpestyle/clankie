@@ -63,6 +63,15 @@ Paginate when the response says more exists. For identity,
 it with the intended workspace/account and connection record. Names and portraits
 alone are not identity proof.
 
+For what the curated tools lack (documents, archive/delete, initiatives and
+the rest of Linear's API), `linear_graphql({query, variables?, operationName?,
+confirm?})` runs one GraphQL operation as the Clankie app. Queries work anywhere
+Linear reads do; mutations only from operator tools and admitted fleet workers.
+A `*Delete`/`*Archive`/`*Suspend`/`*Revoke`/`*Purge`/`*Trash` mutation needs
+`confirm` listing exactly its target ids; confirm only what the owner asked to
+remove. Mutations are sent once: reconcile an uncertain one by `receiptId` or a
+fresh read, never by resending.
+
 Ordinary owner and lead reads retain priority. Mark automated Linear polling with
 `clankie_call({name, arguments, background: true})`; at 80% budget use, background
 reads share a one-minute interval and may return `linear_request_budget` with a

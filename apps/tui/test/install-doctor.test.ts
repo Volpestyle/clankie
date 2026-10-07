@@ -153,6 +153,63 @@ describe("install doctor", () => {
     expect(JSON.stringify(disabled)).not.toContain("isolated-doctor-fixture");
   });
 
+  it("reports whether linear_graphql has an app credential and which actor it runs as", async () => {
+    const root = await installRoot();
+    const credentials = new FileCredentialStore(join(root, "credentials.json"));
+    const inspect = () =>
+      inspectInstall({
+        repoRoot: root,
+        env: {
+          HOME: join(root, "home"),
+          XDG_CONFIG_HOME: join(root, "config"),
+          CLANKIE_STATE: join(root, "state"),
+        },
+        settings: new SettingsStore(join(root, "settings.json")),
+        credentialStore: credentials,
+        execFileImpl: missing,
+        fetchImpl: offline,
+      });
+    // An MCP-audience token cannot call api.linear.app/graphql.
+    await credentials.set("linear", { type: "api", key: "isolated-doctor-mcp" });
+    const mcpOnly = await inspect();
+    expect(mcpOnly.linearGraphql).toEqual({
+      usable: false,
+      detail: "connect the Linear API app from /connect linear",
+    });
+    expect(formatDoctorReport(mcpOnly)).toContain(
+      "○ Linear GraphQL · unavailable · connect the Linear API app from /connect linear",
+    );
+    await credentials.set("linear-api", {
+      type: "oauth",
+      access: "isolated-doctor-access",
+      refresh: "isolated-doctor-refresh",
+      expires: 0,
+      linearAuth: "api",
+      account: {
+        provider: "linear",
+        connectionId: "00000000-0000-4000-8000-0000000000d0",
+        userId: "app-user",
+        workspaceId: "workspace",
+        actor: "app",
+        name: "Clankie",
+        workspaceName: "Vuhlp",
+        verifiedAt: "2026-10-07T00:00:00.000Z",
+      },
+    });
+    const connected = await inspect();
+    expect(connected.linearGraphql).toEqual({
+      usable: true,
+      credential: "linear-api",
+      actor: "app",
+      account: "Clankie",
+      workspace: "Vuhlp",
+    });
+    expect(formatDoctorReport(connected)).toContain(
+      "✓ Linear GraphQL · runs as Clankie (app) in Vuhlp · linear-api",
+    );
+    expect(JSON.stringify(connected)).not.toContain("isolated-doctor-access");
+  });
+
   it("keeps missing webhook credentials separate from an empty owner rule", async () => {
     const root = await installRoot();
     const settings = new SettingsStore(join(root, "settings.json"));

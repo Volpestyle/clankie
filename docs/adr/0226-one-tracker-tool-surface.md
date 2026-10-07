@@ -3,6 +3,8 @@
 Status: accepted (James, 2026-10-05). Tracks [VUH-1665](https://linear.app/vuhlp/issue/VUH-1665).
 Amends the tool vocabulary, priority and disconnected behavior of
 [ADR 0191](0191-work-is-tracked-where-the-repo-tracks-it.md).
+Amended by [ADR 0243](0243-linear-graphql-is-the-tracker-escape-hatch.md):
+`linear_graphql` reaches the rest of Linear's API beyond this subset.
 
 ## Context
 

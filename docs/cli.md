@@ -973,6 +973,26 @@ the name and colored Clankie portrait from the fleet. Output includes the MCP
 result and `ok`; provider/tool rejection sets `ok: false` and exits nonzero.
 See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
 
+### `linear graphql --json-stdin`
+
+Run one Linear GraphQL query or mutation through the operator tool bank as the
+connected Clankie app (`linear_graphql`, [ADR 0243](adr/0243-linear-graphql-is-the-tracker-escape-hatch.md)).
+Input is `{ query, variables?, operationName?, confirm? }`. Use it for what the
+curated `linear_*` tools lack, such as documents or archiving. Destructive
+mutations (`*Delete`, `*Archive`, `*Suspend`, `*Revoke`, `*Purge`, `*Trash`) need
+`confirm` listing exactly their target ids. A mutation is sent once; after an
+uncertain result, read the target before any retry. Output includes the tool
+result and `ok`; GraphQL errors set `ok: false` and exit nonzero.
+
+```sh
+printf '%s' '{"query":"mutation($id:String!){documentDelete(id:$id){success}}","variables":{"id":"DOC-UUID"},"confirm":["DOC-UUID"]}' \
+  | clankie linear graphql --json-stdin
+```
+
+`clankie doctor` shows whether it is usable and which app account it runs as.
+It needs the Linear API app (`linear-api`) or a workspace app connected as `linear`;
+the MCP OAuth token cannot call Linear's GraphQL API.
+
 ### `linear budget`
 
 `clankie linear budget` reads `/v1/linear/request-budget` without calling Linear.
