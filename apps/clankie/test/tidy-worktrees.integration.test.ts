@@ -384,15 +384,16 @@ it("authenticated pruning retains enrolled managed namespaces and archives devel
   const origin = join(f.root, "origin.git");
   await git(f.repo, ["clone", "--bare", f.repo, origin]);
   await git(f.repo, ["remote", "add", "origin", origin]);
-  const managed = await Promise.all(
-    [
-      ".clankie/pinned",
-      ".clankie/runtimes/old",
-      ".clankie/updates/operation/stage",
-      "configured/pin",
-      "services/current",
-    ].map((name) => f.worktree(name, true)),
-  );
+  // Each add writes shared Git worktree metadata; serialize fixture mutations.
+  const managed: string[] = [];
+  for (const name of [
+    ".clankie/pinned",
+    ".clankie/runtimes/old",
+    ".clankie/updates/operation/stage",
+    "configured/pin",
+    "services/current",
+  ])
+    managed.push(await f.worktree(name, true));
   const developer = await f.worktree("developer/landed");
   await writeFile(join(f.repo, ".git", "info", "exclude"), ".local/\n");
   for (const path of [...managed, developer]) {
