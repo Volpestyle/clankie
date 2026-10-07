@@ -163,10 +163,14 @@ it("protects persona API writes and status behind owner authentication", async (
   try {
     expect((await clankie.app.request("/v1/operator/persona")).status).toBe(401);
     const headers = { authorization: "Bearer owner", "content-type": "application/json" };
+    const snapshot = await (await clankie.app.request("/v1/operator/persona", { headers })).json();
     const response = await clankie.app.request("/v1/operator/persona", {
       method: "POST",
       headers,
-      body: JSON.stringify({ imagesDir: join(await temp(), "missing") }),
+      body: JSON.stringify({
+        expectedRevision: snapshot.revision,
+        persona: { imagesDir: join(await temp(), "missing") },
+      }),
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -176,7 +180,7 @@ it("protects persona API writes and status behind owner authentication", async (
     const bad = await clankie.app.request("/v1/operator/persona", {
       method: "POST",
       headers,
-      body: JSON.stringify({ imagesDir: ["not a path"] }),
+      body: JSON.stringify({ expectedRevision: snapshot.revision, persona: { imagesDir: ["not a path"] } }),
     });
     expect(bad.status).toBe(400);
   } finally {

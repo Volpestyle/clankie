@@ -1,3 +1,4 @@
+import { fleetSettingsClient } from "./fixtures/fleet-settings-client.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +10,9 @@ it("persists CLI gate presets and individual overrides without changing push or 
   const root = await mkdtemp(join(tmpdir(), "fleet-gates-cli-"));
   try {
     const settings = new SettingsStore(join(root, "settings.json"));
-    await runFleetCommand(["set", "--push", "owner", "--release", "owner"], { settings });
+    await runFleetCommand(["set", "--push", "owner", "--release", "owner"], fleetSettingsClient(settings));
     const result = await runFleetCommand(["set", "--gate-preset", "hands-off", "--hard-to-undo", "owner"], {
-      settings,
+      ...fleetSettingsClient(settings),
     });
     const disk = await new SettingsStore(settings.path).load();
     expect(disk.autonomy.fleet).toMatchObject({
@@ -23,7 +24,9 @@ it("persists CLI gate presets and individual overrides without changing push or 
       release: { mode: "owner" },
     });
     expect(formatFleetLines(result.fleet).join("\n")).toContain("Money and accounts");
-    await expect(runFleetCommand(["set", "--money-and-accounts", "allow"], { settings })).rejects.toThrow();
+    await expect(
+      runFleetCommand(["set", "--money-and-accounts", "allow"], fleetSettingsClient(settings)),
+    ).rejects.toThrow();
     expect((await settings.load()).autonomy.fleet.moneyAndAccounts).toBe("owner");
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -19,7 +19,12 @@ async function fixture(): Promise<{ readonly env: NodeJS.ProcessEnv; readonly se
   const root = await mkdtemp(join(tmpdir(), "clankie-awake-test-"));
   tempDirs.push(root);
   return {
-    env: { HOME: root, XDG_STATE_HOME: join(root, "state"), XDG_CONFIG_HOME: join(root, "config") },
+    env: {
+      CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:1",
+      HOME: root,
+      XDG_STATE_HOME: join(root, "state"),
+      XDG_CONFIG_HOME: join(root, "config"),
+    },
     settings: new SettingsStore(join(root, "config", "settings.json")),
   };
 }
@@ -59,9 +64,9 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
   it("is a launcher noun with a usage error for anything else", async () => {
     expect(HEADLESS_NOUNS).toContain("awake");
     const { env, settings } = await fixture();
-    await expect(runAwakeCommand(["sideways"], { repoRoot: "/repo", env, settings })).rejects.toThrow(
-      /Usage: clankie awake/u,
-    );
+    await expect(
+      runAwakeCommand(["sideways"], { repoRoot: "/repo", localSetup: true, env, settings }),
+    ).rejects.toThrow(/Usage: clankie awake/u);
   });
 
   it("reports off by default with the sleep warning, and starts nothing", async () => {
@@ -70,6 +75,7 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
     const spawned: string[] = [];
     const result = await runAwakeCommand([], {
       repoRoot: "/repo",
+      localSetup: true,
       env,
       settings,
       stderr: quiet,
@@ -96,6 +102,7 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
     const spawned: (readonly string[])[] = [];
     const result = await runAwakeCommand(["on"], {
       repoRoot: "/repo",
+      localSetup: true,
       env,
       settings,
       stderr: quiet,
@@ -121,6 +128,7 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
     const killed: number[] = [];
     const shared = {
       repoRoot: "/repo",
+      localSetup: true,
       env,
       settings,
       stderr: quiet,
@@ -151,7 +159,7 @@ describe.skipIf(process.platform !== "darwin")("clankie awake", () => {
   it("dispatches through the headless launcher as JSON", async () => {
     const { env } = await fixture();
     let out = "";
-    const code = await runHeadlessCaptainCommand(["awake", "status"], {
+    const code = await runHeadlessCaptainCommand(["awake", "status", "--local-setup"], {
       repoRoot: "/repo",
       env,
       stdout: { write: (chunk: string) => ((out += chunk), true) },

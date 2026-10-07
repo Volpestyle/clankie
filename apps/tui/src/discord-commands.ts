@@ -1,6 +1,10 @@
+import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./command/owner-settings-api.ts";
 import { stripVTControlCharacters } from "node:util";
 import {
   DISCORD_ATTENTION,
+  DISCORD_SETTINGS_PATH,
+  DiscordSettingsSnapshotSchema,
+  type DiscordSettingsSnapshot,
   DiscordSettingsSchema,
   DISCORD_SETTING_GROUPS,
   DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
@@ -23,7 +27,7 @@ import { personaStatus, personaUpdate } from "./command/persona.ts";
 import type { RedactedCredential } from "@clankie/credential-broker";
 import type { DiscordUserSessionOptIn } from "@clankie/protocol";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
-import { discordStatus, discordTransform, formatDiscordSettings } from "./command/discord.ts";
+import { discordStatus, formatDiscordSettings } from "./command/discord.ts";
 import { formatDiscordOfficial, runDiscordOfficialCommand } from "./command/discord-official.ts";
 
 interface DiscordUserSessionOptInClient {
@@ -39,7 +43,7 @@ interface DiscordUserSessionOptInClient {
   revokeDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
 }
 
-export interface DiscordCommandServices {
+export interface DiscordCommandServices extends OwnerSettingsApiOptions {
   settings: SettingsStore;
   setup?: DiscordSetupApi;
   /** Hosted consoles expose raw fields through the host, never local credentials/settings. */
@@ -63,7 +67,7 @@ export interface DiscordCommandServices {
   userSessionOptIn?: DiscordUserSessionOptInClient;
   /**
    * The persona settings `/persona` owns, for the attention section. Defaults
-   * to the local settings file, the same path `clankie persona set` writes.
+   * to the owner settings API, the same path `clankie persona set` writes.
    */
   persona?: DiscordPersonaAccess;
 }
@@ -389,14 +393,21 @@ export async function runDiscordWizard(
 ): Promise<void> {
   if (!services.setup) throw new Error("Discord settings need an authenticated connection to Clankie.");
   const setup = services.setup;
+  let personaRevision: string | undefined;
   const persona =
     services.persona ??
     (services.localAdvanced === false
       ? undefined
       : {
-          read: async () => (await personaStatus({ settings: services.settings })).persona,
-          update: (patch: Partial<DiscordAttentionPersona>) =>
-            personaUpdate(patch, { settings: services.settings }),
+          read: async () => {
+            const current = await personaStatus(services);
+            personaRevision = current.revision;
+            return current.persona;
+          },
+          update: (patch: Partial<DiscordAttentionPersona>) => {
+            if (personaRevision === undefined) throw new Error("Read persona settings before changing them");
+            return personaUpdate(patch, { ...services, expectedRevision: personaRevision });
+          },
         });
   await runDiscordSetup(
     shell,
@@ -525,7 +536,7 @@ export async function runDiscordAdvancedWizard(
   flow.begin("discord");
   try {
     for (;;) {
-      const settings = (await services.settings.load()).discord;
+      const settings = (await discordSnapshot(services)).settings;
       const action = await flow.readSelect({
         message: "Advanced Discord settings",
         options: [
@@ -668,8 +679,25 @@ async function editOfficialBot(shell: ClankieFaceShell): Promise<void> {
 
 type Patch = (current: DiscordSettings) => DiscordSettings;
 
-async function apply(services: DiscordCommandServices, patch: Patch): Promise<void> {
-  await discordTransform(patch, { settings: services.settings });
+async function discordSnapshot(services: DiscordCommandServices): Promise<DiscordSettingsSnapshot> {
+  if (services.setup) return services.setup.discordSettings();
+  return (await ownerSettingsApi(services)).get(DISCORD_SETTINGS_PATH, DiscordSettingsSnapshotSchema);
+}
+
+async function apply(
+  services: DiscordCommandServices,
+  snapshot: DiscordSettingsSnapshot,
+  patch: Patch,
+): Promise<void> {
+  const request = {
+    expectedRevision: snapshot.revision,
+    settings: discordServerSettings(DiscordSettingsSchema.parse(patch(snapshot.settings)), snapshot.settings),
+  };
+  if (services.setup) await services.setup.updateDiscordSettings(request);
+  else
+    await (
+      await ownerSettingsApi(services)
+    ).write(DISCORD_SETTINGS_PATH, request, DiscordSettingsSnapshotSchema);
 }
 
 async function editCredentials(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
@@ -736,7 +764,8 @@ async function editCredentials(shell: ClankieFaceShell, services: DiscordCommand
 
 async function editCore(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
 
   const applicationId = await flow.readText({
     message: "Application id",
@@ -783,7 +812,7 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   });
   if (ambientUsers === undefined) return;
 
-  await apply(services, ({ swarmGuildId: currentSwarmHome, ...discord }) => {
+  await apply(services, snapshot, ({ swarmGuildId: currentSwarmHome, ...discord }) => {
     const nextSwarmHome =
       swarmHome.toLowerCase() === "none" ? undefined : swarmHome ? swarmHome : currentSwarmHome;
     return {
@@ -800,7 +829,8 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
 
 async function editSystemActors(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
 
   const typed = await flow.readText({
     message:
@@ -830,7 +860,7 @@ async function editSystemActors(shell: ClankieFaceShell, services: DiscordComman
 
   const systemActorChannelIds =
     systemActorGuildIds.length === 0 ? [] : resolveIdList(channels, current.systemActorChannelIds);
-  await apply(services, (discord) => ({
+  await apply(services, snapshot, (discord) => ({
     ...discord,
     systemActorUserIds,
     systemActorGuildIds,
@@ -846,7 +876,8 @@ async function editSystemActors(shell: ClankieFaceShell, services: DiscordComman
 
 async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
 
   const enabled = await flow.readSelect({
     message: "Text ingress (requires Message Content Intent in the Discord portal)",
@@ -903,7 +934,7 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
       return;
     }
   }
-  await apply(services, (discord) => ({
+  await apply(services, snapshot, (discord) => ({
     ...discord,
     textIngressEnabled: enabledChoice === "true",
     ...(channels.trim() ? { ingressChannelIds: splitList(channels) } : {}),
@@ -924,7 +955,8 @@ async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServ
 
 async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
 
   const enabled = await flow.readSelect({
     message: "Group voice",
@@ -1023,7 +1055,7 @@ async function editVoice(shell: ClankieFaceShell, services: DiscordCommandServic
       return;
     }
   }
-  await apply(services, (discord) => ({
+  await apply(services, snapshot, (discord) => ({
     ...discord,
     voiceEnabled: enabledChoice === "true",
     voiceJoinPolicy: joinPolicyChoice as DiscordSettings["voiceJoinPolicy"],
@@ -1054,7 +1086,8 @@ const LAB_ACKNOWLEDGEMENT = "I accept Discord ToS and account risk for this pers
 
 async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
   const credentials = await services.listCredentials();
   const picked = await flow.readSelect({
     message: "Which Discord body is the mouth? Only one process is live.",
@@ -1087,7 +1120,7 @@ async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandS
     }
   }
 
-  await apply(services, (discord) => ({ ...discord, activeBody: choice }));
+  await apply(services, snapshot, (discord) => ({ ...discord, activeBody: choice }));
   flow.renderLine(
     choice === "user_session"
       ? "Lab user body is the mouth. Run `clankie restart` so the official bot stays down."
@@ -1098,7 +1131,8 @@ async function editActiveBody(shell: ClankieFaceShell, services: DiscordCommandS
 
 async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
 
   const enabled = await flow.readSelect({
     message:
@@ -1148,7 +1182,7 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
     }
   }
 
-  await apply(services, (discord) => ({
+  await apply(services, snapshot, (discord) => ({
     ...discord,
     userSessionEnabled: enabledChoice === "true",
     ...(guildIds.length === 0 ? {} : { userSessionGuildIds: guildIds }),
@@ -1219,14 +1253,15 @@ async function editLabBody(shell: ClankieFaceShell, services: DiscordCommandServ
 
 async function editActivity(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
   const applicationId = await flow.readText({
     message: "Embedded application id for the Fire Red surface",
     placeholder: current.activityApplicationIdGba ?? "usually the same application id",
     validate: validateSnowflake(true),
   });
   if (applicationId === undefined) return;
-  await apply(services, (discord) => ({
+  await apply(services, snapshot, (discord) => ({
     ...discord,
     ...(applicationId.trim() ? { activityApplicationIdGba: applicationId.trim() } : {}),
   }));
@@ -1240,9 +1275,7 @@ export async function showDiscordInvite(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
 ): Promise<void> {
-  const settings = services.setup
-    ? (await services.setup.discordSettings()).settings
-    : (await services.settings.load()).discord;
+  const settings = (await discordSnapshot(services)).settings;
   const applicationId = settings.applicationId;
   if (applicationId === undefined) {
     shell.insertCommandResult(
@@ -1268,8 +1301,8 @@ async function showEnvironmentExport(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
 ): Promise<void> {
-  const stored = await services.settings.load();
-  const env = discordSettingsToEnvironment(stored.discord);
+  const stored = await discordSnapshot(services);
+  const env = discordSettingsToEnvironment(stored.settings);
   const lines = Object.entries(env)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, value]) => `${name}=${value}`);
@@ -1289,8 +1322,8 @@ async function editAllDiscordSettings(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
 ): Promise<void> {
-  const snapshot = await services.setup?.discordSettings();
-  const current = snapshot?.settings ?? (await services.settings.load()).discord;
+  const snapshot = await discordSnapshot(services);
+  const current = snapshot.settings;
   const fields =
     snapshot?.setup?.definition.advancedGroups.flatMap((group) => group.fields) ??
     DISCORD_SETTING_GROUPS.flatMap((group) => group.fields);
@@ -1328,10 +1361,5 @@ async function editAllDiscordSettings(
       }),
       value,
     );
-  if (snapshot && services.setup)
-    await services.setup.updateDiscordSettings({
-      expectedRevision: snapshot.revision,
-      settings: transform(snapshot.settings),
-    });
-  else await apply(services, transform);
+  await apply(services, snapshot, transform);
 }

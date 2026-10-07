@@ -1,3 +1,4 @@
+import type { CaptainRouteFetcher } from "../src/session/operator-conversations.ts";
 import { runCheckoutsCommand } from "../src/command/checkouts.ts";
 import { runComputerCommand } from "../src/command/computer.ts";
 import { runShareCommand } from "../src/command/share.ts";
@@ -94,6 +95,7 @@ import { outputJson, type Writable } from "../src/command/io.ts";
 export { isHeadlessCaptainCommand, unknownLauncherCommand } from "../src/command/registry.ts";
 
 export interface HeadlessCaptainCommandOptions {
+  readonly ownerFetcher?: CaptainRouteFetcher;
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
   readonly host?: string;
@@ -168,7 +170,12 @@ export async function runHeadlessCaptainCommand(
       const discordHttp =
         command === "discord" &&
         ["setup", "definition", "directory", "rooms", "guide", "call"].includes(rest[0] ?? "");
-      if ((HOSTED_LOCAL_ONLY.has(command ?? "") && !discordHttp) || operatorHarness(command) !== undefined)
+      if (
+        (HOSTED_LOCAL_ONLY.has(command ?? "") &&
+          !discordHttp &&
+          !(command === "update" && rest[0] === "auto")) ||
+        operatorHarness(command) !== undefined
+      )
         throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
       const transport = await hostedTransportFor(env);
       // These existing commands are HTTP-only. The transport replaces their local

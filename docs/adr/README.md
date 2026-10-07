@@ -137,3 +137,4 @@ scope is archived; readers should follow the successor for its implementation.
 | [ADR 0216: Projects own agent roles and tool policy](0216-projects-own-agent-roles-and-tool-policy.md)                  | Archived: Fleet tool gate tied to project membership.                    | Project roles, caps, hiring, and tracker binding remain; connected tool access follows [ADR 0217: Fleet membership gets connected tools](0217-fleet-membership-gets-connected-tools.md). |
 
 - [0246 — Worker questions use native hook answers](0246-worker-questions-use-native-hook-answers.md)
+- [0248 — Owner settings use one revision-fenced API](0248-owner-settings-use-one-revision-fenced-api.md)

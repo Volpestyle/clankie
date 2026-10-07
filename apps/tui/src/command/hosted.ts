@@ -1,3 +1,11 @@
+import { runAwakeCommand } from "./awake.ts";
+import { runUpdateCommand } from "./update.ts";
+import { PersonaAttentionSnapshotSchema } from "@clankie/protocol/discord-attention";
+import { createCaptainRouteClient } from "../session/operator-conversations.ts";
+import { ownerSettingsApi } from "./owner-settings-api.ts";
+import { runFleetCommand } from "./fleet.ts";
+import { runVoiceCommand } from "./voice.ts";
+import { runLinearCommand } from "./linear.ts";
 import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
 import { runAccountsCommand } from "./accounts.ts";
 import { runShareCommand } from "./share.ts";
@@ -219,12 +227,10 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "stop",
   "down",
   "autostart",
-  "awake",
   "herdr",
   "hire-receipt",
   "seat-delivery",
   "discord",
-  "voice",
   "gateway",
   "operator-credential",
   "seat",
@@ -248,6 +254,16 @@ export async function hostedCommand(
   transport: ReturnType<typeof createHostedTransport>,
 ): Promise<unknown> {
   const [command, action, value] = args;
+  const ownerFetcher = createCaptainRouteClient(transport);
+  if (command === "fleet" && ["set", "clear", "show"].includes(action ?? ""))
+    return runFleetCommand(args.slice(1), { ownerFetcher });
+  if (command === "awake") {
+    if (args.includes("--local-setup")) throw new Error("Local setup cannot target a hosted machine");
+    return runAwakeCommand(args.slice(1), { ownerFetcher, repoRoot: process.cwd() });
+  }
+  if (command === "update" && action === "auto") return runUpdateCommand(args.slice(1), { ownerFetcher });
+  if (command === "voice") return runVoiceCommand(args.slice(1), { ownerFetcher });
+  if (command === "linear") return runLinearCommand(args.slice(1), { ownerFetcher });
   if (command === "share") return (await runShareCommand(args.slice(1), { request: transport.request })).body;
   if (command === "status" || command === "health") {
     const health = await transport.request("/health");
@@ -294,9 +310,13 @@ export async function hostedCommand(
     if (action === "images") {
       if (value === undefined || value === "status") return transport.request("/v1/operator/persona");
       if (value === "clear" || (value === "set" && args[3]?.trim())) {
-        const result = await transport.request("/v1/operator/persona", {
-          imagesDir: value === "clear" ? "" : args[3],
-        });
+        const api = await ownerSettingsApi({ ownerFetcher });
+        const current = await api.get("/v1/operator/persona", PersonaAttentionSnapshotSchema);
+        const result = await api.write(
+          "/v1/operator/persona",
+          { expectedRevision: current.revision, persona: { imagesDir: value === "clear" ? "" : args[3] } },
+          PersonaAttentionSnapshotSchema,
+        );
         return {
           result,
           restart: "Restart Clankie to apply persona images. Folder paths refer to the hosted machine.",
@@ -319,11 +339,18 @@ export async function hostedCommand(
         if (!key || args[i + 1] === undefined) throw new Error("Unsupported hosted persona field");
         patch[key] = args[i + 1]!;
       }
-      return transport.request("/v1/operator/persona", patch);
+      const api = await ownerSettingsApi({ ownerFetcher });
+      const current = await api.get("/v1/operator/persona", PersonaAttentionSnapshotSchema);
+      return api.write(
+        "/v1/operator/persona",
+        { expectedRevision: current.revision, persona: patch },
+        PersonaAttentionSnapshotSchema,
+      );
     }
   }
   if (command === "accounts")
     return runAccountsCommand(args.slice(1), {
+      ownerFetcher,
       request: async (path, body) => (await transport.request(path, body)) as Record<string, unknown>,
     });
   if (HOSTED_LOCAL_ONLY.has(command ?? ""))

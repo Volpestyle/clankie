@@ -12,6 +12,7 @@ import { ClankieApiClient, DiscordSetupClient } from "@clankie/api-client";
 import { DiscordSettingsSchema, parseProtocolResponse } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { personaStatus, personaUpdate } from "../src/command/persona.ts";
+import { createPersonaVoiceSettingsRoutes } from "../../clankie/src/persona-voice-settings-routes.ts";
 import { createDiscordRoomRoutes } from "../../clankie/src/discord-room-routes.ts";
 import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
 import { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -98,6 +99,21 @@ async function fixture() {
         : undefined,
     directory: async (query) => readBotDiscordDirectory(cache.client, { ...query, limit: 1 }),
   });
+  app.route(
+    "/",
+    createPersonaVoiceSettingsRoutes({
+      settings,
+      authorizePersona: async (request) =>
+        authorized && request.headers.get("authorization") === "Bearer fixture-operator"
+          ? true
+          : "authentication_required",
+      operator: async (request) =>
+        authorized && request.headers.get("authorization") === "Bearer fixture-operator"
+          ? "fixture-owner"
+          : undefined,
+      voiceSettingsEnv: {},
+    }),
+  );
   const server: Server = createServer(async (request, response) => {
     const path = request.url ?? "/";
     requests.push({ method: request.method ?? "GET", path });
@@ -153,9 +169,22 @@ async function fixture() {
     return JSON.parse(result.stdout);
   }
   function shell(persona?: Parameters<typeof buildDiscordCommands>[0]["persona"]) {
+    let revision: string | undefined;
     const commands = buildDiscordCommands({
-      ...(persona ? { persona } : {}),
+      persona: persona ?? {
+        read: async () => {
+          const snapshot = await personaStatus({ env, host: url });
+          revision = snapshot.revision;
+          return snapshot.persona;
+        },
+        update: async (patch) => {
+          if (!revision) throw new Error("Read persona before changing it");
+          return personaUpdate(patch, { env, host: url, expectedRevision: revision });
+        },
+      },
       setup: api,
+      env,
+      host: url,
       settings: new SettingsStore(env.CLANKIE_SETTINGS_FILE),
       localAdvanced: false,
       listCredentials: async () => ({}),
@@ -325,10 +354,7 @@ it("the attention section saves the wake trigger through the settings API and ch
     ...current,
     discord: { ...current.discord, wakeTrigger: "addressed" },
   }));
-  const shell = f.shell({
-    read: async () => (await personaStatus({ settings: f.settings })).persona,
-    update: (patch) => personaUpdate(patch, { settings: f.settings }),
-  });
+  const shell = f.shell();
   let finished = false;
   const running = submit(shell, "/discord").finally(() => {
     finished = true;
@@ -361,6 +387,9 @@ it("the attention section saves the wake trigger through the settings API and ch
   expect(saved.discord.wakeTrigger).toBe("name");
   expect(saved.persona.chattiness).toBe("chatty");
   expect(saved.persona.replyPolicy).toBe("addressed");
+  expect(
+    f.requests.filter((request) => request.path === "/v1/operator/persona" && request.method === "POST"),
+  ).toHaveLength(2);
   // The CLI saves the earlier spelling under its current name.
   expect((await f.cli("set", "--wake-trigger", "addressed")).discord.wakeTrigger).toBe("mention");
 });

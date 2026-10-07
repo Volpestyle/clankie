@@ -1,18 +1,15 @@
+import { createPersonaVoiceSettingsRoutes } from "../persona-voice-settings-routes.ts";
 import { isDeepStrictEqual } from "node:util";
 import { roomForkIdOf } from "../captain/captain-discord-turns.ts";
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
+import { createWorkerAccountHoldsRoutes } from "../worker-account-holds-routes.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
 import { RuntimeHealthObservationSchema } from "@clankie/protocol";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
-import { PersonaAttentionUpdateSchema } from "@clankie/protocol/discord-attention";
-import {
-  WORKER_ACCOUNTS_PATH,
-  WORKER_ACCOUNT_HOLDS_PATH,
-  WorkerAccountHoldRequestSchema,
-} from "@clankie/protocol/worker-accounts";
+import { WORKER_ACCOUNTS_PATH } from "@clankie/protocol/worker-accounts";
 import { SupportGrantStore } from "../support-access.ts";
 import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
 import { createIntegrationRoutes } from "../integrate-routes.ts";
@@ -24,7 +21,6 @@ import {
   isDiscordPresenceActionAvailable,
   type DiscordPresenceSessionRecord,
 } from "@clankie/interactive-environment";
-import { loadPersonaImages, personaImageStatus } from "@clankie/persona-images";
 import {
   BodyLeaseRequestSchema,
   BodyResourceSchema,
@@ -59,13 +55,7 @@ import {
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/public-gateway";
-import {
-  assertNoSecretShapedValue,
-  GameplaySettingsSchema,
-  PersonaSettingsSchema,
-  SettingsStore,
-  VoiceSettingsSchema,
-} from "@clankie/settings";
+import { GameplaySettingsSchema, SettingsStore } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { randomUUID } from "node:crypto";
@@ -96,6 +86,7 @@ import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../even
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
 import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
+import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
@@ -735,101 +726,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  // The operator (including a hosted-account operator device on the hosted
-  // bridge), or a paired Take Control device, which reads and changes only
-  // talkativeness (VUH-1813).
-  app.get("/v1/operator/persona", async (context) => {
-    if ((await authorizeOwnerSecrets(context.req.raw)) !== true)
-      return context.json({ error: "operator_authentication_required" }, 401);
-    const persona = (await settingsSource.load()).persona;
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (!operator || operator === "unavailable")
-      return context.json({ persona: { chattiness: persona.chattiness, replyPolicy: persona.replyPolicy } });
-    return context.json({ persona, images: personaImageStatus(await loadPersonaImages(persona.imagesDir)) });
-  });
-  app.post("/v1/operator/persona", async (context) => {
-    if ((await authorizeOwnerSecrets(context.req.raw)) !== true)
-      return context.json({ error: "operator_authentication_required" }, 401);
-    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    // A paired device changes talkativeness only; names, notes and the image
-    // folder (a host path) stay with the operator.
-    const patch = (
-      operator && operator !== "unavailable"
-        ? PersonaSettingsSchema.partial().strict()
-        : PersonaAttentionUpdateSchema
-    ).safeParse(await readJson(context.req.raw));
-    if (!patch.success) return context.json({ error: "malformed" }, 400);
-    const updated = await settingsSource.update((value) => ({
-      ...value,
-      persona: PersonaSettingsSchema.parse({ ...value.persona, ...patch.data }),
-    }));
-    return context.json({
-      persona: updated.persona,
-      restart: "Restart Clankie to apply persona images.",
-      images: personaImageStatus(await loadPersonaImages(updated.persona.imagesDir)),
-    });
-  });
-
-  app.on(["GET", "POST"], "/v1/operator/voice", async (context) => {
-    const identity = await authenticateOperator(context.req.raw, dependencies);
-    if (identity === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!identity) return context.json({ error: "operator_authentication_required" }, 401);
-    const guard = async (): Promise<void> => {
-      const current = await authenticateOperator(context.req.raw, dependencies);
-      if (current === "unavailable") throw new Error("operator_authentication_unavailable");
-      if (context.req.raw.signal.aborted || current?.operatorId !== identity.operatorId)
-        throw new Error("operator_authentication_required");
-    };
-    try {
-      let updated;
-      if (context.req.method === "POST") {
-        // Defaults belong to the full stored configuration, never an omitted
-        // patch field (Zod applies nested defaults even inside optional fields).
-        const patch = z
-          .object({
-            ...VoiceSettingsSchema.shape,
-            realtimeProvider: VoiceSettingsSchema.shape.realtimeProvider.removeDefault(),
-            ttsProvider: VoiceSettingsSchema.shape.ttsProvider.removeDefault(),
-            xAiReasoningEffort: VoiceSettingsSchema.shape.xAiReasoningEffort.removeDefault(),
-          })
-          .partial()
-          .strict()
-          .safeParse(await readJson(context.req.raw));
-        if (!patch.success) return context.json({ error: "malformed" }, 400);
-        try {
-          assertNoSecretShapedValue(patch.data);
-        } catch {
-          return context.json({ error: "malformed" }, 400);
-        }
-        if (!settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
-        updated = await settingsSource.update((value) => {
-          const voice = VoiceSettingsSchema.safeParse({ ...value.voice, ...patch.data });
-          if (!voice.success) throw new Error("voice_settings_malformed");
-          return { ...value, voice: voice.data };
-        }, guard);
-      } else updated = await settingsSource.load();
-      const voice = VoiceSettingsSchema.parse(updated.voice);
-      assertNoSecretShapedValue(voice);
-      await guard();
-      context.header("cache-control", "no-store");
-      return context.json({
-        voice,
-        ...(context.req.method === "POST"
-          ? { restart: "Restart the active Discord body to apply voice settings." }
-          : {}),
-      });
-    } catch (error) {
-      const name = error instanceof Error ? error.message : "";
-      if (name === "voice_settings_malformed") return context.json({ error: "malformed" }, 400);
-      if (name === "operator_authentication_required") return context.json({ error: name }, 401);
-      if (name === "operator_authentication_unavailable") return context.json({ error: name }, 503);
-      logger.warn({ phase: "operator_voice_settings" }, "voice settings persistence unavailable");
-      return context.json({ error: "settings_unavailable" }, 503);
-    }
-  });
-
   const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {
     if (denial.denied === "revoked") return context.json({ error: "revoked" }, 401);
     if (denial.denied === "expired") return context.json({ error: "expired" }, 401);
@@ -1120,6 +1016,34 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     }),
   );
+  app.route(
+    "/",
+    createPersonaVoiceSettingsRoutes({
+      settings: settingsSource,
+      authorizePersona: authorizeOwnerSecrets,
+      operator: async (request) => {
+        const identity = await authenticateOperator(request, dependencies);
+        return identity === "unavailable" ? "unavailable" : identity?.operatorId;
+      },
+      ...(dependencies.voiceSettingsEnv === undefined
+        ? {}
+        : { voiceSettingsEnv: dependencies.voiceSettingsEnv }),
+    }),
+  );
+
+  app.route(
+    "/",
+    createHostSettingsRoutes(authorizeOwnerSecrets, settingsSource, {
+      ...(dependencies.autoUpdateManaged === undefined
+        ? {}
+        : { autoUpdateManaged: dependencies.autoUpdateManaged }),
+      ...(dependencies.applyKeepAwake === undefined ? {} : { applyKeepAwake: dependencies.applyKeepAwake }),
+      ...(dependencies.hostPower === undefined ? {} : { power: dependencies.hostPower }),
+      ...(dependencies.keepAwakeStatus === undefined
+        ? {}
+        : { keepAwakeStatus: dependencies.keepAwakeStatus }),
+    }),
+  );
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route("/", createFleetResourceRoutes(authorizeOwnerSecrets, dependencies.fleetResources));
   app.route(
@@ -1135,6 +1059,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     createFleetSettingsRoutes(authorizeOwnerSecrets, settingsSource, {
       runtimes: dependencies.runtimes,
       herdrBinding: dependencies.herdrBinding,
+      configureResources:
+        dependencies.fleetResources === undefined
+          ? undefined
+          : (policy) => dependencies.fleetResources!.configure(policy),
     }),
   );
   app.route(
@@ -1333,36 +1261,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  // Hold or release one worker account (`clankie accounts hold|release`).
-  app.post(WORKER_ACCOUNT_HOLDS_PATH, bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
-    const authority = await authorizeOwnerSecrets(context.req.raw);
-    if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
-    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
-    const input = WorkerAccountHoldRequestSchema.safeParse(await readJson(context.req.raw));
-    if (!input.success) return context.json({ error: "invalid_worker_account_hold" }, 400);
-    const { machine, harness, label, held, reason } = input.data;
-    const current = await settingsSource.load();
-    if (
-      held &&
-      current.workerAccountHolds.length >= 64 &&
-      !current.workerAccountHolds.some(
-        (hold) => hold.machine === machine && hold.harness === harness && hold.label === label,
-      )
-    )
-      return context.json({ error: "too_many_worker_account_holds" }, 400);
-    const updated = await settingsSource.update((current) => {
-      const others = current.workerAccountHolds.filter(
-        (hold) => !(hold.machine === machine && hold.harness === harness && hold.label === label),
-      );
-      return {
-        ...current,
-        workerAccountHolds: held
-          ? [...others, { machine, harness, label, ...(reason === undefined ? {} : { reason }) }]
-          : others,
-      };
-    });
-    return context.json({ holds: updated.workerAccountHolds });
-  });
+  app.route("/", createWorkerAccountHoldsRoutes(authorizeOwnerSecrets, settingsSource));
 
   app.get("/v1/runtime-connections", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -2600,7 +2499,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  registerLinearRoutes({ app, dependencies, settingsSource, clock });
+  registerLinearRoutes({
+    app,
+    dependencies,
+    settingsSource,
+    clock,
+    authorizeOwnerSettings: authorizeOwnerSecrets,
+  });
   const { wakeRevocationTimer } = registerPairingRoutes({
     get supportGrants() {
       return supportGrants;

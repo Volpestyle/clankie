@@ -61,6 +61,16 @@ job to its command. JSON is on stdout and progress on stderr. The most common:
 | Machines and Herdr sessions | `clankie machines --json`, `clankie herdr status --json`             |
 | Restart / stop a service    | `clankie start`, `stop` or `restart [service]`                       |
 
+Fleet, persona, voice, Discord fields, worker holds, Linear follow/wake, `awake`
+and `update auto` use the owner settings API. Read the current snapshot, then
+send its revision; a conflict requires a fresh read and a reviewed change.
+Never retry by editing settings.json. `awake --local-setup on|off` is only for
+a local Mac before the service runs; a running service refuses that bypass.
+If keep-awake returns `saved: true` with an apply error, read its host settings
+and sleep-assertion status before choosing a repair. Bootstrap machine wiring,
+local harness profiles and signed webhook URL setup retain their documented
+local paths; these are separate operations, not API-error fallbacks.
+
 `credential_unavailable` or `not_configured` means nobody connected it yet. Say
 that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying
 you refused. Secrets go through `/auth`, the existing wizards or the credential

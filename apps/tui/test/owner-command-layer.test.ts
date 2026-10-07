@@ -1,3 +1,7 @@
+import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
+import { mintOperatorToken } from "@clankie/credential-broker";
+import { createClankieApp } from "../../clankie/src/app.ts";
+import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { readFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -17,8 +21,14 @@ import { videoModelStatus } from "../src/command/video-model.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
 
 const tempDirs: string[] = [];
+const ownerServices = new Map<
+  string,
+  { service: Awaited<ReturnType<typeof createClankieApp>>; voiceEnv: NodeJS.ProcessEnv }
+>();
 
 afterEach(async () => {
+  for (const fixture of ownerServices.values()) fixture.service.close();
+  ownerServices.clear();
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
 
@@ -33,7 +43,32 @@ function outputBuffer(): { readonly stream: { write(chunk: string): void }; read
 async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-owner-commands-"));
   tempDirs.push(root);
-  return { XDG_CONFIG_HOME: root };
+  const env = { XDG_CONFIG_HOME: root, CLANKIE_OPERATOR_TOKEN: mintOperatorToken() };
+  const voiceEnv = { ...env };
+  const service = await createClankieApp({
+    captain: createStubCaptain(),
+    settings: new SettingsStore(defaultSettingsPath(env)),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === `Bearer ${env.CLANKIE_OPERATOR_TOKEN}`
+        ? { operatorId: "owner" }
+        : undefined,
+    voiceSettingsEnv: voiceEnv,
+    roomObservations: new DiscordRoomObservations(join(root, "rooms.json")),
+  });
+  ownerServices.set(root, { service, voiceEnv });
+  return env;
+}
+
+function ownerClient(env: NodeJS.ProcessEnv) {
+  const fixture = ownerServices.get(env.XDG_CONFIG_HOME!);
+  if (!fixture) throw new Error("Missing owner command service fixture");
+  for (const key of Object.keys(fixture.voiceEnv)) delete fixture.voiceEnv[key];
+  Object.assign(fixture.voiceEnv, env);
+  return {
+    host: "http://clankie.test",
+    fetchImpl: ((url: RequestInfo | URL, init?: RequestInit) =>
+      fixture.service.app.fetch(new Request(String(url), init))) as typeof fetch,
+  };
 }
 
 async function run(args: readonly string[], env: NodeJS.ProcessEnv): Promise<unknown> {
@@ -42,6 +77,7 @@ async function run(args: readonly string[], env: NodeJS.ProcessEnv): Promise<unk
   const exit = await runHeadlessCaptainCommand(args, {
     repoRoot: "/unused",
     env,
+    ...ownerClient(env),
     stdout: stdout.stream,
     stderr: stderr.stream,
   });
@@ -276,9 +312,9 @@ describe("canonical owner command layer", () => {
     expect(await run(["effort", "status"], env)).toEqual(await effortStatus({ env }));
     expect(await run(["image-model", "status"], env)).toEqual(await imageModelStatus({ env }));
     expect(await run(["video-model", "status"], env)).toEqual(await videoModelStatus({ env }));
-    expect(await run(["persona", "status"], env)).toEqual(await personaStatus({ env }));
+    expect(await run(["persona", "status"], env)).toEqual(await personaStatus({ env, ...ownerClient(env) }));
     expect(await run(["games", "status"], env)).toEqual(await gamesStatus({ env }));
-    expect(await run(["discord", "status"], env)).toEqual(await discordStatus({ env }));
+    expect(await run(["discord", "status"], env)).toEqual(await discordStatus({ env, ...ownerClient(env) }));
   });
 
   it("keeps scoped TUI faces free of private durable-config writers", async () => {
@@ -350,6 +386,7 @@ describe("headless ElevenLabs model selection", () => {
         await runHeadlessCaptainCommand(args, {
           repoRoot: "/unused",
           env,
+          ...ownerClient(env),
           stdout: stdout.stream,
           stderr: stderr.stream,
         }),
@@ -394,6 +431,7 @@ describe("headless voice brain selection", () => {
         await runHeadlessCaptainCommand(args, {
           repoRoot: "/unused",
           env: { ...env, ...overrides },
+          ...ownerClient({ ...env, ...overrides }),
           stdout: stdout.stream,
           stderr: stderr.stream,
         }),
@@ -462,6 +500,7 @@ describe("headless voice brain selection", () => {
         await runHeadlessCaptainCommand(args, {
           repoRoot: "/unused",
           env,
+          ...ownerClient(env),
           stdout: stdout.stream,
           stderr: stderr.stream,
         }),

@@ -1,6 +1,11 @@
+import {
+  HOST_SETTINGS_PATH,
+  HostSettingsSnapshotSchema,
+} from "../../../packages/protocol/src/owner-settings.ts";
+import { PersonaAttentionSnapshotSchema } from "../../../packages/protocol/src/discord-attention.ts";
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,7 +55,7 @@ async function listen(handler: (request: IncomingMessage, response: ServerRespon
   if (!address || typeof address === "string") throw new Error("Fixture TCP listener unavailable");
   return `http://127.0.0.1:${address.port}`;
 }
-async function fixture() {
+async function fixture(options: { unavailableAwakeRegistry?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "fleet-settings-relay-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -121,6 +126,13 @@ async function fixture() {
       },
     }),
     settings,
+    ...(options.unavailableAwakeRegistry
+      ? {
+          applyKeepAwake: async () => {
+            await readFile(join(root, "missing-awake-registry"));
+          },
+        }
+      : {}),
     eventLogPath,
     deviceSessionKey: key,
     clock: () => new Date(hf.now),
@@ -346,12 +358,32 @@ it("carries talkativeness, hire defaults and worker-account holds for a control 
   const persona = await call(OPERATOR_PERSONA_PATH);
   expect(persona.status).toBe(200);
   // The relay answers with talkativeness only; owner notes never reach the device.
-  expect(await persona.json()).toEqual({ persona: { chattiness: "balanced", replyPolicy: "all" } });
-  expect((await call(OPERATOR_PERSONA_PATH, { chattiness: "chatty" })).status).toBe(200);
-  expect((await call(OPERATOR_PERSONA_PATH, { characterNotes: "rewritten" })).status).toBe(400);
-  expect((await call(OPERATOR_PERSONA_PATH, { displayName: "Not him", chattiness: "quiet" })).status).toBe(
-    400,
-  );
+  const attention = PersonaAttentionSnapshotSchema.parse(await persona.json());
+  expect(attention.persona).toEqual({ chattiness: "balanced", replyPolicy: "all" });
+  expect(
+    (
+      await call(OPERATOR_PERSONA_PATH, {
+        expectedRevision: attention.revision,
+        persona: { chattiness: "chatty" },
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await call(OPERATOR_PERSONA_PATH, {
+        expectedRevision: attention.revision,
+        persona: { characterNotes: "rewritten" },
+      })
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await call(OPERATOR_PERSONA_PATH, {
+        expectedRevision: attention.revision,
+        persona: { displayName: "Not him", chattiness: "quiet" },
+      })
+    ).status,
+  ).toBe(400);
 
   const hire = FleetHireDefaultsSnapshotSchema.parse(await (await call(FLEET_HIRE_DEFAULTS_PATH)).json());
   expect(hire.hire).toEqual({ harness: "codex" });
@@ -367,7 +399,9 @@ it("carries talkativeness, hire defaults and worker-account holds for a control 
   );
   expect(accounts.machine).toBe("pc-work");
   expect((await call("/v1/worker-accounts?fleet=PC")).status).toBe(400);
+  const holds = WorkerAccountHoldsSchema.parse(await (await call(WORKER_ACCOUNT_HOLDS_PATH)).json());
   const held = await call(WORKER_ACCOUNT_HOLDS_PATH, {
+    expectedRevision: holds.revision,
     machine: "pc-work",
     harness: "codex",
     label: "work",
@@ -392,5 +426,36 @@ it("carries talkativeness, hire defaults and worker-account holds for a control 
     ).toBe(403);
   }
   expect(f.forwarded).toHaveLength(forwarded);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("preserves a validated saved host receipt through device relay when runtime application fails", async () => {
+  const f = await fixture({ unavailableAwakeRegistry: true });
+  await f.settings.update((current) => ({ ...current, host: { ...current.host, keepAwake: true } }));
+  const headers = { authorization: `Bearer ${f.tokens.control}`, "content-type": "application/json" };
+  const snapshot = HostSettingsSnapshotSchema.parse(
+    await (await fetch(`${f.relayUrl}${HOST_SETTINGS_PATH}`, { headers })).json(),
+  );
+  const response = await fetch(`${f.relayUrl}${HOST_SETTINGS_PATH}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      schemaVersion: 1,
+      expectedRevision: snapshot.revision,
+      changes: { keepAwake: false },
+    }),
+  });
+  expect(response.status).toBe(503);
+  const receipt = await response.json();
+  expect(receipt).toMatchObject({ error: "keep_awake_apply_failed", saved: true });
+  const saved = HostSettingsSnapshotSchema.parse(receipt.settings);
+  expect(saved.host.keepAwake).toBe(false);
+  expect(saved.revision).not.toBe(snapshot.revision);
+  const reconciled = HostSettingsSnapshotSchema.parse(
+    await (await fetch(`${f.relayUrl}${HOST_SETTINGS_PATH}`, { headers })).json(),
+  );
+  expect(reconciled).toEqual(saved);
+  expect((await new SettingsStore(f.settings.path).load()).host.keepAwake).toBe(false);
+  expect(f.forwarded.every((entry) => entry.token === f.tokens.control)).toBe(true);
   expect(f.captainCalls()).toBe(0);
 });

@@ -1,10 +1,16 @@
 import { DISCORD_ATTENTION } from "@clankie/protocol/discord-attention";
 import { formatPersonaImages } from "./command-format.ts";
 import { SettingsStore, type PersonaSettings } from "@clankie/settings";
-import { formatPersonaLines, personaStatus, personaUpdate, runPersonaCommand } from "./command/persona.ts";
+import {
+  formatPersonaLines,
+  personaStatus,
+  personaUpdate,
+  runPersonaCommand,
+  type PersonaCommandOptions,
+} from "./command/persona.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
-export interface PersonaCommandServices {
+export interface PersonaCommandServices extends PersonaCommandOptions {
   settings: SettingsStore;
 }
 
@@ -47,7 +53,7 @@ function resolvePersonaText(typed: string, existing: string): string {
 }
 
 async function showPersonaStatus(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
-  const result = await personaStatus({ settings: services.settings });
+  const result = await personaStatus(services);
   shell.insertCommandResult(
     "/persona status",
     [`settings file: ${result.settingsFile}`, "", ...formatPersonaLines(result.persona)].join("\n"),
@@ -92,6 +98,7 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
         continue;
       }
       if (choice === "images") {
+        const snapshot = await personaStatus(services);
         const action = await flow.readSelect({
           message: "Persona images",
           options: [
@@ -106,13 +113,14 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
           action === "set"
             ? await flow.readText({
                 message: "Persona folder (root = vibe; appearance/ = how you look)",
-                defaultValue: (await services.settings.load()).persona.imagesDir ?? "",
+                defaultValue: snapshot.persona.imagesDir ?? "",
                 allowBack: true,
               })
             : undefined;
         if (action === "set" && !folder?.trim()) continue;
         const result = await runPersonaCommand(["images", action, ...(folder ? [folder] : [])], {
-          settings: services.settings,
+          ...services,
+          expectedRevision: snapshot.revision,
         });
         shell.insertCommandResult("/persona images", formatPersonaImages(result.images), "success");
         flow.renderLine(result.restart, "success");
@@ -127,7 +135,8 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
 
 async function editCharacter(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).persona;
+  const snapshot = await personaStatus(services);
+  const current = snapshot.persona;
   const notes = await flow.readText({
     message: "Character — how he acts, jokes, and carries himself",
     defaultValue: current.characterNotes,
@@ -139,14 +148,15 @@ async function editCharacter(shell: ClankieFaceShell, services: PersonaCommandSe
   if (notes === undefined) return;
   await personaUpdate(
     { characterNotes: resolvePersonaText(notes, current.characterNotes) },
-    { settings: services.settings },
+    { ...services, expectedRevision: snapshot.revision },
   );
   flow.renderLine("Saved character. New Discord and voice turns pick it up.", "success");
 }
 
 async function editNames(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).persona;
+  const snapshot = await personaStatus(services);
+  const current = snapshot.persona;
   let displayNameDraft = current.displayName;
 
   for (;;) {
@@ -175,7 +185,7 @@ async function editNames(shell: ClankieFaceShell, services: PersonaCommandServic
         displayName: resolvePersonaText(displayName, current.displayName),
         ...(aliases.trim() ? { aliases: splitList(aliases) } : {}),
       },
-      { settings: services.settings },
+      { ...services, expectedRevision: snapshot.revision },
     );
     flow.renderLine("Saved names.", "success");
     return;
@@ -184,6 +194,7 @@ async function editNames(shell: ClankieFaceShell, services: PersonaCommandServic
 
 async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServices): Promise<void> {
   const flow = shell.setupFlow;
+  const snapshot = await personaStatus(services);
 
   for (;;) {
     const chattiness = await flow.readSelect({
@@ -225,7 +236,7 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
         chattiness: chattinessChoice as PersonaSettings["chattiness"],
         replyPolicy: replyChoice as PersonaSettings["replyPolicy"],
       },
-      { settings: services.settings },
+      { ...services, expectedRevision: snapshot.revision },
     );
     flow.renderLine(
       replyChoice === "all"

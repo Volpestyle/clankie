@@ -1,3 +1,8 @@
+import { startFixtureServer } from "../../clankie/test/owner-settings-surface-fixture.ts";
+import { createClankieApp } from "../../clankie/src/app.ts";
+import { createStubCaptain } from "../../clankie/src/captain/port.ts";
+import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
+import { createCredentialBackedOperatorAuthenticator } from "../../clankie/src/operator-auth.ts";
 import { execFile as execFileCallback, type spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
@@ -10,7 +15,8 @@ import {
   mintOperatorToken,
   OPERATOR_CREDENTIAL_PROVIDER_ID,
 } from "@clankie/credential-broker";
-import { SettingsStore } from "@clankie/settings";
+import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+import { linearOwnerFixture } from "./linear-owner-fixture.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 import { HEADLESS_NOUNS } from "../src/command/registry.ts";
@@ -213,25 +219,48 @@ describe("headless clankie commands", () => {
       discord: { ...current.discord, activeBody: "user_session", userSessionEnabled: true },
     }));
 
-    const result = await execFileAsync(
-      process.execPath,
-      [resolve(import.meta.dirname, "../bin/clankie.ts"), "discord", "status"],
-      {
-        env: {
-          ...process.env,
-          XDG_CONFIG_HOME: join(root, "config"),
-          CLANKIE_SETTINGS_FILE: settings.path,
-          DISCORD_ACTIVE_BODY: "",
-          DISCORD_USER_SESSION_ENABLED: "",
-        },
-      },
-    );
-
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      discord: { activeBody: "user_session", userSessionEnabled: true },
-      effectiveDiscord: { activeBody: "user_session", userSessionEnabled: true },
-      overriddenByEnvironment: [],
+    const token = mintOperatorToken();
+    const credentialPath = join(root, "credentials.json");
+    const credentials = new FileCredentialStore(credentialPath);
+    await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+    const service = await createClankieApp({
+      captain: createStubCaptain(),
+      settings,
+      roomObservations: new DiscordRoomObservations(join(root, "rooms.json")),
+      discordEnvironment: {},
+      authenticateOperator: createCredentialBackedOperatorAuthenticator({
+        env: {},
+        store: credentials,
+        identity: { operatorId: "fixture-owner" },
+      }),
     });
+    const server = await startFixtureServer(service.app.fetch);
+    try {
+      const result = await execFileAsync(
+        process.execPath,
+        [resolve(import.meta.dirname, "../bin/clankie.ts"), "discord", "status"],
+        {
+          env: {
+            ...process.env,
+            XDG_CONFIG_HOME: join(root, "config"),
+            CLANKIE_SETTINGS_FILE: settings.path,
+            CLANKIE_CREDENTIALS_FILE: credentialPath,
+            CLANKIE_OPERATOR_TOKEN: token,
+            CLANKIE_CONTROL_PLANE_URL: server.host,
+            DISCORD_ACTIVE_BODY: "",
+            DISCORD_USER_SESSION_ENABLED: "",
+          },
+        },
+      );
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        discord: { activeBody: "user_session", userSessionEnabled: true },
+        effectiveDiscord: { activeBody: "user_session", userSessionEnabled: true },
+        overriddenByEnvironment: [],
+      });
+    } finally {
+      service.close();
+      await server.close();
+    }
   });
 
   it("prints a self-contained command index on help", async () => {
@@ -590,10 +619,15 @@ describe("headless clankie commands", () => {
 it("returns typed JSON and exits nonzero when Linear following lacks its webhook", async () => {
   const env = await stateEnv();
   env.XDG_CONFIG_HOME = env.XDG_STATE_HOME;
+  const owner = await linearOwnerFixture(
+    new SettingsStore(defaultSettingsPath(env)),
+    new FileCredentialStore(join(env.XDG_STATE_HOME!, "linear-credentials.json")),
+  );
   const stdout = outputBuffer();
   const stderr = outputBuffer();
   const code = await runHeadlessCaptainCommand(["linear", "follow", "on"], {
-    env,
+    ...owner,
+    env: { ...env, ...owner.env },
     repoRoot: process.cwd(),
     stdout: stdout.stream,
     stderr: stderr.stream,

@@ -1,4 +1,7 @@
-import { mkdtemp } from "node:fs/promises";
+import { ClankieApiClient, type DiscordSetupApi } from "@clankie/api-client";
+import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { ownerSettingsFixture } from "./owner-settings-fixture.ts";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -106,20 +109,30 @@ describe("Discord server allowlist resolution", () => {
 
 describe("managed server in /discord", () => {
   /** One pass through "Server, application, and roles" with the managed-server answer given. */
-  async function editSwarmHome(settings: SettingsStore, answer: string): Promise<void> {
+  async function editSwarmHome(
+    fixture: Awaited<ReturnType<typeof ownerSettingsFixture>>,
+    setup: DiscordSetupApi,
+    answer: string,
+    onPrompt?: () => Promise<void>,
+  ): Promise<void> {
     const picks = ["core", "done"];
     const texts = ["", "", answer, "", ""];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
       readSelect: async () => picks.shift(),
-      readText: async () => texts.shift(),
+      readText: async () => {
+        await onPrompt?.();
+        return texts.shift();
+      },
       renderLine: () => undefined,
     } as unknown as SetupFlow;
     await runDiscordAdvancedWizard(
       { setupFlow: flow, insertCommandResult: () => undefined } as unknown as ClankieFaceShell,
       {
-        settings,
+        ...fixture.options,
+        settings: fixture.settings,
+        setup,
         listCredentials: async () => ({}),
         removeCredential: async () => undefined,
         setCredential: async () => undefined,
@@ -130,11 +143,48 @@ describe("managed server in /discord", () => {
   it("sets the server agent channels may be projected into, keeps it on blank, and clears it on none", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-discord-swarm-"));
     const settings = new SettingsStore(join(root, "settings.json"));
-    await editSwarmHome(settings, "123456789012345678");
-    expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
-    await editSwarmHome(settings, "");
-    expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
-    await editSwarmHome(settings, "none");
-    expect((await settings.load()).discord.swarmGuildId).toBeUndefined();
+    const fixture = await ownerSettingsFixture({}, settings);
+    try {
+      const credential = await resolveOperatorCredential({
+        env: fixture.options.env,
+        store: fixture.options.operatorCredentialStore,
+      });
+      if (!credential) throw new Error("Fixture owner credential unavailable");
+      const api = new ClankieApiClient({ baseUrl: fixture.options.host, operatorToken: credential.token });
+      await editSwarmHome(fixture, api, "123456789012345678");
+      expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
+      await editSwarmHome(fixture, api, "");
+      expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
+      await editSwarmHome(fixture, api, "none");
+      expect((await settings.load()).discord.swarmGuildId).toBeUndefined();
+    } finally {
+      await fixture.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it("refuses a stale advanced edit after another owner changes the displayed Discord settings", async () => {
+    const fixture = await ownerSettingsFixture();
+    try {
+      const credential = await resolveOperatorCredential({
+        env: fixture.options.env,
+        store: fixture.options.operatorCredentialStore,
+      });
+      if (!credential) throw new Error("Fixture owner credential unavailable");
+      const api = new ClankieApiClient({ baseUrl: fixture.options.host, operatorToken: credential.token });
+      let changed = false;
+      await expect(
+        editSwarmHome(fixture, api, "123456789012345678", async () => {
+          if (changed) return;
+          changed = true;
+          await fixture.settings.update((current) => ({
+            ...current,
+            discord: { ...current.discord, swarmGuildId: "987654321098765432" },
+          }));
+        }),
+      ).rejects.toThrow(/409|Settings changed/);
+      expect((await fixture.settings.load()).discord.swarmGuildId).toBe("987654321098765432");
+    } finally {
+      await fixture.close();
+    }
   });
 });

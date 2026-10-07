@@ -133,6 +133,8 @@ export interface TrustedDeviceIdentity {
 export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface ClankieAppDependencies {
+  /** Host-side voice environment validation; omitted uses the service process environment. */
+  voiceSettingsEnv?: NodeJS.ProcessEnv;
   fleetResources?: import("../fleet-resource-runtime.ts").FleetResourceRuntime;
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
@@ -191,6 +193,11 @@ export interface ClankieAppDependencies {
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
   /** Whether this host may sleep, and when it last did, so the app can say why he went quiet. */
   hostPower?: () => HostPowerReport;
+  autoUpdateManaged?: boolean;
+  applyKeepAwake?: () => Promise<void>;
+  keepAwakeStatus?: () => Promise<
+    NonNullable<import("@clankie/protocol/owner-settings").HostSettingsSnapshot["keepAwakeService"]>
+  >;
   runtimeHealth?: () => import("@clankie/protocol").RuntimeHealthObservation;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;

@@ -2,7 +2,8 @@ import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { HoldOverrideSchema } from "@clankie/protocol/integrate";
-import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
+import { HOST_SETTINGS_PATH, HostSettingsSnapshotSchema } from "@clankie/protocol/owner-settings";
+import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 
 const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
@@ -68,17 +69,39 @@ export function parseUpdateArgs(args: readonly string[]) {
 
 export async function runUpdateCommand(
   args: readonly string[],
-  options: BrowserCommandOptions & { previewRef?: string } = {},
+  options: BrowserCommandOptions & OwnerSettingsApiOptions & { previewRef?: string } = {},
 ): Promise<unknown> {
   args = args.filter((arg) => arg !== "--json");
   // Scheduled idle installs on a hosted body (ADR 0237); a managed body always takes them.
   if (args[0] === "auto") {
     const verb = args[1] ?? "status";
-    if (args.length > 2 || !["status", "on", "off"].includes(verb)) throw Error(AUTO_USAGE);
-    const store = new SettingsStore(defaultSettingsPath(options.env ?? process.env));
-    if (verb !== "status")
-      await store.update((current) => ({ ...current, host: { ...current.host, autoUpdate: verb === "on" } }));
-    return { autoUpdate: (await store.load()).host.autoUpdate };
+    if (
+      (args.length > 2 && !(args.length === 4 && args[2] === "--expected-revision")) ||
+      !["status", "on", "off"].includes(verb)
+    )
+      throw Error(AUTO_USAGE);
+    const api = await ownerSettingsApi(options);
+    const state = await api.get(HOST_SETTINGS_PATH, HostSettingsSnapshotSchema);
+    const revisionArg = args.indexOf("--expected-revision");
+    const expectedRevision = revisionArg === -1 ? state.revision : args[revisionArg + 1];
+    const updated =
+      verb === "status"
+        ? state
+        : await api.write(
+            HOST_SETTINGS_PATH,
+            {
+              schemaVersion: 1,
+              expectedRevision,
+              changes: { autoUpdate: verb === "on" },
+            },
+            HostSettingsSnapshotSchema,
+          );
+    return {
+      autoUpdate: updated.host.autoUpdate,
+      revision: updated.revision,
+      managed: updated.autoUpdateManaged,
+      effective: updated.autoUpdateEffective,
+    };
   }
   const { canary, status, policy, ref, overrides, overrideHolds, reason } = parseUpdateArgs(args);
   const env = options.env ?? process.env;

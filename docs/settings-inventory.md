@@ -8,7 +8,10 @@ same API. Settings that only make sense on one surface are marked
 **single-surface**, with the reason.
 
 Audited 2026-10-07 against clankie `6f165578`, clankie-app `3068dd9` and
-clankie-ops `244e4de`. When a surface or route changes, update this page.
+clankie-ops `244e4de`. Core follow-up on 2026-10-07 adds host writes and moves
+fleet, persona, voice, Discord fields, holds and Linear follow/wake onto owner
+APIs; app/dashboard controls remain separate work. When a surface or route
+changes, update this page.
 
 ## How to read it
 
@@ -41,8 +44,11 @@ clankie-ops `244e4de`. When a surface or route changes, update this page.
   A route missing from both lists is unreachable from a phone, even though it
   exists on the body.
 
-- **Local CLI and TUI.** Most commands write `settings.json` through
-  `SettingsStore` and skip the HTTP API.
+- **Local CLI and TUI.** Fleet, persona, voice, Discord fields, worker-account
+  holds and Linear follow/wake use the same owner API as devices, including
+  revision fences. Host availability settings also use the owner API. A stale
+  write is refused without retry. Machine bootstrap exceptions are listed in
+  [ADR 0248](adr/0248-owner-settings-use-one-revision-fenced-api.md).
 - **Discord settings.** These are the only settings with a host-supplied
   definition (`DISCORD_SETUP_DEFINITION`, ADR 0222): labels, help and choice
   labels come from `@clankie/protocol`. Every other domain uses typed snapshots.
@@ -51,14 +57,14 @@ clankie-ops `244e4de`. When a surface or route changes, update this page.
 
 ### 1. How he talks: Discord attention
 
-| Setting                                                        | Values (default)                                                    | API                                                                                             | CLI  | TUI                                                      | App                                           | Dash                                                        | Tier     |
-| -------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------- | -------- |
-| What wakes him in text, `discord.wakeTrigger`                  | `mention` / `name` / `any`; unset is the body default (7d7f9485)    | `POST /v1/discord/settings`                                                                     | file | ✓ `/discord` → "What wakes him / how much he talks"      | adv (raw chips; cannot return to the default) | off: free official bot card only; edge not deployed in prod | Common   |
-| How readily he jumps in, `persona.chattiness`                  | `quiet` / `balanced` / `chatty` (balanced)                          | `GET`/`POST /v1/operator/persona`; hosted bridge, and relayed for talkativeness only (669b2946) | file | file: `/persona`, `/discord`; hosted console ✓           | —                                             | —                                                           | Common   |
-| Reply policy, `persona.replyPolicy`                            | `all` / `addressed` (all); voice, and text when the wake is default | same                                                                                            | file | file: `/persona`, `/discord`                             | —                                             | —                                                           | Advanced |
-| Name, aliases, character notes, persona images                 | text                                                                | same                                                                                            | file | file: `/persona`; hosted console ✓ (name, notes, images) | —                                             | —                                                           | Advanced |
-| Live message window, `persona.liveMessageWindow`               | 0–100 (5)                                                           | same                                                                                            | file | file                                                     | —                                             | —                                                           | Advanced |
-| Channels he follows between wakes, `discord.ambientChannelIds` | channel ids                                                         | `POST /v1/discord/settings`; ops edge for hosted and official bots                              | file | ✓ Advanced                                               | adv                                           | off (free-bot card)                                         | Advanced |
+| Setting                                                        | Values (default)                                                    | API                                                                                             | CLI | TUI                                                  | App                                           | Dash                                                        | Tier     |
+| -------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --- | ---------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------- | -------- |
+| What wakes him in text, `discord.wakeTrigger`                  | `mention` / `name` / `any`; unset is the body default (7d7f9485)    | `POST /v1/discord/settings`                                                                     | ✓   | ✓ `/discord` → "What wakes him / how much he talks"  | adv (raw chips; cannot return to the default) | off: free official bot card only; edge not deployed in prod | Common   |
+| How readily he jumps in, `persona.chattiness`                  | `quiet` / `balanced` / `chatty` (balanced)                          | `GET`/`POST /v1/operator/persona`; hosted bridge, and relayed for talkativeness only (669b2946) | ✓   | ✓ `/persona`, `/discord`; hosted console ✓           | —                                             | —                                                           | Common   |
+| Reply policy, `persona.replyPolicy`                            | `all` / `addressed` (all); voice, and text when the wake is default | same                                                                                            | ✓   | ✓ `/persona`, `/discord`                             | —                                             | —                                                           | Advanced |
+| Name, aliases, character notes, persona images                 | text                                                                | same                                                                                            | ✓   | ✓ `/persona`; hosted console ✓ (name, notes, images) | —                                             | —                                                           | Advanced |
+| Live message window, `persona.liveMessageWindow`               | 0–100 (5)                                                           | same                                                                                            | ✓   | file                                                 | —                                             | —                                                           | Advanced |
+| Channels he follows between wakes, `discord.ambientChannelIds` | channel ids                                                         | `POST /v1/discord/settings`; ops edge for hosted and official bots                              | ✓   | ✓ Advanced                                           | adv                                           | off (free-bot card)                                         | Advanced |
 
 ### 2. Where he lives: Discord server
 
@@ -74,24 +80,24 @@ clankie-ops `244e4de`. When a surface or route changes, update this page.
 
 ### 3. His mind: model and voice
 
-| Setting                                | Values (default)          | API                                                      | CLI  | TUI                                | App     | Dash                    | Tier     |
-| -------------------------------------- | ------------------------- | -------------------------------------------------------- | ---- | ---------------------------------- | ------- | ----------------------- | -------- |
-| Captain model and thinking effort      | catalog; `off` to `max`   | `/v1/model-keys/select`, `/v1/model-keys/effort`         | file | file `/model`, `/effort`; hosted ✓ | ✓ Model | view ("set in the app") | Common   |
-| Model keys and subscriptions           | write-only keys           | `/v1/model-keys/*`                                       | file | ✓                                  | ✓       | —                       | Common   |
-| Image/video model, compaction, routing |                           | none (`clankie.json`)                                    | file | file                               | —       | —                       | Advanced |
-| Voice brain and TTS (`voice.*`)        | providers, models, voices | `GET`/`POST /v1/operator/voice` (not bridged or relayed) | file | file `/voice`                      | —       | —                       | Advanced |
+| Setting                                | Values (default)          | API                                               | CLI  | TUI                                | App     | Dash                    | Tier     |
+| -------------------------------------- | ------------------------- | ------------------------------------------------- | ---- | ---------------------------------- | ------- | ----------------------- | -------- |
+| Captain model and thinking effort      | catalog; `off` to `max`   | `/v1/model-keys/select`, `/v1/model-keys/effort`  | file | file `/model`, `/effort`; hosted ✓ | ✓ Model | view ("set in the app") | Common   |
+| Model keys and subscriptions           | write-only keys           | `/v1/model-keys/*`                                | file | ✓                                  | ✓       | —                       | Common   |
+| Image/video model, compaction, routing |                           | none (`clankie.json`)                             | file | file                               | —       | —                       | Advanced |
+| Voice brain and TTS (`voice.*`)        | providers, models, voices | `GET`/`POST /v1/operator/voice` (relayed, fenced) | ✓    | ✓ `/voice`                         | —       | —                       | Advanced |
 
 ### 4. How the fleet works
 
-| Setting                                                                                           | Values (default)                                             | API                                                                        | CLI              | TUI                                | App     | Dash | Tier     |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------- | ---------------- | ---------------------------------- | ------- | ---- | -------- |
-| Fleet size, `fleet.size`                                                                          | `max` / `large` / `small` / `solo` (max)                     | `GET`/`POST /v1/operator/fleet-settings` (relayed, bridged)                | file             | file `/fleet`; hosted console view | ✓ Fleet | —    | Common   |
-| Model choices, `fleet.models`                                                                     | `optimal` / `efficient` (optimal)                            | same                                                                       | file             | file                               | ✓       | —    | Common   |
-| Working preferences: commit, push, release, verification, reporting style, closure, machine setup | `lead` / `owner` / time rule (ADR 0230)                      | same                                                                       | file             | file                               | ✓       | —    | Common   |
-| Hire defaults: harness, model, effort (`fleet.hire`)                                              | "No preference" (`auto`, never stored; ea54ebd6), or a value | `GET`/`POST /v1/operator/fleet-settings/hire` (relayed, bridged; 669b2946) | file `fleet set` | file `/fleet`                      | —       | —    | Common   |
-| Hire defaults: account, subagents, delegation, placement                                          | same profile                                                 | **none**                                                                   | file             | file                               | —       | —    | Advanced |
-| Connected tools for workers, peer messages, fleet notes                                           | `connected`/`off`, `on`/`off`, text                          | **none**                                                                   | file             | file                               | —       | —    | Advanced |
-| Shared resources (heavy and simulator slots, load, memory)                                        | `FleetResourcePolicySchema`                                  | fleet-settings                                                             | file             | file `/fleet resources`            | —       | —    | Advanced |
+| Setting                                                                                           | Values (default)                                             | API                                                                        | CLI           | TUI                             | App     | Dash | Tier     |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------- | ------------- | ------------------------------- | ------- | ---- | -------- |
+| Fleet size, `fleet.size`                                                                          | `max` / `large` / `small` / `solo` (max)                     | `GET`/`POST /v1/operator/fleet-settings` (relayed, bridged)                | ✓             | ✓ `/fleet`; hosted console view | ✓ Fleet | —    | Common   |
+| Model choices, `fleet.models`                                                                     | `optimal` / `efficient` (optimal)                            | same                                                                       | ✓             | ✓                               | ✓       | —    | Common   |
+| Working preferences: commit, push, release, verification, reporting style, closure, machine setup | `lead` / `owner` / time rule (ADR 0230)                      | same                                                                       | ✓             | ✓                               | ✓       | —    | Common   |
+| Hire defaults: harness, model, effort (`fleet.hire`)                                              | "No preference" (`auto`, never stored; ea54ebd6), or a value | `GET`/`POST /v1/operator/fleet-settings/hire` (relayed, bridged; 669b2946) | ✓ `fleet set` | ✓ `/fleet`                      | —       | —    | Common   |
+| Hire defaults: account, subagents, delegation, placement                                          | same profile                                                 | fleet-settings                                                             | ✓             | ✓                               | —       | —    | Advanced |
+| Connected tools for workers, peer messages, fleet notes                                           | `connected`/`off`, `on`/`off`, text                          | fleet-settings                                                             | ✓             | ✓                               | —       | —    | Advanced |
+| Shared resources (heavy and simulator slots, load, memory)                                        | `FleetResourcePolicySchema`                                  | fleet-settings                                                             | ✓             | ✓ `/fleet resources`            | —       | —    | Advanced |
 
 ### 5. Projects
 
@@ -104,34 +110,34 @@ clankie-ops `244e4de`. When a surface or route changes, update this page.
 
 ### 6. Worker accounts
 
-| Setting                                                                      | API                                                           | CLI                          | TUI                        | App             | Dash | Tier                                           |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------- | -------------------------- | --------------- | ---- | ---------------------------------------------- |
-| Accounts per machine (identity, plan, headroom, usable), read                | `GET /v1/worker-accounts?fleet=` (relayed, bridged; 669b2946) | ✓ `accounts workers`         | ✓ `/accounts` → by machine | —               | —    | Common                                         |
-| Hold or release an account, `workerAccountHolds`                             | `POST /v1/worker-accounts/holds` (669b2946)                   | file `accounts hold/release` | file `/accounts`           | —               | —    | Common                                         |
-| Sign a coding agent in (Take Control)                                        | `/v1/harness-logins/*`                                        | ✓                            | ✓                          | ✓ Coding agents | —    | Common                                         |
-| Register Claude profiles and Codex homes (`claudeAccounts`, `codexAccounts`) | none                                                          | file                         | file                       | —               | —    | Single: local filesystem paths on that machine |
+| Setting                                                                      | API                                                           | CLI                       | TUI                        | App             | Dash | Tier                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------- | -------------------------- | --------------- | ---- | ---------------------------------------------- |
+| Accounts per machine (identity, plan, headroom, usable), read                | `GET /v1/worker-accounts?fleet=` (relayed, bridged; 669b2946) | ✓ `accounts workers`      | ✓ `/accounts` → by machine | —               | —    | Common                                         |
+| Hold or release an account, `workerAccountHolds`                             | `GET`/`POST /v1/worker-accounts/holds` (revision-fenced)      | ✓ `accounts hold/release` | ✓ `/accounts`              | —               | —    | Common                                         |
+| Sign a coding agent in (Take Control)                                        | `/v1/harness-logins/*`                                        | ✓                         | ✓                          | ✓ Coding agents | —    | Common                                         |
+| Register Claude profiles and Codex homes (`claudeAccounts`, `codexAccounts`) | none                                                          | file                      | file                       | —               | —    | Single: local filesystem paths on that machine |
 
 ### 7. Connections
 
-| Setting                                          | API                                                               | CLI                                     | TUI                   | App        | Dash                     | Tier                                |
-| ------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------- | --------------------- | ---------- | ------------------------ | ----------------------------------- |
-| GitHub, Linear, Google (Gmail, Calendar, Drive)  | `/v1/accounts/*` (bridged, control plane)                         | ✓                                       | ✓ `/connect`          | ✓ Accounts | ✓ (needs a running body) | Common                              |
-| Email (Clankie mailbox or IMAP/SMTP)             | none                                                              | file                                    | file `/connect email` | —          | —                        | Advanced                            |
-| Linear follow and wake rules (`linearWebhook.*`) | `GET`/`PUT /v1/linear/follow\|wake\|target\|routes` (not bridged) | file (follow, wake); ✓ (target, routes) | ✓ `/linear`           | —          | —                        | Advanced                            |
-| Worker access grants                             | `/v1/worker-grants/*`                                             | ✓                                       | ✓ `/access`           | —          | —                        | Advanced                            |
-| OAuth app client ids and secrets                 | none                                                              | file                                    | file                  | —          | —                        | Single: self-hosted developer setup |
-| MCP servers (`mcp.servers`)                      | none                                                              | —                                       | —                     | —          | —                        | Advanced (file only today)          |
+| Setting                                          | API                                                                                      | CLI  | TUI                   | App        | Dash                     | Tier                                |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------- | ---- | --------------------- | ---------- | ------------------------ | ----------------------------------- |
+| GitHub, Linear, Google (Gmail, Calendar, Drive)  | `/v1/accounts/*` (bridged, control plane)                                                | ✓    | ✓ `/connect`          | ✓ Accounts | ✓ (needs a running body) | Common                              |
+| Email (Clankie mailbox or IMAP/SMTP)             | none                                                                                     | file | file `/connect email` | —          | —                        | Advanced                            |
+| Linear follow and wake rules (`linearWebhook.*`) | `GET`/`POST /v1/linear/follow\|wake` (relayed, fenced); target/routes retain `GET`/`PUT` | ✓    | ✓ `/linear`           | —          | —                        | Advanced                            |
+| Worker access grants                             | `/v1/worker-grants/*`                                                                    | ✓    | ✓ `/access`           | —          | —                        | Advanced                            |
+| OAuth app client ids and secrets                 | none                                                                                     | file | file                  | —          | —                        | Single: self-hosted developer setup |
+| MCP servers (`mcp.servers`)                      | none                                                                                     | —    | —                     | —          | —                        | Advanced (file only today)          |
 
 ### 8. Machines and availability
 
-| Setting                                          | API                                                                         | CLI                 | TUI                       | App                             | Dash | Tier                                                  |
-| ------------------------------------------------ | --------------------------------------------------------------------------- | ------------------- | ------------------------- | ------------------------------- | ---- | ----------------------------------------------------- |
-| Machines and runtime connections, capacity       | `/v1/machines`, `/v1/runtime-connections` (bridged); dispatch `connections` | ✓                   | ✓ `/machines`, `/runtime` | ✓ Machines                      | —    | Common                                                |
-| Keep the Mac awake, `host.keepAwake`             | **none**; status read via `GET /health`                                     | file `awake on/off` | file `/awake`             | view (tells you to run the CLI) | —    | Common on a self-hosted Mac                           |
-| Install updates automatically, `host.autoUpdate` | **none**                                                                    | file `update auto`  | file `/update`            | —                               | —    | Advanced                                              |
-| Hosted machine wake and sleep                    | ops `/fleet/v1/wake`, `/sleep`                                              | —                   | —                         | —                               | ✓    | Single: hosted lifecycle belongs to the control plane |
-| Update canary policy, runtime-health alerts      | `/v1/runtime-update/canary`; `/v1/operator/runtime-health` (bridged)        | ✓                   | ✓                         | —                               | —    | Advanced                                              |
-| Herdr runtime, captain working directory         | none                                                                        | file                | file                      | —                               | —    | Single: local machine wiring                          |
+| Setting                                          | API                                                                         | CLI              | TUI                       | App                        | Dash | Tier                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------------- | ---------------- | ------------------------- | -------------------------- | ---- | ----------------------------------------------------- |
+| Machines and runtime connections, capacity       | `/v1/machines`, `/v1/runtime-connections` (bridged); dispatch `connections` | ✓                | ✓ `/machines`, `/runtime` | ✓ Machines                 | —    | Common                                                |
+| Keep the Mac awake, `host.keepAwake`             | `GET`/`POST /v1/operator/host-settings` (relayed, fenced)                   | ✓ `awake on/off` | ✓ `/awake`                | view (write API available) | —    | Common on a self-hosted Mac                           |
+| Install updates automatically, `host.autoUpdate` | same; managed hosting keeps it enabled                                      | ✓ `update auto`  | ✓ `/update`               | —                          | —    | Advanced                                              |
+| Hosted machine wake and sleep                    | ops `/fleet/v1/wake`, `/sleep`                                              | —                | —                         | —                          | ✓    | Single: hosted lifecycle belongs to the control plane |
+| Update canary policy, runtime-health alerts      | `/v1/runtime-update/canary`; `/v1/operator/runtime-health` (bridged)        | ✓                | ✓                         | —                          | —    | Advanced                                              |
+| Herdr runtime, captain working directory         | none                                                                        | file             | file                      | —                          | —    | Single: local machine wiring                          |
 
 ### 9. Devices, privacy and support
 
@@ -180,21 +186,20 @@ credits read-only.
 3. **Worker account holds.**
    - No API holds or releases an account, and `GET /v1/worker-accounts` is not
      relayed, so the app cannot even read it.
-4. **Keeping the Mac awake.**
-   - The app shows the state but sends the owner to the CLI.
-   - No API writes `host.keepAwake` or `host.autoUpdate`.
+4. **Host availability core gap resolved.**
+   - Revision-fenced host write APIs and device forwarding now exist for
+     `host.keepAwake` and `host.autoUpdate`, with shared protocol wording.
+   - The app still needs to bind its controls to those APIs.
 5. **Hosted dashboard Discord settings** are built but off (VUH-1689), and its
    Model section is view-only.
-6. **Local CLI and TUI bypass the API** for fleet, persona, voice, Discord
-   `set`, holds and Linear follow/wake.
-   - These write `settings.json` directly. The values match, but the
-     revision-fenced API checks are skipped, and a hosted body can't be reached
-     the same way.
-   - Moving these commands onto the API is the remaining half of "the same
-     API".
-7. **Voice brain, Linear follow and wake, email:** owner-relevant, but only on
-   the local CLI and TUI. Candidates for the app's Advanced section once the
-   routes are relayed.
+6. **Core owner paths unified.** Fleet, persona, voice, Discord `set`, holds
+   and Linear follow/wake now read and write the owner API. Every update uses
+   the returned revision; conflicts require a fresh read and review.
+   - First-run machine wiring, local account profile registration, provider
+     credentials and the signed webhook URL remain separate setup operations.
+   - See [ADR 0248](adr/0248-owner-settings-use-one-revision-fenced-api.md).
+7. **Voice brain, Linear follow and wake, email:** app controls remain follow-up
+   work. Voice and follow/wake routes are now relayed; email still has no API.
 8. **Project details:**
    - The fleet size/models override can't be changed after a project is
      created.

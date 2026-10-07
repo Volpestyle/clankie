@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,8 @@ import {
   ensureOperatorCredential,
   rotateOperatorCredential,
 } from "@clankie/credential-broker";
+import { TAKE_CONTROL_GRANTS } from "@clankie/protocol";
+import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it } from "vitest";
 import { createClankieApp, type ClankieAppDependencies } from "../src/app.ts";
@@ -33,6 +36,7 @@ async function fixture(
   options: {
     settings?: (store: SettingsStore) => SettingsSource;
     operatorUnavailable?: boolean;
+    paired?: boolean;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "operator-voice-settings-"));
@@ -41,8 +45,56 @@ async function fixture(
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const owner = await ensureOperatorCredential({ env: {}, store: credentials });
   await credentials.set("anthropic", { type: "api", key: "sk-ant-fixture-secret-never-returned" });
+  const deviceKey = randomBytes(32);
+  const eventLogPath = join(root, "events.jsonl");
+  const now = Date.now();
+  const deviceId = "voice-control-device";
+  const envelope = {
+    occurredAt: new Date(now).toISOString(),
+    missionId: `device:${deviceId}`,
+    correlationId: "voice-paired-fixture",
+    profileHash: "fixture",
+  };
+  if (options.paired)
+    await writeFile(
+      eventLogPath,
+      [
+        {
+          ...envelope,
+          id: randomUUID(),
+          type: "device.pairing.redeemed",
+          data: {
+            schemaVersion: 1,
+            deviceId,
+            offerId: "voice-offer",
+            name: "Phone",
+            platform: "ios",
+            offeredGrants: TAKE_CONTROL_GRANTS,
+            mintedBy: "local-operator",
+            pendingExpiresAt: new Date(now + 600_000).toISOString(),
+          },
+        },
+        {
+          ...envelope,
+          id: randomUUID(),
+          type: "device.activated",
+          data: {
+            schemaVersion: 1,
+            deviceId,
+            grants: TAKE_CONTROL_GRANTS,
+            sessionExpiresAt: new Date(now + 600_000).toISOString(),
+          },
+        },
+      ]
+        .map((value) => JSON.stringify(value))
+        .join("\n") + "\n",
+    );
+  const deviceToken = new DeviceSessionSigner(deviceKey).issue(
+    mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1_000), ttlSeconds: 600 }),
+  );
   const service = await createClankieApp({
     captain: createStubCaptain(),
+    ...(options.paired ? { eventLogPath, deviceSessionKey: deviceKey } : {}),
     settings: options.settings?.(settings) ?? settings,
     ...(options.operatorUnavailable
       ? {}
@@ -71,17 +123,32 @@ async function fixture(
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("No fixture server address");
   const url = `http://127.0.0.1:${address.port}/v1/operator/voice`;
-  const request = (method = "GET", body?: unknown, token: string | null = owner.token) =>
-    fetch(url, {
+  const request = async (method = "GET", body?: unknown, token: string | null = owner.token) => {
+    let input = body;
+    if (
+      method === "POST" &&
+      body !== null &&
+      typeof body === "object" &&
+      !Array.isArray(body) &&
+      !("expectedRevision" in body)
+    ) {
+      const current = await settings.load();
+      input = {
+        expectedRevision: createHash("sha256").update(JSON.stringify(current.voice)).digest("hex"),
+        voice: { ...current.voice, ...body },
+      };
+    }
+    return fetch(url, {
       method,
       headers: {
         connection: "close",
         ...(token === null ? {} : { authorization: `Bearer ${token}` }),
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(input === undefined ? {} : { "content-type": "application/json" }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(input === undefined ? {} : { body: JSON.stringify(input) }),
     });
-  return { settings, credentials, owner, request, url };
+  };
+  return { settings, credentials, owner, request, url, deviceId, deviceToken };
 }
 
 it("reads defaults without creating a file and protects voice settings with current owner credentials", async () => {
@@ -93,7 +160,7 @@ it("reads defaults without creating a file and protects voice settings with curr
   const response = await f.request();
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.json()).toEqual({
+  expect(await response.json()).toMatchObject({
     voice: { realtimeProvider: "openai", ttsProvider: "openai", xAiReasoningEffort: "high" },
   });
   await expect(readFile(f.settings.path)).rejects.toMatchObject({ code: "ENOENT" });
@@ -122,7 +189,7 @@ it("persists a validated Anthropic voice patch and preserves persona and inactiv
   });
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.json()).toEqual({
+  expect(await response.json()).toMatchObject({
     voice: {
       realtimeProvider: "anthropic",
       anthropicModel: "claude-sonnet-5-5",
@@ -134,11 +201,19 @@ it("persists a validated Anthropic voice patch and preserves persona and inactiv
     },
     restart: "Restart the active Discord body to apply voice settings.",
   });
+  const snapshot = await (await f.request()).json();
   const updates = await Promise.all([
-    f.request("POST", { anthropicModel: "claude-opus-4-8" }),
-    f.request("POST", { elevenLabsModelId: "eleven_v4_turbo" }),
+    f.request("POST", {
+      expectedRevision: snapshot.revision,
+      voice: { ...snapshot.voice, anthropicModel: "claude-opus-4-8" },
+    }),
+    f.request("POST", {
+      expectedRevision: snapshot.revision,
+      voice: { ...snapshot.voice, elevenLabsModelId: "eleven_v4_turbo" },
+    }),
   ]);
-  expect(updates.map((update) => update.status)).toEqual([200, 200]);
+  expect(updates.map((update) => update.status).sort()).toEqual([200, 409]);
+  await f.request("POST", { anthropicModel: "claude-opus-4-8", elevenLabsModelId: "eleven_v4_turbo" });
   const persisted = await new SettingsStore(f.settings.path).load();
   expect(persisted.voice).toMatchObject({
     realtimeProvider: "anthropic",
@@ -259,4 +334,77 @@ it("reports unavailable authentication, read-only stores and invalid stored sett
   const invalidRead = await readOnly.request();
   expect(invalidRead.status).toBe(503);
   expect(await invalidRead.json()).toEqual({ error: "settings_unavailable" });
+});
+
+it("refuses a persona write when the real owner credential rotates before persistence", async () => {
+  const entered = deferred();
+  const resume = deferred();
+  const f = await fixture({
+    settings: (store) => ({
+      load: () => store.load(),
+      update: (mutate, guard) =>
+        store.update(mutate, async () => {
+          entered.resolve();
+          await resume.promise;
+          await guard?.();
+        }),
+    }),
+  });
+  await f.settings.update((value) => value);
+  const original = await readFile(f.settings.path, "utf8");
+  const url = f.url.replace(/voice$/u, "persona");
+  const headers = {
+    authorization: `Bearer ${f.owner.token}`,
+    "content-type": "application/json",
+    connection: "close",
+  };
+  const snapshot = await (await fetch(url, { headers })).json();
+  const pending = fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      expectedRevision: snapshot.revision,
+      persona: { displayName: "Refused stale owner" },
+    }),
+  });
+  await entered.promise;
+  await rotateOperatorCredential({ env: {}, store: f.credentials });
+  resume.resolve();
+  expect((await pending).status).toBe(401);
+  expect(await readFile(f.settings.path, "utf8")).toBe(original);
+});
+
+it("lets a current Take Control device read and set voice and refuses its queued write after revocation", async () => {
+  const entered = deferred();
+  const resume = deferred();
+  let block = false;
+  const f = await fixture({
+    paired: true,
+    settings: (store) => ({
+      load: () => store.load(),
+      update: (mutate, guard) =>
+        store.update(mutate, async () => {
+          if (block) {
+            entered.resolve();
+            await resume.promise;
+          }
+          await guard?.();
+        }),
+    }),
+  });
+  expect((await f.request("GET", undefined, f.deviceToken)).status).toBe(200);
+  expect((await f.request("POST", { realtimeProvider: "xai" }, f.deviceToken)).status).toBe(200);
+  const original = await readFile(f.settings.path, "utf8");
+  block = true;
+  const pending = f.request("POST", { xAiRealtimeModel: "refused-after-revoke" }, f.deviceToken);
+  await entered.promise;
+  const revoked = await fetch(f.url.replace(/operator\/voice$/u, `devices/${f.deviceId}/revoke`), {
+    method: "POST",
+    headers: { authorization: `Bearer ${f.owner.token}`, connection: "close" },
+  });
+  expect(revoked.status).toBe(200);
+  resume.resolve();
+  expect((await pending).status).toBe(401);
+  expect(await readFile(f.settings.path, "utf8")).toBe(original);
+  expect((await f.request("GET", undefined, f.deviceToken)).status).toBe(401);
 });

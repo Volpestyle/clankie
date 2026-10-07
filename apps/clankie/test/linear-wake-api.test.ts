@@ -25,13 +25,13 @@ it("authenticates, validates and persists live wake rules without changing follo
       "{broken",
     ])
       expect((await app.request("/v1/linear/wake", { method: "PUT", headers, body })).status).toBe(400);
+    const snapshot = await (await app.request("/v1/linear/wake", { headers })).json();
     const response = await app.request("/v1/linear/wake", {
       method: "PUT",
       headers,
       body: JSON.stringify({
-        actors: ["self", "users"],
-        userIds: ["human-id"],
-        notificationTypes: ["issueMention"],
+        expectedRevision: snapshot.revision,
+        wake: { actors: ["self", "users"], userIds: ["human-id"], notificationTypes: ["issueMention"] },
       }),
     });
     expect(response.status).toBe(200);

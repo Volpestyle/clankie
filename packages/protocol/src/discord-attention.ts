@@ -21,11 +21,19 @@ export const PersonaAttentionSchema = z.object({
 });
 export type PersonaAttention = z.infer<typeof PersonaAttentionSchema>;
 /** `GET`/`POST /v1/operator/persona` as the relay projects it: unknown persona fields are dropped. */
-export const PersonaAttentionSnapshotSchema = z.object({ persona: PersonaAttentionSchema });
+export const PersonaAttentionSnapshotSchema = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+  persona: PersonaAttentionSchema,
+});
 export type PersonaAttentionSnapshot = z.infer<typeof PersonaAttentionSnapshotSchema>;
-export const PersonaAttentionUpdateSchema = PersonaAttentionSchema.partial()
-  .strict()
-  .refine((value) => Object.values(value).some((field) => field !== undefined), "No persona change supplied");
+export const PersonaAttentionUpdateSchema = z
+  .object({
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    persona: PersonaAttentionSchema.partial()
+      .strict()
+      .refine((v) => Object.values(v).some((x) => x !== undefined), "No persona change supplied"),
+  })
+  .strict();
 export type PersonaAttentionUpdate = z.infer<typeof PersonaAttentionUpdateSchema>;
 
 interface Choice {

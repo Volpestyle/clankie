@@ -1,3 +1,4 @@
+import { linearOwnerFixture } from "./linear-owner-fixture.ts";
 import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -152,7 +153,7 @@ describe("clankie linear", () => {
   it("defaults off, persists live follow toggles, and rejects invalid commands", async () => {
     const settings = await tempStore();
     const credentials = { get: async () => ({ type: "api" as const, key: "test-secret" }) };
-    const options = { settings, credentials };
+    const options = await linearOwnerFixture(settings, credentials);
     expect(await runLinearCommand([], options)).toMatchObject({
       following: false,
       wakeConversationId: "global-default",
@@ -173,7 +174,7 @@ describe("clankie linear", () => {
     });
     expect((await settings.load()).linearWebhook.url).toBe("https://hooks.example.test/v1/hooks/linear");
     expect(
-      await runLinearCommand(["status"], { settings, credentials: { get: async () => undefined } }),
+      await runLinearCommand(["status"], await linearOwnerFixture(settings, { get: async () => undefined })),
     ).toMatchObject({
       following: true,
       active: false,

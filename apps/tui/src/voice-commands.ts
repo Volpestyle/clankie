@@ -1,9 +1,13 @@
-import { SettingsStore, resolveVoiceSettings, type VoiceSettings } from "@clankie/settings";
+import { SettingsStore, type VoiceSettings } from "@clankie/settings";
 import type { RedactedCredential } from "@clankie/credential-broker";
 import { assertModelCredentialAllowed } from "@clankie/model-provider";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
-export interface VoiceCommandServices {
+import { OwnerVoiceSnapshotSchema, type OwnerVoiceSnapshot } from "@clankie/protocol/owner-settings";
+import { ownerSettingsApi } from "./command/owner-settings-api.ts";
+import { runVoiceCommand, type VoiceCommandOptions } from "./command/voice.ts";
+
+export interface VoiceCommandServices extends VoiceCommandOptions {
   settings: SettingsStore;
   readonly env?: NodeJS.ProcessEnv;
   /** Redacted view of what the credential broker already holds. */
@@ -103,8 +107,11 @@ export function describeVoice(
 }
 
 async function showVoiceStatus(shell: ClankieFaceShell, services: VoiceCommandServices): Promise<void> {
-  const stored = await services.settings.load();
-  const resolved = resolveVoiceSettings(stored.voice, services.env ?? process.env);
+  const status = await runVoiceCommand(["status"], services);
+  const resolved = {
+    settings: status.effectiveVoice,
+    overriddenByEnvironment: status.overriddenByEnvironment,
+  };
   const credentials = await services.listCredentials();
   const lines = [
     `settings file: ${services.settings.path}`,
@@ -128,7 +135,9 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
   flow.begin("voice");
   try {
     for (;;) {
-      const current = (await services.settings.load()).voice;
+      const current = (
+        await (await ownerSettingsApi(services)).get("/v1/operator/voice", OwnerVoiceSnapshotSchema)
+      ).voice;
       const action = await flow.readSelect({
         message: "Voice",
         options: [
@@ -184,13 +193,15 @@ async function runVoiceWizard(shell: ClankieFaceShell, services: VoiceCommandSer
 
 async function apply(
   services: VoiceCommandServices,
+  snapshot: OwnerVoiceSnapshot,
   patch: (current: VoiceSettings) => VoiceSettings,
 ): Promise<void> {
-  await services.settings.update((current) => {
-    const voice = patch(current.voice);
-    resolveVoiceSettings(voice, services.env ?? process.env);
-    return { ...current, voice };
-  });
+  const api = await ownerSettingsApi(services);
+  await api.write(
+    "/v1/operator/voice",
+    { expectedRevision: snapshot.revision, voice: patch(snapshot.voice) },
+    OwnerVoiceSnapshotSchema,
+  );
 }
 
 function readModel(
@@ -211,7 +222,10 @@ function readModel(
 
 async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const current = (await services.settings.load()).voice;
+  const snapshot = await (
+    await ownerSettingsApi(services)
+  ).get("/v1/operator/voice", OwnerVoiceSnapshotSchema);
+  const current = snapshot.voice;
 
   const provider = await flow.readSelect({
     message: "Which voice stack should Clankie use?",
@@ -266,7 +280,7 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
       validate: (value: string) => (value.trim().length > 64 ? "Keep it under 64 characters." : undefined),
     });
     if (voice === undefined) return;
-    await apply(services, (settings) => ({
+    await apply(services, snapshot, (settings) => ({
       ...settings,
       realtimeProvider: "openai",
       ttsProvider: "openai",
@@ -301,7 +315,7 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
     });
     const reasoningChoice = reasoning;
     if (reasoningChoice !== "high" && reasoningChoice !== "none") return;
-    await apply(services, (settings) => ({
+    await apply(services, snapshot, (settings) => ({
       ...settings,
       realtimeProvider: "xai",
       ttsProvider: "openai",
@@ -329,7 +343,7 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
     if (transcriber === undefined) return;
     const speech = await readElevenLabsSettings(shell, current);
     if (speech === undefined) return;
-    await apply(services, (settings) => ({
+    await apply(services, snapshot, (settings) => ({
       ...settings,
       realtimeProvider: "anthropic",
       ttsProvider: "elevenlabs",
@@ -346,7 +360,7 @@ async function editProvider(shell: ClankieFaceShell, services: VoiceCommandServi
 
   const speech = await readElevenLabsSettings(shell, current);
   if (speech === undefined) return;
-  await apply(services, (settings) => ({
+  await apply(services, snapshot, (settings) => ({
     ...settings,
     realtimeProvider: "openai",
     ttsProvider: "elevenlabs",
@@ -417,7 +431,9 @@ async function editRealtimeCredential(
   shell: ClankieFaceShell,
   services: VoiceCommandServices,
 ): Promise<void> {
-  const provider = (await services.settings.load()).voice.realtimeProvider;
+  const provider = (
+    await (await ownerSettingsApi(services)).get("/v1/operator/voice", OwnerVoiceSnapshotSchema)
+  ).voice.realtimeProvider;
   await editApiCredential(shell, services, provider, providerLabel(provider));
 }
 

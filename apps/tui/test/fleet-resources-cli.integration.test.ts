@@ -57,7 +57,9 @@ async function fixture() {
       ? (true as const)
       : ("authentication_required" as const);
   const resourceRoutes = createFleetResourceRoutes(authorize, resources);
-  const settingsRoutes = createFleetSettingsRoutes(authorize, settings);
+  const settingsRoutes = createFleetSettingsRoutes(authorize, settings, {
+    configureResources: (policy) => resources.configure(policy),
+  });
   let mode: "normal" | "legacy" | "invalid" | "unavailable" | "stalled" = "normal";
   const calls: { path: string; method: string }[] = [];
   const server = createServer(async (incoming, outgoing) => {
@@ -179,6 +181,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
         ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
         f.options,
       );
+      f.calls.length = 0;
       await f.settings.update((settings) => ({
         ...settings,
         client: { mode: "hosted", gatewayUrl: f.host, hostId: "fixture-host-0123456789" },

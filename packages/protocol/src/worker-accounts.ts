@@ -67,6 +67,7 @@ export type WorkerAccountHold = z.infer<typeof WorkerAccountHoldSchema>;
 /** `POST /v1/worker-accounts/holds`: hold (`held: true`) or release one account. */
 export const WorkerAccountHoldRequestSchema = z
   .object({
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
     machine: WorkerAccountMachineSchema.default("local"),
     harness: WorkerAccountHarnessSchema,
     label: WorkerAccountLabelSchema,
@@ -77,7 +78,10 @@ export const WorkerAccountHoldRequestSchema = z
   .strict()
   .refine((value) => value.held || value.reason === undefined, "A release carries no reason");
 export type WorkerAccountHoldRequest = z.input<typeof WorkerAccountHoldRequestSchema>;
-export const WorkerAccountHoldsSchema = z.object({ holds: z.array(WorkerAccountHoldSchema).max(64) });
+export const WorkerAccountHoldsSchema = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+  holds: z.array(WorkerAccountHoldSchema).max(64),
+});
 export type WorkerAccountHolds = z.infer<typeof WorkerAccountHoldsSchema>;
 
 /** Shared wording for the TUI, app and dashboard, in the owner's words. */

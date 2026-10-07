@@ -2,6 +2,7 @@
  * `/update` as a modal: show what is running and the last durable update,
  * then stage one only when the owner picks it. Same endpoint as `clankie update`.
  */
+import { HOST_SETTINGS_WORDING } from "@clankie/protocol/owner-settings";
 import type { ClankieFaceShell } from "./shell/shell.ts";
 import { formatUpdateOutput } from "./command/update-output.ts";
 
@@ -32,15 +33,16 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
         },
         {
           value: "auto",
-          label: "Automatic installs…",
-          hint: "hosted bodies install official releases while idle",
+          label: `${HOST_SETTINGS_WORDING.autoUpdate.label}…`,
+          hint: HOST_SETTINGS_WORDING.autoUpdate.description,
         },
       ],
       allowBack: true,
     });
     if (choice === undefined) return;
     if (choice === "auto") {
-      const enabled = record(await update(["auto"])).autoUpdate === true;
+      const automatic = record(await update(["auto"]));
+      const enabled = automatic.autoUpdate === true;
       const next = await flow.readSelect({
         message: `Automatic installs are ${enabled ? "on" : "off"}. Managed bodies always install their approved release.`,
         options: [
@@ -50,7 +52,7 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
         allowBack: true,
       });
       if (next === undefined) return;
-      await update(["auto", next]);
+      await update(["auto", next, "--expected-revision", String(automatic.revision)]);
       shell.insertCommandResult("/update", `Automatic installs ${next}.`, "success");
       return;
     }

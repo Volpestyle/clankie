@@ -12,7 +12,7 @@ import {
   FleetResourcePolicySchema,
   withoutNoPreference,
 } from "@clankie/protocol";
-import { createResourceGovernor, type FleetResourceGovernor } from "@clankie/fleet-resources";
+import { type FleetResourceGovernor } from "@clankie/fleet-resources";
 import { projectRolePolicy } from "@clankie/protocol/projects";
 import { readFile } from "node:fs/promises";
 import { HireProfileSchema, OPERATOR_SEAT_HARNESSES, type HireProfile } from "@clankie/protocol";
@@ -29,6 +29,8 @@ import {
   type FleetSize,
 } from "@clankie/settings";
 import { readWorkingPreferences, type WorkingPreferencesReport } from "./working-preferences.ts";
+import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
+import { FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema } from "@clankie/protocol";
 import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
@@ -39,14 +41,17 @@ const FLEET_USAGE = [
   "       clankie fleet clear",
 ].join("\n");
 
-export interface FleetCommandOptions extends NonNullable<Parameters<typeof machineSetupContext>[1]> {
-  readonly settings?: SettingsStore;
-  /** Isolated machine registry for integration fixtures. */
-  readonly resourceGovernor?: FleetResourceGovernor;
-}
+export type FleetCommandOptions = NonNullable<Parameters<typeof machineSetupContext>[1]> &
+  OwnerSettingsApiOptions & {
+    readonly settings?: SettingsStore;
+    readonly expectedRevision?: string;
+    /** Isolated machine registry for integration fixtures. */
+    readonly resourceGovernor?: FleetResourceGovernor;
+  };
 
 export interface FleetCommandResult {
   readonly ok: true;
+  readonly revision: string;
   readonly fleet: FleetSettings & FleetAutonomy;
   readonly workingPreferences: WorkingPreferencesReport;
   readonly roleProfiles: Array<{
@@ -123,7 +128,9 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
   ];
 }
 
-function fleetAutonomyFields(value: Partial<FleetAutonomy>): Partial<FleetAutonomy> {
+function fleetAutonomyFields(
+  value: Partial<{ [K in keyof FleetAutonomy]: FleetAutonomy[K] | undefined }>,
+): Partial<FleetAutonomy> {
   const {
     closure,
     machineSetup,
@@ -158,7 +165,7 @@ async function result(
   settings: SettingsStore,
   fleet: FleetSettings,
   options: FleetCommandOptions,
-): Promise<FleetCommandResult> {
+): Promise<Omit<FleetCommandResult, "revision">> {
   const config = await settings.load();
   return {
     ok: true,
@@ -180,7 +187,21 @@ async function result(
 
 export async function fleetStatus(options: FleetCommandOptions = {}): Promise<FleetCommandResult> {
   const settings = store(options);
-  return await result(settings, (await settings.load()).fleet, options);
+  const snapshot = await (
+    await ownerSettingsApi(options)
+  ).get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+  const report = await result(
+    settings,
+    FleetSettingsSchema.parse(
+      Object.fromEntries(Object.entries(snapshot.fleet).filter(([key]) => key in FleetSettingsSchema.shape)),
+    ),
+    options,
+  );
+  return {
+    ...report,
+    revision: snapshot.revision,
+    fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(snapshot.fleet)) },
+  };
 }
 
 /** Merge the given fields into the stored fleet settings; a string alone updates the notes. */
@@ -191,54 +212,38 @@ export async function fleetUpdate(
 ): Promise<FleetCommandResult> {
   const change: FleetUpdate = typeof update === "string" ? { notes: update } : update;
   const settings = store(options);
-  const {
-    closure,
-    machineSetup,
-    commit,
-    push,
-    release,
-    verification,
-    reportingStyle,
-    everydayWork,
-    leavesMac,
-    hardToUndo,
-    moneyAndAccounts,
-    ...fleetChange
-  } = change;
-  const updated = await settings.update((current) => ({
-    ...current,
-    fleet: FleetSettingsSchema.parse({
-      ...current.fleet,
-      ...fleetChange,
-      ...(hirePatch === undefined ? {} : { hire: patchHireDefaults(current.fleet.hire, hirePatch) }),
-    }),
-    autonomy: {
-      ...current.autonomy,
-      fleet: FleetAutonomySchema.parse({
-        ...current.autonomy.fleet,
-        ...(closure === undefined ? {} : { closure }),
-        ...(machineSetup === undefined ? {} : { machineSetup }),
-        ...(commit === undefined ? {} : { commit }),
-        ...(push === undefined ? {} : { push }),
-        ...(release === undefined ? {} : { release }),
-        ...(verification === undefined ? {} : { verification }),
-        ...(reportingStyle === undefined ? {} : { reportingStyle }),
-        ...(everydayWork === undefined ? {} : { everydayWork }),
-        ...(leavesMac === undefined ? {} : { leavesMac }),
-        ...(hardToUndo === undefined ? {} : { hardToUndo }),
-        ...(moneyAndAccounts === undefined ? {} : { moneyAndAccounts }),
-      }),
+  const fleetChange = Object.fromEntries(
+    Object.entries(change).filter(([key]) => key in FleetSettingsSchema.shape),
+  );
+  const api = await ownerSettingsApi(options);
+  const snapshot = await api.get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+  const updated = await api.write(
+    FLEET_SETTINGS_PATH,
+    {
+      schemaVersion: 1,
+      expectedRevision: options.expectedRevision ?? snapshot.revision,
+      changes: {
+        ...fleetChange,
+        ...fleetAutonomyFields(change),
+        ...(Object.hasOwn(change, "hire") ? { hire: change.hire ?? null } : {}),
+        ...(hirePatch === undefined ? {} : { hire: patchHireDefaults(snapshot.fleet.hire, hirePatch) }),
+      },
     },
-  }));
-  if (change.resources !== undefined) {
-    const governor = options.resourceGovernor ?? createResourceGovernor();
-    try {
-      await governor.configure(updated.fleet.resources!);
-    } finally {
-      if (options.resourceGovernor === undefined) await governor.close();
-    }
-  }
-  return await result(settings, updated.fleet, options);
+    FleetSettingsSnapshotSchema,
+  );
+
+  const report = await result(
+    settings,
+    FleetSettingsSchema.parse(
+      Object.fromEntries(Object.entries(updated.fleet).filter(([key]) => key in FleetSettingsSchema.shape)),
+    ),
+    options,
+  );
+  return {
+    ...report,
+    revision: updated.revision,
+    fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(updated.fleet)) },
+  };
 }
 
 function isSize(value: string): value is FleetSize {
@@ -381,7 +386,10 @@ export async function runFleetCommand(
   }
   // `clear` returns every field to its default: no notes, no plan limit.
   if (verb === "clear" && args.length === 1) {
-    const current = (await store(options).load()).fleet;
+    const snapshot = await (
+      await ownerSettingsApi(options)
+    ).get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+    const current = snapshot.fleet;
     return await fleetUpdate(
       {
         ...FleetSettingsSchema.parse({}),
@@ -389,12 +397,19 @@ export async function runFleetCommand(
         ...FleetAutonomySchema.parse({}),
         ...(current.resources === undefined ? {} : { resources: FleetResourcePolicySchema.parse({}) }),
       },
-      options,
+      { ...options, expectedRevision: snapshot.revision },
     );
   }
   if (verb === "set") {
-    const { change, hire } = await parseSet(args.slice(1), (await store(options).load()).fleet.resources);
-    return await fleetUpdate(change, options, Object.keys(hire).length ? hire : undefined);
+    const snapshot = await (
+      await ownerSettingsApi(options)
+    ).get(FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema);
+    const { change, hire } = await parseSet(args.slice(1), snapshot.fleet.resources);
+    return await fleetUpdate(
+      change,
+      { ...options, expectedRevision: snapshot.revision },
+      Object.keys(hire).length ? hire : undefined,
+    );
   }
   throw new Error(FLEET_USAGE);
 }

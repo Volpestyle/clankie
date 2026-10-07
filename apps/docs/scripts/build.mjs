@@ -176,6 +176,75 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 function buildNetworkRows() {
   const routeDetails = new Map([
     [
+      "GET /v1/operator/host-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read keep-awake and automatic update preferences, their revision and host capability status.",
+      },
+    ],
+    [
+      "POST /v1/operator/host-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Save host preferences with revision fencing; managed updates stay on. A saved choice whose runtime application fails returns a validated saved receipt.",
+      },
+    ],
+    [
+      "GET /v1/operator/voice",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read stored and effective public voice settings and revision; provider credentials remain private.",
+      },
+    ],
+    [
+      "POST /v1/operator/voice",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Save a validated voice configuration against its current revision; application requires the active body restart.",
+      },
+    ],
+    [
+      "GET /v1/worker-accounts/holds",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read every held worker account and the current holds revision.",
+      },
+    ],
+    [
+      "GET /v1/linear/follow",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read the following switch, webhook readiness and current revision.",
+      },
+    ],
+    [
+      "POST /v1/linear/follow",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Set the following switch against its current revision; enabling requires the signed webhook.",
+      },
+    ],
+    [
+      "GET /v1/linear/wake",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read signed activity actor and event wake rules and their current revision.",
+      },
+    ],
+    [
+      "POST /v1/linear/wake",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Replace wake rules with revision fencing; rules apply to new signed activity without replaying history.",
+      },
+    ],
+    [
       "POST /v1/activity/viewer",
       {
         access: "Fleet-signed Activity media permit with current audience authorization",
@@ -809,7 +878,7 @@ function networkRow({ method, route, access, purpose }) {
 async function slashCommands() {
   const tuiSrc = resolve(repoRoot, "apps/tui/src");
   const literal =
-    /name: "([^"]+)",\s*aliases: \[([^\]]*)\],\s*description: "([^"]*)",(?:\s*argumentHint:\s*"([^"]*)",)?\s*takesArgument: (?:true|false)/g;
+    /name: "([^"]+)",\s*aliases: \[([^\]]*)\],\s*description:\s*"([^"]*)",(?:\s*argumentHint:\s*"([^"]*)",)?\s*takesArgument: (?:true|false)/g;
   const commands = [];
   let registered = 0;
   for await (const file of glob("**/*.ts", { cwd: tuiSrc })) {

@@ -13,6 +13,7 @@ import {
   FleetAutonomySchema,
   UpdateFleetSettingsSchema,
   type FleetSettingsSnapshot,
+  type FleetResourcePolicy,
 } from "@clankie/protocol";
 import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 import {
@@ -22,6 +23,7 @@ import {
 
 function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot {
   const fleet = {
+    ...settings.fleet,
     size: settings.fleet.size,
     models: settings.fleet.models,
     ...(settings.fleet.resources === undefined ? {} : { resources: settings.fleet.resources }),
@@ -52,7 +54,9 @@ function fleetHireDefaultsSnapshot(settings: ClankieSettings): FleetHireDefaults
 export function createFleetSettingsRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
-  dependencies: FleetSettingsContextDependencies = {},
+  dependencies: FleetSettingsContextDependencies & {
+    configureResources?: ((policy: FleetResourcePolicy) => Promise<unknown>) | undefined;
+  } = {},
 ): Hono {
   const app = new Hono();
   for (const path of [FLEET_SETTINGS_PATH, FLEET_SETTINGS_CONTEXT_PATH, FLEET_HIRE_DEFAULTS_PATH])
@@ -80,7 +84,8 @@ export function createFleetSettingsRoutes(
           if (fleetSettingsSnapshot(current).revision !== input.data.expectedRevision)
             throw new Error("Fleet settings changed");
           before = JSON.stringify(current);
-          const { size, models, resources, ...preferences } = input.data.changes;
+          const { size, models, resources, notes, tools, peerMessages, hire, ...preferences } =
+            input.data.changes;
           const defaults = FleetAutonomySchema.parse({});
           const resolved = Object.fromEntries(
             Object.entries(preferences).map(([field, value]) => [
@@ -95,6 +100,10 @@ export function createFleetSettingsRoutes(
               ...(size === undefined ? {} : { size }),
               ...(models === undefined ? {} : { models }),
               ...(resources === undefined ? {} : { resources }),
+              ...(notes === undefined ? {} : { notes }),
+              ...(tools === undefined ? {} : { tools }),
+              ...(peerMessages === undefined ? {} : { peerMessages }),
+              ...(hire === undefined ? {} : { hire: hire ?? undefined }),
             },
             autonomy: {
               ...current.autonomy,
@@ -110,6 +119,8 @@ export function createFleetSettingsRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
+      if (input.data.changes.resources !== undefined)
+        await dependencies.configureResources?.(input.data.changes.resources);
       return context.json(fleetSettingsSnapshot(updated));
     } catch {
       return context.json({ error: "fleet_settings_conflict" }, 409);

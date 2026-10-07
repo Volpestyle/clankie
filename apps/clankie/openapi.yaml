@@ -1863,110 +1863,123 @@ paths:
   /v1/linear/wake:
     get:
       tags: [Operator]
-      operationId: inspectLinearWakeRules
-      summary: Inspect actor and activity type wake rules
-      security: [{ operatorBearer: [] }]
+      operationId: getLinearWakeRules
+      summary: Inspect actor and activity wake rules
+      description: Live rules apply to new signed activity without replay. The follow switch still gates wakes. Relayed GET/POST retain the original device authority.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
-          description: Current live wake rules
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
           content:
             application/json:
-              schema:
-                type: object
-                required: [schemaVersion, wake]
-                properties:
-                  schemaVersion: { const: 1 }
-                  wake: { $ref: "#/components/schemas/LinearWakeRules" }
-        "401": { description: Operator authentication required }
-        "503": { description: Operator authentication unavailable }
-    put:
+              schema: { $ref: "#/components/schemas/LinearWakeSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "503": { description: Settings unavailable }
+    post:
       tags: [Operator]
-      operationId: setLinearWakeRules
-      summary: Replace wake rules without restarting
-      description: Missing fields take defaults. Defaults select signed comments and mentions by the owner user email volpestyle@gmail.com and exclude issueSubscribed. Owner IDs may also be configured. Unknown or ambiguous authors and own writes never wake. Actor selectors are ORed; exclusions always win. Empty notificationTypes allows all types. Rules apply to new signed webhook activity without replaying history. The follow switch still gates wakes; passive activity remains visible in the selected ordinary chat.
-      security: [{ operatorBearer: [] }]
+      operationId: updateLinearWakeRules
+      summary: Save validated settings with revision fencing
+      description: The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/LinearWakeRules" }
+            schema: { $ref: "#/components/schemas/LinearWakeUpdate" }
       responses:
         "200":
-          description: Persisted live wake rules
+          description: Saved snapshot and revision
           content:
             application/json:
-              schema:
-                type: object
-                required: [schemaVersion, wake]
-                properties:
-                  schemaVersion: { const: 1 }
-                  wake: { $ref: "#/components/schemas/LinearWakeRules" }
-        "400": { description: Malformed rules }
-        "401": { description: Operator authentication required }
-        "503": { description: Settings or operator authentication unavailable }
+              schema: { $ref: "#/components/schemas/LinearWakeSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
+    put:
+      tags: [Operator]
+      operationId: replaceLinearWakeRules
+      summary: Save validated settings with revision fencing
+      description: PUT is the local compatibility alias; devices use POST. The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinearWakeUpdate" }
+      responses:
+        "200":
+          description: Saved snapshot and revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinearWakeSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
   /v1/linear/follow:
     get:
       tags: [Operator]
-      operationId: inspectLinearFollowing
-      summary: Inspect Linear activity following and required webhook readiness
-      security: [{ operatorBearer: [] }]
+      operationId: getLinearFollowing
+      summary: Inspect following and webhook readiness
+      description: Following requires the configured signed webhook. Missing URL or secret refuses enablement. Passive activity remains visible without waking.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
-          {
-            description: Following switch,
-            active readiness,
-            webhookConfigured,
-            reason,
-            missingWebhook,
-            detail,
-            configured ordinary chat in wakeConversationId,
-          }
-        "401": { description: Operator authentication required }
-    put:
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinearFollowSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "503": { description: Settings unavailable }
+    post:
       tags: [Operator]
-      operationId: setLinearFollowing
-      summary: Enable or disable rule-matched turns from signed Linear webhooks
-      description: Enabling requires a stored webhook URL and signing secret. It never promotes passive backlog. Disabling suppresses new and queued wakes while leaving ordinary chat history delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. Bursts coalesce into one wake for the selected ordinary global chat. There is no notification poll.
-      security: [{ operatorBearer: [] }]
+      operationId: updateLinearFollowing
+      summary: Save validated settings with revision fencing
+      description: The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [following]
-              properties:
-                following: { type: boolean }
+            schema: { $ref: "#/components/schemas/LinearFollowUpdate" }
       responses:
         "200":
-          {
-            description: Following switch,
-            active readiness,
-            webhookConfigured,
-            reason,
-            missingWebhook,
-            detail,
-            configured ordinary chat in wakeConversationId,
-          }
-        "400": { description: Invalid request }
-        "401": { description: Operator authentication required }
-        "409":
-          description: Following requires the registered webhook URL and broker-held signing secret; the switch is unchanged.
+          description: Saved snapshot and revision
           content:
             application/json:
-              schema:
-                type: object
-                required: [error, reason, missingWebhook, following, active, detail]
-                properties:
-                  error: { const: linear_webhook_required }
-                  reason: { const: linear_webhook_required }
-                  missingWebhook:
-                    type: array
-                    items: { enum: [url, secret] }
-                  following: { type: boolean }
-                  active: { const: false }
-                  detail: { type: string }
+              schema: { $ref: "#/components/schemas/LinearFollowSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
+    put:
+      tags: [Operator]
+      operationId: replaceLinearFollowing
+      summary: Save validated settings with revision fencing
+      description: PUT is the local compatibility alias; devices use POST. The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinearFollowUpdate" }
+      responses:
+        "200":
+          description: Saved snapshot and revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinearFollowSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
   /v1/worker-grants/:
     get:
       tags: [Operator]
@@ -2202,6 +2215,7 @@ paths:
                 properties:
                   schemaVersion: { type: integer, enum: [1] }
                   workingPreferences: { type: boolean, enum: [true] }
+                  fleetGates: { type: boolean, enum: [true] }
                   revision: { type: string, pattern: "^[a-f0-9]{64}$" }
                   fleet:
                     type: object
@@ -2210,6 +2224,15 @@ paths:
                     properties:
                       size: { type: string, enum: [max, large, small, solo] }
                       models: { type: string, enum: [optimal, efficient] }
+                      resources: { type: object, description: FleetResourcePolicySchema }
+                      notes: { type: string, maxLength: 4000 }
+                      tools: { type: string, enum: [connected, off] }
+                      peerMessages: { type: string, enum: [on, off] }
+                      hire: { type: object, description: Full HireProfileSchema; null clears on write }
+                      everydayWork: { type: string, enum: [allow, lead, owner] }
+                      leavesMac: { type: string, enum: [allow, lead, owner] }
+                      hardToUndo: { type: string, enum: [allow, lead, owner] }
+                      moneyAndAccounts: { type: string, enum: [owner] }
                       closure: { type: string, enum: [lead, owner] }
                       machineSetup: { type: string, enum: [lead, owner] }
                       commit: { type: string, enum: [lead, owner] }
@@ -2243,6 +2266,15 @@ paths:
                   properties:
                     size: { type: string, enum: [max, large, small, solo] }
                     models: { type: string, enum: [optimal, efficient] }
+                    resources: { type: object, description: FleetResourcePolicySchema }
+                    notes: { type: string, maxLength: 4000 }
+                    tools: { type: string, enum: [connected, off] }
+                    peerMessages: { type: string, enum: [on, off] }
+                    hire: { type: object, description: Full HireProfileSchema; null clears on write }
+                    everydayWork: { type: string, enum: [allow, lead, owner] }
+                    leavesMac: { type: string, enum: [allow, lead, owner] }
+                    hardToUndo: { type: string, enum: [allow, lead, owner] }
+                    moneyAndAccounts: { type: string, enum: [owner] }
                     closure: { type: string, enum: [lead, owner, null], nullable: true }
                     machineSetup: { type: string, enum: [lead, owner, null], nullable: true }
                     commit: { type: string, enum: [lead, owner, null], nullable: true }
@@ -2306,23 +2338,43 @@ paths:
         "409": { description: The machine could not be read }
         "503": { description: Worker accounts unavailable }
   /v1/worker-accounts/holds:
+    get:
+      tags: [Operator]
+      operationId: getWorkerAccountHolds
+      summary: Read held worker accounts and current revision
+      description: Holding prevents automatic selection; naming the account explicitly still permits a hire. Hold and release update one account and return all current holds.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkerAccountHoldsSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "503": { description: Settings unavailable }
     post:
       tags: [Operator]
-      operationId: setWorkerAccountHold
-      summary: Hold or release one worker account
-      description: A held account is skipped by Clankie's automatic choice; a hire that names it may still use it. Body {machine (default local), harness, label, held, reason? (hold only)}; returns every hold (WorkerAccountHoldRequestSchema, WorkerAccountHoldsSchema). Same settings as `clankie accounts hold|release`.
+      operationId: updateWorkerAccountHolds
+      summary: Save validated settings with revision fencing
+      description: The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object }
+            schema: { $ref: "#/components/schemas/WorkerAccountHoldUpdate" }
       responses:
-        "200": { description: Every current hold }
-        "400": { description: Invalid hold, or 64 holds already set }
+        "200":
+          description: Saved snapshot and revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkerAccountHoldsSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
         "401": { description: Authentication required }
         "403": { description: Owner authority required }
-        "503": { description: Settings persistence unavailable }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
   /v1/operator/fleet-settings/context:
     get:
       tags: [Operator]
@@ -2761,30 +2813,81 @@ paths:
     get:
       tags: [Operator]
       operationId: getOperatorPersona
-      summary: Read the hosted or local owner-authored persona
-      description: Includes persona image diagnostics (files, roles, counts, sizes, video timestamps, viewable cached sheet paths, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart. A Take Control device that is not the operator receives only chattiness and replyPolicy (PersonaAttentionSnapshotSchema). Hosted-account operator devices on the hosted bridge keep operator scope.
+      summary: Read owner-authored character and talkativeness
+      description: Full operators receive persona and image diagnostics. A Take Control device projection may read and change only chattiness and replyPolicy; its revision still fences the full persona. Images are service-host paths and changes require restart to apply.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
-        "200": { description: Persona settings }
-        "401": { description: Operator authentication required }
+        "200":
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnerPersonaSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "503": { description: Settings unavailable }
     post:
       tags: [Operator]
       operationId: updateOperatorPersona
-      summary: Apply a validated partial persona update
-      description: Accepts imagesDir as a folder on the service host (empty string clears). Top-level images and sampled videos are vibe; appearance/ holds physical character references. Returns image status and a restart reminder. A Take Control device that is not the operator may change only chattiness and replyPolicy (PersonaAttentionUpdateSchema, VUH-1813). Hosted-account operator devices on the hosted bridge keep operator scope.
+      summary: Save validated settings with revision fencing
+      description: The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              description: Partial PersonaSettings; unknown fields are refused
+            schema: { $ref: "#/components/schemas/OwnerPersonaUpdate" }
       responses:
-        "200": { description: Updated persona settings }
-        "400": { description: Invalid persona patch }
-        "401": { description: Operator authentication required }
-        "503": { description: Settings persistence unavailable }
+        "200":
+          description: Saved snapshot and revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnerPersonaSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
+  /v1/operator/host-settings:
+    get:
+      tags: [Operator]
+      operationId: getHostSettings
+      summary: Read keep-awake and automatic update preferences
+      description: Shared labels are HOST_SETTINGS_WORDING in protocol. keepAwakeSupported is false on hosted or non-Mac hosts. Managed hosting keeps autoUpdate enabled; it cannot be disabled. A saved preference does not grant deployment or restart authority.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HostSettingsSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "503": { description: Settings unavailable }
+    post:
+      tags: [Operator]
+      operationId: updateHostSettings
+      summary: Save validated settings with revision fencing
+      description: The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HostSettingsUpdate" }
+      responses:
+        "200":
+          description: Saved snapshot and revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HostSettingsSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503":
+          {
+            description: Settings unavailable or runtime application failed after save; saved=true and settings carries the persisted snapshot,
+          }
   /v1/operator/runtime-health:
     get:
       tags: [Operator]
@@ -2832,48 +2935,40 @@ paths:
     get:
       tags: [Operator]
       operationId: getOperatorVoice
-      summary: Read the owner-authored voice settings
-      description: Native owner/self-hosted voice control; this route is not admitted by the paired hosted-device bridge. Returns stored provider, model and public voice identifiers with schema defaults. Environment overrides, provider credentials and other owner settings are omitted. Does not start voice or contact providers.
-      security: [{ operatorBearer: [] }]
+      summary: Read stored and effective voice settings
+      description: Provider, model and public voice identifiers only; credentials remain in the broker. Device forwarding requires Take Control. Changes need the active Discord body restart to apply and do not contact providers or restart bodies.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
-          description: Stored voice settings; Cache-Control is no-store
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
           content:
             application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                required: [voice]
-                properties:
-                  voice: { $ref: "#/components/schemas/VoiceSettings" }
-        "401": { description: Operator authentication required }
-        "503": { description: Operator authentication or settings read unavailable }
+              schema: { $ref: "#/components/schemas/OwnerVoiceSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "503": { description: Settings unavailable }
     post:
       tags: [Operator]
       operationId: updateOperatorVoice
-      summary: Apply a validated partial voice settings update
-      description: Native owner/self-hosted voice control; this route is not admitted by the paired hosted-device bridge. Merges a strict patch into the current settings under the atomic settings store. The merged configuration must satisfy VoiceSettings, including Anthropic's ElevenLabs voice requirement. Preserves inactive provider models and unrelated settings. Unknown fields and token-shaped values are refused; provider keys belong in the credential broker. Owner authority is rechecked before persistence. Changes stored settings only and requires an active Discord body restart to apply; does not restart a body or contact providers.
-      security: [{ operatorBearer: [] }]
+      summary: Save validated settings with revision fencing
+      description: The expectedRevision from GET is required. Validation and current owner authority are checked before persistence. No automatic conflict retry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/VoiceSettingsPatch" }
+            schema: { $ref: "#/components/schemas/OwnerVoiceUpdate" }
       responses:
         "200":
-          description: Updated stored voice settings; Cache-Control is no-store
+          description: Saved snapshot and revision
           content:
             application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                required: [voice, restart]
-                properties:
-                  voice: { $ref: "#/components/schemas/VoiceSettings" }
-                  restart: { type: string, const: "Restart the active Discord body to apply voice settings." }
-        "400": { description: Malformed, secret-shaped or incompatible voice settings patch }
-        "401": { description: Operator authentication required or revoked before persistence }
-        "503": { description: Operator authentication or settings persistence unavailable }
+              schema: { $ref: "#/components/schemas/OwnerVoiceSnapshot" }
+        "400": { description: Invalid or unfenced settings update }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision, changed owner authority or unsupported preference }
+        "503": { description: Settings unavailable }
   /health:
     get:
       tags: [Health]
@@ -5702,6 +5797,166 @@ paths:
 
 components:
   schemas:
+    OwnerSettingsRevision:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+    HostSettingsSnapshot:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, revision, host, keepAwakeSupported, autoUpdateManaged, autoUpdateEffective]
+      properties:
+        schemaVersion: { const: 1 }
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        host:
+          type: object
+          additionalProperties: false
+          required: [keepAwake, autoUpdate]
+          properties:
+            keepAwake: { type: boolean }
+            autoUpdate: { type: boolean }
+        keepAwakeSupported: { type: boolean }
+        autoUpdateManaged: { type: boolean }
+        autoUpdateEffective: { type: boolean }
+        power: { type: object, description: Optional HostPowerReportSchema observation }
+        keepAwakeService:
+          type: object
+          required: [state]
+          properties:
+            state: { enum: [healthy, unhealthy, unreachable] }
+            detail: { type: string }
+            pid: { type: integer, minimum: 1 }
+    HostSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, expectedRevision, changes]
+      properties:
+        schemaVersion: { const: 1 }
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        changes:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            keepAwake: { type: boolean }
+            autoUpdate: { type: boolean }
+    OwnerPersonaSnapshot:
+      type: object
+      required: [revision, persona]
+      properties:
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        persona: { type: object, description: PersonaSettingsSchema; device projection is talkativeness only }
+        images: { type: object, description: OwnerPersonaImageStatusSchema diagnostics; never image bytes }
+        restart: { type: string }
+    OwnerPersonaUpdate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, persona]
+      properties:
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        persona:
+          {
+            type: object,
+            minProperties: 1,
+            description: Strict partial PersonaSettingsSchema; device projection permits chattiness and replyPolicy only,
+          }
+    OwnerVoiceSnapshot:
+      type: object
+      required: [revision, voice, effectiveVoice, overriddenByEnvironment]
+      properties:
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        voice: { $ref: "#/components/schemas/VoiceSettings" }
+        effectiveVoice: { $ref: "#/components/schemas/VoiceSettings" }
+        overriddenByEnvironment: { type: array, items: { type: string } }
+        restart: { type: string }
+    OwnerVoiceUpdate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, voice]
+      properties:
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        voice: { $ref: "#/components/schemas/VoiceSettings" }
+    LinearWakeSnapshot:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, revision, wake]
+      properties:
+        schemaVersion: { const: 1 }
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        wake: { $ref: "#/components/schemas/LinearWakeRules" }
+    LinearWakeUpdate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, wake]
+      properties:
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        wake: { $ref: "#/components/schemas/LinearWakeRules" }
+    LinearFollowSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          schemaVersion,
+          revision,
+          following,
+          active,
+          webhookConfigured,
+          reason,
+          missingWebhook,
+          wakeWarning,
+          detail,
+          wakeConversationId,
+        ]
+      properties:
+        schemaVersion: { const: 1 }
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        following: { type: boolean }
+        active: { type: boolean }
+        webhookConfigured: { type: boolean }
+        reason: { type: string, nullable: true }
+        missingWebhook: { type: array, items: { type: string, enum: [url, secret] } }
+        wakeWarning: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+        wakeConversationId: { type: string }
+    LinearFollowUpdate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, following]
+      properties:
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        following: { type: boolean }
+    WorkerAccountHoldsSnapshot:
+      type: object
+      required: [revision, holds]
+      properties:
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        holds:
+          {
+            type: array,
+            maxItems: 64,
+            items:
+              {
+                type: object,
+                required: [machine, harness, label],
+                properties:
+                  {
+                    machine: { type: string },
+                    harness: { type: string, enum: [claude, codex] },
+                    label: { type: string },
+                    reason: { type: string, maxLength: 200 },
+                  },
+              },
+          }
+    WorkerAccountHoldUpdate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, harness, label, held]
+      properties:
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        machine: { type: string, default: local }
+        harness: { type: string, enum: [claude, codex] }
+        label: { type: string }
+        held: { type: boolean }
+        reason: { type: string, maxLength: 200, description: Hold only; a release carries no reason }
     VoiceSettingsPatch:
       type: object
       additionalProperties: false

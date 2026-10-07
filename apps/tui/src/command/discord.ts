@@ -1,3 +1,5 @@
+import { ownerSettingsApi } from "./owner-settings-api.ts";
+import { DISCORD_SETTINGS_PATH, DiscordSettingsSnapshotSchema } from "@clankie/protocol";
 import { ClankieApiClient } from "@clankie/api-client";
 import { runDiscordSetupCommand } from "./discord-setup.ts";
 import { runDiscordOfficialCommand, type DiscordOfficialResult } from "./discord-official.ts";
@@ -149,8 +151,9 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
 }
 
 export async function discordStatus(options: DiscordCommandOptions = {}): Promise<DiscordCommandResult> {
-  const settings = store(options);
-  return await result(settings, (await settings.load()).discord, options);
+  const api = await ownerSettingsApi(options);
+  const snapshot = await api.get(DISCORD_SETTINGS_PATH, DiscordSettingsSnapshotSchema);
+  return await result(store(options), snapshot.settings, options);
 }
 
 async function discordUpdate(
@@ -160,16 +163,22 @@ async function discordUpdate(
   return await discordTransform((current) => ({ ...current, ...patch }), options);
 }
 
-export async function discordTransform(
+async function discordTransform(
   transform: (current: DiscordSettings) => DiscordSettings,
   options: DiscordCommandOptions = {},
 ): Promise<DiscordCommandResult> {
-  const settings = store(options);
-  const updated = await settings.update((current) => ({
-    ...current,
-    discord: discordServerSettings(DiscordSettingsSchema.parse(transform(current.discord)), current.discord),
-  }));
-  return await result(settings, updated.discord, options);
+  const api = await ownerSettingsApi(options);
+  const snapshot = await api.get(DISCORD_SETTINGS_PATH, DiscordSettingsSnapshotSchema);
+  const discord = discordServerSettings(
+    DiscordSettingsSchema.parse(transform(snapshot.settings)),
+    snapshot.settings,
+  );
+  const updated = await api.write(
+    DISCORD_SETTINGS_PATH,
+    { expectedRevision: snapshot.revision, settings: discord },
+    DiscordSettingsSnapshotSchema,
+  );
+  return await result(store(options), updated.settings, options);
 }
 
 type DiscordField = keyof DiscordSettings;
@@ -242,19 +251,14 @@ async function discordClearArgs(
   if (args.length === 0) throw new Error(DISCORD_USAGE);
   const fields = args.map(fieldForFlag);
   const defaults = emptySettings().discord;
-  const settings = store(options);
-  const updated = await settings.update((current) => {
-    const discord = { ...current.discord } as Partial<DiscordSettings>;
+  return discordTransform((current) => {
+    const discord = { ...current } as Partial<DiscordSettings>;
     for (const field of fields) {
       if (field in defaults) discord[field] = defaults[field] as never;
       else delete discord[field];
     }
-    return {
-      ...current,
-      discord: discordServerSettings(DiscordSettingsSchema.parse(discord), current.discord),
-    };
-  });
-  return await result(settings, updated.discord, options);
+    return DiscordSettingsSchema.parse(discord);
+  }, options);
 }
 
 export async function runDiscordCommand(

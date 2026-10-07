@@ -1,3 +1,4 @@
+import { linearOwnerFixture } from "./linear-owner-fixture.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ it("shows defaults, validates and persists partial flag edits, and preserves rul
   const root = await mkdtemp(join(tmpdir(), "linear-wake-cli-"));
   roots.push(root);
   const settings = new SettingsStore(join(root, "settings.json"));
-  const options = { settings, credentials: { get: async () => undefined } };
+  const options = await linearOwnerFixture(settings, { get: async () => undefined });
   expect(await runLinearCommand(["wake"], options)).toMatchObject({
     wake: { actors: ["owner"], excludedNotificationTypes: ["issueSubscribed"] },
   });

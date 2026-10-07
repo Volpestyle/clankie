@@ -6,6 +6,7 @@ import { SettingsStore } from "@clankie/settings";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
 
 it.each([
+  "update",
   "restart",
   "reset",
   "deprovision",

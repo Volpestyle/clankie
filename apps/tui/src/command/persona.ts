@@ -1,10 +1,7 @@
-import {
-  loadPersonaImages,
-  personaImageCacheDir,
-  personaImageStatus,
-  resolvePersonaImagesDir,
-} from "@clankie/persona-images";
+import { resolvePersonaImagesDir } from "@clankie/persona-images";
 import { SettingsStore, defaultSettingsPath, type PersonaSettings } from "@clankie/settings";
+import { OwnerPersonaSnapshotSchema, type OwnerPersonaSnapshot } from "@clankie/protocol/owner-settings";
+import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 
 const PERSONA_USAGE = [
   "Usage: clankie persona [status]",
@@ -14,9 +11,9 @@ const PERSONA_USAGE = [
   "                           [--reply-policy addressed|all] [--live-message-window N]",
 ].join("\n");
 
-export interface PersonaCommandOptions {
-  readonly env?: NodeJS.ProcessEnv;
+export interface PersonaCommandOptions extends OwnerSettingsApiOptions {
   readonly settings?: SettingsStore;
+  readonly expectedRevision?: string;
 }
 
 export interface PersonaCommandResult {
@@ -24,7 +21,8 @@ export interface PersonaCommandResult {
   readonly persona: PersonaSettings;
   readonly settingsFile: string;
   readonly restart: string;
-  readonly images?: ReturnType<typeof personaImageStatus>;
+  readonly revision: string;
+  readonly images?: OwnerPersonaSnapshot["images"];
 }
 
 function store(options: PersonaCommandOptions): SettingsStore {
@@ -48,12 +46,15 @@ export function formatPersonaLines(persona: PersonaSettings): string[] {
 }
 
 export async function personaStatus(options: PersonaCommandOptions = {}): Promise<PersonaCommandResult> {
-  const settings = store(options);
+  const api = await ownerSettingsApi(options);
+  const snapshot = await api.get("/v1/operator/persona", OwnerPersonaSnapshotSchema);
   return {
     ok: true,
-    persona: (await settings.load()).persona,
-    settingsFile: settings.path,
+    persona: snapshot.persona,
+    revision: snapshot.revision,
+    settingsFile: store(options).path,
     restart: "clankie restart",
+    ...(snapshot.images ? { images: snapshot.images } : {}),
   };
 }
 
@@ -61,16 +62,21 @@ export async function personaUpdate(
   patch: Partial<PersonaSettings>,
   options: PersonaCommandOptions = {},
 ): Promise<PersonaCommandResult> {
-  const settings = store(options);
-  const updated = await settings.update((current) => ({
-    ...current,
-    persona: { ...current.persona, ...patch },
-  }));
+  const api = await ownerSettingsApi(options);
+  const revision =
+    options.expectedRevision ?? (await api.get("/v1/operator/persona", OwnerPersonaSnapshotSchema)).revision;
+  const snapshot = await api.write(
+    "/v1/operator/persona",
+    { expectedRevision: revision, persona: patch },
+    OwnerPersonaSnapshotSchema,
+  );
   return {
     ok: true,
-    persona: updated.persona,
-    settingsFile: settings.path,
+    persona: snapshot.persona,
+    revision: snapshot.revision,
+    settingsFile: store(options).path,
     restart: "clankie restart",
+    ...(snapshot.images ? { images: snapshot.images } : {}),
   };
 }
 
@@ -115,9 +121,7 @@ export async function runPersonaCommand(
       await personaUpdate({ imagesDir: "" }, options);
     } else if (action !== "status" || args.length > 2) throw new Error(PERSONA_USAGE);
     const status = await personaStatus(options);
-    const images = personaImageStatus(
-      await loadPersonaImages(status.persona.imagesDir, personaImageCacheDir(options.env)),
-    );
+    const images = status.images;
     return { ...status, images, restart: "Restart Clankie to apply persona images: clankie restart" };
   }
   if (verb === undefined || verb === "status") return await personaStatus(options);

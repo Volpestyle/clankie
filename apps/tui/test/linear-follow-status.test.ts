@@ -1,3 +1,4 @@
+import { linearOwnerFixture } from "./linear-owner-fixture.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,8 +28,9 @@ it("makes an empty owner rule visible in status and stops warning after an expli
       wake: { ...current.linearWebhook.wake, ownerUserEmails: [] },
     },
   }));
+  const options = await linearOwnerFixture(settings, credentials);
   const before = await settings.load();
-  const status = await runLinearCommand(["status"], { settings, credentials });
+  const status = await runLinearCommand(["status"], options);
   expect(status).toMatchObject({
     ok: true,
     following: true,
@@ -38,8 +40,8 @@ it("makes an empty owner rule visible in status and stops warning after an expli
   expect(await settings.load()).toEqual(before);
   expect(JSON.stringify(status)).not.toContain(secret);
 
-  await runLinearCommand(["wake", "set", "--owner-user-ids", "james"], { settings, credentials });
-  expect(await runLinearCommand(["status"], { settings, credentials })).toMatchObject({
+  await runLinearCommand(["wake", "set", "--owner-user-ids", "james"], options);
+  expect(await runLinearCommand(["status"], options)).toMatchObject({
     following: true,
     active: true,
     wakeWarning: null,

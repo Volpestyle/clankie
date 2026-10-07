@@ -7,7 +7,7 @@ import {
 } from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
 import { FleetResourcePolicySchema } from "./fleet-resources.ts";
-import { HIRE_NO_PREFERENCE } from "./hire-profile.ts";
+import { HireProfileSchema, HIRE_NO_PREFERENCE } from "./hire-profile.ts";
 import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 
 export const FLEET_SETTINGS_PATH = "/v1/operator/fleet-settings";
@@ -17,6 +17,10 @@ const FleetPolicySchema = z
     size: z.enum(["max", "large", "small", "solo"]),
     models: z.enum(["optimal", "efficient"]),
     resources: FleetResourcePolicySchema.optional(),
+    notes: z.string().max(4000).optional(),
+    tools: z.enum(["connected", "off"]).optional(),
+    peerMessages: z.enum(["on", "off"]).optional(),
+    hire: HireProfileSchema.optional(),
     ...FleetAutonomyWireSchema.shape,
   })
   .strict();
@@ -52,7 +56,7 @@ export const UpdateFleetSettingsSchema = z
     schemaVersion: z.literal(1),
     expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
     changes: FleetPolicySchema.partial()
-      .extend(FleetAutonomyPatchSchema.shape)
+      .extend({ ...FleetAutonomyPatchSchema.shape, hire: HireProfileSchema.nullable().optional() })
       .refine(
         (value) => Object.values(value).some((field) => field !== undefined),
         "No fleet settings changes supplied",

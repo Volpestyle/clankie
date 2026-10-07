@@ -1,3 +1,18 @@
+import {
+  HOST_SETTINGS_PATH,
+  HostSettingsSnapshotSchema,
+  UpdateHostSettingsSchema,
+  OwnerVoiceSnapshotSchema,
+  OwnerVoiceUpdateSchema,
+} from "../../../packages/protocol/src/owner-settings.ts";
+import {
+  LINEAR_FOLLOW_PATH,
+  LINEAR_WAKE_PATH,
+  LinearWakeUpdateSchema,
+  LinearWakeSnapshotSchema,
+  LinearFollowUpdateSchema,
+  LinearFollowSnapshotSchema,
+} from "../../../packages/protocol/src/linear-settings.ts";
 import { DeviceConversationRefusal, type DeviceConversationDispatch } from "./conversation-upstream.ts";
 import { supportReadOperationAllowed } from "../../../packages/protocol/src/support-access.ts";
 import {
@@ -130,7 +145,16 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "GET", path: OPERATOR_PERSONA_PATH },
   { method: "POST", path: OPERATOR_PERSONA_PATH },
   { method: "GET", path: WORKER_ACCOUNTS_PATH },
+  { method: "GET", path: WORKER_ACCOUNT_HOLDS_PATH },
   { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH },
+  { method: "GET", path: LINEAR_FOLLOW_PATH },
+  { method: "POST", path: LINEAR_FOLLOW_PATH },
+  { method: "GET", path: LINEAR_WAKE_PATH },
+  { method: "POST", path: LINEAR_WAKE_PATH },
+  { method: "GET", path: HOST_SETTINGS_PATH },
+  { method: "POST", path: HOST_SETTINGS_PATH },
+  { method: "GET", path: "/v1/operator/voice" },
+  { method: "POST", path: "/v1/operator/voice" },
   { method: "GET", path: PROJECTS_PATH },
   { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH },
 ] as const;
@@ -149,6 +173,26 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     { readonly methods: readonly string[]; readonly update?: ParseSchema; readonly snapshot: ParseSchema }
   >
 > = {
+  [HOST_SETTINGS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateHostSettingsSchema,
+    snapshot: HostSettingsSnapshotSchema,
+  },
+  ["/v1/operator/voice"]: {
+    methods: ["GET", "POST"],
+    update: OwnerVoiceUpdateSchema,
+    snapshot: OwnerVoiceSnapshotSchema,
+  },
+  [LINEAR_FOLLOW_PATH]: {
+    methods: ["GET", "POST"],
+    update: LinearFollowUpdateSchema,
+    snapshot: LinearFollowSnapshotSchema,
+  },
+  [LINEAR_WAKE_PATH]: {
+    methods: ["GET", "POST"],
+    update: LinearWakeUpdateSchema,
+    snapshot: LinearWakeSnapshotSchema,
+  },
   [FLEET_SETTINGS_PATH]: {
     methods: ["GET", "POST"],
     update: UpdateFleetSettingsSchema,
@@ -166,7 +210,7 @@ const OWNER_SETTINGS_ROUTES: Readonly<
   },
   [WORKER_ACCOUNTS_PATH]: { methods: ["GET"], snapshot: MachineWorkerAccountsSchema },
   [WORKER_ACCOUNT_HOLDS_PATH]: {
-    methods: ["POST"],
+    methods: ["GET", "POST"],
     update: WorkerAccountHoldRequestSchema,
     snapshot: WorkerAccountHoldsSchema,
   },
@@ -248,6 +292,31 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           return true;
         }
         if (!upstream.ok) {
+          // Only this documented partial-success receipt survives refusal projection.
+          // Validate the saved snapshot; arbitrary upstream error payloads stay private.
+          if (
+            path === HOST_SETTINGS_PATH &&
+            upstream.status === 503 &&
+            data !== null &&
+            typeof data === "object" &&
+            !Array.isArray(data)
+          ) {
+            const receipt = data as Record<string, unknown>;
+            const saved = HostSettingsSnapshotSchema.safeParse(receipt.settings);
+            if (
+              receipt.error === "keep_awake_apply_failed" &&
+              receipt.saved === true &&
+              Object.keys(receipt).every((key) => ["error", "saved", "settings"].includes(key)) &&
+              saved.success
+            ) {
+              writeJson(response, 503, {
+                error: "keep_awake_apply_failed",
+                saved: true,
+                settings: saved.data,
+              });
+              return true;
+            }
+          }
           writeJson(response, upstream.status, { error: "settings_upstream_refused" });
           return true;
         }

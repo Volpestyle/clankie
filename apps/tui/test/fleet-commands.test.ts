@@ -1,3 +1,4 @@
+import { fleetSettingsClient } from "./fixtures/fleet-settings-client.ts";
 import {
   FleetAutonomySchema,
   FleetResourcePolicySchema,
@@ -40,8 +41,8 @@ function stubStore(initial: ClankieSettings = emptySettings()): {
 describe("clankie fleet", () => {
   it("defaults to empty, so an owner who says nothing leaves the choice to him", async () => {
     const { settings } = stubStore();
-    expect((await runFleetCommand([], { settings })).fleet.notes).toBe("");
-    expect(formatFleetLines((await fleetStatus({ settings })).fleet).join("\n")).toContain(
+    expect((await runFleetCommand([], fleetSettingsClient(settings))).fleet.notes).toBe("");
+    expect(formatFleetLines((await fleetStatus(fleetSettingsClient(settings))).fleet).join("\n")).toContain(
       "he picks a harness per job on his own",
     );
   });
@@ -50,21 +51,21 @@ describe("clankie fleet", () => {
     const { settings, read } = stubStore();
 
     const set = await runFleetCommand(["set", "--notes", "grok attacks what codex builds."], {
-      settings,
+      ...fleetSettingsClient(settings),
     });
     expect(set.fleet.notes).toBe("grok attacks what codex builds.");
     expect(read().fleet.notes).toBe("grok attacks what codex builds.");
     expect(set.restart).toBe("clankie restart");
 
-    expect((await runFleetCommand(["clear"], { settings })).fleet.notes).toBe("");
+    expect((await runFleetCommand(["clear"], fleetSettingsClient(settings))).fleet.notes).toBe("");
   });
 
   it("refuses a shape it cannot store rather than silently truncating", async () => {
     const { settings } = stubStore();
-    await expect(runFleetCommand(["set", "--notes", "x".repeat(4_001)], { settings })).rejects.toThrow(
-      /under 4000/u,
-    );
-    await expect(runFleetCommand(["nope"], { settings })).rejects.toThrow(/Usage/u);
+    await expect(
+      runFleetCommand(["set", "--notes", "x".repeat(4_001)], fleetSettingsClient(settings)),
+    ).rejects.toThrow(/under 4000/u);
+    await expect(runFleetCommand(["nope"], fleetSettingsClient(settings))).rejects.toThrow(/Usage/u);
   });
 
   it("opens the editor on what is already configured and saves what comes back", async () => {
@@ -113,7 +114,9 @@ describe("clankie fleet", () => {
       renderLine: () => undefined,
     } as unknown as SetupFlow;
 
-    await buildFleetCommands({ settings })[0]!.run("", { setupFlow: flow } as unknown as ClankieFaceShell);
+    await buildFleetCommands(fleetSettingsClient(settings))[0]!.run("", {
+      setupFlow: flow,
+    } as unknown as ClankieFaceShell);
 
     expect(selects).toMatchObject([
       { currentValue: "large" },
@@ -166,8 +169,8 @@ describe("clankie fleet", () => {
 describe("clankie fleet budget", () => {
   it("applies the tool kill switch independently and rejects unsupported or repeated values", async () => {
     const { settings, read } = stubStore();
-    await runFleetCommand(["set", "--notes", "keep me", "--size", "small"], { settings });
-    const off = await runFleetCommand(["set", "--tools", "off"], { settings });
+    await runFleetCommand(["set", "--notes", "keep me", "--size", "small"], fleetSettingsClient(settings));
+    const off = await runFleetCommand(["set", "--tools", "off"], fleetSettingsClient(settings));
     expect(off.fleet).toEqual({
       notes: "keep me",
       size: "small",
@@ -177,18 +180,18 @@ describe("clankie fleet budget", () => {
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
-    await expect(runFleetCommand(["set", "--tools", "all"], { settings })).rejects.toThrow(
+    await expect(runFleetCommand(["set", "--tools", "all"], fleetSettingsClient(settings))).rejects.toThrow(
       "--tools must be connected or off",
     );
     await expect(
-      runFleetCommand(["set", "--tools", "off", "--tools", "connected"], { settings }),
+      runFleetCommand(["set", "--tools", "off", "--tools", "connected"], fleetSettingsClient(settings)),
     ).rejects.toThrow("Usage");
     expect(read().fleet.tools).toBe("off");
-    expect((await runFleetCommand(["clear"], { settings })).fleet.tools).toBe("connected");
+    expect((await runFleetCommand(["clear"], fleetSettingsClient(settings))).fleet.tools).toBe("connected");
   });
   it("defaults to maximum bandwidth with the strongest models", async () => {
     const { settings } = stubStore();
-    const status = await runFleetCommand(["status"], { settings });
+    const status = await runFleetCommand(["status"], fleetSettingsClient(settings));
     expect(status.fleet).toMatchObject({
       size: "max",
       models: "optimal",
@@ -203,8 +206,11 @@ describe("clankie fleet budget", () => {
 
   it("sets size and models independently of the notes, and clear restores every default", async () => {
     const { settings, read } = stubStore();
-    await runFleetCommand(["set", "--notes", "codex is the workhorse."], { settings });
-    const set = await runFleetCommand(["set", "--size", "solo", "--models", "efficient"], { settings });
+    await runFleetCommand(["set", "--notes", "codex is the workhorse."], fleetSettingsClient(settings));
+    const set = await runFleetCommand(
+      ["set", "--size", "solo", "--models", "efficient"],
+      fleetSettingsClient(settings),
+    );
     expect(set.fleet).toEqual({
       notes: "codex is the workhorse.",
       size: "solo",
@@ -213,7 +219,7 @@ describe("clankie fleet budget", () => {
       peerMessages: "on",
       ...FleetAutonomySchema.parse({}),
     });
-    await runFleetCommand(["set", "--models", "optimal"], { settings });
+    await runFleetCommand(["set", "--models", "optimal"], fleetSettingsClient(settings));
     expect(read().fleet).toEqual({
       notes: "codex is the workhorse.",
       size: "solo",
@@ -221,7 +227,7 @@ describe("clankie fleet budget", () => {
       tools: "connected",
       peerMessages: "on",
     });
-    expect((await runFleetCommand(["clear"], { settings })).fleet).toEqual({
+    expect((await runFleetCommand(["clear"], fleetSettingsClient(settings))).fleet).toEqual({
       notes: "",
       size: "max",
       models: "optimal",
@@ -233,17 +239,17 @@ describe("clankie fleet budget", () => {
 
   it("refuses unknown values, repeated flags and a flag without a value", async () => {
     const { settings, read } = stubStore();
-    await expect(runFleetCommand(["set", "--size", "huge"], { settings })).rejects.toThrow(
+    await expect(runFleetCommand(["set", "--size", "huge"], fleetSettingsClient(settings))).rejects.toThrow(
       /--size must be one of/u,
     );
-    await expect(runFleetCommand(["set", "--models", "cheap"], { settings })).rejects.toThrow(
-      /--models must be one of/u,
-    );
-    await expect(runFleetCommand(["set", "--size", "max", "--size", "solo"], { settings })).rejects.toThrow(
-      /Usage/u,
-    );
-    await expect(runFleetCommand(["set", "--size"], { settings })).rejects.toThrow(/Usage/u);
-    await expect(runFleetCommand(["set"], { settings })).rejects.toThrow(/Usage/u);
+    await expect(
+      runFleetCommand(["set", "--models", "cheap"], fleetSettingsClient(settings)),
+    ).rejects.toThrow(/--models must be one of/u);
+    await expect(
+      runFleetCommand(["set", "--size", "max", "--size", "solo"], fleetSettingsClient(settings)),
+    ).rejects.toThrow(/Usage/u);
+    await expect(runFleetCommand(["set", "--size"], fleetSettingsClient(settings))).rejects.toThrow(/Usage/u);
+    await expect(runFleetCommand(["set"], fleetSettingsClient(settings))).rejects.toThrow(/Usage/u);
     expect(read().fleet).toEqual({
       notes: "",
       size: "max",
@@ -257,8 +263,8 @@ describe("clankie fleet budget", () => {
 describe("clankie fleet peer messages", () => {
   it("changes peer messages independently, reports the switch and clears back to on", async () => {
     const { settings, read } = stubStore();
-    await runFleetCommand(["set", "--tools", "off", "--notes", "keep me"], { settings });
-    const off = await runFleetCommand(["set", "--peer-messages", "off"], { settings });
+    await runFleetCommand(["set", "--tools", "off", "--notes", "keep me"], fleetSettingsClient(settings));
+    const off = await runFleetCommand(["set", "--peer-messages", "off"], fleetSettingsClient(settings));
     expect(off.fleet).toEqual({
       notes: "keep me",
       size: "max",
@@ -270,21 +276,26 @@ describe("clankie fleet peer messages", () => {
     expect(formatFleetLines(off.fleet).join("\n")).toContain(
       "peer messages: off — new messages between fleet workers disabled",
     );
-    await runFleetCommand(["set", "--peer-messages", "on"], { settings });
+    await runFleetCommand(["set", "--peer-messages", "on"], fleetSettingsClient(settings));
     expect(read().fleet).toMatchObject({ tools: "off", peerMessages: "on" });
-    await runFleetCommand(["set", "--peer-messages", "off"], { settings });
-    expect((await runFleetCommand(["clear"], { settings })).fleet.peerMessages).toBe("on");
+    await runFleetCommand(["set", "--peer-messages", "off"], fleetSettingsClient(settings));
+    expect((await runFleetCommand(["clear"], fleetSettingsClient(settings))).fleet.peerMessages).toBe("on");
   });
 
   it("rejects unsupported, repeated and missing peer-message values without changing the setting", async () => {
     const { settings, read } = stubStore();
-    await expect(runFleetCommand(["set", "--peer-messages", "connected"], { settings })).rejects.toThrow(
-      "--peer-messages must be on or off",
-    );
     await expect(
-      runFleetCommand(["set", "--peer-messages", "off", "--peer-messages", "on"], { settings }),
+      runFleetCommand(["set", "--peer-messages", "connected"], fleetSettingsClient(settings)),
+    ).rejects.toThrow("--peer-messages must be on or off");
+    await expect(
+      runFleetCommand(
+        ["set", "--peer-messages", "off", "--peer-messages", "on"],
+        fleetSettingsClient(settings),
+      ),
     ).rejects.toThrow("Usage");
-    await expect(runFleetCommand(["set", "--peer-messages"], { settings })).rejects.toThrow("Usage");
+    await expect(runFleetCommand(["set", "--peer-messages"], fleetSettingsClient(settings))).rejects.toThrow(
+      "Usage",
+    );
     expect(read().fleet.peerMessages).toBe("on");
   });
 });
@@ -294,11 +305,9 @@ describe("fleet worker defaults persistence", () => {
   async function fixture() {
     const root = await mkdtemp(join(tmpdir(), "clankie-worker-defaults-"));
     const settings = new SettingsStore(join(root, "settings.json"));
-    // Refuse service lookup locally; the test only owns this settings file.
     const options = {
-      settings,
+      ...fleetSettingsClient(settings),
       cwd: root,
-      env: { CLANKIE_OPERATOR_TOKEN: "", CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json") },
     };
     return { root, settings, options };
   }
@@ -354,7 +363,7 @@ describe("fleet worker defaults persistence", () => {
         "worker defaults: harness codex, model gpt-6.1-sol, effort xhigh",
       );
       const output: string[] = [];
-      await buildFleetCommands({ settings: f.settings })[0]!.run("show", {
+      await buildFleetCommands(f.options)[0]!.run("show", {
         insertCommandResult: (_command: string, text: string) => output.push(text),
       } as unknown as ClankieFaceShell);
       expect(output.join("\n")).toContain("worker defaults: harness codex, model gpt-6.1-sol, effort xhigh");
@@ -371,14 +380,16 @@ describe("fleet worker defaults persistence", () => {
     }
   });
 
-  it("keeps independent defaults when field updates share the settings queue and clears the last field", async () => {
+  it("refuses concurrent defaults edits and clears the last field", async () => {
     const f = await fixture();
     try {
-      await Promise.all([
+      const outcomes = await Promise.allSettled([
         runFleetCommand(["set", "--model", "gpt-6.1-sol"], f.options),
         runFleetCommand(["set", "--effort", "xhigh"], f.options),
       ]);
-      expect((await f.settings.load()).fleet.hire).toEqual({ model: "gpt-6.1-sol", effort: "xhigh" });
+      expect(outcomes.filter((result) => result.status === "rejected")).toHaveLength(1);
+      const concurrent = (await f.settings.load()).fleet.hire;
+      expect(concurrent?.model === "gpt-6.1-sol" || concurrent?.effort === "xhigh").toBe(true);
       const cleared = await runFleetCommand(["set", "--model", "auto", "--effort", "auto"], f.options);
       expect(cleared.fleet.hire).toEqual({});
       expect(formatFleetLines(cleared.fleet).join("\n")).toContain(
@@ -455,7 +466,7 @@ describe("fleet worker defaults persistence", () => {
         readText: async (options: Parameters<SetupFlow["readText"]>[0]) =>
           options.message.includes("worker model") ? " " : options.defaultValue,
       } as unknown as SetupFlow;
-      await buildFleetCommands({ settings: f.settings })[0]!.run("", {
+      await buildFleetCommands(f.options)[0]!.run("", {
         setupFlow: flow,
       } as unknown as ClankieFaceShell);
       expect(selects.find((s) => s.message.includes("worker effort"))).toMatchObject({

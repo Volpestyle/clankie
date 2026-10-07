@@ -6,15 +6,20 @@ import { join, resolve } from "node:path";
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it } from "vitest";
 import { runPersonaCommand } from "../src/command/persona.ts";
+import { ownerSettingsFixture } from "./owner-settings-fixture.ts";
+const cleanups: Array<() => Promise<void>> = [];
 const roots: string[] = [];
 afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 it("sets, diagnoses and clears a folder without touching owner images", async () => {
   const root = await mkdtemp(join(tmpdir(), "persona-cli-"));
   roots.push(root);
   const settings = new SettingsStore(join(root, "settings.json"));
-  const options = { settings, env: { XDG_CACHE_HOME: root } };
+  const fixture = await ownerSettingsFixture({ XDG_CACHE_HOME: root }, settings);
+  cleanups.push(fixture.close);
+  const options = fixture.options;
   const result = await runPersonaCommand(["images", "set", "branding"], options);
   expect(result.persona.imagesDir).toBe(resolve("branding"));
   expect(result.images?.count).toBe(3);
@@ -35,6 +40,8 @@ it("sets and clears images through the TUI Persona images choice", async () => {
   const root = await mkdtemp(join(tmpdir(), "persona-tui-"));
   roots.push(root);
   const settings = new SettingsStore(join(root, "settings.json"));
+  const fixture = await ownerSettingsFixture({}, settings);
+  cleanups.push(fixture.close);
   const selections = ["images", "set", "images", "status", "images", "clear", "done"];
   const rendered: string[] = [];
   const shell = {
@@ -47,7 +54,7 @@ it("sets and clears images through the TUI Persona images choice", async () => {
       renderLine: (line: string) => rendered.push(line),
     },
   } as unknown as ClankieFaceShell;
-  await buildPersonaCommands({ settings })[0]!.run("", shell);
+  await buildPersonaCommands(fixture.options)[0]!.run("", shell);
   expect((await settings.load()).persona.imagesDir).toBe("");
   expect(rendered.join("\n")).toContain("3 images from");
   expect(rendered.join("\n")).toContain("0 images from no folder");

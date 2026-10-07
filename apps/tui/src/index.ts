@@ -137,17 +137,16 @@ const captainRouteClient = createCaptainRouteClient({
   ...(callerHerdrSocket ? { herdrSocketPath: callerHerdrSocket } : {}),
   ...(captainRouteToken === undefined ? {} : { captainToken: captainRouteToken }),
 });
-const conversationClient = createCaptainOperatorConversationClient(
-  captainRouteClient,
-  operatorCredential
-    ? createCaptainRouteClient({
-        host: serviceUrl,
-        captainToken: operatorCredential.token,
-        ...(callerHerdrSocket ? { herdrSocketPath: callerHerdrSocket } : {}),
-      })
-    : undefined,
-  { includeCheckouts: true },
-);
+const ownerFetcher = operatorCredential
+  ? createCaptainRouteClient({
+      host: serviceUrl,
+      captainToken: operatorCredential.token,
+      ...(callerHerdrSocket ? { herdrSocketPath: callerHerdrSocket } : {}),
+    })
+  : undefined;
+const conversationClient = createCaptainOperatorConversationClient(captainRouteClient, ownerFetcher, {
+  includeCheckouts: true,
+});
 const herdrRoster = new HerdrRoster(conversationClient);
 const herdrOptions = {
   repoRoot,
@@ -427,6 +426,8 @@ async function stopConversationObservation(): Promise<void> {
 const settingsStore = new SettingsStore();
 const brokeredCommands = {
   settings: settingsStore,
+  ...(ownerFetcher === undefined ? {} : { ownerFetcher }),
+  host: serviceUrl,
   listCredentials: () => services.store.list(),
   getCredential: (providerId: string) => services.store.get(providerId),
   // The doorway the Linear webhook is registered against (ADR 0165); the
@@ -486,13 +487,17 @@ const connectServices = {
   showDiscordInvite,
   runLinearOauth: () => runLinearBrowserLogin(),
   accounts: (args: readonly string[], input?: string) =>
-    runAccountsCommand(args, input === undefined ? {} : { stdin: Readable.from([input]) }),
+    runAccountsCommand(args, {
+      ...brokeredCommands,
+      ...(input === undefined ? {} : { stdin: Readable.from([input]) }),
+    }),
 };
 const commands = [
   ...buildHostedConnectionCommands(settingsStore, true),
   ...buildSetupCommands(setupServices),
   ...buildConsoleCommands({
     repoRoot,
+    ...(ownerFetcher === undefined ? {} : { ownerFetcher }),
     linearFollowMenu: (shell) => runLinearFollowMenu(shell, connectServices),
     settings: settingsStore,
     commandStatus: () =>
@@ -501,11 +506,18 @@ const commands = [
         env: process.env,
         stderr: { write: () => undefined },
       }),
-    commandUpdate: (args) => runUpdateCommand(args),
+    commandUpdate: (args) =>
+      runUpdateCommand(args, { ...(ownerFetcher === undefined ? {} : { ownerFetcher }), host: serviceUrl }),
     commandHarnessLogin: (args, io) => runHarnessLoginCommand(args, io),
     commandDoctor: () => doctorCommand({ repoRoot, env: process.env }),
     commandAwake: (args) =>
-      runAwakeCommand(args, { repoRoot, env: process.env, stderr: { write: () => undefined } }),
+      runAwakeCommand(args, {
+        repoRoot,
+        env: process.env,
+        ...(ownerFetcher === undefined ? {} : { ownerFetcher }),
+        host: serviceUrl,
+        stderr: { write: () => undefined },
+      }),
     commandRuntimeHealth: (args) => runRuntimeHealthCommand(args, { env: process.env }),
     conversations: conversationsContext,
     laneTrace,
@@ -540,8 +552,8 @@ const commands = [
   }),
   ...buildConnectCommands(connectServices),
   ...buildDiscordCommands(brokeredCommands),
-  ...buildPersonaCommands({ settings: settingsStore }),
-  ...buildFleetCommands({ settings: settingsStore }),
+  ...buildPersonaCommands(brokeredCommands),
+  ...buildFleetCommands(brokeredCommands),
   ...buildVoiceCommands(brokeredCommands),
   ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),
 ];

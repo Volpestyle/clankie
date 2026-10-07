@@ -21,6 +21,7 @@ import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative, remoteFleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createReleaseUpdater } from "../../tui/bin/release-updater.ts";
+import { applySavedKeepAwake, savedKeepAwakeStatus } from "../../tui/src/command/awake.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { RuntimeCanary } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
@@ -1784,6 +1785,9 @@ const clankie = await createClankieApp({
   rivals,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
+  autoUpdateManaged: hostedBody !== undefined,
+  applyKeepAwake: () => applySavedKeepAwake({ repoRoot, settings: settingsStore }),
+  keepAwakeStatus: () => savedKeepAwakeStatus({ repoRoot, settings: settingsStore }),
   publicGatewayDoorway: () => {
     if (publicGatewayConnector !== undefined) return publicGatewayConnector.doorway;
     if (publicGatewaySignInRequiredSince !== undefined) {

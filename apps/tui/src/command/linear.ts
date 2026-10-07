@@ -1,3 +1,11 @@
+import type { CaptainRouteFetcher } from "../session/operator-conversations.ts";
+import { ownerSettingsApi } from "./owner-settings-api.ts";
+import {
+  LINEAR_WAKE_PATH,
+  LINEAR_FOLLOW_PATH,
+  LinearWakeSnapshotSchema,
+  LinearFollowSnapshotSchema,
+} from "@clankie/protocol/linear-settings";
 import {
   createDefaultCredentialStore,
   LINEAR_WEBHOOK_PROVIDER_ID,
@@ -43,6 +51,11 @@ export async function runLinearCommand(
   options: {
     readonly env?: NodeJS.ProcessEnv;
     readonly settings?: SettingsStore;
+    readonly host?: string;
+    readonly fetchImpl?: typeof fetch;
+    readonly ownerFetcher?: CaptainRouteFetcher | undefined;
+    readonly operatorCredentialStore?: CredentialStore;
+    readonly expectedRevision?: string;
     readonly credentials?: Pick<CredentialStore, "get">;
     readonly stdin?: Parameters<typeof text>[0];
     readonly callTool?: LaneToolUpstream["callTool"];
@@ -149,17 +162,14 @@ export async function runLinearCommand(
     return request("/v1/linear/target", "PUT", { conversationId: args[2] });
   }
   if (args[0] === "wake") {
-    if (args.length === 1 || (args.length === 2 && args[1] === "show"))
-      return { ok: true, wake: (await settings.load()).linearWebhook.wake, settingsFile: settings.path };
+    const api = await ownerSettingsApi(options);
+    const snapshot = await api.get(LINEAR_WAKE_PATH, LinearWakeSnapshotSchema);
+    if (args.length === 1 || (args.length === 2 && args[1] === "show")) return { ok: true, ...snapshot };
     if (args[1] !== "set" || args.length < 3) throw new Error(LINEAR_USAGE);
-    let current;
-    if (args.length === 3 && args[2] === "--json-stdin") {
-      const wake = LinearWakeSettingsSchema.parse(JSON.parse(await text(options.stdin ?? process.stdin)));
-      current = await settings.update((value) => ({
-        ...value,
-        linearWebhook: { ...value.linearWebhook, wake },
-      }));
-    } else {
+    let wake;
+    if (args.length === 3 && args[2] === "--json-stdin")
+      wake = LinearWakeSettingsSchema.parse(JSON.parse(await text(options.stdin ?? process.stdin)));
+    else {
       const fields: Record<string, string> = {
         "--actors": "actors",
         "--owner-user-ids": "ownerUserIds",
@@ -176,15 +186,35 @@ export async function runLinearCommand(
           throw new Error(LINEAR_USAGE);
         patch[field] = value === "none" ? [] : value.split(",").map((item) => item.trim());
       }
-      current = await settings.update((value) => ({
-        ...value,
-        linearWebhook: {
-          ...value.linearWebhook,
-          wake: LinearWakeSettingsSchema.parse({ ...value.linearWebhook.wake, ...patch }),
-        },
-      }));
+      wake = LinearWakeSettingsSchema.parse({ ...snapshot.wake, ...patch });
     }
-    return { ok: true, wake: current.linearWebhook.wake, settingsFile: settings.path };
+    return {
+      ok: true,
+      ...(await api.write(
+        LINEAR_WAKE_PATH,
+        { expectedRevision: options.expectedRevision ?? snapshot.revision, wake },
+        LinearWakeSnapshotSchema,
+      )),
+    };
+  }
+  if (args.length === 0 || (args.length === 1 && args[0] === "status") || args[0] === "follow") {
+    if (args[0] === "follow" && (args.length !== 2 || !["on", "off"].includes(args[1]!)))
+      throw new Error(LINEAR_USAGE);
+    if (args[0] === "status" && args.length !== 1) throw new Error(LINEAR_USAGE);
+    const api = await ownerSettingsApi(options);
+    const snapshot = await api.get(LINEAR_FOLLOW_PATH, LinearFollowSnapshotSchema);
+    if (args[0] !== "follow") return { ok: true, ...snapshot };
+    if (args[1] === "on" && snapshot.reason === "linear_webhook_required")
+      return { ok: false, error: snapshot.reason, ...snapshot };
+    if (args.length !== 2 || !["on", "off"].includes(args[1]!)) throw new Error(LINEAR_USAGE);
+    return {
+      ok: true,
+      ...(await api.write(
+        LINEAR_FOLLOW_PATH,
+        { expectedRevision: options.expectedRevision ?? snapshot.revision, following: args[1] === "on" },
+        LinearFollowSnapshotSchema,
+      )),
+    };
   }
   if (args.length > 0 && !["status", "follow", "webhook"].includes(args[0]!)) throw new Error(LINEAR_USAGE);
   const credentials =
@@ -192,18 +222,7 @@ export async function runLinearCommand(
   const secret = await credentials.get(LINEAR_WEBHOOK_PROVIDER_ID);
   const secretPresent = secret?.type === "api" && secret.key.trim().length > 0;
   let current;
-  let refused = false;
-  if (args.length === 0 || (args.length === 1 && args[0] === "status")) {
-    current = await settings.load();
-  } else if (args.length === 2 && args[0] === "follow" && (args[1] === "on" || args[1] === "off")) {
-    current = await settings.update((value) => {
-      if (args[1] === "on" && !linearFollowStatus(value.linearWebhook, secretPresent).webhookConfigured) {
-        refused = true;
-        return value;
-      }
-      return { ...value, linearWebhook: { ...value.linearWebhook, following: args[1] === "on" } };
-    });
-  } else if (args[0] === "webhook" && args[1] === "set" && args[2] === "--url" && args.length === 4) {
+  if (args[0] === "webhook" && args[1] === "set" && args[2] === "--url" && args.length === 4) {
     const { url } = LinearWebhookSettingsSchema.parse({ url: args[3] });
     current = await settings.update((value) => ({
       ...value,
@@ -223,8 +242,7 @@ export async function runLinearCommand(
     throw new Error(LINEAR_USAGE);
   }
   return {
-    ok: !refused,
-    ...(refused ? { error: "linear_webhook_required" as const } : {}),
+    ok: true,
     ...linearFollowStatus(current.linearWebhook, secretPresent),
     wakeConversationId: current.linearWebhook.wakeConversationId,
     settingsFile: settings.path,

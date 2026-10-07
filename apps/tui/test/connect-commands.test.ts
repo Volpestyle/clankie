@@ -1,5 +1,10 @@
-import { emptySettings, type ClankieSettings, type SettingsStore } from "@clankie/settings";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { linearOwnerFixture } from "./linear-owner-fixture.ts";
+import { createCaptainRouteClient } from "../src/session/operator-conversations.ts";
+import { SettingsStore } from "@clankie/settings";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   buildConnectCommands,
   type ConnectCommandServices as ConnectServices,
@@ -131,10 +136,19 @@ describe("discord invite URL", () => {
   });
 });
 
+const fixtureRoots: string[] = [];
+afterEach(async () => {
+  for (const root of fixtureRoots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+
 describe("Linear follow setup", () => {
-  function harness(options: {
+  async function harness(options: {
+    readonly ownerFetcher?: ConnectServices["ownerFetcher"];
+    readonly settingsStore?: SettingsStore;
     readonly texts?: readonly (string | undefined)[];
     readonly selections: readonly string[];
+    readonly onReadSelect?: (message: string, settings: SettingsStore) => Promise<void>;
+    readonly onReadText?: (settings: SettingsStore) => Promise<void>;
     readonly secret?: string | undefined;
     readonly following?: boolean;
     readonly url?: string | undefined;
@@ -143,14 +157,18 @@ describe("Linear follow setup", () => {
     readonly connectLinearApp?: ConnectServices["connectLinearApp"];
     readonly storeProviderCredential?: ConnectServices["storeProviderCredential"];
   }) {
-    let settings: ClankieSettings = {
-      ...emptySettings(),
-      linearWebhook: {
-        ...emptySettings().linearWebhook,
-        following: options.following ?? false,
-        url: options.url,
-      },
-    };
+    const root = await mkdtemp(join(tmpdir(), "linear-follow-wizard-"));
+    fixtureRoots.push(root);
+    const settingsStore = options.settingsStore ?? new SettingsStore(join(root, "settings.json"));
+    if (!options.settingsStore)
+      await settingsStore.update((current) => ({
+        ...current,
+        linearWebhook: {
+          ...current.linearWebhook,
+          following: options.following ?? false,
+          ...(options.url === undefined ? {} : { url: options.url }),
+        },
+      }));
     const selections = [...options.selections];
     const texts = options.texts ? [...options.texts] : undefined;
     const stored = new Map<string, string>();
@@ -162,30 +180,33 @@ describe("Linear follow setup", () => {
       end: () => undefined,
       readSelect: async (input: { message: string }) => {
         lines.push(input.message);
+        await options.onReadSelect?.(input.message, settingsStore);
         return selections.shift();
       },
       readSecret: async () => options.secret,
-      readText: async () => (texts ? texts.shift() : "application-id"),
+      readText: async () => {
+        await options.onReadText?.(settingsStore);
+        return texts ? texts.shift() : "application-id";
+      },
       renderLine: (line: string) => lines.push(line),
     } as unknown as SetupFlow;
     const shell = {
       setupFlow: flow,
       insertCommandResult: (_prompt: string, message: string) => results.push(message),
     } as unknown as ClankieFaceShell;
+    const getCredential: ConnectServices["getCredential"] = async (id) =>
+      !removed.includes(id) && (stored.has(id) || options.stored?.[id])
+        ? { type: "api", key: stored.get(id) ?? "fixture-secret" }
+        : undefined;
+    const fixture = await linearOwnerFixture(settingsStore, { get: getCredential });
+    const ownerFetcher =
+      options.ownerFetcher ??
+      createCaptainRouteClient({ host: fixture.host, captainToken: "owner", fetchImpl: fixture.fetchImpl });
     const commands = buildConnectCommands({
-      settings: {
-        path: "/tmp/settings.json",
-        load: async () => settings,
-        update: async (mutate: (current: ClankieSettings) => ClankieSettings) => {
-          settings = mutate(settings);
-          return settings;
-        },
-      } as unknown as SettingsStore,
+      ownerFetcher,
+      settings: settingsStore,
       listCredentials: async () => (options.stored ?? {}) as never,
-      getCredential: async (id) =>
-        !removed.includes(id) && (stored.has(id) || options.stored?.[id])
-          ? { type: "api", key: stored.get(id) ?? "fixture-secret" }
-          : undefined,
+      getCredential,
       setCredential: async (providerId: string, key: string) => {
         stored.set(providerId, key);
       },
@@ -202,11 +223,21 @@ describe("Linear follow setup", () => {
         options.gatewayHook ?? (async () => ({ url: "https://api.clankie.bot", hostId: "host-abc" })),
     });
     const connect = commands.find((command) => command.name === "connect")!;
-    return { connect, shell, stored, removed, lines, results, settings: () => settings };
+    return {
+      connect,
+      shell,
+      stored,
+      removed,
+      lines,
+      results,
+      settingsStore,
+      ownerFetcher,
+      settings: () => settingsStore.load(),
+    };
   }
 
   it("edits every wake rule under Follow Linear without changing following, and cancels atomically", async () => {
-    const h = harness({
+    const h = await harness({
       selections: ["follow", "wake"],
       texts: [
         "owner,self,users",
@@ -219,7 +250,7 @@ describe("Linear follow setup", () => {
       stored: { linear: { type: "oauth" } },
     });
     await h.connect.run("linear", h.shell);
-    expect(h.settings().linearWebhook.wake).toEqual({
+    expect((await h.settings()).linearWebhook.wake).toEqual({
       actors: ["owner", "self", "users"],
       ownerUserIds: ["james"],
       ownerUserEmails: ["volpestyle@gmail.com"],
@@ -227,19 +258,67 @@ describe("Linear follow setup", () => {
       notificationTypes: ["issueMention"],
       excludedNotificationTypes: ["issueSubscribed"],
     });
-    expect(h.settings().linearWebhook.following).toBe(false);
-    const cancelled = harness({
+    expect((await h.settings()).linearWebhook.following).toBe(false);
+    const beforeCancel = (await h.settings()).linearWebhook.wake;
+    const cancelled = await harness({
+      settingsStore: h.settingsStore,
+      ownerFetcher: h.ownerFetcher,
       selections: ["follow", "wake"],
       texts: ["self", undefined],
       stored: { linear: { type: "oauth" } },
     });
     await cancelled.connect.run("linear", cancelled.shell);
-    expect(cancelled.settings().linearWebhook.wake.actors).toEqual(["owner"]);
+    expect((await h.settings()).linearWebhook.wake).toEqual(beforeCancel);
+  });
+
+  it("refuses a stale wake edit when another owner writes while the displayed fields are open", async () => {
+    let changed = false;
+    const h = await harness({
+      selections: ["follow", "wake"],
+      texts: ["owner", "james", "volpestyle@gmail.com", "none", "issueMention", "issueSubscribed"],
+      stored: { linear: { type: "oauth" } },
+      onReadText: async (settings) => {
+        if (changed) return;
+        changed = true;
+        await settings.update((current) => ({
+          ...current,
+          linearWebhook: {
+            ...current.linearWebhook,
+            wake: { ...current.linearWebhook.wake, ownerUserIds: ["other-owner"] },
+          },
+        }));
+      },
+    });
+    await expect(h.connect.run("linear", h.shell)).rejects.toThrow("Settings changed");
+    expect((await h.settings()).linearWebhook.wake.ownerUserIds).toEqual(["other-owner"]);
+    expect((await h.settings()).linearWebhook.following).toBe(false);
+    expect(h.results.join("\n")).not.toContain("wake rules saved");
+  });
+
+  it("refuses a stale follow toggle when another owner changes the displayed settings", async () => {
+    const h = await harness({
+      selections: ["follow", "on"],
+      url: "https://hooks.example.test/v1/hooks/linear",
+      stored: { linear: { type: "oauth" }, "linear-webhook": { type: "api" } },
+      onReadSelect: async (message, settings) => {
+        if (message !== "Follow Linear is off") return;
+        await settings.update((current) => ({
+          ...current,
+          linearWebhook: {
+            ...current.linearWebhook,
+            wake: { ...current.linearWebhook.wake, ownerUserIds: ["other-owner"] },
+          },
+        }));
+      },
+    });
+    await expect(h.connect.run("linear", h.shell)).rejects.toThrow("Settings changed");
+    expect((await h.settings()).linearWebhook.following).toBe(false);
+    expect((await h.settings()).linearWebhook.wake.ownerUserIds).toEqual(["other-owner"]);
   });
 
   it("connects a verified app using concealed secret entry and reports the workspace", async () => {
     const saved: string[] = [];
-    const h = harness({
+    const h = await harness({
       selections: ["app"],
       secret: "private-client-secret",
       connectLinearApp: async (client) => {
@@ -273,21 +352,21 @@ describe("Linear follow setup", () => {
   });
 
   it("stores the webhook secret without automatically enabling follow", async () => {
-    const h = harness({ selections: ["follow", "setup"], secret: "sec-1234567890" });
+    const h = await harness({ selections: ["follow", "setup"], secret: "sec-1234567890" });
 
     await h.connect.run("linear", h.shell);
 
     // The two things an owner would otherwise hand-edit: a provider id typed
     // into /auth, and a settings key.
     expect(h.stored.get("linear-webhook")).toBe("sec-1234567890");
-    expect(h.settings().linearWebhook.following).toBe(false);
-    expect(h.settings().linearWebhook.url).toBe("https://api.clankie.bot/h/host-abc/v1/hooks/linear");
+    expect((await h.settings()).linearWebhook.following).toBe(false);
+    expect((await h.settings()).linearWebhook.url).toBe("https://api.clankie.bot/h/host-abc/v1/hooks/linear");
     expect(h.lines.join("\n")).toContain("Select all available activity events");
     expect(h.lines.join("\n")).toContain("https://api.clankie.bot/h/host-abc/v1/hooks/linear");
   });
 
   it("says what is wrong instead of printing an address Linear cannot reach", async () => {
-    const h = harness({ selections: ["follow", "setup"], gatewayHook: async () => undefined });
+    const h = await harness({ selections: ["follow", "setup"], gatewayHook: async () => undefined });
 
     await h.connect.run("linear", h.shell);
 
@@ -297,37 +376,37 @@ describe("Linear follow setup", () => {
 
   it("removes the secret when he asks, and keeps it when he does not", async () => {
     const stored = { "linear-webhook": { type: "api", redacted: "sec…" } };
-    const removeRun = harness({ selections: ["follow", "setup", "remove"], stored, following: true });
+    const removeRun = await harness({ selections: ["follow", "setup", "remove"], stored, following: true });
     await removeRun.connect.run("linear", removeRun.shell);
     expect(removeRun.removed).toEqual(["linear-webhook"]);
     expect(removeRun.results.join("\n")).toContain("Following is on but blocked: linear_webhook_required");
 
-    const keepRun = harness({ selections: ["follow", "setup", "keep"], stored });
+    const keepRun = await harness({ selections: ["follow", "setup", "keep"], stored });
     await keepRun.connect.run("linear", keepRun.shell);
     expect(keepRun.removed).toEqual([]);
-    expect(keepRun.settings().linearWebhook.following).toBe(false);
-    expect(removeRun.settings().linearWebhook.following).toBe(true);
+    expect((await keepRun.settings()).linearWebhook.following).toBe(false);
+    expect((await removeRun.settings()).linearWebhook.following).toBe(true);
   });
   it("toggles follow with a registered webhook without rotating its credential", async () => {
     const stored = {
       linear: { type: "oauth", expires: 0 },
       "linear-webhook": { type: "api", redacted: "sec…" },
     };
-    const on = harness({
+    const on = await harness({
       selections: ["follow", "on"],
       stored,
       url: "https://hooks.example.test/v1/hooks/linear",
     });
     await on.connect.run("linear", on.shell);
-    expect(on.settings().linearWebhook.following).toBe(true);
+    expect((await on.settings()).linearWebhook.following).toBe(true);
     expect(on.stored.size).toBe(0);
-    const off = harness({
+    const off = await harness({
       selections: ["follow", "off"],
       following: true,
       gatewayHook: async () => undefined,
     });
     await off.connect.run("linear", off.shell);
-    expect(off.settings().linearWebhook.following).toBe(false);
+    expect((await off.settings()).linearWebhook.following).toBe(false);
   });
 
   it.each([
@@ -335,19 +414,19 @@ describe("Linear follow setup", () => {
     { url: "https://hooks.example.test/v1/hooks/linear", secret: false, missing: "secret" },
     { url: undefined, secret: true, missing: "url" },
   ])("refuses to follow with missing $missing", async ({ url, secret, missing }) => {
-    const h = harness({
+    const h = await harness({
       selections: ["follow", "on"],
       url,
       stored: { linear: { type: "oauth" }, ...(secret ? { "linear-webhook": { type: "api" } } : {}) },
     });
     await h.connect.run("linear", h.shell);
-    expect(h.settings().linearWebhook.following).toBe(false);
+    expect((await h.settings()).linearWebhook.following).toBe(false);
     expect(h.results.join("\n")).toContain("linear_webhook_required");
     expect(h.results.join("\n")).toContain(`missing: ${missing}`);
   });
 
   it("shows blocked status when a configured follow loses its webhook", async () => {
-    const h = harness({
+    const h = await harness({
       selections: ["follow"],
       following: true,
       url: "https://hooks.example.test/v1/hooks/linear",
@@ -359,9 +438,9 @@ describe("Linear follow setup", () => {
   });
 
   it("requires a connected Linear account before starting from the wizard", async () => {
-    const h = harness({ selections: ["follow", "on"] });
+    const h = await harness({ selections: ["follow", "on"] });
     await h.connect.run("linear", h.shell);
-    expect(h.settings().linearWebhook.following).toBe(false);
+    expect((await h.settings()).linearWebhook.following).toBe(false);
     expect(h.results.join("\n")).toContain("Connect Clankie’s Linear account first");
   });
 });

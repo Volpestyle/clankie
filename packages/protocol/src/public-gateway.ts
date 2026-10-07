@@ -1,3 +1,5 @@
+import { HOST_SETTINGS_PATH } from "./owner-settings.ts";
+import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
 import { CAPTAIN_READINESS_PATH } from "./captain-readiness.ts";
 import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
@@ -158,6 +160,10 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: DISCORD_VOICE_TRANSCRIPTS_PATH, target: "relay" },
   { method: "POST", path: DISCORD_ROOM_GUIDANCE_PATH, target: "relay" },
   { method: "POST", path: DISCORD_SETUP_TEST_POST_PATH, target: "relay" },
+  { method: "GET", path: LINEAR_FOLLOW_PATH, target: "relay" },
+  { method: "POST", path: LINEAR_FOLLOW_PATH, target: "relay" },
+  { method: "GET", path: LINEAR_WAKE_PATH, target: "relay" },
+  { method: "POST", path: LINEAR_WAKE_PATH, target: "relay" },
   { method: "GET", path: FLEET_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: FLEET_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: FLEET_HIRE_DEFAULTS_PATH, target: "relay" },
@@ -165,7 +171,12 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: OPERATOR_PERSONA_PATH, target: "relay" },
   { method: "POST", path: OPERATOR_PERSONA_PATH, target: "relay" },
   { method: "GET", path: WORKER_ACCOUNTS_PATH, target: "relay" },
+  { method: "GET", path: WORKER_ACCOUNT_HOLDS_PATH, target: "relay" },
   { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH, target: "relay" },
+  { method: "GET", path: HOST_SETTINGS_PATH, target: "relay" },
+  { method: "POST", path: HOST_SETTINGS_PATH, target: "relay" },
+  { method: "GET", path: "/v1/operator/voice", target: "relay" },
+  { method: "POST", path: "/v1/operator/voice", target: "relay" },
   { method: "GET", path: PROJECTS_PATH, target: "relay" },
   { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH, target: "relay" },
 ] as const;

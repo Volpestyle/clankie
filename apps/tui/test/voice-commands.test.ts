@@ -13,8 +13,11 @@ import {
   type VoiceCommandServices,
 } from "../src/voice-commands.ts";
 
+import { ownerSettingsFixture } from "./owner-settings-fixture.ts";
+const cleanups: Array<() => Promise<void>> = [];
 const tempDirs: string[] = [];
 afterAll(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close();
   await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -62,7 +65,7 @@ function testShell(
   return { lines, results, shell };
 }
 
-async function testServices(): Promise<{
+async function testServices(env: NodeJS.ProcessEnv = {}): Promise<{
   readonly credentials: Map<string, { type: "api"; key: string }>;
   readonly services: VoiceCommandServices;
   readonly settings: SettingsStore;
@@ -70,12 +73,14 @@ async function testServices(): Promise<{
   const root = await mkdtemp(join(tmpdir(), "clankie-voice-commands-"));
   tempDirs.push(root);
   const settings = new SettingsStore(join(root, "settings.json"));
+  const fixture = await ownerSettingsFixture(env, settings);
+  cleanups.push(fixture.close);
   const credentials = new Map<string, { type: "api"; key: string }>();
   return {
     credentials,
     settings,
     services: {
-      settings,
+      ...fixture.options,
       listCredentials: () => {
         const redacted: Record<string, RedactedCredential> = {};
         for (const [id, credential] of credentials) {
@@ -217,7 +222,9 @@ describe("/voice", () => {
   });
 
   it("refuses an incompatible effective environment before saving Claude settings or keys", async () => {
-    const { credentials, services, settings } = await testServices();
+    const { credentials, services, settings } = await testServices({
+      CLANKIE_VOICE_REALTIME_PROVIDER: "xai",
+    });
     const before = await settings.load();
     const voice = command(
       buildVoiceCommands({ ...services, env: { CLANKIE_VOICE_REALTIME_PROVIDER: "xai" } }),
@@ -300,4 +307,41 @@ describe("voice command helpers", () => {
     expect(elevenLabs).toContain("voice_abc123");
     expect(elevenLabs).toContain("redacted");
   });
+});
+
+it("refuses a stale voice wizard draft before storing vendor credentials", async () => {
+  const { services, settings, credentials } = await testServices();
+  const view = testShell(["provider", "xai", "high", "done"], ["unused-key"], ["", ""]);
+  const readText = view.shell.setupFlow.readText;
+  view.shell.setupFlow.readText = async (options) => {
+    await settings.update((current) => ({ ...current, voice: { ...current.voice, openAiVoice: "cedar" } }));
+    return readText(options);
+  };
+  await expect(command(buildVoiceCommands(services), "voice").run("", view.shell)).rejects.toThrow(
+    /Settings changed/i,
+  );
+  expect((await settings.load()).voice).toMatchObject({ realtimeProvider: "openai", openAiVoice: "cedar" });
+  expect(credentials.size).toBe(0);
+});
+
+it("sets and clears optional voice models through the same owner API", async () => {
+  const { services, settings } = await testServices();
+  const { runVoiceCommand } = await import("../src/command/voice.ts");
+  await runVoiceCommand(["brain", "set", "xai", "saved-model"], services);
+  expect((await settings.load()).voice.xAiRealtimeModel).toBe("saved-model");
+  await runVoiceCommand(["brain", "model", "clear"], services);
+  expect((await settings.load()).voice.xAiRealtimeModel).toBeUndefined();
+  await settings.update((current) => ({
+    ...current,
+    voice: {
+      ...current.voice,
+      realtimeProvider: "openai",
+      ttsProvider: "elevenlabs",
+      elevenLabsVoiceId: "owned_voice",
+    },
+  }));
+  await runVoiceCommand(["model", "set", "eleven_v4_turbo"], services);
+  expect((await settings.load()).voice.elevenLabsModelId).toBe("eleven_v4_turbo");
+  await runVoiceCommand(["model", "clear"], services);
+  expect((await settings.load()).voice.elevenLabsModelId).toBeUndefined();
 });

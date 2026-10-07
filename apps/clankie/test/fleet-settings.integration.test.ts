@@ -158,7 +158,7 @@ it("persists public fleet controls through the owner API/client and fences stale
   const before = await f.settings.load();
   const original = await f.client.fleetSettings();
   expect(original.workingPreferences).toBe(true);
-  expect(original.fleet).toEqual({ size: "max", models: "optimal", ...FleetAutonomySchema.parse({}) });
+  expect(original.fleet).toEqual({ ...before.fleet, ...FleetAutonomySchema.parse({}) });
   const updated = FleetSettingsSnapshotSchema.parse(
     await f.client.updateFleetSettings({
       schemaVersion: 1,
@@ -167,6 +167,7 @@ it("persists public fleet controls through the owner API/client and fences stale
     }),
   );
   expect(updated.fleet).toEqual({
+    ...before.fleet,
     size: "small",
     models: "efficient",
     ...FleetAutonomySchema.parse({}),
@@ -217,7 +218,7 @@ it("roundtrips working preferences, resolves each project override and restores 
     expectedRevision: initial.revision,
     changes: global,
   });
-  expect(updated.fleet).toEqual({ size: "max", models: "optimal", ...before.autonomy.fleet, ...global });
+  expect(updated.fleet).toEqual({ ...before.fleet, ...before.autonomy.fleet, ...global });
   const projects = await f.client.projects();
   const overrides = {
     commit: "lead" as const,
@@ -771,22 +772,32 @@ it("sets hire defaults, talkativeness and worker-account holds through the owner
     ).status,
   ).toBe(400);
 
-  const persona = await f.request(OPERATOR_PERSONA_PATH, { chattiness: "quiet", replyPolicy: "addressed" });
+  const attention = PersonaAttentionSnapshotSchema.parse(
+    await (await f.request(OPERATOR_PERSONA_PATH)).json(),
+  );
+  const persona = await f.request(OPERATOR_PERSONA_PATH, {
+    expectedRevision: attention.revision,
+    persona: { chattiness: "quiet", replyPolicy: "addressed" },
+  });
   expect(PersonaAttentionSnapshotSchema.parse(await persona.json()).persona).toEqual({
     chattiness: "quiet",
     replyPolicy: "addressed",
   });
 
+  const holds = WorkerAccountHoldsSchema.parse(await (await f.request(WORKER_ACCOUNT_HOLDS_PATH)).json());
   const held = await f.request(WORKER_ACCOUNT_HOLDS_PATH, {
+    expectedRevision: holds.revision,
     harness: "codex",
     label: "work",
     held: true,
     reason: "plan lapses Friday",
   });
-  expect(WorkerAccountHoldsSchema.parse(await held.json()).holds).toEqual([
+  const heldSnapshot = WorkerAccountHoldsSchema.parse(await held.json());
+  expect(heldSnapshot.holds).toEqual([
     { machine: "local", harness: "codex", label: "work", reason: "plan lapses Friday" },
   ]);
   const released = await f.request(WORKER_ACCOUNT_HOLDS_PATH, {
+    expectedRevision: heldSnapshot.revision,
     machine: "local",
     harness: "codex",
     label: "work",

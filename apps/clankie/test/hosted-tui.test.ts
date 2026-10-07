@@ -185,8 +185,18 @@ it("pairs the Mac with signed operator authority; encrypted reconnect shares the
   const transport = createHostedTransport(session, f.store, f.fetchImpl);
   const client = createCaptainOperatorConversationClient(createCaptainRouteClient(transport));
   expect((await client.list())[0]?.conversationId).toBe("global-default");
-  await transport.request("/v1/operator/persona", { displayName: "Shared hosted identity" });
+  const persona = await transport.request("/v1/operator/persona");
+  await transport.request("/v1/operator/persona", {
+    expectedRevision: (persona as { revision: string }).revision,
+    persona: { displayName: "Shared hosted identity" },
+  });
   expect((await f.serviceSettings.load()).persona.displayName).toBe("Shared hosted identity");
+  expect(await hostedCommand(["update", "auto", "off"], transport)).toMatchObject({ autoUpdate: false });
+  expect((await f.serviceSettings.load()).host.autoUpdate).toBe(false);
+  expect((await f.settings.load()).host.autoUpdate).toBe(true);
+  expect(await hostedCommand(["awake", "status"], transport)).toMatchObject({ keepAwake: false });
+  await expect(hostedCommand(["awake", "off", "--local-setup"], transport)).rejects.toThrow();
+  await expect(hostedCommand(["update"], transport)).rejects.toThrow("managed");
   const conversation = (await client.list())[0]!;
   expect(
     await client.send({

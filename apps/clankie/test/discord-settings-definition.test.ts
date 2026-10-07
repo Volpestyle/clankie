@@ -181,10 +181,15 @@ it("the preferred managed-server environment name preserves stored and legacy wi
 });
 
 it("the independent visibility setting keeps the team's selected server across hide and show", async () => {
-  const { client, settings } = fixture();
+  const { client, settings, fetchImpl } = fixture();
   const initial = await client.discordSettings();
   expect(initial.settings.teamVisible ?? true).toBe(true);
-  const command = await runDiscordCommand(["set", "--team-visible", "off"], { settings, env: {} });
+  const command = await runDiscordCommand(["set", "--team-visible", "off"], {
+    settings,
+    env: { CLANKIE_OPERATOR_TOKEN: "fixture-operator" },
+    host: "http://fixture.invalid",
+    fetchImpl,
+  });
   expect("discord" in command && command.discord.teamVisible).toBe(false);
   const refreshed = await client.discordSettings();
   const hidden = await client.updateDiscordSettings({

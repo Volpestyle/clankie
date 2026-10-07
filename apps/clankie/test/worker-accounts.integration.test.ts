@@ -1,3 +1,5 @@
+import { mintOperatorToken } from "@clankie/credential-broker";
+import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-routes.ts";
 import { execFile, execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -122,11 +124,24 @@ describe.skipIf(!harnessesInstalled)("a machine reports its own worker accounts"
         unknown
       >;
     expect((await app.app.request("/v1/worker-accounts?fleet=box")).status).toBe(401);
+    const holdToken = mintOperatorToken();
+    const holdRoutes = createWorkerAccountHoldsRoutes(
+      async (request) =>
+        request.headers.get("authorization") === `Bearer ${holdToken}` ? true : "authentication_required",
+      settings,
+    );
+    const holdClient = {
+      settings,
+      env: { CLANKIE_OPERATOR_TOKEN: holdToken },
+      host: "http://clankie.test",
+      fetchImpl: ((url: RequestInfo | URL, init?: RequestInit) =>
+        holdRoutes.fetch(new Request(String(url), init))) as typeof fetch,
+    };
     expect(
       await runAccountsCommand(
         ["hold", "codex", "work", "--machine", "box", "--reason", "plan not renewed"],
         {
-          settings,
+          ...holdClient,
         },
       ),
     ).toMatchObject({
@@ -140,7 +155,7 @@ describe.skipIf(!harnessesInstalled)("a machine reports its own worker accounts"
       held: { reason: "plan not renewed" },
       signedIn: false,
     });
-    await runAccountsCommand(["release", "codex", "work", "--machine", "box"], { settings });
+    await runAccountsCommand(["release", "codex", "work", "--machine", "box"], holdClient);
     expect((await settings.load()).workerAccountHolds).toEqual([]);
     await expect(runAccountsCommand(["workers", "--machine", "nowhere"], { request })).rejects.toThrow(
       /nowhere is not a linked machine/u,

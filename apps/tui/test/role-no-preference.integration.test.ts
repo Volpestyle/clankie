@@ -1,3 +1,4 @@
+import { fleetSettingsClient } from "./fixtures/fleet-settings-client.ts";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,7 +115,7 @@ it("clears pinned role model and effort to no preference through the CLI, projec
       { role: "builder", ...kept },
       { role: "reviewer", ...kept },
     ]);
-    const status = await runFleetCommand(["status"], { settings });
+    const status = await runFleetCommand(["status"], fleetSettingsClient(settings));
     for (const entry of status.roleProfiles) {
       expect(entry.profile).toEqual(kept);
     }
@@ -163,7 +164,7 @@ it("reports an unset harness as no preference and never defaults a hire to Codex
         projects: [{ id: "game", name: "Game", roles: [{ role: "builder", harness: "codex" }] }],
       }),
     }));
-    await runFleetCommand(["set", "--harness", "auto"], { settings });
+    await runFleetCommand(["set", "--harness", "auto"], fleetSettingsClient(settings));
     const routes = createProjectRoutes(async () => true, settings);
     const store = new FileCredentialStore(join(root, "credentials.json"));
     const token = mintOperatorToken();
@@ -179,7 +180,7 @@ it("reports an unset harness as no preference and never defaults a hire to Codex
     const fresh = await settings.load();
     expect(fresh.fleet.hire).toEqual({});
     expect(fresh.projects.projects[0]!.roles).toEqual([{ role: "builder" }]);
-    const status = await runFleetCommand(["status"], { settings });
+    const status = await runFleetCommand(["status"], fleetSettingsClient(settings));
     expect(status.roleProfiles).toEqual([
       {
         projectId: "game",

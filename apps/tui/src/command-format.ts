@@ -2,7 +2,7 @@
  * Plain-text renderings for command results that used to land as JSON. The
  * CLI keeps its JSON; the console shows what a person reads.
  */
-import type { personaImageStatus } from "@clankie/persona-images";
+import type { OwnerPersonaSnapshot } from "@clankie/protocol/owner-settings";
 import type { SeatPlan } from "./command/seat.ts";
 
 const home = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+/u, "~");
@@ -35,7 +35,7 @@ export function formatSeatPlan(plan: SeatPlan): string {
   ].join("\n");
 }
 
-export function formatPersonaImages(images: ReturnType<typeof personaImageStatus> | undefined): string {
+export function formatPersonaImages(images: OwnerPersonaSnapshot["images"]): string {
   if (!images) return "No persona images.";
   const failed = images.files.filter((file) => file.status !== "loaded");
   return [

@@ -87,17 +87,23 @@ async function fixture() {
 
 it("persists logical fleet autonomy leaves independently and clear restores lead defaults", async () => {
   const f = await fixture();
-  await runFleetCommand(["set", "--closure", "owner", "--size", "small"], { settings: f.settings });
-  const saved = await runFleetCommand(["set", "--machine-setup", "owner"], { settings: f.settings });
+  await runFleetCommand(["set", "--closure", "owner", "--size", "small"], {
+    settings: f.settings,
+    ...f.client,
+  });
+  const saved = await runFleetCommand(["set", "--machine-setup", "owner"], {
+    settings: f.settings,
+    ...f.client,
+  });
   expect(saved.fleet).toMatchObject({ closure: "owner", machineSetup: "owner", size: "small" });
   expect((await f.settings.load()).autonomy.fleet).toEqual(
     FleetAutonomySchema.parse({ closure: "owner", machineSetup: "owner" }),
   );
   expect((await f.settings.load()).fleet).not.toHaveProperty("closure");
-  await expect(runFleetCommand(["set", "--closure", "ask"], { settings: f.settings })).rejects.toThrow(
-    "lead or owner",
-  );
-  const clear = await runFleetCommand(["clear"], { settings: f.settings });
+  await expect(
+    runFleetCommand(["set", "--closure", "ask"], { settings: f.settings, ...f.client }),
+  ).rejects.toThrow("lead or owner");
+  const clear = await runFleetCommand(["clear"], { settings: f.settings, ...f.client });
   expect(clear.fleet).toMatchObject({ closure: "lead", machineSetup: "lead", size: "max" });
   expect((await f.settings.load()).projects.projects[0]!.workerCap).toBe(2);
 });
@@ -217,7 +223,7 @@ it("does not manufacture working preferences or send new project leaves to an ol
 
 it("edits and clears project leaves through the real revision API while reporting stored and effective values", async () => {
   const f = await fixture();
-  await runFleetCommand(["set", "--closure", "owner"], { settings: f.settings });
+  await runFleetCommand(["set", "--closure", "owner"], { settings: f.settings, ...f.client });
   const result = await runProjectSettingsCommand(
     ["settings", "garden", "--machine-setup", "owner"],
     f.client,

@@ -1,3 +1,6 @@
+import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
+import { WORKER_ACCOUNT_HOLDS_PATH, WorkerAccountHoldsSchema } from "@clankie/protocol/worker-accounts";
+import type { machineSetupContext } from "./machine-setup.ts";
 import { runClaudeAccountsCommand } from "./claude-accounts.ts";
 import { runCodexAccountsCommand } from "./codex-accounts.ts";
 import { text } from "node:stream/consumers";
@@ -37,7 +40,8 @@ const WORKER_ACCOUNTS_USAGE =
  */
 async function runWorkerAccountHold(
   args: readonly string[],
-  options: { readonly env?: NodeJS.ProcessEnv; readonly settings?: SettingsStore },
+  options: NonNullable<Parameters<typeof machineSetupContext>[1]> &
+    OwnerSettingsApiOptions & { readonly settings?: SettingsStore },
 ) {
   const [verb, harness, label, ...rest] = args;
   const flags = new Map<string, string>();
@@ -51,19 +55,22 @@ async function runWorkerAccountHold(
   if ((harness !== "claude" && harness !== "codex") || !label || !/^[a-z][a-z0-9_-]{0,63}$/u.test(label))
     throw new Error(WORKER_ACCOUNTS_USAGE);
   const machine = flags.get("--machine") ?? "local";
-  const store = options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
-  const updated = await store.update((current) => {
-    const others = current.workerAccountHolds.filter(
-      (hold) => !(hold.machine === machine && hold.harness === harness && hold.label === label),
-    );
-    const reason = flags.get("--reason")?.trim();
-    return {
-      ...current,
-      workerAccountHolds:
-        verb === "hold" ? [...others, { machine, harness, label, ...(reason ? { reason } : {}) }] : others,
-    };
-  });
-  return { ok: true, holds: updated.workerAccountHolds, settingsFile: store.path };
+  const api = await ownerSettingsApi(options);
+  const current = await api.get(WORKER_ACCOUNT_HOLDS_PATH, WorkerAccountHoldsSchema);
+  const reason = flags.get("--reason")?.trim();
+  const updated = await api.write(
+    WORKER_ACCOUNT_HOLDS_PATH,
+    {
+      expectedRevision: current.revision,
+      machine,
+      harness,
+      label,
+      held: verb === "hold",
+      ...(reason ? { reason } : {}),
+    },
+    WorkerAccountHoldsSchema,
+  );
+  return { ok: true, ...updated };
 }
 
 const APP_FLAGS = {
@@ -82,7 +89,11 @@ const APP_FLAGS = {
 export async function runAccountsCommand(
   args: readonly string[],
   options: {
+    readonly ownerFetcher?: OwnerSettingsApiOptions["ownerFetcher"];
     readonly env?: NodeJS.ProcessEnv;
+    readonly host?: string;
+    readonly fetchImpl?: typeof fetch;
+    readonly operatorCredentialStore?: CredentialStore;
     readonly settings?: SettingsStore;
     readonly prompt?: (line: string) => void;
     readonly sleep?: (ms: number) => Promise<void>;

@@ -1,10 +1,7 @@
+import { createHash } from "node:crypto";
+import { LinearWakeUpdateSchema, LinearFollowUpdateSchema } from "@clankie/protocol/linear-settings";
 import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
-import {
-  linearFollowStatus,
-  linearWakeMatches,
-  LinearWakeSettingsSchema,
-  LinearWebhookSettingsSchema,
-} from "@clankie/settings";
+import { linearFollowStatus, linearWakeMatches, LinearWebhookSettingsSchema } from "@clankie/settings";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -35,6 +32,9 @@ export interface RegisterLinearRoutesContext {
   };
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
+  readonly authorizeOwnerSettings?: (
+    request: Request,
+  ) => Promise<true | "authentication_required" | "forbidden">;
 }
 
 export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
@@ -84,22 +84,48 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     return context.json(LinearRequestBudgetReportSchema.parse(ctx.dependencies.linearRequestBudget.report()));
   });
 
-  ctx.app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+  const revision = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const owner = async (request: Request) =>
+    ctx.authorizeOwnerSettings ? ctx.authorizeOwnerSettings(request) : ("forbidden" as const);
+  for (const path of ["/v1/linear/wake", "/v1/linear/follow"])
+    ctx.app.use(path, async (context, next) => {
+      context.header("cache-control", "no-store");
+      const authority = await owner(context.req.raw);
+      if (authority !== true)
+        return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
+      await next();
+    });
+  ctx.app.on(["GET", "POST", "PUT"], "/v1/linear/wake", async (context) => {
     let current;
-    if (context.req.method === "PUT") {
-      const parsed = LinearWakeSettingsSchema.safeParse(await readJson(context.req.raw));
+    if (context.req.method !== "GET") {
+      const parsed = LinearWakeUpdateSchema.safeParse(await readJson(context.req.raw));
       if (!parsed.success) return context.json({ error: "malformed" }, 400);
       if (!ctx.settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
-      current = await ctx.settingsSource.update((value) => ({
-        ...value,
-        linearWebhook: { ...value.linearWebhook, wake: parsed.data },
-      }));
+      let before: string | undefined;
+      try {
+        current = await ctx.settingsSource.update(
+          (value) => {
+            before = JSON.stringify(value);
+            if (revision(value.linearWebhook.wake) !== parsed.data.expectedRevision)
+              throw new Error("settings_revision_conflict");
+            return { ...value, linearWebhook: { ...value.linearWebhook, wake: parsed.data.wake } };
+          },
+          async () => {
+            if ((await owner(context.req.raw)) !== true) throw new Error("owner_revoked");
+            if (JSON.stringify(await ctx.settingsSource.load()) !== before)
+              throw new Error("settings_revision_conflict");
+          },
+        );
+      } catch {
+        return context.json({ error: "settings_revision_conflict" }, 409);
+      }
     } else current = await ctx.settingsSource.load();
-    return context.json({ schemaVersion: 1, wake: current.linearWebhook.wake });
+    if ((await owner(context.req.raw)) !== true) return context.json({ error: "forbidden" }, 403);
+    return context.json({
+      schemaVersion: 1,
+      revision: revision(current.linearWebhook.wake),
+      wake: current.linearWebhook.wake,
+    });
   });
 
   ctx.app.on(["GET", "PUT"], "/v1/linear/target", async (context) => {
@@ -131,48 +157,45 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     return context.json({ schemaVersion: 1, wakeConversationId: current.linearWebhook.wakeConversationId });
   });
 
-  // Local operator control, independent of the publicly reachable signed webhook.
-  ctx.app.on(["GET", "PUT"], "/v1/linear/follow", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+  ctx.app.on(["GET", "POST", "PUT"], "/v1/linear/follow", async (context) => {
     const secret = await ctx.dependencies.linearWebhook?.secret();
     const secretPresent = secret !== undefined && secret.trim().length > 0;
     let current;
-    if (context.req.method === "PUT") {
-      const body = await readJson(context.req.raw);
-      if (
-        body === null ||
-        typeof body !== "object" ||
-        Array.isArray(body) ||
-        Object.keys(body).length !== 1 ||
-        !("following" in body) ||
-        typeof body.following !== "boolean"
-      ) {
-        return context.json({ error: "malformed" }, 400);
-      }
-      if (ctx.settingsSource.update === undefined)
-        return context.json({ error: "settings_unavailable" }, 503);
-      const following = body.following;
-      let refused = false;
-      current = await ctx.settingsSource.update((value) => {
-        if (following && !linearFollowStatus(value.linearWebhook, secretPresent).webhookConfigured) {
-          refused = true;
-          return value;
-        }
-        return { ...value, linearWebhook: { ...value.linearWebhook, following } };
-      });
-      if (refused)
+    if (context.req.method !== "GET") {
+      const parsed = LinearFollowUpdateSchema.safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "malformed" }, 400);
+      if (!ctx.settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
+      let before: string | undefined;
+      try {
+        current = await ctx.settingsSource.update(
+          (value) => {
+            before = JSON.stringify(value);
+            if (revision(value.linearWebhook) !== parsed.data.expectedRevision)
+              throw new Error("settings_revision_conflict");
+            if (
+              parsed.data.following &&
+              !linearFollowStatus(value.linearWebhook, secretPresent).webhookConfigured
+            )
+              throw new Error("linear_webhook_required");
+            return { ...value, linearWebhook: { ...value.linearWebhook, following: parsed.data.following } };
+          },
+          async () => {
+            if ((await owner(context.req.raw)) !== true) throw new Error("owner_revoked");
+            if (JSON.stringify(await ctx.settingsSource.load()) !== before)
+              throw new Error("settings_revision_conflict");
+          },
+        );
+      } catch (error) {
         return context.json(
-          { error: "linear_webhook_required", ...linearFollowStatus(current.linearWebhook, secretPresent) },
+          { error: error instanceof Error ? error.message : "settings_revision_conflict" },
           409,
         );
-    } else {
-      current = await ctx.settingsSource.load();
-    }
+      }
+    } else current = await ctx.settingsSource.load();
+    if ((await owner(context.req.raw)) !== true) return context.json({ error: "forbidden" }, 403);
     return context.json({
-      schemaVersion: 1 as const,
+      schemaVersion: 1,
+      revision: revision(current.linearWebhook),
       ...linearFollowStatus(current.linearWebhook, secretPresent),
       wakeConversationId: current.linearWebhook.wakeConversationId,
     });

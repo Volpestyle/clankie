@@ -1,3 +1,13 @@
+import { HOST_SETTINGS_WORDING } from "@clankie/protocol/owner-settings";
+import { runAwakeCommand } from "./command/awake.ts";
+import { runUpdateCommand } from "./command/update.ts";
+import { buildConsoleCommands } from "./commands.ts";
+import { PersonaAttentionSnapshotSchema } from "@clankie/protocol/discord-attention";
+import { OwnerPersonaSnapshotSchema } from "@clankie/protocol/owner-settings";
+import { ownerSettingsApi } from "./command/owner-settings-api.ts";
+import { buildFleetCommands } from "./fleet-commands.ts";
+import { runVoiceCommand } from "./command/voice.ts";
+import { splitQuotedArguments } from "./command/agents.ts";
 import { formatPlain } from "./command-format.ts";
 import type { ClankieAutocompleteSkill } from "./face/clankie-autocomplete.ts";
 import { ownerUpdateConsoleCommand } from "./owner-update-commands.ts";
@@ -17,7 +27,7 @@ import {
   beginClankieAccountLogin,
   completeClankieAccountLogin,
 } from "@clankie/credential-broker";
-import { SettingsStore, type PersonaSettings } from "@clankie/settings";
+import { SettingsStore } from "@clankie/settings";
 import { ClankieFaceShell, type FaceShellCommand } from "./shell/shell.ts";
 import {
   createCaptainOperatorConversationClient,
@@ -196,7 +206,67 @@ export async function runHostedConsole() {
     fetchImpl: transport.fetchImpl,
     operatorToken: "hosted-device-transport",
   });
+  const commandAwake = (args: readonly string[]) => {
+    if (args.includes("--local-setup")) throw new Error("Local setup cannot target a hosted machine");
+    return runAwakeCommand(args, { ownerFetcher, repoRoot: process.cwd() });
+  };
+  const commandUpdate = (args: readonly string[]) => {
+    if (args[0] !== "auto")
+      throw new Error(
+        "Runtime updates are managed by the hosted service. Use /update auto to change automatic installs.",
+      );
+    return runUpdateCommand(args, { ownerFetcher });
+  };
+  let attentionRevision: string | undefined;
   const commands: FaceShellCommand[] = [
+    ...buildConsoleCommands({ repoRoot: process.cwd(), commandAwake, commandUpdate }).filter(
+      (command) => command.name === "awake",
+    ),
+    {
+      name: "update",
+      aliases: [],
+      description: "Read or change hosted automatic installs",
+      takesArgument: true,
+      argumentHint: "[auto [status|on|off]]",
+      async run(argument, active) {
+        const args = splitQuotedArguments(argument);
+        if (args.length > 0) {
+          const result = await commandUpdate(args);
+          active.insertCommandResult("/update", JSON.stringify(result, null, 2), "success");
+          return;
+        }
+        const flow = active.setupFlow;
+        flow.begin("automatic installs");
+        try {
+          const current = (await commandUpdate(["auto"])) as {
+            autoUpdate: boolean;
+            revision: string;
+            managed: boolean;
+            effective: boolean;
+          };
+          flow.renderLine(HOST_SETTINGS_WORDING.autoUpdate.description);
+          if (current.managed) {
+            flow.renderLine("Managed hosting installs updates automatically.", "success");
+            return;
+          }
+          const next = await flow.readSelect({
+            message: HOST_SETTINGS_WORDING.autoUpdate.label,
+            options: [
+              { value: "on", label: "On" },
+              { value: "off", label: "Off" },
+            ],
+            initialValue: current.autoUpdate ? "on" : "off",
+            currentValue: current.autoUpdate ? "on" : "off",
+            allowBack: true,
+          });
+          if (next !== "on" && next !== "off") return;
+          await commandUpdate(["auto", next, "--expected-revision", current.revision]);
+          flow.renderLine(`Automatic installs ${next}.`, "success");
+        } finally {
+          flow.end();
+        }
+      },
+    },
     shareConsoleCommand((args) => runShareCommand(args, { request: transport.request })),
     ...buildDiscordCommands({
       settings,
@@ -208,13 +278,23 @@ export async function runHostedConsole() {
       removeCredential: (id) => store.delete(id),
       // Persona lives on the hosted machine; the same route `persona set` uses.
       persona: {
-        read: async () =>
-          (
-            (await transport.request("/v1/operator/persona")) as {
-              persona: Pick<PersonaSettings, "chattiness" | "replyPolicy">;
-            }
-          ).persona,
-        update: (patch) => transport.request("/v1/operator/persona", patch),
+        read: async () => {
+          const api = await ownerSettingsApi({ ownerFetcher });
+          const snapshot = await api.get("/v1/operator/persona", PersonaAttentionSnapshotSchema);
+          attentionRevision = snapshot.revision;
+          return snapshot.persona;
+        },
+        update: async (patch) => {
+          if (attentionRevision === undefined) throw new Error("Read persona settings before changing them");
+          const api = await ownerSettingsApi({ ownerFetcher });
+          const updated = await api.write(
+            "/v1/operator/persona",
+            { expectedRevision: attentionRevision, persona: patch },
+            PersonaAttentionSnapshotSchema,
+          );
+          attentionRevision = updated.revision;
+          return updated;
+        },
       },
     }).filter((command) => command.name === "discord"),
     {
@@ -272,6 +352,8 @@ export async function runHostedConsole() {
               { value: "model", label: "Model" },
               { value: "connect", label: "Connected accounts" },
               { value: "discord", label: "Discord" },
+              { value: "awake", label: HOST_SETTINGS_WORDING.keepAwake.label },
+              { value: "update", label: HOST_SETTINGS_WORDING.autoUpdate.label },
             ],
           });
         } finally {
@@ -280,13 +362,16 @@ export async function runHostedConsole() {
         if (selected) await commands.find((command) => command.name === selected)?.run("", active);
       },
     },
+    ...buildFleetCommands({ settings, ownerFetcher }),
     {
-      name: "fleet",
+      name: "voice",
       aliases: [],
-      description: "Hosted fleet",
-      takesArgument: false,
-      async run() {
-        await show(["fleet"]);
+      description: "Read or set hosted voice settings",
+      takesArgument: true,
+      argumentHint: "[status|brain set openai|xai|anthropic [MODEL]|model set MODEL|model clear]",
+      async run(argument, active) {
+        const result = await runVoiceCommand(splitQuotedArguments(argument), { ownerFetcher });
+        active.insertCommandResult("/voice", JSON.stringify(result, null, 2), "success");
       },
     },
     {
@@ -416,9 +501,15 @@ export async function runHostedConsole() {
         const flow = shell.setupFlow;
         flow.begin("persona");
         try {
-          const current = (await transport.request("/v1/operator/persona")) as {
-            persona: { displayName: string; characterNotes: string; imagesDir?: string };
+          const api = await ownerSettingsApi({ ownerFetcher });
+          const raw = (await transport.request("/v1/operator/persona")) as {
+            persona?: Record<string, unknown>;
           };
+          if (!raw.persona || typeof raw.persona.displayName !== "string")
+            throw new Error(
+              "This connection exposes persona attention settings. Use an owner-authenticated connection to edit his character.",
+            );
+          const current = OwnerPersonaSnapshotSchema.parse(raw);
           const displayName = await flow.readText({
             message: "Name",
             defaultValue: current.persona.displayName,
@@ -434,7 +525,11 @@ export async function runHostedConsole() {
             defaultValue: current.persona.imagesDir ?? "",
           });
           if (imagesDir === undefined) return;
-          await transport.request("/v1/operator/persona", { displayName, characterNotes, imagesDir });
+          await api.write(
+            "/v1/operator/persona",
+            { expectedRevision: current.revision, persona: { displayName, characterNotes, imagesDir } },
+            OwnerPersonaSnapshotSchema,
+          );
           flow.renderLine("Hosted persona saved. Restart Clankie to apply persona images.", "success");
         } finally {
           flow.end();

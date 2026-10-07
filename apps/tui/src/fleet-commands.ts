@@ -9,7 +9,13 @@ import {
   type FleetModelMode,
   type FleetSize,
 } from "@clankie/settings";
-import { fleetStatus, fleetUpdate, formatFleetLines, runFleetCommand } from "./command/fleet.ts";
+import {
+  fleetStatus,
+  fleetUpdate,
+  formatFleetLines,
+  runFleetCommand,
+  type FleetCommandOptions,
+} from "./command/fleet.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import {
   FLEET_AUTONOMY_GUIDANCE,
@@ -28,7 +34,7 @@ import {
 } from "@clankie/protocol";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
 
-export interface FleetCommandServices {
+export interface FleetCommandServices extends FleetCommandOptions {
   settings: SettingsStore;
 }
 
@@ -60,7 +66,7 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
           return;
         }
         if (verb === "clear") {
-          await runFleetCommand(["clear"], { settings: services.settings });
+          await runFleetCommand(["clear"], services);
           shell.insertCommandResult(
             "/fleet clear",
             "Cleared. Fleet size max, models optimal, closure, machine setup, commit and push lead, release owner, focused verification, short plain reports, fleet tools connected and peer messages on.",
@@ -75,7 +81,7 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
 }
 
 async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandServices): Promise<void> {
-  const result = await fleetStatus({ settings: services.settings });
+  const result = await fleetStatus(services);
   shell.insertCommandResult(
     "/fleet status",
     [
@@ -102,7 +108,8 @@ async function editFleetResources(shell: ClankieFaceShell, services: FleetComman
   const flow = shell.setupFlow;
   flow.begin("fleet resources");
   try {
-    const current = (await fleetStatus({ settings: services.settings })).fleet;
+    const snapshot = await fleetStatus(services);
+    const current = snapshot.fleet;
     const resources = FleetResourcePolicySchema.parse(current.resources ?? {});
     const capacity = await flow.readText({
       message: "Fleet — shared heavy capacity (auto or 1–64)",
@@ -159,7 +166,7 @@ async function editFleetResources(shell: ClankieFaceShell, services: FleetComman
     });
     if (memory === undefined) return;
     resources.minAvailableMemoryMb = Number(memory);
-    await fleetUpdate({ resources }, { settings: services.settings });
+    await fleetUpdate({ resources }, { ...services, expectedRevision: snapshot.revision });
     flow.renderLine(
       "Saved. Resource capacity and pressure limits apply to the shared machine governor.",
       "success",
@@ -173,7 +180,8 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
   const flow = shell.setupFlow;
   flow.begin("fleet");
   try {
-    const current = (await fleetStatus({ settings: services.settings })).fleet;
+    const snapshot = await fleetStatus(services);
+    const current = snapshot.fleet;
     flow.renderLine(fleetGateSummary(current));
     const size = await flow.readSelect({
       message: "Fleet — the fleet size to aim for (a target, not a cap)",
@@ -414,7 +422,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     if (notes === undefined) return;
     await fleetUpdate(
       { size, models, tools, peerMessages, closure, machineSetup, notes: notes.trim(), ...preference },
-      { settings: services.settings },
+      { ...services, expectedRevision: snapshot.revision },
       { harness, model: model.trim() || "auto", effort, account: account.trim() || "auto" },
     );
     flow.renderLine(

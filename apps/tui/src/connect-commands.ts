@@ -1,3 +1,4 @@
+import type { CaptainRouteFetcher } from "./session/operator-conversations.ts";
 /**
  * `/connect` is the owner-facing catalog for giving Clankie access to the
  * owner's own services (ADR 0093). Secrets go to the credential broker;
@@ -61,6 +62,7 @@ export const EMAIL_PRESETS: Readonly<Record<Exclude<EmailPresetId, "custom">, Pa
 };
 
 export interface ConnectCommandServices {
+  readonly ownerFetcher?: CaptainRouteFetcher;
   settings: SettingsStore;
   listCredentials: () => Promise<Record<string, RedactedCredential>>;
   getCredential: (providerId: string) => Promise<ProviderCredential | undefined>;
@@ -323,7 +325,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   const flow = shell.setupFlow;
   const listed = await services.listCredentials();
   const existing = listed[LINEAR_PROVIDER_ID];
-  const following = (await services.settings.load()).linearWebhook.following;
+  const following = (await runLinearCommand(["status"], { ownerFetcher: services.ownerFetcher })).following;
   const followHint = existing === undefined ? "connect account" : following ? "on" : "off";
   if (existing !== undefined) {
     const decision = await flow.readSelect({
@@ -395,7 +397,8 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
 }
 
 async function runLinearWakeFlow(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
-  const current = (await services.settings.load()).linearWebhook.wake;
+  const snapshot = await runLinearCommand(["wake"], { ownerFetcher: services.ownerFetcher });
+  const current = snapshot.wake;
   const fields = [
     ["actors", "Actors: owner, human, self (Clankie and workers), users"],
     ["ownerUserIds", "Owner's Linear user IDs"],
@@ -423,10 +426,11 @@ async function runLinearWakeFlow(shell: ClankieFaceShell, services: ConnectComma
     if (value === undefined) return;
     patch[key] = value.trim() === "none" ? [] : value.split(",").map((part) => part.trim());
   }
-  await services.settings.update((value) => ({
-    ...value,
-    linearWebhook: { ...value.linearWebhook, wake: LinearWakeSettingsSchema.parse(patch) },
-  }));
+  await runLinearCommand(["wake", "set", "--json-stdin"], {
+    ownerFetcher: services.ownerFetcher,
+    expectedRevision: snapshot.revision,
+    stdin: Readable.from([JSON.stringify(LinearWakeSettingsSchema.parse(patch))]),
+  });
   shell.insertCommandResult(
     "/linear",
     "Linear wake rules saved. Activity stays visible in your chosen chat.",
@@ -444,7 +448,11 @@ export async function runLinearFollowMenu(
 /** Configure the webhook independently of the switch that wakes the operator conversation. */
 async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
   const flow = shell.setupFlow;
-  const options = { settings: services.settings, credentials: { get: services.getCredential } };
+  const options = {
+    ownerFetcher: services.ownerFetcher,
+    settings: services.settings,
+    credentials: { get: services.getCredential },
+  };
   const status = await runLinearCommand(["status"], options);
   const following = status.following;
   const action = await flow.readSelect({
@@ -523,7 +531,10 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
       shell.insertCommandResult("/connect linear", "Connect Clankie’s Linear account first.", "error");
       return;
     }
-    const result = await runLinearCommand(["follow", action], options);
+    const result = await runLinearCommand(["follow", action], {
+      ...options,
+      expectedRevision: status.revision,
+    });
     if (!result.ok) {
       shell.insertCommandResult("/connect linear", `${result.error}: ${result.detail}`, "error");
       return;

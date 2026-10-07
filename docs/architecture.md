@@ -834,3 +834,15 @@ service checkout are protected independently of developer-root enrollment.
 Roster/fleet checkout reads require explicit opt-in and cache owner discovery
 and inspection together for 30 seconds with a 128-cwd limit; default reads do
 no checkout Git work. Doctor reports cached refs without fetching.
+
+### Owner settings writes
+
+Fleet, persona, voice, Discord fields, worker-account holds, Linear follow/wake
+and host availability share owner APIs across CLI, TUI and device forwarding.
+Each writer reads a domain snapshot and sends its revision; the service checks
+both the revision and current owner authority before committing. Ordinary API
+failures never trigger a local settings-file write. Host availability applies
+the saved keep-awake choice through the launcher's owned process registry, and
+reports automatic-update policy separately from deployment authority. See
+[ADR 0248](adr/0248-owner-settings-use-one-revision-fenced-api.md), the
+[settings inventory](settings-inventory.md) and [CLI contract](cli.md).

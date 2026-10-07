@@ -1,3 +1,5 @@
+import { HOST_SETTINGS_WORDING } from "@clankie/protocol/owner-settings";
+import type { CaptainRouteFetcher } from "./session/operator-conversations.ts";
 import { runCheckoutsCommand } from "./command/checkouts.ts";
 import { runIntegrationCommand } from "./command/integrate.ts";
 import { runDesktopCommand } from "./command/desktop.ts";
@@ -98,6 +100,7 @@ import {
 type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
+  readonly ownerFetcher?: CaptainRouteFetcher;
   readonly repoRoot?: string;
   readonly linearFollowMenu?: (shell: ClankieFaceShell) => Promise<void>;
   readonly settings?: SettingsStore;
@@ -374,7 +377,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     runtime: (args) => runRuntimeCommand(args),
     agents: (args) => runAgentsCommand(args),
     accounts: (args, input) =>
-      runAccountsCommand(args, input === undefined ? {} : { stdin: Readable.from([input]) }),
+      runAccountsCommand(args, {
+        ...(context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher }),
+        ...(input === undefined ? {} : { stdin: Readable.from([input]) }),
+      }),
   });
 
   const statusHelpers = (shell: ClankieFaceShell) => {
@@ -559,7 +565,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           await context.linearFollowMenu(shell);
           return;
         }
-        const result = await runLinearCommand(argument.trim().split(/\s+/u).filter(Boolean));
+        const result = await runLinearCommand(
+          argument.trim().split(/\s+/u).filter(Boolean),
+          context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher },
+        );
         shell.insertCommandResult(
           "/linear",
           JSON.stringify(result, null, 2),
@@ -1297,7 +1306,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       async run(argument, shell): Promise<void> {
         const words = splitQuotedArguments(argument);
         if (words.length <= 1 && (words[0] === undefined || words[0] === "codex" || words[0] === "claude")) {
-          const options = settings ? { settings } : {};
+          const options = {
+            ...(settings ? { settings } : {}),
+            ...(context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher }),
+          };
           await runAccountsMenu(
             shell,
             {
@@ -1856,7 +1868,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "awake",
       aliases: [],
-      description: "Keep this Mac awake while plugged in, so Discord and the app stay reachable",
+      description: "Choose whether this Mac stays awake while plugged in",
       argumentHint: "[on|off]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -1879,10 +1891,15 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
               actions: [
                 {
                   value: "toggle",
-                  label: result.keepAwake ? "Let this Mac sleep" : "Keep this Mac awake",
-                  hint: "while plugged in",
+                  label: result.keepAwake ? "Let this Mac sleep" : HOST_SETTINGS_WORDING.keepAwake.label,
+                  hint: HOST_SETTINGS_WORDING.keepAwake.description,
                   async run() {
-                    return formatAwake(await awake([result.keepAwake ? "off" : "on"])).split("\n")[0];
+                    return formatAwake(
+                      await awake([
+                        result.keepAwake ? "off" : "on",
+                        ...(result.revision === undefined ? [] : ["--expected-revision", result.revision]),
+                      ]),
+                    ).split("\n")[0];
                   },
                 },
               ],

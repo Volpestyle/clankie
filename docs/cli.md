@@ -76,6 +76,30 @@ the token is never an argument, settings value, or printed result.
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
 
+Fleet settings, persona, voice, Discord fields, worker-account holds, Linear
+follow/wake and host availability use the owner settings API. The command reads
+the current snapshot, sends its `expectedRevision`, and reports a conflict
+without retrying or writing a local fallback. The TUI uses the same path. Start
+the service and authenticate as its owner before changing these settings.
+
+`GET`/`POST /v1/operator/host-settings` carries `host {keepAwake, autoUpdate}`,
+its revision and support/managed-state metadata. Writes use
+`{schemaVersion: 1, expectedRevision, changes: {keepAwake?, autoUpdate?}}`.
+Keep-awake is supported only on a self-hosted Mac; managed hosting keeps automatic
+updates enabled. These routes, voice, account holds and Linear follow/wake are
+forwarded to devices with current Take Control authority.
+
+`awake --local-setup on|off` explicitly prepares this Mac when the service is
+down and refuses a remote transport. `update auto` has no offline fallback.
+If runtime application of a saved host setting fails, the API returns 503 with
+`saved: true` and `settings`; read GET to reconcile before another edit.
+
+Local setup remains available for machine wiring before the service runs
+(autostart, working directory, execution connections), account profile/home
+registration and the signed Linear webhook URL (`linear webhook set/clear`).
+Provider credentials remain in the broker. These are setup operations, not a
+fallback after an owner API error. See [ADR 0248](adr/0248-owner-settings-use-one-revision-fenced-api.md).
+
 ## Command index
 
 | Task                                                   | Commands                                                    |
@@ -885,7 +909,8 @@ from a systemd user timer (or cron) every 30 seconds for the same behaviour.
 
 Keep this Mac awake while it is plugged in, so Discord and the app stay reachable
 ([always-on guide](always-on.md), [ADR 0203](adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
-`on` stores the opt-in (`host.keepAwake` in settings) and starts a
+`on` writes the opt-in through the revision-fenced owner host-settings API;
+the local launcher starts a
 launcher-supervised `caffeinate -s` now; `off` clears it and stops that process.
 macOS holds a `-s` assertion only on AC power, so unplugging lets the Mac sleep as
 its own settings say. The opt-in survives a restart: the launcher restarts
@@ -1220,8 +1245,10 @@ entry; it is not replayed into a fresh wake. Historical records in Linear remain
 available through Clankie's connected `linear_*` tools.
 
 The authenticated local operator API exposes `GET /v1/linear/follow` and
-`PUT /v1/linear/follow` with `{ "following": true | false }`. Both report the
-configured `wakeConversationId`; PUT without webhook prerequisites returns 409.
+`POST /v1/linear/follow` (or the local PUT alias) with
+`{ "expectedRevision": "<revision from GET>", "following": true | false }`.
+Both report a revision and the configured `wakeConversationId`; a stale revision
+or missing webhook prerequisites returns 409. The device relay admits GET/POST.
 Changing the local switch does not change which events Linear sends.
 
 An unavailable native receiver leaves matched activity pending. Its next poll
@@ -1248,6 +1275,11 @@ API is `GET /v1/linear/target` and `PUT /v1/linear/target` with
 `{ "conversationId": "global-default" }`.
 
 #### `linear wake [show|set …]`
+
+`GET /v1/linear/wake` returns `{schemaVersion: 1, revision, wake}`.
+`POST` (or the local PUT alias) accepts `{expectedRevision, wake}` and replaces
+the rules. The CLI reads that snapshot and fences flag or JSON edits by its
+revision. Devices use the same GET/POST route.
 
 Bare `/linear` opens **Follow Linear**, including **Wake rules**. Rules live in
 `linearWebhook.wake`. Clankie can inspect or change these non-secret settings
