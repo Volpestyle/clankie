@@ -22,14 +22,11 @@
 !packages/*/
 !packages/*/package.json
 !packages/*/src/**
-!integrations/herdr-plugin/**
-!integrations/claude-plugin/**
-!integrations/codex-plugin/**
-!integrations/worker-skills/**
+# Workspace integrations are bundled (Minecraft, Pokemon, OpenCode, plugins).
+!integrations/**
 !.agents/skills/**
-!docs/cli.md
-!docs/bundled-skills.md
-!docs/worker-access.md
+# Runtime guides the release copies; ADRs and test evidence stay out.
+!docs/*.md
 !scripts/build-release.mjs
 !scripts/build-herdr.mjs
 !scripts/build-fleet-proof.mjs
@@ -40,7 +37,5 @@
 **/.git
 **/dist
 **/target
-!docs/model-keys.md
-!docs/rivals.md
-!docs/discord-ingress.md
+**/.turbo
 !infra/hosted/README.md
