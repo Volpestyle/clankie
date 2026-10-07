@@ -234,7 +234,8 @@ async function inside() {
       const worker = JSON.parse(run("clankie", ["herdr", "agent", "list"])).result.agents.find(
         (agent) => agent.agent === "claude",
       );
-      if (worker) console.error(run("clankie", ["herdr", "pane", "read", worker.pane_id, "--source", "visible"]));
+      if (worker)
+        console.error(run("clankie", ["herdr", "pane", "read", worker.pane_id, "--source", "visible"]));
     }
     assert.equal(await readFile("/workspace/hosted-proof.txt", "utf8"), marker);
     assert.ok(writesRequested > 0 && writesConfirmed > 0, "real Claude confirms its tool result");
