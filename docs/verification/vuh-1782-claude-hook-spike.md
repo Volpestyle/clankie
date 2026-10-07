@@ -61,3 +61,10 @@ boundary with the real command hook, including stable IDs, answer consumption,
 duplicate-answer rejection, timeout and cancellation. That check establishes
 Clankie's transport behavior; it must not be described as a live Claude TUI
 acceptance test. Live acceptance remains a separate authorized lane check.
+
+Delivery receipts distinguish host resolution from command output. The host
+consumes the request before returning its response. The command emits only
+`hookSpecificOutput`, then posts its internal request ID back after the stdout
+write completes. Only that authenticated receipt reports `answered`; a missing
+receipt reports `unconfirmed` after five seconds and remains consumed. This
+confirms command output, not Claude's later execution of the tool.

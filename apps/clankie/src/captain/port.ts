@@ -325,6 +325,7 @@ export interface CaptainPort {
     paneId: string,
     hook: FleetSeatHook,
     proof?: ProjectProcessProof,
+    signal?: AbortSignal,
   ): Promise<
     | boolean
     | { readonly recorded: true; readonly additionalContext: string; readonly messageIds: readonly string[] }

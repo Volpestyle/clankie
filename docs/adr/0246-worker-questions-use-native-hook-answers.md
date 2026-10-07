@@ -43,11 +43,11 @@ Four category leaves live under `autonomy.fleet`: `everydayWork`, `leavesMac`,
 and generated summaries belong to `@clankie/protocol` so the TUI and later app
 lane describe the same policy.
 
-| Preset | Everyday work | Leaves your Mac | Hard to undo | Money and accounts |
-| --- | --- | --- | --- | --- |
-| Hands-off | allow | lead | lead | owner |
-| Balanced (default) | allow | lead | owner | owner |
-| Careful | lead | owner | owner | owner |
+| Preset             | Everyday work | Leaves your Mac | Hard to undo | Money and accounts |
+| ------------------ | ------------- | --------------- | ------------ | ------------------ |
+| Hands-off          | allow         | lead            | lead         | owner              |
+| Balanced (default) | allow         | lead            | owner        | owner              |
+| Careful            | lead          | owner           | owner        | owner              |
 
 Presets change only these four category leaves. Existing `push` and `release`
 settings remain authoritative for those actions; presets do not replace their
@@ -62,9 +62,18 @@ state. This adds no parallel owner-question store or new approval engine. Gates
 describe who decides within existing authority; they grant no credential,
 account, workspace or machine access. Harness permission settings can project
 the policy conservatively where supported; they cannot authorize an action
-outside those boundaries.
+outside those boundaries. Ambiguous shell/MCP permissions are owner-only; a
+category preference cannot safely grant broad native shell permission. Remote
+questions with no verified workspace policy also stay owner-only. The new
+categories do not parse shell commands or replace native custom rules.
 
 ## Consequences
+
+Transport checks exercise the real command hook over HTTP and acknowledge its
+stdout write; that receipt proves the pipe write, not Claude model awareness.
+Owner asks canceled through the inbox leave the native hook waiting until its
+native resolution or nine-minute expiry. Unrelated parallel tool completions
+do not cancel another pending question.
 
 Workers can resolve supported native questions without keystrokes, while the
 owner remains responsible for money and accounts. A lost or expired answer

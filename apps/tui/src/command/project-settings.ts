@@ -208,18 +208,31 @@ async function runProjectFleetSettings(
     else if (args[index] === "--report-style" && changes.reportingStyle === undefined)
       changes.reportingStyle = value === "inherit" ? null : FleetReportingStyleSchema.parse(value);
     else if (args[index] === "--gate-preset") {
-      if (FLEET_GATE_FIELDS.some((field) => field in changes)) throw new Error("Choose one gate preset before individual gate overrides.");
+      if (FLEET_GATE_FIELDS.some((field) => field in changes))
+        throw new Error("Choose one gate preset before individual gate overrides.");
       const preset = FLEET_GATE_PRESETS[value as keyof typeof FLEET_GATE_PRESETS];
       if (value === "inherit") for (const field of FLEET_GATE_FIELDS) changes[field] = null;
       else if (preset) Object.assign(changes, preset.gates);
       else throw new Error("Unsupported gate preset.");
-    } else if (["--everyday-work", "--leaves-mac", "--hard-to-undo", "--money-and-accounts"].includes(args[index] ?? "")) {
-      const gateField = ({ "--everyday-work": "everydayWork", "--leaves-mac": "leavesMac", "--hard-to-undo": "hardToUndo", "--money-and-accounts": "moneyAndAccounts" } as const)[args[index] as "--everyday-work"];
+    } else if (
+      ["--everyday-work", "--leaves-mac", "--hard-to-undo", "--money-and-accounts"].includes(
+        args[index] ?? "",
+      )
+    ) {
+      const gateField = (
+        {
+          "--everyday-work": "everydayWork",
+          "--leaves-mac": "leavesMac",
+          "--hard-to-undo": "hardToUndo",
+          "--money-and-accounts": "moneyAndAccounts",
+        } as const
+      )[args[index] as "--everyday-work" | "--leaves-mac" | "--hard-to-undo" | "--money-and-accounts"];
       const gate = value === "inherit" ? null : FleetGateModeSchema.parse(value);
-      if (gateField === "moneyAndAccounts") changes.moneyAndAccounts = gate === null ? null : FleetGatesSchema.shape.moneyAndAccounts.parse(gate);
+      if (gateField === "moneyAndAccounts")
+        changes.moneyAndAccounts = gate === null ? null : FleetGatesSchema.shape.moneyAndAccounts.parse(gate);
       else changes[gateField] = gate;
-    }
-    else throw new Error("Project fleet settings require each field once with a supported value or inherit.");
+    } else
+      throw new Error("Project fleet settings require each field once with a supported value or inherit.");
   }
   if (releaseMode !== undefined || releaseRule !== undefined) {
     if (releaseMode === "inherit" && releaseRule === undefined) changes.release = null;
@@ -289,12 +302,14 @@ async function runProjectFleetSettings(
             reportingStyle: project.autonomy?.fleet?.reportingStyle ?? "inherit",
           }
         : {}),
-      ...(snapshot.fleetGates === true ? {
-        everydayWork: project.autonomy?.fleet?.everydayWork ?? "inherit",
-        leavesMac: project.autonomy?.fleet?.leavesMac ?? "inherit",
-        hardToUndo: project.autonomy?.fleet?.hardToUndo ?? "inherit",
-        moneyAndAccounts: project.autonomy?.fleet?.moneyAndAccounts ?? "inherit",
-      } : {}),
+      ...(snapshot.fleetGates === true
+        ? {
+            everydayWork: project.autonomy?.fleet?.everydayWork ?? "inherit",
+            leavesMac: project.autonomy?.fleet?.leavesMac ?? "inherit",
+            hardToUndo: project.autonomy?.fleet?.hardToUndo ?? "inherit",
+            moneyAndAccounts: project.autonomy?.fleet?.moneyAndAccounts ?? "inherit",
+          }
+        : {}),
       effective: supported ? effective : { closure: effective.closure, machineSetup: effective.machineSetup },
     },
   };

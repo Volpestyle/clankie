@@ -10,9 +10,18 @@ it("persists CLI gate presets and individual overrides without changing push or 
   try {
     const settings = new SettingsStore(join(root, "settings.json"));
     await runFleetCommand(["set", "--push", "owner", "--release", "owner"], { settings });
-    const result = await runFleetCommand(["set", "--gate-preset", "hands-off", "--hard-to-undo", "owner"], { settings });
+    const result = await runFleetCommand(["set", "--gate-preset", "hands-off", "--hard-to-undo", "owner"], {
+      settings,
+    });
     const disk = await new SettingsStore(settings.path).load();
-    expect(disk.autonomy.fleet).toMatchObject({ everydayWork: "allow", leavesMac: "allow", hardToUndo: "owner", moneyAndAccounts: "owner", push: "owner", release: { mode: "owner" } });
+    expect(disk.autonomy.fleet).toMatchObject({
+      everydayWork: "allow",
+      leavesMac: "lead",
+      hardToUndo: "owner",
+      moneyAndAccounts: "owner",
+      push: "owner",
+      release: { mode: "owner" },
+    });
     expect(formatFleetLines(result.fleet).join("\n")).toContain("Money and accounts");
     await expect(runFleetCommand(["set", "--money-and-accounts", "allow"], { settings })).rejects.toThrow();
     expect((await settings.load()).autonomy.fleet.moneyAndAccounts).toBe("owner");

@@ -100,12 +100,35 @@ Stored means retained, delivered means transport delivery, consumed means the
 native receiver accepted it: none proves the model read or finished it. An
 active Codex steer differs from an after-turn queue; keep that detail.
 
-Hired Codex questions reach the hiring conversation with their native request
+Hired Codex and Claude questions reach the hiring conversation with their native request
 and question IDs. Answer with `message_seat`'s `questionAnswer`, omitting
 `message`, preserving the observed IDs and types (async request IDs are the
 function `call_id`; question IDs are the supplied JSON-encoded IDs). Sync
 answers need the winning tool output; async receipts prove only acceptance of
 that user message.
+
+Claude `AskUserQuestion` and permission prompts use live plugin command hooks.
+Their request IDs bind the exact pane, session, tool invocation and hook event;
+answers return as hook JSON, never terminal keystrokes. Answer all question IDs
+once, preserving their observed options. Expired, closed or resolved questions
+refuse later answers. A bridge error falls back to the harness's own prompt;
+do not retry a question through another transport.
+
+Read `clankie fleet status` in the current verified workspace. Its generated
+Worker gates summary resolves `everydayWork`, `leavesMac`, `hardToUndo`, and
+`moneyAndAccounts` globally and per project. `allow` delegates ordinary work
+within existing authority; `lead` asks you to decide; `owner` reserves the choice
+for James. Money/accounts always belong to the owner. Push and release reuse
+their existing settings. Hands-off, Balanced and Careful presets change only
+the category leaves; explicit assignment limits retain precedence.
+
+Native permissions are a partial projection: local Claude asks for edits,
+writes, shell and network calls with existing denies preserved. Unclassified
+permissions stay owner-only. Local Codex keeps its sandbox with on-request
+approvals. Remote hires
+retain native permissions. Native custom rules remain harness-owned. Neither
+the preset name nor a native allow rule proves authority for accounts, money,
+credentials, evals, or hard-to-undo effects.
 
 If the effective owner's `autonomy.fleet` gate reserves the decision, escalate
 the observed question with Clankie's same `request_user_input` tool: supply

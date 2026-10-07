@@ -42,7 +42,20 @@ async function reportOverLink(link, pane) {
     process.exit(0);
   }
   const event = hook?.hook_event_name;
-  if (!["SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PermissionRequest", "Notification", "PostToolUse", "SessionEnd"].includes(event)) process.exit(0);
+  if (
+    ![
+      "SessionStart",
+      "UserPromptSubmit",
+      "Stop",
+      "StopFailure",
+      "PreToolUse",
+      "PermissionRequest",
+      "Notification",
+      "PostToolUse",
+      "SessionEnd",
+    ].includes(event)
+  )
+    process.exit(0);
   if (typeof hook.session_id !== "string") process.exit(0);
   const lastMessage =
     typeof hook.last_assistant_message === "string" ? hook.last_assistant_message.trim() : "";
@@ -51,7 +64,11 @@ async function reportOverLink(link, pane) {
     event,
     sessionId: hook.session_id,
     ...(typeof hook.tool_name === "string" ? { toolName: hook.tool_name } : {}),
-    ...(event === "PermissionRequest" ? { toolUseId: randomUUID() } : typeof hook.tool_use_id === "string" ? { toolUseId: hook.tool_use_id } : {}),
+    ...(event === "PermissionRequest"
+      ? { toolUseId: randomUUID() }
+      : typeof hook.tool_use_id === "string"
+        ? { toolUseId: hook.tool_use_id }
+        : {}),
     ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
     ...(typeof hook.notification_type === "string" ? { notificationType: hook.notification_type } : {}),
     ...(lastMessage ? { lastMessage: lastMessage.slice(0, TEXT_MAX) } : {}),
@@ -68,7 +85,24 @@ async function reportOverLink(link, pane) {
     });
     if (response.ok && (event === "PermissionRequest" || event === "PreToolUse")) {
       const result = await response.json();
-      if (result.hookOutput) await new Promise((resolve, reject) => process.stdout.write(JSON.stringify(result.hookOutput) + "\n", error => error ? reject(error) : resolve()));
+      if (result.hookOutput) {
+        await new Promise((resolve, reject) =>
+          process.stdout.write(
+            JSON.stringify({ hookSpecificOutput: result.hookOutput.hookSpecificOutput }) + "\n",
+            (error) => (error ? reject(error) : resolve()),
+          ),
+        );
+        if (typeof result.hookOutput.requestId === "string") {
+          const ack = await fetch(seatRoute(link, pane, "hook"), {
+            method: "POST",
+            headers: { ...authorization(link), "content-type": "application/json" },
+            body: JSON.stringify({ ...body, deliveredQuestionId: result.hookOutput.requestId }),
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (!ack.ok)
+            process.stderr.write(`clankie-worker: question receipt answered ${String(ack.status)}\n`);
+        }
+      }
     }
     if (response.ok && event === "UserPromptSubmit") {
       const result = await response.json();

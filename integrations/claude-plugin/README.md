@@ -367,3 +367,32 @@ from the complete artifact; replacing the helper alone is refused. This does not
 refresh a running harness or its plugin cache.
 Doctor checks the installed skill marker separately from native membership.
 Shipping or loading the skill grants no tools and is not a live delivery check.
+
+### Structured worker questions
+
+The worker plugin forwards synchronous `PermissionRequest` hooks and
+`PreToolUse` hooks matching `AskUserQuestion`. The service binds each request to
+the observed worker pane, native session, tool invocation and hook event, then
+projects its options into the hiring conversation. The lead answers through
+`message_seat.questionAnswer` with the exact request and question IDs. An
+owner-reserved decision uses the existing owner ask/escalation path.
+
+A permission answer returns `hookSpecificOutput.decision.behavior` as `allow`
+or `deny` for that invocation. An ask-the-user answer returns a `PreToolUse`
+`allow` plus `updatedInput.answers`, keyed by the original question text.
+No pane typing is involved. Answers are single-use; a closed session, timeout,
+replayed invocation, or resolved request refuses another answer. Hooks wait up
+to ten minutes; the service retires its live request earlier. Bridge failures
+preserve the native prompt rather than asserting an answer was delivered.
+These command hooks belong to the worker package, independently of the
+operator seat's context hooks. Refresh the normal plugin installation for new
+sessions to consume them; this change does not restart existing lanes.
+
+New local hires retain tracker denies and explicitly ask for edits, writes,
+Bash and network calls. Broad native allow rules cannot express the semantic
+owner gates safely, so the hook routes their questions using effective policy.
+Unclassified permissions, including shell commands, stay owner-only; file-tool
+questions use the everyday gate and network tools use the outward gate.
+Native deny and managed rules keep precedence. Owner-authored native custom
+rules continue to live in Claude's own settings; category presets do not create
+a separate rule store or bypass the harness's security policy.

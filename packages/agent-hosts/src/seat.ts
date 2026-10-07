@@ -143,6 +143,8 @@ export type SeatStatus = "working" | "idle" | "blocked" | "released" | "offline"
 
 export interface SeatQuestion {
   readonly requestId: string | number;
+  /** Host-owned category for a native permission; never supplied by tool text. */
+  readonly gate?: "everydayWork" | "leavesMac" | "hardToUndo" | "moneyAndAccounts";
   /** Async Codex message-item questions use attributed native user input, not a server response. */
   readonly delivery?: "async";
   readonly turnId: string;

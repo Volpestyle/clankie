@@ -1,5 +1,14 @@
 import { z } from "zod";
-import { FleetGatesSchema, FleetGateModeSchema, FLEET_GATE_FIELDS, FLEET_GATE_PRESETS, FLEET_GATE_CATEGORIES, FLEET_GATE_MODES, fleetGateSummary, type FleetGates } from "./fleet-gates.ts";
+import {
+  FleetGatesSchema,
+  FleetGateModeSchema,
+  FLEET_GATE_FIELDS,
+  FLEET_GATE_PRESETS,
+  FLEET_GATE_CATEGORIES,
+  FLEET_GATE_MODES,
+  fleetGateSummary,
+  type FleetGates,
+} from "./fleet-gates.ts";
 export * from "./fleet-gates.ts";
 
 /** Owner-selected responsibility; never a credential, machine grant or action receipt. */
@@ -33,7 +42,12 @@ export const FLEET_WORKING_PREFERENCE_FIELDS = [
   "verification",
   "reportingStyle",
 ] as const;
-export const FLEET_AUTONOMY_FIELDS = ["closure", "machineSetup", ...FLEET_WORKING_PREFERENCE_FIELDS, ...FLEET_GATE_FIELDS] as const;
+export const FLEET_AUTONOMY_FIELDS = [
+  "closure",
+  "machineSetup",
+  ...FLEET_WORKING_PREFERENCE_FIELDS,
+  ...FLEET_GATE_FIELDS,
+] as const;
 export const FLEET_AUTONOMY_DEFAULTS = {
   ...FLEET_GATE_PRESETS.balanced.gates,
   closure: "lead",
@@ -43,7 +57,8 @@ export const FLEET_AUTONOMY_DEFAULTS = {
   release: { mode: "owner" },
   verification: "change_run_read",
   reportingStyle: "Short and plain.",
-} satisfies FleetWorkingPreferences & FleetGates & { closure: FleetAutonomyMode; machineSetup: FleetAutonomyMode };
+} satisfies FleetWorkingPreferences &
+  FleetGates & { closure: FleetAutonomyMode; machineSetup: FleetAutonomyMode };
 
 /** New response fields stay absent on an older service; defaults are a disk concern. */
 export const FleetAutonomyWireSchema = z
@@ -182,6 +197,9 @@ export function formatFleetAutonomyGuidance(policy: FleetAutonomy): string[] {
     `Verification: ${fleet.verification}. ${FLEET_AUTONOMY_GUIDANCE.verification[fleet.verification]}`,
     `Reporting style: ${fleet.reportingStyle}`,
     `Worker gates: ${fleetGateSummary(fleet)}`,
-    ...FLEET_GATE_CATEGORIES.map((category) => `${category.label}: ${fleet[category.key]}. ${FLEET_GATE_MODES[fleet[category.key]].description}`),
+    ...FLEET_GATE_CATEGORIES.map(
+      (category) =>
+        `${category.label}: ${fleet[category.key]}. ${FLEET_GATE_MODES[fleet[category.key]].description}`,
+    ),
   ];
 }

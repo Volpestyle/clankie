@@ -124,11 +124,33 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
 }
 
 function fleetAutonomyFields(value: Partial<FleetAutonomy>): Partial<FleetAutonomy> {
-  const { closure, machineSetup, commit, push, release, verification, reportingStyle, everydayWork, leavesMac, hardToUndo, moneyAndAccounts } = value;
+  const {
+    closure,
+    machineSetup,
+    commit,
+    push,
+    release,
+    verification,
+    reportingStyle,
+    everydayWork,
+    leavesMac,
+    hardToUndo,
+    moneyAndAccounts,
+  } = value;
   return Object.fromEntries(
-    Object.entries({ closure, machineSetup, commit, push, release, verification, reportingStyle, everydayWork, leavesMac, hardToUndo, moneyAndAccounts }).filter(
-      ([, value]) => value !== undefined,
-    ),
+    Object.entries({
+      closure,
+      machineSetup,
+      commit,
+      push,
+      release,
+      verification,
+      reportingStyle,
+      everydayWork,
+      leavesMac,
+      hardToUndo,
+      moneyAndAccounts,
+    }).filter(([, value]) => value !== undefined),
   );
 }
 
@@ -169,8 +191,20 @@ export async function fleetUpdate(
 ): Promise<FleetCommandResult> {
   const change: FleetUpdate = typeof update === "string" ? { notes: update } : update;
   const settings = store(options);
-  const { closure, machineSetup, commit, push, release, verification, reportingStyle, everydayWork, leavesMac, hardToUndo, moneyAndAccounts, ...fleetChange } =
-    change;
+  const {
+    closure,
+    machineSetup,
+    commit,
+    push,
+    release,
+    verification,
+    reportingStyle,
+    everydayWork,
+    leavesMac,
+    hardToUndo,
+    moneyAndAccounts,
+    ...fleetChange
+  } = change;
   const updated = await settings.update((current) => ({
     ...current,
     fleet: FleetSettingsSchema.parse({
@@ -283,13 +317,26 @@ async function parseSet(
       change.reportingStyle = FleetReportingStyleSchema.parse(value);
     } else if (flag === "--gate-preset") {
       const preset = FLEET_GATE_PRESETS[value as keyof typeof FLEET_GATE_PRESETS];
-      if (!preset || ["everydayWork", "leavesMac", "hardToUndo", "moneyAndAccounts"].some((field) => field in change))
+      if (
+        !preset ||
+        ["everydayWork", "leavesMac", "hardToUndo", "moneyAndAccounts"].some((field) => field in change)
+      )
         throw new Error("Choose one gate preset before individual gate overrides.");
       Object.assign(change, preset.gates);
-    } else if (["--everyday-work", "--leaves-mac", "--hard-to-undo", "--money-and-accounts"].includes(flag ?? "")) {
-      const field = ({ "--everyday-work": "everydayWork", "--leaves-mac": "leavesMac", "--hard-to-undo": "hardToUndo", "--money-and-accounts": "moneyAndAccounts" } as const)[flag as "--everyday-work"];
+    } else if (
+      ["--everyday-work", "--leaves-mac", "--hard-to-undo", "--money-and-accounts"].includes(flag ?? "")
+    ) {
+      const field = (
+        {
+          "--everyday-work": "everydayWork",
+          "--leaves-mac": "leavesMac",
+          "--hard-to-undo": "hardToUndo",
+          "--money-and-accounts": "moneyAndAccounts",
+        } as const
+      )[flag as "--everyday-work" | "--leaves-mac" | "--hard-to-undo" | "--money-and-accounts"];
       const gate = FleetGateModeSchema.parse(value);
-      if (field === "moneyAndAccounts") change.moneyAndAccounts = FleetGatesSchema.shape.moneyAndAccounts.parse(gate);
+      if (field === "moneyAndAccounts")
+        change.moneyAndAccounts = FleetGatesSchema.shape.moneyAndAccounts.parse(gate);
       else change[field] = gate;
     } else if (flag === "--tools" && change.tools === undefined) {
       if (value !== "connected" && value !== "off") throw new Error("--tools must be connected or off.");

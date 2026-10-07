@@ -11,7 +11,17 @@ import {
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
-const EVENTS = new Set<FleetSeatHook["event"]>(["SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PermissionRequest", "Notification", "PostToolUse", "SessionEnd"]);
+const EVENTS = new Set<FleetSeatHook["event"]>([
+  "SessionStart",
+  "UserPromptSubmit",
+  "Stop",
+  "StopFailure",
+  "PreToolUse",
+  "PermissionRequest",
+  "Notification",
+  "PostToolUse",
+  "SessionEnd",
+]);
 
 /**
  * The worker plugin's lifecycle hook (VUH-1458): tell the service a hired
@@ -44,7 +54,10 @@ export async function runSeatHookCommand(
     transcript_path?: unknown;
     last_assistant_message?: unknown;
     error?: unknown;
-    tool_name?: unknown; tool_use_id?: unknown; tool_input?: unknown; notification_type?: unknown;
+    tool_name?: unknown;
+    tool_use_id?: unknown;
+    tool_input?: unknown;
+    notification_type?: unknown;
   };
   const event = hook.hook_event_name as FleetSeatHook["event"];
   if (!EVENTS.has(event) || typeof hook.session_id !== "string") return 0;
@@ -68,7 +81,11 @@ export async function runSeatHookCommand(
     event,
     sessionId: hook.session_id,
     ...(typeof hook.tool_name === "string" ? { toolName: hook.tool_name } : {}),
-    ...(event === "PermissionRequest" ? { toolUseId: randomUUID() } : typeof hook.tool_use_id === "string" ? { toolUseId: hook.tool_use_id } : {}),
+    ...(event === "PermissionRequest"
+      ? { toolUseId: randomUUID() }
+      : typeof hook.tool_use_id === "string"
+        ? { toolUseId: hook.tool_use_id }
+        : {}),
     ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
     ...(typeof hook.notification_type === "string" ? { notificationType: hook.notification_type } : {}),
     ...(lastMessage === undefined || lastMessage.trim() === ""
@@ -101,8 +118,29 @@ export async function runSeatHookCommand(
   if (response.status === 404) return 0;
   if (!response.ok) throw new Error(`Seat hook was refused (${response.status})`);
   if (event === "PermissionRequest" || event === "PreToolUse") {
-    const result = (await response.json()) as { hookOutput?: unknown };
-    if (result.hookOutput) (options.stdout ?? process.stdout).write(JSON.stringify(result.hookOutput) + "\n");
+    const result = (await response.json()) as {
+      hookOutput?: { hookSpecificOutput: unknown; requestId?: string };
+    };
+    if (result.hookOutput) {
+      const output = JSON.stringify({ hookSpecificOutput: result.hookOutput.hookSpecificOutput }) + "\n";
+      if (options.stdout) options.stdout.write(output);
+      else
+        await new Promise<void>((resolve, reject) =>
+          process.stdout.write(output, (error) => (error ? reject(error) : resolve())),
+        );
+      if (result.hookOutput.requestId) {
+        const ack = await (options.fetchImpl ?? fetch)(
+          new URL(fleetSeatHookPath(paneId), commandHost({ ...options, env })),
+          {
+            method: "POST",
+            headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+            body: JSON.stringify({ ...body, deliveredQuestionId: result.hookOutput.requestId }),
+            signal: AbortSignal.timeout(5_000),
+          },
+        );
+        if (!ack.ok) throw new Error(`Seat question receipt was refused (${ack.status})`);
+      }
+    }
   }
   if (event === "UserPromptSubmit") {
     const result = (await response.json()) as { additionalContext?: unknown };

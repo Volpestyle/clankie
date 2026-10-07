@@ -2234,7 +2234,7 @@ The command is excluded from `pnpm check` and push, PR and scheduled CI.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -2290,6 +2290,40 @@ review, addressed findings and sealing the reviewed revision with evidence;
 `--report-style TEXT` sets reporting guidance (default "Short and plain.").
 Explicit task and integrator gates take precedence, and these preferences
 grant no additional account, tool or workspace authority.
+
+Worker approval categories also live under `autonomy.fleet`. Each uses `allow`
+("Just do it"), `lead` ("Clankie decides"), or `owner` ("Ask me"). Money and
+accounts always stay `owner`. Choose `--gate-preset hands-off|balanced|careful`,
+then optionally override `--everyday-work`, `--leaves-mac`, or `--hard-to-undo`.
+A preset changes only these categories; existing `push` and `release` choices
+remain independent. `fleet status` and `/fleet` show a summary generated from the
+saved categories, including custom combinations. Labels and descriptions come
+from `@clankie/protocol` so the TUI and app share their wording.
+
+| Preset             | Everyday work   | Leaves your Mac | Hard to undo    | Money and accounts |
+| ------------------ | --------------- | --------------- | --------------- | ------------------ |
+| Hands-off          | Just do it      | Clankie decides | Clankie decides | Ask me             |
+| Balanced (default) | Just do it      | Clankie decides | Ask me          | Ask me             |
+| Careful            | Clankie decides | Ask me          | Ask me          | Ask me             |
+
+Per-project settings accept the same category flags and `--gate-preset`, with
+`inherit` to clear their overrides, through `clankie project settings PROJECT`.
+The existing owner API accepts category leaves in the revision-fenced
+`changes` object at `POST /v1/operator/fleet-settings` and
+`changes.autonomy.fleet` in project updates. Current snapshots advertise
+`fleetGates:true`; clients must not invent support on older hosts.
+
+New local Claude hires preserve inherited tracker denies and ask for file
+edits, writes, shell and network operations. The hook routes questions through
+the effective gates; unclassified permissions stay owner-only. Shell tools ask:
+a tool name cannot reliably distinguish ordinary work from purchases or
+irreversible effects. New local Codex hires retain their sandbox and use
+`approval_policy="on-request"`; a trusted native containment policy keeps final
+precedence. These mappings do not change a running lane, bypass managed policy,
+or prove that a harness can enforce every semantic category. Remote launches
+retain their existing native permissions. Owner-managed native custom allow,
+ask and deny rules remain with the harness; Clankie does not persist a separate
+custom-rule evaluator.
 
 `fleet status`, `doctor --json` and the TUI `/doctor` expose the resolved preferences for the actual
 current workspace through the verified service context, including the project

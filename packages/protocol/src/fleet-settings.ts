@@ -28,7 +28,10 @@ export const FleetSettingsSnapshotSchema = z
     fleetGates: z.literal(true).optional(),
   })
   .strict()
-  .refine((value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.fleet).success, "A fleet-gates snapshot must include every global gate")
+  .refine(
+    (value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.fleet).success,
+    "A fleet-gates snapshot must include every global gate",
+  )
   .refine(
     (value) =>
       value.workingPreferences !== true ||
@@ -92,7 +95,10 @@ export const FleetSettingsContextSchema = z
       .strict(),
   })
   .strict()
-  .refine((value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.effective).success, "A fleet-gates context must include every effective gate")
+  .refine(
+    (value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.effective).success,
+    "A fleet-gates context must include every effective gate",
+  )
   .refine(
     (value) =>
       value.workingPreferences !== true ||

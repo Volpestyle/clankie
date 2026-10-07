@@ -469,12 +469,19 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       ctx.dependencies.localFleet?.identity(context.req.raw) ??
       ctx.dependencies.fleetLinks?.identity?.(context.req.raw);
     const proof = identity && (await identity.validate()) ? await identity.projectProof?.() : undefined;
-    const recorded = await ctx.dependencies.captain.recordSeatHook(pane.paneId, parsed.data, proof);
+    const recorded = await ctx.dependencies.captain.recordSeatHook(
+      pane.paneId,
+      parsed.data,
+      proof,
+      context.req.raw.signal,
+    );
     return recorded
       ? context.json({
           schemaVersion: 1 as const,
           recorded: true as const,
-          ...(typeof recorded === "object" && "hookOutput" in recorded ? { hookOutput: recorded.hookOutput } : {}),
+          ...(typeof recorded === "object" && "hookOutput" in recorded
+            ? { hookOutput: recorded.hookOutput }
+            : {}),
           ...(typeof recorded === "object" && "additionalContext" in recorded
             ? {
                 additionalContext: recorded.additionalContext,

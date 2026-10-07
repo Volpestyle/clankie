@@ -7,6 +7,9 @@ import {
   FLEET_AUTONOMY_DEFAULTS,
   FLEET_GATE_FIELDS,
   fleetGatePreset,
+  fleetGateSummary,
+  matchingFleetGatePreset,
+  formatFleetAutonomyGuidance,
   FLEET_AUTONOMY_FIELDS,
   FLEET_WORKING_PREFERENCE_FIELDS,
   FleetSettingsSnapshotSchema,
@@ -392,30 +395,84 @@ it("preserves older wire responses without inventing supported preferences and a
   expect(await f.store.load()).toEqual(settings);
 });
 
-
 it("persists gate presets through disk and project patches while preserving push and release", async () => {
   const f = await fixture();
   await f.store.update((current) => ({
     ...current,
-    autonomy: AutonomySettingsSchema.parse({ fleet: { ...current.autonomy.fleet, ...fleetGatePreset("hands-off"), push: "owner", release: { mode: "time_rule", rule: "After review." } } }),
+    autonomy: AutonomySettingsSchema.parse({
+      fleet: {
+        ...current.autonomy.fleet,
+        ...fleetGatePreset("hands-off"),
+        push: "owner",
+        release: { mode: "time_rule", rule: "After review." },
+      },
+    }),
   }));
   await f.patch({ autonomy: { fleet: { hardToUndo: "owner" } } });
   const saved = await new SettingsStore(f.store.path).load();
   const effective = effectiveFleetAutonomy(saved.autonomy, saved.projects.projects[0]!.autonomy);
-  expect(effective).toMatchObject({ ...fleetGatePreset("hands-off"), hardToUndo: "owner", push: "owner", release: { mode: "time_rule", rule: "After review." } });
+  expect(effective).toMatchObject({
+    ...fleetGatePreset("hands-off"),
+    hardToUndo: "owner",
+    push: "owner",
+    release: { mode: "time_rule", rule: "After review." },
+  });
+  expect(matchingFleetGatePreset(effective)).toBe("balanced");
+  expect(fleetGateSummary(effective)).toBe(
+    "Workers handle everyday work, Clankie decides before anything leaves your Mac, and you approve changes that are hard to undo; money and accounts always ask you.",
+  );
+  expect(formatFleetAutonomyGuidance(effective)).toContain(`Worker gates: ${fleetGateSummary(effective)}`);
   const revision = projectsRevision(saved.projects);
-  const snapshot = FleetSettingsSnapshotSchema.parse({ schemaVersion: 1, revision, fleet: { size: "small", models: "efficient", ...saved.autonomy.fleet }, fleetGates: true });
+  const snapshot = FleetSettingsSnapshotSchema.parse({
+    schemaVersion: 1,
+    revision,
+    fleet: { size: "small", models: "efficient", ...saved.autonomy.fleet },
+    fleetGates: true,
+  });
   expect(snapshot.fleet).toMatchObject(fleetGatePreset("hands-off"));
-  expect(FleetSettingsSnapshotSchema.safeParse({ schemaVersion: 1, revision, fleet: { size: "small", models: "efficient", closure: "lead", machineSetup: "lead" }, fleetGates: true }).success).toBe(false);
+  expect(
+    FleetSettingsSnapshotSchema.safeParse({
+      schemaVersion: 1,
+      revision,
+      fleet: { size: "small", models: "efficient", closure: "lead", machineSetup: "lead" },
+      fleetGates: true,
+    }).success,
+  ).toBe(false);
   for (const mode of ["allow", "lead"]) {
     expect(AutonomySettingsSchema.safeParse({ fleet: { moneyAndAccounts: mode } }).success).toBe(false);
-    expect(UpdateFleetSettingsSchema.safeParse({ schemaVersion: 1, expectedRevision: revision, changes: { moneyAndAccounts: mode } }).success).toBe(false);
-    expect(UpdateProjectSettingsSchema.safeParse({ projectId: "garden", expectedRevision: revision, changes: { autonomy: { fleet: { moneyAndAccounts: mode } } } }).success).toBe(false);
+    expect(
+      UpdateFleetSettingsSchema.safeParse({
+        schemaVersion: 1,
+        expectedRevision: revision,
+        changes: { moneyAndAccounts: mode },
+      }).success,
+    ).toBe(false);
+    expect(
+      UpdateProjectSettingsSchema.safeParse({
+        projectId: "garden",
+        expectedRevision: revision,
+        changes: { autonomy: { fleet: { moneyAndAccounts: mode } } },
+      }).success,
+    ).toBe(false);
   }
   await f.patch({ autonomy: { fleet: { ...fleetGatePreset("careful") } } });
-  expect(effectiveFleetAutonomy((await f.store.load()).autonomy, (await f.store.load()).projects.projects[0]!.autonomy)).toMatchObject(fleetGatePreset("careful"));
+  const careful = await f.store.load();
+  expect(effectiveFleetAutonomy(careful.autonomy, careful.projects.projects[0]!.autonomy)).toMatchObject(
+    fleetGatePreset("careful"),
+  );
+  await f.patch({ autonomy: { fleet: { everydayWork: "owner", hardToUndo: "lead" } } });
+  const custom = await new SettingsStore(f.store.path).load();
+  const customPolicy = effectiveFleetAutonomy(custom.autonomy, custom.projects.projects[0]!.autonomy);
+  expect(matchingFleetGatePreset(customPolicy)).toBeUndefined();
+  expect(fleetGateSummary(customPolicy)).toBe(
+    "You approve everyday work, you approve anything that leaves your Mac, and Clankie decides on changes that are hard to undo; money and accounts always ask you.",
+  );
   await f.patch({ autonomy: { fleet: Object.fromEntries(FLEET_GATE_FIELDS.map((field) => [field, null])) } });
   const inherited = await new SettingsStore(f.store.path).load();
   expect(inherited.projects.projects[0]!.autonomy).toBeUndefined();
-  expect(effectiveFleetAutonomy(inherited.autonomy)).toMatchObject({ ...fleetGatePreset("hands-off"), push: "owner", release: { mode: "time_rule", rule: "After review." } });
+  expect(effectiveFleetAutonomy(inherited.autonomy)).toMatchObject({
+    ...fleetGatePreset("hands-off"),
+    push: "owner",
+    release: { mode: "time_rule", rule: "After review." },
+  });
 });

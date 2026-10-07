@@ -16,6 +16,9 @@ import {
   FLEET_GATE_CATEGORIES,
   FLEET_GATE_PRESETS,
   FLEET_GATE_MODES,
+  FLEET_WORKING_GATE_LABELS,
+  fleetGateSummary,
+  matchingFleetGatePreset,
   HireEffortSchema,
   OPERATOR_SEAT_HARNESSES,
   FleetReportingStyleSchema,
@@ -171,6 +174,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
   flow.begin("fleet");
   try {
     const current = (await fleetStatus({ settings: services.settings })).fleet;
+    flow.renderLine(fleetGateSummary(current));
     const size = await flow.readSelect({
       message: "Fleet — the fleet size to aim for (a target, not a cap)",
       options: FLEET_SIZES.map((value) => ({ value, label: value, description: FLEET_SIZE_GUIDANCE[value] })),
@@ -297,19 +301,25 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     if (machineSetup !== "lead" && machineSetup !== "owner") return;
     const preference: Partial<FleetAutonomy> = {};
     const preset = await flow.readSelect({
-      message: "Fleet — approval gates",
+      message: "How hands-on do you want to be?",
       options: [
-        { value: "custom", label: "Keep current gates", description: "Review each category separately." },
-        ...Object.entries(FLEET_GATE_PRESETS).map(([value, entry]) => ({ value, label: entry.label, description: entry.description })),
+        { value: "custom", label: "Customize", description: "Choose who decides for each category." },
+        ...Object.entries(FLEET_GATE_PRESETS).map(([value, entry]) => ({
+          value,
+          label: entry.label,
+          description: entry.description,
+        })),
       ],
-      initialValue: "custom",
-      currentValue: "custom",
+      initialValue: matchingFleetGatePreset(current) ?? "custom",
+      currentValue: matchingFleetGatePreset(current) ?? "custom",
       allowBack: true,
     });
     if (typeof preset !== "string") return;
-    const presetGates = preset === "custom" ? current : FLEET_GATE_PRESETS[preset as keyof typeof FLEET_GATE_PRESETS]?.gates;
+    const presetGates =
+      preset === "custom" ? current : FLEET_GATE_PRESETS[preset as keyof typeof FLEET_GATE_PRESETS]?.gates;
     if (!presetGates) return;
-    for (const category of FLEET_GATE_CATEGORIES) {
+    if (preset !== "custom") Object.assign(preference, presetGates);
+    for (const category of preset === "custom" ? FLEET_GATE_CATEGORIES : []) {
       if (category.key === "moneyAndAccounts") {
         preference.moneyAndAccounts = "owner";
         flow.renderLine(`${category.label}: ${FLEET_GATE_MODES.owner.label} — ${category.description}`);
@@ -317,7 +327,11 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       }
       const value = await flow.readSelect({
         message: `Fleet — ${category.label}`,
-        options: Object.entries(FLEET_GATE_MODES).map(([value, entry]) => ({ value, label: entry.label, description: entry.description })),
+        options: Object.entries(FLEET_GATE_MODES).map(([value, entry]) => ({
+          value,
+          label: entry.label,
+          description: entry.description,
+        })),
         initialValue: presetGates[category.key],
         currentValue: current[category.key],
         allowBack: true,
@@ -330,7 +344,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
         message: `Fleet — who may ${field} completed work`,
         options: (["lead", "owner"] as const).map((value) => ({
           value,
-          label: value,
+          label: FLEET_WORKING_GATE_LABELS[value],
           description: FLEET_AUTONOMY_GUIDANCE[field][value],
         })),
         initialValue: current[field],
@@ -344,7 +358,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       message: "Fleet — who may publish an official release",
       options: (["lead", "owner", "time_rule"] as const).map((value) => ({
         value,
-        label: value,
+        label: FLEET_WORKING_GATE_LABELS[value],
         description: FLEET_AUTONOMY_GUIDANCE.release[value],
       })),
       initialValue: current.release.mode,

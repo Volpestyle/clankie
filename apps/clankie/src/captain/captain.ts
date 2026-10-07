@@ -1,3 +1,4 @@
+import { escalateWorkerQuestion } from "./worker-question-escalation.ts";
 import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
 import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
@@ -484,7 +485,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return delivery.outcome === "unconfirmed" ? delivery : delivery.outcome === "delivered";
       },
     },
-  } satisfies Pick<ClaudeWorkerSeatDeps, "hooks" | "agent" | "transcript" | "mailbox">;
+  } satisfies Pick<ClaudeWorkerSeatDeps, "hooks" | "agent" | "transcript" | "mailbox" | "hookQuestions">;
   const claudeWorkerSeats = createClaudeWorkerSeatAdapter({
     consent: () => claudeWorkerChannelConsent(),
     fleetGates: localFleetGates,
@@ -1670,6 +1671,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       selected === "owner" ||
       (selected !== null && typeof selected === "object" && "mode" in selected && selected.mode === "owner")
     );
+  };
+  herdrWatches.questionGate = async (agent, question) => {
+    // Do not interpret a remote cwd using this Mac's filesystem.
+    if (splitFleetQualified(agent.paneId) || !agent.workingDirectory) return "owner";
+    const policy = await localFleetGates(agent.workingDirectory);
+    return policy[question.gate ?? "everydayWork"];
+  };
+  herdrWatches.escalateQuestion = async (owner, agent, question, guard) => {
+    await escalateWorkerQuestion(conversations, owner.conversationId, agent.terminalId, question, {
+      current: () => !shutdown.signal.aborted,
+      authorize: async () => {
+        await guard();
+        return true;
+      },
+    });
+    await guard();
   };
   conversations.prepareWorkerQuestion = async (seatId, requestId) => {
     const observed = await herdrWatches.observedSeatQuestion(seatId, requestId);
@@ -4571,7 +4588,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return { schemaVersion: 1, seats: seats.flat() };
     },
 
-    async recordSeatHook(paneId, hook, proof) {
+    async recordSeatHook(paneId, hook, proof, signal) {
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return false;
       // Only the Claude session herdr says sits in that pane may report for it.
       const agent = await herdrRunner.get(paneId).catch(() => undefined);
@@ -4584,11 +4601,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             : basename(session.value, ".jsonl");
       if (agent?.agent !== "claude" || sessionId !== hook.sessionId) return false;
       const ref = { harness: "claude" as const, sessionId, paneId: agent.paneId };
-      if (hook.event === "PermissionRequest" || (hook.event === "PreToolUse" && hook.toolName === "AskUserQuestion")) {
-        const hookOutput = await hookQuestions.open(ref, hook, question => herdrWatches.forwardNativeQuestion(ref, question));
-        return { recorded: true as const, hookOutput };
+      if (hook.deliveredQuestionId) return hookQuestions.acknowledge(ref, hook.deliveredQuestionId);
+      if (
+        hook.event === "PermissionRequest" ||
+        (hook.event === "PreToolUse" && hook.toolName === "AskUserQuestion")
+      ) {
+        const hookOutput = await hookQuestions.open(
+          ref,
+          hook,
+          (question) => herdrWatches.forwardNativeQuestion(ref, question),
+          signal,
+        );
+        return { recorded: true as const, hookOutput: { ...hookOutput } };
       }
-      if (["SessionEnd", "Stop", "StopFailure", "UserPromptSubmit", "PostToolUse"].includes(hook.event))
+      if (["SessionEnd", "Stop", "StopFailure", "UserPromptSubmit"].includes(hook.event))
         hookQuestions.cancel(ref, "Native question is no longer pending");
       if (["PreToolUse", "Notification", "PostToolUse", "SessionEnd"].includes(hook.event)) return true;
       seatHooks.record(paneId, hook);

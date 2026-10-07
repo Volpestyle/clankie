@@ -198,7 +198,11 @@ export const ProjectsSnapshotSchema = z
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict()
-  .refine((value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.autonomyDefaults?.fleet).success, "A fleet-gates project snapshot must include every global gate")
+  .refine(
+    (value) =>
+      value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.autonomyDefaults?.fleet).success,
+    "A fleet-gates project snapshot must include every global gate",
+  )
   .refine(
     (value) =>
       value.workingPreferences !== true ||

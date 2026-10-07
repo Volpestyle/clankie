@@ -117,15 +117,17 @@ export function claudeWorkerSettings(trackerDeny: readonly string[] = [], gates?
   // Shell commands may combine everyday work, accounts and destructive work.
   // Never blanket-allow Bash from a category preference. Existing managed deny
   // rules retain precedence; all ambiguous calls reach the permission hook.
-  const localFiles = ["Read(/**)", "Edit(/**)", "Write(/**)"];
+  const localFiles = ["Edit", "Write"];
   return JSON.stringify({
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
     permissions: {
-      allow: [WORKER_SERVER_RULE, ...(gates?.everydayWork === "allow" ? localFiles : [])],
-      ...(gates === undefined ? {} : {
-        defaultMode: "default",
-        ask: ["Bash", "WebFetch", "WebSearch", ...(gates.everydayWork === "allow" ? [] : localFiles)],
-      }),
+      allow: [WORKER_SERVER_RULE],
+      ...(gates === undefined
+        ? {}
+        : {
+            defaultMode: "default",
+            ask: ["Bash", "WebFetch", "WebSearch", ...localFiles],
+          }),
       ...(trackerDeny.length === 0 ? {} : { deny: [...trackerDeny] }),
     },
   });
@@ -618,14 +620,23 @@ class ClaudeWorkerSeatControl implements SeatControl {
     };
   }
 
-  public pendingQuestion(requestId: string | number) {
+  public async pendingQuestion(requestId: string | number) {
     return this.deps.hookQuestions?.pending(this.ref, requestId);
   }
 
-  public async answerQuestion(answer: import("@clankie/agent-hosts").SeatQuestionAnswer, beforeDispatch?: () => Promise<void>): Promise<import("@clankie/agent-hosts").SeatQuestionResult> {
+  public async answerQuestion(
+    answer: import("@clankie/agent-hosts").SeatQuestionAnswer,
+    beforeDispatch?: () => Promise<void>,
+  ): Promise<import("@clankie/agent-hosts").SeatQuestionResult> {
     const agent = await this.deps.agent(this.ref.paneId).catch(() => undefined);
-    if (!agent || !this.matches(agent)) return { outcome: "offline", detail: "Native question occupant changed" };
-    return this.deps.hookQuestions?.answer(this.ref, answer, beforeDispatch) ?? { outcome: "refused", detail: "No pending Claude hook question" };
+    if (!agent || !this.matches(agent))
+      return { outcome: "offline", detail: "Native question occupant changed" };
+    return (
+      this.deps.hookQuestions?.answer(this.ref, answer, beforeDispatch) ?? {
+        outcome: "refused",
+        detail: "No pending Claude hook question",
+      }
+    );
   }
 
   public async status(): Promise<SeatStatus> {

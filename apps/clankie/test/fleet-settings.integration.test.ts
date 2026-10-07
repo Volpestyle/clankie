@@ -700,14 +700,23 @@ it("round-trips fleet gates across owner API, disk, project inheritance and the 
   });
   const context = await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" });
   expect(context.fleetGates).toBe(true);
-  expect(context.effective).toMatchObject({ everydayWork: "lead", leavesMac: "lead", moneyAndAccounts: "owner" });
+  expect(context.effective).toMatchObject({
+    everydayWork: "lead",
+    leavesMac: "lead",
+    moneyAndAccounts: "owner",
+  });
   await f.client.updateProjectSettings({
-    projectId: "garden", expectedRevision: overridden.revision,
+    projectId: "garden",
+    expectedRevision: overridden.revision,
     changes: { autonomy: { fleet: { leavesMac: null } } },
   });
-  expect((await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" })).effective.leavesMac).toBe("owner");
+  expect(
+    (await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" })).effective.leavesMac,
+  ).toBe("owner");
   const refused = await f.request("/v1/operator/fleet-settings", {
-    schemaVersion: 1, expectedRevision: updated.revision, changes: { moneyAndAccounts: "allow" },
+    schemaVersion: 1,
+    expectedRevision: updated.revision,
+    changes: { moneyAndAccounts: "allow" },
   });
   expect(refused.status).toBe(400);
   expect((await f.settings.load()).autonomy.fleet.moneyAndAccounts).toBe("owner");
