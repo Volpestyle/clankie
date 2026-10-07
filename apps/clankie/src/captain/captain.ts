@@ -176,6 +176,11 @@ import { LaneLog } from "./lane-log.ts";
 import { buildLaneToolBank, laneAuthoredTools, laneAuthoredToolsNamed } from "./lane-tools.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
 import {
+  ModelCredentialHealthLog,
+  modelCredentialHealthPath,
+  readModelCredentialHealth,
+} from "./model-credential-health.ts";
+import {
   nativeSessionId,
   savedSessionFleet,
   savedCodexAccount,
@@ -1403,10 +1408,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return true;
   }
 
+  const credentialHealthPath = modelCredentialHealthPath(options.stateDir);
+  const credentialHealth = new ModelCredentialHealthLog(credentialHealthPath);
+  const rejectedProviders = new Set(
+    Object.keys(readModelCredentialHealth(credentialHealthPath)?.providers ?? {}),
+  );
+  async function credentialRejected(providerId: string, detail: string) {
+    const refreshed = await (await runtime()).refreshRejectedCredential?.(providerId);
+    if (refreshed === undefined) return undefined;
+    const outcome = refreshed === "refreshed" ? ("refreshed" as const) : ("reconnect_required" as const);
+    credentialHealth.rejected(providerId, outcome, detail);
+    rejectedProviders.add(providerId);
+    return outcome;
+  }
+  function credentialAccepted(providerId: string): void {
+    if (rejectedProviders.delete(providerId)) credentialHealth.succeeded(providerId);
+  }
+
   const conversations: ConversationStore = new ConversationStore(
     join(options.stateDir, "conversations"),
     trackConversationRunner(
       createConversationRunner({
+        credentialRejected,
+        credentialAccepted,
         get shutdown() {
           return shutdown;
         },

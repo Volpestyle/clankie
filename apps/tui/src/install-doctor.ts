@@ -31,6 +31,11 @@ import {
   type ClankieSettings,
 } from "@clankie/settings";
 import { inspectHarnessBridges } from "./harness-doctor.ts";
+import {
+  modelCredentialHealthPath,
+  readModelCredentialHealth,
+  type ModelCredentialRejection,
+} from "../../clankie/src/captain/model-credential-health.ts";
 import { commandHost } from "./command/io.ts";
 import { probeHealth, type GatewayDoorwayReport } from "./command/gateway.ts";
 import { nextStepLine } from "./next-step.ts";
@@ -133,6 +138,11 @@ export interface InstallDoctorReport {
     | { readonly usable: false; readonly detail: string };
   readonly mcpServers: readonly string[];
   readonly credentials: readonly InstallDoctorCredential[];
+  /**
+   * Model credentials a provider rejected in Clankie's last real turn on it,
+   * and what the service did; cleared by the next successful turn. No probe.
+   */
+  readonly credentialRejections?: Readonly<Record<string, ModelCredentialRejection>>;
   readonly commands: { readonly [name: string]: CommandPresence };
   readonly ownerHerdrSessions?: readonly string[];
   readonly herdrPlugin: HerdrPluginReport;
@@ -331,9 +341,15 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     options.fetchImpl ?? fetch,
   );
   const captain = captainReadiness({ config: config.config, credentialIds, env });
+  const credentialRejections = readModelCredentialHealth(
+    modelCredentialHealthPath(
+      join(env.CLANKIE_STATE?.trim() || join(env.HOME?.trim() || homedir(), ".clankie"), "captain"),
+    ),
+  )?.providers;
   const remediations = collectRemediations({
     model,
     captain,
+    credentialRejections,
     discord: settings.discord,
     credentialIds,
     commands,
@@ -380,6 +396,9 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     linearGraphql,
     mcpServers: settings.mcp.servers.filter((server) => server.enabled).map((server) => server.id),
     credentials,
+    ...(credentialRejections === undefined || Object.keys(credentialRejections).length === 0
+      ? {}
+      : { credentialRejections }),
     commands,
     ownerHerdrSessions: (
       await listHerdrSessions({ env, runCommand: (command, args) => execute(command, args) })
@@ -570,6 +589,7 @@ interface HerdrPluginListEntry {
 function collectRemediations(input: {
   readonly model: string | null;
   readonly captain: CaptainReadiness;
+  readonly credentialRejections: Readonly<Record<string, ModelCredentialRejection>> | undefined;
   readonly discord: ClankieSettings["discord"];
   readonly credentialIds: ReadonlySet<string>;
   readonly commands: { readonly [name: string]: CommandPresence };
@@ -587,6 +607,12 @@ function collectRemediations(input: {
   }
   if (input.model === null) {
     remediations.push("Pick a captain model with `clankie model set provider/model` or `/setup`.");
+  }
+  for (const [providerId, rejection] of Object.entries(input.credentialRejections ?? {})) {
+    if (rejection.state === "reconnect_required")
+      remediations.push(
+        `${providerId} rejected Clankie's saved sign-in at ${rejection.at} and it could not be refreshed; reconnect it with \`/auth ${providerId}\` in the console.`,
+      );
   }
   if (!input.captain.ready && input.captain.reason === "no_credential") {
     remediations.push(

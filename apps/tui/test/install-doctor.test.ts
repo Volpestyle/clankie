@@ -10,6 +10,10 @@ import {
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createFleetSettingsRoutes } from "../../clankie/src/fleet-settings-routes.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
+import {
+  ModelCredentialHealthLog,
+  modelCredentialHealthPath,
+} from "../../clankie/src/captain/model-credential-health.ts";
 import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
@@ -357,6 +361,42 @@ describe("install doctor", () => {
       "Store a Discord bot token with /discord.",
     ]);
     expect(JSON.stringify(report)).not.toContain(secret);
+  });
+
+  // 2026-10-07: openai-codex rejected the stored token for hours while doctor
+  // still listed the credential as present.
+  it("reports a model credential the provider rejected in a real turn, until a later turn succeeds", async () => {
+    const root = await installRoot();
+    const state = join(root, "state");
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    await store.set("openai-codex", { type: "oauth", access: "a", refresh: "r", expires: Date.now() + 1e9 });
+    // What the service records after its forced refresh failed.
+    const health = new ModelCredentialHealthLog(modelCredentialHealthPath(join(state, "captain")));
+    health.rejected("openai-codex", "reconnect_required", "Your authentication token has expired.");
+    const inspect = () =>
+      inspectInstall({
+        repoRoot: root,
+        env: { HOME: join(root, "home"), CLANKIE_STATE: state },
+        settings,
+        credentialStore: store,
+        execFileImpl: missing,
+        fetchImpl: offline,
+      });
+
+    const report = await inspect();
+    expect(report.credentialRejections).toMatchObject({
+      "openai-codex": { state: "reconnect_required", detail: "Your authentication token has expired." },
+    });
+    expect(report.remediations).toContainEqual(
+      expect.stringContaining("openai-codex rejected Clankie's saved sign-in"),
+    );
+    expect(formatDoctorReport(report)).toContain("✗ openai-codex sign-in · rejected by the provider");
+
+    health.succeeded("openai-codex");
+    const after = await inspect();
+    expect(after.credentialRejections).toBeUndefined();
+    expect(after.remediations.join("\n")).not.toContain("rejected Clankie's saved sign-in");
   });
 
   describe("the selected model", () => {

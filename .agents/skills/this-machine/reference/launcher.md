@@ -271,6 +271,12 @@ flag. Subscription start/status/cancel routes are documented in
 self-hosted Mac is refused when readiness passes; the terminal keeps owner key
 management. Claude subscription sign-in remains unsupported.
 
+A provider that rejects a stored OAuth token early (openai-codex did, with
+"Your authentication token has expired") gets one forced refresh from the
+service. If that fails, the turn and `clankie doctor` (`credentialRejections`)
+say to reconnect the provider with `/auth PROVIDER` in the console; that is the
+owner's action, so report it rather than retrying turns.
+
 `clankie pair` and `/pair` start or reuse the local relay before minting a code;
 run pairing on the host that owns the relay. Public pairing requires the secure
 QR or full link; its fragment is secret-bearing. Never paste it into logs or

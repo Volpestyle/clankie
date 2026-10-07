@@ -153,15 +153,68 @@ export interface CaptainModelRuntime {
   resolveSelection(): Promise<PiModelSelection>;
   /** Resolves the model a purpose runs on this turn (task-based routing). */
   resolveRoute(purpose: ModelPurpose): Promise<RoutedSelection>;
+  /**
+   * The provider just rejected its stored OAuth token: refresh it once now,
+   * whatever expiry the store records. Absent on runtimes without the broker.
+   */
+  refreshRejectedCredential?(providerId: string): Promise<CredentialRefreshOutcome>;
+}
+
+/**
+ * `refreshed`: a new token is stored. `not_oauth`: nothing to refresh (an API
+ * key or no credential). `failed`: refreshing failed, so the owner must
+ * reconnect the provider.
+ */
+export type CredentialRefreshOutcome = "refreshed" | "not_oauth" | "failed";
+
+/** A refresh this recent already answered a rejection; concurrent lanes share it. */
+const FORCED_REFRESH_REUSE_MS = 60_000;
+
+/**
+ * Pi refreshes an OAuth token only once its stored expiry passes. A provider
+ * can reject a token earlier (2026-10-07: openai-codex answered "Your
+ * authentication token has expired" ten days before the stored expiry), so
+ * Clankie marks the stored token expired and lets Pi's own refresh run.
+ */
+export function createRejectedCredentialRefresh(
+  credentials: Pick<BrokerCredentialStore, "read" | "modify">,
+  runtime: Pick<ModelRuntime, "getAuth">,
+  now: () => number = Date.now,
+): (providerId: string) => Promise<CredentialRefreshOutcome> {
+  const recent = new Map<string, { at: number; outcome: Promise<CredentialRefreshOutcome> }>();
+  return (providerId) => {
+    const previous = recent.get(providerId);
+    if (previous !== undefined && now() - previous.at < FORCED_REFRESH_REUSE_MS) return previous.outcome;
+    const outcome = (async (): Promise<CredentialRefreshOutcome> => {
+      const stored = await credentials.read(providerId).catch(() => undefined);
+      if (stored?.type !== "oauth") return "not_oauth";
+      try {
+        await credentials.modify(providerId, (current) =>
+          current?.type === "oauth" ? { ...current, expires: 0 } : undefined,
+        );
+        const auth = await runtime.getAuth(providerId);
+        const after = await credentials.read(providerId);
+        return auth !== undefined && after?.type === "oauth" && after.expires > now()
+          ? "refreshed"
+          : "failed";
+      } catch {
+        return "failed";
+      }
+    })();
+    recent.set(providerId, { at: now(), outcome });
+    return outcome;
+  };
 }
 
 export async function createCaptainModelRuntime(repoRoot: string): Promise<CaptainModelRuntime> {
   const broker = createDefaultCredentialStore();
+  const credentials = new BrokerCredentialStore(broker);
   const runtime = await ModelRuntime.create({
-    credentials: new BrokerCredentialStore(broker),
+    credentials,
     modelsPath: null,
     refreshOnCreate: false,
   });
+  const refreshRejectedCredential = createRejectedCredentialRefresh(credentials, runtime);
   const initialConfig = await loadConfig({ cwd: repoRoot });
   const catalog = await createModelRegistry().catalog();
   registerConfiguredPiProviders(runtime, initialConfig.config, catalog);
@@ -185,6 +238,7 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
   };
   return {
     runtime,
+    refreshRejectedCredential,
     resolveSelection: async () => await select((await loadConfig({ cwd: repoRoot })).config),
     resolveRoute: async (purpose) => {
       const { config } = await loadConfig({ cwd: repoRoot });

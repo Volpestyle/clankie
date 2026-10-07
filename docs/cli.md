@@ -320,7 +320,15 @@ turn at all ([ADR 0190](adr/0190-setup-asks-one-question-then-clankie-takes-over
 `credential`, `env`, `endpoint` or `subscription`, or `{ "ready": false,
 "reason": "no_model" | "no_credential" }`, naming the model and provider when
 one is chosen. A chosen model with nothing to sign it in earns a remediation.
-Credential entries are ids and types, never secrets. `commands` currently
+Credential entries are ids and types, never secrets. A provider can reject a
+stored credential before its recorded expiry: on such a rejection in a real
+turn the service forces one OAuth refresh (a self-wake then runs once more), and
+the failed turn says either that the sign-in was refreshed or to reconnect it
+with `/auth PROVIDER`. `credentialRejections` (present only when there is one)
+records that per provider as `{ "state": "refreshed" | "reconnect_required",
+"at", "detail" }`, read from the service's last real failure, never a new paid
+probe; `reconnect_required` earns a remediation, and the next successful turn on
+that provider clears it. `commands` currently
 probes `herdr`, `ffmpeg`, `yt-dlp` (version strings) and `herdr-lead`, `codex`,
 `claude` (PATH only — never execute `herdr-lead --version`).
 `laneTools` names the streamable-HTTP MCP route that serves a lane's tool bank

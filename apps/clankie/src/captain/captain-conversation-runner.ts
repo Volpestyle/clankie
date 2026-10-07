@@ -19,7 +19,7 @@ import {
   operatorSkillName,
   resolveOperatorPrompt,
 } from "./captain-operator-format.ts";
-import { assistantText, PiRunError, runDurableTurn } from "./captain-session.ts";
+import { assistantText, PiRunError, runDurableTurn, type CredentialRecovery } from "./captain-session.ts";
 import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
 import {
   authorizeQuestion,
@@ -89,13 +89,24 @@ export interface CreateConversationRunnerContext {
   readonly turnSettled: TurnSettledLog;
   readonly goalExecutionReason: (conversationId: string) => string | undefined;
   readonly refuseNativeGoal: (conversationId: string) => boolean;
+  /**
+   * A provider rejected its stored credential in a real turn: refresh it once
+   * and record the result for doctor. Undefined when nothing could be done.
+   */
+  readonly credentialRejected?: (
+    providerId: string,
+    detail: string,
+  ) => Promise<CredentialRecovery["outcome"] | undefined>;
+  /** A turn on this provider succeeded, so a recorded rejection is over. */
+  readonly credentialAccepted?: (providerId: string) => void;
 }
 
 /**
  * One goal continuation or self-wake as a host-authored conversation turn.
  * Throws when the turn fails; a provider refusing the credentials throws
  * {@link WakeHeldError}, since retrying it only spends another full turn on the
- * same refusal (2026-10-07: 15+ attempts on an expired token).
+ * same refusal (2026-10-07: 15+ attempts on an expired token). When Clankie
+ * refreshed the rejected token, the turn runs once more first.
  */
 export async function runAutonomyTurn(
   conversations: Pick<ConversationStore, "submitInternal" | "awaitRunOutcome">,
@@ -104,13 +115,17 @@ export async function runAutonomyTurn(
   origin: "goal" | "wake",
   expectedGoal?: OperatorGoal,
 ): Promise<void> {
-  const result = conversations.submitInternal(conversationId, prompt, origin, expectedGoal);
-  if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
-  const outcome = await conversations.awaitRunOutcome(result.runId);
-  if (outcome.ok) return;
-  if (outcome.error instanceof PiRunError && outcome.error.credentialRejected)
+  for (let attempt = 1; ; attempt += 1) {
+    const result = conversations.submitInternal(conversationId, prompt, origin, expectedGoal);
+    if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
+    const outcome = await conversations.awaitRunOutcome(result.runId);
+    if (outcome.ok) return;
+    if (!(outcome.error instanceof PiRunError && outcome.error.credentialRejected))
+      throw new Error("Internal autonomy turn failed");
+    // A rejected token Clankie just refreshed gets the turn once more.
+    if (outcome.error.credentialRecovery?.outcome === "refreshed" && attempt === 1) continue;
     throw new WakeHeldError("The model provider rejected Clankie's credentials", { cause: outcome.error });
-  throw new Error("Internal autonomy turn failed");
+  }
 }
 
 export function createConversationRunner(ctx: CreateConversationRunnerContext): ConversationRunner {
@@ -625,6 +640,8 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           }
           context.deliveryReceipt?.("responded");
           internalInputsShown.delete(conversationId);
+          const provider = lane.session.model?.provider;
+          if (provider !== undefined) ctx.credentialAccepted?.(provider);
           const text = lane.lastAssistantText.trim();
           await run.wait(
             "said log",
@@ -640,6 +657,17 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
           // Failure before Pi took the input is a definite non-dispatch.
           if (!admitted && !context.signal.aborted) context.deliveryReceipt?.("unavailable");
+          const providerId = lane.session.model?.provider;
+          if (
+            error instanceof PiRunError &&
+            error.credentialRejected &&
+            error.credentialRecovery === undefined &&
+            providerId !== undefined &&
+            ctx.credentialRejected !== undefined
+          ) {
+            const outcome = await ctx.credentialRejected(providerId, error.message).catch(() => undefined);
+            if (outcome !== undefined) throw new PiRunError(error.message, { providerId, outcome });
+          }
           throw error;
         } finally {
           releaseGoalBudget();

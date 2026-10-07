@@ -39,6 +39,7 @@ type PiEvent = { type: string; [key: string]: unknown };
 
 class ScriptedPiSession {
   public isStreaming = false;
+  public readonly model = { provider: "scripted", id: "scripted-model" };
   public readonly state: { messages: { role: string; stopReason?: string; content?: unknown }[] } = {
     messages: [],
   };
@@ -100,6 +101,8 @@ interface Script {
   fail: boolean;
   /** Pi's recorded error when the provider refuses the turn. */
   providerError?: string;
+  /** What the captain's credential recovery reports for a rejected credential. */
+  credentialRecovery?: "refreshed" | "reconnect_required";
   gate: () => Promise<void>;
 }
 
@@ -120,6 +123,7 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
     return box;
   };
   const script: Script = { fail: false, gate: async () => {} };
+  const credentialRejections: string[] = [];
   const sessions: ScriptedPiSession[] = [];
   const lanes = new Map<string, LaneSession>();
   let freshSessions = 0;
@@ -177,6 +181,12 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
     turnSettled: new TurnSettledLog(join(root, "turn-settled.jsonl")),
     goalExecutionReason: () => undefined,
     refuseNativeGoal: () => false,
+    credentialRejected: async (providerId) => {
+      credentialRejections.push(providerId);
+      // A refreshed credential is accepted by the provider again.
+      if (script.credentialRecovery === "refreshed") delete script.providerError;
+      return script.credentialRecovery;
+    },
   });
   const conversations = new ConversationStore(join(root, "conversations"), runner);
   const unusedNativeProbe = async (): Promise<never> => {
@@ -261,6 +271,7 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
     pollSeat,
     report,
     freshSessions: () => freshSessions,
+    credentialRejections,
     events: (id: string) => new ConversationJournal(join(root, "conversations")).read(id),
   };
 }
@@ -718,4 +729,39 @@ it("VUH-1779: an unresolved head delivery refuses only its own resend; later wak
       original: { messageId: lost!.id, prepare: () => {} },
     }),
   ).toMatchObject({ outcome: "unconfirmed", messageId: lost!.id });
+});
+
+it("runs a wake once more after Clankie refreshes the credential the provider rejected", async () => {
+  const f = fixture();
+  f.conversations.rememberNativeHead(ID, "claude-lead");
+  f.script.providerError = "Your authentication token has expired. Please try refreshing it.";
+  f.script.credentialRecovery = "refreshed";
+  f.autonomy.scheduleWake(ID, new Date(Date.now() + 50).toISOString(), "Refresh then answer");
+  await vi.waitFor(() => expect(f.autonomy.status(ID).wake).toBeUndefined());
+  expect(f.credentialRejections).toEqual(["scripted"]);
+  expect(f.wakeRuns).toHaveLength(1);
+  const events = f.events(ID);
+  const failed = events.filter((event) => event.type === "turn" && event.phase === "failed");
+  expect(failed).toHaveLength(1);
+  expect(failed[0]).toMatchObject({ summary: expect.stringContaining("Clankie refreshed it") });
+  expect(events.filter((event) => event.type === "turn" && event.phase === "completed")).toHaveLength(1);
+  expect(
+    events.filter(
+      (event) =>
+        event.type === "message" && event.role === "external" && event.text.includes("Refresh then answer"),
+    ),
+  ).toHaveLength(1);
+});
+
+it("tells the owner to reconnect when the rejected credential cannot be refreshed", async () => {
+  const f = fixture();
+  f.script.providerError = "Your authentication token has expired. Please try refreshing it.";
+  f.script.credentialRecovery = "reconnect_required";
+  const turn = f.conversations.submitInternal(ID, "Wake R check in", "wake");
+  if (turn.status !== "accepted") throw new Error("Expected wake");
+  expect(await f.conversations.awaitRunResult(turn.runId)).toBe(false);
+  const failed = f.events(ID).filter((event) => event.type === "turn" && event.phase === "failed");
+  expect(failed).toMatchObject([
+    { summary: expect.stringContaining("Reconnect scripted with `/auth scripted` in the console") },
+  ]);
 });

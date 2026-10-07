@@ -62,30 +62,46 @@ export const DISCORD_TURN_STALL_MS = 5 * 60_000;
 const STALL_TICK_MS = 5_000;
 
 /**
- * pi can resolve a failed prompt with a terminal assistant `stopReason: "error"`.
- * Preserve its reason for the existing failure path. Aborts remain the caller's
- * interrupt path.
- */
-/**
  * Whether a provider error says it refused the credentials themselves (an
  * expired or revoked token, a bad key). Another attempt with the same
  * credentials cannot succeed.
  */
-export function providerRejectedCredentials(message: string): boolean {
+function providerRejectedCredentials(message: string): boolean {
   return /\b401\b|authentication token has expired|\btoken[_ ]expired\b|\bunauthori[sz]ed\b|invalid[_ ]api[_ ]key|incorrect api key|authentication[_ ]error|invalid[_ ]grant|refresh token (?:has )?(?:expired|been revoked|is invalid)/iu.test(
     message,
   );
 }
 
+/** What Clankie did after a provider rejected its stored credential. */
+export interface CredentialRecovery {
+  readonly providerId: string;
+  /** `refreshed`: a new token is stored, so the turn may run again. */
+  readonly outcome: "refreshed" | "reconnect_required";
+}
+
+/**
+ * pi can resolve a failed prompt with a terminal assistant `stopReason: "error"`.
+ * Preserve its reason for the existing failure path. Aborts remain the caller's
+ * interrupt path.
+ */
 export class PiRunError extends Error {
   readonly code: string;
   /** The provider refused the credentials; retrying the same turn cannot help. */
   readonly credentialRejected: boolean;
+  readonly credentialRecovery: CredentialRecovery | undefined;
 
-  constructor(message: string) {
+  constructor(message: string, credentialRecovery?: CredentialRecovery) {
     const included = includedModelRefusal(message);
-    super(included?.message ?? message);
-    this.credentialRejected = included === undefined && providerRejectedCredentials(message);
+    super(
+      credentialRecovery === undefined
+        ? (included?.message ?? message)
+        : credentialRecovery.outcome === "refreshed"
+          ? `${credentialRecovery.providerId} rejected Clankie's saved sign-in (${message}). Clankie refreshed it; send the message again.`
+          : `${credentialRecovery.providerId} rejected Clankie's saved sign-in (${message}) and Clankie could not refresh it. Reconnect ${credentialRecovery.providerId} with \`/auth ${credentialRecovery.providerId}\` in the console.`,
+    );
+    this.credentialRecovery = credentialRecovery;
+    this.credentialRejected =
+      credentialRecovery !== undefined || (included === undefined && providerRejectedCredentials(message));
     // Receipts stay content-free; the provider's full reason remains in Pi's tree.
     this.code =
       included?.capped === true ||
