@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
 
 // Installing the plugin never claims an operator conversation. Only the
 // launcher grants this invocation a private binding file.
@@ -17,20 +16,9 @@ for await (const chunk of process.stdin) {
 const hook = JSON.parse(input);
 if (hook.agent_id || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(hook.session_id ?? ""))
   process.exit(0);
-if (!bindingPath) {
-  // This plugin is installed independently of the worker plugin. Read only
-  // the local pane's fleet discovery record; never borrow another plugin's
-  // credential, create an operator binding, or open a substitute runtime.
-  if (hook.hook_event_name === "SessionStart" && linkedHerdrPane()) {
-    process.stdout.write(
-      JSON.stringify({
-        systemMessage:
-          "Clankie tools are unverified: this hand-started Codex session exposes no native catalog endpoint. Start the operator session with clankie codex to verify its tools.",
-      }) + "\n",
-    );
-  }
-  process.exit(0);
-}
+// An unbound interactive pane has no operator catalog to verify. The worker
+// plugin reports its own diagnostics without steering this session.
+if (!bindingPath) process.exit(0);
 const binding = JSON.parse(readFileSync(bindingPath, "utf8"));
 const writeBinding = () => {
   const temporary = `${bindingPath}.${process.pid}.tmp`;
@@ -42,40 +30,6 @@ if (!binding.sessionId && hook.hook_event_name === "SessionStart") {
   writeBinding();
 }
 
-function linkedHerdrPane() {
-  const socket = process.env.HERDR_SOCKET_PATH?.trim();
-  if (!socket) return false;
-  const normalize = (value) =>
-    process.platform === "win32"
-      ? String(value ?? "")
-          .replaceAll("/", "\\")
-          .toLowerCase()
-      : String(value ?? "");
-  const directory = join(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"), "links");
-  try {
-    const matches = readdirSync(directory)
-      .filter((name) => name.endsWith(".json"))
-      .flatMap((name) => {
-        try {
-          const link = JSON.parse(readFileSync(join(directory, name), "utf8"));
-          return (link.schemaVersion === 1 ||
-            (link.schemaVersion === 2 && link.authentication === "local-process")) &&
-            typeof link.fleet === "string" &&
-            typeof link.socket === "string" &&
-            /^http:\/\/127\.0\.0\.1:\d{1,5}$/u.test(String(link.url)) &&
-            (link.schemaVersion === 2 || (typeof link.token === "string" && link.token.length >= 32)) &&
-            normalize(link.socket) === normalize(socket)
-            ? [link]
-            : [];
-        } catch {
-          return [];
-        }
-      });
-    return matches.length === 1;
-  } catch {
-    return false;
-  }
-}
 if (binding.sessionId !== hook.session_id) process.exit(0);
 const env = { ...process.env, CLANKIE_SEAT_SESSION_ID: binding.sessionId, CLANKIE_SEAT_HARNESS: "codex" };
 // Each clankie command is a cold start, so independent ones run side by side

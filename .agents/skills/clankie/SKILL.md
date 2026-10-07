@@ -32,10 +32,11 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
 - `clankie doctor` also exposes session-bound `toolCatalogHealth`: `matched`
   proves the native harness listed its bridge's expected tools, `mismatch` names
   missing tools, and `unverified` keeps absent native evidence explicit. Follow
-  that row's one fixing action. Embedded hand-started Codex cannot expose its
-  native catalog; ask Clankie for a managed `hire_agent` seat when verification
-  is needed. Do not switch to the shared daemon to fix this: inherited pane
-  identity can break worker bridges. Roster `toolCatalog` carries the same verdict.
+  that row's fixing action when actionable. Embedded hand-started Codex cannot
+  expose its native catalog; this is advisory. Continue with your current lead
+  and the tools the pane exposes. Report a specific missing-tool blocker to
+  that lead; catalog verification does not require a new hire. Do not switch to
+  the shared daemon to fix this: inherited pane identity can break worker bridges. Roster `toolCatalog` carries the same verdict.
 - `clankie connections`: identify the intended machine/session and connected
   account. A healthy SSH link is transport health, not a native tool-call result.
 - `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`) and

@@ -32,7 +32,7 @@ function runHook(path: string, env: NodeJS.ProcessEnv, hook: Record<string, unkn
 }
 
 describe("Codex original native startup catalog", () => {
-  it("shows an unbound operator diagnostic only in its own linked native pane", async () => {
+  it("keeps unbound owner interactive panes silent, including linked panes", async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-unbound-operator-"));
     const path = join(import.meta.dirname, "../../../integrations/codex-plugin/hooks/run.mjs");
     const env = {
@@ -57,10 +57,7 @@ describe("Codex original native startup catalog", () => {
       );
       const linked = await runHook(path, env, hook);
       expect(linked.code, linked.stderr).toBe(0);
-      expect(JSON.parse(linked.stdout).systemMessage).toContain(
-        "Start the operator session with clankie codex",
-      );
-      expect(JSON.parse(linked.stdout).systemMessage).toContain("unverified");
+      expect(linked).toEqual({ code: 0, stdout: "", stderr: "" });
       for (const [targetEnv, event] of [
         [{ ...env, HERDR_SOCKET_PATH: "/tmp/unlinked.sock" }, hook],
         [env, { ...hook, hook_event_name: "UserPromptSubmit" }],
@@ -73,94 +70,95 @@ describe("Codex original native startup catalog", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
-  it("runs the installed Codex SessionStart hook and emits a native visible systemMessage", async () => {
-    const root = await mkdtemp(join(tmpdir(), "codex-startup-catalog-"));
-    const pluginRoot = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
-    const manifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
-    const hooks = JSON.parse(await readFile(join(pluginRoot, manifest.hooks), "utf8"));
-    expect(hooks.hooks.SessionStart[0].hooks[0].command).toContain("process.env.PLUGIN_ROOT");
-    expect(hooks.hooks.SessionStart[0].hooks[0].command).toContain("--codex");
-    const received: unknown[] = [];
-    const verdict = {
-      status: "unverified",
-      detail: "No original native endpoint.",
-      remediation: "Ask Clankie to launch this work with hire_agent.",
-    };
-    const listener = createServer(async (request, response) => {
-      let input = "";
-      for await (const chunk of request) input += chunk;
-      if (request.url?.endsWith("/tool-catalog")) received.push(JSON.parse(input));
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify(request.url?.endsWith("/tool-catalog") ? verdict : {}));
-    });
-    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
-    const address = listener.address();
-    if (!address || typeof address === "string") throw new Error("No catalog listener");
-    try {
-      await mkdir(join(root, "links"));
-      await writeFile(
-        join(root, "links/test.json"),
-        JSON.stringify({
-          schemaVersion: 2,
-          authentication: "local-process",
-          fleet: "test",
-          socket: "/tmp/catalog-test.sock",
-          url: `http://127.0.0.1:${address.port}`,
-        }),
-      );
-      const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
-        (resolve, reject) => {
-          const child = spawn(hooks.hooks.SessionStart[0].hooks[0].command, {
-            shell: true,
-            env: {
-              ...process.env,
-              PLUGIN_ROOT: pluginRoot,
-              CLANKIE_STATE: root,
-              HERDR_PANE_ID: "w1:p2",
-              HERDR_SOCKET_PATH: "/tmp/catalog-test.sock",
-              CLANKIE_CODEX_CATALOG_OBSERVED: "",
-            },
-            stdio: ["pipe", "pipe", "pipe"],
-          });
-          let stdout = "",
-            stderr = "";
-          child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-          child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-          child.on("error", reject);
-          child.on("close", (code) => resolve({ code, stdout, stderr }));
-          child.stdin.end(JSON.stringify({ hook_event_name: "SessionStart", session_id: "original" }));
-        },
-      );
-      expect(result.code, result.stderr).toBe(0);
-      expect(received).toHaveLength(1);
-      expect(FleetSeatToolCatalogSchema.parse(received[0])).toMatchObject({
-        harness: "codex",
-        sessionId: "original",
-        bridge: "worker",
-        tools: [],
-        error: expect.stringContaining("no native catalog endpoint"),
+  it.each([200, 503])(
+    "keeps installed Codex startup diagnostics out of the pane (catalog HTTP %s)",
+    async (status) => {
+      const root = await mkdtemp(join(tmpdir(), "codex-startup-catalog-"));
+      const pluginRoot = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
+      const manifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
+      const hooks = JSON.parse(await readFile(join(pluginRoot, manifest.hooks), "utf8"));
+      expect(hooks.hooks.SessionStart[0].hooks[0].command).toContain("process.env.PLUGIN_ROOT");
+      expect(hooks.hooks.SessionStart[0].hooks[0].command).toContain("--codex");
+      const received: unknown[] = [];
+      const verdict = {
+        status: "unverified",
+        detail: "No original native endpoint.",
+        remediation: "Ask Clankie to launch this work with hire_agent.",
+      };
+      const listener = createServer(async (request, response) => {
+        let input = "";
+        for await (const chunk of request) input += chunk;
+        if (request.url?.endsWith("/tool-catalog")) received.push(JSON.parse(input));
+        if (request.url?.endsWith("/tool-catalog")) response.statusCode = status;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify(request.url?.endsWith("/tool-catalog") ? verdict : {}));
       });
-      // Native Codex parses this top-level field as a Warning and renders it
-      // as a durable Hook history row; additionalContext alone is hidden.
-      // hooks/src/events/session_start.rs + tui/src/history_cell/hook_cell.rs.
-      expect(JSON.parse(result.stdout)).toEqual({
-        systemMessage: `Clankie tools: ${verdict.detail} ${verdict.remediation}`,
-        hookSpecificOutput: {
-          hookEventName: "SessionStart",
-          additionalContext: `Clankie tools: ${verdict.detail} ${verdict.remediation}`,
-        },
-      });
-    } finally {
-      await new Promise<void>((resolve) => listener.close(() => resolve()));
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+      await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+      const address = listener.address();
+      if (!address || typeof address === "string") throw new Error("No catalog listener");
+      try {
+        await mkdir(join(root, "links"));
+        await writeFile(
+          join(root, "links/test.json"),
+          JSON.stringify({
+            schemaVersion: 2,
+            authentication: "local-process",
+            fleet: "test",
+            socket: "/tmp/catalog-test.sock",
+            url: `http://127.0.0.1:${address.port}`,
+          }),
+        );
+        const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+          (resolve, reject) => {
+            const child = spawn(hooks.hooks.SessionStart[0].hooks[0].command, {
+              shell: true,
+              env: {
+                ...process.env,
+                PLUGIN_ROOT: pluginRoot,
+                CLANKIE_STATE: root,
+                HERDR_PANE_ID: "w1:p2",
+                HERDR_SOCKET_PATH: "/tmp/catalog-test.sock",
+                CLANKIE_CODEX_CATALOG_OBSERVED: "",
+              },
+              stdio: ["pipe", "pipe", "pipe"],
+            });
+            let stdout = "",
+              stderr = "";
+            child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+            child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+            child.on("error", reject);
+            child.on("close", (code) => resolve({ code, stdout, stderr }));
+            child.stdin.end(JSON.stringify({ hook_event_name: "SessionStart", session_id: "original" }));
+          },
+        );
+        expect(result.code, result.stderr).toBe(0);
+        expect(received).toHaveLength(1);
+        expect(FleetSeatToolCatalogSchema.parse(received[0])).toMatchObject({
+          harness: "codex",
+          sessionId: "original",
+          bridge: "worker",
+          tools: [],
+          error: expect.stringContaining("no native catalog endpoint"),
+        });
+        // Even an older service's re-hire remediation must not steer the pane.
+        expect(result.stdout).toBe("");
+        if (status === 200) expect(result.stderr).toBe("");
+        else expect(result.stderr).toContain("Codex catalog report answered 503");
+        expect(result.stderr).not.toMatch(/rehire|hire_agent/);
+      } finally {
+        await new Promise<void>((resolve) => listener.close(() => resolve()));
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
   it("reports embedded sessions as unverified without opening another runtime", async () => {
     const report = await codexToolCatalogReport({ sessionId: "original", bridge: "worker" });
     expect(FleetSeatToolCatalogSchema.safeParse(report).success).toBe(true);
     expect(report).toMatchObject({ harness: "codex", sessionId: "original", tools: [] });
     expect(report.error).toContain("no native catalog endpoint");
-    expect(report.error).toContain("Clankie-managed hire");
+    expect(report.error).toContain("Advisory:");
+    expect(report.error).toContain("Continue the assignment with your current lead");
+    expect(report.error).not.toContain("hire_agent");
   });
 
   it("reads the original loaded thread, exact Clankie server, and all native pages", async () => {

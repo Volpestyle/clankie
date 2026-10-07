@@ -13,7 +13,7 @@ function remediation(identity: ToolCatalogIdentity, observed: boolean): string {
     ? observed
       ? "Run /reload-plugins in this Claude Code pane to reload Clankie's bridge and recheck its tools."
       : "Restart this Claude Code pane with its current Clankie plugin and resume the same session to recheck its tools."
-    : "Ask Clankie to launch this work with hire_agent so the managed Codex controller can verify its native tools.";
+    : "Advisory only: continue with your current lead and use the tools this pane exposes. If a required tool is unavailable, report that specific blocker to your lead; catalog verification does not require a new hire.";
 }
 
 /** Reports belong to native occupants, never the reusable pane address. */

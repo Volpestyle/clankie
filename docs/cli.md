@@ -221,10 +221,11 @@ Current Claude Code's trusted plugin mod reads its actual tool list after
 session start (and after clear/resume/compact); MCP discovery can settle for
 up to 20 seconds. Clankie-managed Codex launches read `mcpServerStatus/list`
 for their original loaded thread. Embedded hand-started Codex has no native
-introspection endpoint and explicitly reports `unverified`; ask Clankie to hire
-a managed Codex seat with `hire_agent` to get a verified catalog. This action
-never recommends the shared daemon, whose pane identity inheritance can break
-worker bridges. Native introspection for embedded Codex remains a follow-up.
+introspection endpoint and explicitly reports `unverified` in doctor/roster.
+This is advisory: continue with the current lead and tools the pane exposes;
+report a specific missing-tool blocker to that lead. It does not require a new
+hire, and routine startup hooks stay silent, including owner interactive panes.
+Switching to the shared daemon can break worker bridge pane identity. Native introspection for embedded Codex remains a follow-up.
 Plugin hook/mod trust is required; an absent probe remains unverified.
 
 Claude's pane check reports HTTP refusal codes separately from a link connection

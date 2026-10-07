@@ -22,7 +22,7 @@ export async function codexToolCatalogReport({
   };
   if (!request) {
     report.error =
-      "This embedded Codex session exposes no native catalog endpoint. Start a Clankie-managed hire to verify its tools.";
+      "Advisory: this embedded Codex session exposes no native catalog endpoint, so its Clankie tool catalog is unverified. Continue the assignment with your current lead; this does not require a new hire.";
     return report;
   }
   try {

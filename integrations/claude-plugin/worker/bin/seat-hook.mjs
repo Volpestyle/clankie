@@ -95,36 +95,12 @@ async function reportOverLink(link, pane) {
         signal: AbortSignal.timeout(5_000),
       });
       if (!catalog.ok) throw new Error(`Codex catalog report answered ${catalog.status}`);
-      const verdict = await catalog.json();
-      const message = [verdict.detail, verdict.remediation]
-        .filter((part) => typeof part === "string" && part)
-        .join(" ");
-      if (message && verdict.status !== "matched") {
-        process.stderr.write(`Clankie tools: ${message}\n`);
-        process.stdout.write(
-          JSON.stringify({
-            systemMessage: `Clankie tools: ${message}`,
-            hookSpecificOutput: {
-              hookEventName: "SessionStart",
-              additionalContext: `Clankie tools: ${message}`,
-            },
-          }) + "\n",
-        );
-      }
+      // Embedded Codex cannot inspect its original native catalog. Retain that
+      // observation for doctor/roster, but it is not an actionable startup
+      // warning, especially in an owner's hand-started interactive pane.
     }
   } catch (error) {
     process.stderr.write(`clankie-worker: ${error instanceof Error ? error.message : String(error)}\n`);
-    if (
-      event === "SessionStart" &&
-      process.argv.includes("--codex") &&
-      !process.env.CLANKIE_CODEX_CATALOG_OBSERVED
-    )
-      process.stdout.write(
-        JSON.stringify({
-          systemMessage:
-            "Clankie tools are unverified: the startup catalog check failed. Ask Clankie to rehire this worker to verify its tools.",
-        }) + "\n",
-      );
   }
   process.exit(0);
 }

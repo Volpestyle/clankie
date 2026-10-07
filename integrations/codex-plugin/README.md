@@ -123,6 +123,8 @@ At startup, a Clankie-managed Codex seat reads the MCP status of its original
 loaded native thread and reports the accepted bridge tools. `clankie doctor`
 and the roster show missing tools with one fixing action. The worker plugin's
 native SessionStart hook explicitly marks embedded hand-started Codex as
-unverified and displays that fact in the pane. For a verified catalog, ask
-Clankie to launch the work with `hire_agent`; switching to the shared daemon is
-not a fix. Embedded native catalog introspection remains a follow-up.
+unverified in doctor/roster without printing a routine startup warning. This
+is advisory: workers continue with their current lead and report specific
+missing-tool blockers there. Owner interactive panes stay silent. Catalog
+verification does not require a new hire; switching to the shared daemon can
+break pane identity. Embedded native catalog introspection remains a follow-up.
