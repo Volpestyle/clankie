@@ -57,7 +57,7 @@ it.skipIf(!manual)(
     if (!address || typeof address === "string") throw new Error("Missing owned listener");
     const connecting = once(server, "connection");
     const client = createConnection(address.port, "127.0.0.1");
-    const churn = spawn(processes, ["churn"], { stdio: ["pipe", "pipe", "pipe"] });
+    const churn = spawn(processes, ["churn", "30"], { stdio: ["pipe", "pipe", "pipe"] });
     const exited = once(churn, "exit");
     const metrics = new FleetHealthMetrics();
     const evidence = [];
@@ -70,7 +70,9 @@ it.skipIf(!manual)(
           throw new Error("Owned churn exited before readiness");
         }),
       ]);
-      for (let attempt = 0; attempt < 64; attempt++) {
+      // Main's helper retries (and waits) only when one scanned PID changes
+      // mid-observation, ~1 in 30 runs under this churn; bound at 512 runs.
+      for (let attempt = 0; attempt < 512; attempt++) {
         const reply = await run(
           "/usr/bin/sandbox-exec",
           ["-f", profile, helper, String(client.localPort), String(address.port), "--diagnostics"],

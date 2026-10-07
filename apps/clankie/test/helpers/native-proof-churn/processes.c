@@ -11,7 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static int churn(void) {
+static int churn(long seconds) {
   struct timespec began, now;
   if (clock_gettime(CLOCK_MONOTONIC, &began)) return 1;
   unsigned count = 0;
@@ -25,7 +25,7 @@ static int churn(void) {
     if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status)) return 3;
     ++count;
     if (clock_gettime(CLOCK_MONOTONIC, &now)) return 4;
-  } while (now.tv_sec - began.tv_sec < 5 && poll(&input, 1, 0) == 0);
+  } while (now.tv_sec - began.tv_sec < seconds && poll(&input, 1, 0) == 0);
   printf("completed %u owned births\n", count);
   return 0;
 }
@@ -89,7 +89,9 @@ static int deep_ancestry(unsigned depth, unsigned port) {
 }
 
 int main(int argc, char **argv) {
-  if (argc == 2 && strcmp(argv[1], "churn") == 0) return churn();
+  if (argc == 2 && strcmp(argv[1], "churn") == 0) return churn(5);
+  /* A longer owned window for a rare per-PID retry; stdin closure still ends it. */
+  if (argc == 3 && strcmp(argv[1], "churn") == 0 && strcmp(argv[2], "30") == 0) return churn(30);
   if (argc == 2 && strcmp(argv[1], "share") == 0) return share();
   if (argc == 3 && (strcmp(argv[1], "descendant") == 0 || strcmp(argv[1], "ancestry") == 0)) {
     char *end = NULL;
