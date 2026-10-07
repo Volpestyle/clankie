@@ -86,6 +86,7 @@ async function fixture(boundGraceMs = 20) {
   store.rememberNativeHead("global-default", "original-claude-session");
   const app = new Hono();
   const issueLookups: string[] = [];
+  let pollStarts = 0;
   registerLinearRoutes({
     app,
     dependencies: {
@@ -111,7 +112,10 @@ async function fixture(boundGraceMs = 20) {
     if (context.req.header("authorization") !== `Bearer ${bearer}`) return context.json({}, 401);
     const events = await store.pollConversationDriver(
       "global-default",
-      () => outbox.poll(Number(context.req.query("wait") ?? 0), context.req.raw.signal, recipient),
+      () => {
+        pollStarts += 1;
+        return outbox.poll(Number(context.req.query("wait") ?? 0), context.req.raw.signal, recipient);
+      },
       context.req.raw.signal,
       async () => {
         store.rememberNativeSource("global-default", {
@@ -199,6 +203,7 @@ async function fixture(boundGraceMs = 20) {
     post,
     events,
     poll,
+    pollStarts: () => pollStarts,
     ack,
     serviceStarts: () => serviceStarts,
     issueLookups,
@@ -285,8 +290,14 @@ it.each([false, true])(
     expect(await f.poll(1800)).toEqual([]);
     expect(await f.ack(wake!.id)).toMatchObject({ acknowledged: true });
     if (restart) await f.restart(checkpoint);
+    // A live native receiver keeps a poll parked while owner activity arrives.
+    // Posting first left a 400 ms detach window under gate load, allowing a
+    // legitimate service fallback instead of exercising late-ACK recovery.
+    const previousPolls = f.pollStarts();
+    const nextPoll = f.poll(4000);
+    await until(() => f.pollStarts() > previousPolls);
     await f.post(f.body("Comment", { body: "Brand new owner comment after the late ACK" }));
-    const [next] = await f.poll(4000);
+    const [next] = await nextPoll;
     expect(next?.content).toContain("Brand new owner comment after the late ACK");
     expect(next?.content).not.toContain("Can Clankie choose sensible defaults?");
     await f.ack(next!.id);
