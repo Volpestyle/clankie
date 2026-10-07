@@ -31,6 +31,17 @@ interface IntegrationOptions {
 }
 
 /** The running pin can be a nested linked worktree; app lives beside its source checkout. */
+/**
+ * Landing runs the repository's fast, change-scoped `check:landing` when it
+ * defines one; the full `check` stays for releases and manual runs.
+ */
+export async function landingGateScript(directory: string): Promise<"check:landing" | "check"> {
+  const manifest = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as {
+    scripts?: Record<string, unknown>;
+  };
+  return typeof manifest.scripts?.["check:landing"] === "string" ? "check:landing" : "check";
+}
+
 export async function integrationSources(runtimeRoot: string): Promise<{ core: string; app: string }> {
   const { stdout } = await execute("git", [
     "-C",
@@ -304,6 +315,7 @@ export class IntegrationQueue {
     const log = join(evidence, `${repo.name}-${name}.log`);
     const startedAt = now();
     const head = await this.head(repo);
+    const gateScript = name === "gate" ? await landingGateScript(repo.directory) : "check";
     const result = await new Promise<{ exitCode: number | null; signal: string | null }>(
       (resolve, reject) => {
         const out = createWriteStream(log, { flags: "wx", mode: 0o600 });
@@ -317,8 +329,12 @@ export class IntegrationQueue {
                 env.npm_config_store_dir!,
                 "--package-import-method=copy",
               ]
-            : ["check"];
-        const child = spawn("pnpm", args, { cwd: repo.directory, env, stdio: ["ignore", "pipe", "pipe"] });
+            : [gateScript];
+        const child = spawn("pnpm", args, {
+          cwd: repo.directory,
+          env: name === "gate" ? { ...env, CLANKIE_LANDING_BASE: repo.base } : env,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         child.stdout.pipe(out, { end: false });
         child.stderr.pipe(out, { end: false });
         child.on("error", (error) => {

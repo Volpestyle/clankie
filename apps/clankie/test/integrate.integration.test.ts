@@ -570,3 +570,25 @@ it("keeps gate-only requests separate from auto-push intent and reports interrup
     await git((await f.queue.status(push.id)).repos[0]!.directory, "ls-tree", "--name-only", "HEAD"),
   ).not.toContain("candidate");
 });
+
+it("lands through the repository's change-scoped check:landing, told the batch base, instead of the full check", async () => {
+  const f = await fixture();
+  await writeFile(
+    join(f.core.source, "landing.mjs"),
+    "console.log(`landing-gate base=${process.env.CLANKIE_LANDING_BASE}`);\n",
+  );
+  const manifest = JSON.parse(await readFile(join(f.core.source, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  manifest.scripts = { check: 'node -e "process.exit(1)"', "check:landing": "node landing.mjs" };
+  await writeFile(join(f.core.source, "package.json"), JSON.stringify(manifest));
+  await git(f.core.source, "add", "landing.mjs", "package.json");
+  await git(f.core.source, "commit", "-m", "landing gate");
+  const change = await git(f.core.source, "rev-parse", "HEAD");
+  const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const batch = await new IntegrationQueue(f.queue.options).status(request.id);
+  expect(batch.state).toBe("passed");
+  expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toContain(`landing-gate base=${f.core.base}`);
+});
