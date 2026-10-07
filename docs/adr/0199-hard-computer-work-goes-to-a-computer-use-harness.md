@@ -1,6 +1,9 @@
 # ADR 0199: Hard computer work goes to a computer-use harness
 
-Status: proposed (2026-09-27), from James's direction the same day. Relates to
+Status: proposed (2026-09-27), from James's direction the same day. Its "a
+hosted body has no desktop at all" is amended by
+[ADR 0244](0244-machines-join-clankie-at-an-access-level.md): an owner can lend
+a joined machine's screen. Relates to
 [ADR 0082](0082-clankie-holds-the-browser.md) (his own browser), which it
 narrows rather than replaces, and to
 [ADR 0127](0127-his-accounts-are-his.md) (human checks stop for the person),

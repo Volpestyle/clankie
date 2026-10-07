@@ -1,6 +1,8 @@
 # 0212. Machines run agents; devices reach Clankie
 
-Status: proposed (2026-10-02). Amends the onboarding and writer sections of
+Status: proposed (2026-10-02). Its reserved `join` transport is decided by
+[ADR 0244](0244-machines-join-clankie-at-an-access-level.md), which also adds
+per-machine access levels. Amends the onboarding and writer sections of
 [ADR 0184](0184-clankie-leads-more-than-one-fleet.md) and the agent-host list of
 [ADR 0189](0189-agent-sessions-read-from-their-transcripts.md). The connection
 contract of [ADR 0181](0181-clankie-is-independent-of-his-connections.md), the

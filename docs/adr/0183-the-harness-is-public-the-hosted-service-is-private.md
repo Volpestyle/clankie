@@ -29,7 +29,9 @@ need it to run one?
   Store and launch records, and any future managed-hosting control plane
   (billing, tenant provisioning, lifecycle, quotas). Managed-body composition
   and its credit, heartbeat-accounting and model-plan policy live here too.
-- **Private (`clankie-app`)**: the iPhone, iPad and macOS companion app.
+- **Private (`clankie-app`)**: the companion app: iPhone, iPad, Android and
+  macOS today, plus the web app and the Windows/Linux desktop app planned by
+  app ADR 0066.
 
 ```mermaid
 flowchart LR

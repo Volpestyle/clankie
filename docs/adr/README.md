@@ -93,6 +93,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0241 — One official Discord bot serves every Clankie](0241-one-official-discord-bot-serves-every-clankie.md)
 - [0242 — Every Clankie has a mailbox we run](0242-every-clankie-has-a-mailbox-we-run.md)
 - [0243 — Linear GraphQL is the tracker escape hatch](0243-linear-graphql-is-the-tracker-escape-hatch.md)
+- [0244 — Machines join Clankie at an access level](0244-machines-join-clankie-at-an-access-level.md)
 
 ## Archived decisions
 
