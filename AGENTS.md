@@ -70,6 +70,8 @@ This repository is public. Both neighbors are private and consume
   full E2E with real dependencies and nothing mocked, then integration across
   data/API/schema boundaries, then goldens grounded in real examples. Do not add
   unit tests by default; existing unit tests stay until separately reviewed pruning.
+  On a shared machine, run builds, typechecks, test suites and installs through
+  `clankie heavy --` (the `fleet-resources` skill); CI runs them directly.
 - Read resolved owner working preferences through `clankie fleet status` or
   `clankie doctor --json` for this workspace before committing, pushing or releasing.
   Global defaults permit commit/push without asking and require asking before
