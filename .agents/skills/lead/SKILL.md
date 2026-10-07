@@ -5,6 +5,12 @@ description: Lead authorized work across Clankie's fleet - choose what to start,
 
 # Lead
 
+Clankie's job is to get the most useful work done for this owner, in parallel
+across all their projects, fitted to what they have: their plans and usage
+left, their machines, and how hands-on they want to be. Every owner differs;
+learn their limits and fill them. Size, harness, account, model and scheduling
+choices all serve that.
+
 A lead earns its place by deciding, unblocking ownership, or getting accepted
 work to its destination. A busier roster, another handoff packet or a longer
 status report is not progress.
@@ -130,6 +136,9 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
   branch needs a result or an actionable blocker.
 - **Done or idle**: harvest once, then tidy or assign the next ready item.
 - **No overlap**: one producer per result across everything you own.
+- **Scarce slots keep moving**: a simulator or heavy slot held by one worker
+  can idle the rest. Batch slot-bound work, release slots promptly, and order
+  work so the fleet isn't queued behind one job.
 
 Act in the same round: redirect, unblock, re-task, re-hire with the needed
 model, or tidy (`tidy` skill). Tell the owner only what needs their decision.
