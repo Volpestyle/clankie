@@ -5322,8 +5322,12 @@ See [Activity sharing](activity.md) and the
 ### Owner checkout freshness
 
 `clankie checkouts status` reports each registered local owner's checkout:
-branch, HEAD, cached `origin/main`, ahead/behind, dirty state, and linked/stale
-worktree counts. Doctor and local roster cards include these observations.
+branch, HEAD, cached `origin/main`, ahead/behind, dirty state, linked/stale
+worktree counts, and `unreconciled` linked worktrees: commits not on
+`origin/main` by content (`git cherry`, so rebased work counts as landed) or
+uncommitted files, with owner (live pane, else the worker closed from it), age
+since last commit or edit, and any recorded decision, oldest first. Managed
+runtime trees are skipped. Doctor and local roster cards include these observations.
 Cached refs are explicitly identified; status never fetches or edits a checkout.
 Roster/fleet requests opt into checkout cards with `includeCheckouts: true`;
 older callers keep their original response shape and perform no checkout Git
@@ -5340,8 +5344,15 @@ updates targeting `origin/main` also run it and retain the result. Manual
 integrators run sync after each confirmed push. A blocked owner checkout does
 not undo a successful push or prevent the fetched runtime from updating.
 
+`clankie checkouts decide --repository OWNER_CHECKOUT --path WORKTREE
+--decision worth_landing|safe_to_drop --reason TEXT` records a judgment of a
+linked worktree's unlanded work at its current HEAD. Doctor and tidy show it; a
+new commit invalidates it.
+
 `clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE` removes
-one landed, clean, inactive linked worktree in an enrolled worktree root. The
+one landed, clean, inactive linked worktree in an enrolled worktree root:
+merged, on main by content, or decided `safe_to_drop` for that exact HEAD. A
+decided drop keeps its commits under `refs/clankie/dropped-worktrees/SHA`. The
 Tidy up skill uses the equivalent `prune_tidy_worktree` tool after preserving
 its result. The service fetches main, copies ignored `.local` evidence, then
 rechecks Git and every live local pane's cwd and foreground cwd. Main checkouts,

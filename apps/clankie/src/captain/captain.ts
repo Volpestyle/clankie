@@ -4,13 +4,15 @@ import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
 import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
 import {
   inspectCheckout,
+  unreconciledLinkedWorktrees,
   ownerCheckout,
   syncOwnerCheckout,
   verifyHireCheckout,
   projectPathContains,
   checkoutGit,
 } from "@clankie/settings";
-import { pruneTidyWorktree } from "./prune-worktree.ts";
+import { pruneTidyWorktree, type PruneWorktreeResult } from "./prune-worktree.ts";
+import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
 import { effectiveFleetAutonomy } from "@clankie/settings";
@@ -1810,11 +1812,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
     return [...new Set(owners)];
   };
-  const checkoutReport = async () => ({
-    observedAt: new Date().toISOString(),
-    refFreshness: "cached-origin/main" as const,
-    checkouts: await Promise.all((await checkoutRepositories()).map(inspectCheckout)),
-  });
+  const checkoutReport = async () => {
+    const managed = await managedWorktreePaths({ runtimeRoot: options.repoRoot });
+    const platform = process.platform === "win32" ? "windows" : "posix";
+    const isManaged = (path: string) =>
+      managed.some(
+        (root) => projectPathContains(root, path, platform) || projectPathContains(path, root, platform),
+      );
+    return {
+      observedAt: new Date().toISOString(),
+      refFreshness: "cached-origin/main" as const,
+      checkouts: await Promise.all(
+        (await checkoutRepositories()).map(async (repository) => {
+          const status = await inspectCheckout(repository);
+          if (status.outcome !== "observed") return status;
+          // Managed runtime snapshots are not anyone's work; every other linked tree is.
+          const unreconciled = await unreconciledLinkedWorktrees(repository, isManaged)
+            .then((found) => paneTidy.describeUnreconciled(found))
+            .catch(() => undefined);
+          return unreconciled ? { ...status, unreconciled } : status;
+        }),
+      ),
+    };
+  };
   const syncCheckouts = async (repository?: string) => {
     const repositories = await checkoutRepositories();
     if (repository !== undefined && !repositories.includes(repository))
@@ -1825,7 +1845,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     repository: string,
     path: string,
     guard: () => Promise<void> = async () => {},
-  ) => {
+  ): Promise<PruneWorktreeResult> => {
     const current = await settings();
     const platform = process.platform === "win32" ? "windows" : "posix";
     const roots = current.projects.projects
@@ -1849,7 +1869,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
           throw Error("Project enrollment changed");
       },
-      { runtimeRoot: options.repoRoot },
+      {
+        runtimeRoot: options.repoRoot,
+        dropDecided: (path: string, head: string): boolean =>
+          paneTidy.decisions.latest(path, head)?.decision === "safe_to_drop",
+      },
     );
   };
 
@@ -2016,7 +2040,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return { ...result, seat: adopted, ...(roleAssignment ? { roleAssignment } : {}) };
   };
 
-  const paneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
+  const paneTidy: PaneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
     runtimeRoot: options.repoRoot,
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
@@ -4468,6 +4492,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     syncCheckouts,
     pruneWorktree,
     tidyWorktrees: (repository, mergedInto) => paneTidy.worktreeReport(repository, mergedInto),
+    decideWorktree: async (input) => {
+      if (!(await checkoutRepositories()).includes(input.repository))
+        throw Error("Select a registered owner checkout");
+      return paneTidy.decideWorktree(input, "operator");
+    },
     restartWorkerTools: async (input, authority) => {
       const owner = { conversationId: conversations.defaultGlobalConversationId() };
       await authority.guard();

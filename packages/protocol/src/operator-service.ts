@@ -12,6 +12,7 @@ import {
   type WorkerReportPage,
 } from "./worker-reports.ts";
 import { ClosedWorkerPaneSchema } from "./operator-conversations.ts";
+import { WorktreeReconciliationSchema } from "./checkouts.ts";
 import { HireReceiptIdSchema, HireReceiptSettlementSchema } from "./hire-receipts.ts";
 import { SeatDeliverySettlementSchema, UnresolvedSeatDeliverySchema } from "./seat-deliveries.ts";
 import { z } from "zod";
@@ -531,6 +532,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
+      /** Why the worker's unlanded commits or uncommitted files may be left behind. */
+      unlandedReason: z.string().trim().min(1).max(512).optional(),
     })
     .strict(),
   z
@@ -1020,6 +1023,14 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
       closed: z.boolean(),
+      /** The seat stayed open: its worktree holds unlanded work and no reason was given. */
+      refusal: z
+        .object({
+          reason: z.literal("unlanded_work"),
+          worktrees: z.array(WorktreeReconciliationSchema).max(8),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -1146,6 +1157,10 @@ export type OperatorConversationTailItem =
  * `@clankie/protocol` types and an injected dispatch — never on Node-only
  * captain-runtime internals — so every surface calls one identical contract.
  */
+interface CloseSeatOutcome {
+  readonly closed: boolean;
+  readonly refusal?: { reason: "unlanded_work"; worktrees: z.infer<typeof WorktreeReconciliationSchema>[] };
+}
 export interface OperatorConversationServiceClient {
   ownerUpdateList?(filter?: OwnerUpdateListFilter): Promise<OwnerUpdateList>;
   ownerUpdateRead?(id: string): Promise<OwnerUpdateResult>;
@@ -1206,6 +1221,11 @@ export interface OperatorConversationServiceClient {
   terminalInput?(request: OperatorTerminalInputRequest): Promise<OperatorTerminalInputResult>;
   /** Close the live Herdr seat without deleting its occupying persona. */
   closeSeat(seatId: string): Promise<boolean>;
+  /**
+   * Close with the reason a refusal needs: the seat stays open while its worktree holds
+   * commits not on main by content or uncommitted files, unless `unlandedReason` says why.
+   */
+  closeWorkerSeat?(seatId: string, unlandedReason?: string): Promise<CloseSeatOutcome>;
   /**
    * Open a pane in a working directory and start a harness in it, returning the
    * seat to open a thread on. Absent on older injected clients; failures come
@@ -1335,6 +1355,16 @@ export function createOperatorConversationServiceClient(
   const fleetWaitMs = Math.min(options.fleetWaitMs ?? 20_000, OPERATOR_FLEET_WAIT_MS_MAX);
   const workProjection = options.includeWork === true ? { includeWork: true } : {};
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  const closeWorkerSeat = async (seatId: string, unlandedReason?: string): Promise<CloseSeatOutcome> => {
+    const result = await dispatch({
+      op: "close_seat",
+      schemaVersion: 1,
+      seatId,
+      ...(unlandedReason === undefined ? {} : { unlandedReason }),
+    });
+    if (result.op !== "close_seat") throw new Error(`Unexpected ${result.op} result for close_seat`);
+    return { closed: result.closed, ...(result.refusal ? { refusal: result.refusal } : {}) };
+  };
   return {
     async projectProposalGet(target) {
       const result = await dispatch({ op: "project_proposal_get", schemaVersion: 1, ...target });
@@ -1559,10 +1589,9 @@ export function createOperatorConversationServiceClient(
       return result.result;
     },
     async closeSeat(seatId) {
-      const result = await dispatch({ op: "close_seat", schemaVersion: 1, seatId });
-      if (result.op !== "close_seat") throw new Error(`Unexpected ${result.op} result for close_seat`);
-      return result.closed;
+      return (await closeWorkerSeat(seatId)).closed;
     },
+    closeWorkerSeat,
     async spawnSeat(input, conversationId) {
       const result = await dispatch({
         op: "spawn_seat",

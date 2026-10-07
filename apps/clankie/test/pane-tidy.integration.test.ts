@@ -1,6 +1,8 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
 import { paneDraftState } from "../src/captain/pane-draft.ts";
@@ -25,7 +27,9 @@ const session = { source: "herdr:codex", kind: "id" as const, value: "10000000-0
 
 // A native boundary fixture feeds production Herdr parsing/close code, real ownership journals,
 // real report files, and captured live ANSI. It never reaches a person's Herdr server.
-async function fixture(options: { adopted?: boolean; unknown?: boolean; reattached?: boolean } = {}) {
+async function fixture(
+  options: { adopted?: boolean; unknown?: boolean; reattached?: boolean; cwd?: string } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-tidy-"));
   roots.push(root);
   const watchPath = join(root, "watch.json");
@@ -49,7 +53,7 @@ async function fixture(options: { adopted?: boolean; unknown?: boolean; reattach
     agent: options.reattached ? "unknown" : "codex",
     agent_status: "working",
     title: "Pip",
-    cwd: root,
+    cwd: options.cwd ?? root,
     ...(options.reattached ? {} : { agent_session: session }),
   };
   const runner = createHerdrWatchRunner(undefined, async (args) => {
@@ -335,4 +339,95 @@ it("idle legacy restart without native exit refuses before saving a close intent
     reason: "native_exit_unavailable",
   });
   expect(f.tidy.history()).toEqual([]);
+});
+
+const exec = promisify(execFile);
+async function git(path: string, ...args: string[]) {
+  const { stdout } = await exec(
+    "git",
+    ["-C", path, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args],
+    { env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))) },
+  );
+  return stdout.trim();
+}
+/** A real repository whose origin/main is a remote-tracking ref, and a worker's linked worktree. */
+async function workerWorktree() {
+  const base = await mkdtemp(join(tmpdir(), "clankie-tidy-worktree-"));
+  roots.push(base);
+  const repo = join(base, "repo");
+  await exec("git", ["init", "--quiet", "--initial-branch", "main", repo]);
+  await git(repo, "config", "user.name", "Fixture");
+  await git(repo, "config", "user.email", "fixture@example.invalid");
+  await writeFile(join(repo, "base.txt"), "base\n");
+  await git(repo, "add", "base.txt");
+  await git(repo, "commit", "--quiet", "-m", "base");
+  await git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const tree = join(base, "worker");
+  await git(repo, "worktree", "add", "--quiet", "-b", "pip/vuh-1", tree, "main");
+  return { repo, tree };
+}
+
+it("refuses to close a worker whose worktree holds unlanded commits or uncommitted files, until a reason is recorded", async () => {
+  const w = await workerWorktree();
+  await writeFile(join(w.tree, "feature.txt"), "unlanded\n");
+  await git(w.tree, "add", "feature.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "unlanded feature");
+  await writeFile(join(w.tree, "notes.txt"), "uncommitted\n");
+  const f = await fixture({ cwd: w.tree });
+  const refused = await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority);
+  expect(refused).toMatchObject({
+    outcome: "refused",
+    reason: "unlanded_work",
+    worktrees: [{ state: "unreconciled", branch: "pip/vuh-1", unlandedCommits: 1, dirtyFiles: 1 }],
+  });
+  expect(f.closes()).toBe(0);
+  const closed = await f.tidy.close(
+    {
+      pane: "w1:p1",
+      reason: "Done",
+      reportPath: f.reportPath,
+      unlandedReason: "Spike superseded by the landed design",
+    },
+    authority,
+  );
+  expect(closed).toMatchObject({
+    outcome: "closed",
+    entry: {
+      unlanded: {
+        reason: "Spike superseded by the landed design",
+        worktrees: [{ unlandedCommits: 1, dirtyFiles: 1 }],
+      },
+    },
+  });
+  expect(f.closes()).toBe(1);
+  // The reason survives in the close record and the per-worktree decision ledger.
+  const reopened = new PaneTidy(f.path, f.ports);
+  expect(reopened.history()[0]!.unlanded?.reason).toBe("Spike superseded by the landed design");
+  const head = await git(w.tree, "rev-parse", "HEAD");
+  const path = await git(w.tree, "rev-parse", "--show-toplevel");
+  expect(reopened.decisions.latest(path, head)).toMatchObject({
+    decision: "closed_unreconciled",
+    reason: "Spike superseded by the landed design",
+    by: "lead: Pip",
+  });
+  f.watch.close();
+});
+
+it("closes a worker whose commits reached main by content after a rebase, without a reason", async () => {
+  const w = await workerWorktree();
+  await writeFile(join(w.tree, "feature.txt"), "landed\n");
+  await git(w.tree, "add", "feature.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "feature");
+  // The integrator lands the same patch on main as a different commit.
+  await writeFile(join(w.repo, "other.txt"), "main moved\n");
+  await git(w.repo, "add", "other.txt");
+  await git(w.repo, "commit", "--quiet", "-m", "main moved");
+  await git(w.repo, "cherry-pick", "pip/vuh-1");
+  await git(w.repo, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const f = await fixture({ cwd: w.tree });
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Landed", reportPath: f.reportPath }, authority),
+  ).toMatchObject({ outcome: "closed" });
+  expect(f.tidy.history()[0]!.unlanded).toBeUndefined();
+  f.watch.close();
 });

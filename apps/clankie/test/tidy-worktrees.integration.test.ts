@@ -308,6 +308,72 @@ it("prune retains dirty, live, unmerged and main trees and refuses an unavailabl
   );
 });
 
+it("lands rebased work by content, holds unlanded work for a decision, and a decided drop keeps its commits", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  const rebased = await f.worktree("rebased");
+  await writeFile(join(rebased, "feature.txt"), "landed by content\n");
+  await git(rebased, ["add", "feature.txt"]);
+  await git(rebased, ["commit", "-m", "feature"]);
+  const spike = await f.worktree("spike");
+  await writeFile(join(spike, "spike.txt"), "never landed\n");
+  await git(spike, ["add", "spike.txt"]);
+  await git(spike, ["commit", "-m", "spike"]);
+  // main moves on and receives the rebased patch as a different commit.
+  await writeFile(join(f.repo, "other.txt"), "main moved\n");
+  await git(f.repo, ["add", "other.txt"]);
+  await git(f.repo, ["commit", "-m", "main moved"]);
+  await git(f.repo, ["cherry-pick", "rebased"]);
+  await git(f.repo, ["push", "--quiet", "origin", "main"]);
+  const native = inventory(() => []);
+  const service = tidy(f.root, native.runner);
+  const report = await service.worktreeReport(f.repo);
+  expect(report.candidates).toEqual([
+    { path: rebased, branch: "rebased", sha: await git(rebased, ["rev-parse", "HEAD"]), landedBy: "content" },
+  ]);
+  expect(report.retained).toContainEqual(
+    expect.objectContaining({
+      path: spike,
+      reason: "unmerged",
+      classification: "undecided",
+      unlandedCommits: 1,
+    }),
+  );
+  const dropDecided = (path: string, head: string) =>
+    service.decisions.latest(path, head)?.decision === "safe_to_drop";
+  const prune = (path: string) =>
+    pruneTidyWorktree(f.repo, path, join(f.root, "evidence"), native.runner, async () => {}, { dropDecided });
+  expect(await prune(spike)).toMatchObject({ outcome: "kept", reason: "unmerged" });
+  const head = await git(spike, ["rev-parse", "HEAD"]);
+  await expect(
+    service.decideWorktree(
+      { repository: f.repo, path: f.repo, decision: "safe_to_drop", reason: "x" },
+      "lead",
+    ),
+  ).rejects.toThrow(/linked worktree/u);
+  expect(
+    await service.decideWorktree(
+      { repository: f.repo, path: spike, decision: "safe_to_drop", reason: "Exploratory spike" },
+      "lead",
+    ),
+  ).toMatchObject({ path: spike, head, decision: "safe_to_drop", unlandedCommits: 1, dirtyFiles: 0 });
+  expect((await service.worktreeReport(f.repo)).candidates.map((entry) => entry.landedBy)).toEqual([
+    "content",
+    "decision",
+  ]);
+  expect(await prune(spike)).toMatchObject({
+    outcome: "removed",
+    branchDeleted: false,
+    keptRef: `refs/clankie/dropped-worktrees/${head}`,
+  });
+  expect(await git(f.repo, ["rev-parse", `refs/clankie/dropped-worktrees/${head}`])).toBe(head);
+  expect(await prune(rebased)).toMatchObject({ outcome: "removed", branchDeleted: false });
+  expect(existsSync(spike) || existsSync(rebased)).toBe(false);
+});
+
 it("authenticated pruning retains enrolled managed namespaces and archives developer evidence in configured state", async () => {
   const { createCaptain } = await import("../src/captain/captain.ts");
   const { createClankieApp } = await import("../src/app.ts");

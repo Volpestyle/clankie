@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { CheckoutStatus } from "@clankie/protocol";
+import type { CheckoutStatus, WorktreeReconciliation } from "@clankie/protocol";
 
 const exec = promisify(execFile);
 export async function checkoutGit(path: string, args: readonly string[]): Promise<string> {
@@ -69,6 +69,109 @@ export async function inspectCheckout(path: string): Promise<CheckoutStatus> {
   } catch (error) {
     return { path, outcome: "unavailable", reason: error instanceof Error ? error.message : String(error) };
   }
+}
+/**
+ * Compare one checkout's HEAD with main by patch content (`git cherry`), so rebased or
+ * cherry-picked commits count as landed, and count uncommitted files. Read-only.
+ * A directory outside any Git checkout, or one that no longer exists, holds nothing.
+ */
+export async function reconcileWorktree(
+  path: string,
+  mergedInto = "origin/main",
+): Promise<WorktreeReconciliation | undefined> {
+  let root: string;
+  try {
+    root = (await checkoutGit(path, ["rev-parse", "--show-toplevel"])).trim();
+  } catch (error) {
+    if (
+      /not a git repository|cannot change to|No such file/iu.test(
+        String((error as { stderr?: unknown }).stderr ?? ""),
+      )
+    )
+      return undefined;
+    return { path, state: "unknown", reason: "Git observation unavailable" };
+  }
+  try {
+    const [head, branch, status] = await Promise.all([
+      checkoutGit(root, ["rev-parse", "--verify", "HEAD^{commit}"]).then((value) => value.trim()),
+      checkoutGit(root, ["branch", "--show-current"]).then((value) => value.trim()),
+      checkoutGit(root, ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal"]),
+    ]);
+    const base = (
+      await checkoutGit(root, ["rev-parse", "--verify", "--end-of-options", `${mergedInto}^{commit}`]).catch(
+        (error: unknown) => {
+          // A repository whose default branch is not main still names it through origin/HEAD.
+          if (mergedInto !== "origin/main") throw error;
+          return checkoutGit(root, ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"]);
+        },
+      )
+    ).trim();
+    let unlandedCommits = 0;
+    try {
+      await checkoutGit(root, ["merge-base", "--is-ancestor", head, base]);
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== 1) throw error;
+      unlandedCommits = (await checkoutGit(root, ["cherry", base, head]))
+        .split("\n")
+        .filter((line) => line.startsWith("+ ")).length;
+    }
+    const dirty = status
+      .split("\0")
+      .filter(Boolean)
+      .map((entry) => entry.slice(3));
+    const times = [
+      Number((await checkoutGit(root, ["log", "-1", "--format=%ct", head])).trim()) * 1000,
+      ...(await Promise.all(
+        dirty
+          .slice(0, 256)
+          .map(async (file) => (await stat(join(root, file)).catch(() => undefined))?.mtimeMs ?? 0),
+      )),
+    ].filter((time) => Number.isFinite(time) && time > 0);
+    return {
+      path: root,
+      state: unlandedCommits || dirty.length ? "unreconciled" : "reconciled",
+      ...(branch ? { branch } : {}),
+      head,
+      unlandedCommits,
+      dirtyFiles: dirty.length,
+      ...(times.length ? { lastActivityAt: new Date(Math.max(...times)).toISOString() } : {}),
+    };
+  } catch (error) {
+    return {
+      path: root,
+      state: "unknown",
+      reason: error instanceof Error ? error.message.slice(0, 512) : "Git observation unavailable",
+    };
+  }
+}
+/** Every linked worktree of one owner checkout that holds unlanded or uncommitted work. */
+export async function unreconciledLinkedWorktrees(
+  repository: string,
+  skip: (path: string) => boolean = () => false,
+): Promise<WorktreeReconciliation[]> {
+  const raw = await checkoutGit(repository, ["worktree", "list", "--porcelain", "-z"]);
+  const paths = raw
+    .split("\0\0")
+    .filter(Boolean)
+    .slice(1)
+    .filter(
+      (record) => !record.split("\0").some((field) => field === "prunable" || field.startsWith("prunable ")),
+    )
+    .map((record) =>
+      record
+        .split("\0")
+        .find((field) => field.startsWith("worktree "))
+        ?.slice(9),
+    )
+    .filter((path): path is string => path !== undefined && !skip(path));
+  const results: WorktreeReconciliation[] = [];
+  // Bounded concurrency: one owner checkout can register hundreds of worktrees.
+  for (let index = 0; index < paths.length; index += 8)
+    for (const result of await Promise.all(
+      paths.slice(index, index + 8).map((path) => reconcileWorktree(path)),
+    ))
+      if (result && result.state !== "reconciled") results.push(result);
+  return results;
 }
 export interface CheckoutBlocker {
   path: string;

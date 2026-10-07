@@ -1,4 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
+import type { UnreconciledWorktree } from "@clankie/protocol";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
 import { formatRuntimeHealth } from "./command/runtime-health.ts";
@@ -9,6 +10,31 @@ const clean = (text: string) =>
   stripVTControlCharacters(text)
     .replace(/[\r\n\t]/gu, " ")
     .trim();
+
+const age = (seconds: number | undefined) =>
+  seconds === undefined
+    ? "age unknown"
+    : seconds >= 86_400
+      ? `${Math.floor(seconds / 86_400)}d`
+      : `${Math.floor(seconds / 3_600)}h`;
+/** Unlanded or uncommitted work in linked worktrees, oldest first, by owner (VUH-1814). */
+function formatUnreconciled(worktrees: readonly UnreconciledWorktree[]): string[] {
+  const shown = worktrees
+    .slice(0, 12)
+    .map(
+      (tree) =>
+        `    ○ ${clean(tree.path)}${tree.branch ? ` (${clean(tree.branch)})` : ""} · ${
+          tree.state === "unknown"
+            ? `unreadable: ${clean(tree.reason ?? "unknown")}`
+            : `${tree.unlandedCommits ?? 0} unlanded commits / ${tree.dirtyFiles ?? 0} uncommitted files`
+        } · ${clean(tree.owner)} · ${age(tree.ageSeconds)}${
+          tree.decision ? ` · decided ${tree.decision.decision}: ${clean(tree.decision.reason)}` : ""
+        }`,
+    );
+  return worktrees.length > shown.length
+    ? [...shown, `    … ${worktrees.length - shown.length} more; \`clankie checkouts status\` lists all`]
+    : shown;
+}
 
 /** `/doctor` as a checklist; `/doctor json` keeps the full canonical report. */
 export function formatDoctorReport(report: InstallDoctorReport): string {
@@ -85,10 +111,10 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
         : [`  ○ Seat deliveries · unknown · ${clean(report.seatDeliveries.detail)}`]),
     ...resources,
     ...(report.checkouts && "checkouts" in report.checkouts
-      ? report.checkouts.checkouts.map(
-          (entry) =>
-            `  ${entry.outcome === "observed" && !entry.behind ? "✓" : "○"} Checkout ${clean(entry.path)} · ${entry.outcome === "unavailable" ? "unavailable" : `${entry.behind} behind / ${entry.ahead} ahead · ${entry.dirty ? "dirty" : "clean"} · ${entry.staleWorktrees} stale / ${entry.linkedWorktrees} linked worktrees`} · cached origin/main`,
-        )
+      ? report.checkouts.checkouts.flatMap((entry) => [
+          `  ${entry.outcome === "observed" && !entry.behind ? "✓" : "○"} Checkout ${clean(entry.path)} · ${entry.outcome === "unavailable" ? "unavailable" : `${entry.behind} behind / ${entry.ahead} ahead · ${entry.dirty ? "dirty" : "clean"} · ${entry.staleWorktrees} stale / ${entry.linkedWorktrees} linked worktrees`} · cached origin/main`,
+          ...formatUnreconciled(entry.unreconciled ?? []),
+        ])
       : report.checkouts
         ? [`  ○ Checkouts · ${clean(report.checkouts.detail)}`]
         : []),

@@ -142,6 +142,31 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     });
   }
 
+  ctx.app.post("/v1/checkouts/decide", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = z
+      .strictObject({
+        repository: z.string().min(1).max(4096),
+        path: z.string().min(1).max(4096),
+        decision: z.enum(["worth_landing", "safe_to_drop"]),
+        reason: z.string().trim().min(1).max(512),
+      })
+      .safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.captain.decideWorktree)
+      return context.json({ error: "checkouts_unavailable" }, 503);
+    try {
+      return context.json(await ctx.dependencies.captain.decideWorktree(parsed.data));
+    } catch (error) {
+      return context.json(
+        { error: "refused", message: error instanceof Error ? error.message : "Decision refused" },
+        409,
+      );
+    }
+  });
+
   // The operator conversation contract (TUI direct, relay in front for
   // devices) and the lanes view — the captain's HTTP face. Both clients send
   // the shared captain token, the same credential the channel-turn door takes.

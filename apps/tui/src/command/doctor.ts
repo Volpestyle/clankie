@@ -95,6 +95,12 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
           )
           .join("\n") + "\nRun `clankie checkouts sync` and the tidy action; local work is preserved."
       );
+    // Unlanded work older than a day with no recorded decision is at risk of being forgotten.
+    const forgotten = checkouts.checkouts.flatMap((entry) =>
+      (entry.unreconciled ?? []).filter((tree) => !tree.decision && (tree.ageSeconds ?? 0) >= 86_400),
+    );
+    if (forgotten.length)
+      return `${forgotten.length} worktrees hold unlanded or uncommitted work over a day old with no decision — land it, hand it to its owner, or record one with \`clankie checkouts decide\`.`;
   }
   return "ready";
 }

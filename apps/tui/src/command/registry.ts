@@ -14,6 +14,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["checkouts"],
     lines: [
       "  checkouts status | sync [--repository OWNER_CHECKOUT] | prune --repository OWNER_CHECKOUT --path WORKTREE  Inspect, safely fast-forward, or tidy local repositories (JSON)",
+      "  checkouts decide --repository OWNER_CHECKOUT --path WORKTREE --decision worth_landing|safe_to_drop --reason TEXT  Record a judgment of a worktree's unlanded work (JSON)",
     ],
   },
   {

@@ -174,6 +174,13 @@ export interface CaptainPort {
   ): Promise<{ conversationId: string; seats: readonly import("@clankie/protocol").OperatorFleetSeat[] }>;
   checkoutReport?(): Promise<import("@clankie/protocol").CheckoutReport>;
   syncCheckouts?(repository?: string): Promise<import("@clankie/settings").CheckoutSyncResult[]>;
+  /** Record worth_landing or safe_to_drop for one linked worktree's unlanded work (VUH-1814). */
+  decideWorktree?(input: {
+    repository: string;
+    path: string;
+    decision: "worth_landing" | "safe_to_drop";
+    reason: string;
+  }): Promise<import("@clankie/protocol").WorktreeDecision>;
   pruneWorktree?(
     repository: string,
     path: string,

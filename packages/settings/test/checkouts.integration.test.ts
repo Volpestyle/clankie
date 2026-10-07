@@ -5,7 +5,14 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { CheckoutReportSchema } from "@clankie/protocol";
-import { checkoutGit, inspectCheckout, syncOwnerCheckout, verifyHireCheckout } from "../src/checkouts.ts";
+import {
+  checkoutGit,
+  inspectCheckout,
+  reconcileWorktree,
+  syncOwnerCheckout,
+  unreconciledLinkedWorktrees,
+  verifyHireCheckout,
+} from "../src/checkouts.ts";
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => {
@@ -199,4 +206,74 @@ it("doctor/roster checkout facts distinguish cached refs, dirt, divergence and s
     linkedWorktrees: 3,
   });
   expect((await checkoutGit(f.owner, ["rev-parse", "HEAD"])).trim()).toBe(f.base);
+});
+
+it("finds linked worktrees with unlanded commits or uncommitted files by content, and nothing in landed or non-Git trees", async () => {
+  const f = await fixture();
+  const commit = (path: string, file: string, text: string) =>
+    writeFile(join(path, file), text)
+      .then(() => checkoutGit(path, ["add", file]))
+      .then(() =>
+        checkoutGit(path, [
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "commit.gpgsign=false",
+          "commit",
+          "-m",
+          file,
+        ]),
+      );
+  const trees: string[] = [];
+  // Sequential: concurrent `worktree add` races on the shared config lock.
+  for (const name of ["unlanded", "dirty", "rebased", "clean"]) {
+    await checkoutGit(f.owner, [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      name,
+      join(f.root, name),
+      "origin/main",
+    ]);
+    trees.push(join(f.root, name));
+  }
+  const [unlanded, dirty, rebased, clean] = trees;
+  await commit(unlanded!, "unlanded.txt", "only here\n");
+  await writeFile(join(dirty!, "notes.txt"), "uncommitted\n");
+  await commit(rebased!, "rebased.txt", "landed elsewhere\n");
+  // The same patch reaches main as a different commit on top of other work.
+  await f.advance();
+  await commit(f.writer, "rebased.txt", "landed elsewhere\n");
+  await checkoutGit(f.writer, ["push", "origin", "main"]);
+  await checkoutGit(f.owner, ["fetch", "origin"]);
+  expect(await reconcileWorktree(rebased!)).toMatchObject({ state: "reconciled", unlandedCommits: 0 });
+  expect(await reconcileWorktree(clean!)).toMatchObject({ state: "reconciled" });
+  expect(await reconcileWorktree(join(f.root, "missing"))).toBeUndefined();
+  const found = await unreconciledLinkedWorktrees(f.owner);
+  expect(
+    found.map(({ path, state, branch, unlandedCommits, dirtyFiles }) => ({
+      path,
+      state,
+      branch,
+      unlandedCommits,
+      dirtyFiles,
+    })),
+  ).toEqual([
+    { path: dirty, state: "unreconciled", branch: "dirty", unlandedCommits: 0, dirtyFiles: 1 },
+    { path: unlanded, state: "unreconciled", branch: "unlanded", unlandedCommits: 1, dirtyFiles: 0 },
+  ]);
+  expect(found.every((entry) => entry.lastActivityAt !== undefined)).toBe(true);
+  expect(await unreconciledLinkedWorktrees(f.owner, (path) => path === unlanded)).toHaveLength(1);
+  // The doctor contract carries them with owner and age.
+  const status = await inspectCheckout(f.owner);
+  expect(
+    CheckoutReportSchema.parse({
+      observedAt: new Date().toISOString(),
+      refFreshness: "cached-origin/main",
+      checkouts: [
+        { ...status, unreconciled: found.map((entry) => ({ ...entry, owner: "Pip", ageSeconds: 5 })) },
+      ],
+    }).checkouts[0]!.unreconciled,
+  ).toHaveLength(2);
 });

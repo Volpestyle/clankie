@@ -666,7 +666,34 @@ export function createOperatorService(
       };
     }
     if (request.op === "close_seat") {
-      const closed = await ctx.herdrWatches.closeSeat(request.seatId);
+      // The same hold as close_worker_pane: unlanded work stays unless a reason is recorded.
+      const tidy = ctx.herdrWatches.tidy;
+      const held = (await tidy?.seatWorktreeHold(request.seatId)) ?? [];
+      if (held.length && request.unlandedReason === undefined)
+        return {
+          op: "close_seat",
+          schemaVersion: 1,
+          seatId: request.seatId,
+          closed: false,
+          refusal: { reason: "unlanded_work", worktrees: held.slice(0, 8) },
+        };
+      const closed = await ctx.herdrWatches.closeSeat(
+        request.seatId,
+        request.unlandedReason === undefined
+          ? async () => {
+              if ((await tidy?.seatWorktreeHold(request.seatId))?.length) throw new Error("unlanded_work");
+            }
+          : undefined,
+      );
+      if (closed && held.length && request.unlandedReason !== undefined)
+        try {
+          tidy?.recordLeftBehind(
+            { reason: request.unlandedReason, worktrees: held.slice(0, 8) },
+            `operator: ${request.seatId}`,
+          );
+        } catch {
+          /* The seat is closed; a lost index entry must not report it open. */
+        }
       if (closed) {
         const personaId = ctx.liveSeats.find((seat) => seat.seatId === request.seatId)?.personaId;
         if (personaId !== undefined) ctx.seatByPersona.delete(personaId);

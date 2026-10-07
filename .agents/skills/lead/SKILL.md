@@ -142,7 +142,11 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
   Harvest includes the worktree: before closing the worker, every commit is
   on main (by content, `git cherry origin/main`) or deliberately abandoned
   with a recorded reason, and nothing uncommitted is left behind. A worktree
-  holding unlanded work is never closed or forgotten silently.
+  holding unlanded work is never closed or forgotten silently; the close
+  refuses `unlanded_work` until it lands or you give `unlandedReason`.
+  Doctor lists unreconciled worktrees by owner and age. Mail the owner
+  (`mail_owner_update`) about one over a day old whose owner is gone and
+  that you cannot land or decide yourself; nothing mails it automatically.
 - **No overlap**: one producer per result across everything you own.
 - **Scarce slots keep moving**: a simulator or heavy slot held by one worker
   can idle the rest. Batch slot-bound work, release slots promptly, and order

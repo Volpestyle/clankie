@@ -21,7 +21,11 @@ output and report in `worker_pane_history`, and returns an undo ID with a short
 deadline. `undo_worker_pane` reopens and resumes that session.
 
 The service protects unsent drafts, owner-interactive or hand-started panes you
-did not hire, and results not kept. Unknown draft state or provenance is a
+did not hire, results not kept, and unlanded work: `unlanded_work` names the
+worker's worktree with commits not on `origin/main` by content or uncommitted
+files. Land it or hand it to its owner first. Pass `unlandedReason` only when
+leaving it is a deliberate decision (superseded, a spike); the reason stays
+with the close record and the worktree's decision. Unknown draft state or provenance is a
 technical failure: leave that pane alone and explain the gap. A missing Herdr
 session on a reattached pane is not evidence that the worker is finished or that
 its results are lost. Never bypass a refusal with raw pane-close or keystrokes.
@@ -29,9 +33,15 @@ its results are lost. Never bypass a refusal with raw pane-close or keystrokes.
 Inspect worktrees for the repositories covered by this tidy round with the
 read-only `list_tidy_worktrees({ repository: REPO_PATH, mergedInto: "origin/main" })`.
 Omit `mergedInto` for its `origin/main` default, or use the deliverable's requested
-remote destination. List the remaining merged-and-clean candidates with path,
-branch and destination evidence; explain relevant exclusions. Main, dirty,
-unmerged or live worktrees are excluded; even idle/shell panes protect their
+remote destination. List the remaining landed candidates with path,
+branch and destination evidence (`landedBy: content` means every commit is on
+the destination by patch; `decision` means a recorded safe_to_drop); explain
+relevant exclusions. Main, dirty, unlanded or live worktrees are excluded.
+Classify each retained unmerged or dirty tree: landed by content, worth
+landing, or safe to drop, and record the last two with
+`decide_tidy_worktree` and a one-line reason. Unlanded work is never removed
+without one, and a decided drop keeps its commits under
+`refs/clankie/dropped-worktrees/`; uncommitted files are never pruned. even idle/shell panes protect their
 working directories. An unavailable or changing census returns no candidates.
 The tool does not establish ownership or refresh the destination ref: confirm
 your ownership and current landing proof before removing a candidate. This tool
@@ -55,7 +65,7 @@ For an authorized owned cleanup, use `prune_tidy_worktree({repository, path})`
 fetches `origin/main`, verifies a registered linked-worktree root, copies ignored
 `.local` evidence to `worktree-evidence/` under Clankie’s configured state directory
 (default `~/.clankie/captain/worktree-evidence/`), then freshly checks
-merge, cleanliness and every live local pane's cwd and foreground cwd. It uses
+landing, cleanliness and every live local pane's cwd and foreground cwd. It uses
 `git worktree remove` without force and deletes only a merged local branch.
 Managed runtime pins, runtime/update namespaces, the running service checkout and
 owner main checkouts are protected independently of developer-root enrollment. Never treat a

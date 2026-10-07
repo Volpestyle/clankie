@@ -50,7 +50,7 @@ paths:
       security: [{ operatorBearer: [] }]
       responses:
         "200":
-          description: Observation time, cached ref freshness, checkout branch, HEAD, ahead/behind, dirty state and stale/linked worktree counts
+          description: Observation time, cached ref freshness, checkout branch, HEAD, ahead/behind, dirty state, stale/linked worktree counts, and unreconciled linked worktrees (commits not on main by content, uncommitted files) with owner, age and any recorded decision
         "401":
           description: Operator authentication required
         "503":
@@ -88,8 +88,8 @@ paths:
     post:
       tags: [Operator]
       operationId: pruneLandedWorktree
-      summary: Preserve evidence and remove one merged clean inactive enrolled worktree
-      description: Fetches main, copies ignored .local evidence, rechecks cwd and foreground cwd of local panes, and uses git worktree remove without force. Deletes only merged branches. Main and runtime trees stay protected.
+      summary: Preserve evidence and remove one landed clean inactive enrolled worktree
+      description: Landed means merged, on main by content (git cherry), or a recorded safe_to_drop decision for its exact HEAD, whose commits stay under refs/clankie/dropped-worktrees/. Fetches main, copies ignored .local evidence, rechecks cwd and foreground cwd of local panes, and uses git worktree remove without force. Deletes only merged branches. Main and runtime trees stay protected.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -111,6 +111,35 @@ paths:
           description: Operator authentication required
         "409":
           description: Enrollment or nested-worktree protection refused
+  /v1/checkouts/decide:
+    post:
+      tags: [Operator]
+      operationId: decideWorktree
+      summary: Record a judgment of one linked worktree's unlanded work
+      description: Records worth_landing or safe_to_drop with a one-line reason for the worktree's current HEAD. Doctor and tidy show it; a new commit invalidates it. Never removes anything.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [repository, path, decision, reason]
+              properties:
+                repository: { type: string, description: Exact enrolled owner checkout }
+                path: { type: string, description: A linked worktree registered to that checkout }
+                decision: { type: string, enum: [worth_landing, safe_to_drop] }
+                reason: { type: string, maxLength: 512 }
+      responses:
+        "200":
+          description: The recorded decision with HEAD, unlanded commit and uncommitted file counts
+        "400":
+          description: Invalid request
+        "401":
+          description: Operator authentication required
+        "409":
+          description: Not a registered linked worktree, or its state is unreadable
   /v1/activity/shares:
     post:
       tags: [Media]

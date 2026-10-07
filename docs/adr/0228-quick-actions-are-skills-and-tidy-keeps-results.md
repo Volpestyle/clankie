@@ -78,3 +78,27 @@ reads and provenance fail closed; this change does not claim atomic draft safety
 Actual model-driven close/Undo on an owned hired session remains a live canary;
 focused integration fixtures exercise the service, journals and native adapter
 boundary without closing the owner's fleet.
+
+## Unlanded work holds the close (2026-10-07; VUH-1814)
+
+Closing a worker no longer forgets its worktree. `close_worker_pane` and the
+operator `close_seat` (the app and TUI close) refuse `unlanded_work` while the
+worker's start or foreground worktree has commits not on `origin/main` by patch
+content (`git cherry`, so rebased and cherry-picked work counts as landed) or
+uncommitted files. A remote fleet's worktree is unreadable from here and holds
+too. The lead may close anyway only with a one-line `unlandedReason`, kept on
+the close record and in a per-worktree decision ledger
+(`worktree-decisions.json` beside `pane-tidy.json`). Restart keeps its thread
+and directory, so it is not held.
+
+Tidy classifies trees as landed (merged, by content), or unlanded with the
+lead's recorded `worth_landing` or `safe_to_drop`. Prune removes a landed clean
+tree, or a `safe_to_drop` clean tree for that exact HEAD while keeping its
+commits under `refs/clankie/dropped-worktrees/`. It never removes uncommitted
+files or undecided unlanded work. Doctor lists unreconciled worktrees by owner
+and age.
+
+Old unreconciled trees reach the owner only when the lead mails them with
+`mail_owner_update`. ADR 0245 keeps owner updates deliberate ("no event, worker
+result or commit automatically publishes mail"), so the service does not
+publish them on its own.

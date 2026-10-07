@@ -9,7 +9,11 @@ import type { HerdrWatchRunner } from "./herdr-watch.ts";
 export interface TidyWorktreesResult {
   readonly outcome: "listed" | "unavailable";
   readonly mergedInto: string;
-  readonly candidates: { path: string; branch?: string; sha: string }[];
+  /**
+   * `landedBy` is absent for a HEAD merged into the destination; "content" means every commit
+   * is there by patch (`git cherry`); "decision" means a recorded safe_to_drop for this HEAD.
+   */
+  readonly candidates: { path: string; branch?: string; sha: string; landedBy?: "content" | "decision" }[];
   readonly excluded: { path: string; reason: string }[];
 }
 interface GitWorktree {
@@ -28,9 +32,11 @@ export interface ManagedWorktreeProtection {
   readonly runtimeRoot?: string;
   readonly home?: string;
   readonly runtimePath?: string;
+  /** A recorded safe_to_drop decision for exactly this worktree HEAD (VUH-1814). */
+  readonly dropDecided?: (path: string, head: string) => boolean;
 }
 
-async function managedWorktreePaths(options: ManagedWorktreeProtection): Promise<string[]> {
+export async function managedWorktreePaths(options: ManagedWorktreeProtection): Promise<string[]> {
   const home = options.home ?? homedir();
   const paths = [
     join(home, ".clankie", "pinned"),
@@ -180,6 +186,7 @@ export async function listTidyWorktrees(
     const result: TidyWorktreesResult = { outcome: "listed", mergedInto, candidates: [], excluded: [] };
     for (const entry of inventory) {
       let reason: string | undefined;
+      let landedBy: "content" | "decision" | undefined;
       if (entry.bare || entry.path === inventory[0]!.path) reason = "main_worktree";
       else if (
         managedPaths.some(
@@ -213,7 +220,11 @@ export async function listTidyWorktrees(
               await git(entry.path, ["merge-base", "--is-ancestor", head, mergeSha]);
             } catch (error) {
               if ((error as { code?: unknown }).code !== 1) throw error;
-              reason = "unmerged";
+              // Rebased or cherry-picked work is on main by content even though HEAD is not.
+              const cherry = await git(entry.path, ["cherry", mergeSha, head]);
+              if (!cherry.split("\n").some((line) => line.startsWith("+ "))) landedBy = "content";
+              else if (protection.dropDecided?.(entry.path, head)) landedBy = "decision";
+              else reason = "unmerged";
             }
           }
         } catch {
@@ -226,6 +237,7 @@ export async function listTidyWorktrees(
           path: entry.path,
           sha: entry.sha!,
           ...(entry.branch ? { branch: entry.branch } : {}),
+          ...(landedBy ? { landedBy } : {}),
         });
     }
     const refreshedRepo = await repository(repositoryPath);

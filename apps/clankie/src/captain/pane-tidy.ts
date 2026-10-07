@@ -14,7 +14,13 @@ import {
 import { dirname, isAbsolute, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { z } from "zod";
-import { ClosedWorkerPaneSchema, type ClosedWorkerPane } from "@clankie/protocol";
+import {
+  ClosedWorkerPaneSchema,
+  type ClosedWorkerPane,
+  type UnreconciledWorktree,
+  type WorktreeReconciliation,
+} from "@clankie/protocol";
+import { checkoutGit, projectPathContains, reconcileWorktree } from "@clankie/settings";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   ConversationOwnerSchema,
@@ -30,6 +36,7 @@ import type { HireSeat } from "./port.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { paneDraftState } from "./pane-draft.ts";
 import { describeRetainedWorktrees, listTidyWorktrees, type TidyWorktreesResult } from "./tidy-worktrees.ts";
+import { WorktreeDecisions, workerWorktreeHold } from "./worktree-decisions.ts";
 
 const UNDO_MS = 5 * 60_000;
 const EntrySchema = ClosedWorkerPaneSchema.extend({
@@ -47,6 +54,8 @@ export type TidyFailure =
   | { outcome: "refused"; reason: "unsent_draft" | "owner_interactive" | "results_not_kept" }
   /** Another lead conversation hired this pane; only it may close it (VUH-1763). */
   | { outcome: "refused"; reason: "not_owner"; ownerConversationId: string }
+  /** The worker's worktree holds commits not on main by content, or uncommitted files (VUH-1814). */
+  | { outcome: "refused"; reason: "unlanded_work"; worktrees: WorktreeReconciliation[] }
   | {
       outcome: "failed";
       reason:
@@ -77,10 +86,12 @@ const fail = (reason: Extract<TidyFailure, { outcome: "failed" }>["reason"]): ne
   throw new Failure({ outcome: "failed", reason });
 };
 const refuse = (
-  reason: Exclude<Extract<TidyFailure, { outcome: "refused" }>["reason"], "not_owner">,
+  reason: Exclude<Extract<TidyFailure, { outcome: "refused" }>["reason"], "not_owner" | "unlanded_work">,
 ): never => {
   throw new Failure({ outcome: "refused", reason });
 };
+const validReason = (reason: string) =>
+  reason.length > 0 && reason.length <= 512 && !/[\r\n]/u.test(reason) && !reason.includes("\0");
 function sessionKey(agent: HerdrAgentSnapshot): string {
   return JSON.stringify([
     splitFleetQualified(agent.paneId)?.fleet ?? "local",
@@ -98,6 +109,8 @@ export class PaneTidy {
   private state: z.infer<typeof PaneTidyStateSchema>;
   private readonly pending = new Set<string>();
   private readonly path: string;
+  /** Recorded lead decisions about unlanded worktree work, beside this history. */
+  readonly decisions: WorktreeDecisions;
   private readonly ports: {
     runner: HerdrWatchRunner;
     prune?(
@@ -120,6 +133,7 @@ export class PaneTidy {
   constructor(path: string, ports: PaneTidy["ports"]) {
     this.path = path;
     this.ports = ports;
+    this.decisions = new WorktreeDecisions(join(dirname(path), "worktree-decisions.json"));
     // Corrupt history blocks construction; it must never become an empty journal.
     this.state = existsSync(path)
       ? PaneTidyStateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
@@ -130,16 +144,61 @@ export class PaneTidy {
   }
   /** List merged, clean, unused linked worktrees; never remove one. */
   worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {
-    return listTidyWorktrees(
-      repositoryPath,
-      mergedInto,
-      this.ports.runner,
-      this.ports.runtimeRoot ? { runtimeRoot: this.ports.runtimeRoot } : {},
-    );
+    return listTidyWorktrees(repositoryPath, mergedInto, this.ports.runner, {
+      ...(this.ports.runtimeRoot ? { runtimeRoot: this.ports.runtimeRoot } : {}),
+      dropDecided: (path, head) => this.decisions.latest(path, head)?.decision === "safe_to_drop",
+    });
   }
+  /**
+   * Candidates are landed (merged, by content, or a decided drop). Each retained tree holding
+   * work says how much and what was decided: unlanded work waits for worth_landing or
+   * safe_to_drop from `decideWorktree`, and is never removed without one.
+   */
   async worktreeReport(repository: string, mergedInto = "origin/main") {
     const result = await this.worktrees(repository, mergedInto);
-    return { ...result, retained: await describeRetainedWorktrees(result, this.ports.runner) };
+    const retained = await describeRetainedWorktrees(result, this.ports.runner);
+    return {
+      ...result,
+      retained: await Promise.all(
+        retained.map(async (entry) => {
+          if (entry.reason !== "unmerged" && entry.reason !== "dirty") return entry;
+          const work = await reconcileWorktree(entry.path, mergedInto);
+          const decision = work?.head ? this.decisions.latest(entry.path, work.head) : undefined;
+          return {
+            ...entry,
+            classification: decision?.decision ?? "undecided",
+            ...(work
+              ? { unlandedCommits: work.unlandedCommits, dirtyFiles: work.dirtyFiles, head: work.head }
+              : {}),
+            ...(decision ? { decision } : {}),
+          };
+        }),
+      ),
+    };
+  }
+  /** Record the lead's judgment of one registered worktree's unlanded work at its current HEAD. */
+  async decideWorktree(
+    input: { repository: string; path: string; decision: "worth_landing" | "safe_to_drop"; reason: string },
+    by: string,
+  ) {
+    const reason = input.reason.trim();
+    if (!validReason(reason)) throw Error("Give a one-line reason");
+    const fields = (await checkoutGit(input.repository, ["worktree", "list", "--porcelain", "-z"])).split(
+      "\0",
+    );
+    if (fields[0] === `worktree ${input.path}` || !fields.includes(`worktree ${input.path}`))
+      throw Error("Select a linked worktree registered to this repository");
+    const work = await reconcileWorktree(input.path);
+    if (!work || work.state === "unknown" || !work.head) throw Error("Worktree state is unreadable");
+    return this.decisions.record({
+      path: input.path,
+      head: work.head,
+      decision: input.decision,
+      reason,
+      by,
+      ...(work.unlandedCommits === undefined ? {} : { unlandedCommits: work.unlandedCommits }),
+      ...(work.dirtyFiles === undefined ? {} : { dirtyFiles: work.dirtyFiles }),
+    });
   }
   async pruneWorktree(repository: string, path: string, source: ConversationAuthority) {
     const authority = captureConversationAuthority(source);
@@ -240,6 +299,8 @@ export class PaneTidy {
       pane: string;
       reason: string;
       reportPath?: string;
+      /** Why the worker's unlanded commits or uncommitted files may be left behind. */
+      unlandedReason?: string;
       idleOnly?: boolean;
       expected?: { terminalId: string; sessionKey: string };
       nativeOnly?: boolean;
@@ -252,7 +313,8 @@ export class PaneTidy {
       const authority = captureConversationAuthority(source);
       await this.authority(authority);
       const reason = input.reason.trim();
-      if (!reason || reason.length > 512 || /[\r\n]/u.test(reason) || reason.includes("\0"))
+      const unlandedReason = input.unlandedReason?.trim();
+      if (!validReason(reason) || (unlandedReason !== undefined && !validReason(unlandedReason)))
         return fail("invalid_reason");
       const agent = await this.fresh(input.pane);
       const key = sessionKey(agent);
@@ -301,6 +363,11 @@ export class PaneTidy {
       // Copy the verified artifact into service-owned history before any close effect.
       this.keepReport(agent, reportText);
       reportPath = this.state.reports.find((report) => report.sessionKey === key)!.reportPath;
+      // Restart resumes the same thread in the same directory, so nothing is left behind.
+      const checkWorktrees = !input.nativeOnly;
+      const held = checkWorktrees ? await workerWorktreeHold(agent) : [];
+      if (held.length && !unlandedReason)
+        throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: held });
       const raw = await this.ports.runner
         .readPane?.(agent.paneId, "recent-unwrapped", "text")
         .catch(() => undefined);
@@ -322,6 +389,12 @@ export class PaneTidy {
         const draft = ansi === undefined ? "unknown" : paneDraftState(agent.agent, ansi);
         if (draft === "draft") return refuse("unsent_draft");
         if (draft === "unknown") return fail("draft_state_unknown");
+        // Work committed or written after the first look still holds the close.
+        if (checkWorktrees && !unlandedReason) {
+          const late = await workerWorktreeHold(latest);
+          if (late.length)
+            throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: late });
+        }
         await this.authority(authority);
       };
       await guard();
@@ -342,6 +415,9 @@ export class PaneTidy {
         closedAt: new Date(closedAt).toISOString(),
         undoUntil: new Date(closedAt + UNDO_MS).toISOString(),
         state: "closing",
+        ...(held.length && unlandedReason
+          ? { unlanded: { reason: unlandedReason, worktrees: held.slice(0, 8) } }
+          : {}),
       });
       this.state.entries.push(entry);
       this.save();
@@ -366,6 +442,12 @@ export class PaneTidy {
       }
       entry.state = closed ? "closed" : "close_unconfirmed";
       this.save();
+      if (entry.unlanded)
+        try {
+          this.recordLeftBehind(entry.unlanded, `${authority.owner.conversationId}: ${entry.title}`);
+        } catch {
+          /* The close record already keeps the reason; the per-worktree index is secondary. */
+        }
       if (!closed) return fail("close_unconfirmed");
       this.ports.untrack(agent.terminalId);
       return { outcome: "closed", entry: publicEntry(entry) };
@@ -382,6 +464,57 @@ export class PaneTidy {
     } finally {
       if (lock) this.pending.delete(lock);
     }
+  }
+  /**
+   * Doctor's view of unreconciled worktrees: who owns each (its live pane, else the worker
+   * closed from it), how long since anything happened there, and any recorded decision.
+   */
+  async describeUnreconciled(worktrees: readonly WorktreeReconciliation[]): Promise<UnreconciledWorktree[]> {
+    const panes = (await this.ports.runner.list?.().catch(() => undefined)) ?? [];
+    const platform = process.platform === "win32" ? "windows" : "posix";
+    const inside = (root: string, path: string | undefined) =>
+      path !== undefined && projectPathContains(root, path, platform);
+    const now = this.now();
+    return worktrees
+      .map((worktree) => {
+        const live = panes.filter(
+          (pane) =>
+            inside(worktree.path, pane.workingDirectory) ||
+            inside(worktree.path, pane.foregroundWorkingDirectory),
+        );
+        const closed = this.state.entries.findLast((entry) => inside(worktree.path, entry.workingDirectory));
+        const decision = this.decisions.latest(worktree.path);
+        const at = worktree.lastActivityAt ? Date.parse(worktree.lastActivityAt) : undefined;
+        return {
+          ...worktree,
+          owner: live.length
+            ? live.map((pane) => pane.name ?? pane.paneId).join(", ")
+            : closed
+              ? `${closed.title || closed.harness} (closed ${closed.closedAt.slice(0, 10)})`
+              : "unattributed",
+          ...(at === undefined ? {} : { ageSeconds: Math.max(0, Math.floor((now - at) / 1000)) }),
+          ...(decision ? { decision } : {}),
+        };
+      })
+      .sort((a, b) => (b.ageSeconds ?? 0) - (a.ageSeconds ?? 0));
+  }
+  /** What closing this seat would leave behind; the operator close path (TUI, app) holds on it too. */
+  async seatWorktreeHold(seatId: string): Promise<WorktreeReconciliation[]> {
+    const agent = await this.ports.runner.resolveTerminal(seatId).catch(() => undefined);
+    return agent ? workerWorktreeHold(agent) : [];
+  }
+  /** The close record keeps the reason; the decision ledger lets doctor and tidy see it per worktree. */
+  recordLeftBehind(unlanded: { reason: string; worktrees: WorktreeReconciliation[] }, by: string): void {
+    for (const worktree of unlanded.worktrees)
+      this.decisions.record({
+        path: worktree.path,
+        ...(worktree.head ? { head: worktree.head } : {}),
+        decision: "closed_unreconciled",
+        reason: unlanded.reason,
+        by: by.slice(0, 512),
+        ...(worktree.unlandedCommits === undefined ? {} : { unlandedCommits: worktree.unlandedCommits }),
+        ...(worktree.dirtyFiles === undefined ? {} : { dirtyFiles: worktree.dirtyFiles }),
+      });
   }
   /** Explicit operator recovery, composed from the same journaled close/resume
    * boundaries as tidy. A lost exit/resume receipt never triggers another hire. */

@@ -228,7 +228,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   commands.push({
     name: "checkouts",
     aliases: [],
-    description: "Inspect owner checkouts, safely sync main, or prune a landed worktree",
+    description:
+      "Inspect owner checkouts, safely sync main, prune a landed worktree, or record a worktree decision",
     argumentHint: "status | sync [--repository PATH] | prune --repository PATH --path WORKTREE",
     takesArgument: true,
     async run(argument, shell) {

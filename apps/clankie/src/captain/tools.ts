@@ -1182,8 +1182,11 @@ function herdrWatchTools(
             name: "list_tidy_worktrees",
             label: "List landed worktrees for tidy",
             description:
-              "Read linked Git worktrees that are clean and merged into the supplied ref (origin/main by default). " +
-              "Excludes the main checkout, dirty/unmerged/locked trees and every live local pane's working tree. " +
+              "Read linked Git worktrees that are clean and landed in the supplied ref (origin/main by default): merged, " +
+              "landed by content (every commit on it by patch, git cherry; landedBy content), or a recorded safe_to_drop for that HEAD (landedBy decision). " +
+              "Excludes the main checkout, dirty/unlanded/locked trees and every live local pane's working tree. Each retained " +
+              "unmerged or dirty tree carries its unlanded commit and uncommitted file counts and classification " +
+              "(undecided, worth_landing, safe_to_drop, closed_unreconciled); judge undecided ones with decide_tidy_worktree. " +
               "An incomplete Git or pane inventory returns unavailable. Lists candidates and exclusion reasons; removes nothing. " +
               "Use the lead/tidy skills for ownership, evidence and post-landing cleanup decisions.",
             parameters: Type.Object({
@@ -1197,10 +1200,29 @@ function herdrWatchTools(
             },
           }),
           defineTool({
+            name: "decide_tidy_worktree",
+            label: "Record a worktree decision",
+            description:
+              "Record your judgment of one linked worktree's unlanded work at its current HEAD: worth_landing (land it or hand it to its owner) or safe_to_drop (superseded, obsolete or a spike), with a one-line reason. " +
+              "Doctor and list_tidy_worktrees show it. A safe_to_drop clean tree becomes a prune candidate; pruning keeps its commits under refs/clankie/dropped-worktrees/. " +
+              "Uncommitted files are never removed by prune. A new commit invalidates the decision.",
+            parameters: Type.Object({
+              repository: Type.String({ minLength: 1, maxLength: 4096 }),
+              path: Type.String({ minLength: 1, maxLength: 4096 }),
+              decision: Type.Union([Type.Literal("worth_landing"), Type.Literal("safe_to_drop")]),
+              reason: Type.String({ minLength: 1, maxLength: 512 }),
+            }),
+            execute: async (_id, input) => {
+              const authority = captureConversationAuthority(turn.conversationAuthority);
+              await assertConversationAuthority(authority);
+              return json(await watches.tidy!.decideWorktree(input, authority.owner.conversationId));
+            },
+          }),
+          defineTool({
             name: "prune_tidy_worktree",
             label: "Remove a landed worktree",
             description:
-              "After keeping its result, remove one merged, clean, inactive linked worktree in an enrolled root. Fetches origin/main, preserves .local evidence, rechecks all panes including foreground cwd, and uses git worktree remove without force. Deletes its branch only when merged. Never removes main or managed runtime trees; list_tidy_worktrees explains kept trees.",
+              "After keeping its result, remove one landed (merged, by content, or decided safe_to_drop), clean, inactive linked worktree in an enrolled root. Fetches origin/main, preserves .local evidence, rechecks all panes including foreground cwd, and uses git worktree remove without force. Deletes its branch only when merged. Never removes main or managed runtime trees; list_tidy_worktrees explains kept trees.",
             parameters: Type.Object({
               repository: Type.String({ minLength: 1, maxLength: 4096 }),
               path: Type.String({ minLength: 1, maxLength: 4096 }),
@@ -1215,10 +1237,18 @@ function herdrWatchTools(
             name: "close_worker_pane",
             label: "Close a finished worker pane",
             description:
-              "Close a worker pane you judge finished, with a one-line reason. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts, owner-interactive/hand-started panes, unkept results, and another lead's hire (not_owner, naming its conversation). Unknown styled input or native hire provenance fails closed. Does not decide whether the work is done. Never bypass a refusal with a raw close.",
+              "Close a worker pane you judge finished, with a one-line reason. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts, owner-interactive/hand-started panes, unkept results, another lead's hire (not_owner, naming its conversation), and unlanded_work: the worker's worktree has commits not on origin/main by content (git cherry) or uncommitted files, or is unreadable (remote). Land the work or hand it to its owner first; pass unlandedReason only when leaving it behind is a deliberate decision, and it is kept with the close record. Unknown styled input or native hire provenance fails closed. Does not decide whether the work is done. Never bypass a refusal with a raw close.",
             parameters: Type.Object({
               pane: Type.String({ minLength: 1, maxLength: 256 }),
               reason: Type.String({ minLength: 1, maxLength: 512 }),
+              unlandedReason: Type.Optional(
+                Type.String({
+                  minLength: 1,
+                  maxLength: 512,
+                  description:
+                    "Only after an unlanded_work refusal: one line on why those commits or files may stay behind (e.g. superseded by a landed change, or handed to their owner).",
+                }),
+              ),
               reportPath: Type.Optional(
                 Type.String({
                   minLength: 1,

@@ -208,18 +208,26 @@ is `clankie agents efficiency review SEAT --conversation ID --json-stdin`.
 
 ## Closing panes and tidying worktrees
 
-`close_worker_pane({ pane, reason, reportPath? })` keeps the last output and a
-report; `reportPath` is an absolute path to a nonempty report when no worker
-report was kept. It refuses unsent drafts, owner-interactive or hand-started
-panes and unkept results, and a refusal never authorizes a raw close.
+`close_worker_pane({ pane, reason, reportPath?, unlandedReason? })` keeps the
+last output and a report; `reportPath` is an absolute path to a nonempty report
+when no worker report was kept. It refuses unsent drafts, owner-interactive or
+hand-started panes, unkept results, and `unlanded_work`: the worker's start or
+foreground worktree has commits not on `origin/main` by content
+(`git cherry`) or uncommitted files, or is on a remote fleet and unreadable.
+Land the work or hand it to its owner; pass `unlandedReason` only when leaving
+it is deliberate, and it stays with the close record. The app's and TUI's
+close (`close_seat`) holds the same way. A refusal never authorizes a raw close.
 `worker_pane_history({})` lists closes and `undo_worker_pane({ id })` reopens one
 within five minutes. Load `tidy` for the cleanup flow.
 
 `list_tidy_worktrees({ repository, mergedInto? })` (CLI
-`clankie agents tidy-worktrees --repo PATH [--merged-into REF]`) lists merged,
-clean candidates against `origin/main` by default, excluding main, dirty,
-unmerged, locked, prunable and live-pane worktrees; an incomplete census returns
-none. It fetches nothing and removes nothing, and listing proves no ownership.
+`clankie agents tidy-worktrees --repo PATH [--merged-into REF]`) lists landed,
+clean candidates against `origin/main` by default (merged, by content, or a
+decided drop), excluding main, dirty, unlanded, locked, prunable and live-pane
+worktrees; an incomplete census returns none. Retained unmerged or dirty trees
+carry their unlanded and uncommitted counts and a classification; judge an
+`undecided` one with `decide_tidy_worktree({ repository, path, decision:
+worth_landing|safe_to_drop, reason })` (CLI `clankie checkouts decide`). It fetches nothing and removes nothing, and listing proves no ownership.
 Refresh the destination ref through the repo's workflow, confirm
 `git merge-base --is-ancestor HEAD DEST_REF` and a clean `git status`, keep any
 needed ignored evidence, then remove only a worktree you own whose result
