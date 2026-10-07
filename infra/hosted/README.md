@@ -44,9 +44,11 @@ docker compose -p my-clankie -f infra/hosted/compose.yaml exec captain clankie
 
 The last command opens the TUI as a portal to the already-running service. Use
 `/auth` to connect model credentials, `/model` to choose the captain's model and
-`/connect` for connected services. Claude workers use Claude Code's own supported
-login: run `exec captain claude` through the same Compose command to authenticate,
-or set `ANTHROPIC_API_KEY` on the body. Each body start prepares Claude for hires
+`/connect` for connected services. Claude and Codex workers use their own
+logins: `clankie harness login claude|codex` (or the app, or `/harness-login`)
+signs them into your Claude subscription or ChatGPT plan with no shell
+([harness sign-in](../../docs/harness-logins.md)); an `ANTHROPIC_API_KEY` on the
+body also works, and a signed-in subscription takes precedence over it. Each body start prepares Claude for hires
 nobody watches (ADR 0238): the image approves the `clankie-worker` channel in
 `/etc/claude-code/managed-settings.json`, and the body installs that plugin
 (disabled until a hire enables it) and Herdr's Claude hook, marks onboarding

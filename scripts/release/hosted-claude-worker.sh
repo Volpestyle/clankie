@@ -33,9 +33,14 @@ herdr integration install claude >/dev/null || exit 1
 # cosmetic onboarding (theme picker) done, keeping any choice already made, and
 # trust the owner's own workspace (ADR 0238). Other folders keep their prompt.
 # An ANTHROPIC_API_KEY the owner set on the body is their choice of key: record
-# its approval as Claude does (the key's last 20 characters, never the key).
-node -e '
+# its approval as Claude does (the key's last 20 characters, never the key),
+# unless they signed Claude into their subscription, which then wins.
+subscription=false
+# Without the env key, a signed-in Claude is the subscription.
+env -u ANTHROPIC_API_KEY claude auth status --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).loggedIn===true?0:1)}catch{process.exit(1)}})' && subscription=true
+CLANKIE_CLAUDE_SUBSCRIPTION="$subscription" node -e '
 const fs = require("node:fs"), path = `${process.env.HOME}/.claude.json`;
+const subscription = process.env.CLANKIE_CLAUDE_SUBSCRIPTION === "true";
 const workspace = process.env.CLANKIE_HOSTED_WORKSPACE || "/workspace";
 let state = {};
 try { state = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
@@ -43,7 +48,8 @@ const project = state.projects?.[workspace] ?? {};
 const key = process.env.ANTHROPIC_API_KEY?.trim().slice(-20);
 const responses = state.customApiKeyResponses ?? {};
 const approved = (responses.approved ?? []).filter((entry) => entry !== key);
-const keyDone = !key || (responses.approved ?? []).includes(key);
+const rejected = (responses.rejected ?? []).filter((entry) => entry !== key);
+const keyDone = !key || (subscription ? (responses.rejected ?? []) : (responses.approved ?? [])).includes(key);
 if (state.hasCompletedOnboarding === true && project.hasTrustDialogAccepted === true && keyDone) process.exit(0);
 fs.writeFileSync(path, JSON.stringify({
   theme: "dark",
@@ -52,11 +58,9 @@ fs.writeFileSync(path, JSON.stringify({
   projects: { ...state.projects, [workspace]: { ...project, hasTrustDialogAccepted: true } },
   ...(key
     ? {
-        customApiKeyResponses: {
-          ...responses,
-          approved: [...approved, key],
-          rejected: (responses.rejected ?? []).filter((entry) => entry !== key),
-        },
+        customApiKeyResponses: subscription
+          ? { ...responses, approved, rejected: [...rejected, key] }
+          : { ...responses, approved: [...approved, key], rejected },
       }
     : {}),
 }, null, 2), { mode: 0o600 });

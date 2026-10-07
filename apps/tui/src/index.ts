@@ -1,5 +1,6 @@
 import { questionConsoleCommand } from "./question-commands.ts";
 import { runUpdateCommand } from "./command/update.ts";
+import { runHarnessLoginCommand } from "./command/harness-login.ts";
 import { buildHostedConnectionCommands } from "./hosted-console.ts";
 import { gatewayStatus } from "./command/gateway.ts";
 import {
@@ -499,6 +500,7 @@ const commands = [
         stderr: { write: () => undefined },
       }),
     commandUpdate: (args) => runUpdateCommand(args),
+    commandHarnessLogin: (args, io) => runHarnessLoginCommand(args, io),
     commandDoctor: () => doctorCommand({ repoRoot, env: process.env }),
     commandAwake: (args) =>
       runAwakeCommand(args, { repoRoot, env: process.env, stderr: { write: () => undefined } }),

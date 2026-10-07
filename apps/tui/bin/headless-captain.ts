@@ -8,6 +8,7 @@ import {
   runWorkerToolRefreshCommand,
   runWorkerToolRestartCommand,
 } from "../src/command/harness.ts";
+import { runHarnessLoginCommand } from "../src/command/harness-login.ts";
 import { runUpdateCli } from "../src/command/update-output.ts";
 import { runBodyCommand } from "../src/command/body.ts";
 import { MachineInventorySchema } from "@clankie/protocol";
@@ -378,6 +379,15 @@ export async function runHeadlessCaptainCommand(
         const result = await runWorkerToolRestartCommand(rest, options);
         outputJson(stdout, result);
         return result.outcome === "restarted" ? 0 : 1;
+      }
+      if (rest[0] === "login") {
+        const result = await runHarnessLoginCommand(rest, options);
+        outputJson(stdout, result);
+        return typeof result === "object" && result !== null && "ok" in result && result.ok === false
+          ? 1
+          : typeof result === "object" && result !== null && "state" in result && result.state !== "complete"
+            ? 1
+            : 0;
       }
       if (rest[0] === "refresh-tools") {
         const result = await runWorkerToolRefreshCommand(rest, options);

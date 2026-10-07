@@ -20,6 +20,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 # The documented npm distribution installs the native platform binary and license.
 RUN npm install --global @anthropic-ai/claude-code@2.1.281 && npm cache clean --force
+# Codex workers sign in with ChatGPT device codes (`clankie harness login codex`).
+RUN npm install --global @openai/codex@0.160.1 && npm cache clean --force
 # pi is a hireable harness, so it must be on PATH like claude; keep the workspace's pin.
 RUN npm install --global @earendil-works/pi-coding-agent@0.84.2 && npm cache clean --force
 COPY --from=build /clankie/dist/hosted /opt/clankie

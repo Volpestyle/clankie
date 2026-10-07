@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+// Replays Claude Code 2.1.281's headless `auth login`, captured 2026-10-06: it
+// prints the authorization link, reads the code the owner copies back, and on a
+// wrong code says so and keeps waiting for another.
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const home = process.env.HOME;
+const [command, sub] = process.argv.slice(2);
+appendFileSync(join(home, "claude-env.log"), `${sub}:${process.env.ANTHROPIC_API_KEY ? "key" : "nokey"}\n`);
+const credentials = join(home, ".claude", ".credentials.json");
+if (command === "auth" && sub === "status") {
+  const oauth = existsSync(credentials);
+  const key = Boolean(process.env.ANTHROPIC_API_KEY);
+  process.stdout.write(
+    JSON.stringify({ loggedIn: oauth || key, authMethod: key ? "api_key" : oauth ? "oauth" : "none" }, null, 2),
+  );
+  process.exit(oauth || key ? 0 : 1);
+}
+if (command === "auth" && sub === "login") {
+  process.stdout.write(
+    "Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&state=fixture\nPaste code here if prompted > ",
+  );
+  let input = "";
+  process.stdin.on("data", (chunk) => {
+    input += chunk;
+    if (!input.includes("\n")) return;
+    const code = input.trim();
+    input = "";
+    if (code === "good-code#state") {
+      mkdirSync(join(home, ".claude"), { recursive: true });
+      writeFileSync(credentials, "{}");
+      process.stdout.write("Login successful.\n");
+      process.exit(0);
+    }
+    process.stdout.write("Invalid code. Please make sure the full code was copied.\n");
+  });
+} else process.exit(2);

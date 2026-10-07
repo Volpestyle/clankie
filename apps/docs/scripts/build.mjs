@@ -272,6 +272,41 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/harness-logins",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read whether the Claude Code and Codex worker harnesses are installed and signed in.",
+      },
+    ],
+    [
+      "POST /v1/harness-logins/start",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Start a worker harness's own login (Claude subscription or Codex device code) for this device.",
+      },
+    ],
+    [
+      "POST /v1/harness-logins/status",
+      {
+        access: "Encrypted initiating device bearer with terminalControl (Take Control)",
+        purpose: "Read this device's transient login link/code or the harness sign-in outcome.",
+      },
+    ],
+    [
+      "POST /v1/harness-logins/code",
+      {
+        access: "Encrypted initiating device bearer with terminalControl (Take Control)",
+        purpose: "Send the code Claude's sign-in page showed to the waiting login.",
+      },
+    ],
+    [
+      "POST /v1/harness-logins/cancel",
+      {
+        access: "Encrypted initiating device bearer with terminalControl (Take Control)",
+        purpose: "Cancel this device's pending worker harness sign-in.",
+      },
+    ],
+    [
       "POST /v1/model-keys/subscriptions/cancel",
       {
         access: "Encrypted initiating device bearer with terminalControl (Take Control)",

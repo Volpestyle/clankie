@@ -110,6 +110,11 @@ export interface ConsoleCommandContext {
   readonly refreshHerdrBinding?: () => Promise<void>;
   readonly restartCaptain?: () => Promise<void>;
   readonly commandUpdate?: (args: readonly string[]) => Promise<unknown>;
+  /** `clankie harness login`, with the console prompting and showing the link. */
+  readonly commandHarnessLogin?: (
+    args: readonly string[],
+    io: { prompt: (question: string) => Promise<string>; tell: (text: string) => void },
+  ) => Promise<unknown>;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
   /** `clankie awake`: the launcher-supervised keep-awake, and the power state it answers to. */
@@ -214,6 +219,63 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         );
       } catch (error) {
         shell.insertCommandResult("/checkouts", String(error), "error");
+      }
+    },
+  });
+  commands.push({
+    name: "harness-login",
+    aliases: [],
+    description: "Sign Claude or Codex workers into your own subscription",
+    argumentHint: "[claude | codex | status]",
+    takesArgument: true,
+    async run(argument, shell) {
+      const login = context.commandHarnessLogin;
+      if (!login) {
+        shell.insertCommandResult(
+          "/harness-login",
+          "Harness sign-in is unavailable on this connection",
+          "error",
+        );
+        return;
+      }
+      const flow = shell.setupFlow;
+      flow.begin("harness-login");
+      try {
+        let harness = argument.trim();
+        if (harness === "status") {
+          shell.insertCommandResult(
+            "/harness-login",
+            JSON.stringify(
+              await login(["login", "status"], { prompt: async () => "", tell: () => undefined }),
+              null,
+              2,
+            ),
+            "success",
+          );
+          return;
+        }
+        if (!harness) {
+          const picked = await flow.readSelect({
+            message: "Sign which worker harness into your own account?",
+            options: [
+              { value: "claude", label: "Claude Code", hint: "your Claude subscription" },
+              { value: "codex", label: "Codex", hint: "your ChatGPT plan, with a device code" },
+            ],
+            allowBack: true,
+          });
+          if (picked === undefined) return;
+          harness = picked;
+        }
+        const result = await login(["login", harness], {
+          tell: (text) => shell.insertCommandResult("/harness-login", text, "success"),
+          prompt: async (question) =>
+            (await flow.readText({ message: question.replace(/:\s*$/u, ""), allowBack: false })) ?? "",
+        });
+        shell.insertCommandResult("/harness-login", JSON.stringify(result, null, 2), "success");
+      } catch (error) {
+        shell.insertCommandResult("/harness-login", String(error), "error");
+      } finally {
+        flow.end();
       }
     },
   });

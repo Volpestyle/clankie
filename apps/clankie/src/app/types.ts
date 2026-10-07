@@ -148,6 +148,8 @@ export interface ClankieAppDependencies {
   seatCallReceiptPath?: string;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
+  /** Worker harness sign-in with each harness's own login (Claude, Codex). */
+  harnessLogins?: import("../harness-logins.ts").HarnessSignIns;
   /** Proven by the primary listener socket, never a caller-supplied header. */
   isLocalCompanionRequest?: (request: Request) => boolean;
   /** A native client on this Mac over loopback, not forwarded by the gateway; picks addresses only. */

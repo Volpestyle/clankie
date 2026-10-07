@@ -21,6 +21,7 @@ This directory and the module READMEs hold the technical references.
 | [Bundled skills](bundled-skills.md)                      | Skill sources, discovery, and worker distribution                          |
 | [Local companion](local-companion.md)                    | Same-UID Mac pairing handoff and native loopback device session            |
 | [Model keys](model-keys.md)                              | Paired-device API for model credentials and selection                      |
+| [Worker harness sign-in](harness-logins.md)              | Sign Claude Code and Codex workers into the owner's own subscriptions      |
 | [Composer transcription](composer-transcription.md)      | Paired-device recording, draft receipts and local/cloud boundaries         |
 | [Worker access](worker-access.md)                        | Connected tools, native peer messages and manual grants                    |
 | [Tracker identity](worker-tracker-identity.md)           | Connected-account enforcement and remaining isolation work                 |

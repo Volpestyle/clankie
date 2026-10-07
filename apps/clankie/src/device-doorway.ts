@@ -11,6 +11,7 @@ const DEVICE_ROUTE_PREFIXES = [
   "/v1/devices",
   "/v1/pairing/",
   "/v1/model-keys",
+  "/v1/harness-logins",
   "/v1/accounts",
   "/v1/captain/readiness",
   "/v1/support/grants",

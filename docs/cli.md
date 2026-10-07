@@ -4562,6 +4562,19 @@ The owner API exposes `GET /v1/operator/projects` and revision-guarded
 `POST /v1/operator/projects/remove-workspace` (`projectId`, `workspaceId`,
 `expectedRevision`).
 
+### Signing worker harnesses in
+
+`clankie harness login [status | claude | codex | cancel SESSION_ID]` signs the
+Claude Code or Codex worker harness into the owner's own account with that
+harness's official login, on any deployment ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
+`status` prints JSON for both harnesses (`installed`, `signedIn`, `method`).
+`codex` prints a link and one-time code on stderr and waits for the device
+sign-in; `claude` prints the authorization link and prompts for the code the
+page shows (it needs a terminal; a wrong code prompts again). Stdout gets only
+the final JSON, without the link or code; exit 0 means `complete`. Ctrl-C
+cancels on the service. TUI: `/harness-login`. API and states:
+[harness sign-in](harness-logins.md).
+
 ### Linking native fleet harnesses
 
 `clankie harness install [--refresh-linked | --codex-source-setup /absolute/script] [--project PROJECT] [--approve]`

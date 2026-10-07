@@ -183,6 +183,7 @@ import {
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { loadRuntimeProvider } from "./runtime-provider.ts";
 import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
+import { HarnessSignIns } from "./harness-logins.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { createWorkItemsService } from "./work-items.ts";
@@ -979,6 +980,8 @@ function releaseUpdaterOrNone() {
 }
 // A hosted image opts its body into idle official-release installs (ADR 0237).
 // A managed body always takes them; a self-run owner can turn them off.
+// Worker harnesses sign in with their own logins, as this service's user.
+const harnessLogins = new HarnessSignIns({ env: process.env });
 const scheduledUpdates =
   runtimeUpdater !== undefined && process.env.CLANKIE_SCHEDULED_UPDATES === "1"
     ? startScheduledUpdates({
@@ -1555,6 +1558,7 @@ const clankie = await createClankieApp({
   isLocalCompanionRequest: (request) => localCompanionBoundary.has(request),
   isSameMacRequest: (request) => localCompanionBoundary.isSameMac(request),
   modelDeviceSetup: { platform: process.platform, hosted: hostedBody !== undefined },
+  harnessLogins,
   modelKeys: createModelKeys({
     store: operatorCredentialStore,
     cwd: repoRoot,
@@ -1896,6 +1900,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void localFleet.close().catch(() => undefined);
   localFleetServer?.close();
   scheduledUpdates?.close();
+  harnessLogins.close();
   fleetLinks.close();
   fleetLinkServer?.close();
   const bodyRequestsStopped = clankie.stopBodyRequests();

@@ -74,7 +74,12 @@ Clankie's Claude subscription auth is removed; `/auth anthropic` is API-key-only
 Hosted ChatGPT login and forwarding refuse pending OpenAI approval; offer a
 provider API key or included usage. Never submit the waitlist, invent an approval
 date or enable this path on the owner's behalf. Local/self-hosted ChatGPT and
-native unmodified Claude Code/Codex seat logins keep their own supported paths.
+native unmodified Claude Code/Codex seat logins keep their own supported paths:
+on any deployment, including managed, the owner signs worker harnesses into
+their own Claude subscription or ChatGPT plan with `clankie harness login
+claude|codex` or the app (ADR 0239). Login links and codes are for the owner's
+screen only; never put them in a conversation. `clankie harness login status`
+shows which workers can run.
 
 ## Managed Discord connection
 

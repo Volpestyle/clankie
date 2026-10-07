@@ -27,6 +27,13 @@ import {
   MODEL_OPTIONS_PATH,
   MODEL_EFFORT_SET_PATH,
 } from "./model-keys.ts";
+import {
+  HARNESS_LOGINS_PATH,
+  HARNESS_LOGIN_CANCEL_PATH,
+  HARNESS_LOGIN_CODE_PATH,
+  HARNESS_LOGIN_START_PATH,
+  HARNESS_LOGIN_STATUS_PATH,
+} from "./harness-logins.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DISCORD_VOICE_TRANSCRIPTS_PATH, OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./index.ts";
@@ -98,6 +105,12 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: MODEL_KEY_REMOVE_PATH, target: "control" },
   { method: "GET", path: MODEL_SUBSCRIPTIONS_PATH, target: "control" },
   { method: "GET", path: MODEL_SUBSCRIPTION_METHODS_PATH, target: "control" },
+  // Worker harness sign-in (Take Control), never through support access.
+  { method: "GET", path: HARNESS_LOGINS_PATH, target: "control" },
+  { method: "POST", path: HARNESS_LOGIN_START_PATH, target: "control" },
+  { method: "POST", path: HARNESS_LOGIN_STATUS_PATH, target: "control" },
+  { method: "POST", path: HARNESS_LOGIN_CODE_PATH, target: "control" },
+  { method: "POST", path: HARNESS_LOGIN_CANCEL_PATH, target: "control" },
   { method: "POST", path: MODEL_SUBSCRIPTION_START_PATH, target: "control" },
   { method: "POST", path: MODEL_SUBSCRIPTION_STATUS_PATH, target: "control" },
   { method: "POST", path: MODEL_SUBSCRIPTION_CANCEL_PATH, target: "control" },

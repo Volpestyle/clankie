@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+// Replays codex-cli 0.160.1's device login, captured 2026-10-06; the owner's
+// approval is the test writing `codex-approved` in HOME.
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const home = process.env.HOME;
+const [command, flag] = process.argv.slice(2);
+if (command === "login" && flag === "status") {
+  if (existsSync(join(home, ".codex", "auth.json"))) {
+    process.stdout.write("Logged in using ChatGPT\n");
+    process.exit(0);
+  }
+  process.stdout.write("Not logged in\n");
+  process.exit(1);
+}
+if (command === "login" && flag === "--device-auth") {
+  process.stdout.write(
+    "\nWelcome to Codex [v\u001b[90m0.160.1\u001b[0m]\n\u001b[90mOpenAI's command-line coding agent\u001b[0m\n\n" +
+      "Follow these steps to sign in with ChatGPT using device code authorization:\n\n" +
+      "1. Open this link in your browser and sign in to your account\n   \u001b[94mhttps://auth.openai.com/codex/device\u001b[0m\n\n" +
+      "2. Enter this one-time code \u001b[90m(expires in 15 minutes)\u001b[0m\n   \u001b[94mQ7RT-9KXWP\u001b[0m\n\n" +
+      "\u001b[90mContinue only if you started this login in Codex. If a website or another person gave you this code, cancel.\u001b[0m\n",
+  );
+  const timer = setInterval(() => {
+    if (!existsSync(join(home, "codex-approved"))) return;
+    clearInterval(timer);
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex", "auth.json"), "{}");
+    process.stdout.write("Successfully logged in\n");
+    process.exit(0);
+  }, 20);
+} else process.exit(2);

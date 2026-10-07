@@ -94,6 +94,7 @@ import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
+import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
 import { PairingOfferStore, replayReviewOffers } from "../pairing.ts";
 import { createProjectRoutes } from "../project-routes.ts";
 import { createPushDispatcher, type PushDispatcher } from "../push.ts";
@@ -1026,6 +1027,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.route(
     "/",
     createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),
+  );
+  app.route(
+    "/",
+    createHarnessLoginRoutes(dependencies.harnessLogins, authorizeOwnerSecrets, async (request) => {
+      const operator = await authenticateOperator(request, dependencies);
+      if (operator && operator !== "unavailable") return `operator:${operator.operatorId}`;
+      const device = await authenticateDevice(request);
+      if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return undefined;
+      return `device:${device.deviceId}`;
+    }),
   );
   const readCaptainReadiness = async () => {
     if (dependencies.captain.operatorSeatReady?.()) return { ready: true } as const;
