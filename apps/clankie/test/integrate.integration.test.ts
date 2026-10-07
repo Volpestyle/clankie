@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, glob, mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -22,6 +22,13 @@ const roots: string[] = [];
 const cleanups: (() => void)[] = [];
 afterEach(async () => {
   for (const close of cleanups.splice(0)) close();
+  // Gate temps live outside the batch root (short socket paths); remove them too.
+  for (const root of roots)
+    for await (const link of glob("**/isolation/*/tmp", { cwd: root }))
+      await readlink(join(root, link)).then(
+        (target) => rm(target, { recursive: true, force: true }),
+        () => undefined,
+      );
   await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
 async function git(directory: string, ...args: string[]): Promise<string> {
@@ -53,7 +60,7 @@ async function fixture(gateExtra: string | ((root: string) => string) = "", with
       join(source, "gate.mjs"),
       `
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -65,6 +72,9 @@ assert.equal(process.env.NODE_OPTIONS, undefined);
 assert.equal(process.env.CLANKIE_KEYCHAIN_TESTS, undefined);
 assert.ok(process.env.CLANKIE_CREDENTIALS_FILE.startsWith(homedir()));
 assert.ok(process.env.npm_config_store_dir.includes('isolation'));
+// Fixture Unix sockets live under TMPDIR; macOS limits their paths to ~104 bytes.
+assert.ok(Buffer.byteLength(join(process.env.TMPDIR, 'clankie-world-body-XXXXXX', 'host.sock')) < 104);
+if (process.platform !== 'win32') assert.equal(statSync(process.env.TMPDIR).mode & 0o077, 0);
 const descriptor = join(process.env.CLANKIE_STATE, 'links', 'default-local.json');
 assert.equal(existsSync(descriptor), false);
 mkdirSync(dirname(descriptor), { recursive: true });

@@ -49,7 +49,10 @@ Each batch runs real `pnpm install --frozen-lockfile`
 with a private store and copied packages, then `pnpm check` in every included
 repository. Evals remain outside the full check. Gate processes start with private
 HOME, XDG directories, Clankie state and fleet descriptors, and a file credential
-broker, before any Vitest setup can snapshot owner paths. Their environment has
+broker, before any Vitest setup can snapshot owner paths. On macOS and Linux their
+TMPDIR is a short private `/tmp/clankie-gate-*` directory linked from the batch's
+isolation root, because Unix socket paths under the deep batch root exceed the
+~104-byte limit. Their environment has
 no inherited tokens, keys, service URLs, harness configuration, or Node options;
 default service addresses point at an unavailable local port. This isolates
 normal repository checks from the live install; it is not a sandbox for malicious
