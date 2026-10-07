@@ -65,6 +65,7 @@ async function inside() {
         const args = JSON.stringify({
           harness: "pi",
           title: "pi proof",
+          role: "builder",
           workingDirectory: "/workspace",
           brief,
         });
@@ -205,6 +206,7 @@ async function inside() {
     hired = await call("hire_agent", {
       harness: "claude",
       title: "hosted-proof",
+      role: "builder",
       workingDirectory: "/workspace",
       brief:
         "Write the authorized test marker to /workspace/hosted-proof.txt. Preserve other files. This isolated fixture supplies synthetic model responses. Report the result and checks.",
