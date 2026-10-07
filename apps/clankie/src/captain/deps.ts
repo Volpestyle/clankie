@@ -100,7 +100,8 @@ export interface CaptainDeps {
   readonly workItems?: Pick<WorkItemsService, "handle">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
   readonly mcp: Pick<McpHost, "catalog" | "call">;
-  readonly email: EmailPort;
+  /** The mail tools only; the account catalog owns status and disconnect. */
+  readonly email: Pick<EmailPort, "list" | "read" | "search" | "send">;
   readonly browser: Pick<BrowserHost, "catalog" | "call">;
   readonly media: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;

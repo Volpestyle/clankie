@@ -23,6 +23,9 @@ There is no save-draft, archive or label operation, so a reply draft lives in th
 conversation and is never "saved to the mailbox". Send with `email_send` only
 when the owner authorized that send with a resolved recipient and content; a
 refusal is something to report, and an uncertain send is checked, never retried.
+`sign_in_rejected` means the mail server refused the stored password: the
+mailbox is not empty, it needs the owner to reconnect it, and the detail carries
+the server's own words.
 
 ## Google connections
 

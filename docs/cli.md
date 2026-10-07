@@ -1289,6 +1289,12 @@ and `/connect accounts` (also `/connections` → Accounts) use that same catalog
 Google rows can report `awaiting_consent`, `expired`, `reconnect_required`,
 `unavailable` or `disconnected`, together with the last check and pending revocation.
 An unconfigured row means an operator has not configured the developer OAuth client.
+The `email` row is his own mailbox (`/connect email`), with the address he sends
+as and the result of the last real sign-in, re-checked when older than a minute:
+`connected`, `reconnect_required` with reason `sign_in_rejected` when the mail
+server refused the stored password, or `unavailable` when the server could not
+be reached. `accounts disconnect email` forgets the stored password and returns
+`revoked: false`; an app password is withdrawn at the provider.
 `accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
 `accounts start github` and `accounts poll github --flow-id ID` expose the same

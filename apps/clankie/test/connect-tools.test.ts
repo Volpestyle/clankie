@@ -7,7 +7,7 @@ const unused = (): never => {
   throw new Error("unused");
 };
 
-function deps(overrides: { email?: Partial<EmailPort> }): CaptainDeps {
+function deps(overrides: { email?: Partial<CaptainDeps["email"]> }): CaptainDeps {
   return {
     mcp: { catalog: async () => [], call: unused },
     email: {

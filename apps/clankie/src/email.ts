@@ -9,7 +9,12 @@ import nodemailer from "nodemailer";
 
 export const EMAIL_PROVIDER_ID = "email";
 
-type EmailRefusalReason = "credential_unavailable" | "not_configured" | "provider_error";
+type EmailRefusalReason =
+  | "credential_unavailable"
+  | "not_configured"
+  /** The provider refused the stored sign-in: the owner has to reconnect. */
+  | "sign_in_rejected"
+  | "provider_error";
 
 type EmailRefusal = {
   readonly outcome: "refused";
@@ -30,7 +35,22 @@ type EmailMessage = EmailHeader & {
   readonly text: string;
 };
 
+/**
+ * What the owner's connection list shows. `checkedAt` is the last real
+ * provider exchange; a probe only runs when that is older than a minute.
+ */
+type MailboxStatus =
+  | { readonly state: "not_connected" }
+  | {
+      readonly state: "connected" | "sign_in_rejected" | "unavailable";
+      readonly address: string;
+      readonly checkedAt: string;
+    };
+
 export type EmailPort = {
+  status(): Promise<MailboxStatus>;
+  /** Forgets the stored sign-in; host settings stay for a reconnect. */
+  disconnect(): Promise<void>;
   list(options?: {
     folder?: string;
     limit?: number;
@@ -80,13 +100,41 @@ type ConnectedMailbox = {
 
 const MAX_LIST = 25;
 const MAX_BODY_CHARS = 12_000;
+const STATUS_FRESH_MS = 60_000;
+const SIGN_IN_REJECTED = "mailbox sign-in rejected — reconnect with /connect email";
 
 export function createEmailPort(options: {
   credentials: CredentialStore;
   settings: SettingsStore;
   adapters?: EmailAdapters;
+  now?: () => number;
 }): EmailPort {
   const adapters = options.adapters ?? defaultEmailAdapters();
+  const now = options.now ?? Date.now;
+  let observed:
+    | {
+        readonly username: string;
+        readonly ok: boolean;
+        readonly reason?: EmailRefusalReason;
+        readonly at: number;
+      }
+    | undefined;
+
+  function observe<T>(account: ConnectedMailbox, result: T | EmailRefusal): T | EmailRefusal {
+    const refusal =
+      typeof result === "object" && result !== null && "outcome" in result && result.outcome === "refused"
+        ? (result as EmailRefusal)
+        : undefined;
+    // A missing uid is the message, not the mailbox.
+    if (refusal?.reason === "provider_error" && refusal.detail.startsWith("no message uid")) return result;
+    observed = {
+      username: account.username,
+      ok: refusal === undefined,
+      ...(refusal === undefined ? {} : { reason: refusal.reason }),
+      at: now(),
+    };
+    return result;
+  }
 
   async function connected(): Promise<ConnectedMailbox | EmailRefusal> {
     const stored = await options.credentials.get(EMAIL_PROVIDER_ID);
@@ -118,18 +166,48 @@ export function createEmailPort(options: {
     try {
       session = await adapters.openImap(account, folder);
     } catch (error) {
-      return refuseProvider(error);
+      return observe(account, refuseProvider(error));
     }
     try {
-      return await use(session, account);
+      return observe(account, await use(session, account));
     } catch (error) {
-      return refuseProvider(error);
+      return observe(account, refuseProvider(error));
     } finally {
       await session.close().catch(() => undefined);
     }
   }
 
   return {
+    async disconnect() {
+      observed = undefined;
+      await options.credentials.delete(EMAIL_PROVIDER_ID);
+    },
+
+    async status() {
+      const account = await connected();
+      if ("outcome" in account) return { state: "not_connected" };
+      if (
+        observed === undefined ||
+        observed.username !== account.username ||
+        now() - observed.at > STATUS_FRESH_MS
+      ) {
+        await withImap("INBOX", async () => ({ outcome: "ok" as const }));
+      }
+      const last = observed;
+      const address = account.settings.fromAddress ?? account.username;
+      if (last === undefined)
+        return { state: "unavailable", address, checkedAt: new Date(now()).toISOString() };
+      return {
+        state: last.ok
+          ? "connected"
+          : last.reason === "sign_in_rejected"
+            ? "sign_in_rejected"
+            : "unavailable",
+        address,
+        checkedAt: new Date(last.at).toISOString(),
+      };
+    },
+
     async list(input = {}) {
       const folder = input.folder?.trim() || "INBOX";
       const limit = clampLimit(input.limit);
@@ -185,9 +263,9 @@ export function createEmailPort(options: {
       }
       try {
         const messageId = await adapters.sendSmtp(account, input);
-        return { outcome: "ok", messageId };
+        return observe(account, { outcome: "ok" as const, messageId });
       } catch (error) {
-        return refuseProvider(error);
+        return observe(account, refuseProvider(error));
       }
     },
   };
@@ -352,10 +430,39 @@ function clampLimit(limit: number | undefined): number {
   return Math.min(Math.max(limit, 1), MAX_LIST);
 }
 
+/**
+ * ImapFlow reports every NO as "Command failed" and keeps what the server said
+ * on the error; nodemailer marks a refused SMTP login `EAUTH`. Both name the
+ * fix, so the refusal carries them. The server text is the provider's own
+ * reply to the login, never the password it was sent.
+ */
 function refuseProvider(error: unknown): EmailRefusal {
+  if (!(error instanceof Error))
+    return { outcome: "refused", reason: "provider_error", detail: String(error) };
+  const fields = error as Error & {
+    authenticationFailed?: unknown;
+    responseText?: unknown;
+    serverResponseCode?: unknown;
+    code?: unknown;
+    response?: unknown;
+  };
+  const said =
+    typeof fields.responseText === "string" && fields.responseText.trim().length > 0
+      ? fields.responseText.trim()
+      : fields.code === "EAUTH" && typeof fields.response === "string"
+        ? fields.response.trim()
+        : undefined;
+  if (fields.authenticationFailed === true || fields.code === "EAUTH") {
+    const code = typeof fields.serverResponseCode === "string" ? `[${fields.serverResponseCode}] ` : "";
+    return {
+      outcome: "refused",
+      reason: "sign_in_rejected",
+      detail: said === undefined ? SIGN_IN_REJECTED : `${SIGN_IN_REJECTED} (server: ${code}${said})`,
+    };
+  }
   return {
     outcome: "refused",
     reason: "provider_error",
-    detail: error instanceof Error ? error.message : String(error),
+    detail: said === undefined || error.message.includes(said) ? error.message : `${error.message}: ${said}`,
   };
 }

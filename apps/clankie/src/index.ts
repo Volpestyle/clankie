@@ -1550,6 +1550,7 @@ const clankie = await createClankieApp({
   accounts: createAccounts({
     hosted: hostedBody !== undefined,
     store: operatorCredentialStore,
+    mailbox: email,
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
   }),
   isLocalCompanionRequest: (request) => localCompanionBoundary.has(request),
