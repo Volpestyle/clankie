@@ -1,0 +1,70 @@
+{
+  "before": [
+    {
+      "name": "structuredClone",
+      "count": 20000,
+      "bytes": 27063,
+      "wallMs": 3209.072292,
+      "cpuMs": 3229.386,
+      "cpuPercent": 100.63300873746724
+    },
+    {
+      "name": "JSON.parse",
+      "count": 20000,
+      "bytes": 27063,
+      "wallMs": 1077.794708,
+      "cpuMs": 1076.913,
+      "cpuPercent": 99.91819332629346
+    },
+    {
+      "name": "load",
+      "count": 20000,
+      "bytes": 27063,
+      "wallMs": 5259.023541,
+      "cpuMs": 5049.357,
+      "cpuPercent": 96.01320398424892
+    },
+    {
+      "name": "10Hz idle load",
+      "count": 198,
+      "bytes": 27063,
+      "wallMs": 20050.137625000003,
+      "cpuMs": 92.801,
+      "cpuPercent": 0.4628447032916563
+    }
+  ],
+  "after": [
+    {
+      "name": "structuredClone",
+      "count": 20000,
+      "bytes": 27063,
+      "wallMs": 4018.2328749999997,
+      "cpuMs": 3971.643,
+      "cpuPercent": 98.84053820549164
+    },
+    {
+      "name": "JSON.parse",
+      "count": 20000,
+      "bytes": 27063,
+      "wallMs": 1543.4404159999995,
+      "cpuMs": 1517.251,
+      "cpuPercent": 98.30317933050682
+    },
+    {
+      "name": "load",
+      "count": 20000,
+      "bytes": 27063,
+      "wallMs": 3577.556667,
+      "cpuMs": 3400.001,
+      "cpuPercent": 95.03695724409333
+    },
+    {
+      "name": "10Hz idle load",
+      "count": 198,
+      "bytes": 27063,
+      "wallMs": 20048.093374999997,
+      "cpuMs": 76.354,
+      "cpuPercent": 0.3808541718745861
+    }
+  ]
+}

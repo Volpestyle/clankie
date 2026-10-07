@@ -72,6 +72,7 @@ message `stored`, delete runtime state, or send a replacement to bypass this gap
 - Browser recordings (opt-in): `~/.clankie/runner/browser/recordings/*.webm`, named by start time
 - Service stdout + lifecycle: `~/.local/state/clankie/<id>.log`, `<id>-service.json`
 - Live status: `clankie status` / `/trace` in the face
+- Opt-in service CPU profiles: set `CLANKIE_CPU_PROFILE_DIR` in the actual launcher's environment for the next planned start/restart; Node writes `.cpuprofile` on graceful service exit. Only Clankie is profiled, not preparation or helpers. Relative directories resolve against the runtime root. Existing live processes are unchanged; a prefixed `clankie update` does not forward this variable into its live-service-owned update helper. Arrange it for the next planned deployment with the operator; do not introduce an extra restart. See `docs/cli.md` under service lifecycle.
 - What's on the TUI screen right now: `herdr pane read <pane> --source visible`
 
 Shapes, retention and the Discord media and Linear activity details are in

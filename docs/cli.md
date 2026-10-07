@@ -753,6 +753,30 @@ New service processes clear inherited pnpm lifecycle and Pi session markers.
 Otherwise a restart launched from a running package script can be mistaken for
 a recursive `start` and skipped by pnpm, leaving all stopped dependents offline.
 
+For CPU attribution on the next planned service start, set
+`CLANKIE_CPU_PROFILE_DIR` in that launcher's environment. For example, when a
+restart is already planned:
+
+```sh
+CLANKIE_CPU_PROFILE_DIR="$PWD/.local/cpu-profiles" clankie restart clankie
+```
+
+The directory is created if absent; relative paths resolve against the runtime
+checkout or install root. Only the Clankie service receives Node's `--cpu-prof`
+flags; checkout preparation, bridges and launcher helpers are unaffected.
+Existing `NODE_OPTIONS` remain intact. Profiling is off when the variable is
+unset or empty and opens no inspector port. Node writes a uniquely named
+`.cpuprofile` there when the service exits normally, including its graceful
+SIGTERM shutdown; forced termination may leave no profile. Read it in Chrome
+DevTools or another CPU profile viewer. Keep profiles private because stacks and
+paths can contain owner context.
+
+This variable does not instrument an already running service. Prefixing
+`clankie update` with it does not forward it into the live service's update
+helper: the environment must reach the actual launcher that starts the next
+runtime. Arrange it with the operator for the next planned deployment; no extra
+restart is required merely to prepare the setting.
+
 ### `start [service]` / `stop [service]`
 
 `start` starts what is not running, in dependency order, and leaves a healthy

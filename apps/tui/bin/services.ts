@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { parsePositiveInt, resolveDiscordActiveBody, serviceInLoadout } from "@clankie/settings";
 import {
   ensureCaptainCredential,
@@ -197,10 +197,29 @@ async function readPresenceDetail(input: {
  * release runs its bundled entrypoint with its bundled Node. `/health`
  * answering on its port is what "up" means.
  */
+const CLANKIE_START = workspaceStart("@clankie/clankie", "apps/clankie/src/index.js");
 const CLANKIE: ManagedService = {
   id: "clankie",
   label: "Clankie",
-  ...workspaceStart("@clankie/clankie", "apps/clankie/src/index.js"),
+  ...CLANKIE_START,
+  resolveProcess: ({ env, repoRoot }) => {
+    const ordinary = CLANKIE_START.resolveProcess!({ env, repoRoot });
+    const directory = env.CLANKIE_CPU_PROFILE_DIR;
+    if (directory === undefined || directory.length === 0) return ordinary;
+    const profileDirectory = resolve(repoRoot, directory);
+    mkdirSync(profileDirectory, { recursive: true, mode: 0o700 });
+    return ordinary.command === "pnpm"
+      ? {
+          command: process.execPath,
+          args: [join(repoRoot, "scripts", "profile-clankie.mjs"), profileDirectory],
+        }
+      : {
+          command: ordinary.command,
+          args: ["--cpu-prof", `--cpu-prof-dir=${profileDirectory}`, ...ordinary.args],
+        };
+  },
+  commandMatches: (command) =>
+    CLANKIE_START.commandMatches(command) || command.includes("/scripts/profile-clankie.mjs "),
   // Match the service's listen port, not a potentially remote probe URL.
   conflictingPids: ({ env, matchingPids, listPortOwners }) =>
     listPortOwners(Number(env.PORT ?? "4310")) ?? matchingPids,

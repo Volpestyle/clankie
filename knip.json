@@ -10,6 +10,7 @@
     ".": {
       "entry": [
         "scripts/evals/run.mjs",
+        "scripts/profile-clankie.mjs",
         ".agents/skills/shared-checkout/scripts/land.mjs",
         ".agents/skills/shared-checkout/scripts/land.test.mjs",
         "scripts/evals/codex.mjs",

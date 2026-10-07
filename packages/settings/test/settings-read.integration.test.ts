@@ -11,8 +11,14 @@ it("isolates repeated settings reads and observes replacement, corruption and de
   const disabled = '{"schemaVersion":1,"fleet":{"tools":"off"}}';
   try {
     await writeFile(store.path, connected);
-    (await store.load()).fleet.tools = "off";
-    expect((await store.load()).fleet.tools).toBe("connected");
+    const first = await store.load();
+    const repeated = await store.load();
+    expect(repeated).toStrictEqual(first);
+    first.fleet.tools = "off";
+    first.agentHosts.connections.push({ id: "fixture", ssh: "fixture.invalid", shell: "posix" });
+    expect(repeated.fleet.tools).toBe("connected");
+    expect(repeated.agentHosts.connections).toEqual([]);
+    expect(await store.load()).toStrictEqual(repeated);
     const fenced = await store.loadFenced();
     fenced.settings.fleet.tools = "off";
     expect((await store.load()).fleet.tools).toBe("connected");

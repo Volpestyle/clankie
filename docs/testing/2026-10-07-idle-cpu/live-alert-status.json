@@ -1,0 +1,48 @@
+{
+  "capturedAt": "2026-10-07T19:13:33.839858+00:00",
+  "runtimeHealthStatus": {
+    "schemaVersion": 1,
+    "revision": "7f8fb939a1ab1eb06bc01e0fd96f746442faae0ecc0343270e259b2e580a1f7e",
+    "settings": {
+      "enabled": true,
+      "cpuPercent": 50,
+      "healthLatencyMs": 1000,
+      "sustainedMs": 300000,
+      "sampleIntervalMs": 15000,
+      "cooldownMs": 1800000
+    },
+    "observation": {
+      "state": "healthy",
+      "observedAt": "2026-10-07T19:13:10.456Z",
+      "cpuPercent": 10.6,
+      "healthLatencyMs": 1,
+      "healthAvailable": true,
+      "durationMs": 0,
+      "reasons": [],
+      "delivery": "none"
+    }
+  },
+  "statusRuntimeHealth": {
+    "state": "healthy",
+    "observedAt": "2026-10-07T19:13:10.456Z",
+    "cpuPercent": 10.6,
+    "healthLatencyMs": 1,
+    "healthAvailable": true,
+    "durationMs": 0,
+    "reasons": [],
+    "delivery": "none"
+  },
+  "doctorRuntimeHealth": {
+    "state": "healthy",
+    "observedAt": "2026-10-07T19:13:25.459Z",
+    "cpuPercent": 10.6,
+    "healthLatencyMs": 1,
+    "healthAvailable": true,
+    "durationMs": 0,
+    "reasons": [],
+    "delivery": "none"
+  },
+  "healthDeliveryEventsAfterRuntimeBoot": [],
+  "launcherPid": 53441,
+  "servicePid": 53563
+}

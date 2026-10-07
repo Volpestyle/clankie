@@ -1,0 +1,146 @@
+{
+  "scope": "V8 self sample attribution after first 15 seconds, not CPU-counter time; startup omitted",
+  "sampledSeconds": 119.597613,
+  "measurement": {
+    "mode": "isolated-before",
+    "pid": 1897,
+    "boot": "c8d910ac-e7e9-48bf-a157-43911d848e48",
+    "elapsedMs": 119998.027083,
+    "cpuMicros": 8472435,
+    "cpuPercent": 7.060478581151841,
+    "healthP95Ms": 1.912916999994195,
+    "clients": 10,
+    "fleets": ["pc", "kh2"],
+    "requests": 352,
+    "errors": 0,
+    "turns": 0,
+    "spawns": {
+      "ssh": 106,
+      "ps": 88
+    },
+    "healthTransport": "fresh node:http, agent:false, full body/5s timeout/32KiB limit; same production local sampler transport",
+    "scope": "Owned installed Captain/API, read-only live fleet inventories; no provider, app, or legacy worker transport reproduction. Ambient fleet uncontrolled."
+  },
+  "top": [
+    {
+      "sampledSeconds": 115.310151,
+      "function": "(idle)",
+      "file": "",
+      "line": 0
+    },
+    {
+      "sampledSeconds": 0.603825,
+      "function": "",
+      "file": "file://apps/clankie/src/captain/seat-telemetry.ts",
+      "line": 1
+    },
+    {
+      "sampledSeconds": 0.485016,
+      "function": "(garbage collector)",
+      "file": "",
+      "line": 0
+    },
+    {
+      "sampledSeconds": 0.404714,
+      "function": "(program)",
+      "file": "",
+      "line": 0
+    },
+    {
+      "sampledSeconds": 0.312863,
+      "function": "",
+      "file": "file://packages/agent-transcript/src/index.ts",
+      "line": 1
+    },
+    {
+      "sampledSeconds": 0.278004,
+      "function": "readCodexGoal",
+      "file": "file://packages/agent-transcript/src/goals.ts",
+      "line": 1
+    },
+    {
+      "sampledSeconds": 0.203008,
+      "function": "RegExp: \\b(?:(?:eve[_ -]?)?session(?:[_ -]?(?:id|token))?|(?:access|refresh|continuation)[_ -]?token|api[_ -]?key|provider[_ -]?credential|password|passwd|secret|credential)\\s*[:=]\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s,;]+)",
+      "file": "",
+      "line": 0
+    },
+    {
+      "sampledSeconds": 0.123869,
+      "function": "parseRecords",
+      "file": "file://packages/agent-transcript/src/index.ts",
+      "line": 1
+    },
+    {
+      "sampledSeconds": 0.120736,
+      "function": "spawn",
+      "file": "node:internal/child_process",
+      "line": 355
+    },
+    {
+      "sampledSeconds": 0.101019,
+      "function": "",
+      "file": "file://integrations/claude-plugin/worker/bin/harness-live.mjs",
+      "line": 204
+    },
+    {
+      "sampledSeconds": 0.057271,
+      "function": "RegExp: \\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[_A-Za-z0-9-]{8,}",
+      "file": "",
+      "line": 0
+    },
+    {
+      "sampledSeconds": 0.052742,
+      "function": "cleanDetail",
+      "file": "file://packages/agent-transcript/src/index.ts",
+      "line": 1
+    },
+    {
+      "sampledSeconds": 0.04638,
+      "function": "RegExp: \\s+",
+      "file": "",
+      "line": 0
+    },
+    {
+      "sampledSeconds": 0.042673,
+      "function": "",
+      "file": "file://integrations/claude-plugin/worker/bin/harness-live.mjs",
+      "line": 202
+    },
+    {
+      "sampledSeconds": 0.041464,
+      "function": "normalizeSpawnArguments",
+      "file": "node:child_process",
+      "line": 584
+    },
+    {
+      "sampledSeconds": 0.040748,
+      "function": "processTimers",
+      "file": "node:internal/timers",
+      "line": 603
+    },
+    {
+      "sampledSeconds": 0.03914,
+      "function": "",
+      "file": "file://integrations/claude-plugin/worker/bin/harness-live.mjs",
+      "line": 147
+    },
+    {
+      "sampledSeconds": 0.039013,
+      "function": "internalConnect",
+      "file": "node:net",
+      "line": 1338
+    },
+    {
+      "sampledSeconds": 0.03115,
+      "function": "",
+      "file": "file://apps/clankie/src/herdr-native-request.ts",
+      "line": 2
+    },
+    {
+      "sampledSeconds": 0.028624,
+      "function": "timestamp",
+      "file": "file://packages/agent-transcript/src/index.ts",
+      "line": 1
+    }
+  ]
+}

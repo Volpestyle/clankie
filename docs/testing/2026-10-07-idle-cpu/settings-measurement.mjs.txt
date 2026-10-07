@@ -1,0 +1,31 @@
+import { SettingsStore } from '../../packages/settings/src/store.ts';
+import { emptySettings } from '../../packages/settings/src/schema.ts';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const root = await mkdtemp(join(tmpdir(), 'vuh-1699-settings-'));
+const settings = emptySettings();
+settings.projects.projects = Array.from({ length: 120 }, (_, i) => ({ id: `fixture-${i}`, name: `Fixture project ${i}`, workspaces: [{id: 'local', machineId: 'local', path: `/tmp/fixture-${i}`, platform: 'posix'}], worktreeRoots: [], roles: [], labelRoleMap: [], grants: [] }));
+const file = join(root, 'settings.json');
+await writeFile(file, JSON.stringify(settings, null, 2));
+const store = new SettingsStore(file);
+const normalized = await store.load();
+const serialized = JSON.stringify(normalized);
+async function measure(name, count, action) {
+ const start = performance.now(); const cpu = process.cpuUsage();
+ for (let i = 0; i < count; i++) await action();
+ const used = process.cpuUsage(cpu); const wallMs = performance.now() - start;
+ console.log(JSON.stringify({name, count, bytes: serialized.length, wallMs, cpuMs:(used.user + used.system)/1000, cpuPercent: (used.user + used.system)/1000/wallMs*100}));
+}
+try {
+ await measure('structuredClone', 20000, () => structuredClone(normalized));
+ await measure('JSON.parse', 20000, () => JSON.parse(serialized));
+ await measure('load', 20000, () => store.load());
+ const start = performance.now(); const cpu = process.cpuUsage(); let count = 0;
+ while (performance.now() - start < 20000) {
+   await store.load(); count++;
+   await new Promise(resolve => setTimeout(resolve, 100));
+ }
+ const used = process.cpuUsage(cpu); const wallMs = performance.now() - start;
+ console.log(JSON.stringify({name: '10Hz idle load', count, bytes:serialized.length,wallMs,cpuMs:(used.user+used.system)/1000,cpuPercent:(used.user+used.system)/1000/wallMs*100}));
+} finally { await rm(root, { recursive: true, force: true }); }

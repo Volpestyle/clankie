@@ -31,7 +31,7 @@ export function defaultSettingsPath(env: NodeJS.ProcessEnv = process.env): strin
 export class SettingsStore {
   private readonly filePath: string;
   private queue: Promise<unknown> = Promise.resolve();
-  private parsed: { raw: string; settings: ClankieSettings } | undefined;
+  private parsed: { raw: string; normalized: string } | undefined;
 
   public constructor(filePath: string = defaultSettingsPath()) {
     this.filePath = filePath;
@@ -103,7 +103,10 @@ export class SettingsStore {
     // Each caller still reads the file. Reuse validation only for exactly equal
     // bytes, never a TTL or stat-only authority snapshot. Return a private copy
     // so a caller's edits cannot contaminate later reads or fenced snapshots.
-    if (this.parsed?.raw === raw) return structuredClone(this.parsed.settings);
+    // Validated settings contain JSON values. Parsing their normalized bytes is
+    // cheaper than structuredClone for repeated idle reads and still gives each
+    // caller an independent object, including defaults and compatibility views.
+    if (this.parsed?.raw === raw) return JSON.parse(this.parsed.normalized) as ClankieSettings;
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -117,7 +120,7 @@ export class SettingsStore {
     const settings = machineSettings(
       migrateLegacyFleetWorkingPreferences(migrateLinearWakeDefaults(dropRetiredSettings(parsed))),
     );
-    this.parsed = { raw, settings: structuredClone(settings) };
+    this.parsed = { raw, normalized: JSON.stringify(settings) };
     return settings;
   }
 
