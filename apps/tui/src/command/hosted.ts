@@ -24,7 +24,7 @@ export const NO_HOSTED_CLANKIE_MESSAGE =
   "This account has no hosted Clankie. Run `clankie login` to sign this Mac in for remote access to your own Clankie, or add a hosted Clankie from your account page.";
 
 /** Why the hosted lookup failed, in the owner's words rather than "no hosted Clankie". */
-export function hostedLookupFailedMessage(error: unknown): string {
+function hostedLookupFailedMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return /\b(401|unauthorized)\b/u.test(message)
     ? "The hosted service didn't accept this sign-in, so it couldn't look up your hosted Clankie. Try `clankie login` again; if it keeps happening, contact support."
