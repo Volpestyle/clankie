@@ -6,6 +6,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import type { FleetProofRefusalReason } from "@clankie/protocol";
 import { nativeRequest, NativePaneNotFoundError } from "./herdr-native-request.ts";
 import type { NativeTransportReason } from "./native-process-transport.ts";
+import { FleetAdmissionUnavailableError } from "./local-fleet-admission.ts";
 import { createProjectProcessObserver, type ProjectProcessProof } from "./project-process-proof.ts";
 import {
   fleetProcessHelper,
@@ -104,13 +105,33 @@ function diagnostic(options: LocalFleetProofOptions, event: LocalFleetProofDiagn
 
 /** macOS local proof. Unsupported platforms and disconnected sockets fail closed. */
 export function localFleetProof(options: LocalFleetProofOptions) {
+  return createLocalFleetProof(options, false);
+}
+
+/** Admission distinguishes unavailable observations from a proven refusal. */
+export function localFleetAdmissionProof(options: LocalFleetProofOptions) {
+  return createLocalFleetProof(options, true);
+}
+
+function createLocalFleetProof(options: LocalFleetProofOptions, admission: boolean) {
   const execute = options.run ?? run;
   const observe = options.observeSocket;
   const owners = new WeakMap<Socket, NativeSocketOwner>();
   return async (socket: Socket, pane: string, signal?: AbortSignal): Promise<boolean> => {
     signal?.throwIfAborted();
+    let refusalRecorded = false;
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
       diagnostic(options, { source: "proof", reason }, pane);
+      refusalRecorded = true;
+      if (
+        admission &&
+        reason !== "unsupported_platform" &&
+        reason !== "invalid_pane" &&
+        reason !== "pane_unavailable" &&
+        reason !== "not_member" &&
+        reason !== "private_seat_expired"
+      )
+        throw new FleetAdmissionUnavailableError("Local fleet observations are unavailable");
       return false;
     };
     const snapshot = (checkpoint: "initial" | "final", expected?: NativeSocketOwner) =>
@@ -168,7 +189,7 @@ export function localFleetProof(options: LocalFleetProofOptions) {
               );
         } catch (error) {
           signal?.throwIfAborted();
-          if (error instanceof NativePaneNotFoundError) return undefined;
+          if (error instanceof NativePaneNotFoundError) return null;
           throw error;
         }
         signal?.throwIfAborted();
@@ -176,9 +197,10 @@ export function localFleetProof(options: LocalFleetProofOptions) {
           ?.process_info;
       };
       const info = await paneInfo();
-      if (info?.pane_id !== pane) return refuse("pane_unavailable");
+      if (info === null) return refuse("pane_unavailable");
+      if (info?.pane_id !== pane) return refuse("observation_failed");
       const shell = info.shell_pid;
-      if (!Number.isSafeInteger(shell) || shell <= 1) return refuse("pane_unavailable");
+      if (!Number.isSafeInteger(shell) || shell <= 1) return refuse("observation_failed");
       const admitted =
         chain.includes(shell) || (await options.privateSeat?.(chain, pane, binding, signal)) === true;
       signal?.throwIfAborted();
@@ -209,8 +231,12 @@ export function localFleetProof(options: LocalFleetProofOptions) {
       owners.set(socket, initial.owner);
       diagnostic(options, { source: "proof_success" }, pane);
       return true;
-    } catch {
+    } catch (error) {
       signal?.throwIfAborted();
+      if (error instanceof FleetAdmissionUnavailableError) {
+        if (!refusalRecorded) diagnostic(options, { source: "proof", reason: "observation_failed" }, pane);
+        throw error;
+      }
       return refuse("observation_failed");
     }
   };

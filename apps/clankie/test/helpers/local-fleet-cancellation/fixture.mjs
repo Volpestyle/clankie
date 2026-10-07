@@ -1,6 +1,6 @@
 // Scripted native observation replies over the real production child transport.
 // These records test cancellation and schema boundaries, not kernel membership.
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,9 @@ for await (const line of createInterface({ input: process.stdin })) {
   if (mode === "hold" || (proof && existsSync(join(root, "hold-proofs")))) {
     while (!existsSync(join(root, "release"))) await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  const result = proof ? snapshot : { pid: process.pid, mode };
+  const failurePath = join(root, proof ? "fail-next-proof" : "fail-next-birth");
+  const unavailable = (proof || mode === "birth") && existsSync(failurePath);
+  if (unavailable) unlinkSync(failurePath);
+  const result = unavailable ? { schemaVersion: 1 } : proof ? snapshot : { pid: process.pid, mode };
   process.stdout.write(JSON.stringify({ id, ok: true, result, stderr: "" }) + "\n");
 }

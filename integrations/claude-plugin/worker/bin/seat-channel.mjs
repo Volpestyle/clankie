@@ -7,6 +7,12 @@ const PLUGIN_VERSION = JSON.parse(
   readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8"),
 ).version;
 import { createInboundSender } from "./inbound-receipt.mjs";
+import {
+  admissionRefusal,
+  checkFleetMembership,
+  FleetMembershipRefused,
+  requestWithAdmissionRetry,
+} from "./admission.mjs";
 import { createPeerSender, readPeerCatalog } from "./peer-receipt.mjs";
 import { createCatalogWatcher, signalCodexCatalog } from "./catalog-watch.mjs";
 // The clankie-worker channel on a linked machine (VUH-1527): the same seat
@@ -96,6 +102,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const refused = (error) => error?.cause?.code === "ECONNREFUSED";
 /** Admission may be settling; only explicit settings metadata withdraws advertised tools. */
 class FleetToolsDenied extends Error {}
+class FleetAdmissionUnavailable extends Error {}
 class FleetSessionExpired extends Error {}
 class FleetRpcError extends Error {}
 class FleetRequestTimeout extends Error {}
@@ -139,11 +146,17 @@ function responseReason(value, text) {
  * streamable-HTTP MCP client because nothing beyond Node is installed here.
  * Each call still checks current admission, settings and the connected account.
  */
-function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
+function fleetTools(current, refresh, requestTimeoutMs, bridgeId, onMembershipRefused, isMembershipStopped) {
+  let membershipRefusal;
   let generation;
   let observedSession;
   let sequence = 0;
   const select = () => {
+    if (membershipRefusal) throw membershipRefusal;
+    if (isMembershipStopped())
+      throw new FleetMembershipRefused(
+        "This native seat is no longer admitted. Ask Clankie to confirm or restore fleet admission; repeated retries cannot grant access.",
+      );
     refresh();
     const link = current();
     if (!link) throw new Error("No linked fleet connection");
@@ -158,21 +171,34 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
   };
   const post = async (active, body, signal, session = active.session) => {
     signal.throwIfAborted();
-    const response = await fetch(new URL("/v1/fleet/mcp", active.link.url), {
-      method: "POST",
-      // A redirect must not transparently replay an already admitted call.
-      redirect: "error",
-      headers: {
-        ...authorization(active.link),
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-        "x-clankie-bridge-id": bridgeId,
-        ...(session === undefined ? {} : { "mcp-session-id": session }),
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", ...body }),
+    const response = await requestWithAdmissionRetry(
+      () =>
+        fetch(new URL("/v1/fleet/mcp", active.link.url), {
+          method: "POST",
+          // A redirect must not transparently replay an already admitted call.
+          redirect: "error",
+          headers: {
+            ...authorization(active.link),
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "x-clankie-bridge-id": bridgeId,
+            ...(session === undefined ? {} : { "mcp-session-id": session }),
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", ...body }),
+          signal,
+        }),
       signal,
-    });
+    );
+    try {
+      await checkFleetMembership(response);
+    } catch (error) {
+      membershipRefusal = error;
+      onMembershipRefused(error);
+      throw error;
+    }
     // Keep the same deadline while consuming the body, including error bodies.
+    const admission = await admissionRefusal(response);
+    if (admission) throw new FleetAdmissionUnavailable(admission.detail);
     const text = await response.text();
     let reply;
     try {
@@ -188,7 +214,9 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
             ? FleetToolsDenied
             : Error;
       const reason = responseReason(reply, text);
-      throw new Refusal(`Fleet tools answered ${String(response.status)}${reason ? `: ${reason}` : ""}`);
+      throw new Refusal(
+        `Fleet tools answered ${String(response.status)}${reason ? `: ${reason}` : ""}${Refusal === FleetToolsDenied ? ". Ask Clankie to confirm admission for this native seat; repeated retries cannot grant access." : ""}`,
+      );
     }
     if (body.id === undefined) return undefined;
     if (!reply || reply.jsonrpc !== "2.0" || reply.id !== body.id)
@@ -322,6 +350,7 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
       return result;
     },
     report(params) {
+      if (membershipRefusal || isMembershipStopped()) return;
       const active = generation?.session ? generation : observedSession;
       if (!active?.session || active.authority !== JSON.stringify(current())) return;
       // Observation only: never initialize, recover, or retire a session to
@@ -380,20 +409,50 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   if (!link) log("no link to Clankie for this Herdr session (HERDR_SOCKET_PATH); serving no tools");
   // A bridge run keeps its observation identity through HTTP reconnects.
   // This header carries no authority; the service still authenticates every request.
-  const granted = fleetTools(() => link, refresh, requestTimeoutMs, randomUUID());
+  let membershipStopped = false;
+  const stopMembership = (error) => {
+    if (!membershipStopped) log(error.message);
+    membershipStopped = true;
+  };
+  const observeMembership = async (response) => {
+    try {
+      await checkFleetMembership(response);
+    } catch (error) {
+      stopMembership(error);
+    }
+    return response;
+  };
+  const refusedMembershipResponse = () =>
+    Response.json({ error: "local_process_membership_required" }, { status: 403 });
+  const granted = fleetTools(
+    () => link,
+    refresh,
+    requestTimeoutMs,
+    randomUUID(),
+    stopMembership,
+    () => membershipStopped,
+  );
   const peerRequest = async (route, suffix = "", init, signal) => {
+    if (membershipStopped) return refusedMembershipResponse();
     if (!link || !paneId) throw new Error("No linked fleet pane");
     const deadline = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(20_000)])
       : AbortSignal.timeout(20_000);
     try {
-      return await fetch(`${seatRoute(link, paneId, route)}${suffix}`, {
-        ...init,
-        headers: { ...authorization(link), "content-type": "application/json" },
-        signal: deadline,
-      });
+      return await observeMembership(
+        await requestWithAdmissionRetry(
+          () =>
+            fetch(`${seatRoute(link, paneId, route)}${suffix}`, {
+              ...init,
+              headers: { ...authorization(link), "content-type": "application/json" },
+              signal: deadline,
+            }),
+          deadline,
+        ),
+      );
     } catch (error) {
-      // A read can follow a republished link. A POST is attempted once only.
+      // A read can follow a republished link. Only an explicit pre-forward
+      // admission refusal permits the one POST retry above.
       if (refused(error) && refresh() && !init)
         return fetch(`${seatRoute(link, paneId, route)}${suffix}`, {
           headers: authorization(link),
@@ -405,6 +464,8 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   const discoverPeers = (signal) => peerRequest("peers", "", undefined, signal);
   const peerCatalog = async (signal) => {
     const response = await discoverPeers(signal);
+    const admission = await admissionRefusal(response);
+    if (admission) throw new FleetAdmissionUnavailable(admission.detail);
     const text = await response.text();
     let value;
     try {
@@ -619,6 +680,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
             requireExpected(result.tools);
             return result;
           } catch (error) {
+            if (membershipStopped) throw error;
             // A final retry can hit the shared deadline before its response.
             // Keep a real refusal already observed instead of hiding it under
             // that timeout; a wholly stalled discovery still reports timeout.
@@ -656,7 +718,14 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   let closed = false;
 
   function startPolling() {
-    if (!initialized || !polling || started || (requiresCatalog && !firstCatalogVerified)) return;
+    if (
+      membershipStopped ||
+      !initialized ||
+      !polling ||
+      started ||
+      (requiresCatalog && !firstCatalogVerified)
+    )
+      return;
     started = true;
     log(`serving the seat channel for pane ${paneId}`);
     void poll();
@@ -664,13 +733,14 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
 
   async function poll() {
     let quiet404 = false;
-    while (!closed) {
+    while (!closed && !membershipStopped) {
       let receiptUnresolved = false;
       try {
         const response = await fetch(`${seatRoute(link, paneId, "events")}?wait=${String(WAIT_MS)}`, {
           headers: authorization(link),
           signal: AbortSignal.timeout(WAIT_MS + 10_000),
         });
+        await checkFleetMembership(response);
         if (response.status === 404) {
           // The pane before Herdr has classified the harness.
           if (!quiet404) log("mailbox not ready yet; retrying");
@@ -708,12 +778,17 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
               signal: AbortSignal.timeout(10_000),
             },
           );
+          await checkFleetMembership(ack);
           const receipt = ack.ok ? await ack.json() : undefined;
           if (receipt?.acknowledged !== true) throw new Error("Exact channel acknowledgment is unresolved");
           receiptUnresolved = false;
         }
       } catch (error) {
         if (closed) return;
+        if (error instanceof FleetMembershipRefused) {
+          stopMembership(error);
+          return;
+        }
         if (receiptUnresolved) {
           log("channel receipt unresolved; stopped polling without replay");
           return;
@@ -733,15 +808,24 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     directory: join(homedir(), ".clankie", "inbound-receipts"),
     scope: JSON.stringify([process.env.HERDR_SOCKET_PATH ?? "", paneId]),
     request: async (suffix, init) => {
+      if (membershipStopped) return refusedMembershipResponse();
       try {
-        return await fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
-          ...init,
-          headers: { ...authorization(link), "content-type": "application/json" },
-          signal: AbortSignal.timeout(Math.min(20_000, requestTimeoutMs)),
-        });
+        const deadline = AbortSignal.timeout(Math.min(20_000, requestTimeoutMs));
+        return await observeMembership(
+          await requestWithAdmissionRetry(
+            () =>
+              fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
+                ...init,
+                headers: { ...authorization(link), "content-type": "application/json" },
+                signal: deadline,
+              }),
+            deadline,
+          ),
+        );
       } catch (error) {
         // Preserve the refused-connection link refresh. Reads can follow the
         // new port immediately; POST uncertainty is never retried here.
+        // Only the explicit admission refusal permits the retry above.
         if (refused(error) && refresh() && !init)
           return fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
             headers: authorization(link),
@@ -804,6 +888,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       if (!startedCatalogWatch) {
         startedCatalogWatch = true;
         setInterval(() => {
+          if (membershipStopped) return;
           void catalog
             .check()
             .catch((error) => log(`catalog refresh failed (${String(error)}); keeping the previous catalog`));
@@ -889,13 +974,22 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         const heldId = receiptId ?? (receiptLookup ? params.arguments.receiptId : undefined);
-        const uncertain = typeof heldId === "string" && !(error instanceof FleetToolsDenied);
+        const retryable = error instanceof FleetAdmissionUnavailable && !receiptLookup;
+        const uncertain =
+          typeof heldId === "string" &&
+          (receiptLookup ||
+            (!(error instanceof FleetToolsDenied || error instanceof FleetMembershipRefused) && !retryable));
         const text =
-          connectedCall && error instanceof FleetToolsDenied
+          connectedCall &&
+          !receiptLookup &&
+          (error instanceof FleetToolsDenied || error instanceof FleetMembershipRefused || retryable)
             ? JSON.stringify({
                 outcome: "refused",
                 reason,
-                detail: "The service refused current access. Nothing was resubmitted.",
+                ...(retryable ? { retryable: true } : {}),
+                detail: retryable
+                  ? reason
+                  : "The service refused current access. Ask Clankie to confirm this native seat is admitted; repeated retries cannot grant access. Nothing was resubmitted.",
               })
             : uncertain
               ? JSON.stringify({

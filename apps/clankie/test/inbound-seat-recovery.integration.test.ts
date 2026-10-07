@@ -12,6 +12,7 @@ import {
 } from "@clankie/protocol";
 import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
 import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
+import { requestWithAdmissionRetry } from "../../../integrations/claude-plugin/worker/bin/admission.mjs";
 import { createInboundSender } from "../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 
 const pane = "w3Z:pR";
@@ -54,7 +55,20 @@ async function stop(child: ChildProcess) {
 }
 async function service(
   root: string,
-  mode: "normal" | "pipe" | "hold" | "hold-abort" | "hold-shutdown" | "storage-failure" | "journal-failure",
+  mode:
+    | "normal"
+    | "pipe"
+    | "hold"
+    | "hold-abort"
+    | "hold-shutdown"
+    | "storage-failure"
+    | "journal-failure"
+    | "admission-once"
+    | "admission-held"
+    | "nonmember"
+    | "admission-post-once"
+    | "admission-post-held"
+    | "admission-post-nonmember",
   deadlineMs = 30_000,
 ) {
   const child = spawn(
@@ -158,10 +172,14 @@ function worker(
         }
       : {}),
     request: (suffix, init) =>
-      current().request(suffix, {
-        ...init,
-        ...(init?.method === "POST" && controller ? { signal: controller.signal } : {}),
-      }),
+      requestWithAdmissionRetry(
+        () =>
+          current().request(suffix, {
+            ...init,
+            ...(init?.method === "POST" && controller ? { signal: controller.signal } : {}),
+          }),
+        controller?.signal,
+      ),
   });
   return {
     send,
@@ -540,3 +558,44 @@ it("clears only an exact expired pending pane fence and leaves all mismatched id
   });
   await expect.poll(() => effects(root)).toEqual([{ message: "Worker output: fresh after exact recovery" }]);
 });
+
+it.each(["admission-once", "admission-post-once"] as const)(
+  "retries explicit %s refusal before forwarding the original exactly once",
+  async (mode) => {
+    const root = fixtureRoot();
+    const current = await service(root, mode);
+    const sender = worker(root, () => current);
+    expect(await sender.send("admitted after temporary proof failure")).toMatchObject({
+      received: true,
+      deliveryStage: "stored",
+    });
+    expect(current.messages.filter((message) => message.state === "admission")).toHaveLength(2);
+    expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(1);
+    await expect
+      .poll(() => effects(root))
+      .toEqual([{ message: "Worker output: admitted after temporary proof failure" }]);
+    expect(claim(root)).toBeUndefined();
+  },
+);
+
+it.each(["admission-held", "admission-post-held", "nonmember", "admission-post-nonmember"] as const)(
+  "surfaces %s without replaying or stranding an undispatched receipt",
+  async (mode) => {
+    const root = fixtureRoot();
+    const current = await service(root, mode);
+    const sender = worker(root, () => current);
+    const receipt = await sender.send("nothing should dispatch");
+    expect(receipt.deliveryStage).toBe(mode.endsWith("nonmember") ? "rejected" : "unavailable");
+    if (!mode.endsWith("nonmember"))
+      expect(receipt).toMatchObject({
+        retryable: true,
+        detail: expect.stringContaining("Wait briefly and retry"),
+      });
+    expect(current.messages.filter((message) => message.state === "admission")).toHaveLength(
+      mode.endsWith("nonmember") ? 1 : 2,
+    );
+    expect(calls(root).filter((call) => call.method === "POST")).toHaveLength(0);
+    expect(effects(root)).toEqual([]);
+    expect(claim(root)).toBeUndefined();
+  },
+);

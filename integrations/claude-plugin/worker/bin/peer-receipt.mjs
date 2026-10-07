@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { admissionRefusal, checkFleetMembership } from "./admission.mjs";
 
 const normalize = (text) => text.replace(/\r\n?/gu, "\n").trim();
 const hash = (text) => createHash("sha256").update(text).digest("hex");
@@ -112,6 +113,20 @@ export function createPeerSender({ directory, scope, discover, request }) {
   const reconcile = async (record, target, text) => {
     const query = new URLSearchParams({ binding: record.binding, fingerprint: record.fingerprint });
     const response = await request(`/${record.deliveryId}?${query}`);
+    try {
+      await checkFleetMembership(response);
+    } catch (error) {
+      return {
+        ...uncertain(record),
+        detail: `${error.message} The original peer receipt remains unresolved; reconcile it after admission is restored, do not resend.`,
+      };
+    }
+    if (await admissionRefusal(response))
+      return {
+        ...uncertain(record),
+        detail:
+          "Fleet admission could not be verified just now. Wait briefly and reconcile this original peer receipt again; do not resend the message.",
+      };
     const value = response.ok ? await response.json() : undefined;
     if (!terminal(value, record)) return uncertain(record);
     settle(record);
@@ -135,11 +150,15 @@ export function createPeerSender({ directory, scope, discover, request }) {
       if (target.length > 200 || text.length > 32_768)
         return refused("rejected", "Peer seat or message exceeds its bound; nothing was sent.");
       const response = await discover();
+      const refusal = await admissionRefusal(response);
+      if (refusal) return { ...refused("unavailable", refusal.detail), retryable: true };
       const catalog = response.ok ? readPeerCatalog(await response.json()) : undefined;
       if (!catalog)
         return refused(
           [400, 401, 403, 413].includes(response.status) ? "rejected" : "unavailable",
-          "No authenticated peer catalog is available; nothing was sent.",
+          [401, 403].includes(response.status)
+            ? "The service refused this native seat. Ask Clankie to confirm fleet admission; repeated retries cannot grant access. Nothing was sent."
+            : "No authenticated peer catalog is available; nothing was sent.",
         );
       const matches = catalog.seats.filter((entry) => entry.seatId === target || entry.paneId === target);
       if (matches.length !== 1)
@@ -172,6 +191,17 @@ export function createPeerSender({ directory, scope, discover, request }) {
           delivery: { id: record.deliveryId, binding: record.binding },
         }),
       });
+      try {
+        await checkFleetMembership(sent);
+      } catch (error) {
+        settle(record);
+        return refused("rejected", `${error.message} Nothing was sent.`);
+      }
+      const sendRefusal = await admissionRefusal(sent);
+      if (sendRefusal) {
+        settle(record);
+        return { ...refused("unavailable", sendRefusal.detail), retryable: true };
+      }
       const value = await sent.json().catch(() => undefined);
       const exactRefusal = exact(value, record) && ["rejected", "unavailable"].includes(value.deliveryStage);
       if (!terminal(value, record) || (!sent.ok && !exactRefusal)) return uncertain(record);

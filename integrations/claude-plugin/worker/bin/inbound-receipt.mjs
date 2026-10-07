@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { admissionRefusal, checkFleetMembership } from "./admission.mjs";
 
 const hash = (text) => createHash("sha256").update(text.replace(/\r\n?/gu, "\n").trim()).digest("hex");
 const hex = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
@@ -113,6 +114,25 @@ export function createInboundSender({ directory, scope, request, onObservation, 
   const reconcile = async (record, text) => {
     const query = new URLSearchParams({ binding: record.binding, fingerprint: record.fingerprint });
     const response = await request(`/${record.deliveryId}?${query}`);
+    try {
+      await checkFleetMembership(response);
+    } catch (error) {
+      return observed(
+        uncertain(
+          record,
+          `${error.message} The original receipt remains unresolved; reconcile it after admission is restored, do not resend.`,
+        ),
+        "receipt_unresolved",
+      );
+    }
+    if (await admissionRefusal(response))
+      return observed(
+        uncertain(
+          record,
+          "Fleet admission could not be verified just now. Wait briefly and reconcile this original receipt again; do not resend the message.",
+        ),
+        "receipt_unresolved",
+      );
     const value = response.ok ? await response.json() : undefined;
     if (
       value?.schemaVersion === 1 &&
@@ -161,13 +181,21 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       // session. Older services are readable but cannot supply durable receipts.
       phase = "binding";
       const bindingResponse = await request("");
+      const bindingRefusal = await admissionRefusal(bindingResponse);
+      if (bindingRefusal)
+        return observed(
+          { received: false, deliveryStage: "unavailable", ...bindingRefusal },
+          "binding_unavailable",
+        );
       const binding = bindingResponse.ok ? (await bindingResponse.json())?.binding : undefined;
       if (!hex(binding))
         return observed(
           {
             received: false,
             deliveryStage: [400, 401, 403, 413].includes(bindingResponse.status) ? "rejected" : "unavailable",
-            detail: "No durable native binding is available; nothing was sent.",
+            detail: [401, 403].includes(bindingResponse.status)
+              ? "The service refused this native seat. Ask Clankie to confirm fleet admission; repeated retries cannot grant access. Nothing was sent."
+              : "No durable native binding is available; nothing was sent.",
           },
           [400, 401, 403, 413].includes(bindingResponse.status) ? "binding_rejected" : "binding_unavailable",
         );
@@ -210,6 +238,22 @@ export function createInboundSender({ directory, scope, request, onObservation, 
           },
           "connection_refused",
         );
+      }
+      try {
+        await checkFleetMembership(response);
+      } catch (error) {
+        settle(record);
+        return observed(
+          { received: false, deliveryStage: "rejected", detail: `${error.message} Nothing was sent.` },
+          "binding_rejected",
+        );
+      }
+      const refusal = await admissionRefusal(response);
+      if (refusal) {
+        // This authenticated contract is emitted before forwarding, so the
+        // original was never dispatched. It must not strand an uncertain claim.
+        settle(record);
+        return observed({ received: false, deliveryStage: "unavailable", ...refusal }, "binding_unavailable");
       }
       // An unauthenticated error response is never an exact receipt proof.
       const value = response.ok ? await response.json().catch(() => undefined) : undefined;

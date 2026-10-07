@@ -15,6 +15,7 @@ interface PeerReceipt {
   recipientBinding?: string;
   fingerprint?: string;
   detail?: string;
+  retryable?: boolean;
   messageId?: string;
   state?: "queued" | "started" | "steered";
 }

@@ -53,15 +53,15 @@ it("reads a held next-turn alert's original acknowledgment after reload without 
   }
 });
 
-it("holds an unconfirmed proof alert across inactivity and bounded admission until its exact original acknowledgment", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "proof-alert-receipt-"));
-  const outbox = new SeatOutbox({ uncertaintyPath: join(directory, "receipts.json"), boundGraceMs: 30 });
-  let now = Date.parse("2026-10-06T12:00:00Z"),
-    attempts = 0;
-  const binding = "b".repeat(64);
-  const metrics = new FleetHealthMetrics({
-    now: () => now,
-    onProofAlert: async () => {
+it.each(["seat", "aggregate"] as const)(
+  "holds an unconfirmed %s proof alert across inactivity and bounded admission until its exact original acknowledgment",
+  async (scope) => {
+    const directory = await mkdtemp(join(tmpdir(), "proof-alert-receipt-"));
+    const outbox = new SeatOutbox({ uncertaintyPath: join(directory, "receipts.json"), boundGraceMs: 30 });
+    let now = Date.parse("2026-10-06T12:00:00Z"),
+      attempts = 0;
+    const binding = "b".repeat(64);
+    const deliver = async () => {
       attempts++;
       const result = await outbox.deliver({
         kind: "message",
@@ -73,53 +73,62 @@ it("holds an unconfirmed proof alert across inactivity and bounded admission unt
       });
       if (result.outcome === "unconfirmed")
         return {
-          outcome: "unconfirmed",
+          outcome: "unconfirmed" as const,
           acknowledged: () => outbox.recoveryAcknowledged(result.messageId),
         };
-      return { outcome: result.outcome === "delivered" ? "accepted" : "unavailable" };
-    },
-  });
-  const refusal = () =>
-    metrics.observeProof("fleet", { source: "proof", reason: "missing_binding" }, "w1:p1");
-  try {
-    const poll = outbox.poll(5_000, undefined, binding);
-    refusal();
-    const [original] = await poll;
-    expect(original).toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 70));
-    expect(outbox.uncertain()).toBe(true);
-    // No proof observations for longer than the seat/rate expiry interval.
-    now += 6 * 60_000;
-    expect(metrics.snapshot().windows[0].proof.attempts).toBe(0);
-    refusal();
-    expect(attempts).toBe(1);
-    // Fill the remaining bounded slots with genuine collector observations.
-    // Overflow must refuse admission, never evict the unresolved original.
-    for (let seat = 0; seat < 511; seat++)
-      metrics.observeProof("fleet", { source: "proof_success" }, `w2:p${seat}`);
-    metrics.observeProof("fleet", { source: "proof", reason: "missing_binding" }, "w3:p1");
-    refusal();
-    expect(attempts).toBe(1);
-    expect(metrics.snapshot().totals.proof.attempts).toBe(515);
-    expect(outbox.acknowledge("invented-original", binding)).toBe(false);
-    expect(outbox.acknowledge(original!.id, "c".repeat(64))).toBe(false);
-    expect(outbox.recoveryAcknowledged(original!.id)).toBe(false);
-    expect(outbox.acknowledge(original!.id, binding)).toBe(true);
-    refusal();
-    expect(attempts).toBe(1);
-    for (let minute = 0; minute < 4; minute++) {
+      return { outcome: result.outcome === "delivered" ? ("accepted" as const) : ("unavailable" as const) };
+    };
+    const metrics = new FleetHealthMetrics({
+      now: () => now,
+      ...(scope === "seat" ? { onProofAlert: deliver } : { onAggregateProofAlert: deliver }),
+    });
+    const refusal = () =>
+      metrics.observeProof(
+        "fleet",
+        { source: "proof", reason: "missing_binding" },
+        scope === "seat" ? "w1:p1" : undefined,
+      );
+    try {
+      const poll = outbox.poll(5_000, undefined, binding);
+      refusal();
+      const [original] = await poll;
+      expect(original).toBeDefined();
+      await new Promise((resolve) => setTimeout(resolve, 70));
+      expect(outbox.uncertain()).toBe(true);
+      // No proof observations for longer than the seat/rate expiry interval.
+      now += 6 * 60_000;
+      expect(metrics.snapshot().windows[0].proof.attempts).toBe(0);
+      refusal();
+      expect(attempts).toBe(1);
+      // Fill the remaining bounded slots with genuine collector observations.
+      // Overflow must refuse admission, never evict the unresolved original.
+      const fillerCount = scope === "seat" ? 511 : 512;
+      for (let seat = 0; seat < fillerCount; seat++)
+        metrics.observeProof("fleet", { source: "proof_success" }, `w2:p${seat}`);
+      metrics.observeProof("fleet", { source: "proof", reason: "missing_binding" }, "w3:p1");
+      refusal();
+      expect(attempts).toBe(1);
+      expect(metrics.snapshot().totals.proof.attempts).toBe(fillerCount + 4);
+      expect(outbox.acknowledge("invented-original", binding)).toBe(false);
+      expect(outbox.acknowledge(original!.id, "c".repeat(64))).toBe(false);
+      expect(outbox.recoveryAcknowledged(original!.id)).toBe(false);
+      expect(outbox.acknowledge(original!.id, binding)).toBe(true);
+      refusal();
+      expect(attempts).toBe(1);
+      for (let minute = 0; minute < 4; minute++) {
+        now += 60_000;
+        refusal();
+      }
+      expect(attempts).toBe(1);
       now += 60_000;
       refusal();
+      expect(attempts).toBe(2);
+    } finally {
+      outbox.close();
+      await rm(directory, { recursive: true, force: true });
     }
-    expect(attempts).toBe(1);
-    now += 60_000;
-    refusal();
-    expect(attempts).toBe(2);
-  } finally {
-    outbox.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+  },
+);
 
 it("counts terminal real socket refusals, keeps diagnostics separate, and serves authenticated 5/60-minute CLI rates", async () => {
   let now = Date.parse("2026-10-05T12:00:00Z");

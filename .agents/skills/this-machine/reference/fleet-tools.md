@@ -129,8 +129,15 @@ Unrelated descriptor/process races retry that PID within the existing job budget
 Instability after a matching socket observation requests a fresh bounded census
 to include new inheritors. Read the
 terminal proof reason and refusal rate before treating a churn counter as lost
-membership. A pre-dispatch `local_process_membership_required` 403 permits a
-fresh request; an earlier uncertain call still requires its original receipt.
+membership. A pre-dispatch `fleet_admission_unavailable` 503 means proof is
+temporarily unavailable; Claude and Codex bridges retry once, then explain how
+to retry or ask the lead to inspect persistent uncertainty. A definite
+`local_process_membership_required` 403 asks for admission and is not retried.
+An earlier uncertain call still requires its original receipt.
+Proof-refusal floods also alert the owner's default conversation, even when the
+caller has no identifiable or currently owned pane. The aggregate notice names
+counts and reasons; it does not attribute the requests to a seat. Logs omit pane
+IDs, so an absent log field alone does not mean the collector lacked one.
 Details: `{repoRoot}/docs/worker-access.md` and
 `{repoRoot}/integrations/fleet-proof/README.md`.
 

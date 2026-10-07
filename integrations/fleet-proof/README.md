@@ -285,8 +285,11 @@ shared client FDs and a second owner born between PID lists. The shipped helper
 has no test controls. Evidence stays in `.local/admission-churn/`; see the
 [bounded-admission report](../../docs/testing/2026-10-06-admission-churn/README.md).
 
-An exact `local_process_membership_required` HTTP403 occurs before dispatch for
-that request and can safely be followed by a fresh request. The existing worker
-bridge does not automatically replay403. Read-only polling may retry; uncertain
-writes or lost replies must reconcile their original receipt. A later403 does
-not establish that an earlier uncertain operation never ran.
+An exact HTTP 503 `fleet_admission_unavailable` means current proof is
+unavailable and that request was refused before dispatch. Claude and Codex
+bridges retry once after a short wait; persistent uncertainty asks the worker
+to retry shortly, then report it to the lead. A definite non-member gets HTTP 403
+`local_process_membership_required` and should ask the lead to inspect admission.
+Neither bridge retries that refusal. Uncertain writes or lost replies must
+reconcile their original receipt. A later refusal does not establish that an
+earlier uncertain operation never ran.

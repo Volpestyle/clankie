@@ -71,7 +71,11 @@ class HeldSettings extends SettingsStore {
 const wrappers = ["clankie_tools", "clankie_call"];
 const requestTimeoutMs = 250;
 
-async function fixture(slowBinding = false, pane = "w1:p1") {
+async function fixture(
+  slowBinding = false,
+  pane = "w1:p1",
+  mailbox?: { status: number; error: string; ack?: boolean },
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-bridge-health-"));
   const settings = new HeldSettings(join(root, "settings.json"));
   await settings.update((current) => ({
@@ -106,11 +110,33 @@ async function fixture(slowBinding = false, pane = "w1:p1") {
   });
   let bindingGets = 0;
   let messagePosts = 0;
+  let mailboxPolls = 0;
+  let mailboxAcks = 0;
+  let requests = 0;
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: async (request) => {
+      requests++;
       const path = new URL(request.url).pathname;
+      if (mailbox && (path.endsWith("/events") || path.endsWith("/ack"))) {
+        if (path.endsWith("/ack")) mailboxAcks++;
+        else mailboxPolls++;
+        if (mailbox.ack && path.endsWith("/events"))
+          return Response.json({
+            events: [
+              {
+                id: "fixture-event",
+                kind: "message",
+                content: "Original event",
+                conversationId: "fixture",
+                source: "clankie",
+                createdAt: new Date().toISOString(),
+              },
+            ],
+          });
+        return Response.json({ error: mailbox.error }, { status: mailbox.status });
+      }
       if (path.endsWith("/messages")) {
         if (request.method === "POST") {
           messagePosts++;
@@ -201,6 +227,9 @@ async function fixture(slowBinding = false, pane = "w1:p1") {
     identity,
     status: () => worker.bridgeStatus("default", pane),
     reportStatus: () => worker.reportBridgeStatus("default", pane),
+    mailboxPolls: () => mailboxPolls,
+    mailboxAcks: () => mailboxAcks,
+    requests: () => requests,
     bindingGets: () => bindingGets,
     messagePosts: () => messagePosts,
     validations: () => validations,
@@ -213,7 +242,7 @@ async function fixture(slowBinding = false, pane = "w1:p1") {
   };
 }
 
-async function startBridge(f: Awaited<ReturnType<typeof fixture>>) {
+async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = false) {
   const socket = join(f.root, "herdr.sock");
   await mkdir(join(f.root, ".clankie", "links"), { recursive: true });
   await writeFile(
@@ -234,7 +263,7 @@ async function startBridge(f: Awaited<ReturnType<typeof fixture>>) {
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:"test",requestTimeoutMs:250});`,
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : "test")},requestTimeoutMs:250});`,
     ],
     { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: f.pane } },
   );
@@ -270,6 +299,8 @@ async function startBridge(f: Awaited<ReturnType<typeof fixture>>) {
     clientInfo: { name: "test", version: "1" },
   });
   await call("tools/list", {});
+  if (polling)
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
   await expect.poll(() => f.status().status).toBe("ready");
   return call;
 }
@@ -301,7 +332,7 @@ it("records a real subprocess binding timeout independently of its healthy tool 
 
 it("carries three real bridge binding timeouts through the inactivity flag, one owning-lead alert and recovery", async () => {
   const workers = await Promise.all([1, 2, 3].map((i) => fixture(true, `w1:p${i}`)));
-  const calls = await Promise.all(workers.map(startBridge));
+  const calls = await Promise.all(workers.map((worker) => startBridge(worker)));
   let now = Date.now() - 16 * 60_000;
   const owner = { conversationId: "global-default" };
   const efficiency = new SeatEfficiencyStore(join(workers[0]!.root, "efficiency.json"), { now: () => now });
@@ -649,4 +680,35 @@ it("bounds an unfinished initialize body without activating a late replacement s
     status: "ready",
     reason: "Native bridge reported: Original catalog still accepted",
   });
+});
+
+it.each([false, true])(
+  "quiets a definitively refused native mailbox and automatic catalog requests (ack=%s)",
+  async (ack) => {
+    const f = await fixture(false, "w1:p1", { status: 403, error: "local_process_membership_required", ack });
+    const call = await startBridge(f, true);
+    await expect.poll(() => (ack ? f.mailboxAcks() : f.mailboxPolls())).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const before = f.requests();
+    await new Promise((resolve) => setTimeout(resolve, 5_200));
+    expect(f.requests()).toBe(before);
+    expect(f.mailboxPolls()).toBe(1);
+    expect(f.mailboxAcks()).toBe(ack ? 1 : 0);
+    const result = await call("tools/call", {
+      name: "message_clankie",
+      arguments: { text: "report after admission loss" },
+    });
+    expect(result.result?.content?.[0]?.text).toContain("Ask Clankie");
+    expect(f.requests()).toBe(before);
+  },
+);
+
+it.each([
+  { status: 403, error: "some_other_refusal" },
+  { status: 503, error: "fleet_admission_unavailable" },
+  { status: 503, error: "service_shutting_down" },
+])("keeps mailbox recovery for $status $error", async (refusal) => {
+  const f = await fixture(false, "w1:p1", refusal);
+  await startBridge(f, true);
+  await expect.poll(() => f.mailboxPolls(), { timeout: 4_000 }).toBeGreaterThanOrEqual(2);
 });

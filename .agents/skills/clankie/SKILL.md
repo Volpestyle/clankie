@@ -99,6 +99,16 @@ still prove current admission and account or native peer authority. A timeout
 does not authorize replaying a mutation. Doctor and roster `workerTools` show
 observed missing/stalled catalogs and reasons; `not-observed` proves no failure.
 Authenticated failures retain their service reason; unauthenticated refusals are generic.
+`fleet_admission_unavailable` means current proof is temporarily unavailable,
+not that your seat is outside the fleet. Claude and Codex bridges retry this
+explicit pre-forward refusal once after a short wait. If it persists, retry
+shortly and report the exact refusal to the lead for inspection; do not ask the
+owner to admit an already-linked seat. `local_process_membership_required` is a
+definite non-member refusal: automatic polling goes quiet; ask the lead to
+inspect admission. A worker startup hook leaves an inherited missing pane
+unclaimed when Herdr returns `pane_not_found`. Never substitute
+another account or bridge. Only the explicit pre-forward refusal is safe to
+retry; a later refusal cannot settle an earlier uncertain call.
 Connected calls return a `receiptId`. If a dispatched call times out, its typed
 `outcome: uncertain` means it may have applied. Call `clankie_call` with only
 `{receiptId}` to read the original result; never repeat its name and arguments.

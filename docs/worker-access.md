@@ -134,13 +134,23 @@ fail closed until a fresh hire records the complete kernel lifetime.
 
 Local admission can refuse when process or descriptor ownership changes during
 the census. The native helper repeats the affected process observation for
-descriptor churn; it never skips an uncertain live same-user record. An exact HTTP 403 with
-`local_process_membership_required` is returned before forwarding that request,
-so a later fresh request can retry safely. Read-only discovery and mailbox polls
-can also retry. The worker bridge currently surfaces that 403 rather than
-automatically replaying it. A timeout, lost reply or uncertain receipt remains
-uncertain: reconcile the original receipt, even if a later request receives 403.
-A later refusal does not prove that an earlier call had no effect.
+descriptor churn; it never skips an uncertain live same-user record. When current
+proof is unavailable, HTTP 503 `fleet_admission_unavailable` marks the request
+retryable: nothing was forwarded. Claude and Codex bridges wait briefly and retry
+that refused request once. If proof remains unavailable, the reply says to retry
+shortly, then ask the lead to inspect admission if it persists. This does not mean
+the seat needs a new fleet admission. A definite non-member gets HTTP 403
+`local_process_membership_required`, with guidance to ask the lead for admission;
+the bridge does not retry it. Automatic polling and catalog refresh go quiet
+on that exact refusal instead of flooding the service. Worker startup hooks
+also check Herdr's pane presence: an exact `pane_not_found` leaves the worker
+unclaimed, including a pre-warmed spare that inherited an obsolete pane ID.
+Unavailable observations remain unknown and still require server proof.
+
+Only an explicit pre-forward refusal permits that retry. A timeout, lost reply or
+uncertain receipt remains uncertain: reconcile the original receipt, even if a
+later request receives an admission refusal. A later refusal does not prove that
+an earlier call had no effect.
 
 No additional native session, harness executable, canonical cwd or project grant
 is needed for connected tools after fleet admission. Anything running in an admitted pane,

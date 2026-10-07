@@ -23,6 +23,10 @@ import {
 import { PeerSeatMessages } from "../src/captain/peer-seat-messages.ts";
 import { createStubCaptain, type LaneTool } from "../src/captain/port.ts";
 import type { ProjectHireProcessProof } from "../src/captain/project-hires.ts";
+import {
+  FleetAdmissionUnavailableError,
+  fleetAdmissionUnavailableResponse,
+} from "../src/local-fleet-admission.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { createMcpHost, type McpHostOptions } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
@@ -43,12 +47,20 @@ function gate() {
   return { promise, release };
 }
 
-async function listen(service: Awaited<ReturnType<typeof createClankieApp>>, local?: LocalFleetLink) {
+async function listen(
+  service: Awaited<ReturnType<typeof createClankieApp>>,
+  local?: LocalFleetLink,
+  observe?: (request: Request) => Promise<Response | undefined>,
+) {
   const forward = local?.fetch((request) => service.app.fetch(request));
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (request, env) => (forward ? forward(request, env) : service.app.fetch(request)),
+    fetch: async (request, env) => {
+      const refusal = await observe?.(request);
+      if (refusal) return refusal;
+      return forward ? forward(request, env) : service.app.fetch(request);
+    },
   }) as HttpServer;
   await new Promise<void>((resolve, reject) => {
     server.once("listening", resolve);
@@ -238,10 +250,17 @@ async function fixture(
       shell: { pid: process.pid, startTime: "fixture-parent" },
     };
   };
+  let refusalMode: "once" | "held" | "nonmember" | undefined;
   const local = new LocalFleetLink({
     directory: join(stateDirectory, "links"),
     binding: async () => ({ runtime: "external", socketPath, session: "fixture" }),
-    prove: async (_socket, pane) => proof(pane) !== undefined,
+    prove: async (_socket, pane) => {
+      if (refusalMode && refusalMode !== "once") {
+        if (refusalMode === "nonmember") return false;
+        throw new FleetAdmissionUnavailableError("Fixture native observations temporarily unavailable");
+      }
+      return proof(pane) !== undefined;
+    },
     projectProof: async (_socket, pane, signal) => {
       projectProofSignals.push(signal);
       if (options.stallProjectProof) {
@@ -281,7 +300,24 @@ async function fixture(
     localFleet: local,
     authenticateOperator: async () => undefined,
   });
-  const listener = await listen(service, local);
+  const admissionCalls: unknown[] = [];
+  const listener = await listen(service, local, async (request) => {
+    if (new URL(request.url).pathname !== "/v1/fleet/mcp" || request.method !== "POST") return;
+    const body = await request
+      .clone()
+      .json()
+      .catch(() => undefined);
+    if (body?.method === "tools/call" && body.params?.name === "clankie_call") {
+      admissionCalls.push(body);
+      // Scope the one-shot refusal to this RPC. Background health discovery
+      // must not consume the failure intended to exercise mutation admission.
+      if (refusalMode === "once") {
+        refusalMode = undefined;
+        return fleetAdmissionUnavailableResponse();
+      }
+    }
+    return undefined;
+  });
   await writeFile(join(root, "auth.json"), "fixture profile presence only; no account sign-in");
   let nextPane = 0;
   const get = (pane: string) => {
@@ -414,6 +450,12 @@ async function fixture(
     },
   });
   return {
+    refuseAdmission(mode: "once" | "held" | "nonmember") {
+      refusalMode = mode;
+      admissionCalls.length = 0;
+    },
+    refusalChecks: () => admissionCalls.length,
+    admissionCalls,
     bridges,
     calls,
     bindings,
@@ -682,3 +724,71 @@ it("returns a specific stalled tracker error within the worker request budget an
     await f.close();
   }
 });
+
+it.each(["once", "held", "nonmember"] as const)(
+  "shared native connected-call bridge handles %s admission refusal before dispatch",
+  async (mode) => {
+    const f = await fixture();
+    try {
+      expect((await f.hire(1))[0]?.outcome).toBe("spawned");
+      const worker = [...f.bridges.values()][0]!;
+      f.refuseAdmission(mode);
+      const result = await worker.client.callTool({
+        name: "clankie_call",
+        arguments: { name: "linear_save_project_update", arguments: { id: "VUH-admission" } },
+      });
+      const receipt = JSON.parse(text(result));
+      if (mode === "once") {
+        expect(receipt.outcome).toBe("ok");
+        expect(f.calls).toEqual([{ provider: "original", id: "VUH-admission" }]);
+      } else {
+        expect(receipt.outcome).toBe("refused");
+        expect(f.calls).toEqual([]);
+        expect(receipt).not.toHaveProperty("receiptId");
+        if (mode === "held")
+          expect(receipt).toMatchObject({
+            retryable: true,
+            detail: expect.stringContaining("Wait briefly and retry"),
+          });
+        else expect(receipt.detail).toContain("Ask Clankie");
+      }
+      expect(f.refusalChecks()).toBe(mode === "nonmember" ? 1 : 2);
+      if (mode !== "nonmember") expect(f.admissionCalls[1]).toEqual(f.admissionCalls[0]);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+it.each(["held", "nonmember"] as const)(
+  "preserves the original connected receipt when %s admission prevents reconciliation",
+  async (mode) => {
+    const f = await fixture();
+    try {
+      expect((await f.hire(1))[0]?.outcome).toBe("spawned");
+      const worker = [...f.bridges.values()][0]!;
+      const original = JSON.parse(
+        text(
+          await worker.client.callTool({
+            name: "clankie_call",
+            arguments: { name: "linear_save_project_update", arguments: { id: "VUH-original" } },
+          }),
+        ),
+      );
+      expect(original.outcome).toBe("ok");
+      f.refuseAdmission(mode);
+      const reconciled = await worker.client.callTool({
+        name: "clankie_call",
+        arguments: { receiptId: original.receiptId },
+      });
+      expect(JSON.parse(text(reconciled))).toMatchObject({
+        outcome: "uncertain",
+        receiptId: original.receiptId,
+      });
+      expect(reconciled.isError).toBe(false);
+      expect(f.calls).toEqual([{ provider: "original", id: "VUH-original" }]);
+    } finally {
+      await f.close();
+    }
+  },
+);

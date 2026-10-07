@@ -12,9 +12,21 @@ const [root, mode, instanceId, deadlineText] = process.argv.slice(2);
 if (
   !root ||
   !instanceId ||
-  !["normal", "pipe", "hold", "hold-abort", "hold-shutdown", "storage-failure", "journal-failure"].includes(
-    mode ?? "",
-  )
+  ![
+    "normal",
+    "pipe",
+    "hold",
+    "hold-abort",
+    "hold-shutdown",
+    "storage-failure",
+    "journal-failure",
+    "admission-once",
+    "admission-held",
+    "nonmember",
+    "admission-post-once",
+    "admission-post-held",
+    "admission-post-nonmember",
+  ].includes(mode ?? "")
 )
   throw new Error("Missing inbound recovery fixture arguments");
 const deadlineMs = Number(deadlineText ?? 30_000);
@@ -48,6 +60,7 @@ const held = new Promise<void>((resolve) => {
   release = resolve;
 });
 let firstPost = true;
+let admissionChecks = 0;
 process.on("message", (message) => {
   if (message === "release") release();
   if (message === "shutdown") {
@@ -80,6 +93,27 @@ const server = createServer(async (request, response) => {
   if (request.headers["x-clankie-pane"] !== pane) {
     response.writeHead(403).end();
     return;
+  }
+  const nonmember = mode === "nonmember" || mode === "admission-post-nonmember";
+  const postAdmission = mode?.startsWith("admission-post-");
+  if (
+    (postAdmission ? request.method === "POST" : request.method === "GET") &&
+    (mode?.startsWith("admission-") || mode === "nonmember")
+  ) {
+    admissionChecks++;
+    process.send?.({ state: "admission", id: String(admissionChecks) });
+    if (nonmember || mode?.endsWith("held") || admissionChecks === 1) {
+      response
+        .writeHead(nonmember ? 403 : 503, { "content-type": "application/json" })
+        .end(
+          JSON.stringify(
+            nonmember
+              ? { error: "local_process_membership_required" }
+              : { error: "fleet_admission_unavailable", retryable: true },
+          ),
+        );
+      return;
+    }
   }
   const reply = (body: unknown) =>
     response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));

@@ -2,6 +2,11 @@ import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import {
+  checkFleetMembership,
+  FleetMembershipRefused,
+  requestWithAdmissionRetry,
+} from "../../../../integrations/claude-plugin/worker/bin/admission.mjs";
 import { createInboundSender } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 /**
  * `clankie mcp --lane operator` and `clankie mcp --seat` — stdio MCP for a
@@ -402,6 +407,10 @@ export async function pumpSeatEvents(
     } catch (error) {
       if (signal.aborted) return;
       report(error, "poll");
+      if (error instanceof FleetMembershipRefused) {
+        diagnostic({ event: "pump_stopped", stage: "poll", ...errorIdentity(error) });
+        return;
+      }
       await delay(retryMs, signal);
       continue;
     }
@@ -488,6 +497,10 @@ async function acknowledgeSeatEvent(
     } catch (error) {
       if (signal.aborted) return false;
       report(error, "ack", eventId);
+      if (error instanceof FleetMembershipRefused) {
+        diagnostic({ event: "pump_stopped", stage: "ack", eventId, ...errorIdentity(error) });
+        throw error;
+      }
       if (attempt === 0) await delay(retryMs, signal);
     }
   }
@@ -842,6 +855,7 @@ export async function connectLaneUpstream(input: {
           signal: AbortSignal.timeout(10_000),
         },
       );
+      await checkFleetMembership(response);
       if (response.status === 404) return false;
       if (!response.ok) throw new Error(`seat acknowledgment answered ${String(response.status)}`);
       return true;
@@ -970,6 +984,7 @@ function connectFleetMailbox(input: {
         new URL(`${fleetSeatEventsPath(input.paneId)}?wait=${String(waitMs)}`, input.host),
         { headers, signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]) },
       );
+      await checkFleetMembership(response);
       if (!response.ok) throw new Error(`fleet mailbox answered ${String(response.status)}`);
       return OperatorSeatEventsPageSchema.parse(await response.json()).events;
     },
@@ -1001,6 +1016,10 @@ function fleetMailboxOnError(stderr: { write(chunk: string): unknown }): (error:
   let warnedUnknownSeat = false;
   return (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof FleetMembershipRefused) {
+      stderr.write(`clankie mcp: ${message}\n`);
+      return;
+    }
     if (message.includes("404")) {
       if (!warnedUnknownSeat) {
         warnedUnknownSeat = true;
@@ -1039,11 +1058,16 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
         ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
       });
       if (credential === undefined) throw new Error("No operator credential");
-      return fetch(new URL(`${fleetSeatMessagesPath(paneId)}${suffix}`, commandHost({ ...options, env })), {
-        ...init,
-        headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-        signal: AbortSignal.timeout(20_000),
-      });
+      const deadline = AbortSignal.timeout(20_000);
+      return requestWithAdmissionRetry(
+        () =>
+          fetch(new URL(`${fleetSeatMessagesPath(paneId)}${suffix}`, commandHost({ ...options, env })), {
+            ...init,
+            headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+            signal: deadline,
+          }),
+        deadline,
+      );
     },
   });
   const server = createFleetSeatBridge(paneId.length === 0 ? undefined : sendInbound, true);

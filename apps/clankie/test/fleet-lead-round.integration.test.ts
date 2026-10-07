@@ -259,6 +259,94 @@ async function fixture(
   };
 }
 
+it("records an aggregate proof flood for the default owner without a current native seat or model turn", async () => {
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    async (_root, rows) => {
+      rows.splice(0);
+    },
+    undefined,
+    false,
+    false,
+  );
+  let now = Date.now();
+  const attempts: Promise<boolean>[] = [];
+  const settlements: string[] = [];
+  const metrics = new FleetHealthMetrics({
+    now: () => now,
+    onAggregateProofAlert: (rates) => {
+      let observed: import("../src/captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
+      const delivery = f.captain.notifyFleetHealthAlert(
+        undefined,
+        `Fleet aggregate proof alert: ${rates.proof.refusals}/${rates.proof.attempts} refused.`,
+        (result) => {
+          observed = result;
+        },
+      );
+      attempts.push(delivery);
+      return delivery.then(() => {
+        settlements.push(observed.outcome);
+        return observed;
+      });
+    },
+  });
+  const proof = localFleetProof({
+    platform: "darwin",
+    herdrBinary: "herdr",
+    binding: async () => undefined,
+    diagnostics: (event, pane) => metrics.observeProof("fleet", event, pane),
+  });
+  const server = serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (_request, environment) =>
+      Response.json({ accepted: await proof(environment.incoming.socket, "") }),
+  });
+  if (!server.listening) await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing real proof TCP listener");
+  try {
+    const refuse = async () => {
+      const response = await fetch(`http://127.0.0.1:${address.port}`);
+      expect(await response.json()).toEqual({ accepted: false });
+    };
+    await refuse();
+    expect(await attempts[0]).toBe(true);
+    await Promise.resolve();
+    expect(settlements).toEqual(["accepted"]);
+    for (let minute = 0; minute < 4; minute++) {
+      now += 60_000;
+      await refuse();
+    }
+    expect(attempts).toHaveLength(1);
+    const replay = await f.captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "replay",
+      replay: { schemaVersion: 1, conversationId: "global-default", surfaceClientId: "test" },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Missing replay page");
+    expect(
+      replay.result.events.filter((event) => event.type === "message" && event.role === "external"),
+    ).toMatchObject([{ text: "Fleet aggregate proof alert: 1/1 refused." }]);
+    expect(
+      new ConversationJournal(join(f.root, "conversations"))
+        .read("global-default")
+        .some((event) => event.type === "turn"),
+    ).toBe(false);
+    expect(
+      f.nativeRequests.filter(
+        (args) => !["get", "list", "wait", "snapshot", "process-info"].includes(args[1]!),
+      ),
+    ).toEqual([]);
+  } finally {
+    if ("closeAllConnections" in server) server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 it("refuses new native health messages behind a durable head receipt until its exact acknowledgment", async () => {
   const originalId = randomUUID();
   const f = await fixture(

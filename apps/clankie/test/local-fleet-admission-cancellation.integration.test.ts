@@ -9,7 +9,7 @@ import { SettingsStore } from "@clankie/settings";
 import { expect, it } from "vitest";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
-import { localFleetProof } from "../src/local-fleet-proof.ts";
+import { localFleetAdmissionProof } from "../src/local-fleet-proof.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { closeNativeProcessObservers, nativeProcessRequest } from "../src/native-process-transport.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
@@ -42,10 +42,19 @@ async function fixture() {
   const state: {
     shell: number;
     holdControl: boolean;
+    missingPane: boolean;
     controls: number;
     closedControls: number;
-    privateSeat?: Parameters<typeof localFleetProof>[0]["privateSeat"];
-  } = { shell: 33, holdControl: false, controls: 0, closedControls: 0 };
+    proofRefusals: string[];
+    privateSeat?: Parameters<typeof localFleetAdmissionProof>[0]["privateSeat"];
+  } = {
+    shell: 33,
+    holdControl: false,
+    missingPane: false,
+    controls: 0,
+    closedControls: 0,
+    proofRefusals: [],
+  };
   const controlSockets = new Set<Socket>();
   const control = createServer((socket) => {
     controlSockets.add(socket);
@@ -63,7 +72,9 @@ async function fixture() {
         socket.write(
           JSON.stringify({
             id: request.id,
-            result: { process_info: { pane_id: request.params.pane_id, shell_pid: state.shell } },
+            ...(state.missingPane
+              ? { error: { code: "pane_not_found", message: "Fixture pane missing" } }
+              : { result: { process_info: { pane_id: request.params.pane_id, shell_pid: state.shell } } }),
           }) + "\n",
         );
     });
@@ -88,10 +99,13 @@ async function fixture() {
   const local = new LocalFleetLink({
     directory: join(root, "links"),
     binding: async () => binding,
-    prove: localFleetProof({
+    prove: localFleetAdmissionProof({
       binding: async () => binding,
       herdrBinary: "unused",
       processHelper: helper,
+      diagnostics: (event) => {
+        if (event.source === "proof") state.proofRefusals.push(event.reason);
+      },
       privateSeat: (...args) => state.privateSeat?.(...args) ?? Promise.resolve(false),
     }),
   });
@@ -127,8 +141,8 @@ async function fixture() {
     root,
     journal,
     release: () => writeFile(join(root, "release"), "release\n"),
-    initialize: async () => {
-      const response = await fetch(`http://127.0.0.1:${address.port}/v1/fleet/mcp`, {
+    initialize: async (path = "/v1/fleet/mcp") => {
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -290,16 +304,23 @@ localIt(
 );
 
 localIt(
-  "retains proof-unavailable 403 before the deadline without asserting true nonmembership",
+  "reports unavailable native observation as a retryable refusal before MCP or seat dispatch",
   async () => {
     const f = await fixture();
     try {
       // Remove only the test's owned helper: production sees a real spawn failure.
       await rm(f.helper);
-      expect(await f.initialize()).toEqual({
-        status: 403,
-        body: { error: "local_process_membership_required" },
-      });
+      for (const path of ["/v1/fleet/mcp", "/v1/fleet/seats/w1:p1/messages"]) {
+        expect(await f.initialize(path)).toEqual({
+          status: 503,
+          body: {
+            error: "fleet_admission_unavailable",
+            retryable: true,
+            reason:
+              "Clankie could not verify this local fleet request yet. Retry shortly; if it persists, ask the lead to inspect clankie fleet status.",
+          },
+        });
+      }
       expect(f.state.controls).toBe(0);
       expect(await f.journal()).toEqual([]);
     } finally {
@@ -307,3 +328,70 @@ localIt(
     }
   },
 );
+
+localIt("rechecks fresh native proof after census failure without admitting a real nonmember", async () => {
+  const f = await fixture();
+  try {
+    await writeFile(join(f.root, "fail-next-proof"), "fail\n");
+    const unavailable = await f.initialize();
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.body).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
+    expect(f.state.controls).toBe(0);
+    expect(f.state.proofRefusals).toEqual(["native_initial_unavailable"]);
+    expect((await f.initialize()).status).toBe(200);
+    expect(f.state.controls).toBe(2);
+    expect((await f.journal()).filter((row) => row.mode === "proof")).toHaveLength(3);
+    f.state.shell = 99;
+    expect(await f.initialize()).toEqual({
+      status: 403,
+      body: { error: "local_process_membership_required" },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+localIt("keeps a private seat's missing lifetime observation retryable and verifies it again", async () => {
+  const f = await fixture();
+  try {
+    const registry = new LocalCodexSeats(
+      () => f.binding,
+      async (_pid, _previous, signal) => {
+        const reply = await nativeProcessRequest(f.helper, ["birth"], signal);
+        return reply && JSON.parse(reply.stdout).mode === "birth" ? "fixture-birth" : undefined;
+      },
+    );
+    registry.register(55, "w1:p1");
+    await nativeProcessRequest(f.helper, ["registered"]);
+    f.state.shell = 99;
+    f.state.privateSeat = (chain, pane, binding, signal) =>
+      registry.allowsAdmission(chain, pane, binding, undefined, signal);
+    await writeFile(join(f.root, "fail-next-birth"), "fail\n");
+    const unavailable = await f.initialize();
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.body).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
+    expect(f.state.proofRefusals).toEqual(["observation_failed"]);
+    expect((await f.initialize()).status).toBe(200);
+    expect((await f.journal()).filter((row) => row.mode === "proof")).toHaveLength(3);
+    expect((await f.journal()).filter((row) => row.mode === "birth")).toHaveLength(4);
+  } finally {
+    await f.close();
+  }
+});
+
+localIt("distinguishes malformed pane observation from Herdr's definitive missing pane", async () => {
+  const f = await fixture();
+  try {
+    f.state.shell = 0;
+    const malformed = await f.initialize();
+    expect(malformed.status).toBe(503);
+    expect(malformed.body).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
+    f.state.missingPane = true;
+    expect(await f.initialize()).toEqual({
+      status: 403,
+      body: { error: "local_process_membership_required" },
+    });
+  } finally {
+    await f.close();
+  }
+});

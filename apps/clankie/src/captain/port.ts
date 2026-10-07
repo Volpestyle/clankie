@@ -201,9 +201,9 @@ export interface CaptainPort {
     headConversationId: string | null,
   ): Promise<OperatorConversation>;
   validateConversationOwner(owner: ConversationOwner, mode?: "machine" | "social"): Promise<boolean>;
-  /** Freshly owned native lead only; never starts a service model turn. */
+  /** Native lead delivery, or default owner for aggregate health; never a service model turn. */
   notifyFleetHealthAlert(
-    pane: string,
+    pane: string | undefined,
     text: string,
     observe?: (delivery: FleetHealthAlertDelivery) => void,
   ): Promise<boolean>;

@@ -5,6 +5,10 @@ import type { Socket } from "node:net";
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
 import type { HerdrBinding } from "@clankie/protocol";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
+import {
+  FleetAdmissionUnavailableError,
+  fleetAdmissionUnavailableResponse,
+} from "./local-fleet-admission.ts";
 
 export interface LocalFleetIdentity {
   readonly fleet?: string;
@@ -74,9 +78,11 @@ export class LocalFleetLink {
         validate: async (signal?: AbortSignal) => {
           const cancelled = cancellation(signal);
           cancelled.throwIfAborted();
-          const admitted = current() && (await this.options.prove(env.incoming.socket, pane, cancelled));
+          if (!current()) throw new FleetAdmissionUnavailableError("Local fleet connection is unavailable");
+          const admitted = await this.options.prove(env.incoming.socket, pane, cancelled);
           cancelled.throwIfAborted();
-          return admitted && current();
+          if (!current()) throw new FleetAdmissionUnavailableError("Local fleet connection changed");
+          return admitted;
         },
         projectProof: async (signal?: AbortSignal) => {
           const cancelled = cancellation(signal);
@@ -108,6 +114,7 @@ export class LocalFleetLink {
         } catch (error) {
           if (request.signal.aborted)
             return Response.json({ error: "local_admission_cancelled" }, { status: 504 });
+          if (error instanceof FleetAdmissionUnavailableError) return fleetAdmissionUnavailableResponse();
           throw error;
         }
       }

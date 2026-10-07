@@ -1,6 +1,10 @@
 import { ProjectIdSchema, type ProjectsSettings } from "@clankie/protocol/projects";
 import type { FleetSettings } from "@clankie/settings";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
+import {
+  FleetAdmissionUnavailableError,
+  fleetAdmissionUnavailableResponse,
+} from "./local-fleet-admission.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
@@ -990,6 +994,7 @@ export class WorkerMcp {
         );
       if (error instanceof LocalFleetAdmissionError)
         return Response.json({ error: "local_process_membership_required" }, { status: 403 });
+      if (error instanceof FleetAdmissionUnavailableError) return fleetAdmissionUnavailableResponse();
       return Response.json(
         { error: "worker_grant_unavailable", reason: "Worker access unavailable" },
         { status: 403 },

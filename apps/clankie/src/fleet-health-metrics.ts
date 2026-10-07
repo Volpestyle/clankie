@@ -13,6 +13,14 @@ import type { FleetHealthAlertDelivery } from "./captain/port.ts";
 type ProofAlertResult = boolean | FleetHealthAlertDelivery;
 
 type Counters = FleetHealthMetricsSnapshot["totals"];
+type AlertState = {
+  buckets: Map<number, Counters>;
+  lastSeen: number;
+  alertAt?: number;
+  attemptAt?: number;
+  alertPending?: boolean;
+  acknowledged?: () => boolean;
+};
 const MINUTE = 60_000;
 function empty(): Counters {
   return {
@@ -66,20 +74,12 @@ export class FleetHealthMetrics {
   private readonly startedAt: string;
   private readonly totals = empty();
   private readonly buckets = new Map<number, Counters>();
-  private readonly seats = new Map<
-    string,
-    {
-      buckets: Map<number, Counters>;
-      lastSeen: number;
-      alertAt?: number;
-      attemptAt?: number;
-      alertPending?: boolean;
-      acknowledged?: () => boolean;
-    }
-  >();
+  private readonly seats = new Map<string, AlertState>();
+  private readonly aggregate: AlertState = { buckets: this.buckets, lastSeen: 0 };
   private readonly reports = new Map<string, { signature: string; lastSeen: number }>();
   private readonly options: {
     now?: () => number;
+    onAggregateProofAlert?(window: FleetHealthMetricsWindow): ProofAlertResult | Promise<ProofAlertResult>;
     onProofAlert?(
       pane: string,
       window: FleetHealthMetricsWindow,
@@ -88,6 +88,7 @@ export class FleetHealthMetrics {
   constructor(
     options: {
       now?: () => number;
+      onAggregateProofAlert?(window: FleetHealthMetricsWindow): ProofAlertResult | Promise<ProofAlertResult>;
       onProofAlert?(
         pane: string,
         window: FleetHealthMetricsWindow,
@@ -140,6 +141,8 @@ export class FleetHealthMetrics {
       }
     };
     const minute = this.record(update);
+    if (this.options.onAggregateProofAlert)
+      this.observeAlert(event, minute, this.aggregate, (rates) => this.options.onAggregateProofAlert!(rates));
     if (!pane || !/^w[\w]+:p[\w]+$/u.test(pane)) return;
     let seat = this.seats.get(pane);
     if (!seat) {
@@ -151,6 +154,15 @@ export class FleetHealthMetrics {
     let bucket = seat.buckets.get(minute);
     if (!bucket) seat.buckets.set(minute, (bucket = empty()));
     update(bucket);
+    this.observeAlert(event, minute, seat, (rates) => this.options.onProofAlert?.(pane, rates), pane);
+  }
+  private observeAlert(
+    event: Extract<LocalFleetProofDiagnostic, { source: "proof" | "proof_success" }>,
+    minute: number,
+    seat: AlertState,
+    deliver: (rates: FleetHealthMetricsWindow) => ProofAlertResult | Promise<ProofAlertResult> | undefined,
+    pane?: string,
+  ): void {
     const rates = window(5, seat.buckets, minute);
     if (seat.alertPending && seat.acknowledged) {
       try {
@@ -176,7 +188,7 @@ export class FleetHealthMetrics {
       const original = seat;
       const settled = (delivery: ProofAlertResult | undefined) => {
         // A replaced/expired seat observation cannot acquire an old cooldown.
-        if (this.seats.get(pane) !== original) return;
+        if (original !== this.aggregate && (pane === undefined || this.seats.get(pane) !== original)) return;
         if (typeof delivery === "object" && delivery.outcome === "unconfirmed") {
           if (delivery.acknowledged) original.acknowledged = delivery.acknowledged;
           return;
@@ -186,7 +198,7 @@ export class FleetHealthMetrics {
           original.alertAt = Math.floor(this.now() / MINUTE);
       };
       try {
-        void Promise.resolve(this.options.onProofAlert?.(pane, rates))
+        void Promise.resolve(deliver(rates))
           .then(settled)
           .catch(() => settled(false));
       } catch {

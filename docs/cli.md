@@ -3201,9 +3201,14 @@ Read operator-only `GET /v1/fleet/metrics` for proof attempts and refusals, work
 report attempts and failures, and fixed native/transport reason counters. The
 five- and sixty-minute windows show failure fractions and failures per minute;
 counters contain no process IDs, paths, argv, report bodies or credentials.
-Doctor includes the same windows. A live seat with more than 1% terminal proof
-refusals in five minutes produces a native alert to its current owning lead,
-with a five-minute cooldown after exact native acknowledgment. A submitted but
+Doctor includes the same windows. More than 1% terminal proof refusals in five
+minutes produces an aggregate alert in the owner's default conversation,
+including refusals without an identifiable or currently owned pane. A live seat
+also alerts its current owning lead. Aggregate alerts are retained as service
+notices even when no native seat can receive them. A definitively unavailable
+native route starts the aggregate five-minute cooldown after retaining that
+notice; an exact native acknowledgment starts the cooldown for delivered alerts.
+A submitted but
 unconfirmed alert stays held across inactivity without replay; later proof
 observations read only
 its original acknowledgment before starting that cooldown. Unavailable delivery

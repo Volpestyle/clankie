@@ -145,7 +145,7 @@ import {
   createRemoteGitWorktreeObserver,
   createRemoteWorktreeRootObserver,
 } from "./remote-project-proof.ts";
-import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
+import { localFleetAdmissionProof, localProjectProof } from "./local-fleet-proof.ts";
 import { FleetHealthMetrics } from "./fleet-health-metrics.ts";
 import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
 import { closeNativeProcessObservers } from "./native-process-transport.ts";
@@ -1108,6 +1108,24 @@ const fleetResources = await createFleetResourceRuntime({
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
 });
 const fleetHealthMetrics = new FleetHealthMetrics({
+  onAggregateProofAlert: async (window) => {
+    let delivery: import("./captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
+    const reasons = Object.entries(window.proof.byReason)
+      .sort(([, left], [, right]) => (right ?? 0) - (left ?? 0))
+      .slice(0, 3)
+      .map(([reason, count]) => `${reason}: ${count}`)
+      .join(", ");
+    await captain
+      .notifyFleetHealthAlert(
+        undefined,
+        `Fleet proof refusals exceeded 1% across all local proof checks over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Reasons: ${reasons}. This includes requests without a current owned seat. Inspect clankie metrics --fleet and clankie doctor.`,
+        (result) => {
+          delivery = result;
+        },
+      )
+      .catch(() => undefined);
+    return delivery;
+  },
   onProofAlert: async (pane, window) => {
     let delivery: import("./captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
     await captain
@@ -1417,12 +1435,12 @@ const localFleet = new LocalFleetLink({
       return grokNative.allows(chain, pane, binding, proof.nativeOccupantId);
     },
   }),
-  prove: localFleetProof({
+  prove: localFleetAdmissionProof({
     diagnostics: localProofDiagnostics(logger, "fleet", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding, signal) => {
-      if (await localCodexSeats.allows(chain, pane, binding, undefined, signal)) return true;
+      if (await localCodexSeats.allowsAdmission(chain, pane, binding, undefined, signal)) return true;
       signal?.throwIfAborted();
       return grokNative.allows(chain, pane, binding);
     },

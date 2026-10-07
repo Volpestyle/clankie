@@ -2827,11 +2827,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   /** Native delivery only. Health observations never start a service model turn. */
   async function notifyFleetHealthAlert(
-    pane: string,
+    pane: string | undefined,
     text: string,
     observe?: (delivery: FleetHealthAlertDelivery) => void,
   ): Promise<boolean> {
     if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
+    const observeDelivery = observe
+      ? (delivery: FleetHealthAlertDelivery) => {
+          try {
+            observe(delivery);
+          } catch {
+            /* Observation cannot change delivery settlement. */
+          }
+        }
+      : undefined;
+    if (pane === undefined) {
+      const conversationId = conversations.defaultGlobalConversationId();
+      if (!conversations.recordServiceNotice(conversationId, text)) return false;
+      return deliverNativeHealthAlert(
+        { conversationId },
+        text,
+        async () => {
+          if (shutdown.signal.aborted) throw new Error("Fleet health alert stopped");
+        },
+        undefined,
+        observeDelivery,
+        true,
+      );
+    }
     const original = await herdrRunner.get(pane).catch(() => undefined);
     if (!original?.session) return false;
     const fleet = await observeFleet(true);
@@ -2848,15 +2871,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (JSON.stringify(currentRoute.owner) !== JSON.stringify(route.owner))
         throw new Error("Fleet health alert lead changed");
     };
-    const observeDelivery = observe
-      ? (delivery: FleetHealthAlertDelivery) => {
-          try {
-            observe(delivery);
-          } catch {
-            /* Observation cannot change delivery settlement. */
-          }
-        }
-      : undefined;
     return deliverNativeHealthAlert(route.owner, text, guard, route.native ?? route.parent, observeDelivery);
   }
 
@@ -2881,15 +2895,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     guard: () => Promise<void>,
     recipient?: NativeSeatRecipient,
     observe?: (delivery: FleetHealthAlertDelivery) => void,
+    durableOwnerNotice = false,
   ): Promise<boolean> {
     const outcome = (submitted: boolean, reason: string) => {
+      // Only a definitively absent native source settles via its owner notice.
+      // Existing unresolved receipts and dispatch failures keep their semantics.
+      const noticeAccepted = durableOwnerNotice && reason === "native_source_unavailable";
+      if (noticeAccepted) observe?.({ outcome: "accepted" });
       options.onHealthAlertDelivery?.({
         fingerprint: deliveryFingerprint(text),
         conversationId: owner.conversationId,
         outcome: submitted ? "submitted" : "unavailable",
         reason,
       });
-      return submitted;
+      return submitted || noticeAccepted;
     };
     try {
       if (shutdown.signal.aborted || !text.trim() || text.length > 4000)

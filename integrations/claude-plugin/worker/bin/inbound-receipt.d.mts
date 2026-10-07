@@ -2,6 +2,7 @@ interface InboundReceipt {
   received: boolean;
   deliveryStage: "stored" | "uncertain" | "rejected" | "unavailable";
   detail?: string;
+  retryable?: boolean;
   deliveryId?: string;
   binding?: string;
   fingerprint?: string;

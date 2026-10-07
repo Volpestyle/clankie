@@ -13,6 +13,7 @@ import {
 import type { z } from "zod";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import { observeNativeBirth, nativeProcessReceipt } from "./local-fleet-process.ts";
+import { FleetAdmissionUnavailableError } from "./local-fleet-admission.ts";
 
 const exec = promisify(execFile);
 const processStart = async (
@@ -317,6 +318,28 @@ export class LocalCodexSeats {
     nativeOccupantId?: string,
     signal?: AbortSignal,
   ): Promise<boolean> {
+    return this.checkAdmission(ancestors, pane, binding, nativeOccupantId, signal, false);
+  }
+
+  /** Keep a missing lifetime observation distinct from a proven registry mismatch. */
+  async allowsAdmission(
+    ancestors: readonly number[],
+    pane: string,
+    binding: HerdrBinding,
+    nativeOccupantId?: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    return this.checkAdmission(ancestors, pane, binding, nativeOccupantId, signal, true);
+  }
+
+  private async checkAdmission(
+    ancestors: readonly number[],
+    pane: string,
+    binding: HerdrBinding,
+    nativeOccupantId: string | undefined,
+    signal: AbortSignal | undefined,
+    distinguishUnavailable: boolean,
+  ): Promise<boolean> {
     for (const pid of ancestors) {
       signal?.throwIfAborted();
       const seat = this.seats.get(pid);
@@ -330,19 +353,18 @@ export class LocalCodexSeats {
       if (nativeOccupantId !== undefined && seat.nativeOccupantId !== nativeOccupantId) continue;
       const start = await seat.start;
       signal?.throwIfAborted();
-      if (!start || (await this.observeStart(pid, start, signal).catch(() => undefined)) !== start) {
-        signal?.throwIfAborted();
-        continue;
-      }
+      const observed = start ? await this.observeStart(pid, start, signal).catch(() => undefined) : undefined;
       signal?.throwIfAborted();
-      if (
-        seat.restored &&
-        (!seat.nativeOccupantId ||
-          (await this.durable?.observeOccupant(pane, signal).catch(() => undefined)) !==
-            seat.nativeOccupantId)
-      ) {
+      if (distinguishUnavailable && (!start || observed === undefined))
+        throw new FleetAdmissionUnavailableError("Private seat lifetime observation is unavailable");
+      if (!start || observed !== start) continue;
+      if (seat.restored) {
+        if (!seat.nativeOccupantId) continue;
+        const occupant = await this.durable?.observeOccupant(pane, signal).catch(() => undefined);
         signal?.throwIfAborted();
-        continue;
+        if (distinguishUnavailable && occupant === undefined)
+          throw new FleetAdmissionUnavailableError("Private seat occupant observation is unavailable");
+        if (occupant !== seat.nativeOccupantId) continue;
       }
       signal?.throwIfAborted();
       const current = this.binding();
