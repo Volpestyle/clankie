@@ -139,6 +139,10 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
 - **Progress**: two hours with no commit, finding or report attempt on its own
   branch needs a result or an actionable blocker.
 - **Done or idle**: harvest once, then tidy or assign the next ready item.
+  Harvest includes the worktree: before closing the worker, every commit is
+  on main (by content, `git cherry origin/main`) or deliberately abandoned
+  with a recorded reason, and nothing uncommitted is left behind. A worktree
+  holding unlanded work is never closed or forgotten silently.
 - **No overlap**: one producer per result across everything you own.
 - **Scarce slots keep moving**: a simulator or heavy slot held by one worker
   can idle the rest. Batch slot-bound work, release slots promptly, and order
