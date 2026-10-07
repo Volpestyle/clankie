@@ -69,10 +69,11 @@ function formatQuestion(result: ConversationQuestionResult): string {
   const q = result.question;
   if (!q) return result.reason ?? "No pending ask";
   if (q.status !== "pending")
-    return `Question ${q.requestId}: ${q.status}${q.reason ? ` (${q.reason})` : ""}${q.continuation ? `; continuation ${q.continuation.runId}: ${q.continuation.state}` : ""}`;
+    return `Question ${q.requestId}: ${q.status}${q.reason ? ` (${q.reason})` : ""}${q.continuation ? `; continuation ${q.continuation.runId}: ${q.continuation.state}` : ""}${q.issue ? `\nIssue: ${q.issue.tracker} ${q.issue.key} — ${q.issue.url}` : ""}`;
   return [
     `${q.purpose}: ${q.prompt}`,
     `Source: ${q.conversationId}${q.workspace ? ` (${q.workspace})` : ""}`,
+    q.issue ? `Issue: ${q.issue.tracker} ${q.issue.key} — ${q.issue.url}` : "",
     q.waitingOn ? `Waiting: ${q.waitingOn}` : "",
     q.recommendation ? `Recommendation: ${q.recommendation}` : "",
     q.gate ? `Owner gate: ${q.gate}` : "",

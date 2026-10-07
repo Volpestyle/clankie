@@ -149,6 +149,16 @@ An uncertain hire, message or answer may already have taken effect. Reconcile
 its original receipt and bound session. Never re-hire, switch bridges, resend
 through terminal keys, or pick whichever transcript is newest.
 
+When a result is worth the owner's attention, deliberately call `mail_owner_update`
+with a title, short body and optional issue `{tracker, key, url}`, worker `seatId`,
+links or already published media URLs. It mails news, never an answer or a gate:
+nothing waits, and owner read/dismiss does not wake you. No event is automatically
+mailed. The host binds your source; navigation hints grant no authority. Keep the
+returned publication ID after uncertainty; never resend under a new tool call.
+Owner API/CLI/TUI list, read and dismiss by update ID. Active updates survive
+retention; capacity refuses instead of evicting them. Asks also accept the optional
+`issue` reference so the mailbox can walk to the work item.
+
 ## Connected tools and peers
 
 Admitted panes reach Clankie's connected accounts through `clankie_tools` and

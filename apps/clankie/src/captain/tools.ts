@@ -1,6 +1,6 @@
 import type { ProjectProposalDraft } from "@clankie/protocol/projects";
 import type { QuestionDraft } from "./conversation-questions.ts";
-import type { ConversationQuestionResult } from "@clankie/protocol";
+import type { OwnerUpdate, OwnerUpdateDraft, ConversationQuestionResult } from "@clankie/protocol";
 import {
   captureConversationAuthority,
   assertConversationAuthority,
@@ -69,6 +69,7 @@ import { minecraftHostTools } from "./minecraft-host-tools.ts";
 export interface TurnContext {
   proposeProjectDefaults?: (() => Promise<unknown>) | undefined;
   proposeProjectCreate?: ((draft: ProjectProposalDraft) => Promise<ConversationQuestionResult>) | undefined;
+  mailOwnerUpdate?: ((draft: OwnerUpdateDraft, publicationId: string) => Promise<OwnerUpdate>) | undefined;
   requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */
   conversationAuthority?: ConversationAuthority | undefined;

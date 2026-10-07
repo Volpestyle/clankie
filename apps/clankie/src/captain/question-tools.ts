@@ -1,3 +1,4 @@
+import { OwnerUpdateDraftSchema, type OwnerUpdateDraft } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectProposalDraftSchema, type ProjectProposalDraft } from "@clankie/protocol/projects";
 import { Type } from "typebox";
@@ -7,6 +8,19 @@ import { toolJson, type TurnContext } from "./tools.ts";
 
 export function questionTools(turn: TurnContext, projects = true): ToolDefinition[] {
   const tools = [
+    defineTool({
+      name: "mail_owner_update",
+      label: "Mail the owner an update",
+      description:
+        "Deliberately send informational mail you choose as worth the owner's attention: results, media or landed work. Supply a title, short body and optional links/media, issue {tracker,key,url}, or source worker seatId. The host binds the source conversation. Nothing waits on this update; reading or dismissing it never starts a turn. No automatic event feed. Keep the returned ID after uncertainty; do not resend with another tool call.",
+      parameters: Type.Unsafe<OwnerUpdateDraft>(
+        withoutPatterns(z.toJSONSchema(OwnerUpdateDraftSchema, { io: "input" })),
+      ),
+      execute: async (id, input) => {
+        if (!turn.mailOwnerUpdate) throw new Error("Owner updates require a current source conversation");
+        return toolJson(await turn.mailOwnerUpdate(OwnerUpdateDraftSchema.parse(input), id));
+      },
+    }),
     defineTool({
       name: "propose_project_defaults",
       label: "Pick project defaults",
@@ -23,7 +37,7 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       name: "request_user_input",
       label: "Ask the owner",
       description:
-        "Ask the owner from this source conversation. Use decision for options and a recommendation, approval only for an action reserved to the owner by autonomy.fleet (supply its gate), or owner_action with exact steps only the owner can perform. Include waitingOn. Answers never grant credentials or change settings. Returns pending metadata immediately; an authenticated answer wakes this source conversation. To escalate an observed worker question, supply workerQuestion with its exact seatId and requestId; the host copies the native question, and the owner answer returns by question ID without terminal typing. Keep the returned pending or uncertain ask; never duplicate it.",
+        "Ask the owner from this source conversation. Use decision for options and a recommendation, approval only for an action reserved to the owner by autonomy.fleet (supply its gate), or owner_action with exact steps only the owner can perform. Include waitingOn and optionally issue {tracker,key,url} for navigation. Answers never grant credentials or change settings. Returns pending metadata immediately; an authenticated answer wakes this source conversation. To escalate an observed worker question, supply workerQuestion with its exact seatId and requestId; the host copies the native question, and the owner answer returns by question ID without terminal typing. Keep the returned pending or uncertain ask; never duplicate it.",
       parameters: Type.Unsafe<QuestionDraft>(
         withoutPatterns(z.toJSONSchema(QuestionDraftSchema, { io: "input" })),
       ),
@@ -51,7 +65,9 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       },
     }),
   ];
-  return projects ? tools : tools.filter((tool) => tool.name === "request_user_input");
+  return projects
+    ? tools
+    : tools.filter((tool) => tool.name === "request_user_input" || tool.name === "mail_owner_update");
 }
 
 /**

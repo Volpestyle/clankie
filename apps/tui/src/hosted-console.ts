@@ -1,5 +1,6 @@
 import { formatPlain } from "./command-format.ts";
 import type { ClankieAutocompleteSkill } from "./face/clankie-autocomplete.ts";
+import { ownerUpdateConsoleCommand } from "./owner-update-commands.ts";
 import { questionConsoleCommand } from "./question-commands.ts";
 import { ClankieApiClient } from "@clankie/api-client";
 import { buildDiscordCommands } from "./discord-commands.ts";
@@ -111,7 +112,8 @@ export async function runHostedConsole() {
     settings = new SettingsStore();
   const session = await loadHostedSession(store),
     transport = createHostedTransport(session, store);
-  const client = createCaptainOperatorConversationClient(createCaptainRouteClient(transport));
+  const ownerFetcher = createCaptainRouteClient(transport);
+  const client = createCaptainOperatorConversationClient(ownerFetcher, ownerFetcher);
   const selection = new OperatorConversationSelection(client);
   const saved = (await settings.load()).client;
   if (
@@ -187,6 +189,7 @@ export async function runHostedConsole() {
       formatPlain(await hostedCommand(args, transport)),
       "success",
     );
+  const updatesCommand = ownerUpdateConsoleCommand(client);
   const questionCommand = questionConsoleCommand(client, () => selection.conversationId);
   const discordApi = new ClankieApiClient({
     baseUrl: transport.host,
@@ -226,6 +229,24 @@ export async function runHostedConsole() {
         } catch (error) {
           active.insertCommandResult(
             "/question",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
+      name: "updates",
+      aliases: [],
+      description: "Read and dismiss informational owner updates",
+      takesArgument: true,
+      argumentHint: "[list [unread|read|dismissed|all] | read UUID | dismiss UUID]",
+      async run(argument, active) {
+        try {
+          active.insertCommandResult("/updates", await updatesCommand(argument), "success");
+        } catch (error) {
+          active.insertCommandResult(
+            "/updates",
             error instanceof Error ? error.message : String(error),
             "error",
           );

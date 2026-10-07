@@ -1,3 +1,4 @@
+import { MailIssueReferenceSchema } from "./mail-reference.ts";
 import { CheckoutStatusSchema } from "./checkouts.ts";
 import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
@@ -1503,6 +1504,7 @@ export const ConversationQuestionSchema = z
     steps: z.array(z.string().trim().min(1).max(2000)).max(32).optional(),
     gate: z.string().min(1).max(100).optional(),
     workerQuestion: ConversationWorkerQuestionSchema.optional(),
+    issue: MailIssueReferenceSchema.optional(),
     kind: z.enum(["text", "choice"]),
     prompt: z.string().trim().min(1).max(2000),
     options: z

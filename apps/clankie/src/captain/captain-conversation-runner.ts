@@ -392,6 +392,11 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 current: bodyIdentity.current,
                 authorize: bodyIdentity.authorize,
               });
+        lane.capture.mailOwnerUpdate = (draft, publicationId) =>
+          ctx.conversations.mailOwnerUpdate(conversationId, draft, `${context.runId}:${publicationId}`, {
+            current: bodyIdentity.current,
+            authorize: bodyIdentity.authorize,
+          });
         lane.capture.room =
           sourceScope?.kind === "room"
             ? roomKey(sourceScope.lane, sourceScope.targetId)

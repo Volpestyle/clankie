@@ -94,8 +94,11 @@ export function createCaptainOperatorConversationClient(
     const ownerError =
       request.op === "acknowledge_worker_report_history"
         ? "Owner authentication required to acknowledge report history."
-        : "Owner authentication required to start, accept, resume, or enable autonomous goals.";
+        : request.op.startsWith("owner_update_")
+          ? "Owner authentication required for mailbox updates."
+          : "Owner authentication required to start, accept, resume, or enable autonomous goals.";
     const ownerRequired =
+      request.op.startsWith("owner_update_") ||
       request.op === "acknowledge_worker_report_history" ||
       (request.op === "autonomy" && operatorAutonomyCommandRequiresOwner(request.command));
     if (ownerRequired && ownerFetcher === undefined) {

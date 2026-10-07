@@ -2330,6 +2330,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           current: () =>
             !shutdown.signal.aborted && conversations.conversation(sourceConversationId) !== undefined,
         });
+      capture.mailOwnerUpdate = (draft, publicationId) =>
+        conversations.mailOwnerUpdate(sourceConversationId, draft, publicationId, {
+          current: () =>
+            !shutdown.signal.aborted && conversations.conversation(sourceConversationId) !== undefined,
+        });
     }
     const currentSettings = await settings();
     const bank = await buildLaneToolBank(
@@ -3941,6 +3946,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   };
                   nativeCapture.requestQuestion = (draft) =>
                     conversations.requestSurfaceQuestion(child.conversationId, draft, {
+                      current: nativeIdentity.current,
+                      authorize: () => nativeIdentity.authorize("discord_mouth", "effect"),
+                    });
+                  nativeCapture.mailOwnerUpdate = (draft, publicationId) =>
+                    conversations.mailOwnerUpdate(child.conversationId, draft, publicationId, {
                       current: nativeIdentity.current,
                       authorize: () => nativeIdentity.authorize("discord_mouth", "effect"),
                     });

@@ -3257,6 +3257,19 @@ paths:
         Escalated worker questions pin native session/request/question IDs;
         worker answers use an ID-keyed answers map, never terminal typing.
         Duplicate answers reconcile the original receipt and never send twice.
+        Informational owner mail uses `owner_update_list` (optional conversationId
+        and unread/read/dismissed/all state; default nondismissed) to return
+        `{updates: [OwnerUpdate, ...]}`, newest first up to 1000 records.
+        `owner_update_read` and `owner_update_dismiss` select an exact update UUID
+        and return `{status, update?, reason?}`. These use the same owner authority
+        as asks; captain-only callers receive 403. Reading/dismissing is idempotent
+        and never resumes a conversation. Updates are created only when Clankie
+        deliberately calls mail_owner_update; no automatic event feed.
+        Updates carry title, short body, source, timestamp, read/dismissed state,
+        and optional links/media. Asks and updates carry optional
+        `issue: {tracker, key, url}` for navigation without tracker authority.
+        Each source conversation retains active updates and 32 dismissed records
+        within 256 total records and 512000 bytes; capacity refuses new mail.
         The canonical schemas are in packages/protocol/src/operator-conversations.ts
         and packages/protocol/src/operator-service.ts.
         Project onboarding uses `project_proposal_get` for one defaults-first

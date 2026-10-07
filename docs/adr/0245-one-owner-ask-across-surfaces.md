@@ -1,7 +1,7 @@
 # ADR 0245: One owner ask across surfaces
 
 Status: accepted for the core of [VUH-1809](https://linear.app/vuhlp/issue/VUH-1809)
-(2026-10-07). App mailbox presentation and informational updates are a later lane.
+(2026-10-07). App mailbox presentation is a separate lane; informational updates now have a core contract.
 
 ## Decision
 
@@ -89,6 +89,57 @@ authority, idempotent answer, and uncertain-receipt rules across restart. This
 extends the existing app contract without changing its wire shape or adding a
 second mailbox store.
 
+## Deliberate owner updates and issue navigation (2026-10-07)
+
+Clankie chooses what news is worth mailing through `mail_owner_update`, available
+alongside `request_user_input` on his source-bound native, console, room and
+service turns. No event, worker result or commit automatically publishes mail.
+An update is informational: no answer, gate, continuation or `waitingOn`.
+Reading or dismissing it never starts a conversation run or resolves an ask.
+
+The shared `OwnerUpdate` contract keeps the app branch's `MailUpdate` fields:
+`id`, `title`, `body`, `conversationId`, and `at`. Core requires a nonblank title
+(up to 200 characters) and body (up to 2000). It adds host-bound
+`source: {conversationId, seatId?}`, optional `links: [{label, url}]` and
+`media: [{url, mimeType, alt?}]` (up to eight each), and state
+`unread | read | dismissed` with `readAt`/`dismissedAt` timestamps.
+URLs are HTTP or HTTPS navigation references; mail does not fetch local files,
+publish artifacts, or confer access to linked media.
+
+Both asks and updates accept optional `issue: {tracker, key, url}`. This is a
+navigation reference, not tracker admission or authority. Different issue
+references keep otherwise identical pending asks distinct. The host pins the
+source conversation; a supplied `seatId` is a worker navigation hint, not proof
+of a worker's identity or an authorization grant.
+
+Updates persist atomically in the existing conversation root's
+`owner-updates.json`, separate from answer/claim records because they have no
+execution receipt. The publication identity is host-scoped by source and tool
+call, with source-run prefixes where the harness supplies them. Repeating that
+identity with the same immutable draft reconciles the original mail even after
+restart while retained; changing its draft refuses. Older dismissed records
+can be pruned, ending their publication deduplication window. An uncertain commit is never automatically
+retried under a new identity. Keep every unread/read update; retain the latest
+32 dismissed records per conversation. Like asks, each conversation is bounded
+to 256 total records and 512,000 serialized bytes. Refuse capacity instead of
+evicting active mail; reserve room for read/dismiss timestamps. Lists return up
+to 1000 records newest first across sources.
+
+Owner API operations are `owner_update_list` (optional `conversationId` and
+`state: unread | read | dismissed | all`; omission lists nondismissed mail),
+`owner_update_read`, and `owner_update_dismiss` (exact update `id`). Read and
+dismiss are idempotent; reading dismissed mail never reopens it. These require
+the same current operator or `terminalControl` device authority as asks,
+including hosted transport. A captain bearer alone cannot list or mutate mail.
+Publishing is a deliberate source-bound tool, not an owner dispatch operation.
+
+The app branch `vuh-1809-mailbox` was read without edits. Its optional
+`OwnerUpdateService.list()` expects an array and `.dismiss(id)` returns void:
+an adapter unwraps `client.ownerUpdateList().updates` and awaits
+`client.ownerUpdateDismiss(id)`. Core is a structural superset of that app's
+fields; the app needs to bind this slot and can add explicit read-state controls,
+links/media and issue navigation. This ADR defines the core wire contract.
+
 ## Gates and scope
 
 Use the effective global/project `autonomy.fleet` leaves from
@@ -100,7 +151,7 @@ This decision adds no presets, custom rules engine, credentials or infrastructur
 setup. A release time rule remains owner-authored agent guidance, not an
 expression evaluator.
 
-The later app lane owns the top-left World mailbox, badges, asks versus
-informational updates, source navigation, and iPhone/iPad layout checks.
+The app lane owns the top-left World mailbox, badges, asks versus
+informational update presentation, source navigation, and iPhone/iPad layout checks.
 Hosted clients use the existing authenticated operator contract; no owner setup
 is added by this core API.

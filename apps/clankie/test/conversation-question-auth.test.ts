@@ -308,3 +308,60 @@ it("captain-only ordinary sends retain no question authority", async () => {
   expect(f.writeSettings).not.toHaveBeenCalled();
   await f.store.close();
 });
+
+it("owner update HTTP and hosted routes require current owner authority without waking a continuation", async () => {
+  const f = await fixture(true);
+  try {
+    const update = await f.store.mailOwnerUpdate(
+      f.id,
+      {
+        title: "Mailbox landed",
+        body: "Informational, with nothing waiting on it.",
+        issue: { tracker: "linear", key: "VUH-1809", url: "https://linear.app/vuhlp/issue/VUH-1809" },
+      },
+      "http-update",
+      { current: () => true },
+    );
+    const requests = [
+      { op: "owner_update_list", schemaVersion: 1, conversationId: f.id },
+      { op: "owner_update_read", schemaVersion: 1, id: update.id },
+      { op: "owner_update_dismiss", schemaVersion: 1, id: update.id },
+    ].map((request) => OperatorConversationServiceRequestSchema.parse(request));
+    for (const request of requests) {
+      expect((await f.post(request, "captain")).status).toBe(403);
+      expect((await f.post(request, f.tokens.read!)).status).toBeGreaterThanOrEqual(400);
+      expect((await f.bridge(request, f.tokens.other!)).status).toBe(403);
+    }
+    for (const request of requests) {
+      const operator = await f.post(request, "owner");
+      expect(operator.status).toBe(200);
+      const body = await operator.json();
+      if (request.op === "owner_update_list") {
+        expect(body).toMatchObject({
+          result: { updates: [{ id: update.id, state: "unread", issue: { key: "VUH-1809" } }] },
+        });
+      } else {
+        expect(body).toMatchObject({
+          result: {
+            update: { id: update.id, state: request.op === "owner_update_read" ? "read" : "dismissed" },
+          },
+        });
+      }
+      expect((await f.post(request, f.tokens.control!)).status).toBe(200);
+      expect((await f.bridge(request, f.tokens.hosted!)).status).toBe(200);
+    }
+    await f.service.app.request("/v1/devices/control/revoke", {
+      method: "POST",
+      headers: { authorization: "Bearer owner" },
+    });
+    for (const request of requests)
+      expect((await f.post(request, f.tokens.control!)).status).toBeGreaterThanOrEqual(400);
+    f.expire();
+    for (const request of requests)
+      expect((await f.bridge(request, f.tokens.hosted!)).status).toBeGreaterThanOrEqual(400);
+    expect(f.continuation).not.toHaveBeenCalled();
+    expect(f.writeSettings).not.toHaveBeenCalled();
+  } finally {
+    await f.store.close();
+  }
+});

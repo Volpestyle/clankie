@@ -97,6 +97,7 @@ export async function requestQuestion(
       return isDeepStrictEqual(
         {
           purpose: q.purpose,
+          ...(q.issue ? { issue: q.issue } : {}),
           kind: q.kind,
           prompt: q.prompt,
           options: q.options.map(({ optionId: _id, ...option }) => option),
@@ -167,6 +168,7 @@ export async function requestQuestion(
       ...(input.gate ? { gate: input.gate } : {}),
       ...(workerQuestion ? { workerQuestion } : {}),
       kind: input.kind,
+      ...(input.issue ? { issue: input.issue } : {}),
       prompt: input.prompt,
       options: input.options.map((o) => ({ ...o, optionId: randomUUID() })),
       allowFreeform: input.kind === "text" || input.allowFreeform,

@@ -1,4 +1,12 @@
 import {
+  OwnerUpdateListFilterSchema,
+  OwnerUpdateListSchema,
+  OwnerUpdateResultSchema,
+  type OwnerUpdateListFilter,
+  type OwnerUpdateList,
+  type OwnerUpdateResult,
+} from "./owner-updates.ts";
+import {
   WorkerReportSummarySchema,
   WorkerReportPageSchema,
   type WorkerReportPage,
@@ -170,6 +178,16 @@ import { encodeBase64 } from "./base64.ts";
 export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  OwnerUpdateListFilterSchema.extend({
+    op: z.literal("owner_update_list"),
+    schemaVersion: z.literal(1),
+  }).strict(),
+  z
+    .object({ op: z.literal("owner_update_read"), schemaVersion: z.literal(1), id: z.string().uuid() })
+    .strict(),
+  z
+    .object({ op: z.literal("owner_update_dismiss"), schemaVersion: z.literal(1), id: z.string().uuid() })
+    .strict(),
   ProjectProposalTweakSchema.extend({
     op: z.literal("project_proposal_tweak"),
     schemaVersion: z.literal(1),
@@ -641,6 +659,27 @@ export type OperatorWorkItemsOutcome =
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({
+      op: z.literal("owner_update_list"),
+      schemaVersion: z.literal(1),
+      result: OwnerUpdateListSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("owner_update_read"),
+      schemaVersion: z.literal(1),
+      result: OwnerUpdateResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("owner_update_dismiss"),
+      schemaVersion: z.literal(1),
+      result: OwnerUpdateResultSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("project_proposal_tweak"),
       schemaVersion: z.literal(1),
       result: ProjectProposalResultSchema,
@@ -1108,6 +1147,9 @@ export type OperatorConversationTailItem =
  * captain-runtime internals — so every surface calls one identical contract.
  */
 export interface OperatorConversationServiceClient {
+  ownerUpdateList?(filter?: OwnerUpdateListFilter): Promise<OwnerUpdateList>;
+  ownerUpdateRead?(id: string): Promise<OwnerUpdateResult>;
+  ownerUpdateDismiss?(id: string): Promise<OwnerUpdateResult>;
   projectProposalGet?(target: ProjectProposalLocator): Promise<ProjectProposalResult>;
   projectProposalConfirm?(target: ProjectProposalTarget): Promise<ProjectProposalResult>;
   projectProposalTweak?(target: ProjectProposalTweak): Promise<ProjectProposalResult>;
@@ -1307,6 +1349,21 @@ export function createOperatorConversationServiceClient(
     async projectProposalConfirm(target) {
       const result = await dispatch({ op: "project_proposal_confirm", schemaVersion: 1, ...target });
       if (result.op !== "project_proposal_confirm") throw new Error("Unexpected proposal response");
+      return result.result;
+    },
+    async ownerUpdateList(filter = {}) {
+      const result = await dispatch({ op: "owner_update_list", schemaVersion: 1, ...filter });
+      if (result.op !== "owner_update_list") throw new Error("Unexpected owner update list response");
+      return result.result;
+    },
+    async ownerUpdateRead(id) {
+      const result = await dispatch({ op: "owner_update_read", schemaVersion: 1, id });
+      if (result.op !== "owner_update_read") throw new Error("Unexpected owner update response");
+      return result.result;
+    },
+    async ownerUpdateDismiss(id) {
+      const result = await dispatch({ op: "owner_update_dismiss", schemaVersion: 1, id });
+      if (result.op !== "owner_update_dismiss") throw new Error("Unexpected owner update response");
       return result.result;
     },
     async inputList(filter = {}) {

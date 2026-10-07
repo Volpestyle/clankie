@@ -3,6 +3,7 @@ import { realpathSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  MailIssueReferenceSchema,
   ConversationQuestionSchema,
   ConversationQuestionAnswerSchema,
   type ConversationQuestion,
@@ -31,6 +32,7 @@ export const QuestionDraftSchema = z
   .object({
     kind: z.enum(["text", "choice"]),
     purpose: z.enum(["preference", "decision", "approval", "owner_action"]).default("preference"),
+    issue: MailIssueReferenceSchema.optional(),
     recommendation: z.string().trim().min(1).max(2000).optional(),
     waitingOn: z.string().trim().min(1).max(2000).optional(),
     steps: z.array(z.string().trim().min(1).max(2000)).min(1).max(20).optional(),

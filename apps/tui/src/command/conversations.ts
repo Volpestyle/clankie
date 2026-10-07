@@ -37,6 +37,8 @@ const USAGE = [
   "       clankie conversations questions [ID] [--request UUID] [--status pending|submitted|cancelled]",
   "       clankie conversations answer ID REQUEST_UUID --incarnation UUID --revision N (--option UUID | --text TEXT | --stdin | --worker-stdin)",
   "       clankie conversations cancel-question ID REQUEST_UUID --incarnation UUID --revision N",
+  "       clankie conversations updates [ID] [--state unread|read|dismissed|all]",
+  "       clankie conversations read-update UUID | dismiss-update UUID",
   "       clankie conversations channels | rooms",
   "       clankie conversations head OWNER HEAD|none",
   "       clankie conversations channel [CHANNEL_ID] [--title TITLE] [--member PERSONA_ID]...",
@@ -60,6 +62,8 @@ export async function runConversationsCommand(
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (["updates", "read-update", "dismiss-update"].includes(args[0] ?? ""))
+    return runOwnerUpdateAction(args, options);
   if (args[0] === "goal") return runGoalAction(args.slice(1), options);
   if (
     [
@@ -488,6 +492,66 @@ async function runQuestionAction(
       result = await client.inputAnswer!({ ...target, answer });
     }
   }
+  outputJson(options.stdout ?? process.stdout, result);
+  return result.status === "ready" || result.status === "resolved" ? 0 : 1;
+}
+
+async function runOwnerUpdateAction(
+  args: readonly string[],
+  options: ConversationsCommandOptions,
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: { state: { type: "string" } },
+  });
+  const [action, selector] = positionals;
+  if (positionals.length > 2 || (action !== "updates" && (!selector || values.state)))
+    throw new Error(
+      "Usage: conversations updates [ID] [--state unread|read|dismissed|all] | read-update UUID | dismiss-update UUID",
+    );
+  const request = OperatorConversationServiceRequestSchema.parse(
+    action === "updates"
+      ? {
+          schemaVersion: 1,
+          op: "owner_update_list",
+          ...(selector ? { conversationId: selector } : {}),
+          ...(values.state ? { state: values.state } : {}),
+        }
+      : {
+          schemaVersion: 1,
+          op: action === "read-update" ? "owner_update_read" : "owner_update_dismiss",
+          id: selector,
+        },
+  );
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (!credential) throw new Error("Owner operator credential required for updates");
+  const ownerFetcher = createCaptainRouteClient({
+    host: commandHost({ ...options, env }),
+    captainToken: credential.token,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  const client = createCaptainOperatorConversationClient(ownerFetcher, ownerFetcher);
+  if (request.op === "owner_update_list") {
+    outputJson(
+      options.stdout ?? process.stdout,
+      await client.ownerUpdateList!({
+        ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+        ...(request.state ? { state: request.state } : {}),
+      }),
+    );
+    return 0;
+  }
+  if (request.op !== "owner_update_read" && request.op !== "owner_update_dismiss")
+    throw new Error("Unexpected update request");
+  const result =
+    request.op === "owner_update_read"
+      ? await client.ownerUpdateRead!(request.id)
+      : await client.ownerUpdateDismiss!(request.id);
   outputJson(options.stdout ?? process.stdout, result);
   return result.status === "ready" || result.status === "resolved" ? 0 : 1;
 }

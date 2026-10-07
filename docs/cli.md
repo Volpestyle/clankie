@@ -4069,6 +4069,48 @@ allows the ask. Existing commit, push and release leaves are reused. Missing gat
 categories refuse approval creation until VUH-1782 provides those settings;
 this ask path introduces no gate presets, custom-rule evaluator or credentials.
 
+### Owner updates
+
+Clankie deliberately calls `mail_owner_update` when a result, media or landed
+change is worth mailing. This is news: nothing waits on it, and reading or
+dismissing it never starts a turn. It is separate from answers to asks.
+
+```sh
+clankie conversations updates
+clankie conversations updates CONVERSATION_ID --state unread
+clankie conversations read-update UPDATE_UUID
+clankie conversations dismiss-update UPDATE_UUID
+```
+
+TUI: `/updates list`, `/updates list unread`, `/updates read UUID`, and
+`/updates dismiss UUID`. Cards show title/body, source, optional worker, issue,
+links/media, ID/time and read state. The same commands work in the hosted
+console through its authenticated owner transport.
+
+HTTP uses `POST /operator/v1/dispatch`, `schemaVersion: 1`, and
+`owner_update_list` with optional `conversationId` and `state`
+(`unread`, `read`, `dismissed`, `all`). Default lists nondismissed mail; result
+is `{updates: [OwnerUpdate, ...]}`, newest first, at most 1000. Exact-ID
+`owner_update_read` and `owner_update_dismiss` return
+`{status, update?, reason?}`. Unknown IDs refuse. Repeating read/dismiss keeps
+the original state; reading dismissed mail does not reopen it. All require
+current owner operator or `terminalControl` device authority; captain credentials
+cannot substitute.
+
+`OwnerUpdate` has `id`, `title`, `body`, `conversationId`, `at`,
+`source: {conversationId, seatId?}`, optional `links: [{label, url}]`, optional
+`media: [{url, mimeType, alt?}]`, `state`, and optional read/dismiss timestamps.
+The tool requires title (max 200) and short body (max 2000), and accepts optional
+`seatId`, links/media (max eight each) and `issue: {tracker, key, url}`.
+The source conversation is supplied by the host. Asks accept the same optional
+`issue` reference; it enables navigation and grants no tracker authority.
+Only HTTP/HTTPS links are accepted; media must already be published at a URL.
+
+Per conversation, retain active news and 32 recent dismissed updates within
+256 total records / 512,000 bytes. Capacity refuses new mail without evicting
+active updates. Same publication identity/draft reconciles across restart;
+a changed draft under that identity refuses. There is no automatic event feed.
+
 ### `project create PROJECT --settings FILE.json --revision REVISION`
 
 Requires a service build containing the local project-creation route; a source

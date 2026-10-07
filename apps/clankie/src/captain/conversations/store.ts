@@ -1,3 +1,5 @@
+import { OwnerUpdates } from "../owner-updates.ts";
+import type { OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
 import type { InboundReport } from "../conversations.ts";
 import type {
   ConversationQuestion,
@@ -289,6 +291,7 @@ export class ConversationStore {
   private readonly driverAdmissions = new Map<string, Set<Promise<void>>>();
 
   private readonly root: string;
+  private readonly ownerUpdates: OwnerUpdates;
   private readonly journal: ConversationJournal;
   private readonly runner: ConversationRunner;
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
@@ -376,6 +379,7 @@ export class ConversationStore {
     this.defaultWorkingDirectory = defaultWorkingDirectory;
     this.ownerAttachments = ownerAttachments;
     mkdirSync(root, { recursive: true });
+    this.ownerUpdates = new OwnerUpdates(join(root, "owner-updates.json"));
     this.loadLinearEventReceipts();
     this.retireLinearInbox();
     // Complete a reset interrupted after archiving but before installing fresh metadata.
@@ -614,6 +618,22 @@ export class ConversationStore {
           schemaVersion: 1,
           result: await this.projectProposalOperation(request, authority),
         };
+      case "owner_update_list": {
+        await authorizeQuestion(authority);
+        return { op: request.op, schemaVersion: 1, result: { updates: this.ownerUpdates.list(request) } };
+      }
+      case "owner_update_read":
+      case "owner_update_dismiss": {
+        await authorizeQuestion(authority);
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          result: this.ownerUpdates.resolve(
+            request.id,
+            request.op === "owner_update_read" ? "read" : "dismiss",
+          ),
+        };
+      }
       case "input_list": {
         await authorizeQuestion(authority);
         for (const meta of this.metas.values()) {
@@ -2960,6 +2980,24 @@ export class ConversationStore {
       this.runner,
       { origin: "input", delivery: "queue", ownerAuthority: authority },
     );
+  }
+
+  public async mailOwnerUpdate(
+    conversationId: string,
+    draft: OwnerUpdateDraft,
+    publicationId: string,
+    admission: { readonly current: () => boolean; readonly authorize?: () => Promise<boolean> },
+  ): Promise<OwnerUpdate> {
+    const meta = this.metas.get(conversationId);
+    if (
+      !meta ||
+      !admission.current() ||
+      (admission.authorize && !(await admission.authorize())) ||
+      !admission.current() ||
+      this.metas.get(conversationId) !== meta
+    )
+      throw new Error("owner_update_source_unavailable");
+    return this.ownerUpdates.publish(conversationId, draft, publicationId);
   }
 
   public async requestSurfaceQuestion(

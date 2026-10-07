@@ -1,3 +1,4 @@
+import { ownerUpdateConsoleCommand } from "./owner-update-commands.ts";
 import { questionConsoleCommand } from "./question-commands.ts";
 import { runUpdateCommand } from "./command/update.ts";
 import { runHarnessLoginCommand } from "./command/harness-login.ts";
@@ -252,6 +253,7 @@ const questionCommand = questionConsoleCommand(
 );
 const conversationsContext = {
   question: questionCommand,
+  updates: ownerUpdateConsoleCommand(conversationClient),
   designateHead: async (headConversationId: string | null) => {
     const conversationId = conversationSelection.conversationId;
     if (operatorClient === undefined || conversationId === undefined)

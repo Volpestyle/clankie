@@ -138,6 +138,7 @@ export interface ConsoleCommandContext {
   };
   readonly conversations?: {
     question?(argument: string): Promise<string>;
+    updates?(argument: string): Promise<string>;
     readonly conversationId?: string | undefined;
     readonly title?: string | undefined;
     /** Directory the selected conversation's session works in. */
@@ -197,6 +198,26 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         } catch (error) {
           shell.insertCommandResult(
             "/question",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    });
+
+  if (conversations?.updates)
+    commands.push({
+      name: "updates",
+      aliases: [],
+      description: "Read and dismiss informational owner updates",
+      takesArgument: true,
+      argumentHint: "[list [unread|read|dismissed|all] | read UUID | dismiss UUID]",
+      async run(argument, shell) {
+        try {
+          shell.insertCommandResult("/updates", await conversations.updates!(argument), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/updates",
             error instanceof Error ? error.message : String(error),
             "error",
           );

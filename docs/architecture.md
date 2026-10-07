@@ -421,7 +421,7 @@ environment for authenticated requests.
 
 ### Owner asks
 
-Clankie's existing `request_user_input` tool creates one durable structured ask
+Clankie's existing `request_user_input` tool creates durable structured asks
 from a native seat, console, room or service conversation. Decisions carry
 options and a recommendation; approvals read the effective owner fleet setting;
 owner-only actions carry exact steps. The host binds the source conversation and
@@ -435,8 +435,17 @@ Worker escalation copies a host-observed native question, preserving its session
 request and question IDs. An owner answer uses the existing native question-answer
 channel once and reports its delivery outcome to Clankie. Pending or uncertain
 records prevent repeat dispatch; project onboarding retains its separate explicit
-confirmation. The app mailbox and informational updates are a later consumer of
-this core API. See [ADR 0245](adr/0245-one-owner-ask-across-surfaces.md) and the
+confirmation. Multiple asks can remain open in each source conversation;
+exact-ID answers leave siblings open. Both asks and updates accept optional
+`issue: {tracker, key, url}` navigation references.
+
+Clankie deliberately sends chosen results/media through `mail_owner_update`.
+The disk-backed update store is independent of answer/claim receipts and keeps
+bounded per-source records. There is no automatic event feed. Owner-authenticated
+`owner_update_list`, `owner_update_read` and `owner_update_dismiss` expose the
+same news through API, CLI and TUI, including hosted transport. Reading/dismissing
+is idempotent and never wakes a conversation. The app mailbox consumes these
+contracts. See [ADR 0245](adr/0245-one-owner-ask-across-surfaces.md) and the
 [CLI contract](cli.md#owner-asks-conversations-questions-id-and-conversations-answer).
 
 ### Goals and autonomous continuation
