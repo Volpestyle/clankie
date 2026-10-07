@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { access, lstat, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Build from the checkout when present; installed packages need only their snapshot. */
@@ -59,5 +59,10 @@ export async function prepareWorkerSkill(workerRoot) {
   }
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url)
+// Bundled into a release entry, import.meta.url is that entry's: run only as this script.
+if (
+  process.argv[1] &&
+  basename(fileURLToPath(import.meta.url)) === "skill-bundle.mjs" &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+)
   await prepareWorkerSkill(resolve(import.meta.dirname, ".."));
