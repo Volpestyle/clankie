@@ -33,3 +33,13 @@ finishes.
 
 Once Node's worker teardown is fixed, returning to `threads` is a one-line
 change, but only worth it if the speed gain can be measured.
+
+## 2026-10-06: bounded parallel forks
+
+[VUH-1762](https://linear.app/vuhlp/issue/VUH-1762) found that the expanded full
+suite spends over 20 minutes serializing file imports and test waits. Vitest now
+runs at most two isolated forks inside the fleet heavy permit. Each file still
+gets its own temporary HOME and stores. The fork pool, suite selection and
+disabled retries remain the same; Node's worker-isolate teardown is still avoided.
+The [gate evidence](../testing/2026-10-06-gate-stability/README.md) records the
+historical failures, cause repairs and before/after measurements.

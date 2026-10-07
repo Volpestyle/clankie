@@ -26,7 +26,10 @@ export default defineConfig({
       "artifacts/**",
       "packages/play/test/free-play-corpus.test.ts", // Explicit manual eval lane.
     ],
-    fileParallelism: false,
+    // Each fork has its own fixture HOME and stores. Bound concurrency inside
+    // the fleet heavy permit instead of paying every file's import/wait serially.
+    fileParallelism: true,
+    maxWorkers: 2,
     retry: 0,
     ...(process.env.CI
       ? {

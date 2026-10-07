@@ -28,6 +28,11 @@ superseded runs on the same ref, retains manual full-check reports for seven
 days, and keeps its 30-minute ceiling. The private app's full client/host journey
 and native builds run at release time or on an explicit manual run.
 
+On fleet machines, run full gates through `clankie heavy -- pnpm check`, one
+gate at a time. Vitest uses at most two isolated forked processes inside that
+permit. Each file gets its own fixture HOME and stores; the full suite selection
+and manual eval boundary are the same as a single-file-at-a-time run.
+
 The fleet load gate is separate from `pnpm check` and default tests. Version-tag
 releases and explicit `workflow_dispatch` runs select it; ordinary pushes and
 pull requests do not. It exercises fixture workers and a local Linear provider,
