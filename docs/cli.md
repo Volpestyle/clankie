@@ -2333,7 +2333,9 @@ the effective gates; unclassified permissions stay owner-only. Shell tools ask:
 a tool name cannot reliably distinguish ordinary work from purchases or
 irreversible effects. New local Codex hires retain their sandbox and use
 `approval_policy="on-request"`; a trusted native containment policy keeps final
-precedence. These mappings do not change a running lane, bypass managed policy,
+precedence. Their `clankie` worker bridge alone is configured with
+`default_tools_approval_mode="approve"`, because the service already decides
+each bridged call; every other MCP server keeps Codex's native approval. These mappings do not change a running lane, bypass managed policy,
 or prove that a harness can enforce every semantic category. Remote launches
 retain their existing native permissions. Owner-managed native custom allow,
 ask and deny rules remain with the harness; Clankie does not persist a separate

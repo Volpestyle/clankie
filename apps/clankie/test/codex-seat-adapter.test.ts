@@ -173,6 +173,31 @@ describe("Codex harness seat adapter", () => {
     if (result.outcome === "started") await result.control.close();
   });
 
+  it("keeps Clankie's own bridge unprompted when fleet gates select on-request", async () => {
+    const f = fixture();
+    const adapter = createCodexSeatAdapter({
+      start: f.start,
+      herdr: f.herdr,
+      trackerOverrides: async () => [],
+      localProcess: () => () => {},
+      fleetGates: async () => ({
+        everydayWork: "allow",
+        leavesMac: "lead",
+        hardToUndo: "owner",
+        moneyAndAccounts: "owner",
+      }),
+    });
+    const result = await adapter.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
+    expect(result.outcome).toBe("started");
+    const config: string[] = f.start.mock.calls[0]![0].config;
+    expect(config).toContain('approval_policy="on-request"');
+    // Only the clankie server is approved; other MCP servers keep Codex's prompts.
+    expect(config.filter((entry) => entry.includes("approval_mode"))).toEqual([
+      'mcp_servers.clankie.default_tools_approval_mode="approve"',
+    ]);
+    if (result.outcome === "started") await result.control.close();
+  });
+
   it("passes a deny-only expected catalog to the dedicated server and rejects a changed binding", async () => {
     const f = fixture();
     const adapter = createCodexSeatAdapter({

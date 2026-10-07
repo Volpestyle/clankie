@@ -125,7 +125,7 @@ the category leaves; explicit assignment limits retain precedence.
 Native permissions are a partial projection: local Claude asks for edits,
 writes, shell and network calls with existing denies preserved. Unclassified
 permissions stay owner-only. Local Codex keeps its sandbox with on-request
-approvals. Remote hires
+approvals; only its own `clankie` bridge tools run without a native prompt. Remote hires
 retain native permissions. Native custom rules remain harness-owned. Neither
 the preset name nor a native allow rule proves authority for accounts, money,
 credentials, evals, or hard-to-undo effects.
