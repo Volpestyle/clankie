@@ -1,0 +1,272 @@
+[
+  {
+    "attempt": 14,
+    "classification": "real bug",
+    "cause": "Remote fixture rejected the new canonical checkout-admission command; all 16 named failures share that fixture. Pell repair 2a138169 executes the actual program.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check14.log",
+    "sha256": "f734952ff520d1605639a42236cddf9b90e9d32eb76c965fe8ee913180e52785",
+    "failedTests": [
+      {
+        "line": 102,
+        "name": "SSH native hire, API history and follow-up reuse the original controller without local allocation 35ms"
+      },
+      {
+        "line": 103,
+        "name": "remote birth change refuses follow-up/reuse without another writer or local fallback 33ms"
+      },
+      {
+        "line": 104,
+        "name": "remote uid change refuses follow-up/reuse without another writer or local fallback 34ms"
+      },
+      {
+        "line": 105,
+        "name": "remote socket-owner change refuses follow-up/reuse without another writer or local fallback 34ms"
+      },
+      {
+        "line": 106,
+        "name": "remote disconnect change refuses follow-up/reuse without another writer or local fallback 33ms"
+      },
+      {
+        "line": 107,
+        "name": "remote retarget change refuses follow-up/reuse without another writer or local fallback 33ms"
+      },
+      {
+        "line": 108,
+        "name": "remote during-probe change refuses follow-up/reuse without another writer or local fallback 34ms"
+      },
+      {
+        "line": 109,
+        "name": "remote windows change refuses follow-up/reuse without another writer or local fallback 33ms"
+      },
+      {
+        "line": 110,
+        "name": "remote link-loss change refuses follow-up/reuse without another writer or local fallback 33ms"
+      },
+      {
+        "line": 111,
+        "name": "remote session change refuses follow-up/reuse without another writer or local fallback 35ms"
+      },
+      {
+        "line": 112,
+        "name": "conflicting host and fleet SSH identities refuse every native history API before transport 32ms"
+      },
+      {
+        "line": 113,
+        "name": "lost native send receipt over SSH is not replayed by a repeated live-session follow-up 32ms"
+      },
+      {
+        "line": 114,
+        "name": "stored remote history grants no cold controller adoption, and unknown hosts do not read local history 34ms"
+      },
+      {
+        "line": 115,
+        "name": "history-first native hire keeps Captain admission during a prepare drop and return 89ms"
+      },
+      {
+        "line": 116,
+        "name": "Captain-first history works after a reconnect without adopting its old controller 33ms"
+      },
+      {
+        "line": 117,
+        "name": "advancing a fleet revision closes and evicts the old helper and SSH forward 84ms"
+      }
+    ],
+    "receipt": "EXIT=130 HEAD=d0a5b4a0778c29ea1a1389fa79b3b0c1adbfa16a\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "d0a5b4a0778c29ea1a1389fa79b3b0c1adbfa16a",
+      "tree": "9ba8f8e355974112cd4045dee8ad2559a034cd81",
+      "baseOrigin": "d2000bb1d5fa3d52cb50c9114c7098a53c3f4bea",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 14,
+      "at": "2026-10-06T19:54:47.508629+00:00",
+      "realInstall": "physical node_modules; package.json/pnpm-lock unchanged from d200; separate prepared frozen install passed"
+    }
+  },
+  {
+    "attempt": 15,
+    "classification": "real bug",
+    "cause": "Updater assertion still expected two guards after checkout admission added a third. Pell repair a1c5af88 (on main) asserts all three named guard boundaries.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check15.log",
+    "sha256": "72b3c8834c882ca77951aeab64490916efb40687df981b74d28536725a1e14f0",
+    "failedTests": [
+      {
+        "line": 752,
+        "name": "accepts once after preparation and detaches fixed helper with private file stdio 61ms"
+      }
+    ],
+    "receipt": "EXIT=1 HEAD=2a138169e2930a6b38696a907f2ac30037552c1c\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "2a138169e2930a6b38696a907f2ac30037552c1c",
+      "tree": "00b08be5fc5a5323980eee725ad5f56da2bc25d6",
+      "baseOrigin": "d2000bb1d5fa3d52cb50c9114c7098a53c3f4bea",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 15,
+      "at": "2026-10-06T20:04:24.159133+00:00",
+      "realInstall": "physical node_modules; package.json/pnpm-lock unchanged from d200; separate prepared frozen install passed"
+    }
+  },
+  {
+    "attempt": 16,
+    "classification": "clean",
+    "cause": "Exit 0; native-boundary stderr is present despite all tests passing and is not itself a failing test.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check16.log",
+    "sha256": "50c1b32ce4dc56e4b5e41dc3b1cf04d9ceeb0ce3921f68f6736d8cec1e1a4b1c",
+    "failedTests": [],
+    "receipt": "EXIT=0 HEAD=a1c5af882531b0689c78f901eca373d1b7f83ef4\nORIGIN_NOT_ANCESTOR_AFTER_CHECK\nNOT PUSHED\n",
+    "frozen": {
+      "head": "a1c5af882531b0689c78f901eca373d1b7f83ef4",
+      "tree": "343642a41dcc33c0e613da23153145fe2111ca16",
+      "baseOrigin": "d2000bb1d5fa3d52cb50c9114c7098a53c3f4bea",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 16,
+      "at": "2026-10-06T20:26:45.657489+00:00",
+      "realInstall": "physical node_modules; package.json/pnpm-lock unchanged from d200; separate prepared frozen install passed"
+    }
+  },
+  {
+    "attempt": 17,
+    "classification": "real bug",
+    "cause": "Unused RoomForkResultSchema export; repaired by Pell 8618028b and carried as 8179e5b4.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check17.log",
+    "sha256": "e0b5f258c85353ea4f50c09829b2407c773afb61f71b6b65bb7219318a6ef230",
+    "failedTests": [],
+    "receipt": "EXIT=1 HEAD=45bf4b1f559b70d1bf2de6abb7314a41df88034c\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "45bf4b1f559b70d1bf2de6abb7314a41df88034c",
+      "tree": "bf710abec49fcbe84b4f90f9d92efb02e7787fcf",
+      "baseOrigin": "2487bbdbd264b34e7936d232955b1aa7b7dc76f9",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 17,
+      "at": "2026-10-06T21:24:19.438850+00:00",
+      "realInstall": "pnpm install --frozen-lockfile observed0 under both fleet limiters; physical node_modules; no lockfile/package changes after install"
+    }
+  },
+  {
+    "attempt": 18,
+    "classification": "environment-dependent cancellation",
+    "cause": "No reported test failure. Verified owned runner deliberately received SIGINT because origin advanced; stopped18.json records this.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check18.log",
+    "sha256": "68b0c54c6394e9e2a5e0533d4306c1cf870cdedbe2fab82a21fa65bc3e9c59eb",
+    "failedTests": [],
+    "receipt": "EXIT=130 HEAD=8618028bf7ba91eff8a96e38b7f5aced97aa48d0\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "8618028bf7ba91eff8a96e38b7f5aced97aa48d0",
+      "tree": "ba384d8b0b238c4d719442012331066a66530f6d",
+      "baseOrigin": "2487bbdbd264b34e7936d232955b1aa7b7dc76f9",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 18,
+      "at": "2026-10-06T21:25:58.734885+00:00",
+      "realInstall": "pnpm install --frozen-lockfile observed0 under both fleet limiters; physical node_modules; no lockfile/package changes after install"
+    }
+  },
+  {
+    "attempt": 19,
+    "classification": "real bug",
+    "cause": "Unused RUNTIME_PROVIDER_API, DEFAULT_RELEASE_TARGET and releaseTarget exports; Pell 1c1a552f carried as d01fcfc2.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check19.log",
+    "sha256": "3654bbb08bb11a2aaed7bdf186896585d61ca34fa2c20c7c9bafb647b0328385",
+    "failedTests": [],
+    "receipt": "EXIT=1 HEAD=ecdae3f532bd9c1354bd820dd8fddbb2113ce5a6\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "ecdae3f532bd9c1354bd820dd8fddbb2113ce5a6",
+      "tree": "3d068a40e20e074f2982ee802263d5f6045ab00c",
+      "baseOrigin": "4ed42be4b567eb28126792207f7fdae85ee24848",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 19,
+      "at": "2026-10-06T21:42:41.789478+00:00",
+      "realInstall": "pnpm install --frozen-lockfile observed0 under both fleet limiters; physical node_modules; no lockfile/package changes after install"
+    }
+  },
+  {
+    "attempt": 20,
+    "classification": "environment-dependent cancellation",
+    "cause": "No reported test failure. Deliberate verified SIGINT after origin advanced; stopped20.json.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check20.log",
+    "sha256": "92b1fb1e3beb1e08f9e2fabd8dc6486694394ae70cad87238ecb9f076b01969d",
+    "failedTests": [],
+    "receipt": "EXIT=130 HEAD=1c1a552f939bd7d5982ec1b94ff77a90fdabb26b\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "1c1a552f939bd7d5982ec1b94ff77a90fdabb26b",
+      "tree": "0c8b8e53d12c527d47faf259dfdad87f8c41f20a",
+      "baseOrigin": "4b55ce138b3860cb46436963e0cfbb2596827c94",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 20,
+      "at": "2026-10-06T21:47:56.982685+00:00",
+      "realInstall": "pnpm install --frozen-lockfile observed0 under both fleet limiters; physical node_modules; no lockfile/package changes after install"
+    }
+  },
+  {
+    "attempt": 21,
+    "classification": "real bug",
+    "cause": "Formatting failure in scheduled-update.ts. Pell 12acc695; already repaired on origin/main by 47cbe333.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check21.log",
+    "sha256": "a367055847a4edb597868984c5e5fb6395279d3ac430de08890330206021f529",
+    "failedTests": [],
+    "receipt": "EXIT=1 HEAD=cc9c89ad29ec3f3a20817caf99698fb53a127734\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "cc9c89ad29ec3f3a20817caf99698fb53a127734",
+      "tree": "9fbcedad735c653596cd8f9733e9a66a0b24273b",
+      "baseOrigin": "e6fd08fcf49ba3baec6e2018a431f65544717906",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 21,
+      "at": "2026-10-06T21:56:38.946012+00:00",
+      "realInstall": "pnpm install --frozen-lockfile observed0 under both fleet limiters; physical node_modules; no lockfile/package changes after install"
+    }
+  },
+  {
+    "attempt": 22,
+    "classification": "test failure plus environment-dependent cancellation",
+    "cause": "One late-ACK delivery test failed; its final assertion stack was not retained before SIGINT for origin advancement. The candidate removes an inferred receiver-detach race by waiting for its native HTTP poll to attach before new activity. stopped22.json records the separate cancellation.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check22.log",
+    "sha256": "f033e50085aaed67c1f467fff3d40a5df66d7cd1a715f728428e4160029c26b9",
+    "failedTests": [
+      {
+        "line": 152,
+        "name": "does not re-offer a taken wake after a late ACK and new comment (restart=false) 5843ms"
+      }
+    ],
+    "receipt": "EXIT=130 HEAD=12acc69520172f62c8ba9a142ec12c4f7806ce86\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "12acc69520172f62c8ba9a142ec12c4f7806ce86",
+      "tree": "a74bac27f4218574deccd22602fc39503688c744",
+      "baseOrigin": "e6fd08fcf49ba3baec6e2018a431f65544717906",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 22,
+      "at": "2026-10-06T21:57:36.758590+00:00",
+      "realInstall": "pnpm install --frozen-lockfile observed0 under both fleet limiters; physical node_modules; no lockfile/package changes after install"
+    }
+  },
+  {
+    "attempt": 23,
+    "classification": "flaky",
+    "cause": "Exact equality on start-to-start retry gaps while fake time advanced over real unsettled I/O: observed [6,10,20] instead of [5,10,20]. Test bytes match candidate base. Candidate waits for real settlement and asserts backoff from settlement.",
+    "log": "/Users/james/dev/clankie-wt/integrate-pc-sender/.local/checkout-freshness/gate/check23.log",
+    "sha256": "14471bd03b668465a8d08d90c358973d67272fbb834e96b13989ef9f164d769c",
+    "failedTests": [
+      {
+        "line": 480,
+        "name": "keeps failed service wakes on exponential backoff instead of a retry storm 32ms"
+      }
+    ],
+    "receipt": "EXIT=1 HEAD=3c70dfb701da23311ef726c34e1d664d2835f2d1\nCHECK_FAILED\nNOT PUSHED\n",
+    "frozen": {
+      "head": "3c70dfb701da23311ef726c34e1d664d2835f2d1",
+      "tree": "dcda73ce0a03b037843f9edfbdbe4cb0dc78a0b6",
+      "baseOrigin": "7e26bfa9d52034a9e69200cef9442fddf69249d3",
+      "branch": "integrate/cpu-wakes-defaults",
+      "origin": "git@github.com:Volpestyle/clankie.git",
+      "gateAttempt": 23,
+      "at": "2026-10-06T22:17:33.639957+00:00",
+      "realInstall": "pnpm install --frozen-lockfile observed0 under both fleet limiters; physical node_modules; no lockfile/package changes after install"
+    }
+  }
+]
