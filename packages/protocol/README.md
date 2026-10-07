@@ -41,6 +41,11 @@ data remain intact. Use ordinary strict schema parsing for requests, persisted
 state and authenticated encryption envelopes; response tolerance grants no
 authority and never changes those schemas.
 
+So a response grows only by new optional keys, including new optional objects
+such as a seat's `owner` (VUH-1763). A new value in an existing enum or
+discriminated union is a known-field change that an older reader rejects;
+give it a new optional key, or a new `schemaVersion`, instead.
+
 VUH-1635 exposed this distinction when new subagent metadata made an older
 app reject an entire successful fleet response. Existing installed clients
 with strict response parsing need new bundled JavaScript to gain tolerance.

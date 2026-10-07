@@ -4,7 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
-import type { OperatorSeatEvent } from "@clankie/protocol";
+import {
+  ClosedWorkerPaneSchema,
+  OperatorConversationServiceResultSchema,
+  OperatorFleetSeatSchema,
+  OperatorFleetSnapshotSchema,
+  parseProtocolResponse,
+  WorkerReportSummarySchema,
+  type OperatorSeatEvent,
+} from "@clankie/protocol";
+import { z } from "zod";
 import { CHANNEL_NOTIFICATION_METHOD, pumpSeatEvents } from "../../tui/src/command/mcp.ts";
 import type { ConversationOwner } from "../src/captain/conversation-owner.ts";
 import { createCaptain } from "../src/captain/captain.ts";
@@ -390,6 +399,49 @@ it("an unadopted remote reporter with a valid census and no parent reaches globa
   const [event] = await poll;
   expect(event).toMatchObject({ conversationId: "global-default", kind: "message" });
   await f.captain.acknowledgeSeatEvent(event!.id, "global-default");
+});
+
+it("an app built before `owner` existed still reads the owner-bearing roster and fleet", async () => {
+  const f = await fixture();
+  // The seat contract an installed app bundled before VUH-1763. Freeze it; do
+  // not extend it as hosts add optional fields.
+  const preOwnerSeat = OperatorFleetSeatSchema.omit({ owner: true });
+  const preOwnerClient = z.discriminatedUnion("op", [
+    z
+      .object({
+        op: z.literal("roster"),
+        schemaVersion: z.literal(1),
+        closedPanes: z.array(ClosedWorkerPaneSchema).max(128).optional(),
+        seats: z.array(preOwnerSeat),
+        workerReports: z.array(WorkerReportSummarySchema).max(1000).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        op: z.literal("fleet"),
+        schemaVersion: z.literal(1),
+        snapshot: OperatorFleetSnapshotSchema.extend({ seats: z.array(preOwnerSeat) }),
+      })
+      .strict(),
+  ]);
+  for (const op of ["roster", "fleet"] as const) {
+    // What crosses the relay is JSON, exactly as the host served it.
+    const wire: unknown = JSON.parse(
+      JSON.stringify(await f.captain.serveOperatorConversation({ schemaVersion: 1, op })),
+    );
+    const served = OperatorConversationServiceResultSchema.parse(wire);
+    const seats = served.op === "roster" ? served.seats : served.op === "fleet" ? served.snapshot.seats : [];
+    const hired = seats.find((seat) => seat.seatId === f.agent.terminalId);
+    expect(hired?.owner).toEqual({ conversationId: f.leads[0], hired: true });
+    // A strict reader (app bundles before 2026-10-04) rejects any added key;
+    // every app since reads responses with the protocol's additive reader.
+    expect(preOwnerClient.safeParse(wire).success).toBe(false);
+    const read = parseProtocolResponse(preOwnerClient, wire);
+    const oldSeats = read.op === "roster" ? read.seats : read.snapshot.seats;
+    const { owner: _owner, ...rest } = hired!;
+    expect(oldSeats.find((seat) => seat.seatId === f.agent.terminalId)).toEqual(rest);
+    expect(oldSeats).toHaveLength(seats.length);
+  }
 });
 
 it("the census names a hire's lead and message_seat from another lead is refused naming it", async () => {
