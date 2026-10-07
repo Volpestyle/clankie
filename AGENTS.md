@@ -83,8 +83,12 @@ This repository is public. Both neighbors are private and consume
   covering tests), `git pull --rebase origin main`, then `git push origin main`.
   Resolve conflicts only in your own files. The full `pnpm check` runs for
   releases and on request; `clankie integrate` is optional, never required.
-- Build every feature API- and CLI-first, expose any settings it needs in the
-  TUI, and update the relevant agent-facing skill and human-facing docs.
+- Build every feature API- and CLI-first, and update the relevant agent-facing
+  skill and human-facing docs. A setting the owner cares about is settable from
+  every UI (TUI, app on phone, web and desktop, and the hosted dashboard)
+  through the same API, unless it only makes sense on one surface (billing,
+  for example). Keep settings few: sensible defaults, grouped by what is at
+  stake, the ones people change easy to reach, the rest under Advanced.
 - Reusable lessons about how Clankie works belong in the relevant shipped skill
   or the tool description that needs them. `apps/clankie/src/captain/instructions.md`
   is re-read on every model call, so it holds only identity, trust boundaries and
