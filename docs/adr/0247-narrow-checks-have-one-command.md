@@ -21,6 +21,11 @@ changed since a base, stopping at the first failure. The base is
 `CLANKIE_LANDING_BASE`, defaulting to `origin/main`. The app runs each
 package's own tests from inside that package, as its full suite does.
 
+Core includes `pnpm deadcode` (knip) in this landing command. Full-gate
+measurements on 2026-10-07 put it at 1.8–3.1 seconds. That small cost catches
+unused exports and missing dependency/entry declarations before they reach the
+release gate; it does not select more tests or include evals.
+
 `clankie integrate` runs a repository's `check:landing` when it defines one,
 passing the batch base, and `check` otherwise. The full `pnpm check` stays for
 releases and explicit runs.

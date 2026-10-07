@@ -51,7 +51,9 @@ with a private store and copied packages, then each included repository's
 ([ADR 0247](adr/0247-narrow-checks-have-one-command.md)). `check:landing` runs
 lint, typecheck and the tests related to files changed since the batch base,
 which the queue passes as `CLANKIE_LANDING_BASE`; the full `pnpm check` stays
-for releases and manual runs. Evals remain outside both. Gate processes start with private
+for releases and manual runs. Core also runs `pnpm deadcode` before typecheck
+and tests: measured knip execution costs about 2–3 seconds and catches unused
+exports and missing declarations before landing. Evals remain outside both. Gate processes start with private
 HOME, XDG directories, Clankie state and fleet descriptors, and a file credential
 broker, before any Vitest setup can snapshot owner paths. On macOS and Linux their
 TMPDIR is a short private `/tmp/clankie-gate-*` directory linked from the batch's

@@ -35,7 +35,7 @@ interface IntegrationOptions {
  * Landing runs the repository's fast, change-scoped `check:landing` when it
  * defines one; the full `check` stays for releases and manual runs.
  */
-export async function landingGateScript(directory: string): Promise<"check:landing" | "check"> {
+async function landingGateScript(directory: string): Promise<"check:landing" | "check"> {
   const manifest = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as {
     scripts?: Record<string, unknown>;
   };
