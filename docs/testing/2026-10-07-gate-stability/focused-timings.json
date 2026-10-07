@@ -1,0 +1,56 @@
+{
+  "revision": "4b9c935fe0ecf711ae41be7673c302479380dada",
+  "isolationSetup": "short private per-suite temp directories",
+  "evalsRun": false,
+  "retries": 0,
+  "measurements": [
+    {
+      "workers": 2,
+      "passed": 55,
+      "failed": 0,
+      "seconds": 79.64238452148437,
+      "files": [
+        {
+          "name": "apps/clankie/test/hired-catalog-bridge.test.ts",
+          "seconds": 32.983384521484375
+        },
+        {
+          "name": "apps/clankie/test/linear-wake-receipts.integration.test.ts",
+          "seconds": 40.3349970703125
+        },
+        {
+          "name": "apps/clankie/test/mcp-receipts-integration.test.ts",
+          "seconds": 30.8992939453125
+        },
+        {
+          "name": "apps/clankie/test/opencode-fleet-lifecycle.integration.test.ts",
+          "seconds": 43.83420581054688
+        }
+      ]
+    },
+    {
+      "workers": 4,
+      "passed": 55,
+      "failed": 0,
+      "seconds": 46.00349731445313,
+      "files": [
+        {
+          "name": "apps/clankie/test/hired-catalog-bridge.test.ts",
+          "seconds": 32.922882080078125
+        },
+        {
+          "name": "apps/clankie/test/linear-wake-receipts.integration.test.ts",
+          "seconds": 40.58959643554687
+        },
+        {
+          "name": "apps/clankie/test/mcp-receipts-integration.test.ts",
+          "seconds": 29.975786865234376
+        },
+        {
+          "name": "apps/clankie/test/opencode-fleet-lifecycle.integration.test.ts",
+          "seconds": 43.486497314453125
+        }
+      ]
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { MinecraftTunnel } from "../src/tunnel.ts";
 
 // Real HTTP serialization and broker persistence; only the remote provider is a fixture.
@@ -74,9 +74,13 @@ for (const outcome of [
       },
     });
     try {
+      // Drive the owned poll clock while HTTP and broker persistence stay real.
+      // Install it before the job schedules its first poll, so cancellation is
+      // exercised by advancing a full cycle after each terminal outcome.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       expect((await tunnel.prepareClaim()).phase).toBe("preparing");
-      await expect.poll(() => setups).toBe(1);
-      await expect.poll(() => tunnel.claimStatus().phase).toBe("pending");
+      await vi.waitFor(() => expect(setups).toBe(1));
+      await vi.waitFor(() => expect(tunnel.claimStatus().phase).toBe("pending"));
       const pending = tunnel.claimStatus();
       expect(MinecraftTunnelClaimStatusSchema.parse(pending)).toEqual(pending);
       // Repeated client reads/completion cannot drive requests or duplicate exchange.
@@ -86,7 +90,7 @@ for (const outcome of [
       if (outcome === "closed") await tunnel.close();
       if (outcome === "deadline") {
         now += 10 * 60_000;
-        await new Promise((resolve) => setTimeout(resolve, 3200));
+        await vi.advanceTimersByTimeAsync(3200);
       }
       const phase =
         outcome === "closed"
@@ -97,8 +101,14 @@ for (const outcome of [
               ? "rejected"
               : "claimed";
       // No completion calls after the simulated browser decision: the job owns polling.
-      await expect.poll(() => tunnel.claimStatus().phase, { timeout: 8000 }).toBe(phase);
-      await new Promise((resolve) => setTimeout(resolve, 3200));
+      await vi.waitFor(
+        async () => {
+          await vi.advanceTimersByTimeAsync(3000);
+          expect(tunnel.claimStatus().phase).toBe(phase);
+        },
+        { timeout: 8000 },
+      );
+      await vi.advanceTimersByTimeAsync(3200);
       const expectedSetups = outcome === "closed" || outcome === "deadline" ? 1 : outcome === "retry" ? 3 : 2;
       expect(setups).toBe(expectedSetups);
       for (const entry of requests) {
@@ -115,6 +125,7 @@ for (const outcome of [
       expect(JSON.stringify([pending, tunnel.claimStatus()])).not.toContain(secret);
     } finally {
       await tunnel.close();
+      vi.useRealTimers();
       await new Promise<void>((resolve, reject) =>
         provider.close((error) => (error ? reject(error) : resolve())),
       );

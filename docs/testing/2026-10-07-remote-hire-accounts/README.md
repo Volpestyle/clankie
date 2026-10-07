@@ -20,12 +20,12 @@ left running after the live probe.
 
 Live read of James's PC (`pc`, PowerShell over ssh), 4.0 s, identities redacted:
 
-| Harness | Label | Home | Signed in | Plan | Headroom | Usable |
-| --- | --- | --- | --- | --- | --- | --- |
-| claude | default | `C:\Users\volpe\.claude` | no | — | — | no: `claude auth login` on pc |
-| claude | james | `C:\Users\volpe\.claude-james` | yes (account A) | max | n/a | yes |
-| codex | default | `C:\Users\volpe\.codex` | yes (account B) | pro | 100% | yes |
-| codex | james | `C:\Users\volpe\.codex-james` | yes (account B) | pro | 100% | yes |
+| Harness | Label   | Home                           | Signed in       | Plan | Headroom | Usable                        |
+| ------- | ------- | ------------------------------ | --------------- | ---- | -------- | ----------------------------- |
+| claude  | default | `C:\Users\volpe\.claude`       | no              | —    | —        | no: `claude auth login` on pc |
+| claude  | james   | `C:\Users\volpe\.claude-james` | yes (account A) | max  | n/a      | yes                           |
+| codex   | default | `C:\Users\volpe\.codex`        | yes (account B) | pro  | 100%     | yes                           |
+| codex   | james   | `C:\Users\volpe\.codex-james`  | yes (account B) | pro  | 100%     | yes                           |
 
 Both PC Codex homes reported the same ChatGPT identity; the live headroom does
 not show a lapsed renewal, so the owner holds an account that should not be

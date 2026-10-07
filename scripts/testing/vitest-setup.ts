@@ -22,9 +22,13 @@ export const ownerDescriptorPaths = [
 // Runs before each test file's imports, including package-local and eval runs.
 // Separate roots also keep files from leaking settings into the next suite.
 if (process.env.CLANKIE_TEST_LIVE_STORES !== "1") {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "clankie-vitest-")));
+  // Inherited queue TMPDIRs can exceed Darwin's 104-byte Unix socket limit.
+  // Give every suite (and its children) a private short temp root as well as HOME.
+  const root = realpathSync(mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "cv-")));
   const home = join(root, "home");
+  const temp = join(root, "tmp");
   mkdirSync(home, { mode: 0o700 });
+  mkdirSync(temp, { mode: 0o700 });
 
   // A caller's path overrides and authentication must not escape the fixture.
   // Tests that exercise env overrides supply their own synthetic values later.
@@ -40,6 +44,9 @@ if (process.env.CLANKIE_TEST_LIVE_STORES !== "1") {
   Object.assign(process.env, {
     HOME: home,
     USERPROFILE: home,
+    TMPDIR: temp,
+    TMP: temp,
+    TEMP: temp,
     XDG_CONFIG_HOME: join(home, ".config"),
     XDG_STATE_HOME: join(home, ".local", "state"),
     XDG_DATA_HOME: join(home, ".local", "share"),

@@ -1,8 +1,9 @@
 # Repeatable quality gates
 
-`pnpm check` is the required local handoff and release gate. It includes the
+`pnpm check` is the full manual and release gate. Per-change handoffs use the
+focused checks in ADR 0240. The full gate includes the
 HTTP journey, unit, integration, Rust, IPC, type, lint and documentation checks.
-Pushes and pull requests run only fast formatting and lint on Linux. Run the
+Pushes and pull requests run fast formatting, lint and native MCP contracts on Linux. Run the
 complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,
 live gateway or running operator service is required.
@@ -29,8 +30,8 @@ days, and keeps its 30-minute ceiling. The private app's full client/host journe
 and native builds run at release time or on an explicit manual run.
 
 On fleet machines, run full gates through `clankie heavy -- pnpm check`, one
-gate at a time. Vitest uses at most two isolated forked processes inside that
-permit. Each file gets its own fixture HOME and stores; the full suite selection
+gate at a time. Vitest uses at most four isolated forked processes inside that
+permit. Each file gets its own fixture HOME, temp directory and stores; the full suite selection
 and manual eval boundary are the same as a single-file-at-a-time run.
 
 The fleet load gate is separate from `pnpm check` and default tests. Version-tag
@@ -45,8 +46,11 @@ and the distinction between an admission failure and measured regressions.
 
 ## Isolation and reproducibility
 
-The shared `vitest.config.ts` setup gives each test file a fresh temporary HOME
-and XDG directories before its imports. It overrides `CLANKIE_SETTINGS_FILE`
+The shared `vitest.config.ts` setup gives each test file a fresh temporary HOME,
+XDG directories and a private short `TMPDIR` (also `TMP` and `TEMP`) before its
+imports. On Unix the temp root starts under `/tmp`, independently of the
+caller's queue path, so nested fixture sockets fit the native Unix socket path
+limit. It overrides `CLANKIE_SETTINGS_FILE`
 and `CLANKIE_CREDENTIALS_FILE`, selecting the file credential backend even on
 macOS, and removes inherited Clankie, Discord, Herdr and provider-key overrides.
 Node children inherit the same fixture paths. Cleanup removes the temporary
@@ -57,7 +61,9 @@ The isolation regression launches focused Vitest fixtures against populated,
 empty and missing synthetic owner configs. A preload trap rejects filesystem
 access to those paths and the original owner config paths, and rejects Keychain
 commands, including in child processes. It also checks that fixture settings
-and credentials can be read and written normally.
+and credentials can be read and written normally, a real Unix socket can bind
+under an overlong inherited temp directory, and child processes inherit the
+private temp root. Both fixture roots are removed after the suite finishes.
 
 Live store access is an explicit manual opt-in: `CLANKIE_TEST_LIVE_STORES=1`
 disables the shared isolation. The existing Keychain smoke test separately

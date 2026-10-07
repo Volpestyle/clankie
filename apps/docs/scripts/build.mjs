@@ -282,7 +282,8 @@ function buildNetworkRows() {
       "POST /v1/harness-logins/start",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose: "Start a worker harness's own login (Claude subscription or Codex device code) for this device.",
+        purpose:
+          "Start a worker harness's own login (Claude subscription or Codex device code) for this device.",
       },
     ],
     [

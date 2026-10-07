@@ -18,10 +18,12 @@ it.each(["populated", "empty", "missing"])(
     const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-owner-isolation-")));
     const ownerHome = join(root, "owner");
     const ownerConfig = join(ownerHome, ".config", "clankie");
+    const ownerTemp = join(root, "inherited-queue-temporary-directory-with-long-socket-paths");
     const settings = join(ownerConfig, "settings.json");
     const credentials = join(ownerConfig, "credentials.json");
     const poison = "owner fixture: intentionally invalid JSON\n";
     try {
+      await mkdir(ownerTemp, { recursive: true });
       if (state !== "missing") await mkdir(ownerConfig, { recursive: true });
       if (state === "populated") {
         await writeFile(settings, poison);
@@ -31,6 +33,10 @@ it.each(["populated", "empty", "missing"])(
         ...process.env,
         HOME: ownerHome,
         USERPROFILE: ownerHome,
+        TMPDIR: ownerTemp,
+        TMP: ownerTemp,
+        TEMP: ownerTemp,
+        TEST_OWNER_TEMP: ownerTemp,
         XDG_CONFIG_HOME: join(ownerHome, ".config"),
         CLANKIE_SETTINGS_FILE: settings,
         CLANKIE_CREDENTIALS_FILE: credentials,
@@ -50,6 +56,9 @@ it.each(["populated", "empty", "missing"])(
       const isolatedHome = /ISOLATED_HOME=([^\r\n]+)/u.exec(result.stdout)?.[1];
       expect(isolatedHome).toBeDefined();
       await expect(access(isolatedHome!)).rejects.toHaveProperty("code", "ENOENT");
+      const isolatedTemp = /ISOLATED_TEMP=([^\r\n]+)/u.exec(result.stdout)?.[1];
+      expect(isolatedTemp).toBeDefined();
+      await expect(access(isolatedTemp!)).rejects.toHaveProperty("code", "ENOENT");
       if (state === "populated") {
         expect(await readFile(settings, "utf8")).toBe(poison);
         expect(await readFile(credentials, "utf8")).toBe(poison);

@@ -29,7 +29,7 @@ export default defineConfig({
     // Each fork has its own fixture HOME and stores. Bound concurrency inside
     // the fleet heavy permit instead of paying every file's import/wait serially.
     fileParallelism: true,
-    maxWorkers: 2,
+    maxWorkers: 4,
     retry: 0,
     ...(process.env.CI
       ? {
