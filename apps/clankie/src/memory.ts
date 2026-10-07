@@ -135,20 +135,6 @@ export class MemoryConflictError extends Error {
   }
 }
 
-/**
- * Compatibility error for older memory adapters and HTTP clients. The file
- * store no longer enforces a retention quota and never throws this error.
- * @deprecated Retention is legacy metadata; all notes persist until forgotten.
- */
-export class MemoryCapacityError extends Error {
-  public readonly code = "retained_memory_full";
-  public readonly capacity = LEGACY_RETAINED_CAPACITY;
-  public constructor(message: string) {
-    super(message);
-    this.name = "MemoryCapacityError";
-  }
-}
-
 /** One memory as recall renders it: where and when it happened, then the note. */
 function episodeLine(episode: CaptainEpisode): string {
   const suffix = episode.correctedAt === undefined ? "" : ` [corrected ${episode.correctedAt}]`;

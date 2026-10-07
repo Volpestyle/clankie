@@ -59,7 +59,6 @@
     },
     "apps/clankie": {
       "entry": [
-        "src/play-execution-shared.ts",
         "scripts/fleet-load.ts",
         "scripts/fleet-resource-burst.ts",
         "scripts/fleet-load-worker.mjs",

@@ -124,7 +124,7 @@ export function detectBannerCapabilities(
 }
 
 function detectUnicode(env: NodeJS.ProcessEnv): boolean {
-  const flag = env.EVE_TUI_UNICODE ?? env.CLANKIE_TUI_UNICODE;
+  const flag = env.CLANKIE_TUI_UNICODE;
   if (flag === "0" || flag === "false") return false;
   if (flag === "1" || flag === "true") return true;
   if (env.TERM === "dumb") return false;

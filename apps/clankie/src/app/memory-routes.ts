@@ -11,7 +11,7 @@ import {
 } from "@clankie/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
-import { MemoryCapacityError, MemoryConflictError } from "../memory.ts";
+import { MemoryConflictError } from "../memory.ts";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
 const DiscordPersonMemoryProposalRequestSchema = z
@@ -276,9 +276,6 @@ export function registerMemoryRoutes(ctx: RegisterMemoryRoutesContext) {
         },
       });
     } catch (error) {
-      if (error instanceof MemoryCapacityError) {
-        return context.json({ error: error.code, message: error.message, capacity: error.capacity }, 409);
-      }
       // Recording never edits. An id the store already holds is a conflict, not
       // an upsert, so the memory it names is still there afterwards.
       if (error instanceof MemoryConflictError) {
@@ -359,15 +356,7 @@ export function registerMemoryRoutes(ctx: RegisterMemoryRoutesContext) {
     if (!lane.success || !episodeId.success || !edit.success) {
       return context.json({ error: "invalid_captain_episode_edit" }, 400);
     }
-    let episode;
-    try {
-      episode = ctx.dependencies.memory.updateEpisode(lane.data, episodeId.data, edit.data);
-    } catch (error) {
-      if (error instanceof MemoryCapacityError) {
-        return context.json({ error: error.code, message: error.message, capacity: error.capacity }, 409);
-      }
-      throw error;
-    }
+    const episode = ctx.dependencies.memory.updateEpisode(lane.data, episodeId.data, edit.data);
     if (episode === undefined) return context.json({ error: "captain_episode_not_found" }, 404);
     ctx.recordEvent("captain.episode.edited", CAPTAIN_EPISODE_STREAM_ID, ctx.clock().toISOString(), {
       episodeId: episode.episodeId,
