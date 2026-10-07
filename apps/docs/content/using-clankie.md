@@ -53,6 +53,11 @@ can override them, and every helper receives the result. Change them by asking
 Clankie, in the app's project settings, or with `clankie fleet` on a DIY
 installation. Preferences never widen access.
 
+When Clankie needs your decision or an action only you can take, he can leave a
+structured ask showing what waits, his recommendation and the exact next steps.
+The console's `/question list` collects pending asks; answering wakes the source
+conversation. The app mailbox is a later addition. See the [ask reference](/cli/#owner-asks-conversations-questions-id-and-conversations-answer).
+
 DIY helpers use the harnesses you install and sign in to
 ([bring your own team](/diy/#bring-your-own-team)). Hosted helper limits follow
 your [plan](https://clankie.bot/#plans).

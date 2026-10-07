@@ -418,6 +418,26 @@ surface is listed in [`apps/clankie/openapi.yaml`](../apps/clankie/openapi.yaml)
 imports that canonical catalog into Yaak and adds a Keychain-backed `Local`
 environment for authenticated requests.
 
+### Owner asks
+
+Clankie's existing `request_user_input` tool creates one durable structured ask
+from a native seat, console, room or service conversation. Decisions carry
+options and a recommendation; approvals read the effective owner fleet setting;
+owner-only actions carry exact steps. The host binds the source conversation and
+what waits on the answer. Operator and `terminalControl` device clients list and
+answer the same immutable records through `input_list`, `input_get`,
+`input_answer` and `input_cancel` on the operator dispatch API. An owner answer
+resolves all portals and wakes the original source without changing room trust.
+Pending asks protect their source from retention pruning.
+
+Worker escalation copies a host-observed native question, preserving its session,
+request and question IDs. An owner answer uses the existing native question-answer
+channel once and reports its delivery outcome to Clankie. Pending or uncertain
+records prevent repeat dispatch; project onboarding retains its separate explicit
+confirmation. The app mailbox and informational updates are a later consumer of
+this core API. See [ADR 0245](adr/0245-one-owner-ask-across-surfaces.md) and the
+[CLI contract](cli.md#owner-asks-conversations-questions-id-and-conversations-answer).
+
 ### Goals and autonomous continuation
 
 The service also keeps `autonomy.json`: one proposed or owner-approved goal and one

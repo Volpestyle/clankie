@@ -61,9 +61,18 @@ export function renderOperatorConversationNotice(event: OperatorConversationStre
       return `**Skill: ${event.skillName} - ${event.phase === "completed" ? "loaded" : "failed to load"}**`;
     }
     case "input_requested":
-      return `**Input requested**\n\n${event.prompt}${
-        event.options.length === 0 ? "" : `\n\n${event.options.map((option) => `- ${option}`).join("\n")}`
-      }\n\nRequest ${event.requestId}. Use /question to read and answer or cancel.`;
+      return [
+        `**Input requested${event.purpose ? `: ${event.purpose}` : ""}**`,
+        event.prompt,
+        `Source: ${event.conversationId}`,
+        event.waitingOn ? `Waiting: ${event.waitingOn}` : "",
+        event.recommendation ? `Recommendation: ${event.recommendation}` : "",
+        ...(event.steps ?? []).map((step, index) => `Step ${index + 1}: ${step}`),
+        ...event.options.map((option) => `- ${option}`),
+        `Request ${event.requestId}. Use /question to read and answer or cancel.`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
     case "input_resolved":
       return `**Input ${event.outcome}**\n\nRequest ${event.requestId}. Use /question to read its current receipt.`;
     case "auth":

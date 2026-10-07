@@ -1170,16 +1170,67 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return delivered;
   }
 
+  /** Host-observed native question, bound to the original occupant; model text is never evidence. */
+  public async observedSeatQuestion(seatId: string, requestId: string | number) {
+    const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    if (!agent?.session) throw new Error("worker_question_unavailable");
+    const sessionId = nativeSessionId(agent);
+    if (!sessionId) throw new Error("worker_question_identity_unavailable");
+    const control = await this.seatControl.attach(agent);
+    const pending = await control?.pendingQuestion?.(requestId);
+    if (!pending) throw new Error("worker_question_resolved_or_unavailable");
+    const current = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    if (
+      !current?.session ||
+      current.paneId !== agent.paneId ||
+      current.agent !== agent.agent ||
+      nativeSessionId(current) !== sessionId
+    )
+      throw new Error("worker_question_occupant_changed");
+    return { sessionId, question: pending };
+  }
+
+  /** Only an online exact native control can prove an ask was answered elsewhere. */
+  public async workerQuestionStatus(
+    seatId: string,
+    requestId: string | number,
+    sessionId: string,
+  ): Promise<"pending" | "resolved" | "unknown"> {
+    try {
+      const agent = await this.runner.resolveTerminal(seatId);
+      if (!agent?.session) return "unknown";
+      if (nativeSessionId(agent) !== sessionId) return "resolved";
+      const control = await this.seatControl.attach(agent);
+      if (!control?.pendingQuestion) return "unknown";
+      const online = (status: string) => status === "working" || status === "idle" || status === "blocked";
+      if (!online(await control.status())) return "unknown";
+      const pending = await control.pendingQuestion(requestId);
+      const current = await this.runner.resolveTerminal(seatId);
+      if (!current?.session) return "unknown";
+      if (nativeSessionId(current) !== sessionId) return "resolved";
+      if (!online(await control.status())) return "unknown";
+      return pending === undefined ? "resolved" : "pending";
+    } catch {
+      return "unknown";
+    }
+  }
+
   public async answerSeatQuestion(
     seatId: string,
     answer: SeatQuestionAnswer,
     source: ConversationAuthority,
+    expectedSessionId?: string,
   ): Promise<FleetSeatDelivery> {
     if (this.closed) return { outcome: "offline", detail: "Native hire service is closed." };
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
     const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) return { outcome: "offline", detail: "The exact native seat is unavailable." };
+    if (expectedSessionId !== undefined && nativeSessionId(agent) !== expectedSessionId)
+      return {
+        outcome: "undelivered",
+        detail: "The original question occupant changed; no answer was sent.",
+      };
     // Another lead may answer (VUH-1763); the seat's own lead stays its lead.
     let owner: ConversationOwner | undefined;
     try {

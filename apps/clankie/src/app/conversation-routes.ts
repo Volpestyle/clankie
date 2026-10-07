@@ -347,6 +347,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       parsed.data.op === "project_proposal_get" ||
       parsed.data.op === "project_proposal_confirm" ||
       parsed.data.op === "project_proposal_tweak" ||
+      parsed.data.op === "input_list" ||
       parsed.data.op === "input_get" ||
       parsed.data.op === "input_answer" ||
       parsed.data.op === "input_cancel";

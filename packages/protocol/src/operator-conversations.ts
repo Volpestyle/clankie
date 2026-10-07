@@ -1443,10 +1443,52 @@ export function operatorAutonomyCommandRequiresOwner(command: OperatorAutonomyCo
  * impossible by schema; the captain redacts to these shapes before publishing
  * to the durable log/tail.
  */
-/** Ordinary context/preferences only. These DTOs never authorize configuration. */
+/** Owner asks share immutable identity across surfaces; answers never grant credentials. */
+export const ConversationWorkerQuestionSchema = z
+  .object({
+    seatId: z.string().min(1).max(256),
+    requestId: z.union([z.string().min(1).max(256), z.number().int()]),
+    sessionId: z.string().min(1).max(256),
+    questions: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(256),
+            header: z.string().max(256).optional(),
+            question: z.string().min(1).max(4000),
+            options: z
+              .array(
+                z
+                  .object({
+                    label: z.string().min(1).max(500),
+                    description: z.string().max(2000).optional(),
+                  })
+                  .strict(),
+              )
+              .max(32)
+              .optional(),
+            isOther: z.boolean().optional(),
+            isSecret: z.boolean().optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(16),
+  })
+  .strict();
+export type ConversationWorkerQuestion = z.infer<typeof ConversationWorkerQuestionSchema>;
 export const ConversationQuestionAnswerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choice"), optionId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("text"), text: z.string().trim().min(1).max(4000) }).strict(),
+  z
+    .object({
+      kind: z.literal("worker"),
+      answers: z.record(
+        z.string().min(1).max(256),
+        z.object({ answers: z.array(z.string().min(1).max(4000)).min(1).max(32) }).strict(),
+      ),
+    })
+    .strict(),
 ]);
 export type ConversationQuestionAnswer = z.infer<typeof ConversationQuestionAnswerSchema>;
 export const ConversationQuestionSchema = z
@@ -1454,8 +1496,13 @@ export const ConversationQuestionSchema = z
     requestId: z.string().uuid(),
     incarnationId: z.string().uuid(),
     conversationId: OperatorConversationIdSchema,
-    workspace: z.string().min(1).max(4096),
-    purpose: z.literal("preference"),
+    workspace: z.string().min(1).max(4096).optional(),
+    purpose: z.enum(["preference", "decision", "approval", "owner_action"]),
+    recommendation: z.string().trim().min(1).max(2000).optional(),
+    waitingOn: z.string().trim().min(1).max(2000).optional(),
+    steps: z.array(z.string().trim().min(1).max(2000)).max(32).optional(),
+    gate: z.string().min(1).max(100).optional(),
+    workerQuestion: ConversationWorkerQuestionSchema.optional(),
     kind: z.enum(["text", "choice"]),
     prompt: z.string().trim().min(1).max(2000),
     options: z
@@ -1508,6 +1555,12 @@ export const ConversationQuestionResultSchema = z
   })
   .strict();
 export type ConversationQuestionResult = z.infer<typeof ConversationQuestionResultSchema>;
+export const ConversationQuestionListSchema = z
+  .object({
+    questions: z.array(ConversationQuestionResultSchema).max(1000),
+  })
+  .strict();
+export type ConversationQuestionList = z.infer<typeof ConversationQuestionListSchema>;
 
 const OperatorConversationEventEnvelopeSchema = z.object({
   schemaVersion: z.literal(1),
@@ -1598,6 +1651,10 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     requestId: OperatorConversationEventRefSchema,
     prompt: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     inputKind: z.enum(["text", "choice", "approval"]),
+    purpose: z.enum(["preference", "decision", "approval", "owner_action"]).optional(),
+    waitingOn: z.string().max(2000).optional(),
+    recommendation: z.string().max(2000).optional(),
+    steps: z.array(z.string().max(2000)).max(32).optional(),
     options: z
       .array(z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX))
       .max(OPERATOR_CONVERSATION_INPUT_OPTIONS_MAX)

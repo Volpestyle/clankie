@@ -442,6 +442,7 @@ it("initializes an operator MCP session with native and connected tools", async 
       "agent_sessions",
       "agent_session_read",
       "linear_list_issues",
+      "request_user_input",
     ])
       expect(names).toContain(name);
     for (const [index, name, args] of [
@@ -464,6 +465,52 @@ it("initializes an operator MCP session with native and connected tools", async 
       expect(reply).toMatchObject({ result: { content: expect.any(Array) } });
       expect(reply.result?.isError).not.toBe(true);
     }
+    const ask = async (id: number) => {
+      const response = await call(
+        app,
+        "operator",
+        {
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: {
+            name: "request_user_input",
+            arguments: {
+              purpose: "approval",
+              kind: "choice",
+              gate: "push",
+              prompt: "Publish this commit?",
+              waitingOn: "Publishing the reviewed commit",
+              options: [{ label: "Approve" }, { label: "Decline" }],
+            },
+          },
+        },
+        sessionId,
+      );
+      const reply = (await response.json()) as Rpc;
+      expect(reply.result?.isError).not.toBe(true);
+      const content = reply.result?.content as Array<{ type: string; text: string }>;
+      return JSON.parse(content.find((item) => item.type === "text")!.text);
+    };
+    expect(await ask(20)).toMatchObject({ status: "refused", reason: "approval_not_owner_reserved" });
+    await settings.update((current) => ({
+      ...current,
+      autonomy: {
+        ...current.autonomy,
+        fleet: { ...current.autonomy.fleet, push: "owner" },
+      },
+    }));
+    const reserved = await ask(21);
+    expect(reserved).toMatchObject({
+      status: "ready",
+      question: {
+        purpose: "approval",
+        gate: "push",
+        conversationId: "global-default",
+        status: "pending",
+      },
+    });
+    expect((await ask(22)).question.requestId).toBe(reserved.question.requestId);
   } finally {
     app.close();
     await captain.close();

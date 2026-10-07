@@ -139,9 +139,10 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
     const preparation = new ConversationServiceRun(signal);
     let preparedMessage: string | undefined;
     try {
-      if (context.inputAnswer) {
+      if (context.origin === "input") {
         await preparation.wait("question authority", authorizeQuestion(context.ownerAuthority));
-        if (!ctx.conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+        if (context.questionBinding?.workspace && !ctx.conversations.questionEligible(conversationId))
+          throw new Error("question_context_lost");
       }
       // Turning follow off also drops activity still queued behind a live turn.
       if (
@@ -280,6 +281,17 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         // log is the source of truth: a harness that drove since this lane last
         // ran is caught up by a fresh session seeded from the log, and the turn
         // opens the handoff span the returning harness receives.
+        const sourceScope = ctx.conversations.conversation(conversationId)?.scope;
+        const socialContinuation = sourceScope?.kind === "room" || sourceScope?.kind === "channel";
+        // Owner answers carry authentication, never a new room machine grant.
+        // A room continuation has no original transport actor proof: run its mind
+        // in the source transcript with social tools and no external mouth route.
+        const continuationLane =
+          sourceScope?.kind === "room"
+            ? sourceScope.lane
+            : socialContinuation
+              ? "discord_presence"
+              : "operator";
         const handoff = ctx.conversations.noteServiceTurn(conversationId);
         const seed =
           context.side === true || ctx.conversations.activeInvocationCount(conversationId) > 1
@@ -287,10 +299,10 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             : ctx.conversations.serviceContextSeed(conversationId);
         const cwd = context.workspace ?? ctx.workingDirectory;
         const lane = await ctx.durableSession(
-          `operator:${conversationId}`,
-          "operator",
+          `${socialContinuation ? "ask-social" : "operator"}:${conversationId}`,
+          continuationLane,
           join(ctx.options.stateDir, "conversations", conversationId, "pi"),
-          true,
+          !socialContinuation,
           cwd,
           context.side === true,
           run,
@@ -332,21 +344,30 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         }
         const bodyIdentity = {
           conversationId,
-          route: { owner: { conversationId }, mode: "machine" as const },
+          route: {
+            owner: { conversationId },
+            mode: socialContinuation ? ("social" as const) : ("machine" as const),
+          },
           current: () =>
-            lane.capture.bodyIdentity === bodyIdentity &&
+            (socialContinuation || lane.capture.bodyIdentity === bodyIdentity) &&
             !run.signal.aborted &&
-            ctx.conversations.runsCaptainTurns(conversationId),
-          authorize: async () => ctx.conversations.runsCaptainTurns(conversationId),
+            (socialContinuation
+              ? ctx.conversations.conversation(conversationId) !== undefined
+              : ctx.conversations.runsCaptainTurns(conversationId)),
+          authorize: async () =>
+            socialContinuation
+              ? ctx.conversations.conversation(conversationId) !== undefined
+              : ctx.conversations.runsCaptainTurns(conversationId),
         };
-        lane.capture.bodyIdentity = bodyIdentity;
+        lane.capture.shell = !socialContinuation;
+        lane.capture.bodyIdentity = socialContinuation ? undefined : bodyIdentity;
         lane.capture.conversationAuthority = {
           owner: { conversationId },
           current: bodyIdentity.current,
           authorize: bodyIdentity.authorize,
         };
         lane.capture.proposeProjectDefaults =
-          context.ownerAuthority && context.questionBinding
+          !socialContinuation && context.ownerAuthority && context.questionBinding
             ? () =>
                 ctx.conversations.proposeProjectDefaults(conversationId, {
                   ...context,
@@ -354,23 +375,34 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 })
             : undefined;
         lane.capture.proposeProjectCreate =
-          context.ownerAuthority && context.questionBinding
+          !socialContinuation && context.ownerAuthority && context.questionBinding
             ? (draft) =>
                 ctx.conversations.proposeProjectCreate(conversationId, draft, {
                   ...context,
                   questionCurrent: bodyIdentity.current,
                 })
             : undefined;
-        lane.capture.requestQuestion =
-          context.ownerAuthority && context.questionBinding
-            ? (draft) =>
-                ctx.conversations.requestQuestion(conversationId, draft, {
-                  ...context,
-                  questionCurrent: bodyIdentity.current,
-                })
-            : undefined;
-        lane.capture.room = roomKey("operator", conversationId);
-        lane.capture.targetId = conversationId;
+        lane.capture.requestQuestion = (draft) =>
+          draft.purpose === "preference" && context.ownerAuthority && context.questionBinding
+            ? ctx.conversations.requestQuestion(conversationId, draft, {
+                ...context,
+                questionCurrent: bodyIdentity.current,
+              })
+            : ctx.conversations.requestSurfaceQuestion(conversationId, draft, {
+                current: bodyIdentity.current,
+                authorize: bodyIdentity.authorize,
+              });
+        lane.capture.room =
+          sourceScope?.kind === "room"
+            ? roomKey(sourceScope.lane, sourceScope.targetId)
+            : roomKey(continuationLane, conversationId);
+        lane.capture.targetId = sourceScope?.kind === "room" ? sourceScope.targetId : conversationId;
+        // A private owner answer supplies no Discord actor, channel or trigger proof.
+        lane.capture.actorId = undefined;
+        lane.capture.guildId = undefined;
+        lane.capture.channelId = undefined;
+        lane.capture.messageId = undefined;
+        lane.capture.discordOrigin = undefined;
         lane.capture.goalExecutionReason = () => ctx.goalExecutionReason(conversationId);
         lane.capture.publishFile = (input) => ctx.conversations.publishFile({ conversationId, ...input });
         if (releaseStarting === undefined && lane.starting !== undefined)
@@ -553,7 +585,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               ? undefined
               : await run.wait("owner model images", modelImagesForOwnerAttachments(context.attachments));
           const workspaceNote =
-            context.ownerAuthority && context.questionBinding
+            !socialContinuation && context.ownerAuthority && context.questionBinding
               ? await run.wait(
                   "question workspace",
                   questionWorkspaceContext(cwd, async () => (await ctx.settings()).projects),
@@ -561,7 +593,8 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               : "";
           if (context.ownerAuthority && context.questionBinding) {
             await run.wait("question authority", authorizeQuestion(context.ownerAuthority));
-            if (!ctx.conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+            if (context.questionBinding.workspace && !ctx.conversations.questionEligible(conversationId))
+              throw new Error("question_context_lost");
           }
           const prompt = resolveOperatorPrompt(
             attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
@@ -614,9 +647,11 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                           if (
                             !bodyIdentity.current() ||
                             !context.ownerAuthority!.current() ||
-                            !ctx.conversations.questionEligible(conversationId) ||
+                            (context.questionBinding?.workspace !== undefined &&
+                              !ctx.conversations.questionEligible(conversationId)) ||
                             !context.questionBinding ||
-                            !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
+                            (context.questionBinding.workspace !== undefined &&
+                              !sameQuestionWorkspace(cwd, context.questionBinding.workspace))
                           )
                             throw new Error("question_context_lost");
                           return [seed?.text, workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");

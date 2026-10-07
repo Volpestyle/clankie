@@ -238,7 +238,7 @@ export interface ConversationTurnContext {
   readonly deliveryOutcome?: (outcome: DeliveryAdmission) => void;
   readonly ownerAuthority?: QuestionAuthority;
   readonly questionCurrent?: () => boolean;
-  readonly questionBinding?: { readonly incarnationId: string; readonly workspace: QuestionWorkspace };
+  readonly questionBinding?: { readonly incarnationId: string; readonly workspace?: QuestionWorkspace };
   readonly inputAnswer?: { readonly requestId: string; readonly answer: ConversationQuestionAnswer };
 
   /**

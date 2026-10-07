@@ -54,3 +54,57 @@ it("shared client has explicit read/answer/cancel operations with no transport r
     answer: { kind: "text", text: "preference" },
   });
 });
+it("owner mailbox schema preserves room source, native question identity and multi-question answers", () => {
+  const questions = [
+    {
+      status: "ready",
+      conversationId: "room:discord:123",
+      revision: 7,
+      question: {
+        requestId: target.requestId,
+        incarnationId: target.incarnationId,
+        conversationId: "room:discord:123",
+        purpose: "decision",
+        kind: "text",
+        prompt: "Choose the worker's next step",
+        options: [],
+        allowFreeform: true,
+        recommendation: "Keep the current API",
+        waitingOn: "Worker's implementation",
+        originRunId: "source-run",
+        createdAt: "2026-10-07T00:00:00.000Z",
+        status: "pending",
+        workerQuestion: {
+          seatId: "worker-seat",
+          sessionId: "native-session",
+          requestId: 42,
+          questions: [{ id: "strategy", question: "Which strategy?", options: [{ label: "Keep" }] }],
+        },
+      },
+    },
+  ];
+  const result = OperatorConversationServiceResultSchema.parse({
+    op: "input_list",
+    schemaVersion: 1,
+    result: { questions },
+  });
+  expect(result).toMatchObject({ result: { questions } });
+  const answer = OperatorConversationServiceRequestSchema.parse({
+    op: "input_answer",
+    schemaVersion: 1,
+    ...target,
+    answer: { kind: "worker", answers: { strategy: { answers: ["Keep"] } } },
+  });
+  expect(answer).toMatchObject({ answer: { answers: { strategy: { answers: ["Keep"] } } } });
+  expect(
+    hostedOperatorAllows(
+      "POST",
+      "/operator/v1/dispatch",
+      JSON.stringify({
+        op: "input_list",
+        schemaVersion: 1,
+        status: "pending",
+      }),
+    ),
+  ).toBe(true);
+});

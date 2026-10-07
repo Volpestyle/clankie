@@ -207,9 +207,9 @@ export async function runHostedConsole() {
     {
       name: "question",
       aliases: [],
-      description: "Read, answer or cancel the current preference question",
+      description: "List owner asks, or read, answer and cancel the source conversation ask",
       takesArgument: true,
-      argumentHint: "[answer NUMBER | text TEXT | cancel]",
+      argumentHint: "[list | answer NUMBER | text TEXT | worker JSON | cancel]",
       async run(argument, active) {
         try {
           active.insertCommandResult("/question", await questionCommand(argument), "success");

@@ -7,6 +7,7 @@ import {
 } from "@clankie/protocol/projects";
 import { projectsRevision, ProjectTrackerUnavailable } from "@clankie/settings";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -46,14 +47,20 @@ export function assertQuestionContext(
   meta: ConversationMeta,
   record: QuestionRecord,
 ): void {
+  const workspaceBound = record.projectCreation || record.question.purpose === "preference";
   if (
     ctx["metas"].get(meta.conversationId) !== meta ||
-    meta.scope.kind !== "workspace" ||
-    meta.parentConversationId ||
-    meta.nativeSource ||
-    !ctx["questionEligible"](meta.conversationId) ||
     meta.questions?.incarnationId !== record.question.incarnationId ||
-    !sameQuestionWorkspace(meta.scope.workspaceId, record.workspace)
+    (workspaceBound &&
+      (meta.scope.kind !== "workspace" ||
+        meta.parentConversationId ||
+        meta.nativeSource ||
+        !ctx["questionEligible"](meta.conversationId) ||
+        !record.workspace ||
+        !sameQuestionWorkspace(
+          meta.scope.kind === "workspace" ? meta.scope.workspaceId : "",
+          record.workspace,
+        )))
   )
     throw new Error("question_context_lost");
 }
@@ -64,29 +71,79 @@ export async function requestQuestion(
   draft: QuestionDraft,
   context: ConversationTurnContext,
   projectDraft?: ProjectProposalDraft,
+  surface = false,
 ): Promise<ConversationQuestionResult> {
   const input = QuestionDraftSchema.parse(draft);
-  await authorizeQuestion(context.ownerAuthority);
+  const workspaceBound = !!projectDraft || input.purpose === "preference";
+  if (workspaceBound) await authorizeQuestion(context.ownerAuthority);
   const meta = ctx["metas"].get(conversationId);
   if (
     !meta ||
-    !context.questionBinding ||
+    (workspaceBound && !context.questionBinding?.workspace) ||
     context.signal.aborted ||
     context.questionCurrent?.() === false ||
-    ctx["runControllers"].get(context.runId)?.conversationId !== conversationId ||
-    (context.internal && context.origin !== "input")
+    (!surface && ctx["runControllers"].get(context.runId)?.conversationId !== conversationId) ||
+    (workspaceBound && context.internal && context.origin !== "input")
   )
     throw new Error("question_turn_unavailable");
   ctx["validQuestionState"](meta);
+  const pending = meta.questions?.records.find((r) => r.question.status === "pending");
+  if (pending) return ctx["questionResult"](meta, pending, "ready", "already_pending");
+  if (input.purpose === "approval" && !(await ctx["questionGate"]?.(conversationId, input.gate!)))
+    return ctx["questionResult"](meta, undefined, "refused", "approval_not_owner_reserved");
+  const workerQuestion = input.workerQuestion
+    ? await ctx["prepareWorkerQuestion"]?.(
+        input.workerQuestion.seatId,
+        input.workerQuestion.requestId,
+        conversationId,
+      )
+    : undefined;
+  if (input.workerQuestion && !workerQuestion) throw new Error("worker_question_unavailable");
+  if (workerQuestion) {
+    for (const source of ctx["metas"].values()) {
+      ctx["validQuestionState"](source);
+      const existingWorker = source.questions?.records.find((record) => {
+        const worker = record.question.workerQuestion;
+        return (
+          worker &&
+          worker.seatId === workerQuestion.seatId &&
+          worker.sessionId === workerQuestion.sessionId &&
+          worker.requestId === workerQuestion.requestId &&
+          (record.question.status === "pending" || record.workerDelivery)
+        );
+      });
+      if (existingWorker)
+        return ctx["questionResult"](
+          source,
+          existingWorker,
+          existingWorker.question.status === "pending" ? "ready" : "resolved",
+          existingWorker.question.status === "pending" ? "already_pending" : "worker_answer_consumed",
+        );
+    }
+  }
+  if (
+    context.signal.aborted ||
+    context.questionCurrent?.() === false ||
+    ctx["metas"].get(conversationId) !== meta
+  )
+    throw new Error("question_turn_unavailable");
+  const concurrent = meta.questions?.records.find((r) => r.question.status === "pending");
+  if (concurrent) return ctx["questionResult"](meta, concurrent, "ready", "already_pending");
+  meta.questions ??= { incarnationId: randomUUID(), records: [] };
   const record: QuestionRecord = {
-    issuer: { ...context.ownerAuthority!.principal },
-    workspace: { ...context.questionBinding.workspace },
+    ...(context.ownerAuthority ? { issuer: { ...context.ownerAuthority.principal } } : {}),
+    ...(context.questionBinding?.workspace ? { workspace: { ...context.questionBinding.workspace } } : {}),
     question: {
       requestId: randomUUID(),
-      incarnationId: context.questionBinding.incarnationId,
+      incarnationId: meta.questions.incarnationId,
       conversationId,
-      workspace: context.questionBinding.workspace.path,
-      purpose: "preference",
+      ...(context.questionBinding?.workspace ? { workspace: context.questionBinding.workspace!.path } : {}),
+      purpose: input.purpose,
+      ...(input.recommendation ? { recommendation: input.recommendation } : {}),
+      ...(input.waitingOn ? { waitingOn: input.waitingOn } : {}),
+      ...(input.steps ? { steps: input.steps } : {}),
+      ...(input.gate ? { gate: input.gate } : {}),
+      ...(workerQuestion ? { workerQuestion } : {}),
       kind: input.kind,
       prompt: input.prompt,
       options: input.options.map((o) => ({ ...o, optionId: randomUUID() })),
@@ -110,7 +167,7 @@ export async function requestQuestion(
     const settings = await onboarding.load();
     const command = {
       ...policy,
-      workspacePath: record.workspace.path,
+      workspacePath: record.workspace!.path,
       expectedRevision: projectsRevision(settings.projects),
     };
     let prepared: Awaited<ReturnType<typeof onboarding.prepare>>;
@@ -157,28 +214,39 @@ export async function requestQuestion(
     });
   }
   const previous = meta.questions;
+  // Native delivery uncertainty must outlive the ordinary recent-answer window.
+  // Refuse bounded-state overflow rather than forgetting a claim and allowing replay.
+  const settled = previous!.records.filter((r) => r.question.status !== "pending");
+  const protectedClaims = settled.filter((r) => r.workerDelivery && r.workerDelivery.state !== "delivered");
+  const recentLimit = Math.max(0, 32 - protectedClaims.length);
+  const recent = recentLimit ? settled.filter((r) => !protectedClaims.includes(r)).slice(-recentLimit) : [];
   const next = {
     ...previous!,
-    records: [...previous!.records.filter((r) => r.question.status !== "pending").slice(-32), record],
+    records: [...protectedClaims, ...recent, record],
   };
   // Pure validation before publishing the in-memory slot: bounded-state refusal has no IO.
-  if (projectDraft) QuestionStateSchema.parse(next);
+  QuestionStateSchema.parse(next);
   meta.questions = next;
   try {
     ctx["saveQuestionMeta"](meta);
   } catch (error) {
     // Project artifacts retain their slot after ANY uncertain writer outcome. No issuer
     // closure is installed on failure, so neither an in-process nor cold retry can CREATE.
-    if (!projectDraft && !(error instanceof QuestionCommitError && error.committed))
+    if (workspaceBound && !projectDraft && !(error instanceof QuestionCommitError && error.committed))
       meta.questions = previous!;
+    else record.persistenceUncertain = true;
     throw error;
   }
-  ctx["questionIssuers"].set(record.question.requestId, context.ownerAuthority!);
+  if (context.ownerAuthority) ctx["questionIssuers"].set(record.question.requestId, context.ownerAuthority);
   ctx["append"](meta, {
     type: "input_requested",
     requestId: record.question.requestId,
     prompt: input.prompt,
     inputKind: input.kind,
+    ...(input.purpose !== "preference" ? { purpose: input.purpose } : {}),
+    ...(input.waitingOn ? { waitingOn: input.waitingOn } : {}),
+    ...(input.recommendation ? { recommendation: input.recommendation } : {}),
+    ...(input.steps ? { steps: input.steps } : {}),
     options: input.options.map((o) => o.label),
   });
   return ctx["questionResult"](meta, record, "ready");
@@ -223,7 +291,7 @@ export async function proposeProjectDefaults(
           context.ownerAuthority,
         )
       : ctx["questionResult"](meta, existing, "ready", "already_pending");
-  const inferred = await ctx["projectOnboarding"].defaults(context.questionBinding.workspace.path);
+  const inferred = await ctx["projectOnboarding"].defaults(context.questionBinding.workspace!.path);
   // requestQuestion repeats owner, workspace, current-turn and pending-slot checks after the IO.
   const result = inferred.draft
     ? await ctx["proposeProjectCreate"](conversationId, inferred.draft, context)
@@ -266,7 +334,7 @@ export async function projectProposalOperation(
     record?.projectCreation === creation;
   if (!record || !creation || !sameRecord()) return { status: "refused", reason: "stale_proposal" };
   const originalPrincipal = () =>
-    authority?.principal.kind === record.issuer.kind && authority.principal.id === record.issuer.id;
+    authority?.principal.kind === record.issuer?.kind && authority?.principal.id === record.issuer?.id;
   if (!originalPrincipal()) throw new Error("question_owner_unavailable");
   const target =
     request.op !== "project_proposal_get"
@@ -481,7 +549,7 @@ export function invalidateQuestionPrincipal(ctx: ConversationStore, deviceId: st
   for (const meta of ctx["metas"].values()) {
     if (
       meta.questions?.records.some(
-        (r) => r.question.status === "pending" && r.issuer.kind === "device" && r.issuer.id === deviceId,
+        (r) => r.question.status === "pending" && r.issuer?.kind === "device" && r.issuer.id === deviceId,
       )
     )
       ctx["cancelPendingQuestion"](meta.conversationId, "owner_context_lost");
@@ -513,14 +581,28 @@ export async function questionOperation(
   let record = meta.questions?.records.find((r) =>
     request.requestId ? r.question.requestId === request.requestId : r.question.status === "pending",
   );
+  if (
+    record?.question.status === "pending" &&
+    record.question.workerQuestion &&
+    !record.workerDelivery &&
+    !ctx["workerAnswerInFlight"].has(record.question.requestId) &&
+    ctx["reconcileWorkerQuestion"] &&
+    (await ctx["reconcileWorkerQuestion"](record.question)) === "resolved"
+  ) {
+    await authorizeQuestion(authority);
+    ctx["resolveWorkerQuestionElsewhere"](meta, record, authority!);
+  }
   if (record?.question.status === "pending") {
     const checkedRequestId = record.question.requestId;
     const issuer = ctx["questionIssuers"].get(checkedRequestId);
+    const workspaceBound = record.projectCreation || record.question.purpose === "preference";
     let lost = false;
     try {
       ctx["assertQuestionContext"](meta, record);
-      if (issuer) await authorizeQuestion(issuer);
-      else lost = true;
+      if (workspaceBound) {
+        if (issuer) await authorizeQuestion(issuer);
+        else lost = true;
+      }
     } catch {
       lost = true;
     }
@@ -548,7 +630,7 @@ export async function questionOperation(
     if (
       request.op === "input_answer" &&
       record.question.status === "submitted" &&
-      JSON.stringify(request.answer) !== JSON.stringify(record.question.answer)
+      !isDeepStrictEqual(request.answer, record.question.answer)
     )
       return ctx["questionResult"](meta, record, "refused", "conflicting_answer");
     return ctx["questionResult"](meta, record, "resolved");
@@ -571,13 +653,64 @@ export async function questionOperation(
     (answer.kind === "text" && !record.question.allowFreeform)
   )
     return ctx["questionResult"](meta, record, "refused", "invalid_answer");
-  const message = answerMessage(record.question, answer);
+  if (record.persistenceUncertain)
+    return ctx["questionResult"](meta, record, "refused", "ask_persistence_uncertain");
+  if (ctx["workerAnswerInFlight"].has(record.question.requestId))
+    return ctx["questionResult"](meta, record, "ready", "answer_in_progress");
+  if (record.workerDelivery && !isDeepStrictEqual(record.workerDelivery.answer, answer))
+    return ctx["questionResult"](meta, record, "refused", "conflicting_answer");
+  if (record.question.workerQuestion) {
+    if (answer.kind !== "worker" || !ctx["deliverWorkerAnswer"])
+      return ctx["questionResult"](meta, record, "refused", "invalid_worker_answer");
+    const ids = record.question.workerQuestion.questions.map((q) => q.id);
+    if (Object.keys(answer.answers).length !== ids.length || ids.some((id) => !answer.answers[id]))
+      return ctx["questionResult"](meta, record, "refused", "invalid_worker_answer");
+    if (!record.workerDelivery) {
+      record.workerDelivery = { state: "attempting", answer };
+      ctx["workerAnswerInFlight"].add(record.question.requestId);
+      // Persist the native delivery claim before touching the worker. An ambiguous
+      // transport or write can never cause a second native answer.
+      try {
+        ctx["saveQuestionMeta"](meta);
+      } catch {
+        record.workerDelivery.state = "uncertain";
+        ctx["workerAnswerInFlight"].delete(record.question.requestId);
+        throw new Error("worker_answer_uncertain");
+      }
+      try {
+        await authorizeQuestion(authority);
+        await ctx["deliverWorkerAnswer"](record.question, answer, authority!);
+        record.workerDelivery.state = "delivered";
+      } catch (error) {
+        record.workerDelivery.state = "uncertain";
+        record.workerDelivery.detail = (error instanceof Error ? error.message : String(error)).slice(
+          0,
+          2000,
+        );
+      }
+      ctx["workerAnswerInFlight"].delete(record.question.requestId);
+      ctx["saveQuestionMeta"](meta);
+    } else if (record.workerDelivery.state === "attempting") {
+      record.workerDelivery.state = "uncertain";
+      record.workerDelivery.detail = "worker_answer_interrupted";
+    }
+  } else if (answer.kind === "worker")
+    return ctx["questionResult"](meta, record, "refused", "invalid_answer");
+  if (record.workerDelivery?.state === "uncertain") record.question.reason = "worker_answer_uncertain";
+  const message =
+    answerMessage(record.question, answer) +
+    (record.workerDelivery
+      ? `\nWorker question answer delivery outcome: ${record.workerDelivery.state}; detail: ${JSON.stringify(record.workerDelivery.detail)}. Never replay uncertain native delivery.`
+      : "");
   try {
-    ctx["enqueue"](meta, message, undefined, false, ctx["runner"], {
+    ctx["enqueue"](meta, message, undefined, true, ctx["runner"], {
       origin: "input",
       delivery: "queue",
       ownerAuthority: authority!,
-      questionBinding: { incarnationId: request.incarnationId, workspace: record.workspace },
+      questionBinding: {
+        incarnationId: request.incarnationId,
+        ...(record.workspace ? { workspace: record.workspace } : {}),
+      },
       inputAnswer: { requestId: request.requestId, answer },
       questionAnswer: { record, answer, authority: authority! },
     });

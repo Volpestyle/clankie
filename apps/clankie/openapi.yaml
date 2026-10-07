@@ -3181,6 +3181,18 @@ paths:
         only fully offered IDs may be marked read. Roster/fleet report summaries
         survive disappeared panes, and delivery receipts never establish reading.
         The TUI and relay both speak this.
+        Owner asks use `input_list` (optional status and conversationId) to return
+        `{questions: [ConversationQuestionResult, ...]}`, `input_get` to read an
+        immutable target, and `input_answer` or `input_cancel` to resolve it.
+        All require authenticated operator or active terminalControl device
+        authority; a captain bearer receives 403 question_owner_required.
+        Decision, approval and owner_action asks carry their source conversation,
+        waitingOn, recommendation, options and exact steps as applicable.
+        Escalated worker questions pin native session/request/question IDs;
+        worker answers use an ID-keyed answers map, never terminal typing.
+        Duplicate answers reconcile the original receipt and never send twice.
+        The canonical schemas are in packages/protocol/src/operator-conversations.ts
+        and packages/protocol/src/operator-service.ts.
         Project onboarding uses `project_proposal_get` for one defaults-first
         proposal, `project_proposal_tweak` for exactly one reviewed field, and
         `project_proposal_confirm` for explicit acceptance. Tweak requires the
@@ -3210,7 +3222,7 @@ paths:
         `in_voice`, `playing`, `leading`, `idle`, in that precedence), detail,
         since (source start timestamp or null when unknown), activeSeats (all live
         registered fleet seats), and optional pendingOwnerItem (oldest unanswered
-        owner preference: conversationId, questionId, title, since). It uses
+        owner ask: conversationId, questionId, title, since). It uses
         optional cursor and waitMs (0–30000); an absent or changed cursor returns
         immediately. A current cursor parks until the projected sources change,
         sampled within 500 ms, or the wait expires. Unreachable is a client

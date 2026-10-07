@@ -320,7 +320,7 @@ it("corrupt actionable state never becomes an empty registry that can accept aga
 it("refuses unbound tool and approval-kind input", async () => {
   const tool = questionTools({}).find((t) => t.name === "request_user_input")!;
   await expect(tool.execute("id", draft, undefined, undefined, {} as never)).rejects.toThrow(
-    "current owner workspace",
+    "current source conversation",
   );
   expect(QuestionDraftSchema.safeParse({ ...draft, kind: "approval" }).success).toBe(false);
 });

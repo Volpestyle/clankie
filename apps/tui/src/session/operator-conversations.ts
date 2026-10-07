@@ -103,7 +103,8 @@ export function createCaptainOperatorConversationClient(
     }
     const transport =
       ownerFetcher &&
-      (ownerRequired || ["send", "input_get", "input_answer", "input_cancel"].includes(request.op))
+      (ownerRequired ||
+        ["send", "input_get", "input_list", "input_answer", "input_cancel"].includes(request.op))
         ? ownerFetcher
         : fetcher;
     const response = await transport.fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {

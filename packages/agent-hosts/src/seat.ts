@@ -229,6 +229,8 @@ export interface SeatControl {
   status(): Promise<SeatStatus>;
   /** Read-only native waiting detail for the roster; does not settle a completion watch. */
   statusReason?(): Promise<string | undefined>;
+  /** Read the exact currently pending native question; no transcript inference. */
+  pendingQuestion?(requestId: string | number): Promise<SeatQuestion | undefined>;
   /** Answer one pending native request through its native control, without terminal fallback. */
   answerQuestion?(
     answer: SeatQuestionAnswer,

@@ -241,6 +241,17 @@ it("Take Control device initiated question can be answered by TUI operator", asy
   expect(f.writeSettings).not.toHaveBeenCalled();
   await f.store.close();
 });
+it("owner mailbox lists the same question target through the shared HTTP client and refuses captain/read devices", async () => {
+  const f = await fixture();
+  await f.send();
+  const pending = await f.client("owner").inputGet!(f.id);
+  const mailbox = await f.client(f.tokens.control!).inputList!({ status: "pending" });
+  expect(mailbox.questions).toEqual([pending]);
+  const request = { op: "input_list", schemaVersion: 1, status: "pending" } as const;
+  expect((await f.post(request, "captain")).status).toBe(403);
+  expect((await f.post(request, f.tokens.read!)).status).toBeGreaterThanOrEqual(400);
+  await f.store.close();
+});
 it.each(["read", "captain", "expired", "revoked", "rotated"])(
   "refuses %s credentials without an answer or continuation",
   async (kind) => {

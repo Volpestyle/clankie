@@ -1172,6 +1172,10 @@ describe("TUI selected-conversation prompt path", () => {
         requestId: "req",
         prompt: "Choose",
         inputKind: "choice",
+        purpose: "decision",
+        waitingOn: "Worker implementation",
+        recommendation: "Choose A",
+        steps: ["Confirm the destination"],
         options: ["A"],
       },
       { ...base, type: "input_resolved", requestId: "req", outcome: "submitted" },
@@ -1180,7 +1184,11 @@ describe("TUI selected-conversation prompt path", () => {
       { ...base, type: "unsupported", kind: "future", summary: "Update required" },
     ];
     const rendered = notices.map(renderOperatorConversationNotice).join("\n");
-    expect(rendered).toContain("Input requested");
+    expect(rendered).toContain("Input requested: decision");
+    expect(rendered).toContain("Waiting: Worker implementation");
+    expect(rendered).toContain("Recommendation: Choose A");
+    expect(rendered).toContain("Step 1: Confirm the destination");
+    expect(rendered).toContain("Source: global-default");
     expect(rendered).toContain("Authorization required");
     expect(rendered).toContain("Worker tail");
     expect(rendered).not.toContain("undefined");

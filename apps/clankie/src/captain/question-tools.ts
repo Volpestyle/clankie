@@ -2,11 +2,11 @@ import { z } from "zod";
 import { ProjectProposalDraftSchema, type ProjectProposalDraft } from "@clankie/protocol/projects";
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { QuestionDraftSchema } from "./conversation-questions.ts";
+import { QuestionDraftSchema, type QuestionDraft } from "./conversation-questions.ts";
 import { toolJson, type TurnContext } from "./tools.ts";
 
-export function questionTools(turn: TurnContext): ToolDefinition[] {
-  return [
+export function questionTools(turn: TurnContext, projects = true): ToolDefinition[] {
+  const tools = [
     defineTool({
       name: "propose_project_defaults",
       label: "Pick project defaults",
@@ -23,31 +23,17 @@ export function questionTools(turn: TurnContext): ToolDefinition[] {
       name: "request_user_input",
       label: "Ask the owner",
       description:
-        "Ask one bounded text or choice preference question in the current owner workspace conversation. Returns pending metadata immediately; a later authenticated answer starts a separate attributed turn. Choices are context/preferences only, never approval, enrollment, permission, tracker initialization or settings writes. No room or native-seat questions. Do not repeat a pending or uncertain request; inspect the returned ID. You decide when a question is useful.",
-      parameters: Type.Object(
-        {
-          kind: Type.Union([Type.Literal("text"), Type.Literal("choice")]),
-          prompt: Type.String({ minLength: 1, maxLength: 2000 }),
-          options: Type.Optional(
-            Type.Array(
-              Type.Object(
-                {
-                  label: Type.String({ minLength: 1, maxLength: 200 }),
-                  description: Type.Optional(Type.String({ maxLength: 500 })),
-                },
-                { additionalProperties: false },
-              ),
-              { maxItems: 8 },
-            ),
-          ),
-          allowFreeform: Type.Optional(Type.Boolean()),
-        },
-        { additionalProperties: false },
+        "Ask the owner from this source conversation. Use decision for options and a recommendation, approval only for an action reserved to the owner by autonomy.fleet (supply its gate), or owner_action with exact steps only the owner can perform. Include waitingOn. Answers never grant credentials or change settings. Returns pending metadata immediately; an authenticated answer wakes this source conversation. To escalate an observed worker question, supply workerQuestion with its exact seatId and requestId; the host copies the native question, and the owner answer returns by question ID without terminal typing. Keep the returned pending or uncertain ask; never duplicate it.",
+      parameters: Type.Unsafe<QuestionDraft>(
+        withoutPatterns(z.toJSONSchema(QuestionDraftSchema, { io: "input" })),
       ),
       execute: async (_id, input) => {
+        const draft = QuestionDraftSchema.parse(input);
+        if (draft.workerQuestion && turn.shell !== true)
+          throw new Error("Worker question escalation requires an admitted machine turn");
         const request = turn.requestQuestion;
-        if (!request) throw new Error("Questions require a current owner workspace conversation");
-        return toolJson(await request(QuestionDraftSchema.parse(input)));
+        if (!request) throw new Error("Questions require a current source conversation");
+        return toolJson(await request(draft));
       },
     }),
     defineTool({
@@ -65,6 +51,7 @@ export function questionTools(turn: TurnContext): ToolDefinition[] {
       },
     }),
   ];
+  return projects ? tools : tools.filter((tool) => tool.name === "request_user_input");
 }
 
 /**

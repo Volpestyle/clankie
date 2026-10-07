@@ -47,7 +47,7 @@ export function laneAuthoredTools(
   return [
     ...((lane === "operator" || turn.shell === true) && reports ? workerReportTools(reports, turn) : []),
     ...runtimeUpdateTools(deps.runtimeUpdater, turn),
-    ...(lane === "operator" ? questionTools(turn) : []),
+    ...questionTools(turn, lane === "operator"),
     ...captainTools(deps, turn, laneLog, lane, gameplay, autonomy, herdrWatches, hireSeat, messageSeat),
     ...(lane === "operator" ? connectionTools(deps, lane) : []),
   ];

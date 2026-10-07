@@ -7,10 +7,15 @@ export function questionConsoleCommand(
 ) {
   let shown: ConversationQuestionResult | undefined;
   return async (argument: string): Promise<string> => {
+    const command = argument.trim();
+    if (command === "list") {
+      if (!client.inputList) throw new Error("Ask listing is unavailable");
+      const { questions } = await client.inputList({ status: "pending" });
+      return questions.length ? questions.map(formatQuestion).join("\n\n") : "No pending asks";
+    }
     const conversationId = conversation();
     if (!conversationId || !client.inputGet || !client.inputAnswer || !client.inputCancel)
-      throw new Error("Select an owner workspace conversation first");
-    const command = argument.trim();
+      throw new Error("Select a source conversation first");
     if (!command) {
       let snapshot = await client.inputGet(conversationId);
       if (!snapshot.question && shown?.conversationId === conversationId && shown.question)
@@ -44,7 +49,12 @@ export function questionConsoleCommand(
         ...target,
         answer: { kind: "text", text: command.slice(5).trim() },
       });
-    } else throw new Error("Usage: /question [answer NUMBER | text TEXT | cancel]");
+    } else if (command.startsWith("worker ")) {
+      result = await client.inputAnswer({
+        ...target,
+        answer: { kind: "worker", answers: JSON.parse(command.slice(7)) },
+      });
+    } else throw new Error("Usage: /question [list | answer NUMBER | text TEXT | worker JSON | cancel]");
     shown = result;
     if (result.status === "revision_conflict") {
       shown = undefined;
@@ -57,14 +67,32 @@ export function questionConsoleCommand(
 
 function formatQuestion(result: ConversationQuestionResult): string {
   const q = result.question;
-  if (!q) return result.reason ?? "No pending preference question";
+  if (!q) return result.reason ?? "No pending ask";
   if (q.status !== "pending")
     return `Question ${q.requestId}: ${q.status}${q.reason ? ` (${q.reason})` : ""}${q.continuation ? `; continuation ${q.continuation.runId}: ${q.continuation.state}` : ""}`;
   return [
-    q.prompt,
+    `${q.purpose}: ${q.prompt}`,
+    `Source: ${q.conversationId}${q.workspace ? ` (${q.workspace})` : ""}`,
+    q.waitingOn ? `Waiting: ${q.waitingOn}` : "",
+    q.recommendation ? `Recommendation: ${q.recommendation}` : "",
+    q.gate ? `Owner gate: ${q.gate}` : "",
+    ...(q.steps ?? []).map((step, i) => `Step ${i + 1}: ${step}`),
+    ...(q.workerQuestion
+      ? [
+          `Worker: ${q.workerQuestion.seatId}; native request ${q.workerQuestion.requestId}`,
+          ...q.workerQuestion.questions.flatMap((question) => [
+            `${question.id}: ${question.question}`,
+            ...(question.options ?? []).map(
+              (option) => `  ${option.label}${option.description ? ` — ${option.description}` : ""}`,
+            ),
+          ]),
+        ]
+      : []),
     ...q.options.map((o, i) => `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ""}`),
     `Request ${q.requestId}`,
-    "Use /question answer NUMBER, /question text TEXT, or /question cancel.",
+    q.workerQuestion
+      ? 'Use /question worker {"QUESTION_ID":{"answers":["ANSWER"]}} or /question cancel.'
+      : "Use /question answer NUMBER, /question text TEXT, or /question cancel.",
     result.reason ?? "",
   ]
     .filter(Boolean)

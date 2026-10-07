@@ -3945,6 +3945,70 @@ the retained claim; that invocation still sends no replacement. Invoke again
 deliberately to send the later report. A timeout, unauthenticated or mismatched
 lookup stays uncertain. See [the worker fleet regression evidence](testing/2026-10-05-worker-fleet-tools/README.md).
 
+### Owner asks: `conversations questions [ID]` and `conversations answer`
+
+Clankie's `request_user_input` is one structured ask tool across native seats
+over MCP, the console, Discord rooms and service conversations. `purpose` is
+`decision` (options plus recommendation), `approval` (an action the owner's
+effective `autonomy.fleet` settings reserve), or `owner_action` (exact steps only
+the owner can take). Legacy `preference` questions remain supported. `kind`
+(`text` or `choice`) describes the answer control. Every new ask states
+`waitingOn`; its host-bound `conversationId` identifies the source. Answers
+never grant credentials, enroll a machine or change settings. Project creation
+still requires its separate reviewed CREATE target.
+
+```sh
+clankie conversations questions
+clankie conversations questions --status pending
+clankie conversations questions CONVERSATION_ID --request REQUEST_UUID
+clankie conversations answer CONVERSATION_ID REQUEST_UUID --incarnation INCARNATION_UUID --revision REVISION --option OPTION_UUID
+clankie conversations answer CONVERSATION_ID REQUEST_UUID --incarnation INCARNATION_UUID --revision REVISION --text 'Owner answer'
+clankie conversations cancel-question CONVERSATION_ID REQUEST_UUID --incarnation INCARNATION_UUID --revision REVISION
+```
+
+The global list defaults to pending asks. `--status submitted|cancelled` reads
+retained resolutions; an optional conversation ID filters the list. Every entry
+has the same immutable request/incarnation and current conversation revision
+used by answer and cancel. Read again after `revision_conflict`; never answer a
+replacement using an older displayed target. Answering the same request with
+the same answer reconciles its original resolution; a conflicting answer is
+refused. Pending or uncertain asks retain their IDs and are never recreated.
+An answer resolves the ask on every surface and wakes its source with the
+owner's attributed answer. A native source uses its existing native channel.
+
+`/question list` shows all pending asks in the TUI. Select the source conversation
+and read `/question`, then use `/question answer NUMBER`, `/question text TEXT`,
+or `/question cancel`. Cards show the source, what waits, recommendation, gate,
+steps and native question IDs. Native multi-question answers use
+`/question worker JSON` or CLI `--worker-stdin`, with a JSON map
+`{"QUESTION_ID":{"answers":["Owner answer"]}}` covering every observed ID.
+
+To escalate a pending worker question, Clankie supplies `workerQuestion` with
+its observed `seatId` and native `requestId` to the same ask tool. The host copies
+the real question and pins the original native session. The owner's answer
+returns through the existing `message_seat` question-answer channel, with the
+original request and question IDs, never terminal typing. Native delivery is
+attempted once; uncertainty is retained and reported to Clankie in the source
+conversation rather than retried. A changed occupant or resolved native question
+cannot receive an answer to its replacement.
+Escalation requires an admitted machine turn; a social room can create its own
+ask but cannot read the owner's private worker questions.
+
+HTTP clients use `POST /operator/v1/dispatch` with `schemaVersion: 1` and
+`op: "input_list"`, optionally `status` and `conversationId`. The result is
+`{questions: [ConversationQuestionResult, ...]}`. `input_get`, `input_answer` and
+`input_cancel` keep their existing immutable target. All four operations require
+an authenticated operator or an active device with `terminalControl`; a captain
+bearer alone cannot read the owner mailbox or answer. Hosted devices use the same
+contract without additional owner setup. The later app mailbox consumes this API;
+informational mail updates and phone/tablet presentation are a separate lane.
+
+Approval routing reads the effective global/project `autonomy.fleet` leaves.
+`lead` or `allow` means Clankie handles it and no owner ask is created; `owner`
+allows the ask. Existing commit, push and release leaves are reused. Missing gate
+categories refuse approval creation until VUH-1782 provides those settings;
+this ask path introduces no gate presets, custom-rule evaluator or credentials.
+
 ### `project create PROJECT --settings FILE.json --revision REVISION`
 
 Requires a service build containing the local project-creation route; a source
@@ -4968,7 +5032,7 @@ captain session, never workers or their children. It is absent when the parent
 or transcript is unavailable, and zero when a readable parent has no running
 children. Child and parent-session changes wake the presence poll independently
 of fleet-seat changes. The oldest
-unanswered owner preference appears as `pendingOwnerItem`, with the conversation
+unanswered owner ask appears as `pendingOwnerItem`, with the conversation
 and question IDs needed to open it. `since` is a source start timestamp, or null
 when that source has no known start. An unreachable service has no mood; clients
 show that connection failure separately. The same read passes through the relay

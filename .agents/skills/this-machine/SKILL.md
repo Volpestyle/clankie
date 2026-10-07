@@ -109,6 +109,21 @@ in [launcher details](reference/launcher.md#updating-the-runtime).
 
 ## One body, several conversations
 
+`request_user_input` is Clankie's one owner ask tool on every source surface,
+including native seats over MCP and Discord. Use a decision with options and
+recommendation, an approval for an action the effective `autonomy.fleet` settings
+reserve, or an owner-only action with exact steps. Include what waits on it.
+An authenticated owner answer wakes the original conversation; it never grants
+credentials or changes room trust. Escalated worker answers keep the original
+native request and question IDs and return without terminal typing. Retain
+pending or uncertain asks rather than repeating them.
+
+`clankie conversations questions` lists pending asks across sources;
+`conversations questions ID --request UUID` reads an exact target. Answer with
+`conversations answer ID UUID --incarnation UUID --revision N --text TEXT`
+or `--option UUID`; native maps use `--worker-stdin`. `/question list` and
+`/question` expose the same state in the console. Full contract: `docs/cli.md`.
+
 `clankie body status` shows the stable conversation holding each of Discord
 mouth, voice/Go Live, browser and play. Inspecting status grants no control.
 Use the current conversation's `body_lease_request` tool to explicitly ask a

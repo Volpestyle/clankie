@@ -1,5 +1,9 @@
 import type { InboundReport } from "../conversations.ts";
-import type { ConversationQuestionAnswer, ConversationQuestionResult } from "@clankie/protocol";
+import type {
+  ConversationQuestion,
+  ConversationQuestionAnswer,
+  ConversationQuestionResult,
+} from "@clankie/protocol";
 import {
   fleetDeliveryStage,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
@@ -315,6 +319,25 @@ export class ConversationStore {
   private readonly corruptQuestions = new Set<string>();
   /** Native seat binding is owned by captain; no native question continuation. */
   public questionEligible: (id: string) => boolean = () => true;
+  public readonly workerAnswerInFlight = new Set<string>();
+  public reconcileWorkerQuestion:
+    | ((question: ConversationQuestion) => Promise<"pending" | "resolved" | "uncertain">)
+    | undefined;
+  public questionGate: ((conversationId: string, gate: string) => Promise<boolean>) | undefined;
+  public prepareWorkerQuestion:
+    | ((
+        seatId: string,
+        requestId: string | number,
+        conversationId: string,
+      ) => Promise<NonNullable<ConversationQuestion["workerQuestion"]>>)
+    | undefined;
+  public deliverWorkerAnswer:
+    | ((
+        question: ConversationQuestion,
+        answer: ConversationQuestionAnswer,
+        authority: QuestionAuthority,
+      ) => Promise<void>)
+    | undefined;
   public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
   public linearFollowing: (() => Promise<boolean>) | undefined;
   public onLinearWakeReceived:
@@ -436,7 +459,7 @@ export class ConversationStore {
             const cancelledQuestions: QuestionRecord[] = [];
             for (const record of meta.questions.records) {
               const q = record.question;
-              if (q.status === "pending") {
+              if (q.status === "pending" && (record.projectCreation || q.purpose === "preference")) {
                 q.status = "cancelled";
                 q.resolvedAt = new Date().toISOString();
                 q.reason = "service_restarted";
@@ -591,6 +614,36 @@ export class ConversationStore {
           schemaVersion: 1,
           result: await this.projectProposalOperation(request, authority),
         };
+      case "input_list": {
+        await authorizeQuestion(authority);
+        for (const meta of this.metas.values()) {
+          if (request.conversationId && request.conversationId !== meta.conversationId) continue;
+          this.validQuestionState(meta);
+          const record = meta.questions?.records.find(
+            (r) => r.question.status === "pending" && r.question.workerQuestion && !r.workerDelivery,
+          );
+          if (
+            record &&
+            !this.workerAnswerInFlight.has(record.question.requestId) &&
+            this.reconcileWorkerQuestion &&
+            (await this.reconcileWorkerQuestion(record.question)) === "resolved"
+          ) {
+            await authorizeQuestion(authority);
+            this.resolveWorkerQuestionElsewhere(meta, record, authority!);
+          }
+        }
+        await authorizeQuestion(authority);
+        const questions = [...this.metas.values()]
+          .filter((meta) => !request.conversationId || meta.conversationId === request.conversationId)
+          .flatMap((meta) => {
+            this.validQuestionState(meta);
+            return (meta.questions?.records ?? [])
+              .filter((record) => record.question.status === (request.status ?? "pending"))
+              .map((record) => this.questionResult(meta, record, "ready"));
+          });
+        questions.sort((a, b) => b.question!.createdAt.localeCompare(a.question!.createdAt));
+        return { op: "input_list", schemaVersion: 1, result: { questions: questions.slice(0, 1000) } };
+      }
       case "input_get":
       case "input_answer":
       case "input_cancel":
@@ -1929,7 +1982,12 @@ export class ConversationStore {
       };
     }
     let questionBinding: ConversationTurnContext["questionBinding"];
-    if (!authority && meta.questions?.records.some((r) => r.question.status === "pending"))
+    if (
+      !authority &&
+      meta.questions?.records.some(
+        (r) => r.question.status === "pending" && (r.projectCreation || r.question.purpose === "preference"),
+      )
+    )
       this.cancelPendingQuestion(meta.conversationId, "owner_context_lost");
     if (
       authority &&
@@ -2861,6 +2919,51 @@ export class ConversationStore {
     return assertQuestionContext(this, meta, record);
   }
 
+  public resolveWorkerQuestionElsewhere(
+    meta: ConversationMeta,
+    record: QuestionRecord,
+    authority: QuestionAuthority,
+  ): void {
+    if (record.question.status !== "pending") return;
+    this.cancelPendingQuestion(meta.conversationId, "worker_question_resolved");
+    this.enqueue(
+      meta,
+      `Native worker question ${record.question.workerQuestion?.requestId} resolved elsewhere or its original occupant changed. The native answer is unknown; this is an observed outcome, not an owner answer.`,
+      undefined,
+      false,
+      this.runner,
+      { origin: "input", delivery: "queue", ownerAuthority: authority },
+    );
+  }
+
+  public async requestSurfaceQuestion(
+    conversationId: string,
+    draft: QuestionDraft,
+    admission: { readonly current: () => boolean; readonly authorize?: () => Promise<boolean> },
+  ): Promise<ConversationQuestionResult> {
+    if (
+      !admission.current() ||
+      (admission.authorize && !(await admission.authorize())) ||
+      !admission.current()
+    )
+      throw new Error("question_turn_unavailable");
+    if (draft.purpose === "preference") throw new Error("surface_ask_requires_purpose");
+    return requestQuestion(
+      this,
+      conversationId,
+      draft,
+      {
+        runId: `ask-${randomUUID()}`,
+        signal: new AbortController().signal,
+        questionCurrent: admission.current,
+        acceptedAt: new Date().toISOString(),
+        draft: () => {},
+      },
+      undefined,
+      true,
+    );
+  }
+
   public async requestQuestion(
     conversationId: string,
     draft: QuestionDraft,
@@ -2952,6 +3055,7 @@ export class ConversationStore {
           (meta) =>
             !meta.isDefault &&
             !this.hasUnreadInboundReports(meta) &&
+            !meta.questions?.records.some((record) => record.question.status === "pending") &&
             meta.sessionState !== "active" &&
             !this.liveRoomHandoffs.has(meta.conversationId) &&
             !this.seatSends.has(meta.conversationId) &&

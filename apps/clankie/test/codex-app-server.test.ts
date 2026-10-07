@@ -759,6 +759,11 @@ it.each(["request-9", 9])(
     );
     await vi.waitFor(() => expect(events).toHaveLength(1));
     expect(events[0]).toMatchObject({ requestId, params: nativeQuestion });
+    expect(client.pendingQuestion("one", requestId)).toMatchObject({
+      requestId,
+      questions: nativeQuestion.questions,
+    });
+    expect(client.pendingQuestion("foreign-thread", requestId)).toBeUndefined();
     const response = next();
     const answering = client.answerQuestion("one", {
       requestId,
@@ -773,6 +778,7 @@ it.each(["request-9", 9])(
     ).resolves.toMatchObject({ outcome: "refused" });
     peer.send(JSON.stringify({ method: "serverRequest/resolved", params: { threadId: "one", requestId } }));
     await expect(answering).resolves.toEqual({ outcome: "resolved" });
+    expect(client.pendingQuestion("one", requestId)).toBeUndefined();
     await expect(
       client.answerQuestion("one", { requestId, answers: { docs: { answers: ["Other"] } } }),
     ).resolves.toMatchObject({ outcome: "refused" });

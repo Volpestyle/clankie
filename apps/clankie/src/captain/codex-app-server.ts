@@ -413,6 +413,7 @@ export interface CodexAppServerSeat {
   expectTools?(names: readonly string[]): void;
   /** Observe this original thread after its bridge binding is in place. */
   checkTools?(): Promise<void>;
+  pendingQuestion?(requestId: string | number): SeatQuestion | undefined;
   answerQuestion?(
     answer: SeatQuestionAnswer,
     beforeDispatch?: () => Promise<void>,
@@ -1171,6 +1172,7 @@ export async function startCodexAppServerSeat(options: {
     };
     return {
       checkTools,
+      pendingQuestion: (requestId) => client!.pendingQuestion(threadId!, requestId),
       async answerQuestion(answer, guard) {
         const parsed = SeatQuestionAnswerSchema.safeParse(answer);
         if (!parsed.success) return { outcome: "refused", detail: "native_question_answer_invalid" };

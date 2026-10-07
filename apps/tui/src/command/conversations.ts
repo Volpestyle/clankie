@@ -18,6 +18,7 @@ import {
   UpsertOperatorChannelSchema,
   ConversationQuestionTargetSchema,
   ConversationQuestionAnswerSchema,
+  OperatorConversationServiceRequestSchema,
   OperatorAutonomyCommandSchema,
   operatorAutonomyCommandRequiresOwner,
   type OperatorConversationServiceClient,
@@ -33,6 +34,9 @@ const USAGE = [
   "       clankie conversations confirm-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
   "       clankie conversations accept-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
   "       clankie conversations tweak-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA --field FIELD --value-stdin",
+  "       clankie conversations questions [ID] [--request UUID] [--status pending|submitted|cancelled]",
+  "       clankie conversations answer ID REQUEST_UUID --incarnation UUID --revision N (--option UUID | --text TEXT | --stdin | --worker-stdin)",
+  "       clankie conversations cancel-question ID REQUEST_UUID --incarnation UUID --revision N",
   "       clankie conversations channels | rooms",
   "       clankie conversations head OWNER HEAD|none",
   "       clankie conversations channel [CHANNEL_ID] [--title TITLE] [--member PERSONA_ID]...",
@@ -344,17 +348,19 @@ async function runQuestionAction(
       option: { type: "string" },
       text: { type: "string" },
       stdin: { type: "boolean" },
+      "worker-stdin": { type: "boolean" },
+      status: { type: "string" },
     },
   });
   const [action, conversationId, requestId] = positionals;
-  if (!conversationId || positionals.length > 3)
+  if ((!conversationId && action !== "questions") || positionals.length > 3)
     throw new Error("Question action requires an exact conversation ID");
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
     env,
     ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
   });
-  if (!credential) throw new Error("Owner operator credential required for preference questions");
+  if (!credential) throw new Error("Owner operator credential required for asks");
   const client = createCaptainOperatorConversationClient(
     createCaptainRouteClient({
       host: commandHost({ ...options, env }),
@@ -362,8 +368,29 @@ async function runQuestionAction(
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     }),
   );
+  if (action === "questions" && (!conversationId || values.status !== undefined)) {
+    if (requestId || Object.keys(values).some((k) => k !== "status"))
+      throw new Error("Usage: conversations questions [ID] [--status pending|submitted|cancelled]");
+    const request = OperatorConversationServiceRequestSchema.parse({
+      op: "input_list",
+      schemaVersion: 1,
+      ...(conversationId === undefined ? {} : { conversationId }),
+      ...(values.status === undefined ? {} : { status: values.status }),
+    });
+    if (request.op !== "input_list") throw new Error("Unexpected question list request");
+    outputJson(
+      options.stdout ?? process.stdout,
+      await client.inputList!({
+        ...(request.conversationId === undefined ? {} : { conversationId: request.conversationId }),
+        ...(request.status === undefined ? {} : { status: request.status }),
+      }),
+    );
+    return 0;
+  }
+  if (!conversationId) throw new Error("Question action requires an exact conversation ID");
+  if (values.status !== undefined) throw new Error("--status requires questions");
   if (["project-proposal", "confirm-project", "accept-project", "tweak-project"].includes(action ?? "")) {
-    if (positionals.length !== 2 || values.option || values.text || values.stdin)
+    if (positionals.length !== 2 || values.option || values.text || values.stdin || values["worker-stdin"])
       throw new Error("Project confirmation accepts an exact proposal target only");
     const locator = ProjectProposalLocatorSchema.parse({
       conversationId,
@@ -431,20 +458,32 @@ async function runQuestionAction(
       expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
     });
     if (action === "cancel-question") {
-      if (values.option !== undefined || values.text !== undefined || values.stdin || values.request)
+      if (
+        values.option !== undefined ||
+        values.text !== undefined ||
+        values.stdin ||
+        values["worker-stdin"] ||
+        values.request
+      )
         throw new Error("Cancel takes a request, incarnation and revision only");
       result = await client.inputCancel!(target);
     } else {
       if (
-        [values.option !== undefined, values.text !== undefined, values.stdin === true].filter(Boolean)
-          .length !== 1 ||
+        [
+          values.option !== undefined,
+          values.text !== undefined,
+          values.stdin === true,
+          values["worker-stdin"] === true,
+        ].filter(Boolean).length !== 1 ||
         values.request
       )
-        throw new Error("Answer needs exactly one of --option UUID, --text TEXT, or --stdin");
+        throw new Error("Answer needs exactly one of --option UUID, --text TEXT, --stdin, or --worker-stdin");
       const answer = ConversationQuestionAnswerSchema.parse(
-        values.option !== undefined
-          ? { kind: "choice", optionId: values.option }
-          : { kind: "text", text: values.stdin ? await readStdin(options, "answer text") : values.text },
+        values["worker-stdin"]
+          ? { kind: "worker", answers: JSON.parse(await readStdin(options, "worker answer map JSON")) }
+          : values.option !== undefined
+            ? { kind: "choice", optionId: values.option }
+            : { kind: "text", text: values.stdin ? await readStdin(options, "answer text") : values.text },
       );
       result = await client.inputAnswer!({ ...target, answer });
     }

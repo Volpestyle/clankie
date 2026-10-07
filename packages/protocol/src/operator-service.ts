@@ -84,6 +84,7 @@ import {
   BeginOperatorAttachmentUploadSchema,
   OperatorAttachmentChunkSchema,
   OperatorAttachmentUploadIdSchema,
+  ConversationQuestionListSchema,
   ConversationQuestionResultSchema,
   OperatorConversationSchema,
   OPERATOR_CONVERSATION_LIST_MAX,
@@ -109,6 +110,7 @@ import {
   type OperatorConversationStreamEvent,
   type OperatorConversationRecovery,
   type OperatorConversationLiveDraft,
+  type ConversationQuestionList,
   type ConversationQuestionResult,
   type ConversationQuestionTarget,
   type ConversationQuestionAnswer,
@@ -186,6 +188,14 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
       requestId: z.string().uuid().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("input_list"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema.optional(),
+      status: z.enum(["pending", "submitted", "cancelled"]).optional(),
     })
     .strict(),
   ConversationQuestionTargetSchema.extend({
@@ -659,6 +669,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("input_list"),
+      schemaVersion: z.literal(1),
+      result: ConversationQuestionListSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("input_answer"),
       schemaVersion: z.literal(1),
       result: ConversationQuestionResultSchema,
@@ -1094,6 +1111,10 @@ export interface OperatorConversationServiceClient {
   projectProposalGet?(target: ProjectProposalLocator): Promise<ProjectProposalResult>;
   projectProposalConfirm?(target: ProjectProposalTarget): Promise<ProjectProposalResult>;
   projectProposalTweak?(target: ProjectProposalTweak): Promise<ProjectProposalResult>;
+  inputList?(filter?: {
+    conversationId?: string;
+    status?: "pending" | "submitted" | "cancelled";
+  }): Promise<ConversationQuestionList>;
   inputGet?(conversationId: string, requestId?: string): Promise<ConversationQuestionResult>;
   inputAnswer?(
     target: ConversationQuestionTarget & { answer: ConversationQuestionAnswer },
@@ -1286,6 +1307,11 @@ export function createOperatorConversationServiceClient(
     async projectProposalConfirm(target) {
       const result = await dispatch({ op: "project_proposal_confirm", schemaVersion: 1, ...target });
       if (result.op !== "project_proposal_confirm") throw new Error("Unexpected proposal response");
+      return result.result;
+    },
+    async inputList(filter = {}) {
+      const result = await dispatch({ op: "input_list", schemaVersion: 1, ...filter });
+      if (result.op !== "input_list") throw new Error("Unexpected question list response");
       return result.result;
     },
     async inputGet(conversationId, requestId) {

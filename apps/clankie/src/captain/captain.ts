@@ -1592,11 +1592,96 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   conversations.onRoomHandoffChange = () => fleetChanges.touch();
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore, () => options.fleetResources?.status());
+  // Legacy workspace preferences/project proposals retain their native-seat fence.
+  // Semantic surface asks use their independently admitted source binding.
   conversations.questionEligible = (id) =>
     !conversations.hasNativeSeat(id) &&
     !conversations.nativeSource(id) &&
     !seatOutboxes.get(id)?.bound() &&
     !seatOutboxes.get(id)?.uncertain();
+  conversations.questionGate = async (conversationId, gate) => {
+    const current = await settings();
+    const conversation = conversations.conversation(conversationId);
+    if (!conversation) return false;
+    let projectId: string | undefined;
+    const native = conversations.nativeSource(conversationId);
+    if (native) {
+      const fleet = splitFleetQualified(native.terminalId)?.fleet ?? "default";
+      const proof = await options.projectHireIdentity?.(fleet, native.paneId);
+      projectId = await nativeHireProject(
+        current.projects,
+        native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
+        proof,
+        (observed) => herdrWatches.projectHireAssignment(fleet, native.paneId, observed),
+        options.projectHireWorkspace,
+      );
+    } else if (conversation.scope.kind === "workspace") {
+      projectId = (
+        await resolveFleetSettingsContext(
+          current,
+          {
+            workingDirectory: conversation.scope.workspaceId,
+            machine: "local",
+          },
+          {},
+        )
+      ).projectId;
+    }
+    const project = current.projects.projects.find((entry) => entry.id === projectId);
+    const policy = effectiveFleetAutonomy(current.autonomy, project?.autonomy);
+    // Settings own the categories; unknown future gates stay unavailable until they land.
+    const selected = (policy as unknown as Record<string, unknown>)[gate];
+    return (
+      selected === "owner" ||
+      (selected !== null && typeof selected === "object" && "mode" in selected && selected.mode === "owner")
+    );
+  };
+  conversations.prepareWorkerQuestion = async (seatId, requestId) => {
+    const observed = await herdrWatches.observedSeatQuestion(seatId, requestId);
+    if (observed.question.questions.some((question) => question.isSecret))
+      throw new Error("worker_secret_question_requires_native_owner_input");
+    return {
+      seatId,
+      requestId: observed.question.requestId,
+      sessionId: observed.sessionId,
+      questions: observed.question.questions.map((question) => ({
+        ...question,
+        ...(question.options === null ? { options: undefined } : { options: [...question.options] }),
+      })),
+    };
+  };
+  conversations.reconcileWorkerQuestion = async (question) => {
+    const worker = question.workerQuestion;
+    const status = worker
+      ? await herdrWatches.workerQuestionStatus(worker.seatId, worker.requestId, worker.sessionId)
+      : "unknown";
+    return status === "unknown" ? "uncertain" : status;
+  };
+  conversations.deliverWorkerAnswer = async (question, answer, authority) => {
+    const worker = question.workerQuestion;
+    if (!worker || answer.kind !== "worker") throw new Error("worker_answer_invalid");
+    const delivery = await herdrWatches.answerSeatQuestion(
+      worker.seatId,
+      { requestId: worker.requestId, answers: answer.answers },
+      {
+        owner: { conversationId: question.conversationId },
+        current: () =>
+          authority.current() &&
+          !shutdown.signal.aborted &&
+          conversations.conversation(question.conversationId) !== undefined,
+        authorize: async () =>
+          authority.current() &&
+          (await authority.authorize()) &&
+          !shutdown.signal.aborted &&
+          conversations.conversation(question.conversationId) !== undefined,
+      },
+      worker.sessionId,
+    );
+    if (delivery.outcome !== "delivered")
+      throw new Error(
+        `worker_answer_${delivery.outcome}: ${delivery.detail ?? "No confirmed native answer"}`,
+      );
+  };
 
   /**
    * Owner uploads and their way into a seat (ADR 0209). A seat receives files
@@ -2185,6 +2270,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         capture.room = roomKey("operator", targetId);
         capture.targetId = targetId;
       }
+    }
+    if (lane === "operator" && capture.targetId !== undefined) {
+      const sourceConversationId = seatContext(conversationId)!.conversationId;
+      capture.requestQuestion = (draft) =>
+        conversations.requestSurfaceQuestion(sourceConversationId, draft, {
+          current: () =>
+            !shutdown.signal.aborted && conversations.conversation(sourceConversationId) !== undefined,
+        });
     }
     const currentSettings = await settings();
     const bank = await buildLaneToolBank(
@@ -3775,6 +3868,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     current: nativeIdentity.current,
                     authorize: () => nativeIdentity.authorize("discord_mouth", "effect"),
                   };
+                  nativeCapture.requestQuestion = (draft) =>
+                    conversations.requestSurfaceQuestion(child.conversationId, draft, {
+                      current: nativeIdentity.current,
+                      authorize: () => nativeIdentity.authorize("discord_mouth", "effect"),
+                    });
                   nativeCapture.room = roomKey(normalized.lane, normalized.targetId);
                   nativeCapture.targetId = normalized.targetId;
                   nativeCapture.actorId = normalized.actorId;

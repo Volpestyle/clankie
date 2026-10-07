@@ -501,6 +501,10 @@ export function createCodexSeatAdapter(
               const pending = questions.keys().next();
               return pending.done ? undefined : `Waiting on a question (${String(pending.value)})`;
             },
+            async pendingQuestion(requestId) {
+              if (closed || state === "offline") return undefined;
+              return seat?.pendingQuestion?.(requestId);
+            },
             async answerQuestion(answer, guard) {
               if (closed || state === "offline")
                 return { outcome: "offline", detail: "Codex app-server is offline" };

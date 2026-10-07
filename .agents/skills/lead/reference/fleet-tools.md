@@ -105,7 +105,18 @@ and question IDs. Answer with `message_seat`'s `questionAnswer`, omitting
 `message`, preserving the observed IDs and types (async request IDs are the
 function `call_id`; question IDs are the supplied JSON-encoded IDs). Sync
 answers need the winning tool output; async receipts prove only acceptance of
-that user message. Approvals stay owner decisions.
+that user message.
+
+If the effective owner's `autonomy.fleet` gate reserves the decision, escalate
+the observed question with Clankie's same `request_user_input` tool: supply
+`workerQuestion: {seatId, requestId}`, a prompt, recommendation and `waitingOn`.
+The host copies the real question and binds its native session and question IDs.
+The owner's answer returns to the worker through that native channel and wakes
+your source conversation with the outcome. Never retype or resend it yourself.
+For your own asks use `purpose: decision` with options and recommendation,
+`approval` with the owner-reserved gate, or `owner_action` with exact steps.
+Delegated gates do not raise an owner ask; settings never grant credentials.
+Keep a pending or uncertain ask and reconcile its original ID.
 
 An uncertain hire, message or answer may already have taken effect. Reconcile
 its original receipt and bound session. Never re-hire, switch bridges, resend

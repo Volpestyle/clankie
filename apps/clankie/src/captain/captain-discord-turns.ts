@@ -610,6 +610,11 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       current: bodyIdentity.current,
       authorize: () => bodyIdentity.authorize("discord_mouth", "effect"),
     };
+    lane.capture.requestQuestion = (draft) =>
+      ctx.conversations.requestSurfaceQuestion(executionConversationId, draft, {
+        current: bodyIdentity.current,
+        authorize: () => bodyIdentity.authorize("discord_mouth", "effect"),
+      });
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     lane.capture.targetId = normalized.targetId;
     lane.capture.actorId = normalized.actorId;
