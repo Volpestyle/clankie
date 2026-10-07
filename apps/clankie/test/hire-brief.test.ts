@@ -51,7 +51,7 @@ async function call(bank: LaneToolBank, name: string, args: Record<string, unkno
 }
 
 test.each(["pi", "claude", "codex"])(
-  "the captain refuses a %s brief without a harness adapter while Swarm is absent",
+  "the captain refuses a %s brief without a harness adapter",
   async (harness) => {
     const { root, captain } = await fixture();
     const send = vi.spyOn(HerdrWatchStore.prototype, "deliverToSeat");

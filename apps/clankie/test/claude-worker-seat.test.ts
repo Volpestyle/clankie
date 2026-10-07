@@ -99,7 +99,7 @@ it("a worker launch enables its plugin for this session only and asks for the ap
     }),
   ).toEqual([
     "--settings",
-    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_swarm"]}}',
+    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"]}}',
     "--channels",
     "plugin:clankie-worker@clankie",
     "--model",
@@ -115,7 +115,7 @@ it("a worker launch enables its plugin for this session only and asks for the ap
       "mcp__linear-server",
     ])[1],
   ).toBe(
-    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_swarm"],"deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
+    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"],"deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
   );
   expect(channelBody(channel("line one\nline two"))).toBe("line one\nline two");
   expect(channelBody("plain prompt")).toBeUndefined();

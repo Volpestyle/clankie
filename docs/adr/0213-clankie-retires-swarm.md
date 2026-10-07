@@ -83,8 +83,9 @@ saved task-bound grants confer no access. Saved personas and conversations
 remain offline, and coordinator state under `~/.clankie/swarm` remains on disk.
 
 James cancelled VUH-1517 on 2026-10-03, disposing of the retained Mac dispatch
-work. The worker plugin keeps its MCP server key `swarm` for compatibility with
-hire permissions and installed PC configuration; only its native hire/link
+work. The worker plugin kept its MCP server key `swarm` for compatibility with
+hire permissions and installed PC configuration until 2026-10-03, when it became
+`clankie` (hire permissions followed in VUH-1784); only its native hire/link
 channel remains. James's independent Swarm fleet and installs are unaffected.
 
 ## Consequences

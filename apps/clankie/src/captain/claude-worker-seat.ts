@@ -105,7 +105,7 @@ const CLAUDE_MANAGED_SETTINGS =
  * tools the owner granted that fleet (Claude names a plugin's MCP server
  * `mcp__plugin_<plugin>_<server>`).
  */
-const WORKER_SERVER_RULE = `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_swarm`;
+const WORKER_SERVER_RULE = `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`;
 
 function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
   return JSON.stringify({
