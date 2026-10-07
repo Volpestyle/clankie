@@ -1,0 +1,64 @@
+Finished in 94ms on 6 files using 18 threads.
+Native fleet proof ready: <owned worktree>/.local/fleet-proof/native-process-proof
+
+ RUN  v4.1.10 <owned worktree>
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  18:42:29
+   Duration  2.32s (transform 176ms, setup 15ms, import 299ms, tests 1.93s, environment 0ms)
+
+
+ RUN  v4.1.10 <owned worktree>
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 2 skipped (3)
+   Start at  18:42:32
+   Duration  813ms (transform 156ms, setup 16ms, import 243ms, tests 491ms, environment 0ms)
+
+$ tsc --noEmit -p tsconfig.json
+Checked 472 markdown files; local links resolve.
+
+Wrapper exit: 0 (read via session completion)
+
+Vocabulary/collector/HTTP and final docs checks:
+clankie heavy: waiting for machine capacity (load; 2/2 held, 2 queued)
+Finished in 99ms on 8 files using 18 threads.
+
+ RUN  v4.1.10 <owned worktree>
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  19:31:09
+   Duration  2.48s (transform 1.21s, setup 15ms, import 2.21s, tests 183ms, environment 0ms)
+
+Checked 472 markdown files; local links resolve.
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 86ms on 8 files using 18 threads.
+
+Wrapper exit: 0 (read via session completion)
+
+After clean rebase onto origin/main 2f7f3a8a:
+$ tsc --noEmit -p tsconfig.json
+
+ RUN  v4.1.10 <owned worktree>
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  19:44:44
+   Duration  2.02s (transform 1.08s, setup 14ms, import 1.77s, tests 174ms, environment 0ms)
+
+Checked 472 markdown files; local links resolve.
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 86ms on 8 files using 18 threads.
+
+Wrapper exit: 0 (read via session completion)
+Native helper, collector, local process reader, build script and existing TCP fixture dependencies are unchanged by the rebase; native results above are reused.
