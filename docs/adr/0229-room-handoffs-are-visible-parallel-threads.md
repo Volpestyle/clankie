@@ -106,3 +106,19 @@ bounded concurrency, exact native ancestry and scoped MCP calls. It separates
 completed computation from confirmed room delivery. The real multi-person voice
 call and native operator session checks belong to James; exact steps and tested
 limits live in the [VUH-1672 evidence record](../testing/2026-10-05-room-handoffs/README.md).
+
+## Amendment: a sender's burst steers their own handoff (2026-10-06)
+
+Giving every text message its own handoff dropped ADR 0118's burst coalescing:
+three messages in seven seconds got three replies, out of order, each asking
+about what the others had already said. A text message now steers the running
+Pi handoff of the same authenticated actor in the same room when its resolved
+grant (plan, owner and machine-grant standing, verified-owner proof and
+transport) matches exactly. It returns `absorbed` with the owning delivery's
+`replyDeliveryId` and keeps a completed child record naming the handoff it
+joined. Another speaker, the same speaker under a different grant, a native
+child, or a run that has already ended starts its own handoff as before; a
+steer the run never read falls back to a new handoff. Steering therefore never
+crosses speakers or raises a one-shot social turn's grant. Siblings still in
+flight are marked in each handoff's quoted room context. The answer stays his:
+the steered run may still reply, react or stay silent.

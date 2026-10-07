@@ -7,7 +7,10 @@ run tools there (ADRs [0124](adr/0124-one-self-has-many-local-threads.md),
 [0186](adr/0186-a-discord-room-harvests-its-own-workers.md)).
 
 Each voice `ask_clankie` handoff and admitted text request has its own thread
-under Clankie in the dock and app. The card shows who asked, the request, current
+under Clankie in the dock and app. A text follow-up from the same person under
+the same grant while their request is still running steers that request instead
+(reported `absorbed`), so a burst gets one answer; other people keep their own
+threads. The card shows who asked, the request, current
 work and result; selecting it opens that request's transcript. Up to four
 handoffs run globally, at most two per room. A 32-job waiting bound returns a
 clear busy result when full. Finished jobs collapse so active work and seats

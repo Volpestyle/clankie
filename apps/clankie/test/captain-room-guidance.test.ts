@@ -112,7 +112,8 @@ it("parallel room children consume guidance once and keep separate tool captures
       personaImages: async () => ({ images: [], hash: "fake", files: [] }),
     },
   );
-  const request = (id: string): DiscordPresenceChannelTurnRequest => ({
+  // Different speakers: one sender's follow-up would steer their running child instead.
+  const request = (id: string, actorId = "11111"): DiscordPresenceChannelTurnRequest => ({
     schemaVersion: 1,
     deliveryId: id,
     identity: {
@@ -128,7 +129,7 @@ it("parallel room children consume guidance once and keep separate tool captures
       id,
       guildId: "12345",
       channelId: "67890",
-      actorId: "11111",
+      actorId,
       body: id,
       attachments: [],
     },
@@ -137,7 +138,7 @@ it("parallel room children consume guidance once and keep separate tool captures
   try {
     const first = captain.submitDiscordTurn(request("first"));
     await entered;
-    const second = captain.submitDiscordTurn(request("second"));
+    const second = captain.submitDiscordTurn(request("second", "22222"));
     // Both independent children reach their heard log while guidance authorization is pending.
     await heard;
     releaseGuard();

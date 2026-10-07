@@ -1,8 +1,9 @@
 import { CAPTAIN_SILENT_REPLY_SENTINEL, type DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { FinishedRender } from "../media-generation.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
 import type { planDiscordTurnSession } from "./system-authority.ts";
-import { roomKey } from "./tools.ts";
+import { roomKey, type TurnContext } from "./tools.ts";
 
 /**
  * Whether the words streaming out of a turn are a reply he is going to send.
@@ -26,6 +27,15 @@ export interface NormalizedDiscordTurn {
   readonly handoffConversationId?: string;
   /** Host-only proof, retained solely for this delivery; never persisted as authority. */
   readonly readAuthoritySettings?: () => Promise<Parameters<typeof planDiscordTurnSession>[0]["settings"]>;
+  /**
+   * A room handoff's one-shot Pi run, offered to the same sender's follow-ups
+   * under the same grant so a burst steers it rather than starting siblings.
+   */
+  readonly liveRun?: {
+    readonly started: (session: AgentSession, capture: TurnContext) => void;
+    /** `unconsumed` are steering messages the run ended without reading. */
+    readonly settled: (completed: boolean, unconsumed: readonly string[]) => void;
+  };
   readonly lane: "discord_voice" | "discord_presence";
   readonly targetId: string;
   readonly prompt: string;

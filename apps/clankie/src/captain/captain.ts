@@ -102,6 +102,7 @@ import {
   cloneSideConversationSession,
   seatEventKindFor,
   SIDE_CONVERSATION_INSTRUCTIONS,
+  toImageContent,
 } from "./captain-session.ts";
 import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
 import { createWorkerReports } from "./captain-worker-reports.ts";
@@ -197,6 +198,7 @@ import {
 } from "./remote-codex-app-server.ts";
 import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
+import { RoomHandoffBursts } from "./room-handoff-bursts.ts";
 import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
 import { RoomConversations } from "./room-conversations.ts";
@@ -923,6 +925,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // bridge polls. The head conversation is always the default global one.
   const shutdown = new AbortController();
   const roomHandoffs = new RoomHandoffCoordinator<CaptainChannelTurnResult>(shutdown.signal);
+  const roomBursts = new RoomHandoffBursts();
+  const roomBurstJoins = new Map<string, Promise<CaptainChannelTurnResult | undefined>>();
   const seatOutboxes = new Map<string, SeatOutbox>();
   function seatOutbox(conversationId: string): SeatOutbox {
     shutdown.signal.throwIfAborted();
@@ -3463,7 +3467,142 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       });
       void admission.catch(() => undefined);
+      // The grant this delivery runs under now: never wider than at admission.
+      const resolveGrant = async () => {
+        const { settings: discord } = resolveDiscordSettings(
+          (await settings()).discord,
+          options.discordEnvironment,
+        );
+        const admitted = await admission;
+        const currentPlan = planDiscordTurnSession({
+          baseSessionKey: discordTurnSessionKey(request),
+          durable: true,
+          actorId: request.trigger.actorId,
+          ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
+          channelId: request.trigger.channelId,
+          transportKind: request.identity.transportKind,
+          settings:
+            authority?.verifiedOwner === true
+              ? {
+                  ...discord,
+                  systemActorUserIds: [...discord.systemActorUserIds, request.trigger.actorId],
+                }
+              : discord,
+        });
+        const plan =
+          admitted.plan.systemTools && currentPlan.systemTools
+            ? currentPlan
+            : {
+                kind: "social" as const,
+                durable: false,
+                systemTools: false as const,
+                sessionKey: admitted.plan.sessionKey,
+              };
+        const owner =
+          admitted.owner &&
+          (authority?.verifiedOwner === true || discord.ownerUserId === request.trigger.actorId);
+        const sender = owner
+          ? ("owner" as const)
+          : plan.systemTools &&
+              admitted.grantedActor &&
+              discord.systemActorUserIds.includes(request.trigger.actorId)
+            ? ("granted" as const)
+            : undefined;
+        const key = JSON.stringify([plan.kind, plan.sessionKey, plan.systemTools, owner, sender ?? null]);
+        return { discord, plan, owner, sender, key };
+      };
+      // ADR 0118 inside ADR 0229: the same sender's follow-up under the same
+      // grant steers their running handoff instead of starting a sibling.
+      const burstIdentity = JSON.stringify([
+        authority?.verifiedOwner === true,
+        request.identity.transportKind,
+      ]);
+      // A retry joins the same attempt; a recorded delivery replays through the coordinator.
+      const joinKey = `${parentId}\n${request.deliveryId}`;
+      let joining = roomBurstJoins.get(joinKey);
+      const liveHandoff =
+        lane === "discord_presence" && prior === undefined && joining === undefined
+          ? roomBursts.latest(parentId, request.trigger.actorId, burstIdentity)
+          : undefined;
+      if (joining !== undefined || liveHandoff !== undefined) {
+        if (joining === undefined && liveHandoff !== undefined) {
+          joining = (async (): Promise<CaptainChannelTurnResult | undefined> => {
+            const grant = await resolveGrant();
+            const run = await roomBursts.join(liveHandoff, grant.key);
+            if (run === undefined || authority?.sourceCurrent?.() === false) return undefined;
+            const heard = await normalizeDiscordTurn(request, deps, {
+              ...(grant.sender === undefined ? {} : { sender: grant.sender }),
+              carriesHistory: true,
+            });
+            if (!run.session.isStreaming || authority?.sourceCurrent?.() === false) return undefined;
+            const child = conversations.beginRoomHandoff(
+              {
+                roomConversationId: parentId,
+                deliveryId: request.deliveryId,
+                actorId: request.trigger.actorId,
+                source: "text",
+                request: (request.trigger.body?.trim() || "(sent attachments)").slice(0, 16_384),
+                state: "pending",
+                host: "pi",
+              },
+              fingerprint,
+              true,
+            );
+            if (child.roomHandoff?.state !== "pending") return undefined;
+            // Tools now act on the newest message, as an absorbed 0118 turn did.
+            run.capture.messageId = heard.messageId;
+            run.capture.requestText = heard.heard;
+            // steer() only queues; unlike prompt() it never starts a run of its own.
+            await run.session.steer(heard.prompt, heard.images.map(toImageContent));
+            conversations.updateRoomHandoff(child.conversationId, {
+              state: "running",
+              doing: `Joined the sender's running request ${liveHandoff.childId}`,
+            });
+            const outcome = await liveHandoff.settled;
+            if (
+              outcome.unconsumed.includes(heard.prompt) ||
+              run.session.getSteeringMessages().includes(heard.prompt)
+            ) {
+              // The run ended before reading it: this message starts its own handoff.
+              conversations.updateRoomHandoff(child.conversationId, { state: "pending", doing: undefined });
+              return undefined;
+            }
+            const result: CaptainChannelTurnResult = outcome.completed
+              ? {
+                  state: "absorbed",
+                  captainSessionId: liveHandoff.sessionKey ?? grant.plan.sessionKey,
+                  turnId: child.conversationId,
+                  replyDeliveryId: liveHandoff.deliveryId,
+                }
+              : { state: "failed", code: "captain_session_failed", turnId: child.conversationId };
+            conversations.updateRoomHandoff(
+              child.conversationId,
+              {
+                state: outcome.completed ? "completed" : "failed",
+                doing: undefined,
+                result: outcome.completed
+                  ? `Answered with the running request ${liveHandoff.childId}.`
+                  : "The request it joined failed.",
+              },
+              result,
+            );
+            return result;
+          })().catch((error: unknown) => {
+            // Joining is an optimization: any failure here leaves the message its own handoff.
+            console.error("Room handoff burst join failed", error);
+            return undefined;
+          });
+          const settledJoin = joining;
+          roomBurstJoins.set(joinKey, settledJoin);
+          void settledJoin.finally(() => {
+            if (roomBurstJoins.get(joinKey) === settledJoin) roomBurstJoins.delete(joinKey);
+          });
+        }
+        const joined = await joining;
+        if (joined !== undefined) return joined;
+      }
       let admittedChild: OperatorConversation | undefined;
+      let burst: ReturnType<RoomHandoffBursts["open"]> | undefined;
       return roomHandoffs
         .submit(
           parentId,
@@ -3483,56 +3622,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               fingerprint,
               true,
             );
+            if (lane === "discord_presence")
+              burst = roomBursts.open(parentId, {
+                actorId: request.trigger.actorId,
+                identity: burstIdentity,
+                deliveryId: request.deliveryId,
+                childId: admittedChild.conversationId,
+              });
           },
           async () => {
             const child = admittedChild!;
-            if (child.roomHandoff?.state !== "pending")
+            if (child.roomHandoff?.state !== "pending") {
+              burst?.close();
               return {
                 state: "failed",
                 code: "room_handoff_already_recorded",
                 turnId: child.conversationId,
               };
+            }
             try {
               const result = await (async (): Promise<CaptainChannelTurnResult> => {
-                const { settings: discord } = resolveDiscordSettings(
-                  (await settings()).discord,
-                  options.discordEnvironment,
-                );
-                const admitted = await admission;
-                const currentPlan = planDiscordTurnSession({
-                  baseSessionKey: discordTurnSessionKey(request),
-                  durable: true,
-                  actorId: request.trigger.actorId,
-                  ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
-                  channelId: request.trigger.channelId,
-                  transportKind: request.identity.transportKind,
-                  settings:
-                    authority?.verifiedOwner === true
-                      ? {
-                          ...discord,
-                          systemActorUserIds: [...discord.systemActorUserIds, request.trigger.actorId],
-                        }
-                      : discord,
-                });
-                const plan =
-                  admitted.plan.systemTools && currentPlan.systemTools
-                    ? currentPlan
-                    : {
-                        kind: "social" as const,
-                        durable: false,
-                        systemTools: false as const,
-                        sessionKey: admitted.plan.sessionKey,
-                      };
-                const owner =
-                  admitted.owner &&
-                  (authority?.verifiedOwner === true || discord.ownerUserId === request.trigger.actorId);
-                const sender = owner
-                  ? ("owner" as const)
-                  : plan.systemTools &&
-                      admitted.grantedActor &&
-                      discord.systemActorUserIds.includes(request.trigger.actorId)
-                    ? ("granted" as const)
-                    : undefined;
+                const { discord, plan, owner, sender, key } = await resolveGrant();
+                if (burst !== undefined) {
+                  burst.handoff.grant = key;
+                  burst.handoff.sessionKey = `${plan.sessionKey}:handoff:${child.conversationId}`;
+                }
                 const heard = await normalizeDiscordTurn(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
                   carriesHistory: false,
@@ -3544,6 +3658,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   durable: false,
                   handoffConversationId: child.conversationId,
                   readAuthoritySettings,
+                  ...(burst === undefined ? {} : { liveRun: burst.liveRun }),
                 };
                 if (request.room !== undefined) {
                   const room = request.room;
@@ -3666,12 +3781,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     },
                     onTranscript: (transcript) =>
                       conversations.syncRoomTranscript(child.conversationId, transcript),
-                    onStarted: (started) =>
+                    onStarted: (started) => {
+                      // A native child has no Pi run to steer; follow-ups start their own.
+                      burst?.close();
                       conversations.updateRoomHandoff(child.conversationId, {
                         host: started.harness,
                         nativeChildSessionId: started.nativeChildSessionId,
                         doing: "Working in the native child",
-                      }),
+                      });
+                    },
                   });
                   if (native !== undefined) {
                     await nativeGuard();
@@ -3737,6 +3855,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   await guard();
                   return outcome;
                 } finally {
+                  burst?.close();
                   finish?.();
                 }
               })();
@@ -3784,6 +3903,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
         )
         .catch((error: unknown) => {
+          burst?.close();
           if (error instanceof Error && error.message === "room_handoff_queue_full")
             return {
               state: "settled",

@@ -208,3 +208,12 @@ sequenceDiagram
 - Media generation is available by default, because the root it needed is now
   always defined. Setting `CLANKIE_DISCORD_ATTACHMENT_ROOT` remains a
   deliberate override, not a prerequisite.
+
+## Amendment: bursts inside room handoffs (2026-10-06)
+
+ADR 0229 moved each admitted text message into its own one-shot handoff, so
+the durable lane above no longer sees a live run and `absorbed` stopped
+occurring. The rule now holds per handoff: a follow-up from the same actor
+under the same resolved grant steers that actor's running handoff and reports
+`absorbed`; other speakers keep separate threads. See the
+[ADR 0229 amendment](0229-room-handoffs-are-visible-parallel-threads.md#amendment-a-senders-burst-steers-their-own-handoff-2026-10-06).

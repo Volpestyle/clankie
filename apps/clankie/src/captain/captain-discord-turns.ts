@@ -776,10 +776,29 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         await serviceRun.wait("room Pi admission authority", admissionGuard?.() ?? Promise.resolve());
         serviceRun.signal.throwIfAborted();
         onAdmitted?.();
-        const completed = await serviceRun.wait(
-          "room Pi execution",
-          runOneShotDiscordTurn(lane.session, prompt, images),
-        );
+        // A handoff's live run accepts its own sender's follow-ups as steering
+        // (ADR 0118, amended 2026-10-06); whatever it never read goes back.
+        const liveRun = normalized.liveRun;
+        const stopLive = liveRun
+          ? lane.session.subscribe((event) => {
+              if (event.type === "agent_start") liveRun.started(lane.session, lane.capture);
+            })
+          : undefined;
+        let completed = false;
+        try {
+          completed = await serviceRun.wait(
+            "room Pi execution",
+            runOneShotDiscordTurn(lane.session, prompt, images),
+          );
+        } finally {
+          stopLive?.();
+          liveRun?.settled(
+            completed,
+            liveRun !== undefined && lane.session.pendingMessageCount > 0
+              ? lane.session.clearQueue().steering
+              : [],
+          );
+        }
         if (!completed) {
           settled = "interrupted";
           early = {

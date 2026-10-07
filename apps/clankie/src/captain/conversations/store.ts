@@ -1379,9 +1379,12 @@ export class ConversationStore {
       .slice(-12)
       .map((meta) => {
         const handoff = meta.roomHandoff!;
+        // A sibling still in flight owns its own answer; this thread need not repeat it.
+        const inFlight = handoff.state === "pending" || handoff.state === "running";
         return (
           `[${meta.createdAt}] <${handoff.actorId}> ${handoff.request.slice(0, 1_000)}\n` +
-          `Handoff ${handoff.state}${handoff.result === undefined ? "" : `: ${handoff.result.slice(0, 1_000)}`}`
+          `Handoff ${handoff.state}${handoff.result === undefined ? "" : `: ${handoff.result.slice(0, 1_000)}`}` +
+          (inFlight ? " (another thread is answering this request)" : "")
         );
       });
     return [...oldMessages, ...handoffs].join("\n\n").slice(-12_000);

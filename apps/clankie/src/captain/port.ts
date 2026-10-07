@@ -216,7 +216,10 @@ export interface CaptainPort {
   bodyRoomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string;
   evaluatorStatus(): EvaluatorStatus;
   evaluatorCommand(command: EvaluatorCommand): Promise<EvaluatorStatus>;
-  /** One Discord text/voice message becomes one captain turn. */
+  /**
+   * One Discord text/voice message becomes one captain turn, unless a text
+   * follow-up steers the same sender's running handoff under the same grant.
+   */
   submitDiscordTurn(
     request: DiscordPresenceChannelTurnRequest,
     authority?: {

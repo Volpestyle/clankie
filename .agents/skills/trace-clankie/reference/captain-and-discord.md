@@ -121,7 +121,11 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   uncertain native delivery is never replayed into the service runner.
 
 - **`absorbed` is not `declined` or answered.** It records input folded into a
-  live run (ADR 0118); inspect that run's final reply and delivery. `declined`
+  live run (ADR 0118); inspect that run's final reply and delivery. Since
+  2026-10-06 a text follow-up from the same actor under the same grant steers
+  that actor's running room handoff (ADR 0229 amendment): its child record is
+  completed with "Answered with the running request <child>", and
+  `replyDeliveryId` names the owning delivery. `declined`
   records the choice to stay silent. Neither status grants new authority.
 
 - **A restart does not clear Discord conversation context.** The next ingress
