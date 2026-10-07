@@ -163,7 +163,8 @@ describe("a remote Codex app-server (VUH-1527)", () => {
   });
 
   it.each([
-    { env: { CODEX_HOME: "/x" }, configArgs: [] },
+    { env: { OPENAI_API_KEY: "x" }, configArgs: [] },
+    { env: { CODEX_HOME: "relative/home" }, configArgs: [] },
     { env: { CLANKIE_EXPECTED_TOOL_NAMES: "[]" }, configArgs: [] },
     {
       env: { CLANKIE_EXPECTED_TOOL_NAMES: "[]" },
@@ -173,7 +174,7 @@ describe("a remote Codex app-server (VUH-1527)", () => {
       ],
     },
     {
-      env: { CODEX_HOME: "/x", CLANKIE_EXPECTED_TOOL_NAMES: "[]" },
+      env: { OPENAI_API_KEY: "x", CLANKIE_EXPECTED_TOOL_NAMES: "[]" },
       configArgs: ["-c", 'mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"'],
     },
   ])("refuses a per-hire environment it cannot carry to the other machine: $env", async (input) => {
@@ -184,8 +185,33 @@ describe("a remote Codex app-server (VUH-1527)", () => {
         ...input,
         onExit: vi.fn(),
       }),
-    ).rejects.toThrow(/environment/u);
+    ).rejects.toThrow(/environment|absolute/u);
     expect(shell).not.toHaveBeenCalled();
+  });
+
+  it("runs the remote server and its tracker read as the Codex home chosen on that machine", async () => {
+    const commands: string[] = [];
+    const shell = vi.fn(async (command: string) => {
+      commands.push(command);
+      return '{"pid":4321,"log":"x.log"}';
+    });
+    const home = "C:\\Users\\volpe\\.codex-james";
+    const server = await remoteCodexServer({
+      fleet: windows,
+      shell,
+      spawn: fakeForward().spawn,
+      freeLocalPort: async () => 1,
+      remotePort: () => 47_124,
+    })({ cwd: "C:\\src", configArgs: [], env: { CODEX_HOME: home }, onExit: vi.fn() });
+    cleanups.push(() => void server.close());
+    expect(decoded(commands[0]!)).toContain(`set "CODEX_HOME=${home}"&& `);
+    await remoteCodexTrackerOverrides(windows, async (command) => {
+      commands.push(command);
+      return "[]";
+    })("C:\\src", { CODEX_HOME: home, HERDR_PANE_ID: "w1:p1" });
+    const tracker = decoded(commands.at(-1)!);
+    expect(tracker).toContain(`$start.EnvironmentVariables['CODEX_HOME'] = '${home}'`);
+    expect(tracker).not.toContain("HERDR_PANE_ID");
   });
 
   it("reads tracker connectors from the remote machine's own Codex configuration", async () => {

@@ -210,6 +210,10 @@ export interface ClankieAppDependencies {
   /** `clankie herdr prepare NAME`: prepare native workers through that fleet's registered transport. */
   prepareFleet?: (id: string, options: { codexSourceSetup?: string }, fleet: HerdrFleet) => Promise<unknown>;
   inspectFleetHarnesses?: (id: string) => Promise<unknown>;
+  /** A machine's worker accounts (VUH-1527); absent fleet is this machine. */
+  workerAccounts?: (
+    fleet?: string,
+  ) => Promise<import("../captain/harness-accounts.ts").MachineWorkerAccounts>;
   /** Host-only project eligibility on a configured fleet; never verifies an MCP connection. */
   inspectFleetMembership?: (
     id: string,

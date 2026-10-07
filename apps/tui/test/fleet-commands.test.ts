@@ -104,6 +104,7 @@ describe("clankie fleet", () => {
       readText: async (options: Parameters<SetupFlow["readText"]>[0]) => {
         prompts.push(options);
         if (options.message.includes("worker model")) return " gpt-6.1-sol ";
+        if (options.message.includes("worker account")) return "";
         return options.message.includes("reporting style")
           ? "Plain evidence."
           : "  claude when it needs skills.  ";
@@ -128,6 +129,7 @@ describe("clankie fleet", () => {
       { currentValue: "change_run_read" },
     ]);
     expect(prompts).toMatchObject([
+      { defaultValue: "" },
       { defaultValue: "" },
       { defaultValue: "Short and plain.", multiline: true },
       { defaultValue: "codex is the workhorse.", multiline: true },
@@ -377,7 +379,7 @@ describe("fleet worker defaults persistence", () => {
       const cleared = await runFleetCommand(["set", "--model", "auto", "--effort", "auto"], f.options);
       expect(cleared.fleet.hire).toEqual({});
       expect(formatFleetLines(cleared.fleet).join("\n")).toContain(
-        "worker defaults: none (he picks harness, model and effort per job)",
+        "worker defaults: none (he picks harness, model, effort and account per job)",
       );
       await runFleetCommand(["set", "--harness", "claude"], f.options);
       const reset = await runFleetCommand(["clear"], f.options);

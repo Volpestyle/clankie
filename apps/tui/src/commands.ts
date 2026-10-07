@@ -1269,7 +1269,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "accounts",
       aliases: [],
-      description: "Register local Claude profiles and Codex accounts/headroom",
+      description: "Claude profiles and Codex accounts: register, see sign-in/usage per machine, hold",
       argumentHint: "[codex|claude [list | add HOME --label LABEL | remove LABEL]]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -1281,6 +1281,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             {
               claude: (args) => runClaudeAccountsCommand(args, options),
               codex: (args) => runCodexAccountsCommand(args, options),
+              workers: (args) => runAccountsCommand(args, options),
             },
             words[0],
           );

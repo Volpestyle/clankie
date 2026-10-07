@@ -130,10 +130,11 @@ export function codexAccountStatus(account: CodexAccount, now = Date.now()) {
       if (fd !== undefined) closeSync(fd);
     }
   }
-  return accountStatus(account, rateLimits, observedAt, now);
+  return codexStatusFromLimits(account, rateLimits, observedAt, now);
 }
 
-function accountStatus(
+/** One account's status from a usage snapshot, wherever the snapshot was read. */
+export function codexStatusFromLimits(
   account: CodexAccount,
   rateLimits: CodexRateLimit | null,
   observedAt: string | null,
@@ -178,44 +179,75 @@ export function selectCodexAccount(accounts: readonly CodexAccount[], label?: st
 
 /** Prefer current account quota, including homes with no rollout yet. */
 export async function readCodexAccountStatus(account: CodexAccount) {
+  let signInRefused = false;
   const [hookTrust, text] = await Promise.all([
     readCodexHookTrust(account.home).catch(() => "unknown" as const),
     existsSync(join(account.home, "auth.json"))
-      ? readCodexRateLimits(account.home).catch(() => null)
+      ? readCodexRateLimits(account.home).catch((error: unknown) => {
+          // By name: the class may come from a substituted module in tests.
+          signInRefused = error instanceof Error && error.name === "CodexSignInRefused";
+          return null;
+        })
       : Promise.resolve(null),
   ]);
   const limits = text === null ? null : codexRateLimit(text);
+  const refused = signInRefused ? { signInRefused: true as const } : {};
   if (limits && (limits.five_hour !== null || limits.seven_day !== null || limits.limited))
-    return { ...accountStatus(account, limits, new Date().toISOString(), Date.now()), hookTrust };
-  return { ...codexAccountStatus(account), hookTrust };
+    return {
+      ...codexStatusFromLimits(account, limits, new Date().toISOString(), Date.now()),
+      hookTrust,
+      ...refused,
+    };
+  return { ...codexAccountStatus(account), hookTrust, ...refused };
 }
 
-export async function selectLiveCodexAccount(accounts: readonly CodexAccount[], label?: string) {
+/**
+ * Without a label, held accounts (owner set aside) and homes whose sign-in
+ * Codex refused are skipped; with one, a refused sign-in is named, never
+ * swapped for another account.
+ */
+export async function selectLiveCodexAccount(
+  accounts: readonly CodexAccount[],
+  label?: string,
+  held: readonly string[] = [],
+) {
   if (label !== undefined && !accounts.some((account) => account.label === label))
     throw new Error(`Unknown Codex account: ${label}`);
   return chooseAccount(
     await Promise.all(
       accounts
-        .filter((account) => label === undefined || account.label === label)
+        .filter((account) => (label === undefined ? !held.includes(account.label) : account.label === label))
         .map(readCodexAccountStatus),
     ),
     label,
   );
 }
 
-function chooseAccount(statuses: ReturnType<typeof codexAccountStatus>[], label?: string) {
+function chooseAccount(
+  statuses: (ReturnType<typeof codexAccountStatus> & { signInRefused?: true })[],
+  label?: string,
+) {
   if (label !== undefined) {
     const selected = statuses.find((account) => account.label === label);
     if (!selected) throw new Error(`Unknown Codex account: ${label}`);
     if (!selected.authPresent)
       throw new Error(`Codex account ${label} has no sign-in; the owner must sign in to its home.`);
+    if (selected.signInRefused)
+      throw new Error(
+        `Codex refused account ${label}'s sign-in when reading usage (expired, revoked or unpaid); the owner must sign in to ${selected.home} again. No other account was tried.`,
+      );
     return selected;
   }
-  const available = statuses.filter((account) => account.authPresent);
+  const available = statuses.filter((account) => account.authPresent && !account.signInRefused);
   // Known headroom wins; unknown beats exhausted. Registry order breaks ties.
   const rank = (headroom: number | null) => (headroom === null ? 1 : headroom > 0 ? 2 : 0);
   available.sort((a, b) => rank(b.headroom) - rank(a.headroom) || (b.headroom ?? 0) - (a.headroom ?? 0));
-  if (!available[0]) throw new Error("No registered Codex account has a sign-in; the owner must sign in.");
+  if (!available[0])
+    throw new Error(
+      statuses.some((account) => account.signInRefused)
+        ? "No registered Codex account has a working sign-in (Codex refused the others); the owner must sign in again."
+        : "No registered Codex account has a sign-in; the owner must sign in.",
+    );
   return available[0];
 }
 

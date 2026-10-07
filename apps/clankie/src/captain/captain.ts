@@ -196,6 +196,7 @@ import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } fro
 import { nativeHireProject, selectHireProject } from "./project-hire-context.ts";
 import { projectOnboarding } from "./project-onboarding.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
+import { createWorkerAccountsReader } from "./harness-accounts.ts";
 import {
   createRemoteCodexSeatAdapter,
   remoteCodexControl,
@@ -321,6 +322,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let namedLocal: Array<{ id: string; session: string; socketPath?: string | undefined }> = [];
   let fleetIdentities = new Map(remoteFleets.map((fleet) => [fleet.id, JSON.stringify(fleet)]));
   const fleetRevisions = new Map<string, number>();
+  const readWorkerAccounts = createWorkerAccountsReader({
+    settings: () => settings(),
+    localFleet: (id) => namedLocal.some((entry) => entry.id === id),
+    fleet: async (id) => (await refreshFleets()).find((entry) => entry.id === id),
+    ...(deps.fleets?.shell === undefined ? {} : { shell: deps.fleets.shell }),
+  });
   const censusFleets = async (): Promise<readonly HerdrCensusFleet[]> => [
     ...(await refreshFleets()).map((fleet) => ({
       id: fleet.id,
@@ -571,6 +578,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(options.nativeLaunchPolicy === undefined ? {} : { nativeLaunchPolicy: options.nativeLaunchPolicy }),
     ...(options.fleetResources === undefined ? {} : { fleetResources: options.fleetResources }),
     codexAccounts: async () => codexAccounts(await settings()),
+    accountHolds: async () => (await settings()).workerAccountHolds,
+    workerAccounts: (fleetId, harness) => readWorkerAccounts(fleetId, [harness]),
     skillBundle: {
       repoRoot: options.repoRoot,
       stateDir: options.stateDir,
@@ -2993,6 +3002,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
   };
   herdrWatches.efficiency = efficiencyActions;
+  herdrWatches.workerAccountsReport = (fleet) => readWorkerAccounts(fleet);
   const pendingFleetRounds = new Set<string>();
   const completedFleetRounds = new Map<string, string>();
   const stopFleetRounds = startFleetRounds(async () => {

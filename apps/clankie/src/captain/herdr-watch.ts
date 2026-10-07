@@ -68,6 +68,7 @@ import {
   type OperatorSeatSpawnResult,
   type OperatorFleetSeat,
   effectiveHireProfile,
+  HIRE_NO_PREFERENCE,
   type HireProfile,
   type SpawnOperatorSeat as HireRequest,
 } from "@clankie/protocol";
@@ -91,6 +92,12 @@ import {
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
+import {
+  chooseWorkerAccount,
+  type MachineWorkerAccounts,
+  type WorkerAccountHarness,
+  type WorkerAccountHold,
+} from "./harness-accounts.ts";
 import type { HireReceiptSettlement, HireRecoveryEvidence } from "@clankie/protocol";
 import { workerSkills } from "./worker-skills.ts";
 import {
@@ -265,6 +272,8 @@ export type HerdrWatchArmResult =
 export interface HerdrWatchPort {
   tidy?: import("./pane-tidy.ts").PaneTidy;
   efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
+  /** A machine's Claude profiles and Codex accounts with sign-in and usage (VUH-1527). */
+  workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
   readoptSeat?(seatId: string, authority: ConversationAuthority): Promise<void>;
   watch(
     conversationId: string,
@@ -768,6 +777,7 @@ export interface ProjectHirePolicy {
 
 export class HerdrWatchStore implements HerdrWatchPort {
   public efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
+  public workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
   private readonly projectHires: ProjectHires;
   private readonly fleetHireTools: (() => Promise<readonly string[]>) | undefined;
   private readonly projectPolicy: ProjectHirePolicy | undefined;
@@ -834,6 +844,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
   private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
+  private readonly workerAccounts:
+    | ((fleet: string, harness: WorkerAccountHarness) => Promise<MachineWorkerAccounts>)
+    | undefined;
+  private readonly accountHolds: (() => Promise<readonly WorkerAccountHold[]>) | undefined;
   private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
   private readonly resumeStarts = new Map<string, Promise<void>>();
 
@@ -851,6 +865,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly resolveHireModel?: (harness: string, model: string) => Promise<string>;
       readonly claudeAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
+      /**
+       * A linked machine's worker accounts, read there through the fleet link
+       * (VUH-1527). Absent, remote hires keep that machine's default homes and
+       * refuse an account override.
+       */
+      readonly workerAccounts?: (
+        fleet: string,
+        harness: WorkerAccountHarness,
+      ) => Promise<MachineWorkerAccounts>;
+      /** Owner holds that keep an account out of automatic choice. */
+      readonly accountHolds?: () => Promise<readonly WorkerAccountHold[]>;
       readonly skillBundle?: {
         readonly repoRoot: string;
         readonly stateDir: string;
@@ -921,6 +946,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.resolveModel = options.resolveHireModel;
     this.claudeAccounts = options.claudeAccounts;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
+    this.workerAccounts = options.workerAccounts;
+    this.accountHolds = options.accountHolds;
     this.remoteWorkspace = options.remoteWorkspace;
     this.piSeatModel = options.piSeatModel;
     this.hireCapacity = options.hireCapacity;
@@ -1608,6 +1635,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrSeatSpawnResult> {
     const defaults = (await this.hireDefaults?.()) ?? {};
     let input = { ...inputRequest, ...effectiveHireProfile(inputRequest, {}, defaults) };
+    // `auto` is "no preference" over any role or fleet default: Clankie picks per machine.
+    if (input.account === HIRE_NO_PREFERENCE) {
+      const { account: _auto, ...rest } = input;
+      input = rest;
+    }
     this.hireDefaultPolicies.set(input, JSON.stringify(defaults));
     if (!this.projectPolicy && input.delegation === "native-first")
       return {
@@ -2731,22 +2763,59 @@ export class HerdrWatchStore implements HerdrWatchPort {
       resumed: resume !== undefined,
     });
     let account: CodexAccount | undefined = prepared?.account;
-    if (
-      input.account !== undefined &&
-      (remote !== undefined || !["codex", "claude"].includes(input.harness))
-    ) {
+    const accountHarness =
+      input.harness === "codex" || input.harness === "claude" ? input.harness : undefined;
+    if (input.account !== undefined && accountHarness === undefined) {
       return {
         outcome: "failed",
         reason: "harness_unavailable",
-        detail: "Account overrides require a registered local Codex or Claude profile.",
+        detail: "Account overrides apply to Codex and Claude hires only.",
       };
+    }
+    // A linked machine answers for its own profiles; an explicit choice is
+    // used exactly or refused, never swapped for another account.
+    let remoteAccountEnv: Record<string, string> | undefined;
+    if (prepared === undefined && remote !== undefined && accountHarness !== undefined) {
+      if (input.account !== undefined && (resume !== undefined || this.workerAccounts === undefined))
+        return {
+          outcome: "failed",
+          reason: "harness_unavailable",
+          detail:
+            resume !== undefined
+              ? "A resumed remote session keeps the home it was saved in; omit account."
+              : `Account choice on ${remote} is unavailable in this service; no account was tried.`,
+        };
+      if (resume === undefined && this.workerAccounts !== undefined) {
+        const report = await this.workerAccounts(remote, accountHarness).catch(() => undefined);
+        const accounts = report?.accounts.filter((entry) => entry.harness === accountHarness) ?? [];
+        const choice =
+          report === undefined
+            ? ({ refused: `${remote} did not answer the account probe.` } as const)
+            : chooseWorkerAccount(remote, accountHarness, report, input.account);
+        if ("refused" in choice) {
+          // An unobservable machine keeps its default home for an automatic
+          // choice, as before account choice existed; an explicit one stops.
+          const unobservable = accounts.every((entry) => entry.signedIn === null);
+          if (input.account !== undefined || !unobservable)
+            return { outcome: "failed", reason: "harness_unavailable", detail: choice.refused };
+        } else {
+          account = { label: choice.account.label, home: choice.account.home };
+          if (choice.account.label !== "default")
+            remoteAccountEnv = {
+              [accountHarness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"]: choice.account.home,
+            };
+        }
+      }
     }
     if (prepared === undefined && remote === undefined && input.harness === "codex") {
       try {
         const accounts = await this.accounts();
+        const held = ((await this.accountHolds?.().catch(() => [])) ?? [])
+          .filter((hold) => hold.machine === "local" && hold.harness === "codex")
+          .map((hold) => hold.label);
         const selected =
           resume === undefined
-            ? await selectLiveCodexAccount(accounts, input.account)
+            ? await selectLiveCodexAccount(accounts, input.account, held)
             : await savedCodexAccount(resume, accounts, input.account);
         account = { label: selected.label, home: selected.home };
       } catch (error) {
@@ -2754,7 +2823,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
     }
     let claudeHome: string | undefined;
-    if (input.harness === "claude" && input.account) {
+    if (input.harness === "claude" && input.account && remote === undefined) {
       const selected = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === input.account);
       if (!selected)
         return {
@@ -2776,7 +2845,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let startupTools: readonly string[] | undefined;
     let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = prepared ?? {
       args: [],
-      ...(account ? { env: { CODEX_HOME: account.home } } : {}),
+      ...(remote !== undefined
+        ? remoteAccountEnv === undefined
+          ? {}
+          : { env: remoteAccountEnv }
+        : account
+          ? { env: { CODEX_HOME: account.home } }
+          : {}),
     };
     try {
       if (prepared === undefined && remote === undefined && this.skillBundle !== undefined) {

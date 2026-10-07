@@ -28,11 +28,11 @@ export type HireProfile = z.infer<typeof HireProfileSchema>;
  * the field stays unset, so the next layer or Clankie decides per hire.
  */
 export const HIRE_NO_PREFERENCE = "auto";
-/** Drops `auto` harness, model, effort and subagent model/effort from a profile-shaped value. */
+/** Drops `auto` harness, model, effort, account and subagent model/effort from a profile-shaped value. */
 export function withoutNoPreference(value: unknown): unknown {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
   const profile: Record<string, unknown> = { ...value };
-  for (const key of ["harness", "model", "effort"])
+  for (const key of ["harness", "model", "effort", "account"])
     if (profile[key] === HIRE_NO_PREFERENCE) delete profile[key];
   const subagents = profile.subagents;
   if (typeof subagents === "object" && subagents !== null && !Array.isArray(subagents)) {

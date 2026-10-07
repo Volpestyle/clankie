@@ -219,6 +219,17 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (effort === undefined) return;
+    const account = await flow.readText({
+      message: "Fleet — default worker account label (empty: he chooses per machine by sign-in and usage)",
+      defaultValue: current.hire?.account ?? "",
+      placeholder: "e.g. james for ~/.claude-james or ~/.codex-james on the hire's machine",
+      allowBack: true,
+      validate: (value: string) =>
+        value.trim() === "" || value.trim() === "auto" || /^[a-z][a-z0-9_-]{0,63}$/u.test(value.trim())
+          ? undefined
+          : "Lowercase label, or empty.",
+    });
+    if (account === undefined) return;
     const tools = await flow.readSelect({
       message: "Fleet — access to connected tools",
       options: [
@@ -358,7 +369,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     await fleetUpdate(
       { size, models, tools, peerMessages, closure, machineSetup, notes: notes.trim(), ...preference },
       { settings: services.settings },
-      { harness, model: model.trim() || "auto", effort },
+      { harness, model: model.trim() || "auto", effort, account: account.trim() || "auto" },
     );
     flow.renderLine(
       "Saved. Fleet autonomy, tool access and peer-message settings apply immediately. Run `clankie restart` to apply routing preferences.",

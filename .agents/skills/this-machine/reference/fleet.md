@@ -40,6 +40,10 @@ not an empty plan. `hire_agent` can pin `account: "LABEL"`; the hire and roster
 report the chosen account. Registration changes apply to new hires only.
 Account list/API reads expose native `hookTrust` (`ready`, `review_required`,
 `unknown`) for home hooks; repository trust still belongs to the owner.
+A home whose sign-in Codex refuses when asked for usage is skipped automatically
+and refused when named. `clankie accounts hold codex LABEL [--machine ID]
+[--reason TEXT]` keeps an account out of automatic choice (`release` returns
+it); an explicit hire may still name a held account.
 A hired Codex startup waiting on trust retains its pane and server and continues
 the original brief automatically after owner review. A visible hook/folder prompt
 reports `trust_required`; other pending startup reports `start_unconfirmed`.
@@ -108,7 +112,8 @@ role/fleet placement defaults still need an explicit pipeline for split.
 Prepared initial-command Pi/OpenCode hires cannot split into an existing pipeline.
 A live-session resume keeps its pane; a new resume uses the repo rule. An
 explicit move allocates a solo tab at its destination with its known role. Never rearrange existing lanes to adopt this layout.
-Local account labels select registered profiles; remote account overrides refuse.
+Local account labels select registered profiles; on a linked machine they are
+that machine's own profiles (see below).
 Friendly model names are registry-validated, and incompatible/retired names refuse.
 A cross-family override includes its harness; `subagents: null` clears inherited
 child settings for that hire. Inspect the current schema on an older install.
@@ -336,6 +341,18 @@ that linked machine. Machine setup policy, source-managed Codex setup and verifi
 [preparing linked machines](fleet-tools.md#preparing-linked-machines). This
 does not grant operator CLI credentials to fleet workers. `herdr fleets` reports
 each link's state. Setup never restarts or steers existing lanes.
+
+Accounts on another machine are that machine's own: its default Claude profile
+and Codex home plus every `~/.claude-<label>` and `~/.codex-<label>`. The
+`worker_accounts` tool (`clankie accounts workers --machine ID`, `GET
+/v1/worker-accounts?fleet=ID`, the `/accounts` menu) asks the machine through
+the fleet link: identity, plan, Codex headroom, worker plugin per Claude profile,
+holds and `usable` or why not. Nothing secret crosses. A remote `account` is used
+exactly (as that pane's `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, and the remote Codex
+app-server's) or refused naming the machine, profile and the sign-in command to
+run there; omitted, Clankie takes a usable, unheld account. A Claude profile
+signed in later needs `clankie herdr prepare NAME` once if its worker plugin is
+missing. Signing in is the owner's step on that machine.
 
 ## Peer messages
 

@@ -151,6 +151,7 @@ import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
 import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
+import { createWorkerAccountsReader } from "./captain/harness-accounts.ts";
 import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
 import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
@@ -1717,6 +1718,11 @@ const clankie = await createClankieApp({
       gitWorktree: projectGitWorktree,
     });
   },
+  workerAccounts: createWorkerAccountsReader({
+    settings: () => settingsStore.load(),
+    fleet: async (id) => (await runtimes.fleets()).find((entry) => entry.id === id),
+    shell: (fleet) => runtimes.fleetShell(fleet),
+  }),
   prepareFleet: async (id: string, options, fleet) => {
     // The route admits an exact target; resolving the ID again could substitute
     // a different machine while operator authority is being revalidated.

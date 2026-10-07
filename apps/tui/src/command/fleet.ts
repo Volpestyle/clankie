@@ -30,7 +30,7 @@ import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
-  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--hire-profile FILE.json]`,
+  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
   "       clankie fleet set [--heavy-slots auto|N] [--simulator-slots N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
   "       clankie fleet resources",
   "       clankie fleet clear",
@@ -63,7 +63,7 @@ function store(options: FleetCommandOptions): SettingsStore {
 }
 
 /** Worker defaults set one field at a time; `auto` leaves the choice to Clankie. */
-type HirePatch = { [K in "harness" | "model" | "effort"]?: string };
+type HirePatch = { [K in "harness" | "model" | "effort" | "account"]?: string };
 
 function patchHireDefaults(current: HireProfile | undefined, patch: HirePatch): HireProfile {
   const next: Record<string, unknown> = { ...current };
@@ -77,7 +77,7 @@ function formatHireDefaults(hire: HireProfile | undefined): string {
   const fields = Object.entries(hire ?? {}).map(
     ([key, value]) => `${key} ${typeof value === "string" ? value : JSON.stringify(value)}`,
   );
-  return fields.length ? fields.join(", ") : "none (he picks harness, model and effort per job)";
+  return fields.length ? fields.join(", ") : "none (he picks harness, model, effort and account per job)";
 }
 
 export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>): string[] {
@@ -264,6 +264,10 @@ async function parseSet(
       if (value !== "auto" && !(OPERATOR_SEAT_HARNESSES as readonly string[]).includes(value))
         throw new Error(`--harness must be auto or one of ${OPERATOR_SEAT_HARNESSES.join(", ")}.`);
       hire.harness = value;
+    } else if (flag === "--account" && !("account" in hire) && value) {
+      if (value !== "auto" && !/^[a-z][a-z0-9_-]{0,63}$/u.test(value))
+        throw new Error("--account must be auto or an account label.");
+      hire.account = value;
     } else if ((flag === "--model" || flag === "--effort") && !(flag.slice(2) in hire) && value) {
       hire[flag.slice(2) as keyof HirePatch] = value;
     } else {
@@ -271,7 +275,7 @@ async function parseSet(
     }
   }
   if (change.hire !== undefined && Object.keys(hire).length)
-    throw new Error("Use --hire-profile or --harness/--model/--effort, not both.");
+    throw new Error("Use --hire-profile or --harness/--model/--effort/--account, not both.");
   if (releaseMode !== undefined || releaseRule !== undefined)
     change.release = FleetReleasePolicySchema.parse({
       mode: releaseMode,

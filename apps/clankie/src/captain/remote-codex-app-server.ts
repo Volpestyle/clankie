@@ -15,6 +15,7 @@ import {
 import { openRemoteCodexConnection, type RemoteCodexConnection } from "./remote-codex-connection.ts";
 import { createRemoteCodexControlObserver, createRemoteCodexQueueObserver } from "../remote-project-proof.ts";
 import { isDeepStrictEqual } from "node:util";
+import { posix, win32 } from "node:path";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
@@ -178,13 +179,18 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
       )
     )
       delete launchEnv.CLANKIE_EXPECTED_TOOL_NAMES;
-    // Only the pane's Herdr identity crosses, so the server's MCP children find
-    // their session's link; everything else comes from that machine.
+    // Only the pane's Herdr identity and the selected Codex home on that
+    // machine cross, so the server's MCP children find their session's link
+    // and it signs in as the chosen account; everything else comes from there.
+    const codexHome = launchEnv.CODEX_HOME;
+    if (codexHome !== undefined && !(fleet.ssh.shell === "powershell" ? win32 : posix).isAbsolute(codexHome))
+      throw new Error("unsupported: a remote Codex home must be an absolute path on that machine");
     const env = Object.fromEntries(
       Object.entries(launchEnv).filter(([key]) => key === "HERDR_PANE_ID" || key === "HERDR_SOCKET_PATH"),
     );
-    if (Object.keys(env).length !== Object.keys(launchEnv).length)
+    if (Object.keys(env).length + (codexHome === undefined ? 0 : 1) !== Object.keys(launchEnv).length)
       throw new Error("unsupported: a remote Codex server takes its environment from its own machine");
+    if (codexHome !== undefined && !options.privateSeat) env.CODEX_HOME = codexHome;
     const id = randomUUID();
     const remotePort = options.remotePort?.() ?? randomInt(REMOTE_PORTS.min, REMOTE_PORTS.max + 1);
     const bridge = options.privateSeat ? await windowsCodexBridge() : undefined;
@@ -200,6 +206,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
                 id,
                 bridge: bridge!,
                 catalogObserved,
+                ...(codexHome === undefined ? {} : { codexHome }),
               })
             : powershellScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id }))
           : posixScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id })),
@@ -389,9 +396,15 @@ export function createRemoteCodexSeatAdapter(
 
 /** Tracker isolation for a remote Codex seat, read from that machine's own configuration. */
 export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShellRun) {
-  return async (cwd: string): Promise<string[]> => {
+  return async (cwd: string, env?: Readonly<Record<string, string>>): Promise<string[]> => {
     const stdout = await shell(
-      remoteProgramCommand(fleet.ssh.shell, "codex", ["mcp", "list", "--json"], cwd),
+      remoteProgramCommand(
+        fleet.ssh.shell,
+        "codex",
+        ["mcp", "list", "--json"],
+        cwd,
+        env?.CODEX_HOME === undefined ? undefined : { CODEX_HOME: env.CODEX_HOME },
+      ),
     ).catch((error: unknown) => {
       throw new Error(
         `Could not read Codex's MCP servers on fleet ${fleet.id} to switch off inherited Linear connectors: ${error instanceof Error ? error.message : String(error)}`,

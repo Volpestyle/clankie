@@ -56,7 +56,8 @@ export type ClaudeWorkerConsent =
   | { readonly approved: false; readonly detail: string; readonly fix: string };
 
 export interface ClaudeWorkerSeatDeps {
-  readonly consent: () => Promise<ClaudeWorkerConsent>;
+  /** Consent for the profile this launch runs in (its CLAUDE_CONFIG_DIR, when one was chosen). */
+  readonly consent: (env?: Readonly<Record<string, string>>) => Promise<ClaudeWorkerConsent>;
   readonly hooks: SeatHookLog;
   readonly agent: (paneId: string) => Promise<WorkerSeatAgent | undefined>;
   readonly transcript: (agent: WorkerSeatAgent) => Promise<HerdrSeatTranscript | undefined>;
@@ -772,7 +773,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           reason: "harness_unavailable",
           detail: "This pane cannot start interactive Claude",
         };
-      const consent = await deps.consent();
+      const consent = await deps.consent(launch.env);
       if (!consent.approved)
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       try {

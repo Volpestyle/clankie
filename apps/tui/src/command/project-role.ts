@@ -11,7 +11,7 @@ export async function runProjectRoleCommand(
   const role = args[0];
   if (!role || args.length < 3 || args.length % 2 !== 1)
     throw new Error(
-      "Usage: clankie agents role ROLE --project PROJECT [--model NAME|auto ...]; auto means no preference for harness, model and effort, inherit clears any field",
+      "Usage: clankie agents role ROLE --project PROJECT [--model NAME|auto ...]; auto means no preference for harness, model, effort and account, inherit clears any field",
     );
   const flags = new Map<string, string>();
   const fields = [
@@ -43,7 +43,7 @@ export async function runProjectRoleCommand(
   const value: Record<string, unknown> = { ...prior, role };
   // `auto` is no preference: unset, like the fleet's own `auto`, so Clankie decides per hire.
   const clears = (key: string, v: string | undefined) =>
-    v === "inherit" || (v === HIRE_NO_PREFERENCE && /(^|-)(harness|model|effort)$/u.test(key));
+    v === "inherit" || (v === HIRE_NO_PREFERENCE && /(^|-)(harness|model|effort|account)$/u.test(key));
   for (const key of ["harness", "model", "effort", "delegation", "account", "placement"]) {
     const v = flags.get(key);
     if (clears(key, v)) delete value[key];

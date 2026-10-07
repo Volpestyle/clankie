@@ -791,6 +791,24 @@ export const ClankieSettingsSchema = z
         "Codex accounts need unique labels and homes",
       )
       .default([]),
+    /**
+     * Worker accounts the owner set aside from Clankie's automatic choice
+     * (an unrenewed plan, usage saved for something else). An explicit hire
+     * may still name one. `machine` is `local` or a runtime connection id.
+     */
+    workerAccountHolds: z
+      .array(
+        z
+          .object({
+            machine: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+            harness: z.enum(["claude", "codex"]),
+            label: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u),
+            reason: z.string().trim().min(1).max(200).optional(),
+          })
+          .strict(),
+      )
+      .max(64)
+      .default([]),
     machines: z
       .array(
         AgentHostConnectionSchema.extend({

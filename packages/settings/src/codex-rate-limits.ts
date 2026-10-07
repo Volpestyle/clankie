@@ -32,13 +32,26 @@ export async function readCodexHookTrust(home: string): Promise<"review_required
   return unknown ? "unknown" : "ready";
 }
 
+/** Codex rejected this home's sign-in when asked for usage: expired, revoked or unpaid. */
+class CodexSignInRefused extends Error {
+  override readonly name = "CodexSignInRefused";
+}
+
 /** Codex owns credentials. Never starts a login or model turn. */
 export async function readCodexRateLimits(home: string): Promise<string | null> {
+  let refused = false;
   const result = await readAccountRpc<{ rateLimitsByLimitId?: { codex?: Snapshot }; rateLimits?: Snapshot }>(
     home,
     "account/rateLimits/read",
     { excludeResetCreditDetails: true },
+    (message) => {
+      refused = /\b(?:401|403)\b|unauthori[sz]ed/iu.test(message);
+    },
   );
+  if (refused)
+    throw new CodexSignInRefused(
+      "Codex refused this sign-in when reading usage (expired, revoked or unpaid)",
+    );
   const snapshot: Snapshot | undefined = result?.rateLimitsByLimitId?.codex ?? result?.rateLimits;
   if (!snapshot) return null;
   const window = (value?: Window | null) =>
@@ -65,6 +78,7 @@ async function readAccountRpc<T>(
   home: string,
   method: string,
   params: Record<string, unknown>,
+  onError?: (message: string) => void,
 ): Promise<T | null> {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
@@ -100,7 +114,10 @@ async function readAccountRpc<T>(
       try {
         const message = JSON.parse(line);
         if (message.id !== 1 && message.id !== 2) return;
-        if (message.error) return finish(null);
+        if (message.error) {
+          if (message.id === 2) onError?.(String(message.error.message ?? ""));
+          return finish(null);
+        }
         if (message.id === 1) {
           send({ method: "initialized", params: {} });
           send({ id: 2, method, params });

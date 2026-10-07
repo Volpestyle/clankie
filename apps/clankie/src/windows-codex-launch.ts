@@ -151,6 +151,8 @@ export function windowsCodexLaunchCommand(input: {
   bridge: WindowsCodexBridge;
   /** Trusted controller owns catalog observation; this flag grants no tools. */
   catalogObserved?: boolean;
+  /** The selected Codex home on that machine; absent keeps its default. */
+  codexHome?: string;
 }): string {
   const command = powershellScriptCommand(`$ErrorActionPreference='Stop'
 if (-not ('ClankieCodexLaunch' -as [type])) { Add-Type -TypeDefinition @'
@@ -181,6 +183,7 @@ $environment=[Environment]::GetEnvironmentVariables()
 $environment['HERDR_PANE_ID']=$pane
 $environment['HERDR_SOCKET_PATH']=$bindings[0].socket_path
 ${input.catalogObserved ? "$environment['CLANKIE_CODEX_CATALOG_OBSERVED']='1'" : ""}
+${input.codexHome === undefined ? "" : `$environment['CODEX_HOME']=${powershellLiteral(input.codexHome)}`}
 $block=(@($environment.Keys | Sort-Object | ForEach-Object {[string]$_ + '=' + [string]$environment[$_]}) -join [char]0) + [char]0 + [char]0
 $bridgeConfig=[string[]]@('-c','mcp_servers.clankie.enabled=true','-c','mcp_servers.clankie.env.NODE_OPTIONS=""','-c','mcp_servers.clankie.env.NODE_PATH=""','-c',('mcp_servers.clankie.command=' + (ConvertTo-Json -InputObject $bridgeNode -Compress)),'-c',('mcp_servers.clankie.args=' + (ConvertTo-Json -InputObject @($bridgeEntry) -Compress)),'-c',('mcp_servers.clankie.env.HERDR_PANE_ID=' + (ConvertTo-Json -InputObject $pane -Compress)),'-c',('mcp_servers.clankie.env.HERDR_SOCKET_PATH=' + (ConvertTo-Json -InputObject $bindings[0].socket_path -Compress)))
 $serverArgs=@(${input.args.slice(0, -3).map(powershellLiteral).join(",")}) + $bridgeConfig + @(${input.args.slice(-3).map(powershellLiteral).join(",")})

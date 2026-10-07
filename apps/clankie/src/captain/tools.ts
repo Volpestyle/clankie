@@ -258,6 +258,9 @@ export function captainTools(
           ...(herdrWatches.efficiency === undefined
             ? []
             : fleetEfficiencyTools(herdrWatches.efficiency, turn)),
+          ...(herdrWatches.workerAccountsReport === undefined
+            ? []
+            : [workerAccountsTool(herdrWatches.workerAccountsReport)]),
         ]
       : []),
     // Hiring starts a process on the operator's machine, so it rides the same
@@ -895,7 +898,7 @@ function hireAgentTool(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",
           description:
-            "Registered local Codex or Claude account label; omitted inherits role/fleet, then Codex chooses by headroom. Claude profiles come from claudeAccounts.",
+            "Codex or Claude account label on the hire's machine (worker_accounts lists them with sign-in and usage). Explicit labels are used exactly or refused with the reason and fix, never swapped. Omitted inherits role/fleet, else Clankie picks a usable, unheld account (Codex by headroom). Locally labels come from codexAccounts/claudeAccounts; on a linked machine from its ~/.claude-<label> and ~/.codex-<label> homes. 'auto' means no preference.",
         }),
       ),
       title: Type.String({
@@ -1003,6 +1006,30 @@ function hireAgentTool(
         },
       });
     },
+  });
+}
+
+function workerAccountsTool(report: NonNullable<HerdrWatchPort["workerAccountsReport"]>): ToolDefinition {
+  return defineTool({
+    name: "worker_accounts",
+    label: "Worker accounts on a machine",
+    description:
+      "The Claude profiles and Codex accounts a machine can hire on, read from that machine now: label, home, " +
+      "signed-in identity and plan, Codex usage headroom (Claude usage is not observable), whether Clankie's worker " +
+      "plugin is in each Claude profile, owner holds, and usable or why not with the fix. Omit fleet for this " +
+      "machine (its registered profiles); pass a fleet id for a linked machine (its default home plus every " +
+      "~/.claude-<label> and ~/.codex-<label>). Choose harness and account per hire from this, weighing usage and " +
+      "the owner's notes; pass the label as hire_agent account. No secrets are read or returned.",
+    parameters: Type.Object({
+      fleet: Type.Optional(
+        Type.String({
+          pattern: "^[a-z][a-z0-9-]{0,63}$",
+          description: "A runtime connection (fleet) id such as pc; omit for this machine.",
+        }),
+      ),
+    }),
+    executionMode: "sequential",
+    execute: async (_id, params: { fleet?: string }) => json(await report(params.fleet)),
   });
 }
 

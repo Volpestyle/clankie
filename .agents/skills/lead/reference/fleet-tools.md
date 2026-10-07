@@ -37,8 +37,19 @@ share it); `new-tab` is normal, one worker per tab named `Name · role`. A share
 workflow passes an explicit named `pipeline`: its first member creates the tab
 and later stages `split` into it. Tabs need matching repo and pipeline metadata
 on every pane; unmarked or ambiguous tabs refuse. Never substitute the lead's or
-the focused pane. Registered local account labels select existing profiles;
-remote account overrides are unsupported.
+the focused pane.
+
+Accounts: `worker_accounts` (omit `fleet` for this Mac, or pass one such as
+`pc`) reads that machine's Claude profiles and Codex accounts now: identity,
+plan, Codex usage headroom (Claude usage is not observable), worker plugin per
+Claude profile, owner holds, and `usable` or the reason with its fix. Choose the
+harness and `account` per hire from it and the owner's fleet notes; nothing pins
+one. A linked machine's labels are its own: `default` plus each
+`~/.claude-<label>` / `~/.codex-<label>`. An explicit label is used exactly or
+refused with the machine, profile and fix, never swapped; omitted (or `auto`),
+Clankie takes a usable, unheld account (Codex by headroom) and names what it
+skipped. Exhausted, signed-out or refused sign-ins are skipped. Relay a refusal's
+fix to the owner rather than signing anything in yourself.
 
 ## Report routing
 

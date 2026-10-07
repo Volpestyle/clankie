@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import type { HerdrSshTransport } from "@clankie/settings";
+export type { HerdrSshTransport };
 import { decodeRemoteShellError } from "./remote-shell-error.ts";
 
 /**
@@ -156,10 +157,19 @@ export function remoteProgramCommand(
   argv: readonly string[],
   /** Run it in this directory on the remote machine; the remote user's home when absent. */
   cwd?: string,
+  /** Extra environment for the program only, e.g. a selected harness home. */
+  env?: Readonly<Record<string, string>>,
 ): string {
   if (!/^[a-z][a-z0-9-]*$/u.test(program)) throw new Error("Remote program must be a bare command name");
   if (argv.some((arg) => arg.includes("\0")) || cwd?.includes("\0") === true)
     throw new Error("Remote arguments cannot contain NUL");
+  const variables = Object.entries(env ?? {});
+  if (
+    variables.some(
+      ([key, value]) => !/^[A-Z_][A-Z0-9_]*$/u.test(key) || value.includes("\0") || /[\r\n]/u.test(value),
+    )
+  )
+    throw new Error("Remote environment must be plain variables without control characters");
   // Only the bootstrap knows whether the child started. A command-specific
   // marker prevents an application's own dependency error from replaying it.
   const launchFailure = `clankie-launch-${randomBytes(8).toString("hex")}: `;
@@ -172,6 +182,7 @@ export function remoteProgramCommand(
               `cd ${posixQuote(cwd)} || { printf '%s\\n' ${posixQuote(`${launchFailure}Cannot enter working directory ${cwd}`)} >&2; exit 127; }`,
             ]),
         `command -v ${program} >/dev/null 2>&1 || { printf '%s\\n' ${posixQuote(`${launchFailure}${program} not found in PATH`)} >&2; exit 127; }`,
+        ...variables.map(([key, value]) => `export ${key}=${posixQuote(value)}`),
         `exec ${program} ${argv.map(posixQuote).join(" ")}`,
       ].join("; "),
     );
@@ -184,6 +195,10 @@ export function remoteProgramCommand(
     "$start.FileName = $program",
     `$start.Arguments = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${commandLine}'))`,
     ...(cwd === undefined ? [] : [`$start.WorkingDirectory = ${powershellLiteral(cwd)}`]),
+    ...variables.map(
+      ([key, value]) =>
+        `$start.EnvironmentVariables[${powershellLiteral(key)}] = ${powershellLiteral(value)}`,
+    ),
     "$start.UseShellExecute = $false",
     "$start.RedirectStandardOutput = $true",
     "$start.RedirectStandardError = $true",

@@ -138,6 +138,7 @@ export {
   selectLiveCodexAccount,
   readCodexAccountStatus,
   codexRateLimit,
+  codexStatusFromLimits,
   type CodexAccount,
 } from "./codex-accounts.ts";
 

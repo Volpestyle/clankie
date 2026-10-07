@@ -1299,6 +1299,34 @@ canonical home path and label; `authPresent` checks file existence, not whether
 the login is valid. `default` is implicit (`CODEX_HOME`, otherwise `~/.codex`).
 Removing a registration never deletes its home or credentials.
 
+### `accounts workers [--machine ID]` / `accounts hold|release claude|codex LABEL [--machine ID] [--reason TEXT]`
+
+`accounts workers` asks a machine which worker accounts it can hire on now
+(`GET /v1/worker-accounts?fleet=ID`, operator credential; omit the machine for
+this Mac's registered profiles). Each Claude profile and Codex account reports
+its label, home, `signedIn`, identity (email) and plan as its own CLI states
+them (`claude auth status`; Codex's app-server `account/read` and
+`account/rateLimits/read`), Codex `headroom`, whether Clankie's worker plugin is
+in each Claude profile, any owner hold, and `usable` or the `reason` with its
+fix. Tokens and credential files are never read or returned. Claude usage is not
+observable, so its headroom stays `null`.
+
+`accounts hold` sets an account aside from Clankie's automatic choice, for
+example a plan that will not be renewed or usage saved for something else; an
+explicit hire may still name it. `release` returns it. Holds live in
+`workerAccountHolds`; `--machine` is a runtime connection id (or the machine it
+rides) and defaults to `local`. The console's `/accounts` menu shows the same
+report per machine and holds or releases an account from it.
+
+```sh
+clankie accounts workers --machine pc
+clankie accounts hold codex default --reason "plan not renewed"
+clankie accounts release codex default
+```
+
+A Codex home whose sign-in the vendor refuses when asked for usage (401/403) is
+skipped by automatic local selection as well, and refused when named.
+
 Account reads also report `hookTrust`: `ready`, `review_required`, or `unknown`,
 from Codex’s read-only `hooks/list` query for that home. Unsupported or failed
 queries stay unknown. This checks home hooks, not trust for a future repository.
@@ -2181,7 +2209,7 @@ The command is excluded from `pnpm check` and push, PR and scheduled CI.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -2255,8 +2283,8 @@ preferences mark the migration complete; clearing that project override then
 stays cleared after restart. An unregistered project inherits global ask-first
 releases. See [ADR 0230](adr/0230-fleet-responsibility-is-owner-settings.md).
 
-`--harness`, `--model` and `--effort` update default workers one field at a time
-(`fleet.hire`), preserving native subagents, delegation, account and placement.
+`--harness`, `--model`, `--effort` and `--account` update default workers one field at a time
+(`fleet.hire`), preserving native subagents, delegation and placement.
 `auto` removes a field so Clankie chooses it per job. `--hire-profile FILE.json`
 replaces the whole profile; use it separately from the field flags. Explicit
 per-hire choices override project roles, which override fleet defaults. These
@@ -2298,7 +2326,7 @@ on machine-authorized lanes, including the default `lead` responsibilities.
 JSON includes the global `fleet` projection and a separate workspace
 `workingPreferences` report, with either available resolved values or an
 unavailable detail. The TUI `/fleet` command opens the same editor (size, models,
-worker harness, model and effort, connected tools, peer messages, closure, machine setup, working preferences, then notes)
+worker harness, model, effort and account, connected tools, peer messages, closure, machine setup, working preferences, then notes)
 and `/fleet status` (also `/fleet show`) prints the same values. CLI `fleet show` aliases `fleet status`.
 
 ```bash
@@ -2307,6 +2335,7 @@ clankie fleet set --size small --models efficient
 clankie fleet set --peer-messages off
 clankie fleet set --harness codex --model gpt-6.1-sol --effort xhigh
 clankie fleet set --model auto --effort auto
+clankie fleet set --account auto
 clankie fleet set --closure owner --machine-setup owner
 clankie fleet set --commit lead --push lead --release owner
 clankie fleet set --verification review_and_seal --report-style "Short and plain."
@@ -2510,7 +2539,7 @@ current saved role, including a cleared role.
 its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
 `--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,
 `--account LABEL`, `--placement new-tab|split`, `--cap N` and `--naming TEXT`.
-`auto` for harness, model, effort, subagent model or subagent effort means no
+`auto` for harness, model, effort, account, subagent model or subagent effort means no
 preference: the field is saved unset, so the fleet default applies and, with
 none, Clankie chooses per hire or leaves it to the harness. `inherit` clears any
 field; omitted fields remain unchanged. The console's `/agents roles` menu sets
@@ -2568,8 +2597,21 @@ Local Codex accounts use the registered account labels and homes; local Claude
 accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
 `default` profile. The owner registers their existing alternate directory with
 `clankie accounts claude add /absolute/config/home --label second` (also
-`/accounts claude` in the console); no login or profile path is guessed. Remote
-account overrides remain unsupported. Profile selection confers no grants.
+`/accounts claude` in the console); no login or profile path is guessed.
+Profile selection confers no grants.
+
+A hire on a linked machine (`fleet`) resolves `account` against that machine's
+own profiles, which it reports through the fleet link: its default Claude
+profile and Codex home plus every `~/.claude-<label>` and `~/.codex-<label>`
+directory (a Codex one needs `config.toml` or `auth.json`). The chosen home
+reaches the pane and, for Codex, the remote app-server and its tracker read as
+`CLAUDE_CONFIG_DIR` / `CODEX_HOME`; the default profile keeps the machine's own
+environment. An explicit label that is missing, signed out, refused by its
+vendor or out of usage fails `harness_unavailable` naming the machine, profile
+and the sign-in command to run there; no other account is tried. Without a
+label (or with `auto`), Clankie takes a usable account the owner has not held,
+Codex by headroom; if the machine cannot be asked at all, the hire keeps its
+default home as before. A resumed remote session keeps its saved home.
 
 `clankie fleet set --hire-profile FILE.json` replaces all fleet hire defaults with the
 same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the

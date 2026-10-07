@@ -10,6 +10,36 @@ import type { ClankieFaceShell } from "./shell/shell.ts";
 export interface AccountsMenuServices {
   readonly claude: (args: readonly string[]) => ReturnType<typeof runClaudeAccountsCommand>;
   readonly codex: (args: readonly string[]) => ReturnType<typeof runCodexAccountsCommand>;
+  /** `clankie accounts workers|hold|release …`: worker accounts as a machine reports them. */
+  readonly workers?: (args: readonly string[]) => Promise<unknown>;
+}
+interface WorkerAccountRow {
+  harness: "claude" | "codex";
+  label: string;
+  home: string;
+  identity?: string;
+  plan?: string;
+  headroom: number | null;
+  held?: { reason?: string };
+  usable: boolean;
+  reason?: string;
+}
+
+/** `jamescvolpe@… · max · 80% headroom · usable` for one machine-reported account. */
+function workerAccountHint(account: WorkerAccountRow): string {
+  return [
+    account.identity ?? "no identity",
+    account.plan,
+    account.harness === "codex"
+      ? account.headroom === null
+        ? "headroom unknown"
+        : `${Math.round(account.headroom * 100)}% headroom`
+      : undefined,
+    account.held ? `held${account.held.reason ? `: ${account.held.reason}` : ""}` : undefined,
+    account.usable ? "usable" : (account.reason ?? "unusable"),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 type Harness = "claude" | "codex";
 type CodexAccount = Awaited<ReturnType<typeof runCodexAccountsCommand>>["accounts"][number];
@@ -41,9 +71,22 @@ export async function runAccountsMenu(
           options: [
             { value: "claude", label: "Claude profiles", hint: `${claude.accounts.length}` },
             { value: "codex", label: "Codex accounts", hint: `${codex.accounts.length}` },
+            ...(services.workers
+              ? [
+                  {
+                    value: "workers",
+                    label: "Worker accounts by machine",
+                    hint: "sign-in, usage, holds — this Mac or a linked machine",
+                  },
+                ]
+              : []),
           ],
           allowBack: true,
         });
+        if (chosen === "workers" && services.workers) {
+          await machineAccounts(shell, services.workers);
+          continue;
+        }
         if (chosen !== "claude" && chosen !== "codex") return;
         harness = chosen;
       }
@@ -117,6 +160,71 @@ async function harnessAccounts(shell: ClankieFaceShell, services: AccountsMenuSe
       if (confirm !== "yes") continue;
       await run(["remove", choice]);
       flow.renderLine(`Removed ${choice}.`, "success");
+    } catch (error) {
+      flow.renderLine(message(error), "error");
+    }
+  }
+}
+
+async function machineAccounts(
+  shell: ClankieFaceShell,
+  workers: NonNullable<AccountsMenuServices["workers"]>,
+) {
+  const flow = shell.setupFlow;
+  const machine = await flow.readText({
+    message: "Machine (runtime connection id; empty: this Mac)",
+    placeholder: "pc",
+    allowBack: true,
+    validate: (value) =>
+      value.trim() === "" || /^[a-z][a-z0-9-]{0,63}$/u.test(value.trim()) ? undefined : "A connection id.",
+  });
+  if (machine === undefined) return;
+  const target = machine.trim() ? ["--machine", machine.trim()] : [];
+  for (;;) {
+    flow.renderLine(`Asking ${machine.trim() || "this Mac"} for its worker accounts…`, "info");
+    let report: { accounts: WorkerAccountRow[]; unavailable?: Record<string, string> };
+    try {
+      report = (await workers(["workers", ...target])) as typeof report;
+    } catch (error) {
+      flow.renderLine(message(error), "error");
+      return;
+    }
+    for (const [harness, why] of Object.entries(report.unavailable ?? {}))
+      flow.renderLine(`${harness}: ${why}`, "error");
+    const choice = await flow.readSelect({
+      message: `Worker accounts on ${machine.trim() || "this Mac"} — pick one to hold or release`,
+      options: report.accounts.map((account) => ({
+        value: `${account.harness}:${account.label}`,
+        label: `${account.harness} ${account.label}`,
+        hint: workerAccountHint(account),
+        description: account.home,
+      })),
+      allowBack: true,
+    });
+    if (choice === undefined) return;
+    const account = report.accounts.find((entry) => `${entry.harness}:${entry.label}` === choice);
+    if (!account) continue;
+    try {
+      if (account.held) {
+        await workers(["release", account.harness, account.label, ...target]);
+        flow.renderLine(`${account.label} is back in automatic choice.`, "success");
+      } else {
+        const reason = await flow.readText({
+          message: `Hold ${account.harness} ${account.label} from automatic choice — why? (optional)`,
+          placeholder: "e.g. plan not renewed; usage saved for Clankie",
+          allowBack: true,
+          validate: (value) => (value.length > 200 ? "Keep it under 200 characters." : undefined),
+        });
+        if (reason === undefined) continue;
+        await workers([
+          "hold",
+          account.harness,
+          account.label,
+          ...target,
+          ...(reason.trim() ? ["--reason", reason.trim()] : []),
+        ]);
+        flow.renderLine(`Held ${account.label}; an explicit hire may still name it.`, "success");
+      }
     } catch (error) {
       flow.renderLine(message(error), "error");
     }

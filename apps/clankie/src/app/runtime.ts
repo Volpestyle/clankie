@@ -1301,6 +1301,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
+  app.get("/v1/worker-accounts", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.workerAccounts) return context.json({ error: "worker_accounts_unavailable" }, 503);
+    const fleet = context.req.query("fleet");
+    if (fleet !== undefined && !/^[a-z][a-z0-9-]{0,63}$/u.test(fleet))
+      return context.json({ error: "invalid_fleet" }, 400);
+    try {
+      return context.json(await dependencies.workerAccounts(fleet));
+    } catch (error) {
+      return context.json(
+        { error: "worker_accounts_failed", detail: error instanceof Error ? error.message : "Unavailable" },
+        409,
+      );
+    }
+  });
+
   app.get("/v1/runtime-connections", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")

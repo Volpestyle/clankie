@@ -38,10 +38,11 @@ function prepareFix(fleet: string): string {
   return `Run clankie herdr prepare ${fleet} once: it installs ${CLAUDE_WORKER_PLUGIN_ID} on ${fleet} from this Clankie and approves its channel in that machine's managed policy, as its administrator.`;
 }
 
-function consentScript(fleet: HerdrFleet): string {
+function consentScript(fleet: HerdrFleet, configDir?: string): string {
   if (fleet.ssh.shell === "powershell")
     return powershellScriptCommand(
       [
+        ...(configDir === undefined ? [] : [`$env:CLAUDE_CONFIG_DIR = ${powershellLiteral(configDir)}`]),
         `Write-Output ${powershellLiteral(PLUGINS)}`,
         "try { & claude plugin list --json 2>$null } catch { }",
         "$dir = 'C:\\Program Files\\ClaudeCode'",
@@ -51,6 +52,7 @@ function consentScript(fleet: HerdrFleet): string {
     );
   return posixScriptCommand(
     [
+      ...(configDir === undefined ? [] : [`export CLAUDE_CONFIG_DIR=${posixQuote(configDir)}`]),
       `echo ${posixQuote(PLUGINS)}`,
       "claude plugin list --json 2>/dev/null || true",
       'for file in "/Library/Application Support/ClaudeCode/managed-settings.json" "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json /etc/claude-code/managed-settings.json /etc/claude-code/managed-settings.d/*.json; do',
@@ -68,10 +70,12 @@ export function parseConsentOutput(stdout: string): { plugins: string; policies:
 }
 
 export function remoteClaudeConsent(fleet: HerdrFleet, shell: FleetShellRun) {
-  return async (): Promise<ClaudeWorkerConsent> => {
+  return async (env?: Readonly<Record<string, string>>): Promise<ClaudeWorkerConsent> => {
+    const configDir = env?.CLAUDE_CONFIG_DIR;
+    const where = configDir === undefined ? `on ${fleet.id}` : `in ${fleet.id}'s profile ${configDir}`;
     let output: { plugins: string; policies: string[] };
     try {
-      output = parseConsentOutput(await shell(consentScript(fleet), 30_000));
+      output = parseConsentOutput(await shell(consentScript(fleet, configDir), 30_000));
     } catch (error) {
       return {
         approved: false,
@@ -91,7 +95,7 @@ export function remoteClaudeConsent(fleet: HerdrFleet, shell: FleetShellRun) {
     if (!installed)
       return {
         approved: false,
-        detail: `${CLAUDE_WORKER_PLUGIN_ID} is not installed on ${fleet.id}.`,
+        detail: `${CLAUDE_WORKER_PLUGIN_ID} is not installed ${where}.`,
         fix: prepareFix(fleet.id),
       };
     if (!policiesApproveWorker(output.policies))
@@ -203,7 +207,8 @@ try {
     sources.push(result);
   };
   const configs = [path.join(home, ".claude.json")];
-  if (process.env.CLAUDE_CONFIG_DIR) configs.push(path.join(absolute(process.env.CLAUDE_CONFIG_DIR), ".claude.json"));
+  const configDir = input.configDir || process.env.CLAUDE_CONFIG_DIR;
+  if (configDir) configs.push(path.join(absolute(configDir), ".claude.json"));
   for (const file of configs) {
     const config = read(file);
     if (!config) continue;
@@ -224,9 +229,9 @@ try {
 } catch { process.stderr.write("Claude tracker configuration unavailable\n"); process.exitCode = 1; }
 `.replace(/\n[ \t]*/gu, " ");
 
-/** Read the supported SSH profile and ancestor configs; never select another account. */
+/** Read the launch's Claude profile (its CLAUDE_CONFIG_DIR, else the SSH default) and ancestor configs. */
 export function remoteClaudeTrackerDeny(fleet: HerdrFleet, shell: FleetShellRun) {
-  return async (cwd: string): Promise<readonly string[]> => {
+  return async (cwd: string, env?: Readonly<Record<string, string>>): Promise<readonly string[]> => {
     try {
       const windows = fleet.ssh.shell === "powershell";
       const native = windows ? win32 : posix;
@@ -234,7 +239,12 @@ export function remoteClaudeTrackerDeny(fleet: HerdrFleet, shell: FleetShellRun)
       const command = remoteProgramCommand(fleet.ssh.shell, "node", [
         "-e",
         TRACKER_READ,
-        JSON.stringify({ cwd, windows, trackerHost: TRACKER_HOST }),
+        JSON.stringify({
+          cwd,
+          windows,
+          trackerHost: TRACKER_HOST,
+          ...(env?.CLAUDE_CONFIG_DIR === undefined ? {} : { configDir: env.CLAUDE_CONFIG_DIR }),
+        }),
       ]);
       // Leave room for the Windows OpenSSH/default-shell command wrapper.
       if (windows && command.length > 30_000) throw new Error();

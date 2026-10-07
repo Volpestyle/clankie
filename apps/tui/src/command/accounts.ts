@@ -28,6 +28,44 @@ import { isHostedModelEnvironment } from "@clankie/model-provider";
 const ACCOUNTS_USAGE =
   "Usage: clankie accounts [list] | connect github|linear|email|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
 
+const WORKER_ACCOUNTS_USAGE =
+  "Usage: clankie accounts workers [--machine ID] | hold claude|codex LABEL [--machine ID] [--reason TEXT] | release claude|codex LABEL [--machine ID]";
+
+/**
+ * The owner sets a worker account aside from Clankie's automatic choice, or
+ * returns it (VUH-1527). An explicit hire may still name a held account.
+ */
+async function runWorkerAccountHold(
+  args: readonly string[],
+  options: { readonly env?: NodeJS.ProcessEnv; readonly settings?: SettingsStore },
+) {
+  const [verb, harness, label, ...rest] = args;
+  const flags = new Map<string, string>();
+  for (let index = 0; index < rest.length; index += 2) {
+    const flag = rest[index]!;
+    const value = rest[index + 1];
+    if (!value || flags.has(flag) || !(flag === "--machine" || (flag === "--reason" && verb === "hold")))
+      throw new Error(WORKER_ACCOUNTS_USAGE);
+    flags.set(flag, value);
+  }
+  if ((harness !== "claude" && harness !== "codex") || !label || !/^[a-z][a-z0-9_-]{0,63}$/u.test(label))
+    throw new Error(WORKER_ACCOUNTS_USAGE);
+  const machine = flags.get("--machine") ?? "local";
+  const store = options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+  const updated = await store.update((current) => {
+    const others = current.workerAccountHolds.filter(
+      (hold) => !(hold.machine === machine && hold.harness === harness && hold.label === label),
+    );
+    const reason = flags.get("--reason")?.trim();
+    return {
+      ...current,
+      workerAccountHolds:
+        verb === "hold" ? [...others, { machine, harness, label, ...(reason ? { reason } : {}) }] : others,
+    };
+  });
+  return { ok: true, holds: updated.workerAccountHolds, settingsFile: store.path };
+}
+
 const APP_FLAGS = {
   "--github-client-id": ["github", "clientId"],
   "--linear-client-id": ["linear", "clientId"],
@@ -61,6 +99,7 @@ export async function runAccountsCommand(
     if (options.request) throw new Error("Codex homes are managed on the local machine");
     return runCodexAccountsCommand(args.slice(1), options);
   }
+  if (args[0] === "hold" || args[0] === "release") return runWorkerAccountHold(args, options);
   const env = options.env ?? process.env;
   const request =
     options.request ??
@@ -77,6 +116,16 @@ export async function runAccountsCommand(
     });
 
   if (args.length === 0 || (args.length === 1 && args[0] === "list")) return request("/v1/accounts");
+  if (args[0] === "workers") {
+    if (!(args.length === 1 || (args.length === 3 && args[1] === "--machine" && args[2])))
+      throw new Error(WORKER_ACCOUNTS_USAGE);
+    const result = await request(
+      `/v1/worker-accounts${args[2] === undefined ? "" : `?fleet=${encodeURIComponent(args[2])}`}`,
+    );
+    if (typeof result.error === "string")
+      throw new Error(typeof result.detail === "string" ? result.detail : result.error);
+    return result;
+  }
   const google = GoogleAccountProviderSchema.safeParse(args[1]);
   if (google.success && args.length === 2 && (args[0] === "connect" || args[0] === "start")) {
     const result = AccountGoogleStartResultSchema.safeParse(

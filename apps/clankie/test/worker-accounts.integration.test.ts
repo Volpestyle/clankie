@@ -1,0 +1,382 @@
+import { execFile, execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { afterEach, describe, expect, it } from "vitest";
+import type { HerdrFleet, HerdrFleetRun } from "../src/herdr-fleet.ts";
+import { createRemoteHerdrRunner, routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
+import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
+import { SettingsStore } from "@clankie/settings";
+import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
+import { runAccountsCommand } from "../../tui/src/command/accounts.ts";
+import {
+  createWorkerAccountsReader,
+  chooseWorkerAccount,
+  readMachineWorkerAccounts,
+  workerAccountsProbeCommand,
+  type MachineWorkerAccounts,
+  type WorkerAccountHold,
+} from "../src/captain/harness-accounts.ts";
+
+/**
+ * Account choice across the fleet link (VUH-1527, ADR 0221): the probe is the
+ * real script run by a real shell and Node against real `claude` and `codex`
+ * CLIs in a fixture home, and the hire runs through the remote Herdr runner.
+ */
+const exec = promisify(execFile);
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+const installed = (command: string) => {
+  try {
+    execFileSync("/bin/sh", ["-c", `command -v ${command}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+const harnessesInstalled = process.platform !== "win32" && installed("claude") && installed("codex");
+
+/** A fleet shell into a fixture home: what ssh gives a posix machine, minus the network. */
+function fixtureShell(home: string) {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !["CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"].includes(key),
+    ),
+  );
+  return async (command: string, timeout?: number) =>
+    (
+      await exec("/bin/sh", ["-c", command], {
+        env: { ...env, HOME: home },
+        timeout: timeout ?? 60_000,
+        maxBuffer: 1024 * 1024,
+      })
+    ).stdout;
+}
+
+async function fixtureHome(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "clankie-worker-accounts-"));
+  roots.push(root);
+  const home = join(root, "home");
+  await mkdir(join(home, ".claude-work"), { recursive: true });
+  await mkdir(join(home, ".codex-work"), { recursive: true });
+  await writeFile(join(home, ".codex-work", "config.toml"), "");
+  // Not a Codex home: no config or sign-in, so it is not offered.
+  await mkdir(join(home, ".codex-notes"), { recursive: true });
+  return home;
+}
+
+const box: HerdrFleet = { id: "box", session: "default", ssh: { host: "box.invalid", shell: "posix" } };
+
+describe.skipIf(!harnessesInstalled)("a machine reports its own worker accounts", () => {
+  it("discovers ~/.claude-<label> and ~/.codex-<label> homes and asks each CLI whether it is signed in", async () => {
+    const home = await fixtureHome();
+    const report = await readMachineWorkerAccounts(box, fixtureShell(home));
+    expect(report.unavailable).toBeUndefined();
+    const labels = report.accounts.map((account) => `${account.harness}:${account.label}`);
+    expect(labels).toEqual(["claude:default", "claude:work", "codex:default", "codex:work"]);
+    const work = report.accounts.filter((account) => account.label === "work");
+    for (const account of work) {
+      expect(account).toMatchObject({ signedIn: false, usable: false, headroom: null });
+      expect(account.home).toBe(join(home, `.${account.harness}-work`));
+      expect(account.reason).toContain("Sign it in on box");
+    }
+    expect(JSON.stringify(report)).not.toMatch(/token|secret/iu);
+  }, 90_000);
+
+  it("answers the API and CLI for a linked machine, with the owner's holds", async () => {
+    const home = await fixtureHome();
+    const settings = new SettingsStore(join(home, "..", "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      execution: {
+        connections: [
+          {
+            id: "box",
+            kind: "herdr",
+            session: "default",
+            ssh: box.ssh,
+            enabled: true,
+            capabilities: ["code"],
+          },
+        ],
+      },
+    }));
+    const app = await createClankieApp({
+      captain: createStubCaptain(),
+      authenticateOperator: async (request) =>
+        request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+      workerAccounts: createWorkerAccountsReader({
+        settings: () => settings.load(),
+        fleet: async (id) => (id === "box" ? box : undefined),
+        shell: () => fixtureShell(home),
+      }),
+    });
+    const request = async (path: string) =>
+      (await (await app.app.request(path, { headers: { authorization: "Bearer owner" } })).json()) as Record<
+        string,
+        unknown
+      >;
+    expect((await app.app.request("/v1/worker-accounts?fleet=box")).status).toBe(401);
+    expect(
+      await runAccountsCommand(
+        ["hold", "codex", "work", "--machine", "box", "--reason", "plan not renewed"],
+        {
+          settings,
+        },
+      ),
+    ).toMatchObject({
+      holds: [{ machine: "box", harness: "codex", label: "work", reason: "plan not renewed" }],
+    });
+    const report = (await runAccountsCommand(["workers", "--machine", "box"], {
+      request,
+    })) as MachineWorkerAccounts;
+    expect(report.machine).toBe("box");
+    expect(report.accounts.find((a) => a.harness === "codex" && a.label === "work")).toMatchObject({
+      held: { reason: "plan not renewed" },
+      signedIn: false,
+    });
+    await runAccountsCommand(["release", "codex", "work", "--machine", "box"], { settings });
+    expect((await settings.load()).workerAccountHolds).toEqual([]);
+    await expect(runAccountsCommand(["workers", "--machine", "nowhere"], { request })).rejects.toThrow(
+      /nowhere is not a linked machine/u,
+    );
+  }, 90_000);
+
+  it("refuses a hire on a signed-out or missing profile by name, before any pane exists", async () => {
+    const home = await fixtureHome();
+    const calls: string[][] = [];
+    const run: HerdrFleetRun = async (args) => {
+      calls.push([...args]);
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const root = await mkdtemp(join(tmpdir(), "clankie-worker-accounts-store-"));
+    roots.push(root);
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: routeHerdrFleets(
+        {
+          get: async () => ({}) as HerdrAgentSnapshot,
+          resolveTerminal: async () => undefined,
+          wait: async () => ({}) as HerdrAgentSnapshot,
+        },
+        new Map([["box", createRemoteHerdrRunner(box, run, { pollMs: 5 })]]),
+      ),
+      remoteWorkspace: async (fleet, directory) => fleet === "box" && directory === "/src/app",
+      workerAccounts: (fleet, harness) =>
+        readMachineWorkerAccounts(box, fixtureShell(home), { harnesses: [harness] }).then((report) => {
+          expect(fleet).toBe("box");
+          return report;
+        }),
+    });
+    const signedOut = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "claude",
+      title: "Reader",
+      workingDirectory: "/src/app",
+      fleet: "box",
+      account: "work",
+    });
+    expect(signedOut).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    const detail = (signedOut as { detail: string }).detail;
+    expect(detail).toContain("Claude profile work on box");
+    expect(detail).toContain(`CLAUDE_CONFIG_DIR='${join(home, ".claude-work")}' claude auth login`);
+    expect(detail).toContain("No other account was tried");
+    const missing = await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "codex",
+      title: "Reader",
+      workingDirectory: "/src/app",
+      fleet: "box",
+      account: "spare",
+    });
+    expect((missing as { detail: string }).detail).toContain("box has no Codex account spare");
+    expect(calls).toEqual([]);
+    store.close();
+  }, 120_000);
+});
+
+it("keeps the Windows probe command within the ssh command-line bound", () => {
+  const command = workerAccountsProbeCommand("powershell");
+  expect(command.length).toBeLessThan(30_000);
+  expect(command).toMatch(/^powershell\.exe -NoProfile -NonInteractive -EncodedCommand /u);
+});
+
+/**
+ * James's PC as its probe reported it on 2026-10-07 (identities redacted):
+ * the default Claude profile signed out, `~/.claude-james` signed in, and two
+ * Codex homes with headroom.
+ */
+const PC_REPORT: MachineWorkerAccounts = {
+  machine: "pc",
+  shell: "powershell",
+  observedAt: "2026-10-07T18:16:08.148Z",
+  accounts: [
+    {
+      harness: "claude",
+      label: "default",
+      home: "C:\\Users\\volpe\\.claude",
+      signedIn: false,
+      headroom: null,
+      workerPlugin: true,
+      usable: false,
+      reason: "not signed in. Sign it in on pc: claude auth login.",
+    },
+    {
+      harness: "claude",
+      label: "james",
+      home: "C:\\Users\\volpe\\.claude-james",
+      signedIn: true,
+      identity: "owner@example.com",
+      plan: "max",
+      headroom: null,
+      workerPlugin: true,
+      usable: true,
+    },
+    {
+      harness: "codex",
+      label: "default",
+      home: "C:\\Users\\volpe\\.codex",
+      signedIn: true,
+      identity: "owner2@example.com",
+      plan: "pro",
+      headroom: 1,
+      usable: true,
+    },
+    {
+      harness: "codex",
+      label: "james",
+      home: "C:\\Users\\volpe\\.codex-james",
+      signedIn: true,
+      identity: "owner2@example.com",
+      plan: "pro",
+      headroom: 1,
+      usable: true,
+    },
+  ],
+};
+
+describe("a remote hire runs as the account Clankie chose on that machine", () => {
+  const pc: HerdrFleet = { id: "pc", session: "default", ssh: { host: "pc.invalid", shell: "powershell" } };
+  async function hireOn(harness: "claude" | "codex", holds: readonly WorkerAccountHold[], account?: string) {
+    const calls: string[][] = [];
+    const run: HerdrFleetRun = async (args) => {
+      calls.push([...args]);
+      if (args[0] === "worktree")
+        return JSON.stringify({
+          result: { source: { repo_key: "fixture-repo", repo_root: "C:\\src", repo_name: "src" } },
+        });
+      if (args[0] === "api")
+        return JSON.stringify({
+          result: {
+            snapshot: {
+              workspaces: [
+                {
+                  workspace_id: "w2",
+                  label: "src",
+                  number: 2,
+                  worktree: {
+                    repo_key: "fixture-repo",
+                    repo_root: "C:\\src",
+                    repo_name: "src",
+                    is_linked_worktree: false,
+                  },
+                },
+              ],
+              tabs: [],
+              panes: [],
+            },
+          },
+        });
+      if (args[0] === "pane" && args[1] === "rename") return "{}";
+      if (args[0] === "tab") return JSON.stringify({ result: { root_pane: { pane_id: "w2:p9" } } });
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              {
+                pane_id: "w2:p9",
+                terminal_id: "term_new",
+                agent: harness,
+                agent_status: "idle",
+                agent_session: { source: `herdr:${harness}`, kind: "id", value: "session-new" },
+              },
+            ],
+          },
+        });
+      if (args[0] === "agent" && args[1] === "start") return "{}";
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const root = await mkdtemp(join(tmpdir(), "clankie-worker-accounts-hire-"));
+    roots.push(root);
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: routeHerdrFleets(
+        {
+          get: async () => ({}) as HerdrAgentSnapshot,
+          resolveTerminal: async () => undefined,
+          wait: async () => ({}) as HerdrAgentSnapshot,
+        },
+        new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5 })]]),
+      ),
+      remoteWorkspace: async (fleet, directory) => fleet === "pc" && directory === "C:\\src\\rivals",
+      workerAccounts: async () => ({
+        ...PC_REPORT,
+        accounts: PC_REPORT.accounts.map((entry) => {
+          const hold = holds.find((h) => h.harness === entry.harness && h.label === entry.label);
+          return hold ? { ...entry, held: {} } : entry;
+        }),
+      }),
+    });
+    const result = await store.spawnSeat({
+      schemaVersion: 1,
+      harness,
+      title: "Reader",
+      workingDirectory: "C:\\src\\rivals",
+      fleet: "pc",
+      ...(account === undefined ? {} : { account }),
+    });
+    store.close();
+    const tab = calls.find((call) => call[0] === "tab");
+    return { result, env: tab?.flatMap((arg, index) => (tab[index - 1] === "--env" ? [arg] : [])) ?? [] };
+  }
+
+  it("skips a signed-out default Claude profile for a signed-in one and starts there", async () => {
+    const { result, env } = await hireOn("claude", []);
+    expect(result).toMatchObject({ outcome: "spawned", seat: { paneId: "pc/w2:p9" } });
+    expect(env).toContain("CLAUDE_CONFIG_DIR=C:\\Users\\volpe\\.claude-james");
+  });
+
+  it("refuses an explicit signed-out profile instead of falling back", async () => {
+    const { result, env } = await hireOn("claude", [], "default");
+    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    expect((result as { detail: string }).detail).toContain("Claude profile default on pc");
+    expect(env).toEqual([]);
+  });
+
+  it("leaves a held Codex account to an explicit choice", async () => {
+    const auto = await hireOn("codex", [{ machine: "pc", harness: "codex", label: "default" }]);
+    expect(auto.result).toMatchObject({ outcome: "spawned" });
+    expect(auto.env).toContain("CODEX_HOME=C:\\Users\\volpe\\.codex-james");
+    const explicit = await hireOn(
+      "codex",
+      [{ machine: "pc", harness: "codex", label: "default" }],
+      "default",
+    );
+    expect(explicit.result).toMatchObject({ outcome: "spawned" });
+    expect(explicit.env.some((entry) => entry.startsWith("CODEX_HOME="))).toBe(false);
+  });
+
+  it("explains why nothing is usable when every account is out", () => {
+    const report: MachineWorkerAccounts = {
+      ...PC_REPORT,
+      accounts: PC_REPORT.accounts.map((entry) => ({ ...entry, usable: false, reason: "usage exhausted" })),
+    };
+    expect(chooseWorkerAccount("pc", "codex", report)).toEqual({
+      refused:
+        "No Codex account on pc can take a hire now: default: usage exhausted; james: usage exhausted.",
+    });
+  });
+});

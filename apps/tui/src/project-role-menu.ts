@@ -23,7 +23,14 @@ const ROLE_FIELDS: readonly {
   { flag: "naming", label: "Hire naming", read: (p) => p.hireNaming },
 ];
 /** Launch choices where unset is the owner's "no preference": Clankie decides per hire. */
-const PREFERENCE_FIELDS = new Set(["harness", "model", "effort", "subagent-model", "subagent-effort"]);
+const PREFERENCE_FIELDS = new Set([
+  "harness",
+  "model",
+  "effort",
+  "account",
+  "subagent-model",
+  "subagent-effort",
+]);
 const unset = (value: unknown) => value === undefined || value === null;
 const shown = (flag: string, value: unknown) =>
   unset(value) ? (PREFERENCE_FIELDS.has(flag) ? "no preference" : "inherit") : String(value);
@@ -118,9 +125,11 @@ async function editRole(shell: ClankieFaceShell, projectId: string, role: string
           ? "native-first or panes"
           : field === "placement"
             ? "new-tab or split"
-            : preference
-              ? "auto, or a friendly model, level or harness"
-              : "friendly model, level or label",
+            : field === "account"
+              ? "auto, or a label on the hire's machine (e.g. james)"
+              : preference
+                ? "auto, or a friendly model, level or harness"
+                : "friendly model, level or label",
       allowBack: true,
     });
     if (!value?.trim()) continue;
