@@ -84,6 +84,15 @@ export interface RegisterPairingRoutesContext {
   readonly hostDisplayName: string;
 }
 
+/** This Mac's own service and relay, as a loopback client reaches them. */
+function sameMacAddresses(request: Request): { controlPlaneUrl: string; relayUrl: string } {
+  const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? "4321");
+  return {
+    controlPlaneUrl: new URL(request.url).origin,
+    relayUrl: `http://127.0.0.1:${Number.isInteger(relayPort) && relayPort > 0 && relayPort <= 65535 ? relayPort : 4321}`,
+  };
+}
+
 export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
   // Deliberately separate: these offers cannot redeem through the gateway or
   // ordinary pairing routes, even if a proxy forwards them from loopback.
@@ -177,9 +186,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
             { schemaVersion: 1, deviceId, grants, sessionExpiresAt },
           ),
         );
-        const controlPlaneUrl = new URL(context.req.url).origin;
-        const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? "4321");
-        const relayUrl = `http://127.0.0.1:${Number.isInteger(relayPort) && relayPort > 0 && relayPort <= 65535 ? relayPort : 4321}`;
+        const { controlPlaneUrl, relayUrl } = sameMacAddresses(context.req.raw);
         return context.json({
           deviceId,
           deviceToken,
@@ -202,6 +209,13 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       relayUrl: process.env.CLANKIE_RELAY_URL?.trim(),
     });
     return parsed.success ? { directRoute: parsed.data } : {};
+  };
+  // A device on this Mac pairs over loopback; the advertised direct route is
+  // for other devices and may be plain HTTP that Apple's ATS refuses.
+  const sameMacRoute = (request: Request) => {
+    if (!ctx.dependencies.isSameMacRequest?.(request)) return undefined;
+    const route = sameMacAddresses(request);
+    return { relayUrl: route.relayUrl, directRoute: route };
   };
   const advertisedRelayUrl = () => {
     const raw = ctx.dependencies.publicGatewayHostBaseUrl ?? process.env.CLANKIE_RELAY_URL?.trim();
@@ -455,7 +469,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         deviceToken,
         grants: accepted,
         sessionExpiresAt,
-        ...advertisedRelayUrl(),
+        ...(sameMacRoute(context.req.raw) ?? advertisedRelayUrl()),
       } satisfies PairingCompleteResponse);
     });
   });
@@ -514,7 +528,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         deviceToken,
         grants,
         sessionExpiresAt,
-        ...advertisedRelayUrl(),
+        ...(sameMacRoute(context.req.raw) ?? advertisedRelayUrl()),
       } satisfies DeviceSessionRefreshResponse);
     });
   });
@@ -591,8 +605,9 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     if ("denied" in identity) return ctx.deviceDenialResponse(context, identity);
     const record = ctx.devices.get(identity.deviceId);
     if (record === undefined) return context.json({ error: "device_authentication_required" }, 401);
+    const sameMac = sameMacRoute(context.req.raw);
     return context.json({
-      ...advertisedDirectRoute(),
+      ...(sameMac ? { directRoute: sameMac.directRoute } : advertisedDirectRoute()),
       deviceId: record.deviceId,
       name: record.name,
       platform: record.platform,

@@ -409,6 +409,7 @@ describe("public gateway Mac connector", () => {
             delivery: request.headers["linear-delivery"] as string | undefined,
             event: request.headers["linear-event"] as string | undefined,
             timestamp: request.headers["linear-timestamp"] as string | undefined,
+            gateway: request.headers["x-clankie-gateway"] as string | undefined,
           },
           body,
         });
@@ -459,6 +460,7 @@ describe("public gateway Mac connector", () => {
           delivery: "delivery-1",
           event: "Comment",
           timestamp: "1757206800000",
+          gateway: "1",
         },
         body,
       },

@@ -26,6 +26,9 @@ import type { PairingOfferWire } from "@clankie/protocol";
 import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
 import type { PushWakeRequest, PushWakeStatus } from "./push.ts";
 
+/** Set on every request this connector forwards to the local service. */
+export const GATEWAY_FORWARDED_HEADER = "x-clankie-gateway";
+
 const CONNECT_TIMEOUT_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -499,6 +502,9 @@ export class PublicGatewayConnector {
     for (const header of frame.headers) {
       if (REQUEST_HEADER_ALLOWLIST.has(header.name)) headers.set(header.name, header.value);
     }
+    // Forwarded over loopback like a local client; the mark keeps gateway
+    // traffic out of the same-Mac boundary (LocalCompanionBoundary).
+    headers.set(GATEWAY_FORWARDED_HEADER, "1");
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
       let discordWebEnvelope = false;
@@ -532,7 +538,9 @@ export class PublicGatewayConnector {
                 async (request) => {
                   const url = new URL(request.url);
                   const origin = url.hostname === "control" ? this.controlPlaneUrl : this.relayUrl;
-                  return this.fetcher(new Request(new URL(`${url.pathname}${url.search}`, origin), request));
+                  const forwarded = new Request(new URL(`${url.pathname}${url.search}`, origin), request);
+                  forwarded.headers.set(GATEWAY_FORWARDED_HEADER, "1");
+                  return this.fetcher(forwarded);
                 },
               );
       await sendFrame(socket, {

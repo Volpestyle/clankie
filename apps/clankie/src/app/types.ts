@@ -150,6 +150,8 @@ export interface ClankieAppDependencies {
   modelKeys?: ModelKeysPort;
   /** Proven by the primary listener socket, never a caller-supplied header. */
   isLocalCompanionRequest?: (request: Request) => boolean;
+  /** A native client on this Mac over loopback, not forwarded by the gateway; picks addresses only. */
+  isSameMacRequest?: (request: Request) => boolean;
   modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;

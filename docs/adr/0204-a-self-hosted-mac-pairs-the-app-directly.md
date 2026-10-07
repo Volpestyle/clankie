@@ -113,3 +113,10 @@ direct route.
 - A scanned direct link is trusted the way a gateway link already is: the
   person scanning chooses the host. The access review names the host before
   any grant.
+- Amended 2026-10-06: a native client on the same Mac (the macOS app's
+  **On this Mac** code) pairs, refreshes and restores over loopback, so the
+  service answers it with its own loopback control and relay addresses
+  instead of the configured route. That route is for other devices and is
+  often plain HTTP, which macOS App Transport Security refuses. The
+  listener's socket decides this, never a header; the gateway connector
+  marks what it forwards so gateway traffic keeps the configured route.

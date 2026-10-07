@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { deviceDoorwayFetch } from "../src/device-doorway.ts";
+import { LocalCompanionBoundary } from "../src/local-companion-boundary.ts";
+import type { HttpBindings } from "@hono/node-server";
 
 // ADR 0204: a pairing link carries every route the Mac has, and a phone on the
 // LAN reaches only the device routes through the opt-in device doorway.
@@ -194,6 +196,74 @@ describe("device doorway", () => {
       const response = await doorway(new Request(`http://192.168.4.20:4311${path}`, { method }));
       expect({ method, path, status: response.status }).toEqual({ method, path, status: 404 });
     }
+  });
+});
+
+describe("same-Mac pairing", () => {
+  // A Mac app pairs with its own service over loopback. The configured direct
+  // route is for other devices and is often plain HTTP that macOS refuses.
+  const LOOPBACK = { controlPlaneUrl: "http://127.0.0.1:4310", relayUrl: "http://127.0.0.1:4321" };
+  const MAC = { name: "Clankie Mac", platform: "macos" } as const;
+  const env = {
+    incoming: { socket: { remoteAddress: "127.0.0.1", localAddress: "127.0.0.1" } },
+  } as unknown as HttpBindings;
+
+  async function sameMacService() {
+    configureDirectRoute();
+    const boundary = new LocalCompanionBoundary();
+    const app = await makeApp({ isSameMacRequest: (request) => boundary.isSameMac(request) });
+    const listener = boundary.fetch(app.fetch);
+    // Node's server hands the app the Host header a real client sent.
+    const send = (path: string, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers);
+      headers.set("host", new URL(LOOPBACK.controlPlaneUrl).host);
+      return listener(new Request(`${LOOPBACK.controlPlaneUrl}${path}`, { ...init, headers }), env);
+    };
+    const pair = async (headers: Record<string, string> = {}) => {
+      const wire = PairingOfferWireSchema.parse((await mint(app)).body);
+      const offerSecret = new URL(wire.deepLink).searchParams.get("offer");
+      const json = { "content-type": "application/json", ...headers };
+      const redeemed = (await (
+        await send("/v1/pairing/redeem", {
+          method: "POST",
+          headers: json,
+          body: JSON.stringify({ offerSecret, device: MAC }),
+        })
+      ).json()) as { completionToken: string; offeredGrants: unknown };
+      const completed = await send("/v1/pairing/complete", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({
+          completionToken: redeemed.completionToken,
+          acceptedGrants: redeemed.offeredGrants,
+        }),
+      });
+      expect(completed.status).toBe(200);
+      return (await completed.json()) as { deviceToken: string; relayUrl?: string; directRoute?: unknown };
+    };
+    return { send, pair };
+  }
+
+  it("gives a native client on this Mac its own loopback service and relay", async () => {
+    const { send, pair } = await sameMacService();
+    const session = await pair();
+    expect(session).toMatchObject({ relayUrl: LOOPBACK.relayUrl, directRoute: LOOPBACK });
+
+    const auth = { authorization: `Bearer ${session.deviceToken}` };
+    const self = (await (await send("/v1/devices/self", { headers: auth })).json()) as {
+      directRoute?: unknown;
+    };
+    expect(self.directRoute).toEqual(LOOPBACK);
+    const refreshed = (await (
+      await send("/v1/devices/self/session/refresh", { method: "POST", headers: auth })
+    ).json()) as { relayUrl?: string; directRoute?: unknown };
+    expect(refreshed.relayUrl).toBe(LOOPBACK.relayUrl);
+  });
+
+  it("keeps the advertised route for requests the gateway forwards over loopback", async () => {
+    const { pair } = await sameMacService();
+    const session = await pair({ "x-clankie-gateway": "1" });
+    expect(session.directRoute).toEqual(DIRECT);
   });
 });
 

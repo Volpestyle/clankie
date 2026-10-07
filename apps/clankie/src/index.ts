@@ -1550,6 +1550,7 @@ const clankie = await createClankieApp({
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
   }),
   isLocalCompanionRequest: (request) => localCompanionBoundary.has(request),
+  isSameMacRequest: (request) => localCompanionBoundary.isSameMac(request),
   modelDeviceSetup: { platform: process.platform, hosted: hostedBody !== undefined },
   modelKeys: createModelKeys({
     store: operatorCredentialStore,
