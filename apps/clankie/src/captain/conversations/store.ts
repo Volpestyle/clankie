@@ -1103,6 +1103,28 @@ export class ConversationStore {
     return freshLinearEvents(this, id);
   }
 
+  /**
+   * Record a service observation (a runtime health alarm or recovery) in an
+   * ordinary chat as received context. It is durable and shown by every
+   * conversation surface, and it never queues a turn (VUH-1702, VUH-1698).
+   * The same text is recorded once, so a retried notice cannot duplicate it.
+   */
+  public recordServiceNotice(conversationId: string, text: string): boolean {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined || !text.trim() || text.length > OPERATOR_CONVERSATION_TEXT_MAX) return false;
+    if (
+      this.readEvents(conversationId).some(
+        (event) => event.type === "message" && event.role === "external" && event.text === text,
+      )
+    )
+      return true;
+    meta.revision += 1;
+    this.append(meta, { type: "message", role: "external", text, streaming: false });
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    return true;
+  }
+
   /** Following disabled before admission consumes the queued wake without running it. */
   public discardLinearWake(id: string): void {
     return discardLinearWake(this, id);

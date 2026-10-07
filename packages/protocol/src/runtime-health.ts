@@ -35,7 +35,13 @@ export const RuntimeHealthObservationSchema = z
     healthAvailable: z.boolean().optional(),
     durationMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     reasons: z.array(z.enum(["cpu", "health"])).max(2),
+    /** Native seat delivery of the latest alarm or recovery notice. */
     delivery: z.enum(["none", "accepted", "unavailable"]),
+    /**
+     * Whether that notice is recorded in the owner's default conversation, which
+     * never depends on the seat taking a delivery (VUH-1702). Absent before any notice.
+     */
+    recorded: z.boolean().optional(),
     lastAlarmAt: z.string().datetime().optional(),
     lastRecoveryAt: z.string().datetime().optional(),
     lastIncidentDurationMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),

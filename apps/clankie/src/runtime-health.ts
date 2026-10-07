@@ -21,6 +21,8 @@ export class RuntimeHealthObserver {
   private unhealthySince: number | undefined;
   private alarmed = false;
   private alertAccepted = false;
+  /** One incident's alarm text, reused on retries so its conversation record stays single. */
+  private alarmText: string | undefined;
   private nextAlertAttempt = 0;
   private lastAlarm = -Infinity;
   private recovery: { text: string; nextAttempt: number } | undefined;
@@ -32,6 +34,8 @@ export class RuntimeHealthObserver {
     settings(): Promise<RuntimeHealthSettings>;
     healthUrl: string;
     notify(text: string): Promise<boolean>;
+    /** Record the notice in the owner's default conversation; no model turn. */
+    record?(text: string): boolean;
     observed?(observation: RuntimeHealthObservation): void;
     unavailable?(): void;
   };
@@ -93,6 +97,7 @@ export class RuntimeHealthObserver {
       this.unhealthySince = undefined;
       this.alarmed = false;
       this.alertAccepted = false;
+      this.alarmText = undefined;
       this.recovery = undefined;
       this.observation = {
         ...this.observation,
@@ -135,15 +140,16 @@ export class RuntimeHealthObserver {
         this.lastAlarm = now;
         this.nextAlertAttempt = 0;
         this.observation.lastAlarmAt = observedAt;
+        this.alarmText =
+          `Runtime health alarm: ${reasons.join(" and ")} held for ${durationMs}ms at ${observedAt}. ` +
+          `Clankie process CPU ${cpuPercent}% (threshold ${settings.cpuPercent}%); /health ${healthLatencyMs}ms ` +
+          `(${healthAvailable ? "available" : "unavailable"}, threshold ${settings.healthLatencyMs}ms). ` +
+          "Inspect clankie status or clankie doctor; include the incident in the next Linear project check-in.";
       }
       state = this.alarmed ? "alarm" : "cooldown";
-      if (this.alarmed && !this.alertAccepted && now >= this.nextAlertAttempt) {
-        this.alertAccepted = await this.notify(
-          `Runtime health alarm: ${reasons.join(" and ")} held for ${durationMs}ms at ${observedAt}. ` +
-            `Clankie process CPU ${cpuPercent}% (threshold ${settings.cpuPercent}%); /health ${healthLatencyMs}ms ` +
-            `(${healthAvailable ? "available" : "unavailable"}, threshold ${settings.healthLatencyMs}ms). ` +
-            "Inspect clankie status or clankie doctor; include the incident in the next Linear project check-in.",
-        );
+      if (this.alarmed && !this.alertAccepted && this.alarmText && now >= this.nextAlertAttempt) {
+        this.observation.recorded = this.record(this.alarmText);
+        this.alertAccepted = await this.notify(this.alarmText);
         this.nextAlertAttempt = now + Math.max(60_000, settings.sampleIntervalMs);
       }
     } else if (!reasons.length && this.unhealthySince !== undefined) {
@@ -151,7 +157,8 @@ export class RuntimeHealthObserver {
         this.observation.lastIncidentDurationMs = durationMs;
         this.observation.lastRecoveryAt = observedAt;
       }
-      if (this.alertAccepted)
+      // Every raised alarm reached the owner's conversation, so its recovery does too.
+      if (this.alarmed)
         this.recovery = {
           text:
             `Runtime health recovered after ${durationMs}ms at ${observedAt}: Clankie process CPU ${cpuPercent}%; /health ${healthLatencyMs}ms. ` +
@@ -161,10 +168,12 @@ export class RuntimeHealthObserver {
       this.unhealthySince = undefined;
       this.alarmed = false;
       this.alertAccepted = false;
+      this.alarmText = undefined;
     }
     let delivery = this.observation.delivery;
     if (state === "alarm") delivery = this.alertAccepted ? "accepted" : "unavailable";
     if (this.recovery && now >= this.recovery.nextAttempt) {
+      this.observation.recorded = this.record(this.recovery.text);
       if (await this.notify(this.recovery.text)) {
         this.recovery = undefined;
         delivery = "accepted";
@@ -187,6 +196,13 @@ export class RuntimeHealthObserver {
     this.publish();
   }
 
+  private record(text: string): boolean {
+    try {
+      return this.options.record?.(text) ?? false;
+    } catch {
+      return false;
+    }
+  }
   private async notify(text: string): Promise<boolean> {
     try {
       return await this.options.notify(text);

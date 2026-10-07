@@ -76,5 +76,5 @@ export async function runRuntimeHealthCommand(
     : request({ schemaVersion: 1, expectedRevision: current.revision, changes });
 }
 export function formatRuntimeHealth(observation: RuntimeHealthObservation): string {
-  return `Runtime health: ${observation.state} · CPU ${observation.cpuPercent === undefined ? "unknown" : `${observation.cpuPercent}%`} · /health ${observation.healthLatencyMs === undefined ? "unknown" : `${observation.healthLatencyMs}ms`}${observation.healthAvailable === false ? " unavailable" : ""} · held ${observation.durationMs}ms${observation.lastIncidentDurationMs === undefined ? "" : ` · last incident ${observation.lastIncidentDurationMs}ms`}`;
+  return `Runtime health: ${observation.state} · CPU ${observation.cpuPercent === undefined ? "unknown" : `${observation.cpuPercent}%`} · /health ${observation.healthLatencyMs === undefined ? "unknown" : `${observation.healthLatencyMs}ms`}${observation.healthAvailable === false ? " unavailable" : ""} · held ${observation.durationMs}ms${observation.lastIncidentDurationMs === undefined ? "" : ` · last incident ${observation.lastIncidentDurationMs}ms`}${observation.delivery === "none" ? "" : ` · seat ${observation.delivery}`}${observation.recorded === undefined ? "" : ` · chat ${observation.recorded ? "recorded" : "not recorded"}`}`;
 }

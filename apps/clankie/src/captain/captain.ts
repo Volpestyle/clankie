@@ -2715,14 +2715,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return deliverNativeHealthAlert(route.owner, text, guard, route.native ?? route.parent, observeDelivery);
   }
 
+  /**
+   * The owner's default conversation records the alert durably as received
+   * context, without a model turn, so it reaches the owner even when its native
+   * seat cannot take a delivery (VUH-1702). The same text is recorded once. The
+   * result is the native seat delivery, which callers retry with that same text.
+   */
   async function notifyRuntimeHealthAlert(text: string): Promise<boolean> {
-    return deliverNativeHealthAlert(
-      { conversationId: conversations.defaultGlobalConversationId() },
-      text,
-      async () => {
-        if (shutdown.signal.aborted) throw new Error("Runtime health alert stopped");
-      },
-    );
+    if (shutdown.signal.aborted || !text.trim() || text.length > 4000) return false;
+    const conversationId = conversations.defaultGlobalConversationId();
+    conversations.recordServiceNotice(conversationId, text);
+    return deliverNativeHealthAlert({ conversationId }, text, async () => {
+      if (shutdown.signal.aborted) throw new Error("Runtime health alert stopped");
+    });
   }
 
   async function deliverNativeHealthAlert(
@@ -4227,6 +4232,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     wakeConversation,
     notifyFleetHealthAlert,
     notifyRuntimeHealthAlert,
+    recordRuntimeHealthNotice: (text: string) =>
+      conversations.recordServiceNotice(conversations.defaultGlobalConversationId(), text),
 
     async fleetEfficiency(conversationId, review) {
       const owner = { conversationId };

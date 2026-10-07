@@ -150,12 +150,18 @@ Health probes use a fresh local HTTP connection and time the complete bounded
 response, so an idle shared fetch connection does not inflate the measurement.
 
 CPU above its threshold or slow health must persist for the sustained duration
-before one alert goes to the native `global-default` conversation. Recovery
-reports the incident duration. A persistent incident emits no repeated alert;
-the cooldown bounds alarms for subsequent incidents. An unavailable native
-delivery retries at most once a minute, and a retained uncertain native receipt
-counts as accepted so it is not replayed. These observations create no service
-model turn. Include incident and recovery evidence in the next Linear check-in.
+before one alert goes to the owner's default conversation (`global-default`).
+The alert and its recovery, with the incident duration, are first recorded in
+that conversation as received context, so every console and app surface shows
+them even when no native seat can take a delivery. The same incident's text is
+recorded once. They are then delivered to the conversation's native seat.
+`status` reports both: `delivery` is the seat delivery, and `recorded` is the
+conversation record. A persistent incident emits no repeated alert; the
+cooldown bounds alarms for subsequent incidents. An unavailable native delivery
+retries the same text at most once a minute, and a retained uncertain native
+receipt counts as accepted so it is not replayed. These observations create no
+service model turn. Include incident and recovery evidence in the next Linear
+check-in.
 
 An operator catalog report with fresh process/session proof preserves the exact
 native attachment to that conversation. A bare transcript attachment still

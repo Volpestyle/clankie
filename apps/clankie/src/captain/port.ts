@@ -213,6 +213,8 @@ export interface CaptainPort {
     observe?: (delivery: FleetHealthAlertDelivery) => void,
   ): Promise<boolean>;
   notifyRuntimeHealthAlert(text: string): Promise<boolean>;
+  /** Record a service notice in the owner's default conversation; never a model turn (VUH-1702). */
+  recordRuntimeHealthNotice(text: string): boolean;
   wakeConversation(
     owner: ConversationOwner,
     text: string,
@@ -460,6 +462,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     wakeConversation: async () => false,
     notifyFleetHealthAlert: async () => false,
     notifyRuntimeHealthAlert: async () => false,
+    recordRuntimeHealthNotice: () => false,
     laneMemoryCard: async () => "",
     acknowledgeSeatEvent: async () => false,
     acknowledgeFleetSeatEvent: async () => false,

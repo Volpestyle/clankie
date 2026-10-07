@@ -1517,6 +1517,7 @@ const runtimeHealth = new RuntimeHealthObserver({
   settings: async () => (await settingsStore.load()).runtimeHealth,
   healthUrl: `http://127.0.0.1:${port}/health`,
   notify: (text) => captain.notifyRuntimeHealthAlert(text),
+  record: (text) => captain.recordRuntimeHealthNotice(text),
   observed: (observation) =>
     bodyTelemetry?.emit({
       event: "body.runtime_health",
