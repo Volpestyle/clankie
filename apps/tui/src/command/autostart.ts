@@ -18,7 +18,7 @@ const AUTOSTART_USAGE = "Usage: clankie autostart enable|disable|status";
 /** One recovery pass; its first run after a boot starts Clankie (`clankie recover`). */
 const AUTOSTART_SERVICE_ARGS = ["recover", "--autostart"] as const;
 /** Seconds between recovery passes: how long a crashed service can stay down unnoticed. */
-export const AUTOSTART_INTERVAL_SECONDS = 30;
+const AUTOSTART_INTERVAL_SECONDS = 30;
 /** launchd starts jobs with a bare environment; carry the shell's view of these when set. */
 const CARRIED_ENVIRONMENT = ["PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CLANKIE_STATE_HOME"] as const;
 const LAUNCHCTL_TIMEOUT_MS = 10_000;

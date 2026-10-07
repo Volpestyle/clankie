@@ -45,15 +45,15 @@ import {
  */
 
 /** Crashes inside this window count toward backoff and giving up. */
-export const CRASH_WINDOW_MS = 30 * 60_000;
+const CRASH_WINDOW_MS = 30 * 60_000;
 /** Wait before restart attempt N (1-based) within the window. */
-export const RESTART_BACKOFF_MS = [0, 30_000, 2 * 60_000, 5 * 60_000] as const;
+const RESTART_BACKOFF_MS = [0, 30_000, 2 * 60_000, 5 * 60_000] as const;
 /** Crashes within the window after which recovery leaves the service stopped. */
 export const GIVE_UP_AFTER = 5;
 const LOG_TAIL_BYTES = 4_096;
 const KEPT_CRASHES = 20;
 
-export interface CrashEntry {
+interface CrashEntry {
   /** The dead process, or 0 for a recovery restart that failed before it was healthy. */
   readonly pid: number;
   readonly detectedAt: string;
@@ -78,7 +78,7 @@ export interface RecoveryRecord {
   readonly resetAt?: string;
 }
 
-export interface RecoveryAction {
+interface RecoveryAction {
   readonly id: ServiceId;
   readonly action: "restarted" | "failed" | "waiting" | "gave_up";
   readonly detectedAt: string;
@@ -176,7 +176,7 @@ function logTail(id: ServiceId, env: NodeJS.ProcessEnv): string {
 }
 
 /** One plain line that names the failure, for an owner notice. */
-export function crashSummary(tail: string): string {
+function crashSummary(tail: string): string {
   const lines = tail
     .split("\n")
     .map((line) => line.trim())

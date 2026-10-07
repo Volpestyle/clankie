@@ -21,7 +21,7 @@ export interface RecoverCommandOptions extends CreateServiceOptionsInput {
  * boot (start Clankie, as the login agent always did) from every later tick
  * (only restart what crashed).
  */
-export function currentBootId(): string | undefined {
+function currentBootId(): string | undefined {
   try {
     if (process.platform === "darwin") {
       const raw = execFileSync("/usr/sbin/sysctl", ["-n", "kern.boottime"], {

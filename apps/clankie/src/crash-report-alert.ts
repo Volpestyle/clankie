@@ -13,7 +13,7 @@ interface CrashEntry {
 
 const MAX_RECORD_BYTES = 256 * 1024;
 
-export function crashAlertText(
+function crashAlertText(
   record: { readonly id?: unknown; readonly crashes?: unknown },
   alertedThrough: string | undefined,
 ): { readonly text: string; readonly through: string } | undefined {
