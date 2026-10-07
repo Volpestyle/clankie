@@ -198,6 +198,51 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/operator/fleet-settings/hire",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read harness, model and effort defaults; omitted fields leave the choice to Clankie.",
+      },
+    ],
+    [
+      "POST /v1/operator/fleet-settings/hire",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Update hire defaults against the whole hire profile revision; auto clears a preference.",
+      },
+    ],
+    [
+      "GET /v1/worker-accounts",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read sign-in, identity, usage headroom and holds for this machine or the named fleet connection; never credentials.",
+      },
+    ],
+    [
+      "POST /v1/worker-accounts/holds",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Hold or release one account for automatic hiring; an explicitly selected account remains usable.",
+      },
+    ],
+    [
+      "GET /v1/operator/persona",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read chattiness and reply policy; account-paired hosted operators retain full persona access.",
+      },
+    ],
+    [
+      "POST /v1/operator/persona",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Update chattiness and reply policy; other persona fields require operator authority.",
+      },
+    ],
+    [
       "GET /v1/operator/projects",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
