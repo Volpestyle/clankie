@@ -104,6 +104,19 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   `uncertain` (2026-10-06: a 24k service handoff, before events were bounded to
   the channel limit). A pump logging nothing after `pump_started` is polling;
   look for the missing deliveries in the service's receipts, not the bridge.
+  A poll failure carries `elapsedMs`, `causeCode` and `httpStatus`, never a
+  message: `TypeError`/`ECONNREFUSED` is the service down, 503 is it shutting
+  down, and `TimeoutError` near 35s means the service held the poll open. Before
+  2026-10-07 that last case meant a pi run admitted while the seat was away had
+  the conversation, and the poll waited for it to settle; the run reached the
+  seat afterwards as a "Service handoff" event.
+
+- **A restart does not hand a live seat's conversation to pi.** The head
+  mailbox writes `<conversation>.json.presence` beside its receipt journal on
+  each poll (at most every 5s). A new service treats a seat that polled within
+  two minutes of its start as bound for 45 seconds; turns queue for it and
+  return to pi only if it never polls. Without that file, or with an older one,
+  an unpolled seat is unbound at once.
 
 - **An unresolved head receipt fences only its own original.** The head
   mailbox journal is `~/.clankie/captain/delivery-receipts/head/<conversation>.json`

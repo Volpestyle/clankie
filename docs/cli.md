@@ -3803,7 +3803,16 @@ The bridge keeps polling through acknowledgment errors, retaining exact receipt
 IDs for reconciliation without repeating channel notifications. Content-free
 pump diagnostics live in the state home's `clankie/seat-bridges/<pid>.jsonl`
 (`~/.local/state/clankie/seat-bridges/` by default): PID, conversation, source
-hash captured at module load, stage and event ID. A live tool connection alone
+hash captured at module load, stage and event ID. A failed request adds
+`elapsedMs`, the error name and code, the system `causeCode` (`ECONNREFUSED`
+while the service is down) and the service's `httpStatus` (503 while it shuts
+down); a poll that fails with `TimeoutError` near 35 seconds was parked by the
+service, not refused. A seat that polled the previous service within two
+minutes of a restart keeps its conversation for 45 seconds after the new
+service starts, so wakes and reports wait for it to reconnect instead of
+running on pi beside it; the evidence is
+`~/.clankie/captain/delivery-receipts/head/<conversation>.json.presence`.
+A live tool connection alone
 does not prove a running receiver. A failed channel write remains uncertain;
 the bridge stops polling rather than implicitly acknowledging an unseen take.
 The service keeps every event inside the channel's 16,384-character limit: a

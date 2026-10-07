@@ -382,11 +382,12 @@ export async function pumpSeatEvents(
       // Diagnostics cannot interrupt delivery or receipt reconciliation.
     }
   };
-  const report = (error: unknown, stage: "poll" | "ack", eventId?: string) => {
+  const report = (error: unknown, stage: "poll" | "ack", eventId?: string, elapsedMs?: number) => {
     diagnostic({
       event: "pump_error",
       stage,
       ...(eventId === undefined ? {} : { eventId }),
+      ...(elapsedMs === undefined ? {} : { elapsedMs }),
       ...errorIdentity(error),
     });
     try {
@@ -402,11 +403,13 @@ export async function pumpSeatEvents(
     await delay(0, signal);
     if (signal.aborted) return;
     let events: readonly OperatorSeatEvent[];
+    const pollStartedAt = Date.now();
     try {
       events = await upstream.pollEvents(waitMs, signal);
     } catch (error) {
       if (signal.aborted) return;
-      report(error, "poll");
+      // How long the poll lived tells a refused connection from one the service parked.
+      report(error, "poll", undefined, Date.now() - pollStartedAt);
       if (error instanceof FleetMembershipRefused) {
         diagnostic({ event: "pump_stopped", stage: "poll", ...errorIdentity(error) });
         return;
@@ -523,16 +526,38 @@ export interface SeatPumpDiagnostic {
   readonly eventId?: string;
   readonly errorName?: string;
   readonly errorCode?: string | number;
+  /** The underlying system error code, such as ECONNREFUSED behind fetch's TypeError. */
+  readonly causeCode?: string;
+  /** The service's HTTP status when it answered with a refusal. */
+  readonly httpStatus?: number;
+  /** How long the failed request lived before it failed. */
+  readonly elapsedMs?: number;
 }
 
-function errorIdentity(error: unknown): Pick<SeatPumpDiagnostic, "errorName" | "errorCode"> {
+/** A non-OK service answer; only its status is journaled. */
+class SeatHttpError extends Error {
+  public override readonly name = "SeatHttpError";
+  public readonly status: number;
+  public constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function errorIdentity(
+  error: unknown,
+): Pick<SeatPumpDiagnostic, "errorName" | "errorCode" | "causeCode" | "httpStatus"> {
   if (!(error instanceof Error)) return { errorName: typeof error };
   const code = "code" in error ? error.code : undefined;
+  const cause: unknown = error.cause;
+  const causeCode = typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined;
   return {
     errorName: /^[a-zA-Z_$][a-zA-Z0-9_.$-]{0,63}$/u.test(error.name) ? error.name : "Error",
     ...(typeof code === "number" || (typeof code === "string" && /^[A-Z_0-9-]{1,64}$/u.test(code))
       ? { errorCode: code }
       : {}),
+    ...(typeof causeCode === "string" && /^[A-Z_0-9-]{1,64}$/u.test(causeCode) ? { causeCode } : {}),
+    ...(error instanceof SeatHttpError ? { httpStatus: error.status } : {}),
   };
 }
 
@@ -843,7 +868,8 @@ export async function connectLaneUpstream(input: {
         headers,
         signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]),
       });
-      if (!response.ok) throw new Error(`seat outbox answered ${String(response.status)}`);
+      if (!response.ok)
+        throw new SeatHttpError(`seat outbox answered ${String(response.status)}`, response.status);
       return OperatorSeatEventsPageSchema.parse(await response.json()).events;
     },
     async acknowledge(eventId) {
@@ -857,7 +883,8 @@ export async function connectLaneUpstream(input: {
       );
       await checkFleetMembership(response);
       if (response.status === 404) return false;
-      if (!response.ok) throw new Error(`seat acknowledgment answered ${String(response.status)}`);
+      if (!response.ok)
+        throw new SeatHttpError(`seat acknowledgment answered ${String(response.status)}`, response.status);
       return true;
     },
     async reply(eventId, text) {

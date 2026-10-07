@@ -95,6 +95,10 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
         wantsReply: false,
         signal: context.signal,
       });
+      // Nothing was taken: the seat that held the route (a restart's reconnect
+      // grace, or a poll gap) never came back, so the service runs it after all.
+      if (result.outcome === "unbound")
+        return ctx.conversations.serviceRunner(conversationId, content, publish, context);
       context.deliveryReceipt?.(result.deliveryStage ?? "uncertain");
       if (result.outcome !== "delivered" && result.outcome !== "replied")
         throw new Error("Worker report native delivery remains unavailable");

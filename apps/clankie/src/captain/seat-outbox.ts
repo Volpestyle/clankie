@@ -7,9 +7,14 @@
  * stdio bridge long-polls them out and pushes each one into the session as a
  * channel event. A bound head is a head that is polling: the bridge asks again
  * the moment a poll returns, so a seat that has gone quiet for longer than the
- * re-poll grace is gone, and what it never took goes back to pi.
+ * re-poll grace is gone, and what it never took goes back to pi. A service
+ * restart is the exception: a seat that was polling the previous process is
+ * presumed to be reconnecting for a short grace, so the service does not run
+ * the conversation on pi beside a live seat (2026-10-07).
  */
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   headSeatDeliveryStage,
@@ -37,6 +42,16 @@ function fitSeatChannel(content: string): string {
 
 /** Covers the millisecond gap between a poll returning and the live bridge asking again. */
 const BOUND_GRACE_MS = 2_000;
+/**
+ * A seat that polled the previous service this recently is presumed to be
+ * reconnecting after the restart, not gone: its bridge retries every 5s and its
+ * parked poll was at most 25s old when the old service stopped (2026-10-07).
+ */
+const RESTART_RECENT_SEAT_MS = 2 * 60_000;
+/** How long after the service starts that presumed seat keeps its turns before pi takes them. */
+const RESTART_RECONNECT_GRACE_MS = 45_000;
+/** The presence heartbeat is rewritten at most this often. */
+const PRESENCE_WRITE_INTERVAL_MS = 5_000;
 /** How long an escalation waits for the seat's `reply` before the run settles unanswered. */
 const REPLY_TIMEOUT_MS = 10 * 60_000;
 
@@ -138,6 +153,11 @@ export class SeatOutbox {
   private readonly onUnresolved: ((receipt: UnresolvedSeatReceipt) => void) | undefined;
   private lastPollAt: number | undefined;
   private lastPollBinding: string | undefined;
+  private readonly presencePath: string | undefined;
+  private presenceWrittenAt: number | undefined;
+  private presenceBinding: string | undefined;
+  /** Until a seat polls this process, a seat present before the restart is presumed bound. */
+  private reconnectUntil: number | undefined;
   private closed = false;
   private turnActive = false;
   private turnSessionId: string | undefined;
@@ -160,6 +180,16 @@ export class SeatOutbox {
       readonly boundGraceMs?: number;
       readonly replyTimeoutMs?: number;
       readonly now?: () => number;
+      /**
+       * Seat presence heartbeat. A seat that polled the previous service within
+       * the recent window stays bound for a reconnect grace after this service
+       * starts, so its turns queue for it instead of running on pi.
+       */
+      readonly presencePath?: string;
+      /** When this service process started; the reconnect grace counts from here. */
+      readonly startedAt?: number;
+      readonly reconnectGraceMs?: number;
+      readonly recentSeatMs?: number;
       /** Tell the lead about an unresolved receipt instead of failing silently. Called once per receipt. */
       readonly onUnresolved?: (receipt: UnresolvedSeatReceipt) => void;
     } = {},
@@ -172,6 +202,17 @@ export class SeatOutbox {
     this.boundGraceMs = options.boundGraceMs ?? BOUND_GRACE_MS;
     this.replyTimeoutMs = options.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
+    this.presencePath = options.presencePath;
+    if (this.presencePath !== undefined) {
+      const presence = readPresence(this.presencePath);
+      const startedAt = options.startedAt ?? this.now();
+      const age = presence === undefined ? undefined : startedAt - presence.lastPollAt;
+      if (age !== undefined && age >= 0 && age <= (options.recentSeatMs ?? RESTART_RECENT_SEAT_MS)) {
+        this.reconnectUntil = startedAt + (options.reconnectGraceMs ?? RESTART_RECONNECT_GRACE_MS);
+        // The reconnecting seat proves the same native binding when it polls.
+        this.lastPollBinding = presence!.recipientBinding;
+      }
+    }
   }
 
   /** Read the exact original from the live mailbox or its retained acknowledgment. */
@@ -472,6 +513,9 @@ export class SeatOutbox {
   /** The bridge's long poll: ack in-flight turns, then everything queued, or park. */
   public poll(waitMs: number, signal?: AbortSignal, recipientBinding?: string): Promise<OperatorSeatEvent[]> {
     if (this.closed) return Promise.resolve([]);
+    // The seat is back: from here, its own polls decide whether it is bound.
+    this.reconnectUntil = undefined;
+    this.recordPresence(recipientBinding);
     // A polling seat is present: announce receipts it has not been told about yet.
     this.alertUnresolved();
     this.ackInFlight(recipientBinding);
@@ -586,9 +630,35 @@ export class SeatOutbox {
   }
 
   private remainingGraceMs(): number {
-    if (this.lastPollAt === undefined) return 0;
-    const elapsed = this.now() - this.lastPollAt;
-    return elapsed < this.boundGraceMs ? this.boundGraceMs - elapsed : 0;
+    const now = this.now();
+    const reconnect = this.reconnectUntil === undefined ? 0 : Math.max(0, this.reconnectUntil - now);
+    if (this.lastPollAt === undefined) return reconnect;
+    const elapsed = now - this.lastPollAt;
+    return Math.max(reconnect, elapsed < this.boundGraceMs ? this.boundGraceMs - elapsed : 0);
+  }
+
+  /** Durable evidence that a seat is polling, read by the next service after a restart. */
+  private recordPresence(recipientBinding: string | undefined): void {
+    if (this.presencePath === undefined) return;
+    const now = this.now();
+    if (
+      this.presenceWrittenAt !== undefined &&
+      now - this.presenceWrittenAt < PRESENCE_WRITE_INTERVAL_MS &&
+      this.presenceBinding === recipientBinding
+    )
+      return;
+    try {
+      mkdirSync(dirname(this.presencePath), { recursive: true, mode: 0o700 });
+      writeFileSync(
+        this.presencePath,
+        `${JSON.stringify({ schemaVersion: 1, lastPollAt: now, ...(recipientBinding === undefined ? {} : { recipientBinding }) })}\n`,
+        { mode: 0o600 },
+      );
+      this.presenceWrittenAt = now;
+      this.presenceBinding = recipientBinding;
+    } catch {
+      // Presence only shortens a restart's pi fallback; a failed write keeps today's behavior.
+    }
   }
 
   /** The bridge came back: previous takes are delivered, escalations start their reply window. */
@@ -677,5 +747,20 @@ export class SeatOutbox {
     if (first === undefined) return;
     const ready = this.take(first.recipientBinding);
     if (ready.length > 0) first.finish(ready, "wake");
+  }
+}
+
+function readPresence(path: string): { lastPollAt: number; recipientBinding?: string } | undefined {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof raw !== "object" || raw === null) return undefined;
+    const { lastPollAt, recipientBinding } = raw as Record<string, unknown>;
+    if (typeof lastPollAt !== "number" || !Number.isFinite(lastPollAt)) return undefined;
+    return {
+      lastPollAt,
+      ...(typeof recipientBinding === "string" ? { recipientBinding } : {}),
+    };
+  } catch {
+    return undefined;
   }
 }

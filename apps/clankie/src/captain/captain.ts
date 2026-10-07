@@ -983,17 +983,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const roomBursts = new RoomHandoffBursts();
   const roomBurstJoins = new Map<string, Promise<CaptainChannelTurnResult | undefined>>();
   const seatOutboxes = new Map<string, SeatOutbox>();
+  const serviceStartedAt = Date.now();
+  const headReceiptDirectory = join(options.stateDir, "delivery-receipts", "head");
   function seatOutbox(conversationId: string): SeatOutbox {
     shutdown.signal.throwIfAborted();
     let outbox = seatOutboxes.get(conversationId);
     if (outbox === undefined) {
+      const uncertaintyPath = join(headReceiptDirectory, `${encodeURIComponent(conversationId)}.json`);
       const created: SeatOutbox = new SeatOutbox({
-        uncertaintyPath: join(
-          options.stateDir,
-          "delivery-receipts",
-          "head",
-          `${encodeURIComponent(conversationId)}.json`,
-        ),
+        uncertaintyPath,
+        // A seat polling the previous process keeps its turns while it reconnects.
+        presencePath: `${uncertaintyPath}.presence`,
+        startedAt: serviceStartedAt,
         // VUH-1779: tell the seat once about an unresolved receipt instead of failing silently.
         onUnresolved: (receipt) => {
           if (shutdown.signal.aborted) return;
@@ -1013,6 +1014,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       seatOutboxes.set(conversationId, outbox);
     }
     return outbox;
+  }
+  // Open every head outbox whose seat was polling before this restart, so each
+  // routing check sees that seat as reconnecting rather than gone.
+  for (const file of existsSync(headReceiptDirectory) ? readdirSync(headReceiptDirectory) : []) {
+    if (!file.endsWith(".json.presence")) continue;
+    const name = file.slice(0, -".json.presence".length);
+    try {
+      const conversationId = decodeURIComponent(name);
+      if (encodeURIComponent(conversationId) === name) seatOutbox(conversationId);
+    } catch {
+      // Unreadable presence leaves today's behavior: an unpolled seat is unbound.
+    }
   }
   const deliverServiceHandoff = createServiceHandoffDelivery({
     get conversations() {
