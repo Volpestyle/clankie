@@ -32,8 +32,7 @@ function fixture(extra: Partial<RuntimeUpdaterOptions> = {}) {
   mkdirSync(common, { recursive: true });
   mkdirSync(runtime, { recursive: true });
   writeFileSync(join(runtime, ".git"), "fixture");
-  let allowed = true,
-    guardCalls = 0;
+  let allowed = true;
   const launches: { command: string; args: readonly string[]; options: unknown }[] = [];
   const run: InstallCommand = (_command, args) => {
     if (args.includes("--git-common-dir")) return common;
@@ -53,7 +52,6 @@ function fixture(extra: Partial<RuntimeUpdaterOptions> = {}) {
   });
   const authority = {
     guard: async () => {
-      guardCalls++;
       if (!allowed) throw Error("revoked");
     },
     current: () => allowed,
@@ -67,17 +65,33 @@ function fixture(extra: Partial<RuntimeUpdaterOptions> = {}) {
     revoke: () => {
       allowed = false;
     },
-    guards: () => guardCalls,
   };
 }
 it("accepts once after preparation and detaches fixed helper with private file stdio", async () => {
-  const f = fixture();
-  const result = await f.updater.request("main", f.authority);
+  const stages: string[] = [];
+  const f = fixture({
+    materialize: async (directory) => {
+      stages.push("preparing");
+      const hashes = await materializeUpdateHelper(directory);
+      stages.push("prepared");
+      return hashes;
+    },
+  });
+  const result = await f.updater.request("main", {
+    ...f.authority,
+    guard: async () => {
+      stages.push("guard");
+      await f.authority.guard();
+    },
+  });
   expect(result).toMatchObject({
     accepted: true,
     latest: { phase: "scheduled", oldCommit: "a".repeat(40), newCommit: "b".repeat(40) },
   });
-  expect(f.guards()).toBe(2);
+  // The boundary matters: admitted before preparation and freshly authorized
+  // after it. Additional authority checks must not make a safe update fail.
+  expect(stages.indexOf("guard")).toBeLessThan(stages.indexOf("preparing"));
+  expect(stages.lastIndexOf("guard")).toBeGreaterThan(stages.indexOf("prepared"));
   const plan = JSON.parse(
     readFileSync(join(f.home, ".clankie/updates", result.pending!, "plan.json"), "utf8"),
   );
@@ -110,13 +124,19 @@ it("revocation during materialization prevents any durable acceptance or spawn",
   expect(f.updater.status().pending).toBeUndefined();
 });
 it("synchronous current check rejects authority lost while final guard awaited", async () => {
-  const f = fixture();
-  let count = 0;
+  let prepared = false;
+  const f = fixture({
+    materialize: async (directory) => {
+      const hashes = await materializeUpdateHelper(directory);
+      prepared = true;
+      return hashes;
+    },
+  });
   await expect(
     f.updater.request("main", {
       current: f.authority.current,
       guard: async () => {
-        if (++count === 2) {
+        if (prepared) {
           await Promise.resolve();
           f.revoke();
         }
