@@ -1,0 +1,170 @@
+[
+  {
+    "revision": "d293a22bae9f0085448240de351b8bff54474691",
+    "seconds": 486.40465679199997,
+    "results": [
+      {
+        "command": "pnpm herdr:skill:check",
+        "seconds": 0.672084916,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/0-herdr-skill-check.log",
+        "logSha256": "57c045f32200353061d1665ea951bf56fd3ec98ee17a8e440eca315fcad23067"
+      },
+      {
+        "command": "pnpm fmt:check",
+        "seconds": 2.3335316670000004,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/1-fmt-check.log",
+        "logSha256": "439cc49a35f862e3ee37823e5c9c8306cb3d7b8567430489a7f6341cc01525b7"
+      },
+      {
+        "command": "pnpm lint",
+        "seconds": 1.210207542,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/2-lint.log",
+        "logSha256": "1cb92ad84e1cf88d0d352712152288dba62269d72970c915c8b9b8f9082f19f2"
+      },
+      {
+        "command": "pnpm deadcode",
+        "seconds": 1.997585916,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/3-deadcode.log",
+        "logSha256": "5d923312c4ea87d8171f001214f1123f143596e344333599e27fac33bf68e4cc"
+      },
+      {
+        "command": "pnpm docs:check",
+        "seconds": 1.7856742920000006,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/4-docs-check.log",
+        "logSha256": "8ce4cd65bac4a48a395fe106d4c3096e631f3897e1849de1eeb635a1f73c5cff"
+      },
+      {
+        "command": "pnpm infra:check",
+        "seconds": 0.9511237090000004,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/5-infra-check.log",
+        "logSha256": "8b285e54a8871652c67e0abdb32c4148fbf64fae12c52450b57e3f2d602510ac"
+      },
+      {
+        "command": "pnpm typecheck --concurrency=1",
+        "seconds": 15.299305417,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/6---concurrency=1.log",
+        "logSha256": "d39da42c6464d99a26cb677174bff71bf2a1dd1e07b774a7bdd8ed3f5ade06ba"
+      },
+      {
+        "command": "pnpm test",
+        "seconds": 462.067150417,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/repaired-gate-1/7-test.log",
+        "logSha256": "90a8a91eb2937343f9feac40caa4cb6ceaee46139e315fd8b7f02ac298f14263"
+      }
+    ],
+    "run": "repaired-gate-1",
+    "summaries": [
+      "Test Files  799 passed | 19 skipped (818)",
+      "Tests  7332 passed | 49 skipped (7381)",
+      "Duration  458.92s (transform 15.57s, setup 5.68s, import 514.68s, tests 1229.55s, environment 47ms)",
+      "test result: ok. 124 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s",
+      "Vox IPC ready: /Users/james/dev/clankie-wt/vuh-1762-gate/apps/vox/target/debug/clankvox"
+    ],
+    "result": "passed",
+    "admissionWaitExcluded": true,
+    "typecheckConcurrency": 1,
+    "vitestWorkers": 4,
+    "retry": 0,
+    "junitSha256": "838734c2153fbd47e6c5cf9eda422150739099d31ff525ae94c548e29a737bf4"
+  },
+  {
+    "revision": "a78c9187fc7d912883cf5e2189a901a251c0d778",
+    "seconds": 620.831153791,
+    "results": [
+      {
+        "command": "pnpm herdr:skill:check",
+        "seconds": 0.7257070000000001,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/0-herdr-skill-check.log",
+        "logSha256": "57c045f32200353061d1665ea951bf56fd3ec98ee17a8e440eca315fcad23067"
+      },
+      {
+        "command": "pnpm fmt:check",
+        "seconds": 3.149812042,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/1-fmt-check.log",
+        "logSha256": "3fadee478df934276be09d230aae5db5b3a86928fb4ee2de3d5b0f77d944d73d"
+      },
+      {
+        "command": "pnpm lint",
+        "seconds": 1.3868247499999997,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/2-lint.log",
+        "logSha256": "e5c2129e0ff4efa78ee7fe3d4f8b531a7500ff0f1d4c1defd679409a70ef346f"
+      },
+      {
+        "command": "pnpm deadcode",
+        "seconds": 2.2852852090000004,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/3-deadcode.log",
+        "logSha256": "5d923312c4ea87d8171f001214f1123f143596e344333599e27fac33bf68e4cc"
+      },
+      {
+        "command": "pnpm docs:check",
+        "seconds": 2.1487764160000005,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/4-docs-check.log",
+        "logSha256": "2641c4e0d9c2eb01d1ee1a048e788979dd5eda38898262b619ab0077f24cf8a6"
+      },
+      {
+        "command": "pnpm infra:check",
+        "seconds": 0.8787821249999997,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/5-infra-check.log",
+        "logSha256": "8b285e54a8871652c67e0abdb32c4148fbf64fae12c52450b57e3f2d602510ac"
+      },
+      {
+        "command": "pnpm typecheck --concurrency=1",
+        "seconds": 16.136660374999998,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/6---concurrency=1.log",
+        "logSha256": "032f790c125839b80b1ce8ad02471a4535f54ab21c73b871fa519d95ed447eaf"
+      },
+      {
+        "command": "pnpm test",
+        "seconds": 594.009388834,
+        "status": 0,
+        "signal": null,
+        "log": ".local/vuh1762/verified-gate-2/7-test.log",
+        "logSha256": "c4dfd9e613ee4679808712ec4c41f92abc8c92d477b6aef412b3070937559790"
+      }
+    ],
+    "run": "verified-gate-2",
+    "summaries": [
+      "Test Files  799 passed | 19 skipped (818)",
+      "Tests  7333 passed | 49 skipped (7382)",
+      "Duration  589.39s (transform 20.58s, setup 7.32s, import 689.31s, tests 1555.81s, environment 56ms)",
+      "test result: ok. 124 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s",
+      "Vox IPC ready: /Users/james/dev/clankie-wt/vuh-1762-gate/apps/vox/target/debug/clankvox"
+    ],
+    "result": "passed",
+    "admissionWaitExcluded": true,
+    "typecheckConcurrency": 1,
+    "vitestWorkers": 4,
+    "retry": 0,
+    "junitSha256": "f8c2be6c6a4f5de63fda193fecf1a66d77c19dd301bf63455c7e0f397dbdc512"
+  }
+]

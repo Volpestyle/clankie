@@ -116,3 +116,39 @@ barrier after durable broker/config writes for the admitted-cancellation case.
 Teardown cancels pending work, releases held provider/commit work and observes
 admitted sessions settle before deleting their files. No production code,
 timeout, retry count or provider/authority assertion changes.
+
+## Accepted full gates
+
+| Gate | Main revision                              | Whole gate        | Vitest   | Typecheck             | TypeScript coverage           | Native coverage                  |
+| ---- | ------------------------------------------ | ----------------- | -------- | --------------------- | ----------------------------- | -------------------------------- |
+| 1    | `d293a22bae9f0085448240de351b8bff54474691` | 486.40 s (8m06s)  | 458.92 s | 15.30 s; 28/29 cached | 799 files, 7,332 tests passed | Vox 124 passed; IPC smoke passed |
+| 2    | `a78c9187fc7d912883cf5e2189a901a251c0d778` | 620.83 s (10m21s) | 589.39 s | 16.14 s; 28/29 cached | 799 files, 7,333 tests passed | Vox 124 passed; IPC smoke passed |
+
+Both passed all eight full-gate steps through `clankie heavy`. Each retained
+19 existing manual-only skipped files (49 tests); no suites were removed,
+quarantined or retried. Evals remain excluded, and per-push CI stays narrow.
+Main was fetched before each gate. Both full concurrent runs passed all six
+subscription integration cases after the synchronization repair.
+
+Between these passes, freshly fetched `f9b337d4` stopped at knip before tests:
+its new `landingGateScript` helper was exported without an external consumer.
+The helper remains internal with identical behavior and its real queue test
+passed. James explicitly retained `d293a22b` as gate 1 and requested gate 2
+restart after this static repair. At his request, `check:landing` now includes
+`pnpm deadcode`; its measured 1.8–3.1-second cost is recorded in
+[ADR 0247](../../adr/0247-narrow-checks-have-one-command.md) and the integration
+guide. This catches the recurring declaration/export omissions before landing.
+
+Whole-gate execution fell 51–62% from the historical 1,264.34-second baseline.
+The current selection is larger, and compiler cache state and shared machine
+load vary between runs. These are observed whole-gate results, not a controlled
+attribution of that entire improvement to four workers. The same-input focused
+comparison above isolates the worker gain (42%) and claim timer gain (98%).
+
+[Final per-step receipts, summaries and log/JUnit hashes](full-gates.json)
+retain both accepted results. Raw logs and JUnit reports are in
+`.local/vuh1762/repaired-gate-1/` and `.local/vuh1762/verified-gate-2/`.
+Remaining scope: existing opt-in/native checks and live subscription-provider
+acceptance were not exercised; evals were not authorized. The full gate itself
+has no remaining failure, and no deployment or restart was performed by this
+worker.
