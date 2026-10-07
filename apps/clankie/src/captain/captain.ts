@@ -205,7 +205,12 @@ import { RoomConversations } from "./room-conversations.ts";
 import { captainRoutingExtension } from "./routing.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
-import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
+import {
+  SEAT_DELIVERY_ALERT_SOURCE,
+  SeatLinkInterruptedError,
+  SeatOutbox,
+  seatDeliveryAlert,
+} from "./seat-outbox.ts";
 import { createServiceHandoffDelivery } from "./service-handoff-delivery.ts";
 import { withSeatSubagents } from "./seat-subagents.ts";
 import { CaptainResourceLoader, skillSearchExtension } from "./skill-catalog.ts";
@@ -932,14 +937,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     shutdown.signal.throwIfAborted();
     let outbox = seatOutboxes.get(conversationId);
     if (outbox === undefined) {
-      outbox = new SeatOutbox({
+      const created: SeatOutbox = new SeatOutbox({
         uncertaintyPath: join(
           options.stateDir,
           "delivery-receipts",
           "head",
           `${encodeURIComponent(conversationId)}.json`,
         ),
+        // VUH-1779: tell the seat once about an unresolved receipt instead of failing silently.
+        onUnresolved: (receipt) => {
+          if (shutdown.signal.aborted) return;
+          void created
+            .deliver({
+              kind: "message",
+              conversationId,
+              source: SEAT_DELIVERY_ALERT_SOURCE,
+              content: seatDeliveryAlert(conversationId, receipt),
+              wantsReply: false,
+              signal: shutdown.signal,
+            })
+            .catch(() => undefined);
+        },
       });
+      outbox = created;
       seatOutboxes.set(conversationId, outbox);
     }
     return outbox;
@@ -1362,9 +1382,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   function seatEventKind(
     conversationId: string,
     context: Pick<ConversationTurnContext, "internal" | "origin">,
+    content: string,
   ): OperatorSeatEventKind | undefined {
-    const outbox = seatOutbox(conversationId);
-    if (!outbox.bound() && !outbox.uncertain()) return undefined;
+    // VUH-1779: another delivery's unresolved receipt no longer holds this input.
+    if (!seatOutbox(conversationId).routesToSeat(content)) return undefined;
     return seatEventKindFor(context, true);
   }
 
@@ -2713,7 +2734,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (!(await validateConversationOwner(owner))) return outcome(false, "owner_unavailable");
       await guard();
       const outbox = seatOutbox(owner.conversationId);
-      if (outbox.uncertain()) return outcome(false, "owner_receipt_unresolved");
+      // VUH-1779: only this alert's own unresolved original holds it back.
+      if (outbox.uncertainFor(text)) return outcome(false, "owner_receipt_unresolved");
       if (!recipient && outbox.bound()) {
         const result = await outbox
           .deliver({
@@ -2752,7 +2774,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         target.terminalId,
         join(options.stateDir, "delivery-receipts", "fleet"),
       );
-      if (mailbox.uncertain()) return outcome(false, "native_receipt_unresolved");
+      if (mailbox.uncertainFor(text)) return outcome(false, "native_receipt_unresolved");
       let blocked = false;
       let dispatchChecked = false;
       const finalGuard = async () => {
@@ -2760,7 +2782,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (!(await validateConversationOwner(owner))) throw new Error("Health alert owner changed");
         if (recipient && !(await nativeRecipientCurrent(recipient)))
           throw new Error("Health alert native lead changed");
-        if (outbox.uncertain() || mailbox.uncertain()) {
+        if (outbox.uncertainFor(text) || mailbox.uncertainFor(text)) {
           blocked = true;
           throw new Error("Health alert recipient has an unresolved original receipt; nothing was sent");
         }
@@ -3943,6 +3965,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
       get seatOutboxes() {
         return seatOutboxes;
+      },
+      seatOutbox: (conversationId: string) => seatOutbox(conversationId),
+      headSeatConversations: () => {
+        const directory = join(options.stateDir, "delivery-receipts", "head");
+        const ids = new Set(seatOutboxes.keys());
+        if (existsSync(directory))
+          for (const file of readdirSync(directory)) {
+            if (!file.endsWith(".json")) continue;
+            const name = file.slice(0, -5);
+            const id = decodeURIComponent(name);
+            if (encodeURIComponent(id) === name) ids.add(id);
+          }
+        return [...ids];
       },
       get terminals() {
         return terminals;

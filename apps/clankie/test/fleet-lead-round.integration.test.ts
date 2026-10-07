@@ -201,11 +201,14 @@ async function fixture(
   fixtures.push({ root, captain });
   // Park both native outboxes before a scheduled wake; zero-wait reads do not bind them.
   if (bind) {
+    // A seeded unresolved original produces its one VUH-1779 alert, nothing else.
     expect(
-      await Promise.all([
-        captain.pollSeatEvents(1, undefined, "global-default"),
-        captain.pollSeatEvents(1, undefined, second.conversation.conversationId),
-      ]),
+      (
+        await Promise.all([
+          captain.pollSeatEvents(1, undefined, "global-default"),
+          captain.pollSeatEvents(1, undefined, second.conversation.conversationId),
+        ])
+      ).map((events) => events.filter((event) => event.source !== "seat-delivery-alert")),
     ).toEqual([[], []]);
   }
   const leadSessions = new Map([

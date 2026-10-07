@@ -222,6 +222,7 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "awake",
   "herdr",
   "hire-receipt",
+  "seat-delivery",
   "discord",
   "voice",
   "gateway",

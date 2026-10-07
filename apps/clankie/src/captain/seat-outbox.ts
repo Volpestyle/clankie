@@ -14,6 +14,7 @@ import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   headSeatDeliveryStage,
   type HireRecoveryEvidence,
+  type SeatDeliveryAbandonment,
   type DeliveryStage,
   type OperatorSeatEvent,
   type OperatorSeatEventKind,
@@ -28,7 +29,7 @@ const CLIPPED_NOTE_MAX = 200;
  * cannot parse, which would leave its events taken but never shown (2026-10-06:
  * a 24k service handoff). The note says plainly what did not reach the seat.
  */
-export function fitSeatChannel(content: string): string {
+function fitSeatChannel(content: string): string {
   if (content.length <= OPERATOR_CONVERSATION_TEXT_MAX) return content;
   const kept = OPERATOR_CONVERSATION_TEXT_MAX - CLIPPED_NOTE_MAX;
   return `${content.slice(0, kept)}\n\n[Clipped to the seat channel's ${String(OPERATOR_CONVERSATION_TEXT_MAX)}-character limit: the last ${String(content.length - kept)} characters were not delivered.]`;
@@ -38,6 +39,26 @@ export function fitSeatChannel(content: string): string {
 const BOUND_GRACE_MS = 2_000;
 /** How long an escalation waits for the seat's `reply` before the run settles unanswered. */
 const REPLY_TIMEOUT_MS = 10 * 60_000;
+
+/** Source of the service's own notice about an unresolved delivery; it never alerts about itself. */
+export const SEAT_DELIVERY_ALERT_SOURCE = "seat-delivery-alert";
+
+/** One delivery whose receipt never resolved; only its own resend is refused (VUH-1779). */
+export interface UnresolvedSeatReceipt {
+  readonly receiptId: string;
+  /** Absent for receipts recorded before VUH-1779. */
+  readonly beganAt?: number;
+}
+
+/** The seat's notice for one unresolved receipt: what happened and the owner settle command. */
+export function seatDeliveryAlert(conversationId: string, receipt: UnresolvedSeatReceipt): string {
+  const began =
+    receipt.beganAt === undefined ? "at an unrecorded time" : new Date(receipt.beganAt).toISOString();
+  return [
+    `Seat delivery ${receipt.receiptId} (began ${began}) never confirmed receipt, so it stays unresolved and is never resent. Other wakes, watches and reports keep arriving.`,
+    `If this session never received it, settle it without claiming receipt: \`clankie seat-delivery settle ${receipt.receiptId} abandoned-unknown --conversation ${conversationId}\`. \`clankie seat-delivery list\` shows every unresolved delivery and its age.`,
+  ].join("\n");
+}
 
 /** The service lost its reply waiter; this says nothing about the native turn. */
 export class SeatLinkInterruptedError extends Error {
@@ -112,6 +133,9 @@ export class SeatOutbox {
   private readonly fence: DeliveryFence;
   private readonly delivered: DeliveryFence;
   private readonly active = new Set<string>();
+  /** Receipts already announced, including the alerts' own, so an alert never alerts about an alert. */
+  private readonly alerted = new Set<string>();
+  private readonly onUnresolved: ((receipt: UnresolvedSeatReceipt) => void) | undefined;
   private lastPollAt: number | undefined;
   private lastPollBinding: string | undefined;
   private closed = false;
@@ -136,8 +160,11 @@ export class SeatOutbox {
       readonly boundGraceMs?: number;
       readonly replyTimeoutMs?: number;
       readonly now?: () => number;
+      /** Tell the lead about an unresolved receipt instead of failing silently. Called once per receipt. */
+      readonly onUnresolved?: (receipt: UnresolvedSeatReceipt) => void;
     } = {},
   ) {
+    this.onUnresolved = options.onUnresolved;
     this.fence = new DeliveryFence(options.uncertaintyPath);
     this.delivered = new DeliveryFence(
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
@@ -193,8 +220,86 @@ export class SeatOutbox {
     store.settleRecovery(original[0], id, evidence);
   }
 
+  /** Any unresolved receipt. Routing keeps the seat lane; `deliver` refuses only that original. */
   public uncertain(): boolean {
-    return this.fence.entries().some(([id]) => !this.active.has(id));
+    return this.unresolved().length > 0;
+  }
+
+  /**
+   * Driver selection: the seat takes this input while it polls, or when the
+   * input is (or may be) an unresolved original that only the seat may
+   * reconcile. Must agree with `deliver`, which refuses unrelated input with
+   * `unbound` when no seat polls, or a driver fence would select it forever.
+   */
+  public routesToSeat(content: string, messageId?: string): boolean {
+    return (
+      this.bound() ||
+      this.conflict({ content, ...(messageId === undefined ? {} : { messageId }) }) !== undefined
+    );
+  }
+
+  /** True when this exact content is (or may be) an unresolved original, so it must not be sent again. */
+  public uncertainFor(content: string): boolean {
+    return this.conflict({ content }) !== undefined;
+  }
+
+  /** Unresolved receipts, oldest first, for doctor and the owner settle path. */
+  public unresolvedDeliveries(): UnresolvedSeatReceipt[] {
+    return this.unresolved()
+      .map(([, receipt]) => ({
+        receiptId: receipt.messageId,
+        ...(receipt.beganAt === undefined ? {} : { beganAt: receipt.beganAt }),
+      }))
+      .sort((left, right) => (left.beganAt ?? 0) - (right.beganAt ?? 0));
+  }
+
+  /**
+   * Owner settlement (VUH-1779): retain the original as `abandoned-unknown`.
+   * It claims no receipt and the original is never resent; it only stops
+   * counting as unresolved.
+   */
+  public abandonUnknown(receiptId: string): SeatDeliveryAbandonment {
+    if (this.active.has(receiptId))
+      throw new Error("That delivery is still in flight; wait for it to settle");
+    const matches = this.unresolved().filter(([, receipt]) => receipt.messageId === receiptId);
+    if (matches.length !== 1) throw new Error("No unresolved seat delivery has that receipt ID");
+    return this.fence.abandonUnknown(matches[0]![0], receiptId, this.now());
+  }
+
+  private unresolved() {
+    return this.fence.entries().filter(([id]) => !this.active.has(id));
+  }
+
+  /**
+   * ADR 0207 protects the uncertain original itself: its own ID or exact
+   * content may never be sent again. Unrelated deliveries are not blocked.
+   * An unreadable journal cannot tell the two apart, so it refuses everything.
+   */
+  private conflict(input: { content: string; messageId?: string }) {
+    const fingerprint = deliveryFingerprint(input.content);
+    return this.unresolved().find(
+      ([id, receipt]) =>
+        id === "unreadable-receipts" ||
+        receipt.fingerprint === fingerprint ||
+        (input.messageId !== undefined && (id === input.messageId || receipt.messageId === input.messageId)),
+    );
+  }
+
+  /** Each unresolved receipt is announced once per process, only while a seat is reachable. */
+  private alertUnresolved(): void {
+    if (this.onUnresolved === undefined) return;
+    for (const receipt of this.unresolvedDeliveries()) {
+      if (this.alerted.has(receipt.receiptId)) continue;
+      this.alerted.add(receipt.receiptId);
+      const notify = this.onUnresolved;
+      queueMicrotask(() => {
+        try {
+          notify(receipt);
+        } catch {
+          /* The alert is advisory; doctor still reports the receipt. */
+        }
+      });
+    }
   }
 
   /** Exact acknowledged content, retained for read-only reconciliation after restart. */
@@ -234,21 +339,31 @@ export class SeatOutbox {
    */
   public deliver(input: SeatDeliveryInput): Promise<SeatDelivery> {
     if (this.closed) return Promise.reject(new SeatLinkInterruptedError());
-    const unresolved = this.fence.entries().find(([id]) => !this.active.has(id));
-    if (
-      unresolved !== undefined &&
-      input.source === "peer" &&
-      unresolved[1].fingerprint !== deliveryFingerprint(input.content)
-    )
-      return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
+    const unresolved = this.conflict({
+      content: input.content,
+      ...(input.original === undefined ? {} : { messageId: input.original.messageId }),
+    });
     if (unresolved !== undefined)
       return Promise.resolve({
         outcome: "unconfirmed",
         deliveryStage: "uncertain",
         messageId: unresolved[1].messageId,
-        detail: "An earlier delivery is uncertain; its exact receipt must be reconciled before any retry.",
+        detail:
+          "This delivery is uncertain; its exact receipt must be reconciled (or the owner must settle it as abandoned-unknown) and it is never resent.",
+      });
+    const abandoned =
+      input.original === undefined
+        ? undefined
+        : this.fence.all().find(([id, receipt]) => receipt.abandoned && id === input.original!.messageId);
+    if (abandoned !== undefined)
+      return Promise.resolve({
+        outcome: "unconfirmed",
+        deliveryStage: "uncertain",
+        messageId: abandoned[1].messageId,
+        detail: "The owner settled this original as abandoned-unknown; it is never resent.",
       });
     if (!this.bound()) return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
+    if (input.source !== SEAT_DELIVERY_ALERT_SOURCE) this.alertUnresolved();
     if (input.signal?.aborted === true)
       return Promise.resolve({ outcome: "aborted", deliveryStage: "expired" });
     const fingerprint = deliveryFingerprint(input.content);
@@ -270,6 +385,7 @@ export class SeatOutbox {
       this.fence.begin(event.id, {
         messageId: event.id,
         fingerprint,
+        beganAt: this.now(),
         ...(input.original === undefined
           ? input.recipientBinding === undefined
             ? {}
@@ -278,6 +394,7 @@ export class SeatOutbox {
             { sessionId: input.recipientBinding ?? "" }),
       });
       this.active.add(event.id);
+      if (input.source === SEAT_DELIVERY_ALERT_SOURCE) this.alerted.add(event.id);
       const onAbort = (): void =>
         pending.settle(
           pending.acknowledged
@@ -355,6 +472,8 @@ export class SeatOutbox {
   /** The bridge's long poll: ack in-flight turns, then everything queued, or park. */
   public poll(waitMs: number, signal?: AbortSignal, recipientBinding?: string): Promise<OperatorSeatEvent[]> {
     if (this.closed) return Promise.resolve([]);
+    // A polling seat is present: announce receipts it has not been told about yet.
+    this.alertUnresolved();
     this.ackInFlight(recipientBinding);
     const ready = this.take(recipientBinding);
     if (ready.length > 0 || waitMs <= 0 || signal?.aborted === true) return Promise.resolve(ready);

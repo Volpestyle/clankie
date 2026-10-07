@@ -31,7 +31,7 @@ function fixture() {
   let outbox = new SeatOutbox({ boundGraceMs: 100 });
   const select = (conversationId: string, message: string) => {
     const selected = outbox;
-    if (!selected.bound() && !selected.uncertain()) return undefined;
+    if (!selected.routesToSeat(message)) return undefined;
     return {
       run: async () => {
         const delivery = await selected.deliver({

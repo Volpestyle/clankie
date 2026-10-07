@@ -2,6 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
 import { formatRuntimeHealth } from "./command/runtime-health.ts";
+import { formatSeatDeliveryAge } from "./command/seat-delivery.ts";
 
 const mark = (ok: boolean) => (ok ? "✓" : "✗");
 const clean = (text: string) =>
@@ -72,6 +73,16 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     ...fleetLinks,
     ...workerTools,
     ...workerReports,
+    ...(report.seatDeliveries === undefined
+      ? []
+      : "unresolved" in report.seatDeliveries
+        ? report.seatDeliveries.unresolved.length === 0
+          ? ["  ✓ Seat deliveries · none unresolved"]
+          : report.seatDeliveries.unresolved.map(
+              (entry) =>
+                `  ! Seat delivery ${clean(entry.receiptId)} · ${clean(entry.conversationId)} · unresolved ${formatSeatDeliveryAge(entry.ageMs)} · only its own resend is refused · \`clankie seat-delivery settle ${clean(entry.receiptId)} abandoned-unknown --conversation ${clean(entry.conversationId)}\``,
+            )
+        : [`  ○ Seat deliveries · unknown · ${clean(report.seatDeliveries.detail)}`]),
     ...resources,
     ...(report.checkouts && "checkouts" in report.checkouts
       ? report.checkouts.checkouts.map(

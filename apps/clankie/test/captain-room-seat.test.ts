@@ -407,7 +407,7 @@ it("a room-owned watch reaches its attached seat and replies on its original gua
   expect(fake.prompts).toEqual([]);
 });
 
-it("an unresolved original room outbox retains its durable completion watch without dispatching a replacement", async () => {
+it("an unresolved original room outbox never redispatches its original while an unrelated completion watch still settles", async () => {
   const f = await fixture(true);
   const poll = f.captain.pollSeatEvents(1000, undefined, f.conversationId);
   const originalTurn = f.captain.wakeConversation(f.owner, "unresolved-original-room-turn");
@@ -421,12 +421,14 @@ it("an unresolved original room outbox retains its durable completion watch with
   const watch = await durableRoomWatch(f);
   watch.settle();
   await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(1));
-  expect(watch.records()).toEqual([expect.objectContaining(watch.original)]);
+  // VUH-1779: the unrelated watch is no longer held behind another delivery's receipt.
+  expect(watch.records()).toEqual([]);
   expect(roomReceipts(f).pending(originalEvent!.id)).toEqual(receipt);
-  expect(roomReceipts(f).all()).toHaveLength(1);
-  expect(await f.captain.pollSeatEvents(0, undefined, f.conversationId)).toEqual([]);
-  expect(f.execute).not.toHaveBeenCalled();
-  expect(fake.prompts).toEqual([]);
+  expect(JSON.stringify(await f.captain.pollSeatEvents(0, undefined, f.conversationId))).not.toContain(
+    "unresolved-original-room-turn",
+  );
+  expect(JSON.stringify(fake.prompts)).not.toContain("unresolved-original-room-turn");
+  expect(JSON.stringify(f.execute.mock.calls)).not.toContain("unresolved-original-room-turn");
 });
 
 it("a taken unacknowledged room wake retains its original watch and late acknowledgment settles retry without redispatch", async () => {

@@ -41,6 +41,7 @@ export * from "./minecraft.ts";
 export * from "./minecraft-host.ts";
 export * from "./seat-call.ts";
 export * from "./hire-receipts.ts";
+export * from "./seat-deliveries.ts";
 export * from "./discord-permissions.ts";
 export {
   MissionIdSchema,

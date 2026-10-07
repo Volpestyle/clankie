@@ -450,7 +450,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
           // Host-selected Pi room work bypasses the operator inbox without changing
           // its existing social or machine grant. Native admission uses the child path.
           if (preferPi) return undefined;
-          if (!outbox.bound() && !outbox.uncertain()) return undefined;
+          if (!outbox.routesToSeat(normalized.prompt)) return undefined;
           return {
             run: async () => ({
               handled: true as const,
@@ -462,7 +462,8 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
             }),
           };
         }
-        if (!outbox.bound() && !outbox.uncertain()) return undefined;
+        // VUH-1779: only this turn's own unresolved original keeps an absent seat selected.
+        if (!outbox.routesToSeat(normalized.prompt, watch?.context.messageId)) return undefined;
         return {
           run: async () => {
             const preparation = new ConversationServiceRun(ctx.shutdown.signal);

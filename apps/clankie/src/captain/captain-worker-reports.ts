@@ -83,7 +83,9 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       }
       // ADR 0218: with no live seat, the service runs the conversation. Its
       // driver fence rechecks the seat, so a seat that binds meanwhile still wins.
-      if (!outbox?.bound() && !outbox?.uncertain())
+      // Only this report's own unresolved original stays with the seat; another
+      // delivery's unresolved receipt never holds it back (VUH-1779).
+      if (!outbox?.routesToSeat(content))
         return ctx.conversations.serviceRunner(conversationId, content, publish, context);
       const result = await outbox!.deliver({
         kind: "message",

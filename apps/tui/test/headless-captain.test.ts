@@ -128,6 +128,82 @@ describe("headless clankie commands", () => {
       }
     },
   );
+  it("settles one unresolved seat delivery as abandoned-unknown through the operator API and refuses loose usage", async () => {
+    const receiptId = "seat-7afbfa3f-8e87-4a95-9407-00fcf61229a2";
+    const requests: unknown[] = [];
+    const server = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      const parsed = JSON.parse(body) as { op: string };
+      requests.push(parsed);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          parsed.op === "seat_deliveries"
+            ? {
+                op: "seat_deliveries",
+                schemaVersion: 1,
+                unresolved: [{ conversationId: "global-default", receiptId }],
+              }
+            : {
+                op: "settle_seat_delivery",
+                schemaVersion: 1,
+                result: {
+                  state: "abandoned-unknown",
+                  conversationId: "global-default",
+                  receiptId,
+                  evidence: {
+                    disposition: "abandoned-unknown",
+                    journal: "owner-settled-unknown",
+                    receiptId,
+                    fingerprint: "f".repeat(64),
+                    abandonedAt: 1,
+                  },
+                },
+              },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Missing fixture HTTP port");
+      const env = {
+        ...(await stateEnv()),
+        CLANKIE_CAPTAIN_TOKEN: "captain-fixture-secret",
+        CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
+      };
+      const run = async (args: string[]) => {
+        const output = outputBuffer();
+        const code = await runHeadlessCaptainCommand(args, {
+          repoRoot: process.cwd(),
+          env,
+          stdout: output.stream,
+        });
+        return { code, output: output.text() };
+      };
+      expect(await run(["seat-delivery", "list"])).toMatchObject({ code: 0 });
+      const settled = await run(["seat-delivery", "settle", receiptId, "abandoned-unknown"]);
+      expect(settled.code).toBe(0);
+      expect(JSON.parse(settled.output)).toMatchObject({ state: "abandoned-unknown", receiptId });
+      // Settlement must be explicit: no implied disposition.
+      expect((await run(["seat-delivery", "settle", receiptId])).code).not.toBe(0);
+      expect(requests).toEqual([
+        { op: "seat_deliveries", schemaVersion: 1 },
+        {
+          op: "settle_seat_delivery",
+          schemaVersion: 1,
+          conversationId: "global-default",
+          receiptId,
+          disposition: "abandoned-unknown",
+        },
+      ]);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
   it("does not project stored Discord settings back as environment overrides for config commands", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-discord-command-"));
     tempDirs.push(root);

@@ -8,6 +8,7 @@ import {
   HireNoLaunchEvidenceSchema,
   HireRecoveryEvidenceSchema,
   RetainedHireEvidenceSchema,
+  SeatDeliveryAbandonmentSchema,
   SpawnOperatorSeatSchema,
   type HireRecoveryEvidence,
   type RetainedHireEvidence,
@@ -43,6 +44,10 @@ export const ReceiptSchema = z
     /** Operator recovery permanently excludes ordinary launch/adoption/reconciliation. */
     recoveryRequested: z.literal(true).optional(),
     settlement: RetainedHireEvidenceSchema.optional(),
+    /** When a seat mailbox began this delivery; absent before VUH-1779. */
+    beganAt: z.number().int().nonnegative().optional(),
+    /** Owner settled a seat delivery without receipt (VUH-1779). Never resent, never claimed. */
+    abandoned: SeatDeliveryAbandonmentSchema.optional(),
     sessionId: z.string().optional(),
     /** Original native occupant observed by the host, never inferred from pane/name. */
     occupantId: z.string().optional(),
@@ -99,7 +104,7 @@ export class DeliveryFence {
   public pending(key: string): UncertainReceipt | undefined {
     if (this.unreadable) return { messageId: "unreadable-receipts", fingerprint: "" };
     const receipt = this.records.get(key);
-    return receipt?.completed || receipt?.settlement ? undefined : receipt;
+    return receipt?.completed || receipt?.settlement || receipt?.abandoned ? undefined : receipt;
   }
 
   public settled(key: string): UncertainReceipt | undefined {
@@ -178,6 +183,7 @@ export class DeliveryFence {
       this.unreadable ||
       previous?.messageId !== messageId ||
       previous.settlement ||
+      previous.abandoned ||
       proof.fingerprint !== previous.fingerprint ||
       (unknown &&
         (!previous.remoteAdmission ||
@@ -212,7 +218,9 @@ export class DeliveryFence {
   public entries(): readonly (readonly [string, UncertainReceipt])[] {
     return this.unreadable
       ? [["unreadable-receipts", { messageId: "unreadable-receipts", fingerprint: "" }]]
-      : [...this.records.entries()].filter(([, receipt]) => !receipt.completed && !receipt.settlement);
+      : [...this.records.entries()].filter(
+          ([, receipt]) => !receipt.completed && !receipt.settlement && !receipt.abandoned,
+        );
   }
 
   /** Persist before crossing the uncertain boundary. A persistence failure sends nothing. */
@@ -220,12 +228,13 @@ export class DeliveryFence {
     key: string,
     receipt: Omit<UncertainReceipt, "messageId"> & { messageId?: string },
   ): UncertainReceipt {
-    if (this.pending(key) || this.completed(key) || this.settled(key))
+    if (this.pending(key) || this.completed(key) || this.settled(key) || this.records.get(key)?.abandoned)
       throw new Error("Delivery is uncertain; reconcile its original receipt before any retry");
     for (const [id, value] of this.records)
       if (
         !value.freshHire &&
         !value.settlement &&
+        !value.abandoned &&
         value.completed &&
         value.completed.at <= Date.now() - COMPLETED_RETENTION_MS
       )
@@ -254,6 +263,7 @@ export class DeliveryFence {
       previous?.messageId !== messageId ||
       previous.completed ||
       previous.settlement ||
+      previous.abandoned ||
       previous.recoveryRequested
     )
       throw new Error("Missing original delivery receipt");
@@ -272,6 +282,7 @@ export class DeliveryFence {
       this.unreadable ||
       previous?.messageId !== messageId ||
       previous.settlement ||
+      previous.abandoned ||
       (previous.freshHire &&
         ((Object.hasOwn(fields, "freshHire") && !isDeepStrictEqual(fields.freshHire, previous.freshHire)) ||
           (Object.hasOwn(fields, "fingerprint") && fields.fingerprint !== previous.fingerprint))) ||
@@ -325,12 +336,48 @@ export class DeliveryFence {
     }
   }
 
+  /**
+   * Owner settlement of an unresolved seat delivery (VUH-1779). The original
+   * stays retained under its key and identity, so it can never be begun,
+   * reconciled or resent; nothing here claims it was received.
+   */
+  public abandonUnknown(key: string, messageId: string, abandonedAt: number) {
+    const previous = this.records.get(key);
+    if (
+      this.unreadable ||
+      previous?.messageId !== messageId ||
+      previous.completed ||
+      previous.settlement ||
+      previous.abandoned ||
+      previous.freshHire ||
+      previous.remoteAdmission
+    )
+      throw new Error("Only an unresolved seat delivery can be settled as abandoned-unknown");
+    const evidence = SeatDeliveryAbandonmentSchema.parse({
+      disposition: "abandoned-unknown",
+      journal: "owner-settled-unknown",
+      receiptId: messageId,
+      fingerprint: previous.fingerprint,
+      ...(previous.beganAt === undefined ? {} : { beganAt: previous.beganAt }),
+      abandonedAt,
+    });
+    this.records.set(key, { ...previous, abandoned: evidence });
+    try {
+      this.save();
+    } catch (error) {
+      this.records.set(key, previous);
+      throw error;
+    }
+    return evidence;
+  }
+
   /** Only the mechanism calls this after matching an acknowledgment or proving no dispatch. */
   public reconcile(key: string, messageId: string): boolean {
     if (
       this.unreadable ||
       this.records.get(key)?.messageId !== messageId ||
       this.records.get(key)?.settlement ||
+      this.records.get(key)?.abandoned ||
       this.records.get(key)?.recoveryRequested
     )
       return false;

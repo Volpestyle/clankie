@@ -149,6 +149,10 @@ export interface InstallDoctorReport {
     readonly error?: string;
   };
   readonly fleetHealthMetrics?: import("@clankie/protocol").FleetHealthMetricsSnapshot;
+  /** Head seat deliveries whose receipt never resolved (VUH-1779); each blocks only its own resend. */
+  readonly seatDeliveries?:
+    | { readonly unresolved: readonly import("@clankie/protocol").UnresolvedSeatDelivery[] }
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };

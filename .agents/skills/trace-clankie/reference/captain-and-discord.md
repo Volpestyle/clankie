@@ -105,6 +105,19 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   the channel limit). A pump logging nothing after `pump_started` is polling;
   look for the missing deliveries in the service's receipts, not the bridge.
 
+- **An unresolved head receipt fences only its own original.** The head
+  mailbox journal is `~/.clankie/captain/delivery-receipts/head/<conversation>.json`
+  (`.delivered` holds exact acknowledgements). An entry there without
+  `completed`, `settlement` or `abandoned` is unresolved: a resend of that ID or
+  exact content returns `uncertain` with the original's ID, while unrelated
+  wakes, watches and reports keep delivering (VUH-1779). The seat gets one
+  `seat-delivery-alert` message per unresolved receipt. `clankie seat-delivery
+list` and `clankie doctor` show each with its age (legacy entries have none).
+  Never edit the journal. If the native transcript proves the event arrived,
+  acknowledge that exact ID; if it never arrived or cannot be known, the owner
+  runs `clankie seat-delivery settle ID abandoned-unknown --conversation C`,
+  which records `abandoned-unknown`, claims no receipt and resends nothing.
+
 - **An `accepted` receipt establishes admission, not execution or liveness.**
   The input may be queued, preparing, executing or awaiting native delivery.
   With no active Pi tools, service preparation and execution fail after five

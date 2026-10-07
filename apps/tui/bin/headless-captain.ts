@@ -14,6 +14,7 @@ import { MachineInventorySchema } from "@clankie/protocol";
 import { runMachinesCommand, formatMachines, MACHINE_RESTART_HINT } from "../src/command/machines.ts";
 import { runWorkOnCommand } from "../src/command/work-on.ts";
 import { runHireReceiptCommand } from "../src/command/hire-receipt.ts";
+import { runSeatDeliveryCommand } from "../src/command/seat-delivery.ts";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import {
   connectHostedCli,
@@ -473,6 +474,7 @@ export async function runHeadlessCaptainCommand(
       return await runWorkOnCommand(rest, { ...options, stdout });
     }
     if (command === "hire-receipt") return await runHireReceiptCommand(rest, { ...options, stdout });
+    if (command === "seat-delivery") return await runSeatDeliveryCommand(rest, { ...options, stdout });
     // Prompt and memory card print the words themselves, not a JSON envelope:
     // the consumer is another harness's system prompt or a per-turn hook.
     if (command === "prompt") {

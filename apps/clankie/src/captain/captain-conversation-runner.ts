@@ -51,6 +51,7 @@ export interface CreateConversationRunnerContext {
   readonly seatEventKind: (
     conversationId: string,
     context: Pick<ConversationTurnContext, "internal" | "origin">,
+    content: string,
   ) => OperatorSeatEventKind | undefined;
   readonly seatOutbox: (conversationId: string) => SeatOutbox;
   readonly workingDirectory: string;
@@ -135,7 +136,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
     return ctx.conversations.runWithConversationDriver<void>(
       conversationId,
       () => {
-        const kind = ctx.seatEventKind(conversationId, context);
+        const kind = ctx.seatEventKind(conversationId, context, message);
         if (kind === undefined) return undefined;
         const selectedOutbox = ctx.seatOutbox(conversationId);
         return {

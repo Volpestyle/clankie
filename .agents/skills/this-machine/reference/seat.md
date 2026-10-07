@@ -34,6 +34,10 @@ to `global-default` affects only that chat; attach to the room's conversation to
 drive its turns. A live seat receives worker reports, escalations, wakes and
 watches through its channel. After it leaves, new inputs use the service runner.
 An accepted or uncertain delivery is never replayed across that handover.
+An unresolved delivery refuses only its own resend; other inputs keep arriving,
+and the seat gets one alert naming it. `clankie seat-delivery list` shows them
+with their age; the owner settles one that never arrived with `clankie
+seat-delivery settle ID abandoned-unknown`, which claims no receipt.
 Pi goal continuations keep their existing service loop.
 
 Room replies keep the original actor's route and mouth lease. Attachment never

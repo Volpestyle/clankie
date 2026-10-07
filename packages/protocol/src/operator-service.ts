@@ -5,6 +5,7 @@ import {
 } from "./worker-reports.ts";
 import { ClosedWorkerPaneSchema } from "./operator-conversations.ts";
 import { HireReceiptIdSchema, HireReceiptSettlementSchema } from "./hire-receipts.ts";
+import { SeatDeliverySettlementSchema, UnresolvedSeatDeliverySchema } from "./seat-deliveries.ts";
 import { z } from "zod";
 import {
   ProjectProposalLocatorSchema,
@@ -512,6 +513,23 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       disposition: z.enum(["not-launched", "delivered", "abandoned", "abandoned-unknown"]).optional(),
     })
     .strict(),
+  /** Head seat-mailbox receipts that never resolved (VUH-1779). Read-only. */
+  z
+    .object({
+      op: z.literal("seat_deliveries"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
+  /** Owner settlement: records `abandoned-unknown`, never receipt, never a resend. */
+  z
+    .object({
+      op: z.literal("settle_seat_delivery"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      receiptId: z.string().min(1).max(256),
+      disposition: z.literal("abandoned-unknown"),
+    })
+    .strict(),
   /**
    * Staff the fleet by starting a conversation (ADR 0013). Operator-only for
    * the same reason `channel` is: an agent that can hire is an agent that can
@@ -953,6 +971,20 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("settle_hire_receipt"),
       schemaVersion: z.literal(1),
       result: HireReceiptSettlementSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("seat_deliveries"),
+      schemaVersion: z.literal(1),
+      unresolved: z.array(UnresolvedSeatDeliverySchema),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("settle_seat_delivery"),
+      schemaVersion: z.literal(1),
+      result: SeatDeliverySettlementSchema,
     })
     .strict(),
   z

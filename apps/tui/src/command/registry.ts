@@ -411,6 +411,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["seat-delivery"],
+    lines: [
+      "  seat-delivery list         Unresolved head seat deliveries and their age.",
+      "  seat-delivery settle RECEIPT_ID abandoned-unknown [--conversation ID]",
+      "                           Owner settlement: never claims receipt, never resends the original.",
+    ],
+  },
+  {
     nouns: ["stance"],
     lines: [
       "  stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]",

@@ -30,9 +30,9 @@ export function createServiceHandoffDelivery(ctx: ServiceHandoffDeliveryContext)
       );
       return;
     }
-    // Another delivery's unresolved receipt would refuse this one before take;
-    // reopen the span for a later poll instead of sealing it into uncertainty.
-    if (outbox.uncertain()) {
+    // Only this exact handoff's own unresolved original refuses it before take
+    // (VUH-1779); reopen the span for a later poll instead of sealing it into uncertainty.
+    if (outbox.uncertainFor(claim.text)) {
       ctx.conversations.settleServiceHandoff(conversationId, claim.spanId, "refused");
       return;
     }

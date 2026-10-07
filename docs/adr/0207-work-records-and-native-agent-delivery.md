@@ -105,6 +105,23 @@ fingerprint tombstones survive result-body expiry and service restart. Reconcili
 reports what the original receipt proves, preserving the distinction between
 native delivery, uncertainty and completed work.
 
+## An uncertain delivery fences only itself (VUH-1779)
+
+"Never duplicate an uncertain dispatch" protects that original, not the
+recipient. A seat mailbox refuses a delivery whose original ID or exact content
+matches an unresolved receipt, and returns that original's ID. Other wakes,
+watches, reports and messages deliver normally. Blocking them all turned one
+unacknowledged event around a seat reset (2026-10-06) into a silent outage of
+every later wake and worker report. An unreadable journal still refuses
+everything, because it cannot tell an original from a new message.
+
+The seat receives one notice per unresolved receipt, and `clankie doctor` and
+`clankie seat-delivery list` show each with its age. When the event never
+arrived, or its fate cannot be known, the owner settles it with `clankie
+seat-delivery settle ID abandoned-unknown`. Like `hire-receipt settle …
+abandoned-unknown`, this retains the original and its identity, claims no
+receipt, and never resends it; the original ID stays refused afterwards.
+
 ## Private Windows Codex control (VUH-1563)
 
 Windows control must preserve a pane's private environment. Joining the account's

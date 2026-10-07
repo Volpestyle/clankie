@@ -328,6 +328,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return context.json({ error: "operator_authority_required" }, 403);
     const workerOwnerOp =
       parsed.data.op === "settle_hire_receipt" ||
+      parsed.data.op === "settle_seat_delivery" ||
+      parsed.data.op === "seat_deliveries" ||
       parsed.data.op === "readopt_seat" ||
       parsed.data.op === "worker_reports" ||
       parsed.data.op === "acknowledge_worker_reports" ||

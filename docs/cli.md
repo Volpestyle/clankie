@@ -586,6 +586,23 @@ attest its own history. The journal covers service-authorized effects, not arbit
 programs launched outside Clankie's controlled hire path. It adds no fleet tool,
 worker authority, account setup or TUI setting.
 
+`clankie seat-delivery list` reads the operator-only `seat_deliveries`
+operation: every head seat-mailbox delivery whose receipt never resolved, with
+its conversation, receipt ID and age (receipts recorded before VUH-1779 have no
+start time). An unresolved delivery refuses only a resend of that original, by
+ID or exact content; unrelated wakes, watches and worker reports keep reaching
+the seat, and the seat receives one `seat-delivery-alert` message about it.
+`clankie doctor` lists the same entries.
+
+`clankie seat-delivery settle RECEIPT_ID abandoned-unknown [--conversation ID]`
+(default `global-default`) calls `settle_seat_delivery`. It is the owner's
+explicit decision that the event's fate is unknown: the original stays retained
+under its ID with `abandoned-unknown` evidence, never claims receipt, and is never
+resent; a later delivery under the same original ID is still refused. Use it
+only after the native transcript shows the event never arrived or cannot be
+inspected; if it did arrive, acknowledge that exact ID instead. In-flight and
+unknown IDs refuse. Never edit the receipt journal by hand.
+
 `clankie hire-receipt fresh --json-stdin` admits separately authorized new remote
 work after a retained settlement. Supply an existing hiring conversation, a new
 brief and `seat.freshIntent` through the public `spawn_seat` request:

@@ -233,8 +233,8 @@ async function fixture(options: { oldBudgetWindow?: boolean } = {}) {
     settings: () => settings.load(),
     options: { repoRoot: root, stateDir: root },
     workingDirectory: root,
-    seatEventKind: (id, context) =>
-      outbox(id).bound() || outbox(id).uncertain() ? seatEventKindFor(context, true) : undefined,
+    seatEventKind: (id, context, content) =>
+      outbox(id).routesToSeat(content) ? seatEventKindFor(context, true) : undefined,
     seatOutbox: outbox,
     durableSession: forbidden,
     buildSession: forbidden,

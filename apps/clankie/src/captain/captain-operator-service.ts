@@ -46,6 +46,10 @@ export interface CreateOperatorServiceContext {
   readonly settingsStore: SettingsStore;
   readonly deps: CaptainDeps;
   readonly seatOutboxes: Map<string, SeatOutbox>;
+  /** Opens (or returns) the head mailbox for one conversation, with its durable receipts. */
+  readonly seatOutbox: (conversationId: string) => SeatOutbox;
+  /** Conversations with a head mailbox in memory or a receipt journal on disk. */
+  readonly headSeatConversations: () => readonly string[];
   readonly terminals: RuntimeTerminals;
   readonly conversations: ConversationStore;
   readonly autonomy: AutonomyStore;
@@ -602,6 +606,51 @@ export function createOperatorService(
         schemaVersion: 1,
         sessions: await ctx.terminals.catalog(),
       };
+    }
+    if (request.op === "seat_deliveries") {
+      const now = Date.now();
+      return {
+        op: "seat_deliveries",
+        schemaVersion: 1,
+        unresolved: ctx.headSeatConversations().flatMap((conversationId) =>
+          ctx
+            .seatOutbox(conversationId)
+            .unresolvedDeliveries()
+            .map((receipt) => ({
+              conversationId,
+              ...receipt,
+              ...(receipt.beganAt === undefined ? {} : { ageMs: Math.max(0, now - receipt.beganAt) }),
+            })),
+        ),
+      };
+    }
+    if (request.op === "settle_seat_delivery") {
+      if (!authority) throw new ConversationRefusedError("Operator settlement authority is required");
+      await authorizeQuestion(authority);
+      try {
+        const evidence = ctx.seatOutbox(request.conversationId).abandonUnknown(request.receiptId);
+        return {
+          op: "settle_seat_delivery",
+          schemaVersion: 1,
+          result: {
+            state: "abandoned-unknown",
+            conversationId: request.conversationId,
+            receiptId: request.receiptId,
+            evidence,
+          },
+        };
+      } catch (error) {
+        return {
+          op: "settle_seat_delivery",
+          schemaVersion: 1,
+          result: {
+            state: "refused",
+            conversationId: request.conversationId,
+            receiptId: request.receiptId,
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
     }
     if (request.op === "settle_hire_receipt") {
       if (!authority) throw new ConversationRefusedError("Operator settlement authority is required");

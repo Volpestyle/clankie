@@ -934,7 +934,13 @@ it("a taken attached-workspace report keeps its accepted route after detach, ado
   newLead.stop.abort();
   oldLead.stop.abort();
   expect(await newLead.events()).toEqual([]);
-  expect(await oldLead.events()).toEqual([]);
+  // VUH-1779: the old lead is told about its unresolved original once; the report is never resent.
+  expect(
+    (await oldLead.events()).map((event) => ({
+      source: event.source,
+      resent: event.content.includes("Taken report with lost bridge acknowledgment"),
+    })),
+  ).toEqual([{ source: "seat-delivery-alert", resent: false }]);
 });
 
 it.each(["reporter", "parent", "edge"] as const)(

@@ -10,6 +10,7 @@ import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import { readWorkingPreferences } from "./working-preferences.ts";
 import { runResourceStatusCommand } from "./fleet-resources.ts";
+import { formatSeatDeliveryAge, readSeatDeliveries } from "./seat-delivery.ts";
 import { summarizeRecovery } from "../../bin/service-recovery.ts";
 import {
   createCaptainOperatorConversationClient,
@@ -60,6 +61,12 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
   }
   if (report.runtimeHealth?.state === "alarm")
     return `Runtime health alarm (${report.runtimeHealth.reasons.join(" and ")}) — run \`clankie runtime-health status\`.`;
+  const unresolved =
+    report.seatDeliveries && "unresolved" in report.seatDeliveries
+      ? report.seatDeliveries.unresolved[0]
+      : undefined;
+  if (unresolved)
+    return `Seat delivery ${unresolved.receiptId} to ${unresolved.conversationId} has been unresolved for ${formatSeatDeliveryAge(unresolved.ageMs)} — confirm the seat never received it, then run \`clankie seat-delivery settle ${unresolved.receiptId} abandoned-unknown --conversation ${unresolved.conversationId}\`.`;
   const remediation = report.remediations[0];
   if (remediation !== undefined) {
     const line = remediation.replace(/\s+/gu, " ").trim();
@@ -105,7 +112,7 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const [report, workerObservations, resources, checkouts] = await Promise.all([
+  const [report, workerObservations, resources, checkouts, seatDeliveries] = await Promise.all([
     inspectInstall(options),
     inspectWorkerTools(options),
     inspectResources(options),
@@ -118,6 +125,17 @@ export async function doctorCommand(
         status: "unavailable" as const,
         detail: "Checkout status unavailable; run clankie checkouts status",
       })),
+    readSeatDeliveries({
+      ...options,
+      ...(options.credentialStore ? { captainCredentialStore: options.credentialStore } : {}),
+      timeoutMs: 5_000,
+    }).then(
+      (unresolved) => ({ unresolved }),
+      (error: unknown) => ({
+        status: "unavailable" as const,
+        detail: error instanceof Error ? error.message : String(error),
+      }),
+    ),
   ]);
   const { workerTools, workerReports } = workerObservations;
   const serviceRecovery = summarizeRecovery(options.env ?? process.env);
@@ -225,6 +243,7 @@ export async function doctorCommand(
     toolCatalogHealth,
     workerTools,
     workerReports,
+    seatDeliveries,
     workingPreferences,
     resources,
     checkouts,

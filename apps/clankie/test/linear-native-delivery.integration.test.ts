@@ -67,8 +67,8 @@ async function fixture(boundGraceMs = 20) {
     settings: () => settings.load(),
     options: { repoRoot: root, stateDir: root },
     workingDirectory: root,
-    seatEventKind: (_id, context) =>
-      outbox.bound() || outbox.uncertain() ? seatEventKindFor(context, true) : undefined,
+    seatEventKind: (_id, context, content) =>
+      outbox.routesToSeat(content) ? seatEventKindFor(context, true) : undefined,
     seatOutbox: () => outbox,
     durableSession: forbiddenSession,
     buildSession: forbiddenSession,

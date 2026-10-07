@@ -17,7 +17,11 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { LaneLog } from "../src/captain/lane-log.ts";
-import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import {
+  createOperatorService,
+  type CreateOperatorServiceContext,
+} from "../src/captain/captain-operator-service.ts";
+import { SeatOutbox, type UnresolvedSeatReceipt } from "../src/captain/seat-outbox.ts";
 import { createServiceHandoffDelivery } from "../src/captain/service-handoff-delivery.ts";
 import { TurnSettledLog } from "../src/captain/turn-metrics.ts";
 
@@ -90,10 +94,14 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
   const autonomy = new AutonomyStore(join(root, "autonomy.json"));
   const settings = new SettingsStore(join(root, "settings.json"));
   const outboxes = new Map<string, SeatOutbox>();
+  const alerts: UnresolvedSeatReceipt[] = [];
   const outbox = (id: string) => {
     let box = outboxes.get(id);
     if (!box) {
-      box = new SeatOutbox({ uncertaintyPath: join(root, `${id}-outbox.json`) });
+      box = new SeatOutbox({
+        uncertaintyPath: join(root, `${id}-outbox.json`),
+        onUnresolved: (receipt) => alerts.push(receipt),
+      });
       outboxes.set(id, box);
     }
     return box;
@@ -140,8 +148,8 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
     settings: () => settings.load(),
     options: { repoRoot: root, stateDir: root },
     workingDirectory: root,
-    seatEventKind: (id, context) =>
-      outbox(id).bound() || outbox(id).uncertain() ? seatEventKindFor(context, true) : undefined,
+    seatEventKind: (id, context, content) =>
+      outbox(id).routesToSeat(content) ? seatEventKindFor(context, true) : undefined,
     seatOutbox: outbox,
     durableSession,
     buildSession: async () => {
@@ -232,6 +240,8 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
     conversations,
     reports,
     outbox,
+    outboxes,
+    alerts,
     script,
     sessions,
     wakeRuns,
@@ -464,4 +474,181 @@ it("keeps failed service wakes on exponential backoff instead of a retry storm",
   expect(gaps).toEqual([5_000, 10_000, 20_000]);
   expect(f.sessions.flatMap((session) => session.prompts)).toEqual([]);
   expect(f.autonomy.status(ID).wake?.at).toBe("2026-10-05T17:00:00.000Z");
+});
+
+it("VUH-1779: an unresolved head delivery refuses only its own resend; later wakes and reports still reach the seat", async () => {
+  const f = fixture();
+  f.conversations.rememberNativeHead(ID, "claude-lead");
+  // 2026-10-06 21:21Z: around a seat reset the seat takes a wake and never acknowledges it.
+  const poll = f.pollSeat(ID, 60_000);
+  const wakeA = f.conversations.submitInternal(ID, "Wake A before the seat reset", "wake");
+  if (wakeA.status !== "accepted") throw new Error("Expected wake");
+  const [lost] = (await poll).map((event) => OperatorSeatEventSchema.parse(event));
+  expect(lost!.content).toContain("Wake A before the seat reset");
+  await f.close();
+
+  const restarted = fixture(f.root);
+  const head = restarted.outbox(ID);
+  expect(head.uncertain()).toBe(true);
+  expect(head.unresolvedDeliveries()).toEqual([{ receiptId: lost!.id, beganAt: expect.any(Number) }]);
+
+  // The lead's next self-wake reaches the seat instead of settling `uncertain`.
+  const seatPoll = restarted.pollSeat(ID, 60_000);
+  const wakeB = restarted.conversations.submitInternal(ID, "Wake B the lead's self-wake", "wake");
+  if (wakeB.status !== "accepted") throw new Error("Expected wake");
+  const [delivered] = (await seatPoll).map((event) => OperatorSeatEventSchema.parse(event));
+  expect(delivered!.content).toContain("Wake B the lead's self-wake");
+  // The lead is told about the unresolved original once, instead of failing silently.
+  await vi.waitFor(() =>
+    expect(restarted.alerts).toEqual([{ receiptId: lost!.id, beganAt: expect.any(Number) }]),
+  );
+  expect(head.acknowledge(delivered!.id)).toBe(true);
+  await settled(restarted, wakeB.runId);
+
+  // A worker report also reaches the live seat.
+  const reportPoll = restarted.pollSeat(ID, 60_000);
+  const report = restarted.report(ID, "Report C finished");
+  expect(report.accept()).toMatchObject({ received: true });
+  const [reportEvent] = (await reportPoll).map((event) => OperatorSeatEventSchema.parse(event));
+  expect(reportEvent!.content).toContain(`Worker report ${report.delivery.id}`);
+  head.acknowledge(reportEvent!.id);
+  await vi.waitFor(() =>
+    expect(restarted.conversations.inboundReports(ID, { includeRead: true })).toContainEqual(
+      expect.objectContaining({
+        deliveryId: report.delivery.id,
+        reportDelivery: expect.objectContaining({ state: "delivered" }),
+      }),
+    ),
+  );
+  expect(restarted.sessions.flatMap((session) => session.prompts)).toEqual([]);
+
+  // ADR 0207: the unresolved original itself is never sent again, by content or by ID.
+  const parked = head.poll(60_000);
+  expect(
+    await head.deliver({
+      kind: "message",
+      conversationId: ID,
+      source: "service",
+      content: lost!.content,
+      wantsReply: false,
+    }),
+  ).toMatchObject({ outcome: "unconfirmed", deliveryStage: "uncertain", messageId: lost!.id });
+  expect(
+    await head.deliver({
+      kind: "message",
+      conversationId: ID,
+      source: "service",
+      content: "A different text under the original ID",
+      wantsReply: false,
+      original: { messageId: lost!.id, prepare: () => {} },
+    }),
+  ).toMatchObject({ outcome: "unconfirmed", messageId: lost!.id });
+  // Nothing reached the parked poll.
+  const stillParked = await Promise.race([
+    parked,
+    new Promise((resolve) => setTimeout(() => resolve("parked"), 50)),
+  ]);
+  expect(stillParked).toBe("parked");
+  expect(restarted.alerts).toHaveLength(1);
+  await restarted.close();
+
+  // With no live seat, an unrelated report runs on the service lane despite the unresolved receipt.
+  const unbound = fixture(f.root);
+  expect(unbound.outbox(ID).uncertain()).toBe(true);
+  expect(unbound.outbox(ID).bound()).toBe(false);
+  const later = unbound.report(ID, "Report D finished");
+  expect(later.accept()).toMatchObject({ received: true });
+  await vi.waitFor(() =>
+    expect(unbound.conversations.inboundReports(ID, { includeRead: true })).toContainEqual(
+      expect.objectContaining({
+        deliveryId: later.delivery.id,
+        reportDelivery: expect.objectContaining({ state: "delivered" }),
+      }),
+    ),
+  );
+  expect(unbound.sessions.flatMap((session) => session.prompts).join("\n")).toContain(
+    `Worker report ${later.delivery.id}`,
+  );
+
+  // The owner settles it through the operator API: abandoned-unknown, never a receipt.
+  let current = true;
+  const authority = {
+    principal: { kind: "operator" as const, id: "owner" },
+    current: () => current,
+    authorize: async () => current,
+  };
+  const serve = createOperatorService({
+    personas: { ready: async () => {} },
+    settingsStore: {},
+    deps: { herdrAvailable: () => true },
+    shutdown: new AbortController(),
+    seatOutboxes: unbound.outboxes,
+    seatOutbox: unbound.outbox,
+    headSeatConversations: () => [ID],
+  } as unknown as CreateOperatorServiceContext);
+  expect(await serve({ op: "seat_deliveries", schemaVersion: 1 })).toMatchObject({
+    op: "seat_deliveries",
+    unresolved: [{ conversationId: ID, receiptId: lost!.id, ageMs: expect.any(Number) }],
+  });
+  current = false;
+  await expect(
+    serve(
+      {
+        op: "settle_seat_delivery",
+        schemaVersion: 1,
+        conversationId: ID,
+        receiptId: lost!.id,
+        disposition: "abandoned-unknown",
+      },
+      authority,
+    ),
+  ).rejects.toThrow("question_owner_unavailable");
+  current = true;
+  expect(
+    await serve(
+      {
+        op: "settle_seat_delivery",
+        schemaVersion: 1,
+        conversationId: ID,
+        receiptId: "seat-invented",
+        disposition: "abandoned-unknown",
+      },
+      authority,
+    ),
+  ).toMatchObject({ result: { state: "refused" } });
+  expect(
+    await serve(
+      {
+        op: "settle_seat_delivery",
+        schemaVersion: 1,
+        conversationId: ID,
+        receiptId: lost!.id,
+        disposition: "abandoned-unknown",
+      },
+      authority,
+    ),
+  ).toMatchObject({
+    result: {
+      state: "abandoned-unknown",
+      receiptId: lost!.id,
+      evidence: { disposition: "abandoned-unknown", journal: "owner-settled-unknown", receiptId: lost!.id },
+    },
+  });
+  expect(unbound.outbox(ID).uncertain()).toBe(false);
+  await unbound.close();
+
+  // Durable: after restart nothing is unresolved, nothing claims receipt, and the original ID stays closed.
+  const settledBox = fixture(f.root).outbox(ID);
+  expect(settledBox.uncertain()).toBe(false);
+  expect(settledBox.receipt(lost!.content)).toBeUndefined();
+  expect(
+    await settledBox.deliver({
+      kind: "message",
+      conversationId: ID,
+      source: "service",
+      content: "Retry under the settled original ID",
+      wantsReply: false,
+      original: { messageId: lost!.id, prepare: () => {} },
+    }),
+  ).toMatchObject({ outcome: "unconfirmed", messageId: lost!.id });
 });
