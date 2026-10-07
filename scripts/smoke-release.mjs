@@ -153,7 +153,8 @@ try {
   ) {
     throw new Error(`packaged status failed: ${JSON.stringify(status)}`);
   }
-  const herdrStatus = () => JSON.parse(capture(binary, ["herdr", "status", "--json"], { cwd: workspace, env }).stdout);
+  const herdrStatus = () =>
+    JSON.parse(capture(binary, ["herdr", "status", "--json"], { cwd: workspace, env }).stdout);
   const chosen = herdrStatus();
   assert.equal(chosen.active.runtime, "bundled");
   assert.equal(chosen.herdr.runtime, "bundled");

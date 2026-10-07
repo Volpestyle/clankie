@@ -9,6 +9,7 @@ for await (const path of glob("**/*.md", {
     "**/node_modules/**",
     // Installation snapshot; validate the authored skill sources instead.
     "integrations/codex-plugin/skills/**",
+    "integrations/claude-plugin/worker/skills/**",
     "**/target/**",
     "**/.git/**",
     "**/.turbo/**",
