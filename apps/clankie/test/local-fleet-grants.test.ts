@@ -178,8 +178,15 @@ it("gives proven local panes the two-tool bridge without project proof and reche
     live = false;
     expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
     live = true;
+    const callsBeforeClose = calls.mock.calls.length;
+    const checksBeforeClose = checks;
     await local.close();
-    expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
+    const unavailable = await rpc("w1:p1", "tools/list", {}, session);
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("retry-after")).toBe("1");
+    expect(await unavailable.json()).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
+    expect(checks).toBe(checksBeforeClose);
+    expect(calls).toHaveBeenCalledTimes(callsBeforeClose);
   } finally {
     clankie.close();
     await worker.close();

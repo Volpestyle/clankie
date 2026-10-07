@@ -89,6 +89,7 @@ describe("clankie fleet", () => {
       "off",
       "owner",
       "owner",
+      "hands-off",
       "owner",
       "lead",
       "owner",
@@ -123,6 +124,7 @@ describe("clankie fleet", () => {
       { currentValue: "on" },
       { currentValue: "lead" },
       { currentValue: "lead" },
+      { currentValue: "balanced" },
       { currentValue: "lead" },
       { currentValue: "lead" },
       { currentValue: "owner" },
@@ -146,6 +148,7 @@ describe("clankie fleet", () => {
       FleetAutonomySchema.parse({
         closure: "owner",
         machineSetup: "owner",
+        hardToUndo: "lead",
         commit: "owner",
         push: "lead",
         verification: "review_and_seal",

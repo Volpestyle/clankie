@@ -131,18 +131,37 @@ describe("clankie-worker claude plugin", () => {
       },
     });
     expect(await readdir(workerRoot)).toEqual(expect.not.arrayContaining(["output-styles"]));
-    // Its hooks report a Clankie hire's settled turns (VUH-1458), through one no-op-elsewhere script.
+    // Lifecycle and owner-gate events use the same no-op-outside-a-pane script.
     const hooks = JSON.parse(await readFile(join(workerRoot, "hooks", "hooks.json"), "utf8")) as {
       hooks: Record<string, { hooks: { command: string }[] }[]>;
     };
     expect(Object.keys(hooks.hooks).sort()).toEqual([
+      "Notification",
+      "PermissionRequest",
+      "PostToolUse",
+      "PreToolUse",
+      "SessionEnd",
       "SessionStart",
       "Stop",
       "StopFailure",
       "UserPromptSubmit",
     ]);
-    for (const entries of Object.values(hooks.hooks))
-      expect(entries[0]?.hooks[0]?.command).toBe('node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"');
+    for (const [event, entries] of Object.entries(hooks.hooks)) {
+      expect(entries).toEqual([
+        {
+          hooks: [
+            {
+              type: "command",
+              command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"',
+              timeout: ["PermissionRequest", "PreToolUse"].includes(event) ? 600 : 30,
+              ...(["Stop", "StopFailure"].includes(event) ? { async: true } : {}),
+            },
+          ],
+          ...(event === "PreToolUse" ? { matcher: "AskUserQuestion" } : {}),
+          ...(event === "Notification" ? { matcher: "idle_prompt|permission_prompt" } : {}),
+        },
+      ]);
+    }
   });
 
   it("serves a Clankie hire's mailbox through clankie mcp --seat, with Claude's argv handed over", async () => {

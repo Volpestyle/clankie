@@ -170,6 +170,8 @@ it.each([true, false])(
 
 it("uses the linked service's live runtime identity to expose an older operator bridge without worker readiness", async () => {
   const home = await mkdtemp(join(tmpdir(), "clankie-older-seat-doctor-"));
+  // A distinct secret avoids matching legitimate macOS /private/tmp paths.
+  const secret = "harness-doctor-environment-secret";
   try {
     await mkdir(join(home, ".clankie/links"), { recursive: true });
     await writeFile(
@@ -194,7 +196,7 @@ it("uses the linked service's live runtime identity to expose an older operator 
             ? args.includes("pid=,lstart=")
               ? "30 Sat Oct  3 12:00:00 2026\n99 Sun Oct  4 12:00:00 2026"
               : args[0] === "eww"
-                ? "30 node clankie mcp --lane operator HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/test/default.sock SECRET=private"
+                ? `30 node clankie mcp --lane operator HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/test/default.sock SECRET=${secret}`
                 : "20 10 /bin/claude\n30 20 node /home/.local/bin/clankie mcp --lane operator\n99 1 node /runtime/apps/clankie/src/index.ts"
             : "{}",
     });
@@ -226,7 +228,7 @@ it("uses the linked service's live runtime identity to expose an older operator 
         expect(unknown.linkedSession.panes[0]?.operatorBridge?.freshness).toBe("unknown");
       }
     }
-    expect(JSON.stringify(report)).not.toContain("private");
+    expect(JSON.stringify(report)).not.toContain(secret);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

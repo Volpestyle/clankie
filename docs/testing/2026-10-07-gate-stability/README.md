@@ -30,6 +30,21 @@ The assigned baseline is `4b9c935fe0ecf711ae41be7673c302479380dada`.
   The connected-call refusal fixture expects the newly shipped admission
   guidance exactly, retaining zero dispatch and no replay assertions. Both
   complete files passed 127/127 after these fixes.
+- A complete TypeScript run on `100616af` found five further fixture failures:
+
+  | Test                   | Cause and repair                                                                                                                                                                 |
+  | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Fleet editor           | Its positional selections omitted the new gate preset, so the editor cancelled before saving. Select the preset and assert its persisted gate with all original preferences.     |
+  | Harness doctor         | The secret sentinel `private` matched legitimate Darwin `/private/tmp` paths. Use a distinct secret sentinel; retain the exact secret-redaction and native freshness assertions. |
+  | Claude plugin manifest | The expected four hook events predated the nine-event owner-question channel. Assert the exact current events, commands, timeouts, matchers and asynchronous flags.              |
+  | Fleet hook route       | `Notification` became a valid event. Assert it is recorded; unknown events, malformed sessions, extra fields and unauthorized bodies remain rejected without dispatch.           |
+  | Local fleet admission  | A closed connection now returns the intentional retryable 503, distinct from revoked live membership's 403. Assert its error/header and zero proof/provider calls after closure. |
+
+  This failed run retained 7,294 passes, five failures and 49 existing manual
+  skips in 814 files. It took 532.10 seconds including an 87.99-second typecheck
+  (8/29 cache hits); Vitest took 433.73 seconds. It is failure evidence, not a
+  clean gate. Focused repairs preserve every existing suite and boundary.
+
 - Minecraft claim integration coverage drives its existing poll timers instead
   of sleeping through each three-second interval. HTTP and credential persistence
   remain real. All seven outcomes and exact request counts, cancellation, expiry,
