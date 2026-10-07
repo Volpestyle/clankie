@@ -132,7 +132,7 @@ import { createEmailPort } from "./email.ts";
 import { accountMailbox, bodyMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
-import { createProjectProcessObserver } from "./project-process-proof.ts";
+import { createProjectProcessObserver, HarnessBinaryObservations } from "./project-process-proof.ts";
 import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
 import { createPreparedNativeHost } from "./captain/prepared-native-host.ts";
@@ -916,9 +916,12 @@ const localFleetBinding = async () => {
     ? herdr.binding()
     : undefined;
 };
+// Seats left on a superseded harness release after an auto-update (VUH-1748).
+const harnessBinaries = new HarnessBinaryObservations();
 const localProjectProcessObserver = createProjectProcessObserver({
   binding: localFleetBinding,
   herdrBinary: "herdr",
+  harnessBinary: harnessBinaries.record,
 });
 const remoteCodexSeats = new RemoteCodexSeats(async (id) =>
   (await runtimes.fleets()).find((fleet) => fleet.id === id),
@@ -944,7 +947,12 @@ const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
   path: join(stateRoot, "local-codex-seats.json"),
   observeOccupant: async (pane, signal) => {
     const observe = signal
-      ? createProjectProcessObserver({ binding: localFleetBinding, herdrBinary: "herdr", signal })
+      ? createProjectProcessObserver({
+          binding: localFleetBinding,
+          herdrBinary: "herdr",
+          signal,
+          harnessBinary: harnessBinaries.record,
+        })
       : localProjectProcessObserver;
     const proof = await observe("default", pane);
     signal?.throwIfAborted();
@@ -1248,7 +1256,23 @@ const captain = createCaptain(
     fleetProjectMembership: () => fleetProjectMembership,
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
     fleetHireTools: () => workerMcp.expectedFleetToolNames(),
-    workerBridgeStatus: (fleet, pane) => workerMcp.bridgeStatus(fleet, pane),
+    workerBridgeStatus: (fleet, pane) => {
+      const status = workerMcp.bridgeStatus(fleet, pane);
+      const stale = fleet === "default" ? harnessBinaries.status(pane) : undefined;
+      if (!stale) return status;
+      const { harness, running, installed } = stale.update;
+      return {
+        ...status,
+        harnessUpdate: { ...stale.update, observedAt: stale.observedAt },
+        remediation: [
+          status.remediation,
+          `${harness} ${installed} is installed, but this seat still runs ${running}. Messaging keeps working; resume this thread when it is idle to run the current release.`,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .slice(0, 2048),
+      };
+    },
     workerReportBridgeStatus: (fleet, pane) => workerMcp.reportBridgeStatus(fleet, pane),
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
@@ -1370,6 +1394,7 @@ const localFleet = new LocalFleetLink({
   directory: join(stateRoot, "links"),
   binding: localFleetBinding,
   projectProof: localProjectProof({
+    harnessBinary: harnessBinaries.record,
     diagnostics: localProofDiagnostics(logger, "project", fleetHealthMetrics),
     binding: localFleetBinding,
     herdrBinary: "herdr",

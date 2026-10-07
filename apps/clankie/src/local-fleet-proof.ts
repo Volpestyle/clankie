@@ -52,7 +52,7 @@ export function ancestors(output: string, pid: number): number[] {
 
 export interface LocalFleetProofOptions extends Pick<
   Parameters<typeof createProjectProcessObserver>[0],
-  "launcher" | "canonical"
+  "launcher" | "canonical" | "harnessBinary"
 > {
   binding(): Promise<HerdrBinding | undefined>;
   /** Server-owned private app-server registry; never supplied by a caller. */

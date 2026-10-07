@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, isAbsolute, join, normalize } from "node:path";
 import { access, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createHash } from "node:crypto";
@@ -56,6 +56,65 @@ async function installedLauncher(harness: string): Promise<NativeLauncher | unde
   return interpreter ? { executable: interpreter, script: launcher } : undefined;
 }
 
+/** A running seat's harness binary differs from the installed one only by its release. */
+export interface HarnessUpdate {
+  readonly harness: string;
+  /** Release of the running seat's executable, e.g. `0.160.0`. */
+  readonly running: string;
+  /** Release the installed launcher now resolves to, e.g. `0.160.1`. */
+  readonly installed: string;
+}
+
+/**
+ * Harness auto-updates install each release beside the last one
+ * (`…/releases/0.160.1-aarch64-apple-darwin/bin/codex`, `…/versions/2.1.3`) and
+ * repoint the launcher. A seat started before the update keeps running the old
+ * release. That process is still the installed harness: the two paths are
+ * identical except for one version-named directory or file with the same
+ * suffix. Any other difference, including a different install root, platform
+ * suffix or file name, is a different executable and is refused.
+ */
+export function harnessReleaseSibling(
+  installed: string,
+  running: string,
+): { readonly installed: string; readonly running: string } | undefined {
+  if (installed === running || !isAbsolute(installed) || !isAbsolute(running)) return undefined;
+  if (normalize(running) !== running || normalize(installed) !== installed) return undefined;
+  const a = installed.split("/");
+  const b = running.split("/");
+  if (a.length !== b.length) return undefined;
+  const differing = a.flatMap((segment, index) => (segment === b[index] ? [] : [index]));
+  // The version directory sits inside a harness-owned install root, never near `/`.
+  if (differing.length !== 1 || differing[0]! < 3) return undefined;
+  const version = /^v?(\d+(?:\.\d+){1,3})((?:[-+_][0-9A-Za-z._+-]*)?)$/u;
+  const installedRelease = a[differing[0]!]!.match(version);
+  const runningRelease = b[differing[0]!]!.match(version);
+  if (!installedRelease || !runningRelease || installedRelease[2] !== runningRelease[2]) return undefined;
+  return { installed: installedRelease[1]!, running: runningRelease[1]! };
+}
+
+/**
+ * The latest proof outcome per local pane: which seats run a superseded harness
+ * release. Filled by proofs that already run for bridge and peer calls; a
+ * roster read never probes processes for it.
+ */
+export class HarnessBinaryObservations {
+  private readonly panes = new Map<
+    string,
+    { readonly occupantId: string; readonly update: HarnessUpdate; readonly observedAt: string }
+  >();
+  readonly record = (pane: string, occupantId: string, update: HarnessUpdate | undefined): void => {
+    this.panes.delete(pane);
+    if (update === undefined) return;
+    this.panes.set(pane, { occupantId, update, observedAt: new Date().toISOString() });
+    // Bounded like the roster; the oldest observation goes first.
+    if (this.panes.size > 256) this.panes.delete(this.panes.keys().next().value!);
+  };
+  status(pane: string) {
+    return this.panes.get(pane);
+  }
+}
+
 export interface ProjectProcessProof {
   readonly fleet: string;
   /** Remote OS observation; machineId comes from the registered fleet, never the caller. */
@@ -87,6 +146,8 @@ export function createProjectProcessObserver(options: {
   signal?: AbortSignal;
   nativeDiagnostics?(event: NativeProcessDiagnostic, checkpoint: "initial" | "final", pane: string): void;
   nativeTransportDiagnostics?(reason: NativeTransportReason, pane: string): void;
+  /** Every completed proof reports whether its seat runs a superseded harness release. */
+  harnessBinary?(pane: string, occupantId: string, update: HarnessUpdate | undefined): void;
 }) {
   const execute = options.run ?? run;
   const canonical = options.canonical ?? realpath;
@@ -182,22 +243,34 @@ export function createProjectProcessObserver(options: {
       const initialProcesses = await snapshot("initial");
       if (!initialProcesses) return undefined;
       const [shell, agent] = initialProcesses.processes;
-      const matchesLauncher = async (observed: NonNullable<typeof agent>) => {
-        if ((await canonical(observed.executable)) !== launcher.executable) return false;
-        if (!launcher.script) return true;
+      // The installed executable, or an earlier/later release beside it that a
+      // harness auto-update left running. A superseded release may already be
+      // pruned from disk; its kernel path is then compared without resolution.
+      const executableRelease = async (
+        path: string,
+      ): Promise<false | { readonly installed: string; readonly running: string } | undefined> => {
+        const resolved = await canonical(path).catch(() => undefined);
+        if (resolved === launcher.executable) return undefined;
+        return harnessReleaseSibling(launcher.executable, resolved ?? path) ?? false;
+      };
+      const matchesLauncher = async (
+        observed: NonNullable<typeof agent>,
+      ): Promise<false | { readonly update?: HarnessUpdate }> => {
+        const executable = await executableRelease(observed.executable);
+        if (executable === false) return false;
+        const update = (release: { installed: string; running: string } | undefined) =>
+          release === undefined ? {} : { update: { harness: nativeInitial.harness, ...release } };
+        if (!launcher.script) return update(executable);
         // Interpreter launches need the exact installed script as argv[1], never an arbitrary
         // command containing its name. Unsupported wrappers/process-title rewrites deny.
         const [interpreter, script] = observed.argv;
-        return (
-          !!interpreter &&
-          !!script &&
-          isAbsolute(interpreter) &&
-          isAbsolute(script) &&
-          (await canonical(interpreter)) === launcher.executable &&
-          (await canonical(script)) === launcher.script
-        );
+        if (!interpreter || !script || !isAbsolute(interpreter) || !isAbsolute(script)) return false;
+        const interpreterRelease = await executableRelease(interpreter);
+        if (interpreterRelease === false || (await canonical(script)) !== launcher.script) return false;
+        return update(interpreterRelease ?? executable);
       };
-      if (!shell || !agent || !(await matchesLauncher(agent))) return undefined;
+      const initialMatch = shell && agent ? await matchesLauncher(agent) : false;
+      if (!shell || !agent || !initialMatch) return undefined;
       // Keep a roster read's permit until every owned native child has closed,
       // even when another observation fails or cancellation arrives first.
       const [paneRead, nativeRead, processRead] = await Promise.allSettled([
@@ -214,9 +287,11 @@ export function createProjectProcessObserver(options: {
       const latest = paneRead.value;
       const latestNative = nativeRead.value;
       const finalProcesses = processRead.value;
+      const finalMatch = finalProcesses ? await matchesLauncher(finalProcesses.processes[1]!) : false;
       if (
         !finalProcesses ||
-        !(await matchesLauncher(finalProcesses.processes[1]!)) ||
+        !finalMatch ||
+        JSON.stringify(finalMatch) !== JSON.stringify(initialMatch) ||
         JSON.stringify(latestNative) !== JSON.stringify(nativeInitial) ||
         latest.shell_pid !== shellPid ||
         latest.foreground_process_group_id !== agentPid ||
@@ -226,23 +301,31 @@ export function createProjectProcessObserver(options: {
       const current = await options.binding();
       if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
         return undefined;
+      const nativeOccupantId =
+        nativeInitial.nativeOccupantId ??
+        `process-${createHash("sha256")
+          .update(JSON.stringify([binding, pane, nativeInitial, shell, agent]))
+          .digest("hex")}`;
+      try {
+        options.harnessBinary?.(pane, nativeOccupantId, initialMatch.update);
+      } catch {
+        // A diagnostic observer never changes the proof.
+      }
       return {
         fleet,
         pane,
         // SessionStart reporting can depend on MCP startup completing. The actual installed
         // foreground process is already proven above; a disjoint process identity permits
         // only owner-started workspace access until a native session is reported.
-        nativeOccupantId:
-          nativeInitial.nativeOccupantId ??
-          `process-${createHash("sha256")
-            .update(JSON.stringify([binding, pane, nativeInitial, shell, agent]))
-            .digest("hex")}`,
+        nativeOccupantId,
         ...(nativeInitial.nativeOccupantId === undefined ? { nativeSessionPending: true as const } : {}),
         binding: {
           socketPath: binding.socketPath,
           ...(binding.session === undefined ? {} : { session: binding.session }),
         },
         shell: { pid: shell.pid, startTime: nativeProcessStart(shell.birth) },
+        // The release is reported beside the proof, never inside it: process
+        // identity and keys derived from it do not change when the harness updates.
         processes: [{ pid: agent.pid, startTime: nativeProcessStart(agent.birth) }],
       };
     } catch {

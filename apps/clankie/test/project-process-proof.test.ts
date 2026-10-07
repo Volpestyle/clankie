@@ -1,6 +1,18 @@
-import { expect, it } from "vitest";
-import { createProjectProcessObserver } from "../src/project-process-proof.ts";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  createProjectProcessObserver,
+  harnessReleaseSibling,
+  HarnessBinaryObservations,
+} from "../src/project-process-proof.ts";
 import { projectProcessFixture, processFixtureStart } from "./helpers/local-fleet-process.ts";
+
+const cleanups: (() => Promise<unknown>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0)) await cleanup();
+});
 
 function fixture() {
   const state = {
@@ -148,4 +160,117 @@ it("supports a trusted Node launcher only with its installed script as the first
     f.state.argv = argv;
     expect(await f.observe("default", "w1:p1")).toBeUndefined();
   }
+});
+
+describe("a seat left on a superseded harness release", () => {
+  /** Real install tree: the launcher symlink moves to the new release, like a harness auto-update. */
+  async function install() {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "harness-releases-")));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const release = async (name: string) => {
+      const path = join(root, ".codex/packages/standalone/releases", name, "bin/codex");
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, "binary");
+      return path;
+    };
+    const previous = await release("0.160.0-aarch64-apple-darwin");
+    const current = await release("0.160.1-aarch64-apple-darwin");
+    const launcher = join(root, "bin/codex");
+    await mkdir(dirname(launcher), { recursive: true });
+    await symlink(current, launcher);
+    return { root, previous, current, launcher, release };
+  }
+  function observer(launcher: string, executable: () => string, seen: unknown[]) {
+    return createProjectProcessObserver({
+      platform: "darwin",
+      launcher: async () => ({ executable: await realpath(launcher) }),
+      herdrBinary: "herdr",
+      binding: async () => ({ runtime: "external", socketPath: "/host/socket", session: "default" }),
+      harnessBinary: (pane, occupantId, update) => seen.push({ pane, occupantId, update }),
+      run: async (command, args) => {
+        if (command === "herdr" && args[0] === "agent")
+          return JSON.stringify({
+            result: {
+              agent: {
+                pane_id: args.at(-1),
+                terminal_id: "terminal",
+                agent: "codex",
+                agent_session: { source: "codex", kind: "id", value: "thread" },
+              },
+            },
+          });
+        if (args[0] === "--processes")
+          return projectProcessFixture(Number(args[1]), Number(args[2]), {
+            start: "Sat Oct  3 10:00:00 2026",
+            executable: executable(),
+            argv: [],
+          });
+        return JSON.stringify({
+          result: { process_info: { pane_id: args.at(-1), shell_pid: 30, foreground_process_group_id: 40 } },
+        });
+      },
+    });
+  }
+
+  it("keeps proving the same seat across a routine update and reports the stale release", async () => {
+    const tree = await install();
+    const seen: unknown[] = [];
+    let running = tree.current;
+    const observe = observer(tree.launcher, () => running, seen);
+    const before = await observe("default", "w1:p1");
+    expect(before).toBeDefined();
+    // The seat started on 0.160.0; the launcher has since moved to 0.160.1.
+    running = tree.previous;
+    const after = await observe("default", "w1:p1");
+    expect(after).toEqual(before);
+    expect(seen.at(-1)).toEqual({
+      pane: "w1:p1",
+      occupantId: after!.nativeOccupantId,
+      update: { harness: "codex", running: "0.160.0", installed: "0.160.1" },
+    });
+    // The updater pruned the old release: the kernel path still identifies it.
+    await rm(dirname(dirname(tree.previous)), { recursive: true });
+    expect(await observe("default", "w1:p1")).toEqual(before);
+    const observations = new HarnessBinaryObservations();
+    observations.record("w1:p1", "thread", { harness: "codex", running: "0.160.0", installed: "0.160.1" });
+    expect(observations.status("w1:p1")?.update.running).toBe("0.160.0");
+    observations.record("w1:p1", "thread", undefined);
+    expect(observations.status("w1:p1")).toBeUndefined();
+  });
+
+  it("still refuses executables that are not a release of the installed harness", async () => {
+    const tree = await install();
+    const impostors = [
+      // Same version shape, different platform build or file name.
+      await tree.release("0.160.0-x86_64-apple-darwin"),
+      join(tree.root, ".codex/packages/standalone/releases/0.160.0-aarch64-apple-darwin/bin/codex-helper"),
+      // Not a version directory, or a different install root.
+      await tree.release("evil-aarch64-apple-darwin"),
+      join(tree.root, ".other/packages/standalone/releases/0.160.0-aarch64-apple-darwin/bin/codex"),
+      "/bin/zsh",
+      "/usr/bin/node",
+    ];
+    for (const impostor of impostors) {
+      const seen: unknown[] = [];
+      expect(await observer(tree.launcher, () => impostor, seen)("default", "w1:p1")).toBeUndefined();
+      expect(seen).toEqual([]);
+    }
+  });
+});
+
+it("matches only one version-named path segment with the same suffix", () => {
+  expect(
+    harnessReleaseSibling(
+      "/Users/a/.local/share/claude/versions/2.1.3",
+      "/Users/a/.local/share/claude/versions/2.1.2",
+    ),
+  ).toEqual({ installed: "2.1.3", running: "2.1.2" });
+  for (const running of [
+    "/Users/a/.local/share/claude/versions/2.1.3/../../evil",
+    "/Users/a/.local/share/other/versions/2.1.2",
+    "/Users/a/.local/share/claude/versions/2.1.2-beta",
+    "relative/claude/versions/2.1.2",
+  ])
+    expect(harnessReleaseSibling("/Users/a/.local/share/claude/versions/2.1.3", running)).toBeUndefined();
+  expect(harnessReleaseSibling("/opt/1.0.0", "/opt/1.0.1")).toBeUndefined();
 });
