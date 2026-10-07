@@ -76,7 +76,7 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
           },
           {
             value: "voice",
-            label: "How much he talks",
+            label: "How readily he jumps in",
             hint: "chattiness and reply policy",
           },
           { value: "images", label: "Persona images", hint: "mood board folder" },
@@ -186,11 +186,12 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
 
   for (;;) {
     const chattiness = await flow.readSelect({
-      message: "How talkative is he in Discord and on stream?",
+      message:
+        "How readily does he jump in when nobody is talking to him?\nOnce addressed he answers normally; how long he talks is always his call.",
       options: [
-        { value: "quiet", label: "Quiet", hint: "short, sparing" },
-        { value: "balanced", label: "Balanced", hint: "a sentence or two" },
-        { value: "chatty", label: "Chatty", hint: "takes more room" },
+        { value: "quiet", label: "Quiet", hint: "only something notable or relevant to him" },
+        { value: "balanced", label: "Balanced", hint: "when he has something to add" },
+        { value: "chatty", label: "Chatty", hint: "small and passing messages too" },
       ],
       allowBack: true,
     });
@@ -208,9 +209,9 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
         },
         {
           value: "addressed",
-          label: "When addressed",
+          label: "An @mention or his name",
           description:
-            "Only a mention or one of his names spends a model turn; useful when cost matters more.",
+            "Only an @mention or one of his names spends a model turn; useful when cost matters more. /discord can narrow text further to @mentions only.",
         },
       ],
       allowBack: true,

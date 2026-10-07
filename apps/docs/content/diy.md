@@ -24,8 +24,12 @@ clankie persona set --display-name Clankie --aliases Clank,Clanks \
   --chattiness quiet --reply-policy addressed
 ```
 
-Chattiness is `quiet`, `balanced`, or `chatty`. Reply policy decides which
-Discord messages he sees (see [Discord](#discord)); he can always stay quiet.
+Chattiness is how readily he jumps in when nobody is talking to him: `chatty`
+answers small, passing messages; `balanced` joins when he has something to add;
+`quiet` speaks up only for something notable or directly relevant to him. Once
+someone addresses him he answers normally, and how long he talks is always his
+call. Reply policy decides which Discord messages he sees (see
+[Discord](#discord)); he can always stay quiet.
 `clankie persona status` shows what is saved and whether a restart is needed.
 
 ### A visual persona
@@ -119,12 +123,15 @@ and per server, and `clankie discord official` shows them. Creating your own
 bot remains the advanced path, in the
 [Discord connection guide](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md#configure-discord).
 
-Reply policy `addressed` shows him messages that start with his name or mention
-him, plus the next few after he replies (`--live-message-window`, default 5).
+Reply policy `addressed` shows him messages that @mention him or use his name,
+plus the next few after he replies (`--live-message-window`, default 5).
 `all` shows him every admitted message. Neither forces a reply.
-`clankie discord set --wake-trigger addressed|name|any` overrides it for text:
-`addressed` is mentions and DMs only, `name` adds his name, `any` is every
-message. Unset keeps the reply policy above.
+`clankie discord set --wake-trigger mention|name|any` overrides it for text:
+`mention` wakes him only for an @mention, DM, reply or `/clankie ask` (writing
+his name without an @mention does not count), `name` adds his name, `any` is
+every message. Unset keeps the reply policy above. In the console, `/discord` →
+**What wakes him / how much he talks** sets the wake trigger, chattiness and
+reply policy in one place.
 
 ```bash
 clankie persona set --reply-policy addressed --chattiness quiet

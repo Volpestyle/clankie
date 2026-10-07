@@ -239,8 +239,13 @@ authority still come from this machine's settings, so the edge's owner flag
 grants nothing. Limits apply per account and per server; a refusal or block
 names its reason in `clankie discord official`. A bring-your-own bot can run
 beside it, but never the official application's own token.
-`discord.wakeTrigger` (`addressed`, `name`, `any`) sets what wakes him for text;
-unset keeps `persona.replyPolicy`. `ambientChannelIds` lets the hosted or
+`discord.wakeTrigger` (`mention`, `name`, `any`) sets what wakes him for text:
+`mention` is an @mention, DM, reply or command and ignores his plain name,
+`name` adds it, `any` is every message; unset keeps `persona.replyPolicy`, and a
+stored `addressed` reads as `mention`. `persona.chattiness` (`quiet`,
+`balanced`, `chatty`) is only how readily he joins in when nobody addressed him,
+never how long he talks. `/discord` → What wakes him / how much he talks edits
+all three. `ambientChannelIds` lets the hosted or
 official edge keep a short encrypted buffer of a channel's chat as context for
 his next wake.
 

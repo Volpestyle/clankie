@@ -52,9 +52,11 @@ describe("persona instructions", () => {
 
   it("tunes talkativeness for shared rooms, not the operator's working seat", () => {
     const quiet = persona({ chattiness: "quiet" });
-    expect(personaInstructions(quiet, "social")).toContain("Speak rarely and briefly");
-    expect(personaInstructions(quiet, "gameplay")).toContain("Speak rarely and briefly");
-    expect(personaInstructions(quiet, "operator")).not.toContain("Speak rarely and briefly");
+    expect(personaInstructions(quiet, "social")).toContain("only something notable or directly relevant");
+    expect(personaInstructions(quiet, "gameplay")).toContain("only something notable or directly relevant");
+    expect(personaInstructions(quiet, "operator")).not.toContain(
+      "only something notable or directly relevant",
+    );
   });
 
   it("describes each register instead of quoting a line he could say", () => {

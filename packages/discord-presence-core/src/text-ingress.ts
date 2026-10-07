@@ -14,6 +14,7 @@ import {
   type DiscordPresenceWrite,
   type DiscordPresenceWriteResult,
   type DiscordTransportKind,
+  type DiscordWakeTrigger,
 } from "@clankie/protocol";
 
 export type DiscordDmPolicy = "deny" | "owner_only" | "allowlist";
@@ -67,11 +68,12 @@ export type DiscordReplyPolicy = "addressed" | "all";
  * Apply the owner's Discord wake trigger (VUH-1765) to the self-hosted text
  * attention policy. Unset keeps today's behavior exactly: the persona reply
  * policy and his names decide. `any` reads every admitted message, `name` wakes
- * on a mention or one of his names, and `addressed` wakes on a mention only (a
- * DM is always addressed). The live-conversation window applies as before.
+ * on a mention or one of his names, and `mention` (stored earlier as
+ * `addressed`) wakes on a mention only (a DM is always addressed). The
+ * live-conversation window applies as before.
  */
 export function discordTextAttention(input: {
-  readonly wakeTrigger?: "addressed" | "name" | "any" | undefined;
+  readonly wakeTrigger?: DiscordWakeTrigger | undefined;
   readonly replyPolicy: DiscordReplyPolicy;
   readonly characterNames: readonly string[];
 }): { readonly replyPolicy: DiscordReplyPolicy; readonly characterNames: readonly string[] } {

@@ -1,7 +1,7 @@
 import { ClankieApiClient } from "@clankie/api-client";
 import { runDiscordSetupCommand } from "./discord-setup.ts";
 import { runDiscordOfficialCommand, type DiscordOfficialResult } from "./discord-official.ts";
-import { DISCORD_SETTING_GROUPS, discordServerSettings } from "@clankie/protocol";
+import { DISCORD_SETTING_GROUPS, discordServerSettings, discordWakeTrigger } from "@clankie/protocol";
 import { DiscordDirectoryRequestSchema, type DiscordDirectorySnapshot } from "@clankie/protocol";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import type {
@@ -112,7 +112,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     showList("  ingress channels", settings.ingressChannelIds),
     `  dm policy: ${settings.ingressDmPolicy}`,
     `  context messages: ${String(settings.ingressContextMessages)}`,
-    `  what wakes him: ${settings.wakeTrigger ?? "this body's default (self-hosted: persona reply policy; hosted: addressed)"}`,
+    `  what wakes him: ${discordWakeTrigger(settings.wakeTrigger) ?? "this body's default (self-hosted: persona reply policy; hosted: mention)"}`,
     showList("  followed between wakes (hosted/official)", settings.ambientChannelIds),
     showList("  tool progress channels", settings.toolProgressChannelIds),
     "",
@@ -213,6 +213,8 @@ export function parseDiscordSettingValue(
     if (!Number.isInteger(parsed)) throw new Error(`${field} must be a whole number.`);
     return parsed;
   }
+  // `addressed` was the first spelling of `mention`; save the current one.
+  if (field === "wakeTrigger" && raw === "addressed") return "mention";
   return raw;
 }
 

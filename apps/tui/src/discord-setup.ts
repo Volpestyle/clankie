@@ -138,6 +138,7 @@ export async function runDiscordSetup(
   shell: ClankieFaceShell,
   api: DiscordSetupApi,
   advanced: () => Promise<void>,
+  attention?: () => Promise<void>,
 ): Promise<void> {
   const client = new DiscordSetupClient(api);
   const flow = shell.setupFlow;
@@ -154,6 +155,16 @@ export async function runDiscordSetup(
             description: plain(sentence.help),
             hint: sentence.checks.map(checkText).join(" · "),
           })),
+          ...(attention
+            ? [
+                {
+                  value: "attention",
+                  label: "What wakes him / how much he talks",
+                  description:
+                    "What reaches him in text, and how readily he joins in when nobody is talking to him.",
+                },
+              ]
+            : []),
           {
             value: "invite",
             label: "Invite Clankie to a server…",
@@ -197,6 +208,10 @@ export async function runDiscordSetup(
       }
       if (choice === "advanced") {
         await advanced();
+        continue;
+      }
+      if (choice === "attention" && attention) {
+        await attention();
         continue;
       }
       const sentence = view.snapshot.setup!.definition.sentences.find((item) => item.id === choice)!;

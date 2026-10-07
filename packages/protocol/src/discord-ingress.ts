@@ -7,7 +7,12 @@ import {
 } from "./index.ts";
 import { DiscordIdSchema } from "./discord-ids.ts";
 
-export { DiscordIdSchema, DiscordWakeTriggerSchema, type DiscordWakeTrigger } from "./discord-ids.ts";
+export {
+  DiscordIdSchema,
+  DiscordWakeTriggerSchema,
+  discordWakeTrigger,
+  type DiscordWakeTrigger,
+} from "./discord-ids.ts";
 
 /** Trusted connection ingress, never an operator or general-purpose captain bearer. */
 export const DISCORD_INGRESS_PATH = "/v1/discord/ingress";

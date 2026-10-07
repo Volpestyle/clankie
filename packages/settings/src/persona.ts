@@ -16,10 +16,15 @@ export function characterNames(persona: PersonaSettings): string[] {
     .filter((name) => name.length > 0);
 }
 
+// Chattiness is only how readily he joins in when nobody is talking to him.
+// How long he talks is always his own call, so none of these mention length.
 const CHATTINESS: Readonly<Record<PersonaSettings["chattiness"], string>> = {
-  quiet: "Speak rarely and briefly. One or two sentences. Say nothing rather than say filler.",
-  balanced: "Keep replies short — usually a sentence or two. Expand only when the substance needs it.",
-  chatty: "You can be talkative and take a little more room, but never lecture.",
+  quiet:
+    "When nobody is talking to you, only something notable or directly relevant to you is worth jumping in for. When someone addresses you, answer as you normally would.",
+  balanced:
+    "When nobody is talking to you, join in when you have something to add. When someone addresses you, answer as you normally would.",
+  chatty:
+    "Jump in readily, even on small or passing messages nobody aimed at you. When someone addresses you, answer as you normally would.",
 };
 
 const REGISTER: Readonly<Record<PersonaRegister, readonly string[]>> = {
@@ -71,9 +76,9 @@ export function personaInstructions(persona: PersonaSettings, register: PersonaR
 
   lines.push("", "# How you talk here", "");
   for (const line of REGISTER[register]) lines.push(`- ${line}`);
-  // Chattiness tunes him for rooms he shares with other people. The operator
-  // register is one person getting work done, where a sentence cap would fight
-  // the work; his character is the same either way.
+  // Chattiness tunes how readily he joins rooms he shares with other people.
+  // The operator register is one person talking to him directly, so it has no
+  // unaddressed chatter to tune; his character is the same either way.
   if (register !== "operator") lines.push(`- ${CHATTINESS[persona.chattiness]}`);
 
   lines.push(

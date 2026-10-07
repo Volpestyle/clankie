@@ -92,8 +92,9 @@ an operator bearer nor arbitrary grants. Mentions, DMs, replies and commands
 can wake a sleeping body. Channels in `discord.ambientChannelIds` (opted in by a
 server admin; none by default) keep a short encrypted buffer of recent chat that
 arrives as context with the next wake; buffered chat alone never wakes or bills
-the body. `discord.wakeTrigger` decides what wakes him: `addressed` (hosted
-default), `name`, or `any`. Without Message Content access on the official app,
+the body. `discord.wakeTrigger` decides what wakes him: `mention` (hosted
+default: an @mention, DM, reply or command, never his plain name), `name` (his
+name too), or `any`; a stored `addressed` is the old spelling of `mention`. Without Message Content access on the official app,
 nothing is buffered and ping-disabled replies may need a mention or DM. A failed delivery marked interrupted was admitted before
 a restart: inspect effects before explicitly retrying it.
 

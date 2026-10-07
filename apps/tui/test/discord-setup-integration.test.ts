@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ClankieApiClient, DiscordSetupClient } from "@clankie/api-client";
 import { DiscordSettingsSchema, parseProtocolResponse } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
+import { personaStatus, personaUpdate } from "../src/command/persona.ts";
 import { createDiscordRoomRoutes } from "../../clankie/src/discord-room-routes.ts";
 import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
 import { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -151,8 +152,9 @@ async function fixture() {
     expect(await readFile(descriptorPath)).toEqual(descriptor);
     return JSON.parse(result.stdout);
   }
-  function shell() {
+  function shell(persona?: Parameters<typeof buildDiscordCommands>[0]["persona"]) {
     const commands = buildDiscordCommands({
+      ...(persona ? { persona } : {}),
       setup: api,
       settings: new SettingsStore(env.CLANKIE_SETTINGS_FILE),
       localAdvanced: false,
@@ -314,6 +316,53 @@ it("real TUI overlays use the shared role, fleet and tracking writer and keep ra
     }
     await running;
   }
+});
+
+it("the attention section saves the wake trigger through the settings API and chattiness through the persona writer", async () => {
+  const f = await fixture();
+  // A trigger saved before the rename keeps its meaning and shows its new name.
+  await f.settings.update((current) => ({
+    ...current,
+    discord: { ...current.discord, wakeTrigger: "addressed" },
+  }));
+  const shell = f.shell({
+    read: async () => (await personaStatus({ settings: f.settings })).persona,
+    update: (patch) => personaUpdate(patch, { settings: f.settings }),
+  });
+  let finished = false;
+  const running = submit(shell, "/discord").finally(() => {
+    finished = true;
+  });
+  try {
+    await choose(shell, "Invite Clankie to a server", "What wakes him");
+    const section = await prompt(shell, "whatever length fits");
+    const rendered = stripVTControlCharacters(section.render(180).join("\n"));
+    expect(rendered).toContain("Only an @mention");
+    expect(rendered).toContain("Balanced");
+    await choose(shell, "whatever length fits", "What wakes him in text");
+    const wake = stripVTControlCharacters((await prompt(shell, "does not wake him")).render(180).join("\n"));
+    expect(wake).toContain("An @mention or his name");
+    await choose(shell, "does not wake him", "or his name");
+    await choose(shell, "whatever length fits", "How readily");
+    await choose(shell, "always his call", "Chatty");
+    await choose(shell, "whatever length fits", "Reply policy");
+    await choose(shell, "while the wake trigger is the default", "An @mention or his name");
+    await choose(shell, "whatever length fits", "Done");
+    await choose(shell, "Invite Clankie to a server", "Done");
+    await running;
+  } finally {
+    for (let attempt = 0; !finished && attempt < 10; attempt++) {
+      shell.setupFlow.handleSubmit("/cancel");
+      await new Promise((resolveTick) => setTimeout(resolveTick, 50));
+    }
+    await running;
+  }
+  const saved = await f.settings.load();
+  expect(saved.discord.wakeTrigger).toBe("name");
+  expect(saved.persona.chattiness).toBe("chatty");
+  expect(saved.persona.replyPolicy).toBe("addressed");
+  // The CLI saves the earlier spelling under its current name.
+  expect((await f.cli("set", "--wake-trigger", "addressed")).discord.wakeTrigger).toBe("mention");
 });
 
 it("stale or revoked writes fail and a disconnected account never reports successful checks", async () => {

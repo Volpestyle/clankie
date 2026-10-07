@@ -667,6 +667,12 @@ export class HostedBodyClient {
   async syncDiscordPolicy(policy: Omit<ManagedDiscordPolicyRequest, "installationId">) {
     const input = ManagedDiscordPolicyRequestSchema.parse({
       ...policy,
+      // An edge built before `mention` existed rejects it, so the earlier
+      // spelling, which every edge reads the same way, stays on this wire.
+      settings:
+        policy.settings.wakeTrigger === "mention"
+          ? { ...policy.settings, wakeTrigger: "addressed" }
+          : policy.settings,
       installationId: this.bootstrap.installationId,
     });
     return ManagedDiscordPolicyResponseSchema.parse(

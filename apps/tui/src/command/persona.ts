@@ -38,7 +38,7 @@ export function formatPersonaLines(persona: PersonaSettings): string[] {
     `also answers to: ${persona.aliases.length === 0 ? "—" : persona.aliases.join(", ")}`,
     `chattiness: ${persona.chattiness}`,
     `persona images: ${persona.imagesDir || "none"} (restart applies changes)`,
-    `reads text channels: ${persona.replyPolicy === "all" ? "every admitted message" : "when addressed"}`,
+    `reads text channels: ${persona.replyPolicy === "all" ? "every admitted message" : "an @mention or his name"}`,
     "",
     "character:",
     ...(notes.length === 0

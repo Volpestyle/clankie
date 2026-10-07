@@ -1999,14 +1999,14 @@ See [persona images](persona-images.md) for caching, voice, model support and A/
 
 Update one or more persona fields atomically:
 
-| Flag                    | Value                                                                                    |
-| ----------------------- | ---------------------------------------------------------------------------------------- |
-| `--display-name`        | 1–64 characters                                                                          |
-| `--aliases`             | Comma-separated names; `none` clears                                                     |
-| `--character-notes`     | Up to 4,000 characters                                                                   |
-| `--chattiness`          | `quiet`, `balanced`, or `chatty`; shapes Discord and stream rooms, not the operator lane |
-| `--reply-policy`        | `addressed` or `all`                                                                     |
-| `--live-message-window` | Whole number from 0 through 100                                                          |
+| Flag                    | Value                                                                                                                                                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--display-name`        | 1–64 characters                                                                                                                                                                                 |
+| `--aliases`             | Comma-separated names; `none` clears                                                                                                                                                            |
+| `--character-notes`     | Up to 4,000 characters                                                                                                                                                                          |
+| `--chattiness`          | `quiet`, `balanced`, or `chatty`: how readily he joins in when nobody addressed him (Discord and stream rooms, not the operator lane). Never a length limit; once addressed he answers normally |
+| `--reply-policy`        | `addressed` (an @mention or one of his names) or `all`                                                                                                                                          |
+| `--live-message-window` | Whole number from 0 through 100                                                                                                                                                                 |
 
 JSON contains `{ "ok": true, "persona": { … }, "settingsFile": "…", "restart": "clankie restart captain" }`.
 The TUI `/persona` modal calls this same writer.
@@ -4379,14 +4379,27 @@ comma-separated (`none` clears); booleans accept `on|off`, `true|false`, or
 completed settings document and the settings writer rejects token-shaped
 values.
 
-| Group                  | Fields                                                                                                                                                                                                                |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Application and roles  | `application-id`, `guild-id`, `swarm-guild-id`, `ambient-role-ids`, `ambient-user-ids`, `approval-role-ids`, `owner-user-id`                                                                                          |
-| Machine grants         | `system-actor-user-ids`, `system-actor-guild-ids`, `system-actor-channel-ids`                                                                                                                                         |
-| Text and presence      | `text-ingress-enabled`, `ingress-guild-ids`, `ingress-channel-ids`, `ingress-dm-policy`, `ingress-dm-user-ids`, `ingress-context-messages`, `tool-progress-channel-ids`, `presence-guild-ids`, `presence-channel-ids` |
-| Voice                  | `voice-enabled`, `voice-guild-ids`, `voice-channel-ids`, `voice-channel-id`, `voice-join-policy`, `voice-consent-policy`, `voice-transcript-logging-enabled`                                                          |
-| Body selection and lab | `active-body`, `user-session-enabled`, `user-session-guild-ids`, `user-session-channel-ids`, `user-session-voice-enabled`, `user-session-voice-channel-ids`, `user-session-dm-policy`, `user-session-dm-user-ids`     |
-| Activity               | `activity-application-id-gba`, `activity-tunnel-name`, `activity-tunnel-hostname`                                                                                                                                     |
+| Group                  | Fields                                                                                                                                                                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Application and roles  | `application-id`, `guild-id`, `swarm-guild-id`, `ambient-role-ids`, `ambient-user-ids`, `approval-role-ids`, `owner-user-id`                                                                                                                                 |
+| Machine grants         | `system-actor-user-ids`, `system-actor-guild-ids`, `system-actor-channel-ids`                                                                                                                                                                                |
+| Text and presence      | `text-ingress-enabled`, `ingress-guild-ids`, `ingress-channel-ids`, `ingress-dm-policy`, `ingress-dm-user-ids`, `ingress-context-messages`, `wake-trigger`, `ambient-channel-ids`, `tool-progress-channel-ids`, `presence-guild-ids`, `presence-channel-ids` |
+| Voice                  | `voice-enabled`, `voice-guild-ids`, `voice-channel-ids`, `voice-channel-id`, `voice-join-policy`, `voice-consent-policy`, `voice-transcript-logging-enabled`                                                                                                 |
+| Body selection and lab | `active-body`, `user-session-enabled`, `user-session-guild-ids`, `user-session-channel-ids`, `user-session-voice-enabled`, `user-session-voice-channel-ids`, `user-session-dm-policy`, `user-session-dm-user-ids`                                            |
+| Activity               | `activity-application-id-gba`, `activity-tunnel-name`, `activity-tunnel-hostname`                                                                                                                                                                            |
+
+`wake-trigger` decides what wakes him for ordinary text chat: `mention` (an
+@mention, a DM, a reply to him or `/clankie ask`; writing his name without an
+@mention does not count), `name` (also his name or an alias in plain text), or
+`any` (every admitted message; he decides whether to answer). `clear
+--wake-trigger` restores the body's default: self-hosted follows the persona
+`--reply-policy` (`all` → `any`, `addressed` → `name`), hosted uses `mention`.
+`addressed` is the earlier spelling of `mention` and is saved as `mention`.
+`ambient-channel-ids` (hosted and official bot only) lists channels whose recent
+chat is kept briefly, encrypted, as context for his next wake; empty means none.
+How readily he joins in once something reaches him is the persona
+`--chattiness`. In the TUI, `/discord` → **What wakes him / how much he talks**
+edits the wake trigger, chattiness and reply policy together.
 
 `active-body` is `bot` or `user_session`. These commands never accept Discord
 tokens and do not perform the lab-user ToS opt-in. The main TUI `/discord` flow

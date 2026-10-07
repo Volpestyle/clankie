@@ -16,7 +16,7 @@ import {
   beginClankieAccountLogin,
   completeClankieAccountLogin,
 } from "@clankie/credential-broker";
-import { SettingsStore } from "@clankie/settings";
+import { SettingsStore, type PersonaSettings } from "@clankie/settings";
 import { ClankieFaceShell, type FaceShellCommand } from "./shell/shell.ts";
 import {
   createCaptainOperatorConversationClient,
@@ -203,6 +203,16 @@ export async function runHostedConsole() {
       listCredentials: () => store.list(),
       setCredential: (id, key) => store.set(id, { type: "api", key }),
       removeCredential: (id) => store.delete(id),
+      // Persona lives on the hosted machine; the same route `persona set` uses.
+      persona: {
+        read: async () =>
+          (
+            (await transport.request("/v1/operator/persona")) as {
+              persona: Pick<PersonaSettings, "chattiness" | "replyPolicy">;
+            }
+          ).persona,
+        update: (patch) => transport.request("/v1/operator/persona", patch),
+      },
     }).filter((command) => command.name === "discord"),
     {
       name: "question",

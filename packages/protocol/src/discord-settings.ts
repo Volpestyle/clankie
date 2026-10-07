@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { DiscordWakeTriggerSchema } from "./discord-ids.ts";
+
+export { discordWakeTrigger, type DiscordWakeTrigger } from "./discord-ids.ts";
 
 /** Discord snowflakes are numeric strings; reject anything else early. */
 const SnowflakeSchema = z.string().regex(/^\d{5,32}$/u, "must be a numeric Discord id");
@@ -67,13 +70,15 @@ export const DiscordSettingsSchema = z
     ingressDmUserIds: SnowflakeListSchema,
     ingressContextMessages: z.number().int().min(0).max(50).default(10),
     /**
-     * What wakes Clankie for ordinary channel chat (VUH-1765): `addressed` (a
-     * mention, DM, reply or slash command), `name` (also his name in a message),
-     * or `any` (every admitted message; he decides whether to answer). Unset
-     * keeps each body's default: self-hosted follows `persona.replyPolicy`
-     * (`all` → `any`, `addressed` → `name`), and the hosted edge uses `addressed`.
+     * What wakes Clankie for ordinary channel chat (VUH-1765): `mention` (an
+     * @mention, DM, reply or slash command; his name alone does not count),
+     * `name` (also his name in a message), or `any` (every admitted message; he
+     * decides whether to answer). Unset keeps each body's default: self-hosted
+     * follows `persona.replyPolicy` (`all` → `any`, `addressed` → `name`), and
+     * the hosted edge uses `mention`. A stored `addressed` is the earlier
+     * spelling of `mention`.
      */
-    wakeTrigger: z.enum(["addressed", "name", "any"]).optional(),
+    wakeTrigger: DiscordWakeTriggerSchema.optional(),
     /**
      * Hosted and official-bot channels whose ordinary chat the edge may keep in a
      * short encrypted buffer for context (VUH-1765). Opt-in per channel by a

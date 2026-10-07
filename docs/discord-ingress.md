@@ -45,7 +45,8 @@ in the private operations repository. The official shared bot token never goes
 into this service or a tenant's credential broker.
 
 `kind: "message"` is unaddressed guild chat admitted by the owner's wake
-trigger (`discord.wakeTrigger`: `addressed`, `name` or `any`; VUH-1765). Any
+trigger (`discord.wakeTrigger`: `mention`, `name` or `any`; VUH-1765; `addressed`
+is the earlier spelling of `mention`, still accepted). Any
 event except voice may carry `context`: at most 20 buffered channel messages
 before it, oldest first, which the body passes to the captain as the turn's
 context messages. Context is never a trigger. Default remote text still

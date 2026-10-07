@@ -527,6 +527,8 @@ it.each([
   { trigger: undefined, persona: "all", body: "anyone around?", expected: ["201"] },
   { trigger: undefined, persona: "addressed", body: "anyone around?", expected: [] },
   { trigger: undefined, persona: "addressed", body: "hey clankie", expected: ["201"] },
+  { trigger: "mention", persona: "all", body: "hey clankie", expected: [] },
+  // A setting stored before the rename keeps its meaning.
   { trigger: "addressed", persona: "all", body: "hey clankie", expected: [] },
   { trigger: "name", persona: "all", body: "hey clankie", expected: ["201"] },
   { trigger: "name", persona: "all", body: "anyone around?", expected: [] },

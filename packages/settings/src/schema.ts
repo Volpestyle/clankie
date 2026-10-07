@@ -53,7 +53,10 @@ export const PersonaSettingsSchema = z
     characterNotes: z.string().max(4_000).default(""),
     /** Owner-selected mood board directory on the service host; restart applies changes. */
     imagesDir: z.string().trim().max(4096).optional(),
-    /** How readily he speaks, and how much room he takes when he does. */
+    /**
+     * How readily he joins in when nobody addressed him. Once addressed he
+     * answers normally, and how long he talks is always his own choice.
+     */
     chattiness: z.enum(["quiet", "balanced", "chatty"]).default("balanced"),
     /** What he perceives in admitted text channels; silence remains his decision. */
     replyPolicy: z.enum(["addressed", "all"]).default("all"),
