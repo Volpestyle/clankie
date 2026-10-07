@@ -37,13 +37,12 @@ through the connected account, or uses an explicit grant.
 | Native `hire_agent`        | Local Claude and Codex hires get the same deny rules and overrides. Local Claude gets the mailbox-only seat bridge; pi its Herdr extension. | No automatic tracker grant, so writes go through the lead. pi inherits extensions unfiltered. Remote launches read no remote configuration. |
 | Explicit worker grant      | `WorkerMcp` verifies account binding, principal, tool and arguments on every call. Account replacement invalidates access.                  | A grant protects the bridge; it does not remove credentials already available to the worker.                                                |
 
-Following reads the verified connected account's actual Linear notification
-inbox. New notifications reach `global-default`; workspace webhook activity is
-passive. Self-filtering compares stable provider user IDs, regardless of which
-fleet member made the write. When notification actor IDs are absent, Linear's
-recipient/self-notification semantics supply that filtering; the current MCP
-response omits actor IDs. The [ADR amendment](adr/0168-linear-awareness-is-opt-in.md)
-records checkpoint, account-switch and replay behavior.
+Signed Linear webhooks that pass the actor/type rules wake one ordinary chat:
+the project's configured lead chat, otherwise `global-default`
+([ADR 0214](adr/0214-linear-wakes-require-attribution-and-rules.md)). The
+connected account's Linear notifications are only marked read after that chat
+confirms the wake. Self-filtering compares stable provider user IDs, regardless
+of which fleet member made the write.
 
 ## Remaining isolation work
 
