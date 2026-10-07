@@ -127,7 +127,7 @@ export interface InboundReport extends InboundAcceptance {
   readonly reportDelivery: z.infer<typeof InboundReportDeliverySchema>;
 }
 
-export interface ServiceHandoffSpan {
+interface ServiceHandoffSpan {
   /** Exclusive log cursor: the harness already holds everything up to here. */
   fromCursor: string;
   /** `attempting` is persisted before transport; restart turns it into `unresolved`. */
@@ -163,7 +163,18 @@ export interface ConversationMeta {
   retainedFromCursor?: string;
   /** Newest external event already carried by a Linear hook turn. */
   linearWakeCursor?: string;
-  linearWakeCheckpoint?: { previous: string; cursor: string; runId?: string };
+  linearWakeCheckpoint?: { previous: string; cursor: string; runId?: string; wakeId?: string };
+  /** Exact offered batches; a native transport ACK alone does not mark provider notifications read. */
+  linearWakeReceipts?: Record<
+    string,
+    {
+      runId?: string;
+      eventIds: string[];
+      offeredAt: string;
+      receivedAt?: string;
+      native?: { messageId: string; fingerprint: string; recipientBinding?: string };
+    }
+  >;
   /** Harness-native messages already folded into this durable persona thread. */
   seatTranscript?: SeatTranscriptCheckpoint;
   roomTranscripts?: Record<string, SeatTranscriptCheckpoint>;

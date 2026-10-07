@@ -161,3 +161,15 @@ Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
   whose results you kept.
 - A user pause or redirect stops new dispatch; productive jobs stay safe.
 - Open dashboards or rearrange terminals only when asked.
+
+After a confirmed integrator push, run `clankie checkouts sync` for the selected
+registered local owner repositories (`--repository` selects one). The integration
+queue records this automatically. Preserve and report blocked owner edits or
+local commits. New hires require a clean checkout containing fetched
+`origin/main`; roster and doctor checkout counts use cached refs.
+
+For authorized owned cleanup, `prune_tidy_worktree` rechecks merge, clean and
+inactive state in an enrolled developer root and preserves `.local` evidence
+under Clankie's state directory first. Runtime pins, runtime/update namespaces
+and the running service checkout stay protected regardless of enrollment.
+Keep live workers' owned trees even when their pane startup cwd is main.

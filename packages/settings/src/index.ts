@@ -149,3 +149,5 @@ export * from "./project-worktrees.ts";
 export * from "./project-worktree-observer.ts";
 
 export { DesktopSettingsSchema, desktopIsQuiet, type DesktopSettings } from "./desktop.ts";
+
+export * from "./checkouts.ts";

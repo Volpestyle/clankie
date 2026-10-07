@@ -11,6 +11,7 @@ import {
 import { object, operationId, privateDirectory, readPrivateJson } from "../../tui/bin/update-files.ts";
 import { DeployHolds, durableJson, withDirectoryLock } from "./deploy-holds.ts";
 import { RuntimeHealthSampleSchema, type RuntimeHealthSample } from "./runtime-health-sample.ts";
+import type { DeployHold } from "@clankie/protocol/integrate";
 
 export const RuntimeCanaryPolicySchema = z
   .strictObject({
@@ -133,6 +134,26 @@ export class RuntimeCanary {
         ? {}
         : { ratioToPrevious: current / previous.cpuMeanPercent }),
     };
+  }
+
+  describeHolds(holds: DeployHold[]) {
+    return holds.map((hold) => {
+      try {
+        const result = readRuntimeUpdate(join(this.options.updatesDirectory, operationId(hold.id)));
+        const wanted = this.hold(result, this.previousHealthy(result));
+        if (
+          result.id === hold.id &&
+          hold.holder === wanted.holder &&
+          hold.reason === wanted.reason &&
+          !hold.pane &&
+          !hold.seat
+        )
+          return { ...hold, candidate: result.newCommit, canary: result.canary };
+      } catch {
+        // Missing or unreadable provenance stays a blocking hold, with its original reason.
+      }
+      return hold;
+    });
   }
 
   private latest(): RuntimeUpdateResult | undefined {

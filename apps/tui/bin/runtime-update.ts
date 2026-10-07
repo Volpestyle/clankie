@@ -1,3 +1,4 @@
+import { CheckoutSyncResultSchema } from "@clankie/protocol";
 /** Detached update transaction. Only the helper executes this engine; imports do not install or restart. */
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -30,6 +31,7 @@ export interface RuntimeUpdatePlan {
   readonly oldCommit: string;
   readonly newCommit: string;
   readonly oldInstanceId: string;
+  readonly ownerCheckoutSync?: import("@clankie/settings").CheckoutSyncResult;
   readonly resolvedRef?: string;
   readonly warning?: RuntimeUpdateResult["warning"];
   readonly initiator?: RuntimeUpdateInitiator;
@@ -160,6 +162,7 @@ export interface RuntimeUpdateResult {
   readonly serviceReceipts?: readonly RuntimeServiceReceipt[];
   readonly harnessRefresh?: { readonly ok: boolean; readonly result?: unknown; readonly error?: string };
   readonly canary?: RuntimeCanaryResult;
+  readonly ownerCheckoutSync?: import("@clankie/settings").CheckoutSyncResult;
   readonly resolvedRef?: string;
   readonly warning?: "older-than-current-pin" | "diverged-from-current-pin";
   readonly initiator?: RuntimeUpdateInitiator;
@@ -255,6 +258,9 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
     newCommit: commitString(value.newCommit),
     phase: value.phase as RuntimeUpdateResult["phase"],
     updatedAt: boundedString(value.updatedAt, 64),
+    ...(value.ownerCheckoutSync === undefined
+      ? {}
+      : { ownerCheckoutSync: CheckoutSyncResultSchema.parse(value.ownerCheckoutSync) }),
     ...(value.resolvedRef === undefined ? {} : { resolvedRef: boundedString(value.resolvedRef, 512) }),
     ...(value.warning === undefined
       ? {}
@@ -405,6 +411,7 @@ export async function executeRuntimeUpdate(
       ref: plan.ref,
       oldCommit: plan.oldCommit,
       newCommit: plan.newCommit,
+      ...(plan.ownerCheckoutSync === undefined ? {} : { ownerCheckoutSync: plan.ownerCheckoutSync }),
       ...(plan.resolvedRef === undefined ? {} : { resolvedRef: plan.resolvedRef }),
       ...(plan.warning === undefined ? {} : { warning: plan.warning }),
       ...(plan.initiator === undefined ? {} : { initiator: plan.initiator }),

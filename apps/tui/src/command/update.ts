@@ -6,19 +6,11 @@ import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 
 const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
-export async function runUpdateCommand(
-  args: readonly string[],
-  options: BrowserCommandOptions = {},
-): Promise<unknown> {
-  // Scheduled idle installs on a hosted body (ADR 0237); a managed body always takes them.
-  if (args[0] === "auto") {
-    const verb = args[1] ?? "status";
-    if (args.length > 2 || !["status", "on", "off"].includes(verb)) throw Error(AUTO_USAGE);
-    const store = new SettingsStore(defaultSettingsPath(options.env ?? process.env));
-    if (verb !== "status")
-      await store.update((current) => ({ ...current, host: { ...current.host, autoUpdate: verb === "on" } }));
-    return { autoUpdate: (await store.load()).host.autoUpdate };
-  }
+export const UPDATE_USAGE =
+  "Usage: clankie update [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\nOwner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.";
+
+export function parseUpdateArgs(args: readonly string[]) {
+  args = args.filter((arg) => arg !== "--json");
   const canary = args[0] === "canary";
   const status = args.length === 1 && args[0] === "status";
   const policy: Record<string, number> = {};
@@ -42,26 +34,53 @@ export async function runUpdateCommand(
   let ref = "main";
   const holdIds: string[] = [];
   let actor: string | undefined, reason: string | undefined;
+  let overrideHolds = false;
   if (!status && !canary) {
-    for (let i = 0; i < args.length; i += 2) {
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--override-holds" && !overrideHolds) {
+        overrideHolds = true;
+        continue;
+      }
       const key = args[i],
-        value = args[i + 1];
+        value = args[++i];
       if (
         !value ||
         value.startsWith("-") ||
         !["--ref", "--override-hold", "--actor", "--reason"].includes(key ?? "")
       )
-        throw Error(
-          "Usage: clankie update [--ref REF] [--override-hold UUID --actor NAME --reason TEXT] | status | canary | auto",
-        );
+        throw Error(UPDATE_USAGE);
       if (key === "--ref") ref = value;
       else if (key === "--override-hold") holdIds.push(value);
       else if (key === "--actor") actor = value;
       else reason = value;
     }
   }
-  if ((actor || reason) && !holdIds.length) throw Error("--actor and --reason require --override-hold");
-  const overrides = holdIds.map((holdId) => HoldOverrideSchema.parse({ holdId, actor, reason }));
+  if (overrideHolds && (holdIds.length || actor)) throw Error(UPDATE_USAGE);
+  if (overrideHolds && !reason?.trim()) throw Error("--override-holds requires --reason TEXT");
+  if ((actor || reason) && !holdIds.length && !overrideHolds)
+    throw Error("--actor and --reason require a hold override");
+  const overrides = holdIds.map((holdId) =>
+    HoldOverrideSchema.parse({ holdId, actor: actor ?? "authenticated-owner", reason }),
+  );
+  if (overrideHolds) HoldOverrideSchema.shape.reason.parse(reason);
+  return { canary, status, policy, ref, overrides, overrideHolds, reason };
+}
+
+export async function runUpdateCommand(
+  args: readonly string[],
+  options: BrowserCommandOptions & { previewRef?: string } = {},
+): Promise<unknown> {
+  args = args.filter((arg) => arg !== "--json");
+  // Scheduled idle installs on a hosted body (ADR 0237); a managed body always takes them.
+  if (args[0] === "auto") {
+    const verb = args[1] ?? "status";
+    if (args.length > 2 || !["status", "on", "off"].includes(verb)) throw Error(AUTO_USAGE);
+    const store = new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+    if (verb !== "status")
+      await store.update((current) => ({ ...current, host: { ...current.host, autoUpdate: verb === "on" } }));
+    return { autoUpdate: (await store.load()).host.autoUpdate };
+  }
+  const { canary, status, policy, ref, overrides, overrideHolds, reason } = parseUpdateArgs(args);
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
     env,
@@ -80,13 +99,28 @@ export async function runUpdateCommand(
   let response: Response;
   try {
     response = await (options.fetchImpl ?? fetch)(
-      new URL(canary ? "/v1/runtime-update/canary" : "/v1/runtime-update", commandHost(options)),
+      new URL(
+        canary
+          ? "/v1/runtime-update/canary"
+          : `/v1/runtime-update${read && options.previewRef ? `?ref=${encodeURIComponent(options.previewRef)}` : ""}`,
+        commandHost(options),
+      ),
       {
         method: read ? "GET" : canary ? "PUT" : "POST",
         headers,
         ...(read
           ? {}
-          : { body: JSON.stringify(canary ? policy : { ref, ...(overrides.length ? { overrides } : {}) }) }),
+          : {
+              body: JSON.stringify(
+                canary
+                  ? policy
+                  : {
+                      ref,
+                      ...(overrides.length ? { overrides } : {}),
+                      ...(overrideHolds ? { overrideHolds, reason } : {}),
+                    },
+              ),
+            }),
         signal: AbortSignal.timeout(30_000),
       },
     );

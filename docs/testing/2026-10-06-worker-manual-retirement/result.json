@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-06",
+  "scope": "Current local Codex refresh; pre-0.6.5 diagnosis and manual retirement. No automated legacy restart.",
+  "installedRefresh": [
+    {
+      "outcome": "skipped-busy",
+      "reason": "original_codex_thread_or_descendant_busy"
+    }
+  ],
+  "deployed": {
+    "commit": "c72c3d028438a41d1d8666f516ff0c1dfe469501",
+    "operation": "4bf90928-0262-4207-a45d-7a067927c2fa",
+    "phase": "healthy",
+    "harnessRefreshOk": false,
+    "reason": "harness-refresh-incomplete"
+  },
+  "checks": {
+    "focusedPassed": 17,
+    "ownedHerdrNativeCaseIncluded": true,
+    "serviceTypecheck": "passed",
+    "scopedLint": "passed",
+    "docLinks": "458 passed"
+  },
+  "effects": {
+    "existingLanesClosed": 0,
+    "existingLanesRestarted": 0
+  }
+}

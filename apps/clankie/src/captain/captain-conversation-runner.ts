@@ -160,7 +160,19 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             }
             signal.throwIfAborted();
             let queuedAtSeat = false;
+            const linearOriginal =
+              context.origin === "hook"
+                ? ctx.conversations.linearWakeReceipt(conversationId, context.runId)
+                : undefined;
             const delivery = await selectedOutbox.deliver({
+              ...(linearOriginal
+                ? {
+                    original: linearOriginal,
+                    ...(selectedOutbox.recipientBinding()
+                      ? { recipientBinding: selectedOutbox.recipientBinding()! }
+                      : {}),
+                  }
+                : {}),
               ...(context.delivery === undefined ? {} : { delivery: context.delivery }),
               onAdmitted: (state) => {
                 if (state === "queued") queuedAtSeat = true;

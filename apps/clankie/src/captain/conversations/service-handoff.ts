@@ -23,7 +23,7 @@ export const CONVERSATION_PROJECTION_BUDGET = 24_000;
 const PROJECTED_EVENT_MAX = 4_000;
 const TOOL_DETAIL_MAX = 400;
 
-export interface ConversationProjection {
+interface ConversationProjection {
   readonly text: string;
   /** Newest event cursor the projection covers, including skipped non-text events. */
   readonly through: string | undefined;
@@ -56,7 +56,7 @@ function projectedLine(event: OperatorConversationStreamEvent): string | undefin
  * The one bounded projection of the conversation log. Newest events win the
  * budget; the result reads oldest first. `after` is an exclusive cursor.
  */
-export function projectConversation(
+function projectConversation(
   events: readonly OperatorConversationStreamEvent[],
   options: { readonly after?: string; readonly budget?: number } = {},
 ): ConversationProjection {
@@ -89,7 +89,7 @@ function omittedNote(omitted: number): string {
 }
 
 /** A conversation that a harness has driven, now or before. */
-export function nativeSeatEver(ctx: ConversationStore, meta: ConversationMeta): boolean {
+function nativeSeatEver(ctx: ConversationStore, meta: ConversationMeta): boolean {
   return (
     ctx.hasNativeSeat(meta.conversationId) ||
     meta.seatTranscript !== undefined ||

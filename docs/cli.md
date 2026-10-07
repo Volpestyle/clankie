@@ -338,6 +338,20 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 ### `update [--ref REF]` / `update status` / `update canary`
 
+In a terminal, update shows the live commit, the fetched target, its new commit
+count and latest commit summaries, then groups holds by cause with CPU and
+health measurements. `status` and `canary` also use plain words. Add `--json`
+for structured output; piped output stays JSON. `update --help` lists the flags.
+
+After reviewing holds, the authenticated owner can use
+`clankie update --override-holds --reason "why proceeding is safe"`.
+An interactive terminal also offers confirmation and asks for the reason;
+declining or giving no reason leaves the update held. Each hold gets its own
+durable override audit, attributed to the authenticated owner. A new hold
+acquired after the prompt still blocks. Legacy per-hold flags remain available:
+`--override-hold UUID [--actor NAME] --reason TEXT`; the server derives the
+audit actor from authentication regardless of the supplied name.
+
 What `clankie update` installs depends on the install. A hosted image never
 updates itself; its deployment replaces the image, and the request answers
 `runtime_updates_unavailable`. A Mac release install moves to
@@ -413,24 +427,20 @@ with a reason. Busy requests remain pending under their original authority.
 Roster `workerTools` and `/doctor` show observed/expected plugin versions and
 whether the observed runtime revision is behind. Local Codex seats started on
 worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh
-success. The staging command `clankie harness restart-tools --pane PANE` (TUI
-`/restart-tools --pane PANE`) accepts canonical pane IDs only. It can take
-`--report /absolute/report` for a completed result. The current production local
-Codex adapter lacks verified native exit; an idle otherwise-eligible target
-returns `native_exit_unavailable` before any close intent. Automatic restart is
-unsupported. Owner native quit
-and saved-thread resume are required until that capability is available.
-The operator API is `POST /v1/fleet/worker-tool-restart` with
-`{"paneId":"PANE","reportPath":"/absolute/report"}` (`reportPath` is optional).
+success. Automatic restart of those legacy seats is disabled. They retire
+naturally; deployment or refresh never quits them. The lead may close an idle
+legacy seat through the existing tidy path and hire a fresh worker with the
+current plugin. First retain its handoff, issue/evidence links and original
+thread reference, settle original receipts, and check that it has no unsent
+draft. The old thread's evidence stays on disk; a fresh hire receives that
+handoff as context, rather than replaying an old report or resuming the old
+thread automatically. See the [manual retirement steps](testing/worker-tool-refresh/manual-proof.md#pre-065-local-codex-manual-retirement).
 
-Restart requires an idle seat, no draft, known lead ownership, saved results,
-settled report receipts, and a verified native exit controller. It rechecks the
-original occupant before exit, records the close, and resumes the same native
-thread through the saved account and working directory. The result returns the
-thread, history ID, and resumed seat ID. A missing exit/resume acknowledgment
-stays held in tidy history; inspect it before retrying. Restart is an explicit
-operator action, never automatic deployment recovery. Remote Codex and Claude
-restarts are outside this command. These fields grant no access.
+The compatibility command `clankie harness restart-tools --pane PANE` and
+`POST /v1/fleet/worker-tool-restart` remain safe refusal surfaces for local
+Codex. An otherwise eligible idle target returns `native_exit_unavailable`
+before any close/history intent. They are not the manual retirement path and
+do not enable supervised quit/resume. Remote Codex and Claude remain VUH-1742.
 
 Known native busy state also holds deployment metadata publication until idle.
 The current implementation cannot safely refresh remote Codex configurations
@@ -971,9 +981,11 @@ credential refresh is counted.
 
 ### `linear status` / `linear follow on|off`
 
-A verified Linear webhook stores a compact **External activity** message in one
-ordinary Clankie chat. `linearWebhook.wakeConversationId` selects that chat;
-`global-default`, the lead conversation, is the default. Open it with
+A verified Linear webhook stores a compact **External activity** message in its
+selected ordinary Clankie chat. `linearWebhook.projectChats` maps verified project
+UUIDs to existing lead chats. Unconfigured projects and removed lead chats go to
+`global-default` with the project named. Nonproject activity uses
+`linearWebhook.wakeConversationId`, default `global-default`. Open it with
 `clankie --chat global-default`, or use the configured ID. A chat named for Linear
 has the same conversation controls and history as any other chat.
 
@@ -988,16 +1000,44 @@ Unknown or ambiguous actors stay quiet. Production wakes also require the
 connected Linear account identity to match the signed event's workspace. An
 unavailable identity or workspace mismatch keeps activity passive, logged as
 `identity_unavailable` or `account_workspace_mismatch`; local `active` readiness
-alone does not prove this identity lookup succeeded. No connected-account
-notification poll, separate inbox, read/ack protocol, or issue-owner route
-participates in delivery.
+alone does not prove this identity lookup succeeded. Signed webhooks drive wakes;
+the separate inbox and issue-owner routing are retired.
+
+After a wake arrives, its target chat confirms the host-issued original ID through
+`linear_wake({ action: "received", wakeId: "seat-…" })`. The tool derives the chat
+from its current host authority and verifies the original native recipient and
+fingerprint. A different chat, replaced occupant or untaken wake cannot confirm
+it. A native transport ACK alone leaves provider notifications unread.
+Only unique signed notification matches for events included in the received batch
+are marked read. Comment UUID anchors permit delayed inbox creation; ambiguous
+matches remain unread. Read claims persist before mutation. Uncertain writes are
+held and settle through read-only observation, without replaying the mutation.
+The shared background request budget applies to bounded scans and the ten-minute
+delayed-notification retry window, including service reload.
 
 A Comment webhook may carry only `issueId`, without an issue title. Missing
 display context is filled from retained signed Issue history or a native
-connected `get_issue` lookup bounded to one second. That read supplies the identifier/title only; signed
+connected `get_issue` lookup bounded to one second. Its exact project UUID/name
+can select a configured lead chat. Sparse project-update comments resolve only
+their signed parent update UUID through `get_status_updates`. URL slugs do not
+prove project identity. These reads supply context; signed
 actor, resource and changes remain the authority for wake rules. If title lookup
 is unavailable, the compact event says `Title unavailable` and keeps its signed
 issue UUID and link rather than dropping the event.
+
+### `linear routes show|set --json-stdin` / `linear deliveries`
+
+`clankie linear routes show` lists project destinations. Replace the array through
+`linear routes set --json-stdin`, or use `linear_wake({ action: "set", projectChats: […] })`.
+Each entry is `{ projectId: "full UUID", name: "Project name", conversationId: "existing global chat ID" }`.
+Duplicate projects or missing/worker chats are refused. `/linear` → **Project lead chats**
+edits one entry. No live app registration changes are needed.
+
+`GET/PUT /v1/linear/routes` reads/replaces `{ projectChats }` with operator
+authentication. `clankie linear deliveries` reads `GET /v1/linear/deliveries`:
+offered wake ID, conversation ID, included event IDs/projects/routes, native
+original receipt, and `receivedAt` when the target confirms. An offered batch
+can have failed before delivery; `offeredAt` is not a consumption receipt.
 
 | Following     | Chat history                   | Automatic model turns                  |
 | ------------- | ------------------------------ | -------------------------------------- |
@@ -1921,6 +1961,21 @@ using the current private host claim. Expiry, restart, a stop request, or a
 failed response does not imply termination. Uncertain operations remain held
 until exact delivery or termination evidence resolves them. Recovery never
 silently retries a Discord send.
+
+For `recovery_required` browser, voice, play and Discord mouth leases, the
+service tries the same verified stop-check automatically at boot, then retries
+with backoff from 5 seconds up to 60 seconds. It requires a known service-owned
+holder whose turn and body operations have ended, and checks both again across
+awaited work. Missing or unreadable holder metadata and native-owned turns
+require explicit owner recovery; native display activity does not prove completion.
+Only confirmed termination releases the exact lease incarnation. Refused or
+unavailable stop proof keeps the lease held; computer recovery stays in its
+separate contract. If recovery persists, the owner can inspect `clankie body
+status` and explicitly recover from an existing writable conversation:
+
+```sh
+clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'
+```
 
 ### `browser [status]` / `browser record on|off`
 
@@ -4822,3 +4877,41 @@ media never appears on the self-hosted public legacy stream.
 
 See [Activity sharing](activity.md) and the
 [wire reference](../apps/discord-activity/README.md#scoped-general-media-core).
+
+### Owner checkout freshness
+
+`clankie checkouts status` reports each registered local owner's checkout:
+branch, HEAD, cached `origin/main`, ahead/behind, dirty state, and linked/stale
+worktree counts. Doctor and local roster cards include these observations.
+Cached refs are explicitly identified; status never fetches or edits a checkout.
+Roster/fleet requests opt into checkout cards with `includeCheckouts: true`;
+older callers keep their original response shape and perform no checkout Git
+observation. Opted-in reads cache owner discovery and inspection together for
+30 seconds, retaining at most 128 cwd observations.
+
+`clankie checkouts sync [--repository OWNER_CHECKOUT]` fetches `origin/main`
+and fast-forwards an owner checkout on `main` only when it has no local commits
+and no local edits overlapping incoming paths. Disjoint staged and unstaged
+edits survive. A refusal lists blocking files with their modification age in
+seconds. No stash, reset, rebase, force, or automatic commit is used. Confirmed
+`clankie integrate` pushes run the same sync and retain its result in the batch;
+updates targeting `origin/main` also run it and retain the result. Manual
+integrators run sync after each confirmed push. A blocked owner checkout does
+not undo a successful push or prevent the fetched runtime from updating.
+
+`clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE` removes
+one landed, clean, inactive linked worktree in an enrolled worktree root. The
+Tidy up skill uses the equivalent `prune_tidy_worktree` tool after preserving
+its result. The service fetches main, copies ignored `.local` evidence, then
+rechecks Git and every live local pane's cwd and foreground cwd. Main checkouts,
+managed pinned/runtime/update namespaces, the running service checkout, locked,
+dirty, unmerged, and live trees stay regardless of developer-root enrollment. Git
+removal is never forced; local branches are deleted only if merged. Evidence
+is retained under `worktree-evidence/` in Clankie’s configured state directory
+(default `~/.clankie/captain/worktree-evidence/`).
+
+New local and SSH hires fetch and verify their start checkout on that machine.
+Dirty checkouts, missing remote main, failed fetches and a HEAD that does not
+contain fetched `origin/main` refuse admission before launch. Clean topic
+branches based on current main are valid. Non-Git workspaces remain usable for
+other tasks; saved-session resumes keep the exact saved cwd.

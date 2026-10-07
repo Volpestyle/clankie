@@ -27,3 +27,25 @@ after the additional owner exits. Ancestor facts alone do not grant pane
 membership; the body's unchanged ancestry/registry fences consume them.
 
 Do not run this churn experiment concurrently with a performance benchmark.
+
+The additional `FLEET_ADDITIONAL_OS_TEST=1` manual file uses `fd-bounds.c` to
+open 16,384 extra real FDs under only its own soft limit (maximum 1.5 s), and
+`exec-changes.c` for real distinct executable transitions or changes to the
+running program's own argument storage (maximum 3 s). `reparent.c` exits its
+owned parent after stdin closes; its live leaf lasts at most 20 ms. The driver
+waits for inherited pipes to close before beginning another iteration.
+`ancestry-race.c` gives only the leaf a TCP FD and exits the root to change the
+middle ancestor. Both descendants last at most 100 ms; root stdin wait is at
+most one second. Kernel calls, helper budgets and diagnostic schemas are
+unchanged. The driver observes at most 512 reparent or 256 ancestry workloads
+and stops when the target event is observed.
+
+Build and run through the fleet heavy wrapper:
+
+```sh
+clankie heavy -- pnpm fleet-proof:build
+clankie heavy -- env FLEET_ADDITIONAL_OS_TEST=1 pnpm exec vitest run apps/clankie/test/fleet-additional-os-native.integration.test.ts
+```
+
+The backlog fleet also requires its outer `bin/heavy` wrapper. These direct
+native diagnostics do not independently prove full HTTP/Herdr admission.

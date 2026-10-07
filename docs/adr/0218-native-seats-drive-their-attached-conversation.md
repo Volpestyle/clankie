@@ -119,7 +119,8 @@ with an `owner_removed` reason; it does not enable implicit parent adoption.
 
 Superseded later that day by
 [ADR 0214's VUH-1678 decision](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04):
-Linear activity has one configured ordinary chat, default `global-default`, and
+The later [VUH-1743 amendment](0214-linear-wakes-require-attribution-and-rules.md)
+selects configured project lead chats, with `global-default` as the project fallback;
 the lead delegates from there. This extension's issue-owner routing and inbox
 handoff are historical; native seat conversation admission elsewhere in this ADR
 remains unchanged.

@@ -77,7 +77,8 @@ it("accepts once after preparation and detaches fixed helper with private file s
     accepted: true,
     latest: { phase: "scheduled", oldCommit: "a".repeat(40), newCommit: "b".repeat(40) },
   });
-  expect(f.guards()).toBe(2);
+  // Admission, owner-checkout synchronization, and final helper scheduling.
+  expect(f.guards()).toBe(3);
   const plan = JSON.parse(
     readFileSync(join(f.home, ".clankie/updates", result.pending!, "plan.json"), "utf8"),
   );
@@ -116,7 +117,7 @@ it("synchronous current check rejects authority lost while final guard awaited",
     f.updater.request("main", {
       current: f.authority.current,
       guard: async () => {
-        if (++count === 2) {
+        if (++count === 3) {
           await Promise.resolve();
           f.revoke();
         }

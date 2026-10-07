@@ -4,6 +4,7 @@
  * public identifiers go to settings.json — the same split `/discord` uses.
  */
 import { LinearWakeSettingsSchema, SettingsStore, type EmailSettings } from "@clankie/settings";
+import { Readable } from "node:stream";
 import {
   connectLinearApp,
   LINEAR_MCP_RESOURCE,
@@ -459,11 +460,47 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
       },
       { value: "wake", label: "Wake rules", hint: "Who and which events wake Clankie" },
       { value: "target", label: "Wake chat", hint: status.wakeConversationId },
+      { value: "routes", label: "Project lead chats", hint: "Route project activity to its lead" },
       { value: "setup", label: "Configure webhook", hint: "URL, all activity events, signing secret" },
     ],
     allowBack: true,
   });
   if (action === undefined) return;
+  if (action === "routes") {
+    const current = (await services.settings.load()).linearWebhook.projectChats;
+    const projectId = await flow.readText({
+      message: "Linear project UUID",
+      validate: (value) =>
+        /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(value)
+          ? undefined
+          : "Enter the full project UUID.",
+    });
+    if (projectId === undefined) return;
+    const existing = current.find((route) => route.projectId.toLowerCase() === projectId.toLowerCase());
+    const name = await flow.readText({
+      message: "Project name",
+      ...(existing ? { defaultValue: existing.name } : {}),
+      validate: (value) =>
+        value.trim().length > 0 && value.length <= 256 ? undefined : "Enter the project name.",
+    });
+    if (name === undefined) return;
+    const conversationId = await flow.readText({
+      message: "Existing lead chat ID (empty removes this route)",
+      ...(existing ? { defaultValue: existing.conversationId } : {}),
+      validate: (value) =>
+        value === "" || /^[a-zA-Z0-9_-]{1,256}$/u.test(value) ? undefined : "Enter a chat ID.",
+    });
+    if (conversationId === undefined) return;
+    const projectChats = current.filter((route) => route.projectId.toLowerCase() !== projectId.toLowerCase());
+    if (conversationId) projectChats.push({ projectId, name, conversationId });
+    // Use the API guard, shared with CLI and agent settings, before persisting the target.
+    const result = await runLinearCommand(["routes", "set", "--json-stdin"], {
+      ...options,
+      stdin: Readable.from([JSON.stringify(projectChats)]),
+    });
+    shell.insertCommandResult("/linear", JSON.stringify(result), "success");
+    return;
+  }
   if (action === "target") {
     const conversationId = await flow.readText({
       message: "Existing global chat ID",

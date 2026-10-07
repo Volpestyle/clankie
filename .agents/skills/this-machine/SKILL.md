@@ -66,6 +66,17 @@ that, and point at `clankie model`, `/connect`, or `/auth`, rather than implying
 you refused. Secrets go through `/auth`, the existing wizards or the credential
 broker, never flags or chat.
 
+## Recovering a body
+
+A body lease marked `recovery_required` is still held. The service retries its
+verified stop-check after a known service-owned holder's turn and body
+operations end, at boot and with 5–60 second backoff. Missing or unreadable
+holders and native-owned turns stay held for explicit owner recovery; display
+activity is not native completion proof. Never infer release from expiry or a failed close.
+If it persists, an authorized owner can inspect `clankie body status` and use
+`clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'`
+from an existing writable conversation. Computer recovery uses its own contract.
+
 ## Updating and restarting yourself
 
 Landed code is not live until the pinned runtime is updated. From an admitted
@@ -74,6 +85,13 @@ machine turn, `update_runtime` or `clankie update [--ref REF]` installs fetched
 means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
+
+For agents, add `--json` (piped output is also JSON). A terminal shows the
+live and target commits and groups deploy holds by cause. An authenticated
+owner may explicitly use `clankie update --override-holds --reason TEXT`;
+every hold gets an audited override with the server-derived owner identity.
+Never override without the owner's reviewed reason. Overrides retain the holds;
+only an explicit owner release clears historical holds.
 
 When a trace lands in your own code on a self-hosted source checkout, fix it in
 that checkout, never in the pinned `repoRoot`: a dirty pin refuses every update. Commit there and
@@ -146,7 +164,7 @@ management across conversations is in [launcher details](reference/launcher.md#m
   updates and canary, restart, reset, models and voice, Discord setup, devices,
   pairing and sleep, memory, `clankie send`, `/setup`, games, conflicts.
 - [Linear activity and wakes](reference/linear.md): Follow Linear, wake rules,
-  the wake chat, request budget.
+  project lead chats, wake consumption receipts, request budget.
 - [Leading work](reference/work.md): wakes and long-horizon loops, lead review
   rounds, watching workers, cost evidence, `work-on`, service goals, tidying,
   project onboarding and worktree roots.

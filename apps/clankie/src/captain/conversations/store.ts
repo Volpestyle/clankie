@@ -4,6 +4,7 @@ import {
   fleetDeliveryStage,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_LIST_MAX,
+  OperatorConversationSchema,
   RoomHandoffMetadataSchema,
   CaptainChannelTurnResultSchema,
   type CaptainChannelTurnResult,
@@ -124,6 +125,9 @@ import {
   flushLinearActivity,
   freshLinearEvents,
   linearWakePrompt,
+  linearWakeReceipt,
+  receiveLinearWake,
+  linearWakeDeliveries,
   linearWakeTargetAllowed,
   loadLinearEventReceipts,
   queueLinearActivity,
@@ -311,6 +315,11 @@ export class ConversationStore {
   public questionEligible: (id: string) => boolean = () => true;
   public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
   public linearFollowing: (() => Promise<boolean>) | undefined;
+  public onLinearWakeReceived:
+    | ((
+        references: readonly import("../../linear-wake-read.ts").LinearWakeNotificationReference[],
+      ) => Promise<unknown>)
+    | undefined;
 
   public constructor(
     root: string,
@@ -840,6 +849,28 @@ export class ConversationStore {
     return meta === undefined ? undefined : publicConversation(meta);
   }
 
+  /** Host-only stop admission: includes queued runs and drivers still settling after their last event. */
+  public turnIdle(conversationId: string): boolean {
+    const meta = this.metas.get(conversationId);
+    // Missing metadata and native display activity cannot prove an ended holder turn.
+    // Native-owned bodies retain explicit, host-verified operator recovery.
+    if (
+      meta === undefined ||
+      meta.conversationId !== conversationId ||
+      !OperatorConversationSchema.safeParse(publicConversation(meta)).success ||
+      this.hasNativeSeat(conversationId)
+    )
+      return false;
+    return (
+      meta.sessionState !== "active" &&
+      (this.runCounts.get(conversationId) ?? 0) === 0 &&
+      (this.activeInvocations.get(conversationId) ?? 0) === 0 &&
+      (this.serviceDrives.get(conversationId)?.size ?? 0) === 0 &&
+      (this.driverAdmissions.get(conversationId)?.size ?? 0) === 0 &&
+      !this.liveRoomHandoffs.has(conversationId)
+    );
+  }
+
   /** A native head remains native while its channel is offline. */
   /** The service runner every unrouted turn uses; host fallbacks reuse it (ADR 0218). */
   public get serviceRunner(): ConversationRunner {
@@ -1080,6 +1111,20 @@ export class ConversationStore {
   /** Compact verified context is prepared when the queued chat turn starts. */
   public linearWakePrompt(id = "global-default", runId?: string): string | undefined {
     return linearWakePrompt(this, id, runId);
+  }
+
+  public linearWakeReceipt(id: string, runId?: string) {
+    return linearWakeReceipt(this, id, runId);
+  }
+
+  public receiveLinearWake(
+    ...args: Parameters<typeof receiveLinearWake> extends [unknown, ...infer Rest] ? Rest : never
+  ) {
+    return receiveLinearWake(this, ...args);
+  }
+
+  public linearWakeDeliveries(id?: string) {
+    return linearWakeDeliveries(this, id);
   }
 
   public conversationIdForSeat(seatId: string): string | undefined {

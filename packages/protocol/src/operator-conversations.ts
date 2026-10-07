@@ -1,3 +1,4 @@
+import { CheckoutStatusSchema } from "./checkouts.ts";
 import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
 import { WorkerReportBridgeStatusSchema } from "./worker-report-health.ts";
@@ -794,6 +795,8 @@ export type WorkerBridgeStatus = z.infer<typeof WorkerBridgeStatusSchema>;
 
 export const OperatorFleetSeatSchema = z
   .object({
+    /** Cached owner repository observation; not freshness admission proof. */
+    checkout: CheckoutStatusSchema.optional(),
     /** Host-observed bridge facts, not tool or message delivery acceptance. */
     harnessBridge: OperatorHarnessBridgeSchema.optional(),
     /** Native client acceptance for this exact occupying session. */
@@ -1525,6 +1528,13 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
         notification: z.boolean().optional(),
         conversationId: OperatorConversationIdSchema,
         following: z.boolean(),
+        project: z
+          .object({ id: z.string().uuid(), name: z.string().max(256).optional() })
+          .strict()
+          .optional(),
+        route: z.enum(["project_lead", "project_fallback", "default"]).optional(),
+        receiver: z.object({ userId: z.string().uuid(), workspaceId: z.string().uuid() }).strict().optional(),
+        notificationTypes: z.array(z.string().min(1).max(128)).max(32).optional(),
       })
       .strict()
       .optional(),

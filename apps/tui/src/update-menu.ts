@@ -3,6 +3,7 @@
  * then stage one only when the owner picks it. Same endpoint as `clankie update`.
  */
 import type { ClankieFaceShell } from "./shell/shell.ts";
+import { formatUpdateOutput } from "./command/update-output.ts";
 
 type Run = (args: readonly string[]) => Promise<unknown>;
 type Json = Record<string, unknown>;
@@ -11,7 +12,7 @@ const short = (value: unknown) => (typeof value === "string" ? value.slice(0, 8)
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** `Running 0b9d486d · last update main 887e07f6 → cc9727b9 healthy`. */
-export function formatUpdateState(state: unknown): string {
+function formatUpdateState(state: unknown): string {
   const runtime = record(record(state).runtime);
   const latest = record(record(state).latest ?? record(state).operation);
   const running = `Running ${short(runtime.commit)}`;
@@ -117,14 +118,44 @@ export async function runUpdateMenu(shell: ClankieFaceShell, update: Run): Promi
       if (typed === undefined) return;
       ref = typed.trim();
     }
-    const staged = await update(ref === "main" ? [] : ["--ref", ref]);
+    const args = ref === "main" ? [] : ["--ref", ref];
+    let staged = await update(args);
+    if (Array.isArray(record(staged).holds) && (record(staged).holds as unknown[]).length) {
+      const held = record(staged).holds as { id: string }[];
+      const consent = await flow.readSelect({
+        message: formatUpdateOutput(staged),
+        options: [
+          { value: "keep", label: "Keep the update held" },
+          {
+            value: "override",
+            label: "Override the reviewed holds and update",
+            hint: "authenticated owner; audited per hold",
+          },
+        ],
+        allowBack: true,
+      });
+      if (consent !== "override") return;
+      const reason = await flow.readText({
+        message: "Reason for each audited override",
+        allowBack: true,
+        validate: (text) => (text.trim() ? undefined : "Enter a reason."),
+      });
+      if (reason === undefined) return;
+      staged = await update([
+        ...args,
+        ...held.flatMap((hold) => ["--override-hold", hold.id]),
+        "--reason",
+        reason,
+      ]);
+    }
     const accepted = record(staged).accepted === true;
+    const upToDate = record(staged).upToDate === true;
     shell.insertCommandResult(
       "/update",
       accepted
         ? `Staged ${ref}. ${formatUpdateState(staged)}\n/update status follows it.`
-        : `Not staged: another update is still settling. ${formatUpdateState(staged)}`,
-      accepted ? "success" : "error",
+        : formatUpdateOutput(staged),
+      accepted || upToDate ? "success" : "error",
     );
   } catch (error) {
     shell.insertCommandResult("/update", message(error), "error");

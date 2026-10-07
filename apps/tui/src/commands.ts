@@ -1,3 +1,4 @@
+import { runCheckoutsCommand } from "./command/checkouts.ts";
 import { runDesktopCommand } from "./command/desktop.ts";
 import { runWorkerToolRefreshCommand, runWorkerToolRestartCommand } from "./command/harness.ts";
 import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
@@ -6,7 +7,8 @@ import { runProjectsMenu } from "./project-menu.ts";
 import { runAccessMenu } from "./access-menu.ts";
 import { runAccountsMenu } from "./accounts-menu.ts";
 import { formatDoctorReport } from "./doctor-report.ts";
-import { formatUpdateState, runUpdateMenu } from "./update-menu.ts";
+import { runUpdateMenu } from "./update-menu.ts";
+import { formatUpdateOutput } from "./command/update-output.ts";
 import { runMinecraftMenu } from "./minecraft-menu.ts";
 import { runProjectCommand } from "./command/project.ts";
 import { runMachinesCommand } from "./command/machines.ts";
@@ -197,6 +199,24 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     });
 
   commands.push({
+    name: "checkouts",
+    aliases: [],
+    description: "Inspect owner checkouts, safely sync main, or prune a landed worktree",
+    argumentHint: "status | sync [--repository PATH] | prune --repository PATH --path WORKTREE",
+    takesArgument: true,
+    async run(argument, shell) {
+      try {
+        shell.insertCommandResult(
+          "/checkouts",
+          JSON.stringify(await runCheckoutsCommand(splitQuotedArguments(argument)), null, 2),
+          "success",
+        );
+      } catch (error) {
+        shell.insertCommandResult("/checkouts", String(error), "error");
+      }
+    },
+  });
+  commands.push({
     name: "update",
     aliases: [],
     description: "Stage a runtime update or read its durable result",
@@ -214,11 +234,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       }
       try {
         const result = await context.commandUpdate(args);
-        shell.insertCommandResult(
-          "/update",
-          args[0] === "status" ? formatUpdateState(result) : JSON.stringify(result, null, 2),
-          "success",
-        );
+        shell.insertCommandResult("/update", formatUpdateOutput(result), "success");
       } catch (error) {
         shell.insertCommandResult("/update", String(error), "error");
       }
@@ -421,7 +437,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       aliases: [],
       description: "Configure Linear webhook wakes, rules and chat target",
       takesArgument: true,
-      argumentHint: "[status|follow on/off|wake show/set|target show/set]",
+      argumentHint: "[status|follow on/off|wake show/set|target show/set|routes show/set|deliveries]",
       async run(argument, shell): Promise<void> {
         if (!argument.trim()) {
           if (!context.linearFollowMenu) throw new Error("Linear settings menu is unavailable");

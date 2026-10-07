@@ -1,0 +1,185 @@
+{
+  "date": "2026-10-06",
+  "helper": {
+    "buildHash": "0e87131ddc37a3e7146a06291e93fea4301b823cb9ed5e8bbf06a3a3a5a040f9",
+    "binaryHash": "496e00fd468f97c473b8d5540fe0ad10362f63dfe3e7e3eafb5d8e7a623496f5"
+  },
+  "manualChecksPassed": 6,
+  "distinctAdditionalReasons": 7,
+  "cases": [
+    {
+      "case": "executable",
+      "nativeDiagnostics": {
+        "executable_unavailable": 1
+      },
+      "events": [
+        {
+          "schemaVersion": 1,
+          "stage": "executable",
+          "reason": "executable_unavailable",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        }
+      ]
+    },
+    {
+      "case": "fd-bounds",
+      "nativeDiagnostics": {
+        "fd_list_bounds": 1
+      },
+      "events": [
+        {
+          "schemaVersion": 1,
+          "stage": "fd_list",
+          "reason": "fd_list_bounds",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        }
+      ]
+    },
+    {
+      "case": "exec-changes-executable",
+      "nativeDiagnostics": {
+        "argv_unavailable": 259,
+        "argv_invalid": 9,
+        "executable_changed": 1
+      },
+      "events": [
+        {
+          "schemaVersion": 1,
+          "stage": "argv",
+          "reason": "argv_unavailable",
+          "errno": 5,
+          "attempt": 1,
+          "retry": false
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "argv",
+          "reason": "argv_invalid",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "argv",
+          "reason": "argv_unavailable",
+          "errno": 22,
+          "attempt": 1,
+          "retry": false
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "executable",
+          "reason": "executable_changed",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        }
+      ]
+    },
+    {
+      "case": "exec-changes-argv",
+      "nativeDiagnostics": {
+        "argv_changed": 1
+      },
+      "events": [
+        {
+          "schemaVersion": 1,
+          "stage": "argv",
+          "reason": "argv_changed",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        }
+      ]
+    },
+    {
+      "case": "reparent",
+      "nativeDiagnostics": {
+        "process_changed": 1
+      },
+      "events": [
+        {
+          "schemaVersion": 1,
+          "stage": "process",
+          "reason": "process_changed",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        }
+      ]
+    },
+    {
+      "case": "ancestry-race",
+      "nativeDiagnostics": {
+        "socket_unavailable": 4,
+        "ancestry_unavailable": 4,
+        "process_unavailable": 11,
+        "process_census_changed": 3,
+        "ancestry_changed": 1
+      },
+      "events": [
+        {
+          "schemaVersion": 1,
+          "stage": "fd_socket",
+          "reason": "socket_unavailable",
+          "errno": 9,
+          "attempt": 1,
+          "retry": true
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "ancestry",
+          "reason": "ancestry_unavailable",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "process",
+          "reason": "process_unavailable",
+          "errno": 3,
+          "attempt": 1,
+          "retry": true
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "process",
+          "reason": "process_unavailable",
+          "errno": 3,
+          "attempt": 2,
+          "retry": true
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "census",
+          "reason": "process_census_changed",
+          "errno": 0,
+          "attempt": 1,
+          "retry": true
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "census",
+          "reason": "process_census_changed",
+          "errno": 0,
+          "attempt": 2,
+          "retry": true
+        },
+        {
+          "schemaVersion": 1,
+          "stage": "ancestry",
+          "reason": "ancestry_changed",
+          "errno": 0,
+          "attempt": 1,
+          "retry": false
+        }
+      ]
+    }
+  ]
+}

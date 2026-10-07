@@ -1,3 +1,4 @@
+import { runCheckoutsCommand } from "../src/command/checkouts.ts";
 import { runComputerCommand } from "../src/command/computer.ts";
 import { runShareCommand } from "../src/command/share.ts";
 import { runDesktopCommand } from "../src/command/desktop.ts";
@@ -6,7 +7,7 @@ import {
   runWorkerToolRefreshCommand,
   runWorkerToolRestartCommand,
 } from "../src/command/harness.ts";
-import { runUpdateCommand } from "../src/command/update.ts";
+import { runUpdateCli } from "../src/command/update-output.ts";
 import { runBodyCommand } from "../src/command/body.ts";
 import { MachineInventorySchema } from "@clankie/protocol";
 import { runMachinesCommand, formatMachines, MACHINE_RESTART_HINT } from "../src/command/machines.ts";
@@ -211,9 +212,12 @@ export async function runHeadlessCaptainCommand(
       else stdout.write(`${formatDoctorSummary(result)}\n`);
       return 0;
     }
-    if (command === "update") {
-      outputJson(stdout, await runUpdateCommand(rest, options));
+    if (command === "checkouts") {
+      outputJson(stdout, await runCheckoutsCommand(rest, options));
       return 0;
+    }
+    if (command === "update") {
+      return await runUpdateCli(rest, { ...options, stdout });
     }
     if (command === "restart") return await runRestartCommand(rest, options);
     if (command === "start") return await runStartCommand(rest, options);

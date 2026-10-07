@@ -1,3 +1,14 @@
+import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
+import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
+import {
+  inspectCheckout,
+  ownerCheckout,
+  syncOwnerCheckout,
+  verifyHireCheckout,
+  projectPathContains,
+  checkoutGit,
+} from "@clankie/settings";
+import { pruneTidyWorktree } from "./prune-worktree.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
 import { effectiveFleetAutonomy } from "@clankie/settings";
@@ -829,6 +840,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     linearWake: {
       settings: settingsStore,
       targetAllowed: (id: string) => conversations.linearWakeTargetAllowed(id),
+      received: (id: string, wakeId: string) =>
+        conversations.receiveLinearWake(id, wakeId, async (original) => {
+          const source = await operatorNativeSource(id);
+          const binding = inboundBinding(source);
+          if (!binding || binding !== original.recipientBinding) return false;
+          shutdown.signal.throwIfAborted();
+          return seatOutbox(id).confirmReceived(original);
+        }),
     },
     discordSettings: () => readDiscordServerSettings(options.discordEnvironment, settingsStore),
   };
@@ -1570,6 +1589,62 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   }
 
+  const checkoutRepositories = async () => {
+    const current = await settings();
+    const paths = current.projects.projects.flatMap((project) => [
+      ...project.workspaces
+        .filter((workspace) => workspace.machineId === "local")
+        .map((workspace) => workspace.path),
+      ...project.worktreeRoots.filter((root) => root.machineId === "local").map((root) => root.repoPath),
+    ]);
+    const owners = await Promise.all(
+      [...new Set(paths)].map((path) => ownerCheckout(path).catch(() => path)),
+    );
+    return [...new Set(owners)];
+  };
+  const checkoutReport = async () => ({
+    observedAt: new Date().toISOString(),
+    refFreshness: "cached-origin/main" as const,
+    checkouts: await Promise.all((await checkoutRepositories()).map(inspectCheckout)),
+  });
+  const syncCheckouts = async (repository?: string) => {
+    const repositories = await checkoutRepositories();
+    if (repository !== undefined && !repositories.includes(repository))
+      throw Error("Select a registered owner checkout");
+    return Promise.all((repository === undefined ? repositories : [repository]).map(syncOwnerCheckout));
+  };
+  const pruneWorktree = async (
+    repository: string,
+    path: string,
+    guard: () => Promise<void> = async () => {},
+  ) => {
+    const current = await settings();
+    const platform = process.platform === "win32" ? "windows" : "posix";
+    const roots = current.projects.projects
+      .flatMap((project) => project.worktreeRoots)
+      .filter((root) => root.machineId === "local");
+    if (!roots.some((root) => root.repoPath === repository && projectPathContains(root.path, path, platform)))
+      throw Error("Select a linked worktree in a registered root; managed runtime trees are protected");
+    for (const owner of await checkoutRepositories()) {
+      const raw = await checkoutGit(owner, ["worktree", "list", "--porcelain", "-z"]);
+      if (raw.split("\0").some((field) => field.startsWith(`worktree ${path}/`)))
+        throw Error("Nested registered worktree is still present; keep the parent");
+    }
+    return pruneTidyWorktree(
+      repository,
+      path,
+      join(options.stateDir, "worktree-evidence"),
+      herdrRunner,
+      async () => {
+        await guard();
+        const latest = await settings();
+        if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
+          throw Error("Project enrollment changed");
+      },
+      { runtimeRoot: options.repoRoot },
+    );
+  };
+
   // One hire path for the compose page and the captain's own `hire_agent`
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
   // persona thread created through `create` is — otherwise its first reply
@@ -1577,6 +1652,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   conversations.linearFollowing = async () =>
     (await settings()).linearWebhook.following &&
     (options.linearFollowing === undefined || (await options.linearFollowing()));
+  conversations.onLinearWakeReceived = options.linearWakeReceived;
   const hireSeat: HireSeat = async (request, brief, source) => {
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
@@ -1612,6 +1688,32 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           detail: error instanceof Error ? error.message : String(error),
         };
       }
+    }
+    if (resume === undefined) {
+      const remote = remoteFleets.find((fleet) => fleet.id === request.fleet);
+      const shell = remote && deps.fleets?.shell?.(remote);
+      const freshness = remote
+        ? shell
+          ? await verifyRemoteHireCheckout(remote, shell, request.workingDirectory)
+          : {
+              outcome: "refused" as const,
+              path: request.workingDirectory,
+              reason: "Remote checkout observer unavailable",
+            }
+        : await verifyHireCheckout(request.workingDirectory);
+      if (freshness.outcome === "refused")
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: freshness.reason ?? "Checkout freshness unverified",
+        };
+      if (freshness.outcome === "fresh")
+        brief = [
+          brief,
+          `Start checkout verified against fetched origin/main: HEAD ${freshness.head}, origin/main ${freshness.remoteMain}. Keep new work based on current origin/main.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
     }
     if (request.harness === "claude" && namedLocal.some((entry) => entry.id === request.fleet))
       return {
@@ -1708,6 +1810,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const paneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
+    runtimeRoot: options.repoRoot,
+    prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
     close: (seatId, guard, nativeOnly) => herdrWatches.closeSeat(seatId, guard, nativeOnly),
@@ -2221,6 +2325,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
+  const checkoutObservations = new CheckoutObservationCache();
+  async function enrichCheckoutSeats(
+    seats: readonly OperatorFleetSeat[],
+  ): Promise<readonly OperatorFleetSeat[]> {
+    return Promise.all(
+      seats.map(async (seat) => {
+        if (seat.fleet !== undefined || !seat.workingDirectory) return seat;
+        const checkout = await checkoutObservations.observe(seat.workingDirectory);
+        return checkout ? { ...seat, checkout } : seat;
+      }),
+    );
+  }
   async function observeFleetProjection(): Promise<readonly OperatorFleetSeat[]> {
     await personas.ready(settingsStore);
     const fleet = await observeFleet();
@@ -2284,7 +2400,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.workerTools = {
           ...seat.workerTools!,
           restartNeeded: true,
-          remediation: `Restart needed: native exit is unavailable for local Codex. Preserve the original thread and receipts; owner native quit plus same-thread resume is required.`,
+          remediation: `Restart needed: automatic legacy restart is disabled. The lead can close this seat when idle and hire a fresh worker. Retain the original thread evidence and settle original receipts without replay.`,
         };
       }
       const report = options.workerReportBridgeStatus?.(fleetId, pane);
@@ -2702,10 +2818,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   /** Read every fleet-owned record against one stable Herdr change cursor. */
-  async function fleetSnapshot(): Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>> {
+  async function fleetSnapshot({ includeCheckouts = false }: { includeCheckouts?: boolean } = {}): Promise<
+    Extract<OperatorConversationServiceResult, { op: "fleet" }>
+  > {
     for (;;) {
       const cursor = fleetChanges.current();
-      const seats = await refreshFleet();
+      const observed = await refreshFleet();
+      const seats = includeCheckouts ? await enrichCheckoutSeats(observed) : observed;
       const channelsResult = await conversations.serve({ op: "channels", schemaVersion: 1 });
       const goalConversations = await conversations.serve({ op: "list", schemaVersion: 1 });
       const goals =
@@ -3744,6 +3863,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get shutdown() {
         return shutdown;
       },
+      get enrichCheckoutSeats() {
+        return enrichCheckoutSeats;
+      },
       get fleetSnapshot() {
         return fleetSnapshot;
       },
@@ -3857,6 +3979,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     seatContext,
+    conversationTurnIdle: (conversationId) => conversations.turnIdle(conversationId),
     syncSeatTranscript: (id, transcript) => {
       if (!conversations.syncNativeSeatTranscript(id, transcript.sessionId, transcript.entries)) return false;
       autonomy.pauseGoal(id);
@@ -3947,7 +4070,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         review,
       );
     },
-    tidyWorktrees: (repository, mergedInto) => paneTidy.worktrees(repository, mergedInto),
+    checkoutReport,
+    syncCheckouts,
+    pruneWorktree,
+    tidyWorktrees: (repository, mergedInto) => paneTidy.worktreeReport(repository, mergedInto),
     restartWorkerTools: async (input, authority) => {
       const owner = { conversationId: conversations.defaultGlobalConversationId() };
       await authority.guard();
@@ -4474,6 +4600,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     fleetWriteAuthority,
     linearWakeTargetAllowed: (id) => conversations.linearWakeTargetAllowed(id),
+    linearWakeDeliveries: () => conversations.linearWakeDeliveries(),
     receiveLinearActivity: (activity, following, conversationId) =>
       conversations.receiveLinearActivity(activity, following, conversationId),
 

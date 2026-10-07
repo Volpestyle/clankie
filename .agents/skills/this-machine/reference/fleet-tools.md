@@ -106,17 +106,15 @@ The local host observation currently supports macOS; remote/Windows native
 acceptance remains separate. Roster samples live for at most five seconds;
 explicit doctor reads probe again.
 
-Local Codex seats on worker plugins before 0.6.5 show `restart needed`. An explicit
-operator can inspect the staging restart command `clankie harness restart-tools
---pane PANE`; it accepts canonical pane IDs only and does not implement a
-working automatic exit for current local Codex controllers. It requires idle, no draft,
-known lead ownership and settled receipts. Production local Codex currently lacks
-verified native exit; the command refuses `native_exit_unavailable` before any
-close intent. Owner native quit plus saved-thread resume is still required.
-A controller with verified native exit can journal resume of the same thread/account/cwd. A lost receipt stays held in tidy history:
-inspect the original operation before retrying. Never use this to replay an
-uncertain report or automatically restart existing lanes. Remote/Claude recovery
-is separate.
+Local Codex seats on worker plugins before 0.6.5 show `restart needed` and retire
+naturally. Automatic legacy restart is disabled. When the lead chooses to retire
+one, retain its handoff and original thread/evidence references, settle original
+receipts, verify idle/no draft, close it through the existing tidy path, then
+hire a fresh worker with the current plugin and that handoff. The old thread's
+evidence stays on disk. Never replay an uncertain report or claim that the new
+hire resumed the old thread. `clankie harness restart-tools --pane PANE` remains
+a canonical-pane compatibility refusal: `native_exit_unavailable` occurs before
+any close intent. It is not this manual path. Remote/Claude recovery is separate.
 Roster `workerReportBridge` separately records the last report outcome, time and
 fixed safe reason. Done/idle hires held for fifteen minutes without a stored
 report since their latest brief carry `finished, unreported`. Three failed seats
@@ -124,6 +122,17 @@ within ten minutes produce one native alert to their owning lead. Inspect
 `clankie metrics --fleet` for five- and sixty-minute proof/refusal and report
 failure rates. Preserve and reconcile uncertain originals; health observations
 never authorize deleting receipts or replaying reports.
+
+Native `process_census_changed` with `retry: false` can accompany a successful
+admission: changing PID lists are reconciled and every candidate is inspected.
+Unrelated descriptor/process races retry that PID within the existing job budget.
+Instability after a matching socket observation requests a fresh bounded census
+to include new inheritors. Read the
+terminal proof reason and refusal rate before treating a churn counter as lost
+membership. A pre-dispatch `local_process_membership_required` 403 permits a
+fresh request; an earlier uncertain call still requires its original receipt.
+Details: `{repoRoot}/docs/worker-access.md` and
+`{repoRoot}/integrations/fleet-proof/README.md`.
 
 Remote reports also include `linkState`: an `unreachable` link's `error` is the
 decoded remote reason, independently of harness installation health. Fleet

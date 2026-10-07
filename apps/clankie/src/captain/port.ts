@@ -170,6 +170,12 @@ export interface CaptainPort {
     conversationId: string,
     review?: import("./fleet-efficiency-tools.ts").FleetEfficiencyReview,
   ): Promise<{ conversationId: string; seats: readonly import("@clankie/protocol").OperatorFleetSeat[] }>;
+  checkoutReport?(): Promise<import("@clankie/protocol").CheckoutReport>;
+  syncCheckouts?(repository?: string): Promise<import("@clankie/settings").CheckoutSyncResult[]>;
+  pruneWorktree?(
+    repository: string,
+    path: string,
+  ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
   tidyWorktrees?(
     repository: string,
     mergedInto?: string,
@@ -261,6 +267,8 @@ export interface CaptainPort {
    */
   syncSeatTranscript(conversationId: string, transcript: SeatTranscriptUpload): boolean;
   seatContext(conversationId?: string): { conversationId: string; cwd: string } | undefined;
+  /** Service-observed turn/driver completion; unavailable evidence must not authorize automatic body stop. */
+  conversationTurnIdle(conversationId: string): boolean;
   lanePrompt(input: {
     readonly lane: CaptainSessionLaneV2;
     readonly sections?: readonly CaptainPromptSection[];
@@ -365,6 +373,7 @@ export interface CaptainPort {
   ): Promise<WorkerWriteAuthority | undefined>;
   /** True for an existing ordinary global chat that may receive Linear wakes. */
   linearWakeTargetAllowed(conversationId: string): boolean;
+  linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
   /** Append verified external context to the selected ordinary chat and optionally wake it. */
   receiveLinearActivity(
     activity: LinearActivityEvent,
@@ -428,6 +437,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     },
     syncSeatTranscript: () => true,
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
+    conversationTurnIdle: () => false,
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
     designatedConversationHead: () => undefined,
     setDesignatedConversationHead: async () => {
@@ -467,6 +477,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
     linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
+    linearWakeDeliveries: () => [],
     receiveLinearActivity: () => true,
     fleetConversationAuthority: async () => undefined,
     fleetWriteAuthority: async () => undefined,

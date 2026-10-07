@@ -456,6 +456,11 @@ export class LiveAgentPicker implements Component {
           ...(selected.seat.efficiency?.flags.map((flag) => this.theme.ansi.red(clean(flag))) ?? []),
           step ?? this.theme.ansi.dim("Step unavailable"),
           ...shownCatalogDetail,
+          ...(selected.seat.checkout
+            ? [
+                `Checkout ${clean(selected.seat.checkout.path)}: ${selected.seat.checkout.outcome === "unavailable" ? "unavailable" : `${selected.seat.checkout.behind} behind / ${selected.seat.checkout.ahead} ahead; ${selected.seat.checkout.staleWorktrees} stale / ${selected.seat.checkout.linkedWorktrees} linked worktrees; ${selected.seat.checkout.dirty ? "dirty" : "clean"}`} (cached origin/main)`,
+              ]
+            : []),
           ...(selected.seat.workerTools
             ? [
                 `Worker tools: ${clean(selected.seat.workerTools.reason)}`,

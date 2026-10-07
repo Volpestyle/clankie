@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { canonicalProjectPath, projectPathContains } from "@clankie/settings";
 import type { HerdrWatchRunner } from "./herdr-watch.ts";
@@ -22,6 +23,27 @@ interface GitWorktree {
 const exec = promisify(execFile);
 const platform = process.platform === "win32" ? "windows" : "posix";
 const SHA = /^[a-f0-9]{40,64}$/u;
+
+export interface ManagedWorktreeProtection {
+  readonly runtimeRoot?: string;
+  readonly home?: string;
+  readonly runtimePath?: string;
+}
+
+async function managedWorktreePaths(options: ManagedWorktreeProtection): Promise<string[]> {
+  const home = options.home ?? homedir();
+  const paths = [
+    join(home, ".clankie", "pinned"),
+    join(home, ".clankie", "runtimes"),
+    join(home, ".clankie", "updates"),
+    options.runtimePath ?? process.env.CLANKIE_RUNTIME_DIR ?? join(home, ".clankie", "pinned"),
+    options.runtimeRoot ?? process.cwd(),
+  ].map((path) => resolve(path));
+  // Protect both configured names and their actual targets, including a pin alias.
+  return [
+    ...new Set([...paths, ...(await Promise.all(paths.map((path) => realpath(path).catch(() => path))))]),
+  ];
+}
 
 async function canonical(path: string, directory = true): Promise<string> {
   if (
@@ -89,7 +111,7 @@ function worktrees(raw: string): GitWorktree[] {
     });
   if (
     records.length === 0 ||
-    records.length > 256 ||
+    records.length > 4096 ||
     new Set(records.map((record) => record.path)).size !== records.length
   )
     throw new Error("Incomplete worktree inventory");
@@ -106,6 +128,11 @@ async function paneDirectories(runner: Pick<HerdrWatchRunner, "list">): Promise<
     const path = await realpath(pane.workingDirectory);
     if (!(await stat(path)).isDirectory()) throw new Error("Unknown pane directory");
     paths.push(path);
+    if (pane.foregroundWorkingDirectory) {
+      const foreground = await realpath(pane.foregroundWorkingDirectory);
+      if (!(await stat(foreground)).isDirectory()) throw new Error("Unknown foreground directory");
+      paths.push(foreground);
+    }
   }
   return [...new Set(paths)].sort();
 }
@@ -115,6 +142,7 @@ export async function listTidyWorktrees(
   repositoryPath: string,
   mergedInto: string,
   runner: Pick<HerdrWatchRunner, "list">,
+  protection: ManagedWorktreeProtection = {},
 ): Promise<TidyWorktreesResult> {
   const unavailable = (reason: string): TidyWorktreesResult => ({
     outcome: "unavailable",
@@ -148,10 +176,19 @@ export async function listTidyWorktrees(
   try {
     const raw = await git(repo.top, ["worktree", "list", "--porcelain", "-z"]);
     const inventory = worktrees(raw);
+    const managedPaths = await managedWorktreePaths(protection);
     const result: TidyWorktreesResult = { outcome: "listed", mergedInto, candidates: [], excluded: [] };
     for (const entry of inventory) {
       let reason: string | undefined;
       if (entry.bare || entry.path === inventory[0]!.path) reason = "main_worktree";
+      else if (
+        managedPaths.some(
+          (path) =>
+            projectPathContains(path, entry.path, platform) ||
+            projectPathContains(entry.path, path, platform),
+        )
+      )
+        reason = "managed_runtime";
       else if (entry.locked) reason = "locked";
       else if (entry.prunable) reason = "prunable";
       else {
@@ -206,4 +243,32 @@ export async function listTidyWorktrees(
   } catch {
     return unavailable("inventory_unavailable");
   }
+}
+
+/** Reporting only: registration age and observed pane owners never authorize deletion. */
+export async function describeRetainedWorktrees(
+  result: TidyWorktreesResult,
+  runner: Pick<HerdrWatchRunner, "list">,
+) {
+  const panes = await runner.list?.().catch(() => []);
+  return Promise.all(
+    result.excluded.map(async (entry) => {
+      const metadata = await stat(join(entry.path, ".git")).catch(() => undefined);
+      const owners = (panes ?? []).filter((pane) =>
+        [pane.workingDirectory, pane.foregroundWorkingDirectory].some(
+          (path) => path && projectPathContains(entry.path, path, platform),
+        ),
+      );
+      return {
+        ...entry,
+        owner: owners.length ? owners.map((pane) => pane.name ?? pane.paneId).join(", ") : "unattributed",
+        ...(metadata
+          ? {
+              ageSeconds: Math.max(0, Math.floor((Date.now() - metadata.birthtimeMs) / 1000)),
+              ageKind: "worktree-registration" as const,
+            }
+          : {}),
+      };
+    }),
+  );
 }

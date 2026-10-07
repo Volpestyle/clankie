@@ -58,6 +58,18 @@ selected page and recording. Only the owner can renew or request ordinary stop;
 owner-authorized recovery is explicit and records the original claimant. An
 independent transport-owned voice stay needs its own exact conversation binding.
 
+The [VUH-1752](https://linear.app/vuhlp/issue/VUH-1752) recovery amendment
+(2026-10-06) permits the service to retry the same verified stop-check at boot
+and on 5–60 second backoff. Automatic admission requires `recovery_required`,
+usable metadata for a service-owned holder, an ended turn/driver, and no live
+body operation. Missing/unreadable holders and native-owned turns require explicit
+owner recovery: display activity is not native completion proof. These conditions remain
+fenced to the exact lease incarnation across awaited checks. Only confirmed
+termination releases it; a refused or unavailable proof retains the claim.
+This cleanup does not replay a Discord send or grant another conversation
+authority. Explicit owner recovery remains available; computer sessions use
+their separate adapter contract.
+
 A conflict returns typed `busy` with resource, owning conversation, state, and
 allowed explicit `queue`/`ask` actions. It includes no other room's transcript,
 actor identity, prompt, or private display name. Queueing is an explicit bounded
@@ -90,6 +102,8 @@ flowchart LR
   Busy --> Request[Explicit scoped queue or ask]
   Request --> Wake[Exact conversation / designated head]
   Effect --> Reconcile[Receipt / termination / recovery]
+  Lease -->|recovery required; holder idle; no live operation| Check[Guarded stop-check / capped backoff]
+  Check -->|confirmed termination| Reconcile
   Reconcile --> Lease
 ```
 

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -240,4 +240,233 @@ it("withholds candidates when a live pane appears during the inventory", async (
     candidates: [],
     excluded: [{ path: f.repo, reason: "inventory_changed" }],
   });
+});
+
+it("foreground cwd protects a worktree even when the pane startup cwd is main", async () => {
+  const f = await fixture();
+  const live = await f.worktree("foreground-live");
+  const native = inventory(() => [{ ...pane(f.repo), foreground_cwd: live }]);
+  const result = await tidy(f.root, native.runner).worktrees(f.repo);
+  expect(result.candidates).toEqual([]);
+  expect(result.excluded).toContainEqual({ path: live, reason: "live_pane" });
+});
+
+it("prune saves ignored evidence, removes a merged clean worktree and only deletes its merged branch", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  // A real local origin gives prune its required successful fetch boundary.
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  await git(f.repo, ["config", "branch.main.remote", "origin"]);
+  await git(f.repo, ["config", "branch.main.merge", "refs/heads/main"]);
+  const path = await f.worktree("landed");
+  const common = await git(f.repo, ["rev-parse", "--git-common-dir"]);
+  await writeFile(join(f.repo, common, "info", "exclude"), ".local/\n");
+  await mkdir(join(path, ".local"));
+  await writeFile(join(path, ".local", "proof.txt"), "kept evidence\n");
+  const result = await pruneTidyWorktree(
+    f.repo,
+    path,
+    join(f.root, "evidence"),
+    inventory(() => []).runner,
+    async () => {},
+  );
+  expect(result).toMatchObject({ outcome: "removed", path, branchDeleted: true });
+  expect(existsSync(path)).toBe(false);
+  expect(await readFile(join(result.evidencePath!, "proof.txt"), "utf8")).toBe("kept evidence\n");
+  expect(await git(f.repo, ["branch", "--list", "landed"])).toBe("");
+});
+
+it("prune retains dirty, live, unmerged and main trees and refuses an unavailable census", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  const dirty = await f.worktree("prune-dirty");
+  await writeFile(join(dirty, "draft.txt"), "keep\n");
+  const live = await f.worktree("prune-live");
+  const unmerged = await f.worktree("prune-unmerged");
+  await writeFile(join(unmerged, "base.txt"), "unfinished\n");
+  await git(unmerged, ["add", "base.txt"]);
+  await git(unmerged, ["commit", "-m", "unfinished"]);
+  const native = inventory(() => [pane(live)]);
+  for (const [path, reason] of [
+    [f.repo, "main_worktree"],
+    [dirty, "dirty"],
+    [live, "live_pane"],
+    [unmerged, "unmerged"],
+  ]) {
+    expect(
+      await pruneTidyWorktree(f.repo, path!, join(f.root, "evidence"), native.runner, async () => {}),
+    ).toMatchObject({ outcome: "kept", reason });
+    expect(existsSync(path!)).toBe(true);
+  }
+  expect((await pruneTidyWorktree(f.repo, live, join(f.root, "evidence"), {}, async () => {})).outcome).toBe(
+    "unavailable",
+  );
+});
+
+it("authenticated pruning retains enrolled managed namespaces and archives developer evidence in configured state", async () => {
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { createClankieApp } = await import("../src/app.ts");
+  const { SettingsStore, addProjectWorktreeRoot, projectsRevision } = await import("@clankie/settings");
+  const { ProjectSchema } = await import("@clankie/protocol/projects");
+  const { runCheckoutsCommand } = await import("../../tui/src/command/checkouts.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  const managed = await Promise.all(
+    [
+      ".clankie/pinned",
+      ".clankie/runtimes/old",
+      ".clankie/updates/operation/stage",
+      "configured/pin",
+      "services/current",
+    ].map((name) => f.worktree(name, true)),
+  );
+  const developer = await f.worktree("developer/landed");
+  await writeFile(join(f.repo, ".git", "info", "exclude"), ".local/\n");
+  for (const path of [...managed, developer]) {
+    await mkdir(join(path, ".local"));
+    await writeFile(join(path, ".local", "proof.txt"), "retained proof\n");
+    expect(await git(path, ["status", "--porcelain"])).toBe("");
+  }
+  const settings = new SettingsStore(join(f.root, "settings.json"));
+  const platform = process.platform === "win32" ? "windows" : "posix";
+  const commonDirectory = await git(f.repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  await settings.update((current) => {
+    let projects = {
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ProjectSchema.parse({
+          id: "managed-fixture",
+          name: "Managed fixture",
+          workspaces: [{ id: "owner", machineId: "local", platform, path: f.repo }],
+        }),
+      ],
+    };
+    for (const name of [".clankie", "configured", "services", "developer"]) {
+      const path = join(f.root, name);
+      projects = addProjectWorktreeRoot(
+        projects,
+        {
+          projectId: "managed-fixture",
+          expectedRevision: projectsRevision(projects),
+          machineId: "local",
+          platform,
+          path,
+          repoPath: f.repo,
+        },
+        { path, repoPath: f.repo, commonDirectory, homePath: f.root },
+      );
+    }
+    return { ...current, projects };
+  });
+  const originalHome = process.env.HOME,
+    originalRuntime = process.env.CLANKIE_RUNTIME_DIR;
+  let captain: ReturnType<typeof createCaptain> | undefined;
+  let service: Awaited<ReturnType<typeof createClankieApp>> | undefined;
+  try {
+    process.env.HOME = f.root;
+    const configuredPin = join(f.root, "pin-alias");
+    await symlink(managed[3]!, configuredPin);
+    process.env.CLANKIE_RUNTIME_DIR = configuredPin;
+    const stateDir = join(f.root, "state");
+    captain = createCaptain({ herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps, {
+      repoRoot: managed[4]!,
+      stateDir,
+      settings,
+      nativeHerdrRunner: inventory(() => []).runner,
+      nativeCensusRunner: async () => ({
+        stdout: JSON.stringify({ result: { snapshot: { agents: [], panes: [], workspaces: [], tabs: [] } } }),
+        stderr: "",
+      }),
+    });
+    service = await createClankieApp({
+      captain,
+      settings,
+      authenticateOperator: async (request) =>
+        request.headers.get("authorization") === "Bearer fixture-owner"
+          ? { operatorId: "fixture-owner" }
+          : undefined,
+    });
+    const app = service.app;
+    const cli = {
+      host: "http://fixture.invalid",
+      env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" },
+      fetchImpl: async (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        app.fetch(new Request(input, init)),
+    };
+    for (const path of managed) {
+      expect(await runCheckoutsCommand(["prune", "--repository", f.repo, "--path", path], cli)).toMatchObject(
+        { outcome: "kept", path, reason: "managed_runtime" },
+      );
+      expect(existsSync(path)).toBe(true);
+      expect(await git(path, ["rev-parse", "HEAD"])).toBe(f.sha);
+    }
+    expect(existsSync(join(stateDir, "worktree-evidence"))).toBe(false);
+    const removed = (await runCheckoutsCommand(
+      ["prune", "--repository", f.repo, "--path", developer],
+      cli,
+    )) as { evidencePath: string };
+    expect(removed).toMatchObject({ outcome: "removed", path: developer });
+    expect(removed.evidencePath.startsWith(join(stateDir, "worktree-evidence") + "/")).toBe(true);
+    expect(await readFile(join(removed.evidencePath, "proof.txt"), "utf8")).toBe("retained proof\n");
+    expect(existsSync(join(f.root, ".herdr-handoffs"))).toBe(false);
+    expect(existsSync(developer)).toBe(false);
+    for (const path of managed) expect(existsSync(path)).toBe(true);
+  } finally {
+    service?.close();
+    await captain?.close();
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalRuntime === undefined) delete process.env.CLANKIE_RUNTIME_DIR;
+    else process.env.CLANKIE_RUNTIME_DIR = originalRuntime;
+  }
+}, 30_000);
+
+it("prune refuses evidence aliases, an archive inside the retiring tree, and copy failures without removal", async () => {
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  await writeFile(join(f.repo, ".git", "info", "exclude"), ".local\n");
+  const path = await f.worktree("evidence-refusal");
+  const outside = join(f.root, "evidence-source");
+  await mkdir(outside);
+  await writeFile(join(outside, "proof.txt"), "must survive\n");
+  await symlink(outside, join(path, ".local"));
+  const prune = (archive: string) =>
+    pruneTidyWorktree(f.repo, path, archive, inventory(() => []).runner, async () => {});
+  expect(await prune(join(f.root, "archive"))).toMatchObject({ outcome: "kept", reason: "evidence_alias" });
+  await rm(join(path, ".local"));
+  await mkdir(join(path, ".local"));
+  await writeFile(join(path, ".local", "proof.txt"), "must survive\n");
+  expect(await prune(join(path, ".local", "archive"))).toMatchObject({
+    outcome: "kept",
+    reason: "evidence_archive_in_worktree",
+  });
+  const alias = join(f.root, "archive-alias");
+  await symlink(outside, alias);
+  expect(await prune(alias)).toMatchObject({ outcome: "kept", reason: "evidence_archive_alias" });
+  const file = join(f.root, "archive-file");
+  await writeFile(file, "not a directory\n");
+  expect(await prune(file)).toMatchObject({ outcome: "unavailable" });
+  if (process.platform !== "win32" && process.getuid?.() !== 0) {
+    // A real failed copy must retain the original evidence and registered tree.
+    await chmod(join(path, ".local", "proof.txt"), 0);
+    try {
+      expect(await prune(join(f.root, "copy-failure"))).toMatchObject({ outcome: "unavailable" });
+      expect(existsSync(path)).toBe(true);
+    } finally {
+      await chmod(join(path, ".local", "proof.txt"), 0o600);
+    }
+  }
+  expect(existsSync(path)).toBe(true);
+  expect(await readFile(join(path, ".local", "proof.txt"), "utf8")).toBe("must survive\n");
 });

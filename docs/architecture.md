@@ -651,8 +651,13 @@ Parallel conversations belong to one Clankie and arbitrate the shared
 `discord_mouth`, `voice`, `browser`, `computer`, and `play` resources through
 [body leases](../apps/clankie/src/body-leases.ts). Conversation identity and
 incarnation tokens fence stale operations; viewing a resource does not acquire
-it, and a lease never adds authority. Uncertain operations require explicit
-recovery rather than age-based takeover. The
+it, and a lease never adds authority. Uncertain operations remain held until
+the host verifies stop. [Automatic recovery](../apps/clankie/src/body-lease-recovery.ts)
+checks at boot and retries with a 5–60 second backoff after a known service-owned
+holder's turn and body operations end. Missing/unreadable holders and native-owned
+turns remain held for explicit owner recovery. It uses the operator recovery proof and fences the
+exact incarnation across every await; expiry alone never releases a body.
+Computer sessions keep their separate adapter recovery. The
 [router](../apps/clankie/src/body-lease-router.ts) preserves the original machine
 or social route when handing a request to the holder. See
 [ADR 0215](adr/0215-conversations-lease-one-body.md) and the
@@ -777,3 +782,17 @@ inside the existing encrypted device envelope. No local body or operator bearer
 is started or exported. See the [ADR 0173 amendment](adr/0173-the-gateway-cannot-read-device-traffic.md#amendment-the-mac-can-be-a-hosted-operator-device-2026-09-27-vuh-1110)
 for authority and the [CLI contract](cli.md#local-and-hosted-connection-modes)
 for supported commands and recovery. Fleet ticket issuance stays private.
+
+Owner checkout maintenance uses `packages/settings/src/checkouts.ts` for native
+Git observations, safe fast-forward, and new-hire freshness admission.
+`/v1/checkouts` reports enrolled local repositories; `/v1/checkouts/sync` and
+`/v1/checkouts/prune` require operator authentication. Confirmed integration
+pushes and main runtime updates persist checkout-sync results. Fresh hires
+verify fetched main on their actual machine before any launch; saved resumes
+retain their directory. Tidy's exact-worktree removal preserves `.local`
+evidence in the configured state directory and rechecks complete local pane
+and Git inventories. Managed pin/runtime/update namespaces and the running
+service checkout are protected independently of developer-root enrollment.
+Roster/fleet checkout reads require explicit opt-in and cache owner discovery
+and inspection together for 30 seconds with a 128-cwd limit; default reads do
+no checkout Git work. Doctor reports cached refs without fetching.

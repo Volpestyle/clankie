@@ -60,6 +60,15 @@ const Registry = z.object({
     }),
   ),
 });
+export class DeployHeldError extends Error {
+  readonly holds: DeployHold[];
+  constructor(holds: DeployHold[]) {
+    super(
+      `Deploy held: ${holds.map((h) => `${h.id} by ${h.holder}: ${h.reason} (since ${h.createdAt})`).join("; ")}`,
+    );
+    this.holds = holds;
+  }
+}
 export class DeployHolds {
   readonly directory: string;
   private readonly presence: ((hold: DeployHold) => Promise<DeployHold["presence"]>) | undefined;
@@ -142,9 +151,20 @@ export class DeployHolds {
     });
   }
   /** Hold acquisition and landing share a lock; a hold cannot race the push/deploy admission. */
-  async landing<T>(operation: string, overrides: HoldOverride[], work: () => Promise<T>): Promise<T> {
+  async landing<T>(
+    operation: string,
+    overrides: HoldOverride[],
+    work: () => Promise<T>,
+    admission?: {
+      overrideAll?: { actor: string; reason: string };
+      guard: () => Promise<void>;
+    },
+  ): Promise<T> {
     return withDirectoryLock(join(this.directory, "landing.lock"), async () => {
       const registry = await this.read();
+      await admission?.guard();
+      if (admission?.overrideAll)
+        overrides = registry.holds.map((hold) => ({ holdId: hold.id, ...admission.overrideAll! }));
       const ids = new Set(overrides.map((o) => o.holdId));
       if (
         ids.size !== overrides.length ||
@@ -152,10 +172,7 @@ export class DeployHolds {
       )
         throw Error("Override must name each existing hold exactly once");
       const blocked = registry.holds.filter((h) => !ids.has(h.id));
-      if (blocked.length)
-        throw Error(
-          `Deploy held: ${blocked.map((h) => `${h.id} by ${h.holder}: ${h.reason} (since ${h.createdAt})`).join("; ")}`,
-        );
+      if (blocked.length) throw new DeployHeldError(blocked);
       for (const override of overrides)
         registry.events.push({
           action: "override",
@@ -165,7 +182,7 @@ export class DeployHolds {
           at: new Date().toISOString(),
           operation,
         });
-      if (overrides.length) await durableJson(this.path, registry);
+      if (overrides.length) await durableJson(this.path, registry, admission?.guard);
       return work();
     });
   }

@@ -640,11 +640,28 @@ export type LinearWakeSettings = z.infer<typeof LinearWakeSettingsSchema>;
 export const LinearWebhookSettingsSchema = z
   .object({
     following: z.boolean().default(false),
-    /** One ordinary global chat; Linear never routes directly to an issue's worker. */
+    /** Default ordinary chat for nonproject activity; projects without a lead use global-default. */
     wakeConversationId: z
       .string()
       .regex(/^[a-zA-Z0-9_-]{1,256}$/u)
       .default("global-default"),
+    /** Explicit Linear project-to-lead chat destinations; never inferred from assignees. */
+    projectChats: z
+      .array(
+        z
+          .object({
+            projectId: z.string().uuid(),
+            name: z.string().trim().min(1).max(256),
+            conversationId: z.string().regex(/^[a-zA-Z0-9_-]{1,256}$/u),
+          })
+          .strict(),
+      )
+      .max(100)
+      .default([])
+      .refine(
+        (routes) => new Set(routes.map((route) => route.projectId.toLowerCase())).size === routes.length,
+        "Each Linear project needs one lead chat",
+      ),
     wake: LinearWakeSettingsSchema.default(() => LinearWakeSettingsSchema.parse({})),
     /** Public URL registered in Linear; the signing secret remains broker-owned. */
     url: z.url({ protocol: /^https?$/ }).optional(),
