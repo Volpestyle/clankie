@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { outputJson, type Writable } from "./io.ts";
 import { parseUpdateArgs, runUpdateCommand, UPDATE_USAGE } from "./update.ts";
-import type { RuntimeCanaryResult } from "../../bin/runtime-update.ts";
+import type { RuntimeCanaryResult, RuntimeUpdateResult } from "../../bin/runtime-update.ts";
 import type { DeployHold } from "@clankie/protocol/integrate";
 
 type Hold = DeployHold & { candidate?: string; canary?: RuntimeCanaryResult };
@@ -15,7 +15,7 @@ type CpuComparison = {
 interface View {
   runtime?: { commit: string };
   target?: { newCommit: string; ref: string; commitCount: number; summary: string[]; warning?: string };
-  latest?: { id: string; phase: string; newCommit: string; canary?: RuntimeCanaryResult };
+  latest?: RuntimeUpdateResult;
   holds?: Hold[];
   canary?: RuntimeCanaryResult;
   policy?: RuntimeCanaryResult["policy"];
@@ -67,6 +67,90 @@ function measurements(canaries: RuntimeCanaryResult[]): string {
   );
   return `CPU mean ${cpu} vs ${cpuAdvisory} advisory; health p95 ${health}${fine ? ", fine" : ""}`;
 }
+const phases: Record<string, string> = {
+  scheduled: "Scheduled; waiting for the helper to start",
+  installing: "Preparing the update; live runtime has not been replaced",
+  stopping: "Draining and stopping the old runtime",
+  activating: "Switching to the prepared runtime",
+  restarting: "Starting the replacement and checking health",
+  healthy: "Replacement is healthy",
+  refused: "Update refused before cutover; live runtime was not replaced",
+  failed: "Update failed",
+  "rolled-back": "Update failed; previous runtime restored and healthy",
+  "stop-unconfirmed": "Could not confirm that services stopped",
+};
+const reasons: Record<string, string> = {
+  "pre-cutover-failed": "Preparation failed before cutover; live runtime was not replaced",
+  "old-services-stop-unconfirmed": "Could not confirm the old runtime stopped",
+  "new-services-stop-unconfirmed": "Could not confirm the replacement stopped before rollback",
+  "cutover-failed": "Update failed during cutover",
+  "rollback-unconfirmed": "Could not confirm that rollback completed safely",
+  "pinned-runtime-changed": "The live runtime changed before preparation",
+  "resolved-commit-changed": "The target commit changed before preparation",
+  "runtime-changed-during-install": "The runtime changed during preparation",
+  "target-update-status-unsupported": "The target does not support durable update status",
+  "target-runtime-canary-unsupported": "The target does not support the runtime canary",
+  "harness-refresh-incomplete": "Runtime is healthy, but some harness tools could not be refreshed",
+};
+const errors: Record<string, string> = {
+  update_refused: "The update request was not admitted",
+  update_status_unavailable: "Could not read update status. Reconnect and run clankie update status.",
+  update_response_unreadable: "Could not read the update response.",
+  update_record_unreadable:
+    "Could not read the saved update record. Keep the original operation for reconciliation.",
+  service_shutting_down:
+    "The old runtime is draining. A brief disconnect is expected; reconnect and run clankie update status.",
+};
+function updateNextStep(view: View): string[] {
+  const latest = view.latest;
+  if (view.pending && view.pending !== latest?.id)
+    return ["The original update is still pending. Run clankie update status; do not resend it."];
+  if (
+    view.needsReconciliation ||
+    (latest &&
+      ["failed", "stop-unconfirmed"].includes(latest.phase) &&
+      latest.reason !== "pre-cutover-failed" &&
+      !latest.reconciled)
+  )
+    return [
+      "Result is uncertain. Keep the original operation and lock for reconciliation. Reconnect and run clankie update status; do not resend the update or restart services.",
+    ];
+  if (latest?.reconciled)
+    return [
+      `The running service confirmed this operation safe at ${clean(latest.reconciled.at)} (${short(latest.reconciled.commit)}). Another clankie update is allowed, subject to holds.`,
+    ];
+  if (latest?.phase === "failed" && latest.reason === "pre-cutover-failed")
+    return [
+      "Run clankie update to retry, subject to holds. The next update safely retires any retained lock for this failed operation.",
+    ];
+  if (latest?.phase === "scheduled")
+    return [
+      "Finish the initiating turn and run clankie update status. An unstarted helper fails after ten minutes when startup or a later update checks it; status alone does not retire it.",
+    ];
+  if (latest && ["stopping", "activating", "restarting"].includes(latest.phase))
+    return [
+      "A brief disconnect is expected during the drain and replacement. Let it finish, reconnect and run clankie update status; do not resend the update.",
+    ];
+  if (latest?.phase === "installing")
+    return ["Let preparation finish, then run clankie update status; do not submit another update."];
+  if (latest && ["refused", "rolled-back"].includes(latest.phase))
+    return ["Review the cause, then run clankie update with a supported target to retry, subject to holds."];
+  if (latest?.phase === "healthy") {
+    const canary = latest.canary;
+    if (
+      !canary ||
+      (canary.state === "passed" && canary.holdReleased === true) ||
+      (canary.state === "failed" && canary.holdEstablished === true)
+    )
+      return ["Canary observation is complete. Another clankie update is allowed, subject to holds."];
+    return [
+      "Canary observation is still settling. Run clankie update status; do not submit another update yet.",
+    ];
+  }
+  if (view.pending)
+    return ["The original update is still pending. Run clankie update status; do not resend it."];
+  return [];
+}
 export function formatUpdateOutput(input: unknown): string {
   const view = input as View;
   const lines: string[] = [];
@@ -79,8 +163,15 @@ export function formatUpdateOutput(input: unknown): string {
     lines.push(...t.summary.map((s) => `  ${clean(s)}`));
     if (t.warning) lines.push(`Target warning: ${clean(t.warning)}`);
   }
-  if (view.latest)
-    lines.push(`Last update: ${short(view.latest.newCommit)} ${view.latest.phase} (${view.latest.id})`);
+  if (view.latest) {
+    const latest = view.latest;
+    lines.push(
+      `Last update: ${short(latest.newCommit)} — ${phases[latest.phase] ?? "Unrecognized saved update state"} (${clean(latest.id)})`,
+    );
+    if (latest.reason) lines.push(`Cause: ${reasons[latest.reason] ?? clean(latest.reason)}`);
+    if (latest.error) lines.push(`Failure detail: ${clean(latest.error)}`);
+    if (latest.rollbackError) lines.push(`Rollback detail: ${clean(latest.rollbackError)}`);
+  }
   const canary = view.canary ?? view.latest?.canary;
   if (canary) {
     lines.push(`Canary: ${canary.state}; ${measurements([canary])}`);
@@ -112,7 +203,7 @@ export function formatUpdateOutput(input: unknown): string {
     groups.set(cause, [...(groups.get(cause) ?? []), hold]);
   }
   if (groups.size) {
-    lines.push("Update held. Live runtime remains in place.");
+    lines.push("Further updates are held. Review these holds before admitting another update.");
     for (const [cause, holds] of groups) {
       const label = causes[cause] ?? clean(cause);
       const canaries = holds.flatMap((h) => (h.canary ? [h.canary] : []));
@@ -129,16 +220,15 @@ export function formatUpdateOutput(input: unknown): string {
     );
   }
   if (view.upToDate) lines.push("Already running the requested official release. No update was scheduled.");
-  else if (view.accepted)
+  else if (view.accepted && !view.needsReconciliation)
     lines.push(
       "Update accepted. Finish this turn, then run clankie update status to check health and canary.",
     );
-  else if (view.pending && !groups.size)
-    lines.push(`Update still settling: ${view.pending}. Read clankie update status.`);
-  if (view.error && !groups.size)
-    lines.push(`Update unavailable: ${clean(view.error)}${view.detail ? ` (${clean(view.detail)})` : ""}`);
-  if (view.needsReconciliation)
-    lines.push("Result is uncertain. Read clankie update status; do not resend the update.");
+  if (view.error && !(groups.size && view.error === "update_refused"))
+    lines.push(
+      `Update unavailable: ${errors[view.error] ?? clean(view.error)}${view.detail ? ` (${clean(view.detail)})` : ""}`,
+    );
+  lines.push(...updateNextStep(view));
   return lines.join("\n") || "No update observation available.";
 }
 export async function runUpdateCli(
@@ -160,7 +250,8 @@ export async function runUpdateCli(
     const result = await runUpdateCommand(rest, options);
     if (json) outputJson(stdout, result);
     else stdout.write(`${formatUpdateOutput(result)}\n`);
-    return (result as View).error ? 1 : 0;
+    const view = result as View;
+    return view.error || (view.accepted === false && !view.upToDate) ? 1 : 0;
   }
   const { status, ref } = parseUpdateArgs(rest);
   const preview = (await runUpdateCommand(["status"], { ...options, previewRef: ref })) as View;

@@ -7,7 +7,7 @@ import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
 export const UPDATE_USAGE =
-  "Usage: clankie update [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\nOwner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.";
+  "Usage: clankie update [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\nTerminal output explains holds and update progress; --json or piped output stays structured.\nHistorical holds remain blocking until explicitly released or overridden. Owner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.\nUse status after acceptance or a disconnect. Do not resend an uncertain update or restart services. A recorded pre-cutover failure may retry, subject to holds.";
 
 export function parseUpdateArgs(args: readonly string[]) {
   args = args.filter((arg) => arg !== "--json");
@@ -126,7 +126,9 @@ export async function runUpdateCommand(
     );
   } catch (error) {
     if (status) return { error: "update_status_unavailable", needsReconciliation: true };
-    throw error;
+    throw Error(
+      `Update result is uncertain. Reconnect and run clankie update status; do not resend the update or restart services. (${error instanceof Error ? error.message : String(error)})`,
+    );
   }
   let result: unknown;
   try {
@@ -134,7 +136,10 @@ export async function runUpdateCommand(
   } catch {
     return { error: "update_response_unreadable", status: response.status, needsReconciliation: true };
   }
-  if (status && !response.ok) return { error: "update_status_unavailable", status: response.status, result };
+  if (response.status === 503 && (result as { error?: string })?.error === "service_shutting_down")
+    return { error: "service_shutting_down", needsReconciliation: true };
+  if (status && !response.ok)
+    return { error: "update_status_unavailable", status: response.status, result, needsReconciliation: true };
   if (!response.ok && response.status !== 409)
     throw Error(`Runtime update unavailable (${response.status}): ${JSON.stringify(result)}`);
   return result;

@@ -363,7 +363,9 @@ After reviewing holds, the authenticated owner can use
 An interactive terminal also offers confirmation and asks for the reason;
 declining or giving no reason leaves the update held. Each hold gets its own
 durable override audit, attributed to the authenticated owner. A new hold
-acquired after the prompt still blocks. Legacy per-hold flags remain available:
+acquired after the prompt still blocks. A passing newer canary releases only its
+own hold; historical and independent holds still need an explicit owner decision.
+Legacy per-hold flags remain available:
 `--override-hold UUID [--actor NAME] --reason TEXT`; the server derives the
 audit actor from authentication regardless of the supplied name.
 
@@ -483,12 +485,19 @@ private `~/.clankie/updates/<operation-id>/` directories and survive the old
 service exiting. A nonterminal operation or uncertain shutdown blocks another
 schedule; inspect/reconcile that operation rather than retrying or deleting its
 lock. PIDs alone are never proof that an abandoned operation is safe to repeat.
+Scheduled means the helper has not yet reported progress; installing means it
+is preparing the replacement. Finish the initiating turn, then read
+`clankie update status`. During shutdown, a brief disconnection is expected:
+the old service drains its process group and seat bridges reconnect to the
+replacement. Wait for that reconnect and read status; the update owns its restart.
 The helper runs from private copies in the operation directory that import only
 Node builtins and each other. One that stops before claiming its operation, for
 example because it cannot load, has changed nothing: it records `failed` with
-`pre-cutover-failed`, and the next update retires the lock. If it could not record
-even that, an operation still `scheduled` and unclaimed ten minutes after
-acceptance is recorded the same way when the service next starts or admits an update.
+`pre-cutover-failed`. The live runtime was not replaced, and another
+`clankie update` can safely retire that lock and retry, subject to deploy holds.
+If it could not record even that, an operation still `scheduled` and unclaimed
+ten minutes after acceptance is recorded the same way when the service next
+starts or admits an update. Reading status alone never retires or reconciles it.
 An operation that ended `stop-unconfirmed` or `failed` reconciles itself when the
 service next starts, and again before the next update, once three facts hold: its
 helper wrote that final result as its last log line, the pin is a clean detached
@@ -497,6 +506,11 @@ pin. The result gains `reconciled` (time, commit, instance) and the lock is kept
 beside the operation as `active.reconciled-ID-TIME`. A deploy hold the canary
 armed for that operation before it could begin is then released as well. Anything else, such as a
 missing or edited pin, still needs the owner and is never repaired automatically.
+Until that proof appears, keep the original operation and lock, inspect its
+status and ask the owner to review it; do not resend the update or restart to
+work around it. Once status reports `reconciled`, another update is permitted,
+subject to remaining deploy holds. Terminal output includes the recorded reason,
+failure and rollback details so the next step follows the actual evidence.
 
 The operator API is `POST /v1/runtime-update` with optional `{ "ref": "main" }`
 and `GET /v1/runtime-update` for status. It requires the actual operator credential;

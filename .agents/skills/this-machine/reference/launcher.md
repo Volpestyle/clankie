@@ -85,13 +85,23 @@ tunnel survives cutover under its current owner.
 the old/new commit, initiator and actual health or rollback. Unreadable saved
 records return a JSON reconciliation error without changing the journal or lock. The TUI has `/update` and
 `/update status`. Never repeat an uncertain update; inspect its existing operation.
+Scheduled means the helper has not reported progress; installing means it is
+preparing the replacement. Finish the initiating turn and check status next turn.
 An uncertain ending your restarted service can prove (helper finished, clean pin,
-booted from it) retires itself and shows `latest.reconciled`; then update again.
+booted from it) retires itself and shows `latest.reconciled`; then another update
+is permitted, subject to remaining deploy holds. Until that proof appears, keep
+the original operation and lock, report its reason, error and rollback details,
+and ask the owner to review it. Do not resend a `stop-unconfirmed` or other
+uncertain failure, delete its lock, or restart to work around it.
 An update that never left `scheduled` because its helper crashed on start (no
-`claimed` file beside `helper.log`) changed nothing; the helper, or the service ten
-minutes later, records it `failed` with `pre-cutover-failed`, and the next update
-proceeds. A runtime whose own copied helper cannot start cannot repair itself this
-way; that needs an owner reinstall of a fixed pin.
+`claimed` file beside `helper.log`) changed nothing. The helper can record it
+`failed` with `pre-cutover-failed`; otherwise, an unclaimed scheduled operation is
+recorded that way after ten minutes on service startup or update admission.
+Status reads alone never retire or reconcile it. A recorded pre-cutover failure
+means the live runtime was not replaced: the next `clankie update` can safely
+retire the lock and retry, subject to deploy holds. A runtime whose own copied
+helper cannot start cannot repair itself this way; that needs an owner reinstall
+of a fixed pin.
 Do not run `clankie restart` while an update is mid-cutover: it refuses, and the
 update restarts services itself.
 A dirty pin or failed install leaves the old runtime untouched.
@@ -101,6 +111,8 @@ acknowledgments `503 service_shutting_down` and closes keep-alive connections, s
 seat bridges reconnect to the replacement. Two Clankie processes after an update
 (`ps -Ao pid,pgid,command | grep 'clankie.*src/index.ts'`) is a defect to report,
 not a state to work around.
+During this drain, a brief disconnection is expected. Wait for reconnect and
+check status; do not submit another update while the original is in progress.
 
 New service liveness starts a five-minute `/health` canary;
 `healthy: true` alone does not mean it passed. Read `latest.canary` and deploy
@@ -112,7 +124,10 @@ only its own canary hold. Historical, independent and unreadable holds still
 block until the owner explicitly releases them. Terminal output groups
 holds by cause; `--json` or piped output keeps structured results. Only the
 authenticated owner can use `clankie update --override-holds --reason TEXT`,
-which records one override audit per hold. `clankie update canary` reads its policy; configure the next
+which records one override audit per hold and keeps each hold recorded. Interactive
+confirmation requires a reason; declining or leaving it blank keeps the update
+held. A newly acquired hold still blocks after confirmation. `clankie update
+canary` reads its policy; configure the next
 observation with `--window-seconds`, `--sample-seconds`, `--cpu-percent`, and
 `--health-ms`, or use `/update` → Canary settings. A restart begins a full new
 window. Only unhealthy, stale or slow `/health` holds; captain CPU (100% is one
