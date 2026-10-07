@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { resolveProjectMembership } from "@clankie/settings";
+import { projectPathContains, resolveProjectMembership, type ClankieSettings } from "@clankie/settings";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 
 /** The service's local machine ID is `local` (machines.ts); a fleet label is not a machine identity. */
@@ -37,6 +37,63 @@ export async function localWorkspaceProject(
   throw new Error(
     "This folder belongs to more than one project. Check its project workspaces before hiring.",
   );
+}
+
+/**
+ * This host cannot canonicalize another machine's paths, so a remote destination is
+ * proven only by the owner's registered spelling: a project workspace on the
+ * fleet's machine (its machine ID, an alias, or any connection to that machine,
+ * since connections to one machine share its filesystem), on its platform, at or
+ * under the exact registered path. Returns undefined when nothing registered matches.
+ */
+export function remoteWorkspaceProject(
+  settings: Pick<ClankieSettings, "machines" | "execution">,
+  projects: ProjectsSettings,
+  fleet: string,
+  directory: string,
+  requested?: string,
+): string | undefined {
+  const target = remoteHireMachine(settings, fleet);
+  if (target === undefined) return undefined;
+  const matches = projects.projects
+    .filter((project) =>
+      project.workspaces.some(
+        (workspace) =>
+          target.ids.has(workspace.machineId) &&
+          workspace.platform === target.platform &&
+          projectPathContains(workspace.path, directory, target.platform),
+      ),
+    )
+    .map((project) => project.id);
+  if (requested !== undefined && matches.includes(requested)) return requested;
+  if (matches.length > 1)
+    throw new Error(
+      `${directory} on fleet ${fleet} is registered to more than one project (${matches.join(", ")}). Name the projectId to hire into.`,
+    );
+  return matches[0];
+}
+
+/** The machine a remote fleet reaches, with every ID its project workspaces may be registered under. */
+export function remoteHireMachine(
+  settings: Pick<ClankieSettings, "machines" | "execution">,
+  fleet: string,
+):
+  | { readonly machine: string; readonly ids: ReadonlySet<string>; readonly platform: "posix" | "windows" }
+  | undefined {
+  const connection = settings.execution.connections.find((entry) => entry.id === fleet);
+  const machine = settings.machines.find((entry) => entry.id === connection?.machine);
+  if (connection?.ssh === undefined || machine === undefined) return undefined;
+  return {
+    machine: machine.id,
+    ids: new Set([
+      machine.id,
+      ...machine.aliases,
+      ...settings.execution.connections
+        .filter((entry) => entry.machine === machine.id)
+        .map((entry) => entry.id),
+    ]),
+    platform: machine.shell === "powershell" ? "windows" : "posix",
+  };
 }
 
 export function selectHireProject(

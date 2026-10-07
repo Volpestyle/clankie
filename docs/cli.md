@@ -4144,7 +4144,7 @@ machine is readable; remote, missing or changed sources report unavailable.
 Existing registered repos remain independent. Project label mappings are
 preserved but this editor does not apply them to station placement.
 
-### `project add NAME --workspace PATH`
+### `project add NAME --workspace PATH [--machine ID --platform windows|posix]`
 
 The owner can approve one local project workspace with `clankie project add NAME
 --workspace /absolute/canonical/path`. This local settings command requires the
@@ -4155,6 +4155,20 @@ or nested-overlapping local workspaces are rejected across all projects, includi
 the same project. Appended workspace IDs are derived deterministically from the
 machine, platform and canonical path. It creates no roles, assignments or tool
 grants. Fleet connected-tool access is independent of these project approvals.
+
+`--machine ID --platform windows|posix` registers a workspace on a linked machine
+instead, spelled exactly as that machine spells it (this host cannot canonicalize
+it). Use the fleet ID you hire with, for example
+`clankie project add rivals --workspace 'C:\Users\me\repos\rivals' --machine pc --platform windows`.
+`hire_agent` with `fleet` uses the hiring conversation's own project when it has
+one, and it stays pinned. A conversation without a project, such as the global
+operator seat, can hire on a linked machine only into a folder at or under a
+registered workspace of that machine: one registered under the machine's ID, an
+alias, or any of its connections, since connections to one machine share its
+files. The platform must match and the spelling must match exactly, including
+case on Windows. A folder in several projects needs `projectId`. Anything else is
+refused with the `project add` command to run. The fleet's own directory grant
+(`clankie runtime workspaces FLEET --dir PATH`) is still required separately.
 
 ### `access` and `mcp --grant FILE`
 

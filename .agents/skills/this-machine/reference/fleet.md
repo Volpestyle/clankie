@@ -346,6 +346,14 @@ that linked machine. Machine setup policy, source-managed Codex setup and verifi
 does not grant operator CLI credentials to fleet workers. `herdr fleets` reports
 each link's state. Setup never restarts or steers existing lanes.
 
+A remote hire takes its project from the hiring conversation; a project
+conversation's project stays pinned. From a conversation without one (the global
+operator seat), the folder must be a registered project workspace on that machine,
+spelled exactly as the machine spells it: `clankie project add PROJECT --workspace
+PATH --machine FLEET --platform windows|posix`. A workspace registered under any
+connection to the same machine counts. The fleet's own grant (`clankie runtime
+workspaces FLEET --dir PATH`) is a separate requirement.
+
 Accounts on another machine are that machine's own: its default Claude profile
 and Codex home plus every `~/.claude-<label>` and `~/.codex-<label>`. The
 `worker_accounts` tool (`clankie accounts workers --machine ID`, `GET

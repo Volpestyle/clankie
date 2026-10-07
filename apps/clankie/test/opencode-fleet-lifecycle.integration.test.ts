@@ -31,9 +31,22 @@ afterEach(async () => {
 });
 
 async function fixture(
-  options: { remote?: boolean; preferencesOnly?: boolean; historyFirst?: boolean; assignRole?: boolean } = {},
+  options: {
+    remote?: boolean;
+    preferencesOnly?: boolean;
+    historyFirst?: boolean;
+    assignRole?: boolean;
+    /** Hire from the global operator seat into a project workspace registered on the fleet's machine. */
+    operatorSeat?: boolean;
+  } = {},
 ) {
-  const { remote = false, preferencesOnly = false, historyFirst = false, assignRole = true } = options;
+  const {
+    remote = false,
+    preferencesOnly = false,
+    historyFirst = false,
+    assignRole = true,
+    operatorSeat = false,
+  } = options;
   const tabLabel = assignRole ? "Oriana Vale · tester" : "Oriana Vale";
   const root = await realpath(await mkdtemp(join(tmpdir(), "opencode-fleet-integration-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
@@ -294,7 +307,49 @@ async function fixture(
         ],
       }),
     }));
-  if (ssh && !preferencesOnly)
+  if (ssh && operatorSeat)
+    // The owner's live shape: one machine reached by two Herdr connections, with the
+    // project workspace registered under the sibling connection rather than the hiring one.
+    await settings.update((current) => ({
+      ...current,
+      machines: [{ id: "fixture-box", ssh: ssh.fleet.ssh.host, shell: ssh.fleet.ssh.shell, aliases: [] }],
+      execution: {
+        ...current.execution,
+        connections: [
+          {
+            id: ssh.fleet.id,
+            machine: "fixture-box",
+            session: ssh.fleet.session,
+            kind: "herdr",
+            capabilities: ["code"],
+            enabled: true,
+          },
+          {
+            id: "fixture-desk",
+            machine: "fixture-box",
+            session: "desk",
+            kind: "herdr",
+            capabilities: ["code"],
+            enabled: true,
+          },
+        ],
+      },
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "home",
+            name: "Home",
+            workspaces: [{ id: "home", machineId: "local", platform: "posix", path: state }],
+          },
+          {
+            id: "remote-app",
+            name: "Remote app",
+            workspaces: [{ id: "remote", machineId: "fixture-desk", platform: "posix", path: root }],
+          },
+        ],
+      }),
+    }));
+  else if (ssh && !preferencesOnly)
     await settings.update((current) => ({
       ...current,
       projects: ProjectsSettingsSchema.parse({
@@ -373,7 +428,10 @@ async function fixture(
   const created = await captain.serveOperatorConversation({
     schemaVersion: 1,
     op: "create",
-    scope: ssh || preferencesOnly ? { kind: "workspace", workspaceId: root } : { kind: "global" },
+    scope:
+      (ssh && !operatorSeat) || preferencesOnly
+        ? { kind: "workspace", workspaceId: root }
+        : { kind: "global" },
     title: "Native hire",
   });
   if (created.op !== "create") throw new Error("create expected");
@@ -388,6 +446,7 @@ async function fixture(
       ...(assignRole ? { role: "tester" } : {}),
       workingDirectory: root,
       ...(ssh === undefined ? {} : { fleet: ssh.fleet.id }),
+      ...(operatorSeat ? { projectId: "remote-app" } : {}),
     },
     ...(preferencesOnly ? {} : { brief: "Fixture native brief" }),
   });
@@ -679,6 +738,55 @@ test.each([
   expect(result).toMatchObject({ result: { outcome: "failed" } });
   if (result.op === "spawn_seat" && result.result.outcome === "failed")
     expect(result.result.detail).not.toContain("Hire from a project conversation");
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+  expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
+});
+
+test("the global operator seat hires on a linked machine only into a registered project workspace", async () => {
+  // Live repro on 4b9c935f: the operator seat has no project of its own, so the remote
+  // destination is proven by the owner's registration on the fleet's machine.
+  const f = await fixture({ remote: true, operatorSeat: true });
+  expect(f.created.conversation.scope).toEqual({ kind: "global" });
+  expect(f.hired.seat.seatId).toBe(f.ssh!.fleet.id + "/term_native123");
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+
+  const hire = (workingDirectory: string, projectId?: string) =>
+    f.captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "spawn_seat",
+      conversationId: f.created.conversation.conversationId,
+      seat: {
+        schemaVersion: 1,
+        harness: "opencode",
+        title: "Remote Stranger",
+        workingDirectory,
+        fleet: f.ssh!.fleet.id,
+        ...(projectId === undefined ? {} : { projectId }),
+      },
+      brief: "Must not launch",
+    });
+  // A registered path named under another project is not re-labelled.
+  expect(await hire(f.root, "home")).toMatchObject({
+    result: { outcome: "failed", reason: "not_ready", detail: expect.stringContaining("does not match") },
+  });
+  // Once the owner's registration no longer covers this folder, nothing proves its project.
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: current.projects.projects.map((project) =>
+        project.id === "remote-app"
+          ? { ...project, workspaces: [{ ...project.workspaces[0]!, path: join(f.root, "nested") }] }
+          : project,
+      ),
+    },
+  }));
+  const refused = await hire(f.root);
+  expect(refused).toMatchObject({ result: { outcome: "failed", reason: "not_ready" } });
+  if (refused.op !== "spawn_seat" || refused.result.outcome !== "failed") throw new Error("refusal expected");
+  expect(refused.result.detail).toContain(
+    `clankie project add PROJECT --workspace "${f.root}" --machine ${f.ssh!.fleet.id} --platform posix`,
+  );
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
   expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
 });

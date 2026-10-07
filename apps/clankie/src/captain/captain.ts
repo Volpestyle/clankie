@@ -193,7 +193,12 @@ import { PaneTidy } from "./pane-tidy.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
 import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } from "./port.ts";
-import { nativeHireProject, selectHireProject } from "./project-hire-context.ts";
+import {
+  nativeHireProject,
+  remoteHireMachine,
+  remoteWorkspaceProject,
+  selectHireProject,
+} from "./project-hire-context.ts";
 import { projectOnboarding } from "./project-onboarding.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
 import { createWorkerAccountsReader } from "./harness-accounts.ts";
@@ -506,10 +511,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const context = seatContext(origin);
       if (context !== undefined) source = await localProject(context.cwd);
     }
-    // Remote paths cannot be canonicalized by this host. A proven source project remains pinned.
-    const destination = input.fleet === undefined ? await localProject(input.workingDirectory) : undefined;
-    if (input.fleet !== undefined && source === undefined && projects.projects.length > 0)
-      throw new Error("The remote agent's project could not be verified. Hire from a project conversation.");
+    // Remote paths cannot be canonicalized by this host. A proven source project remains
+    // pinned; without one, only an owner-registered workspace on the fleet's machine counts.
+    let destination: string | undefined;
+    if (input.fleet === undefined) destination = await localProject(input.workingDirectory);
+    else if (source === undefined && projects.projects.length > 0) {
+      const current = await settings();
+      destination = remoteWorkspaceProject(
+        current,
+        projects,
+        input.fleet,
+        input.workingDirectory,
+        input.projectId,
+      );
+      if (destination === undefined) {
+        const machine = remoteHireMachine(current, input.fleet);
+        throw new Error(
+          `${input.workingDirectory} on fleet ${input.fleet} is not a registered workspace of any project, so the remote agent's project could not be verified. ` +
+            `Register it with \`clankie project add PROJECT --workspace "${input.workingDirectory}" --machine ${input.fleet} --platform ${machine?.platform ?? "windows|posix"}\`` +
+            " (the exact path as that machine spells it), or hire from that project's conversation.",
+        );
+      }
+    }
     return selectHireProject(source, destination, input.projectId);
   };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
