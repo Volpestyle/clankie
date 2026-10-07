@@ -46,8 +46,12 @@ failures caused by the base or infrastructure may affect every member; diagnosis
 is bounded by smaller subsets, and every failure retains its logs.
 
 Each batch runs real `pnpm install --frozen-lockfile`
-with a private store and copied packages, then `pnpm check` in every included
-repository. Evals remain outside the full check. Gate processes start with private
+with a private store and copied packages, then each included repository's
+`pnpm check:landing`, or `pnpm check` where it defines none
+([ADR 0247](adr/0247-narrow-checks-have-one-command.md)). `check:landing` runs
+lint, typecheck and the tests related to files changed since the batch base,
+which the queue passes as `CLANKIE_LANDING_BASE`; the full `pnpm check` stays
+for releases and manual runs. Evals remain outside both. Gate processes start with private
 HOME, XDG directories, Clankie state and fleet descriptors, and a file credential
 broker, before any Vitest setup can snapshot owner paths. On macOS and Linux their
 TMPDIR is a short private `/tmp/clankie-gate-*` directory linked from the batch's
