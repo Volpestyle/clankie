@@ -54,6 +54,15 @@ reported as `settled-not-launched`, permanently. Its original key cannot dispatc
 again. Missing history, allocated identity, launch commitment, changed connection,
 incomplete census or revoked authority refuses. No caller can submit its own proof.
 
+The host program is installed once per version on each host, under
+`~/.clankie/hire-receipt-programs/<sha256>.js`, in bounded chunks that join only
+when the bytes match the digest. Each operation sends a small loader, the digest
+and the service-authored request; the loader evaluates exactly the bytes it
+hashed. A missing or different program refuses before it runs, with a marker
+unique to that dispatch, and only that refusal lets the service install and send
+the same request again. Inlining the program on every call outgrew the Windows
+command line ([VUH-1780](command-bound/CHECKS.md)).
+
 [Native security review](settlement/SECURITY-REVIEW.md) approved the final design.
 [Actual PC census](settlement/pc-census.json) at 2026-10-06T03:22Z proves the new
 guarded host path through `volpe@supedupsilly`: 5 panes, 534 processes, 4 sessions;

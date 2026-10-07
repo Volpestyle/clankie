@@ -3,7 +3,6 @@ import { PassThrough, Writable } from "node:stream";
 import { createServer, createConnection, type Server, type Socket } from "node:net";
 import { execFile, type ChildProcess, type spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { inflateRawSync } from "node:zlib";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -11,8 +10,11 @@ import { remoteProgramCommand, type HerdrFleet } from "../../src/herdr-fleet.ts"
 import { remoteCheckoutProgram } from "../../src/captain/checkout-freshness.ts";
 import { RemoteOpenCodeWorkers } from "../../src/captain/remote-opencode-workers.ts";
 import { createRemoteOpenCodeHelper } from "../../src/captain/remote-opencode-helper.ts";
-import { remoteHireReceiptCommand, type RemoteHireClaim } from "../../src/remote-hire-receipts.ts";
-import { REMOTE_HIRE_RECEIPT_PROGRAM } from "../../src/remote-hire-receipt-program.ts";
+import {
+  remoteHireReceiptCommand,
+  remoteHireReceiptInstallCommands,
+  type RemoteHireClaim,
+} from "../../src/remote-hire-receipts.ts";
 
 /** SSH/remote OS inputs only; RPC framing, socket API, reader and controller remain real. */
 export async function remoteOpenCodeFixture(options: {
@@ -237,29 +239,25 @@ export async function remoteOpenCodeFixture(options: {
       });
       return stdout;
     }
-    // Admit only the canonical service-authored reservation/launch program.
-    // Its real filesystem locks, original claim and launch fence run in this
-    // fixture's private host HOME, never the owner's ~/.clankie receipts.
-    const compressed = command.match(/[A-Za-z0-9+/]{128,}={0,2}/u)?.[0];
-    if (!compressed) throw new Error("Unexpected SSH fixture command");
-    const script = inflateRawSync(Buffer.from(compressed, "base64")).toString();
-    const prefix = `Promise.resolve().then(()=>(${REMOTE_HIRE_RECEIPT_PROGRAM})(`;
-    if (!script.startsWith(prefix)) throw new Error("Unexpected SSH fixture command");
-    const request = JSON.parse(
-      script.slice(prefix.length, script.indexOf(")).then(value=>", prefix.length)),
-    ) as {
-      op: "reserve" | "launch";
-      claim: RemoteHireClaim;
-    };
-    if (
-      !["reserve", "launch"].includes(request.op) ||
-      command.replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture") !==
-        remoteHireReceiptCommand(request.claim, request.op).replaceAll(
-          /clankie-launch-[a-f0-9]{16}/gu,
-          "clankie-launch-fixture",
-        )
-    )
-      throw new Error("Unexpected SSH fixture command");
+    // Admit only the canonical service-authored receipt program install and
+    // reservation/launch requests. Its real filesystem locks, original claim
+    // and launch fence run in this fixture's private host HOME, never the
+    // owner's ~/.clankie receipts.
+    const canonical = (value: string) =>
+      value
+        .replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture")
+        .replaceAll(/clankie-hire-receipt-program-missing-[a-f0-9]{16}/gu, "refusal");
+    const install = remoteHireReceiptInstallCommands(fleet.ssh.shell).map(canonical);
+    if (!install.includes(canonical(command))) {
+      const encoded = /\{"op":"[a-z]+".*\}(?=')/u.exec(command)?.[0];
+      if (!encoded) throw new Error("Unexpected SSH fixture command");
+      const request = JSON.parse(encoded) as { op: "reserve" | "launch"; claim: RemoteHireClaim };
+      if (
+        !["reserve", "launch"].includes(request.op) ||
+        canonical(command) !== canonical(remoteHireReceiptCommand(request.claim, request.op))
+      )
+        throw new Error("Unexpected SSH fixture command");
+    }
     const { stdout } = await execute("/bin/sh", ["-c", command], {
       cwd: root,
       env: { ...process.env, HOME: receiptHome },

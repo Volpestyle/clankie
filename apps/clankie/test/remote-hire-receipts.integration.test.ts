@@ -14,6 +14,9 @@ import { HerdrWatchStore, createHerdrWatchRunner } from "../src/captain/herdr-wa
 import {
   createRemoteHireReceipts,
   remoteHireReceiptCommand,
+  remoteHireReceiptInstallCommands,
+  REMOTE_HIRE_RECEIPT_COMMAND_BOUND,
+  REMOTE_HIRE_RECEIPT_PROGRAM_DIGEST,
   type RemoteHireClaim,
 } from "../src/remote-hire-receipts.ts";
 import {
@@ -46,12 +49,21 @@ function claim(): RemoteHireClaim {
     target: { fleet: "pc", host: "configured-host", session: "default", shell: "posix" },
   };
 }
+const installedHomes = new Set<string>();
 async function host(
   home: string,
   original: RemoteHireClaim,
   op: "reserve" | "launch" | "seal",
   env: NodeJS.ProcessEnv = {},
 ) {
+  if (!installedHomes.has(home)) {
+    for (const command of remoteHireReceiptInstallCommands(original.target.shell))
+      await exec("/bin/sh", ["-c", command], {
+        env: { ...process.env, ...env, HOME: home },
+        timeout: 30_000,
+      });
+    installedHomes.add(home);
+  }
   const { stdout } = await exec("/bin/sh", ["-c", remoteHireReceiptCommand(original, op)], {
     env: { ...process.env, ...env, HOME: home },
     timeout: 30_000,
@@ -74,6 +86,91 @@ it("retains the host original, forbids repeat launch and refuses absent or repla
     claim: original,
     state: "launching",
   });
+});
+
+it("keeps every PC receipt command within half the Windows bound and installs the host program once per version", async () => {
+  // A realistic PowerShell claim with every field at production size (VUH-1780).
+  const pc: RemoteHireClaim = {
+    receiptId: randomUUID(),
+    receiptKey: JSON.stringify([
+      "pc",
+      "codex",
+      "C:\\Users\\james\\dev\\clankie-wt\\a-long-worktree-name-for-a-realistic-claim",
+      "new",
+    ]),
+    fingerprint: deliveryFingerprint("x".repeat(4000)),
+    nonce: "f".repeat(64),
+    target: {
+      fleet: "pc",
+      host: "james@supedupsilly.tailnet-name.ts.net",
+      session: "default",
+      shell: "powershell",
+    },
+  };
+  const recoveries = [
+    {
+      disposition: "delivered" as const,
+      paneId: "pc/w1a2b3c4d5:p12",
+      cwd: "C:\\Users\\james\\dev\\clankie-wt\\a-long-worktree-name-for-a-realistic-claim",
+      harness: "codex",
+      beforeIds: Array.from({ length: 40 }, (_, index) => `pc/w1a2b3c4d5:p${index}`),
+      message: { receiptId: randomUUID(), seatId: `seat-${randomUUID()}`, binding: "b".repeat(64) },
+    },
+    { disposition: "abandoned-unknown" as const, cwd: "C:\\Users\\james", harness: "claude" },
+  ];
+  const commands = [
+    ...(["reserve", "launch", "seal"] as const).map((op) => remoteHireReceiptCommand(pc, op)),
+    ...recoveries.map((recovery) => remoteHireReceiptCommand(pc, "recover", recovery)),
+    ...remoteHireReceiptInstallCommands("powershell"),
+  ];
+  for (const command of commands)
+    expect(command.length).toBeLessThanOrEqual(REMOTE_HIRE_RECEIPT_COMMAND_BOUND / 2);
+
+  // The real loader and installer on a fresh host: refuse before the program
+  // runs, install the exact digest, then dispatch the same request once.
+  const home = await root();
+  const sent: string[] = [];
+  const receipts = createRemoteHireReceipts({
+    fleet: async () => ({ id: "pc", session: "default", ssh: { host: "configured-host", shell: "posix" } }),
+    shell: () => async (command) => {
+      sent.push(command);
+      return (
+        await exec("/bin/sh", ["-c", command], { env: { ...process.env, HOME: home }, timeout: 30_000 })
+      ).stdout;
+    },
+  });
+  const install = remoteHireReceiptInstallCommands("posix");
+  const first = claim();
+  await receipts.reserve(first);
+  const canonical = (commands: readonly string[]) =>
+    commands.map((command) =>
+      command
+        .replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-x")
+        .replaceAll(/clankie-hire-receipt-program-missing-[a-f0-9]{16}/gu, "refusal"),
+    );
+  const reserve = remoteHireReceiptCommand(first, "reserve");
+  expect(canonical(sent)).toEqual(canonical([reserve, ...install, reserve]));
+  const programs = join(home, ".clankie/hire-receipt-programs");
+  expect(await readdir(programs)).toEqual([`${REMOTE_HIRE_RECEIPT_PROGRAM_DIGEST}.js`]);
+  sent.length = 0;
+  await receipts.launch(first);
+  expect(sent).toHaveLength(1);
+
+  // A replaced program file is never evaluated: the loader refuses, the
+  // service reinstalls the digest, and the original journal is untouched.
+  await writeFile(
+    join(programs, `${REMOTE_HIRE_RECEIPT_PROGRAM_DIGEST}.js`),
+    "function(){return {reserved:true}}",
+  );
+  const journal = (await readdir(join(home, ".clankie/hire-receipts"))).filter((name) =>
+    name.endsWith(".json"),
+  );
+  const before = await readFile(join(home, ".clankie/hire-receipts", journal[0]!), "utf8");
+  sent.length = 0;
+  await expect(receipts.launch(first)).rejects.toThrow(/cannot launch again/u);
+  expect(sent).toHaveLength(install.length + 2);
+  expect(await readFile(join(home, ".clankie/hire-receipts", journal[0]!), "utf8")).toBe(before);
+  expect(await readdir(programs)).toEqual([`${REMOTE_HIRE_RECEIPT_PROGRAM_DIGEST}.js`]);
 });
 
 it("refuses legacy allocated originals and non-hire IDs without contacting a host or changing receipts", async () => {
