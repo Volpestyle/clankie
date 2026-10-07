@@ -32,6 +32,7 @@ export {
   parseDiscordDmPolicy,
   parseDiscordIdSet,
   parseDiscordReplyPolicy,
+  discordTextAttention,
   selectInboundImageAttachments,
   type DiscordDmPolicy,
   type DiscordReplyPolicy,

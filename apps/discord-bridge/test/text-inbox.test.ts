@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
+import { emptySettings } from "@clankie/settings";
 import {
   DISCORD_TURN_FAILED_NOTICE,
   DiscordTextIngress,
+  discordTextAttention,
   type DiscordTextIngressConfig,
   type DiscordTextIngressPort,
 } from "@clankie/discord-presence-core";
@@ -518,6 +520,56 @@ it.each([
     }
   },
 );
+
+// VUH-1765: the wake trigger is configurable, and an owner who never sets it
+// keeps today's self-hosted behavior, where he considers every admitted message.
+it.each([
+  { trigger: undefined, persona: "all", body: "anyone around?", expected: ["201"] },
+  { trigger: undefined, persona: "addressed", body: "anyone around?", expected: [] },
+  { trigger: undefined, persona: "addressed", body: "hey clankie", expected: ["201"] },
+  { trigger: "addressed", persona: "all", body: "hey clankie", expected: [] },
+  { trigger: "name", persona: "all", body: "hey clankie", expected: ["201"] },
+  { trigger: "name", persona: "all", body: "anyone around?", expected: [] },
+  { trigger: "any", persona: "addressed", body: "anyone around?", expected: ["201"] },
+] as const)(
+  "wake trigger $trigger with persona $persona admits '$body' as $expected",
+  async ({ trigger, persona, body, expected }) => {
+    const inbox = new DiscordTextInbox(":memory:", "200");
+    try {
+      const ingress = new DiscordTextIngress(inbox.port(replyPort()), {
+        ...guildConfig,
+        ...discordTextAttention({ wakeTrigger: trigger, replyPolicy: persona, characterNames: ["clankie"] }),
+      });
+      const item = historyMessage("201", "human", body);
+      const fetch = vi.fn(
+        async ({ before }: { before?: string }) => new Collection(before ? [] : [[item.id, item]]),
+      );
+      await scanDiscordTextChannel(
+        inbox,
+        { id: "room", messages: { fetch }, isDMBased: () => false } as unknown as TextBasedChannel,
+        "bot",
+        ingress,
+      );
+      expect(inbox.pending().map((row) => row.id)).toEqual(expected);
+    } finally {
+      inbox.close();
+    }
+  },
+);
+
+it("leaves fresh self-hosted settings considering every admitted message", () => {
+  const settings = emptySettings();
+  expect(settings.discord.wakeTrigger).toBeUndefined();
+  expect(settings.discord.ambientChannelIds).toEqual([]);
+  expect(settings.discord.officialBotEnabled).toBe(false);
+  expect(
+    discordTextAttention({
+      wakeTrigger: settings.discord.wakeTrigger,
+      replyPolicy: settings.persona.replyPolicy,
+      characterNames: ["clankie"],
+    }),
+  ).toEqual({ replyPolicy: "all", characterNames: ["clankie"] });
+});
 
 it("keeps the cursor when a reply's addressing lookup fails transiently", async () => {
   const inbox = new DiscordTextInbox(":memory:", "200");

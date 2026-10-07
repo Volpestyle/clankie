@@ -3,7 +3,7 @@ import {
   createMinecraftLoginCodeDelivery,
   tryHandleMinecraftLoginCodeRequest,
 } from "@clankie/discord-presence-core";
-import { voiceRoomEvidence } from "@clankie/discord-presence-core";
+import { voiceRoomEvidence, discordTextAttention } from "@clankie/discord-presence-core";
 import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { tryHandleBodyVoiceReconcile } from "@clankie/discord-presence-core";
 import { VoiceBodyLease, type VoiceBodyAdmission } from "@clankie/discord-presence-core";
@@ -259,8 +259,12 @@ const textIngress = textIngressEnabled
         contextMessageLimit: textIngressContextLimit,
         authenticatedSurfaceUrl,
         // Persona owns who he is and when he speaks; the bridge only carries it.
-        replyPolicy: storedSettings.persona.replyPolicy,
-        characterNames: characterNames(storedSettings.persona),
+        // The owner's wake trigger (VUH-1765) refines it; unset changes nothing.
+        ...discordTextAttention({
+          wakeTrigger: storedSettings.discord.wakeTrigger,
+          replyPolicy: storedSettings.persona.replyPolicy,
+          characterNames: characterNames(storedSettings.persona),
+        }),
         liveMessageWindow: storedSettings.persona.liveMessageWindow,
         channelActivity: textInbox!.channelActivity,
       },

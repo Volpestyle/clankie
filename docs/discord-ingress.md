@@ -42,9 +42,28 @@ files are private service state, not telemetry; they contain no Discord token.
 
 The hosted edge, OAuth install UI, tenant routing and wake/allowance policy live
 in the private operations repository. The official shared bot token never goes
-into this service or a tenant's credential broker. There is no ambient ingress
-kind. Default remote text requires explicit addressing; being awake does not
-make Discord supply otherwise restricted Message Content.
+into this service or a tenant's credential broker.
+
+`kind: "message"` is unaddressed guild chat admitted by the owner's wake
+trigger (`discord.wakeTrigger`: `addressed`, `name` or `any`; VUH-1765). Any
+event except voice may carry `context`: at most 20 buffered channel messages
+before it, oldest first, which the body passes to the captain as the turn's
+context messages. Context is never a trigger. Default remote text still
+requires explicit addressing; channels opt in to buffering separately
+(`discord.ambientChannelIds`).
+
+### Self-hosted official bot
+
+A self-hosted machine signed in with its Clankie account can receive the same
+envelopes (VUH-1766). With `discord.officialBotEnabled`, the service keeps a
+P-256 ingress key in its credential broker and registers it at
+`POST /fleet/v1/self-hosted/discord/register` with the account bearer. The
+fleet answers with the route id the permits name and its public Ed25519 permit
+keys. The edge then delivers through the public gateway to the machine's
+account-derived host. Until registration succeeds, the route answers 503.
+The edge's `owner` flag grants nothing on this route: the machine's own Discord
+settings decide authority, exactly as for a bring-your-own bot. Contracts are in
+`@clankie/protocol/official-discord`.
 
 Voice callbacks use `kind: "voice"` and one strict `voice.action`: `briefing`,
 `handoff`, or `self_tool`. Briefing and the three existing voice self-tools use

@@ -28,6 +28,7 @@
     "./hosted-discord": "./src/hosted-discord.ts",
     "./hosted-discord-crypto": "./src/hosted-discord-crypto.ts",
     "./managed-discord": "./src/managed-discord.ts",
+    "./official-discord": "./src/official-discord.ts",
     "./discord-settings": "./src/discord-settings.ts",
     "./projects": "./src/projects.ts",
     "./presence": "./src/presence.ts",

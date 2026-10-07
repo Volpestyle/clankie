@@ -66,6 +66,20 @@ export const DiscordSettingsSchema = z
     ingressDmPolicy: z.enum(["deny", "owner_only", "allowlist"]).default("deny"),
     ingressDmUserIds: SnowflakeListSchema,
     ingressContextMessages: z.number().int().min(0).max(50).default(10),
+    /**
+     * What wakes Clankie for ordinary channel chat (VUH-1765): `addressed` (a
+     * mention, DM, reply or slash command), `name` (also his name in a message),
+     * or `any` (every admitted message; he decides whether to answer). Unset
+     * keeps each body's default: self-hosted follows `persona.replyPolicy`
+     * (`all` → `any`, `addressed` → `name`), and the hosted edge uses `addressed`.
+     */
+    wakeTrigger: z.enum(["addressed", "name", "any"]).optional(),
+    /**
+     * Hosted and official-bot channels whose ordinary chat the edge may keep in a
+     * short encrypted buffer for context (VUH-1765). Opt-in per channel by a
+     * server admin; empty means no ambient ingestion anywhere.
+     */
+    ambientChannelIds: SnowflakeListSchema,
     /** Guild text channels where the body shows deterministic, content-free tool activity cards. */
     toolProgressChannelIds: SnowflakeListSchema,
 
@@ -102,6 +116,13 @@ export const DiscordSettingsSchema = z
      * requires enablement, allowlists, and the durable opt-in.
      */
     activeBody: z.enum(["bot", "user_session"]).default("bot"),
+    /**
+     * Free official Clankie bot through the signed-in Clankie account (VUH-1766).
+     * The hosted edge holds the official token and delivers sealed messages to
+     * this machine; no developer portal, bot token or intents setup. Independent
+     * of `activeBody`: a bring-your-own bot can still run beside it.
+     */
+    officialBotEnabled: z.boolean().default(false),
 
     /**
      * Personal-lab user-session body (ADR 0048). Off by default. Storing a

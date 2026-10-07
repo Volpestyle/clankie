@@ -10,6 +10,25 @@ import {
 export const DISCORD_INGRESS_PATH = "/v1/discord/ingress";
 export const DISCORD_INGRESS_DOMAIN = "clankie-discord-ingress-v1";
 export const DiscordIdSchema = z.string().regex(/^[0-9]{1,20}$/u);
+/** Recent channel messages a connection buffered before the trigger (VUH-1765). */
+export const DISCORD_INGRESS_CONTEXT_MAX = 20;
+export const DISCORD_INGRESS_CONTEXT_BODY_MAX = 2_000;
+export const DiscordIngressContextMessageSchema = z
+  .object({
+    messageId: DiscordIdSchema,
+    actorId: DiscordIdSchema,
+    content: z.string().min(1).max(DISCORD_INGRESS_CONTEXT_BODY_MAX),
+    atMs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type DiscordIngressContextMessage = z.infer<typeof DiscordIngressContextMessageSchema>;
+/**
+ * What wakes a body for ordinary channel chat (VUH-1765): `addressed` is a
+ * mention, DM, reply or slash command; `name` adds his name in a message;
+ * `any` lets every admitted message reach him so he decides for himself.
+ */
+export const DiscordWakeTriggerSchema = z.enum(["addressed", "name", "any"]);
+export type DiscordWakeTrigger = z.infer<typeof DiscordWakeTriggerSchema>;
 const Encoded32 = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 /** Connection-owned voice RPCs carry no credential or general operator authority. */
 export const DiscordIngressVoiceSchema = z.discriminatedUnion("action", [
@@ -37,16 +56,21 @@ export const DiscordIngressEventSchema = z
     actorId: DiscordIdSchema,
     /** Asserted only by the authenticated connection, never by message content. */
     owner: z.boolean(),
-    kind: z.enum(["mention", "dm", "reply", "slash", "voice"]),
+    /** `message` is unaddressed chat admitted by the `name` or `any` wake trigger. */
+    kind: z.enum(["mention", "dm", "reply", "slash", "voice", "message"]),
     voice: DiscordIngressVoiceSchema.optional(),
     content: z.string().max(16_384),
     attachments: z.array(DiscordPresenceAttachmentSchema).max(4).default([]),
+    /** Buffered channel messages before this one, oldest first. Never a trigger. */
+    context: z.array(DiscordIngressContextMessageSchema).max(DISCORD_INGRESS_CONTEXT_MAX).optional(),
   })
   .strict()
   .refine((e) => e.expiresAtMs > e.eventAtMs && e.expiresAtMs - e.eventAtMs <= 300_000)
   .refine((e) => e.content.trim().length > 0 || e.attachments.length > 0)
   .refine((e) => (e.kind === "dm") === (e.guildId === undefined))
   .refine((e) => (e.kind === "voice") === (e.voice !== undefined))
+  .refine((e) => e.kind !== "message" || e.guildId !== undefined)
+  .refine((e) => e.context === undefined || e.kind !== "voice")
   .refine((e) => {
     if (e.voice?.action !== "handoff") return true;
     const r = e.voice.request;
