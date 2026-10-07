@@ -186,12 +186,12 @@ export type UpdateFleetHireDefaults = z.infer<typeof UpdateFleetHireDefaultsSche
 /** Shared wording; `noPreference` matches `clankie fleet status`. */
 export const FLEET_HIRE_DEFAULTS_WORDING = {
   title: "Who he hires",
-  summary: "What a new worker runs when its project role doesn't say. Clankie decides anything left open.",
+  summary: "What a new worker runs unless its project says otherwise. Clankie decides anything left open.",
   noPreference: "No preference",
   harness: {
     label: "Coding agent",
     noPreferenceDetail: "Clankie picks Claude or Codex for each job, from the accounts with usage left.",
   },
-  model: { label: "Model", noPreferenceDetail: "The harness's own choice for each job." },
+  model: { label: "Model", noPreferenceDetail: "The coding agent picks its own model." },
   effort: { label: "Thinking effort", noPreferenceDetail: "Clankie sets it for each job." },
 } as const;

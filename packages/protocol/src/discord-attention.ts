@@ -37,7 +37,7 @@ interface Choice {
 export const DISCORD_ATTENTION = {
   title: "What wakes him / how much he talks",
   summary: "Once someone addresses him he answers normally, at whatever length fits.",
-  saved: "Saved. Restart the Discord connection to apply.",
+  saved: "Saved. Takes effect next time Discord reconnects.",
   wake: {
     label: "What wakes him in text",
     description: "Whether an @mention, his name, or any message reaches him.",
@@ -54,11 +54,11 @@ export const DISCORD_ATTENTION = {
       },
       any: {
         label: "Every message",
-        description: "Every admitted message reaches him, and he decides whether to say anything.",
+        description: "Every message he can see reaches him, and he decides whether to say anything.",
       },
       default: {
-        label: "This body's default",
-        description: "Self-hosted follows the reply policy; hosted wakes on an @mention only.",
+        label: "Default",
+        description: "On your own computer he follows the reply policy; hosted Clankie wakes on an @mention.",
       },
     } satisfies Record<"mention" | "name" | "any" | "default", Choice>,
   },
@@ -80,12 +80,12 @@ export const DISCORD_ATTENTION = {
     choices: {
       all: {
         label: "Every message",
-        description: "He sees each admitted message and decides for himself whether to speak.",
+        description: "He reads each message in the room and decides for himself whether to speak.",
       },
       addressed: {
         label: "An @mention or his name",
         description:
-          "Only an @mention or one of his names, plus the next few messages after he replies, spends a model turn.",
+          "Only an @mention or one of his names, plus the next few messages after he replies, gets his attention.",
       },
     } satisfies Record<PersonaReplyPolicy, Choice>,
   },

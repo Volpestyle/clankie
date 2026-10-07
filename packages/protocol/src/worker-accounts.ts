@@ -90,5 +90,5 @@ export const WORKER_ACCOUNTS_WORDING = {
   setAsideState: "Set aside",
   setAsideDetail: "Clankie won't pick it on his own. A worker you start on it by name can still use it.",
   ready: "Ready",
-  thisMachine: "This machine",
+  thisMachine: "This computer",
 } as const;
