@@ -103,8 +103,8 @@ On completion, inspect, decide and act. A branch is not landed, and landing is
 not delivery: check the integrated consumer as soon as the parts can join.
 Respect the repo's review gate with one bounded pass over the actual diff and
 the boundary that could break. Reuse valid proof for unchanged inputs; waived
-verification stays labelled and is never a pass. Landing through
-`clankie integrate`, holds and reverts: [delivery](reference/delivery.md).
+verification stays labelled and is never a pass. Landing directly on
+`main`, and the optional `clankie integrate`: [delivery](reference/delivery.md).
 
 When nothing needs judgment, let workers work. Do not manufacture supervision.
 

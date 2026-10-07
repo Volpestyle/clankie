@@ -89,6 +89,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0237 — Hosted bodies update themselves to official releases](0237-hosted-bodies-update-themselves-to-official-releases.md)
 - [0238 — Hosted Claude workers trust their own workspace](0238-hosted-claude-workers-trust-their-own-workspace.md)
 - [0239 — Worker harnesses sign in with their own logins](0239-worker-harnesses-sign-in-with-their-own-logins.md)
+- [0240 — Changes land directly on main](0240-changes-land-directly-on-main.md)
 
 ## Archived decisions
 

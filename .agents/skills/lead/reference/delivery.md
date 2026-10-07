@@ -27,16 +27,13 @@ keep what is missing in a focused follow-up.
 
 ## Landing Clankie's own changes
 
-Everyone, including James's interactive panes, lands clankie and clankie-app
-through the queue. Commit, push a branch, run
-`clankie integrate <sha> --push --no-wait` (repeat `--app SHA` for the app), then
-follow with `clankie integrate status`; `status UUID` reads one request receipt.
-Never push main directly. Doctor offers the tracked pre-push guard for either
-checkout with `clankie doctor --install-main-guard REPO`; installing it on this
-Mac requires James's approval. The explicit owner recovery bypass and its
-local audit are documented in `docs/integration.md`.
+Everyone, including James's interactive panes and their subagents, lands
+clankie and clankie-app directly on `main` (ADR 0240). Brief workers to stage
+only their files, run the narrow checks for what they changed, then
+`git pull --rebase origin main` and `git push origin main`, reporting the SHA.
+The full `pnpm check` runs for releases and on request.
 
-The service composes fresh origin in independent worktrees. Compatible requests
+`clankie integrate` remains optional for a composed, gated batch. The service composes fresh origin in independent worktrees. Compatible requests
 waiting during a gate join the next batch, with one full gate for the composed
 core/app pair. Conflicting requests roll back as a whole; failed shared gates
 split into smaller batches until the failing request is reported. Each receipt

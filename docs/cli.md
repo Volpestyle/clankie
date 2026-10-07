@@ -643,10 +643,10 @@ clankie integrate hold --holder NAME --reason TEXT [--pane ID|--seat ID] [--id U
 clankie integrate release UUID --actor NAME --reason TEXT
 ```
 
-Everyone, including the owner's interactive panes, lands clankie and clankie-app
-through the queue: commit, push a branch, run
-`clankie integrate <sha> --push --no-wait`, then follow with
-`clankie integrate status`. With no UUID, status shows running batches, waiting
+Changes land directly on `main` after their narrow checks
+([ADR 0240](adr/0240-changes-land-directly-on-main.md)); the queue is optional.
+To use it, push a branch, run `clankie integrate <sha> --push --no-wait`, then
+follow with `clankie integrate status`. With no UUID, status shows running batches, waiting
 requests, the last result and interrupted work. `status UUID` reads a request
 receipt, including its shared batch and attempts. `/integrate` shows this queue
 in the TUI.

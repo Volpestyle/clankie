@@ -14,9 +14,10 @@ clankie integrate push UUID
 clankie integrate revert PASSED_BATCH_UUID --push
 ```
 
-Everyone, including the owner's interactive panes, commits, pushes a branch, runs
-`clankie integrate <sha> --push --no-wait`, then follows with
-`clankie integrate status`. No direct main pushes. `status` without a UUID shows
+Using it is optional: changes land directly on `main` after their narrow checks
+([ADR 0240](adr/0240-changes-land-directly-on-main.md)). When you want a composed,
+gated batch, push a branch, run `clankie integrate <sha> --push --no-wait`, then
+follow with `clankie integrate status`. `status` without a UUID shows
 running batches, waiting requests, the last result and interrupted work;
 `status UUID` follows one request through shared batches and failure isolation.
 The TUI `/integrate` shows the same queue.
@@ -80,6 +81,9 @@ whether a production failure invalidates a previously passed tree. History
 remains intact; no force push is used.
 
 ## Direct main push guard
+
+Direct pushes to `main` are the normal path (ADR 0240), so do not install this
+guard; it remains only for a checkout that wants to require the queue.
 
 Doctor inspects the caller's clankie or clankie-app checkout and offers the
 tracked guard shipped in the launcher. Installing on this Mac requires the owner's

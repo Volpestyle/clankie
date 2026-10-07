@@ -75,8 +75,8 @@ production enforcement.
 ## Approved commit integration
 
 The source-checkout service owns an approved-commit integration queue through
-`POST /v1/integrate` and `clankie integrate`. All core/app main landings use this
-queue. Requests waiting during a gate share the next compatible batch;
+`POST /v1/integrate` and `clankie integrate`. Landings go directly to `main`
+(ADR 0240); the queue is an optional gated path. Requests waiting during a gate share the next compatible batch;
 conflicting requests roll back and failed shared gates split to isolate failures.
 Doctor offers a tracked direct-main pre-push guard for source checkouts.
 `integrate status` and `/integrate` expose running/waiting work and the last result.

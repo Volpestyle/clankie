@@ -77,13 +77,12 @@ This repository is public. Both neighbors are private and consume
   permits release when the last `v*` tag is more than one week old and `main` has
   user-visible changes worth shipping (`release-clankie`). Explicit task and
   integrator gates take precedence; the private app reads its own project policy.
-- Everyone, including James's interactive panes, lands clankie and clankie-app
-  changes through the landing queue. Commit, push a branch, run
-  `clankie integrate <sha> --push --no-wait` (repeat `--app SHA` for app commits),
-  then follow with `clankie integrate status` and `status UUID` for the receipt.
-  Do not push main directly. Doctor offers the tracked pre-push guard;
-  installing it on this Mac requires James's approval. Only an explicit owner
-  recovery decision permits the documented bypass in [integration](docs/integration.md).
+- Land clankie and clankie-app changes directly on `main`
+  ([ADR 0240](docs/adr/0240-changes-land-directly-on-main.md)): stage only your
+  files, run the narrow checks for what you changed (formatting, typecheck, the
+  covering tests), `git pull --rebase origin main`, then `git push origin main`.
+  Resolve conflicts only in your own files. The full `pnpm check` runs for
+  releases and on request; `clankie integrate` is optional, never required.
 - Build every feature API- and CLI-first, expose any settings it needs in the
   TUI, and update the relevant agent-facing skill and human-facing docs.
 - Reusable lessons about how Clankie works belong in the relevant shipped skill
