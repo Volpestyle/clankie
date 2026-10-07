@@ -24,6 +24,14 @@ named connector. `message_clankie` reaches him as agent output. Send a concrete
 question or useful result when the assignment calls for it; it does not become
 an owner instruction.
 
+Ask your lead with `message_clankie`. Your harness's own ask-the-user prompt
+reaches the lead only on a managed seat that routes it; otherwise it waits
+unseen in your pane. Durable state (what landed and at which commit, evidence,
+what is left, decisions) goes on your work item; a message is never its only
+copy. Before your seat is retired, put machine state (worktree, uncommitted
+work, background jobs, local paths) in `.local/HANDOFF-<name>.md` in your owned
+worktree and link it from the item. This is the `work-items` handoff protocol.
+
 On a host with the owner-authorized CLI, these bounded reads explain a gap:
 
 - `clankie doctor --json`: distinguish installed, enabled, version, bridge, hooks,

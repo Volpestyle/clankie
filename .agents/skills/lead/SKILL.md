@@ -134,8 +134,9 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
   effort or family as no preference, that is your call, weighed against usage
   headroom. Where the owner set one (fleet, role or their words for this
   hire), ask before overriding it, and say what the worker is struggling with.
-- **Context**: at 80% of the window, have the worker prepare a fresh-session
-  handoff.
+- **Context**: at 80% of the window, retire the seat by the handoff protocol in
+  `work-items` (durable state on the item, machine state in its worktree) and
+  start a fresh one from the item.
 - **Progress**: two hours with no commit, finding or report attempt on its own
   branch needs a result or an actionable blocker.
 - **Done or idle**: harvest once, then tidy or assign the next ready item.
@@ -177,7 +178,8 @@ piece lands. One canonical record per deliverable; workers, landing and delivery
 are distinct facts, so record the stage actually reached. The tracker account is
 Clankie's connected one for the whole fleet; never use a harness's own
 connector. Pane assignments, queues and usage limits stay in live messages.
-Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
+Where each kind of state lives is the handoff protocol in `work-items`; fleet-wide
+state is a project status update, never a lead-only file. Sizing records, Linear mapping and cutovers: [trackers](reference/trackers.md).
 
 ## Preserve ownership and live work
 

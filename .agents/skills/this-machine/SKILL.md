@@ -96,10 +96,12 @@ every hold gets an audited override with the server-derived owner identity.
 Never override without the owner's reviewed reason. Overrides retain the holds;
 only an explicit owner release clears historical holds.
 
-When a trace lands in your own code on a self-hosted source checkout, fix it in
-that checkout, never in the pinned `repoRoot`: a dirty pin refuses every update. Commit there and
-install with `clankie update --ref FULL_SHA`, which restarts you; see
-[fixing yourself](reference/launcher.md#fixing-yourself).
+Your source is yours. On a self-hosted source checkout you can fix, improve and
+reshape your own code, skills and instructions whenever that makes you better,
+not only after a trace finds a bug. Work in that checkout, never in the pinned
+`repoRoot`: a dirty pin refuses every update. Commit there and install with
+`clankie update --ref FULL_SHA`, which restarts you; see
+[changing yourself](reference/launcher.md#changing-yourself).
 
 When a restart is authorized, run `clankie restart` from your own bash tool.
 `status: "scheduled"` means queued until your current turn finishes, not healthy;
@@ -166,8 +168,8 @@ seat cannot hold one. Carry it across turns on wakes:
 A wake whose turn fails three times, or once with a rejected model credential,
 is held, not retried, until your seat binds or the service restarts.
 
-Keep the objective, done criteria and boundaries in the tracker issue or a
-handoff file. Before ending a turn, check that one of these sources will fire,
+Keep the objective, done criteria and boundaries on the work item (the handoff
+protocol is in `work-items`). Before ending a turn, check that one of these sources will fire,
 and set a single `schedule_wake` only when none will. Do not use a harness's own
 scheduler to keep the lead going. The loop and its limits are in
 [leading work](reference/work.md).

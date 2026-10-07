@@ -16,8 +16,8 @@ Carry it across turns on wakes instead:
 | Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you     |
 | A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
 
-The loop: keep the objective, done criteria and boundaries in the tracker issue
-or a handoff file, because a wake starts from the conversation, not from a fixed
+The loop: keep the objective, done criteria and boundaries on the work item
+(the handoff protocol is in `work-items`), because a wake starts from the conversation, not from a fixed
 goal. On each wake, harvest what changed, land or redirect, and assign the next
 ready item in tracker order. Before ending the turn, check that one of the sources
 above will fire. If no owned seat is live and no issue activity is expected,
