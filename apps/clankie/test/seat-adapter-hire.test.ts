@@ -162,8 +162,13 @@ it("an unconfirmed brief keeps its pane for inspection and never retries", async
   expect(runner.promptAgent).not.toHaveBeenCalled();
 });
 
-it.each([false, true])(
-  "a local Claude hire uses the real channel adapter with a registered remote fleet (trust blocked: %s)",
+// Claude's trust prompt before and after 2.1.281's "Quick safety check" wording.
+it.each([
+  false,
+  "Do you trust the files in this folder?",
+  "Quick safety check: Is this a project you created or one you trust?\n ❯ No, exit\n   Yes, I trust this folder",
+] as const)(
+  "a local Claude hire uses the real channel adapter with a registered remote fleet (trust prompt: %s)",
   async (blocked) => {
     const { root, runner, agent } = await fixture(async () => ({
       outcome: "started",
@@ -193,7 +198,7 @@ it.each([false, true])(
       });
       return true;
     });
-    const read = vi.fn(async () => (blocked ? "Do you trust the files in this folder?" : "ready"));
+    const read = vi.fn(async () => (blocked === false ? "ready" : blocked));
     if (blocked) runner.startAgent.mockRejectedValue(new Error("agent_not_ready: blocked during startup"));
     const adapter = createClaudeWorkerSeatAdapter({
       consent,

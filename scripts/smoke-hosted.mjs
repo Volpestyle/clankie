@@ -189,6 +189,9 @@ async function inside() {
     for (const skill of ["lead"])
       assert.ok((await readFile(`/opt/clankie/.agents/skills/${skill}/SKILL.md`, "utf8")).length > 0);
     assert.ok(JSON.parse(await readFile("/opt/clankie/SBOM.cdx.json", "utf8")).components.length > 0);
+    // Two whole bodies share this one Docker VM, so its memory floor is the
+    // proof's, not a tenant's; hires still pass through the resource governor.
+    run("clankie", ["fleet", "set", "--minimum-free-memory-mb", "1024"]);
     const tools = await rpc("tools/list", {});
     assert.ok(tools.tools.some((tool) => tool.name === "hire_agent"));
     assert.ok(!tools.tools.some((tool) => tool.name.startsWith("swarm_")));
@@ -211,9 +214,28 @@ async function inside() {
       brief:
         "Write the authorized test marker to /workspace/hosted-proof.txt. Preserve other files. This isolated fixture supplies synthetic model responses. Report the result and checks.",
     });
+    if (hired.outcome !== "spawned") {
+      // The pane is the evidence: show what Claude was waiting on.
+      const pane = /pane (\S+?);/u.exec(String(hired.detail))?.[1];
+      if (pane) {
+        try {
+          console.error(run("clankie", ["herdr", "pane", "read", pane, "--source", "visible"]));
+        } catch (error) {
+          console.error(`Pane ${pane} unreadable: ${error}`);
+        }
+      }
+    }
     assert.equal(hired.outcome, "spawned", JSON.stringify(hired));
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline && writesConfirmed === 0) await sleep(250);
+    if (writesConfirmed === 0) {
+      // Show what the worker is waiting on, and whether it reached the model at all.
+      console.error(JSON.stringify({ writesRequested, writesConfirmed }));
+      const worker = JSON.parse(run("clankie", ["herdr", "agent", "list"])).result.agents.find(
+        (agent) => agent.agent === "claude",
+      );
+      if (worker) console.error(run("clankie", ["herdr", "pane", "read", worker.pane_id, "--source", "visible"]));
+    }
     assert.equal(await readFile("/workspace/hosted-proof.txt", "utf8"), marker);
     assert.ok(writesRequested > 0 && writesConfirmed > 0, "real Claude confirms its tool result");
     const pi = await provePiHire();
@@ -246,40 +268,27 @@ async function inside() {
   // hire_agent(pi) needs the pi CLI and Herdr's pi integration, whose session
   // report is the seat's durable identity; then the captain's brief, and nothing
   // else, starts the worker's turn (VUH-1373).
+  // Briefed pi hires stay opt-in (CLANKIE_PI_NATIVE_ENABLED, packages/agent-hosts)
+  // until live acceptance: the captain's hire must refuse honestly, starting no seat.
   async function provePiHire() {
-    const agentDir = join(process.env.HOME, ".pi", "agent");
-    await mkdir(agentDir, { recursive: true });
-    await writeFile(
-      join(agentDir, "models.json"),
-      JSON.stringify({
-        providers: {
-          proof: {
-            baseUrl: "http://127.0.0.1:18081/v1",
-            api: "openai-completions",
-            apiKey: "synthetic-hosted-proof",
-            models: [{ id: "pi-worker" }],
-          },
-        },
-      }),
-    );
-    await writeFile(
-      join(agentDir, "settings.json"),
-      JSON.stringify({ defaultProvider: "proof", defaultModel: "pi-worker" }),
-    );
-    run("clankie", ["send", "--conversation", "global-default", "HIRE_PI_WORKER for the hosted proof."]);
+    // Queue it: the Claude worker's report may still hold an autonomous wake
+    // turn, and a steer into that turn cannot hire.
+    run("clankie", [
+      "send",
+      "--conversation",
+      "global-default",
+      "--delivery",
+      "queue",
+      "HIRE_PI_WORKER for the hosted proof.",
+    ]);
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline && hireResult === undefined) await sleep(250);
-    assert.match(hireResult ?? "no hire_agent result", /\\?"outcome\\?":\s*\\?"spawned/, hireResult);
-    const worker = JSON.parse(run("clankie", ["herdr", "agent", "list"])).result.agents.find(
-      (agent) => agent.agent === "pi",
-    );
-    assert.ok(worker?.agent_session?.source, JSON.stringify(worker));
-    assert.match(hireResult, /\\?"brief\\?":\s*\{(?:\\n|\s)*\\?"outcome\\?":\s*\\?"delivered/, hireResult);
-    const turnDeadline = Date.now() + 90_000;
-    while (Date.now() < turnDeadline && piTurns === 0) await sleep(250);
-    assert.ok(piTurns > 0, "the captain's brief starts a pi worker turn");
-    run("clankie", ["herdr", "pane", "close", worker.pane_id]);
-    return { version: run("pi", ["--version"]).trim(), session: worker.agent_session.source, piTurns };
+    assert.match(hireResult ?? "no hire_agent result", /harness_unavailable/, hireResult);
+    assert.match(hireResult, /no seat was started and no terminal input was sent/, hireResult);
+    const agents = JSON.parse(run("clankie", ["herdr", "agent", "list"])).result.agents;
+    assert.ok(!agents.some((agent) => agent.agent === "pi"), JSON.stringify(agents));
+    assert.equal(piTurns, 0, "no pi turn ran");
+    return { version: run("pi", ["--version"]).trim(), briefs: "opt-in" };
   }
 }
 
@@ -357,7 +366,7 @@ async function outside() {
     assert.deepEqual(state(id), before, "credentials, settings and work survive container replacement");
     assert.equal(before.workdir, "/workspace/project");
     console.log(
-      "Hosted smoke passed: non-root captain turn + relay, real Claude/Herdr worker with synthetic model, native hire, captain-hired pi worker whose turn the captain's brief started, owner isolation, persistent credentials/settings/workspace.",
+      "Hosted smoke passed: non-root captain turn + relay, real Claude/Herdr worker with synthetic model, native hire, honest refusal of a briefed pi hire while pi briefs are opt-in, owner isolation, persistent credentials/settings/workspace.",
     );
   } catch (error) {
     for (const project of projects) process.stderr.write(compose(project, ["logs", "--tail", "30"]));

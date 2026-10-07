@@ -26,6 +26,13 @@ COPY --from=build /clankie/dist/hosted /opt/clankie
 COPY --chmod=755 scripts/release/hosted-entrypoint.sh /usr/local/bin/clankie-hosted
 COPY --chmod=755 scripts/release/hosted-body.sh /usr/local/bin/clankie-body
 COPY --chmod=755 scripts/release/hosted-release-root.sh /usr/local/bin/clankie-release-root
+COPY --chmod=755 scripts/release/hosted-claude-worker.sh /usr/local/bin/clankie-claude-worker
+# The image builder is this machine's administrator: approve the Claude worker
+# channel that hires enable per session, so hosted hires need no owner step (VUH-1767).
+RUN mkdir -p /etc/claude-code \
+ && printf '%s\n' '{"channelsEnabled":true,"allowedChannelPlugins":[{"marketplace":"clankie","plugin":"clankie-worker"}]}' \
+    > /etc/claude-code/managed-settings.json \
+ && chmod 644 /etc/claude-code/managed-settings.json
 # /opt/clankie is the seed; the body runs and updates /state/install/current (ADR 0237).
 RUN printf '#!/bin/sh\n[ -x /state/install/current/bin/clankie ] && exec /state/install/current/bin/clankie "$@"\nexec /opt/clankie/bin/clankie "$@"\n' > /usr/local/bin/clankie \
  && chmod 755 /usr/local/bin/clankie \

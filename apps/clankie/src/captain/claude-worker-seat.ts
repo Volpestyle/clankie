@@ -88,7 +88,11 @@ const READY_MS = 30_000;
 const RECEIPT_MS = 15_000;
 const POLL_MS = 250;
 const SESSION_LIMIT = 256;
-const CLAUDE_MANAGED_SETTINGS = "/Library/Application Support/ClaudeCode/managed-settings.json";
+/** Claude Code's machine policy: macOS, or Linux (the hosted image writes it, VUH-1767). */
+const CLAUDE_MANAGED_SETTINGS =
+  process.platform === "linux"
+    ? "/etc/claude-code/managed-settings.json"
+    : "/Library/Application Support/ClaudeCode/managed-settings.json";
 
 /**
  * The argv a worker launch adds to `claude`: its plugin for this session only,
@@ -357,7 +361,7 @@ export class SeatHookLog {
 }
 
 const INSTALL_FIX = `Install the worker plugin once from Clankie's marketplace, leaving it off by default (each hire enables it for its own session): claude plugin install ${CLAUDE_WORKER_PLUGIN_ID} && claude plugin disable ${CLAUDE_WORKER_PLUGIN_ID}`;
-const POLICY_FIX = `Approve its channel once as this Mac's administrator: in ${CLAUDE_MANAGED_SETTINGS}, set "channelsEnabled": true and add { "marketplace": "${CLAUDE_WORKER_PLUGIN.marketplace}", "plugin": "${CLAUDE_WORKER_PLUGIN.plugin}" } to "allowedChannelPlugins", keeping any entries already there (docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).`;
+const POLICY_FIX = `Approve its channel once as this machine's administrator: in ${CLAUDE_MANAGED_SETTINGS}, set "channelsEnabled": true and add { "marketplace": "${CLAUDE_WORKER_PLUGIN.marketplace}", "plugin": "${CLAUDE_WORKER_PLUGIN.plugin}" } to "allowedChannelPlugins", keeping any entries already there (docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).`;
 
 /** Whether managed policy approves the worker plugin's channel, from the main file and its drop-ins. */
 export function managedPolicyApprovesWorker(path = CLAUDE_MANAGED_SETTINGS): boolean {

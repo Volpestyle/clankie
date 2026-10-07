@@ -45,7 +45,13 @@ docker compose -p my-clankie -f infra/hosted/compose.yaml exec captain clankie
 The last command opens the TUI as a portal to the already-running service. Use
 `/auth` to connect model credentials, `/model` to choose the captain's model and
 `/connect` for connected services. Claude workers use Claude Code's own supported
-login: run `exec captain claude` through the same Compose command to authenticate.
+login: run `exec captain claude` through the same Compose command to authenticate,
+or set `ANTHROPIC_API_KEY` on the body. Each body start prepares Claude for hires
+nobody watches (ADR 0238): the image approves the `clankie-worker` channel in
+`/etc/claude-code/managed-settings.json`, and the body installs that plugin
+(disabled until a hire enables it) and Herdr's Claude hook, marks onboarding
+done, trusts `/workspace` and sets Claude's default permission mode to `auto`
+unless the owner chose one.
 Pi workers use pi's own provider configuration under `/state/home/.pi/agent`
 (`exec captain pi`, then `/login`). Clankie installs Herdr's pi integration there
 before each pi hire; the session it reports is the seat's durable identity.
@@ -157,10 +163,10 @@ node scripts/smoke-hosted.mjs
 
 The smoke creates and removes two isolated Compose deployments. A real Claude
 process in Herdr executes a file tool under canned, local model responses after
-a native hire through Clankie's MCP path. The captain also completes a
-conversation through its compiled model client, then hires a real pi worker with
-`hire_agent`; the seat must carry Herdr's pi session and the worker completes a
-turn. It checks non-root execution,
+a native hire through Clankie's MCP path, with no prompt answered for it. The
+captain also completes a conversation through its compiled model client, then
+asks to hire a briefed pi worker, which must refuse without starting a seat while
+pi briefs are opt-in (`CLANKIE_PI_NATIVE_ENABLED`). It checks non-root execution,
 private broker files, distinct owner credentials/workspaces, and preservation of
 settings, credentials and work after container replacement. It never authenticates
 to a real model/provider or reads the operator's accounts.

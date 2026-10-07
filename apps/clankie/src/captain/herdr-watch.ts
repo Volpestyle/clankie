@@ -3170,7 +3170,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const visible = await this.runner.read?.(paneId, harness, "visible").catch(() => undefined);
     let failure: HerdrSeatSpawnFailure = { outcome: "failed", reason, detail };
     if (
-      (harness === "claude" && visible?.includes("Do you trust the files in this folder?")) ||
+      // Claude Code 2.1.281 asks "Quick safety check … Yes, I trust this folder".
+      (harness === "claude" &&
+        (visible?.includes("Do you trust the files in this folder?") ||
+          visible?.includes("Yes, I trust this folder"))) ||
       (harness === "codex" &&
         (visible?.includes("Trust this folder?") || visible?.includes("Hooks need review")))
     )

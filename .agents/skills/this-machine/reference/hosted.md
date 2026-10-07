@@ -9,7 +9,10 @@ In the hosted coding image, `/opt/clankie` is the immutable seed and the body ru
 see [updating the runtime](launcher.md#updating-the-runtime)). `/workspace` is
 persistent project storage, and `/state` holds the owner home/settings/broker.
 Use the existing CLI and skill roots. The whole body runs under the launcher
-(`clankie-body`); replacing a container ends live workers, so reconcile persisted
+(`clankie-body`), and each start prepares hired Claude workers to run unwatched:
+channel approved, plugin and Herdr hook installed, `/workspace` trusted, Claude's
+auto permission mode (ADR 0238). A hire into another folder still stops at
+Claude's trust prompt, which you never accept. Replacing a container ends live workers, so reconcile persisted
 intents before reassigning.
 The gateway is only a portal. Managed bodies configure their included model
 automatically; a funded first conversation requires no model login, API key,

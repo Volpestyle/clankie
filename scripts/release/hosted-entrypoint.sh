@@ -5,6 +5,8 @@ umask 077
 # Side jobs (telemetry, one-off CLI) run the image read-only without /state.
 if [ "$#" -eq 1 ] && [ "$1" = clankie-body ]; then
   clankie-release-root
+  # Claude hires report a missing plugin themselves; never block the body on it.
+  clankie-claude-worker || echo "clankie: Claude worker plugin unavailable" >&2
 fi
 # Only the default captain command and the whole-body command initialize an
 # absent workdir preference. CLI/relay overrides must not rewrite owner configuration.
