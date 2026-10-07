@@ -35,6 +35,16 @@
       "pattern": "\\blinear work (bind|unbind)\\b",
       "adr": "0214 (VUH-1678 amendment)",
       "now": "One wake target setting selects an ordinary global chat; the lead chooses any work delegation."
+    },
+    {
+      "pattern": "install-main-guard|main push guard|CLANKIE_MAIN_PUSH_BYPASS",
+      "adr": "0240",
+      "now": "Changes land directly on main after narrow checks; no pre-push guard is offered."
+    },
+    {
+      "pattern": "changes through the landing queue|do not push main directly",
+      "adr": "0240",
+      "now": "Changes land directly on main after narrow checks; clankie integrate is optional."
     }
   ]
 }
