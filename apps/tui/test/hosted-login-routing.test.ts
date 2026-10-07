@@ -128,6 +128,38 @@ describe("clankie login routing", () => {
     expect((await store.get("clankie-account"))?.type).toBe("oauth");
   });
 
+  it("says the sign-in was refused, not that there is no hosted Clankie, when `connect hosted` gets a 401", async () => {
+    const { env, settings, store } = await stores();
+    const failure = await routeSignedInAccount({
+      target: undefined,
+      gatewayUrl: "https://api.clankie.bot",
+      credential,
+      env,
+      store,
+      settings,
+      fetchImpl: (async () => Response.json({ error: "unauthorized" }, { status: 401 })) as typeof fetch,
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toBe(NO_HOSTED_CLANKIE_MESSAGE);
+    expect((failure as Error).message).toMatch(/didn't accept this sign-in/u);
+    expect(await store.get("clankie-account")).toBeUndefined();
+  });
+
+  it("still says there is no hosted Clankie when `connect hosted` gets not_found", async () => {
+    const { env, settings, store } = await stores();
+    await expect(
+      routeSignedInAccount({
+        target: undefined,
+        gatewayUrl: "https://api.clankie.bot",
+        credential,
+        env,
+        store,
+        settings,
+        fetchImpl: (async () => Response.json({ error: "not_found" }, { status: 404 })) as typeof fetch,
+      }),
+    ).rejects.toThrow(NO_HOSTED_CLANKIE_MESSAGE);
+  });
+
   it("logout on a Mac that is not a hosted client points at remote-access off and changes nothing", async () => {
     const { env, store } = await stores();
     await store.set("clankie-account", credential);

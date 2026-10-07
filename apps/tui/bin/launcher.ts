@@ -103,8 +103,16 @@ async function runOperatorConsole(): Promise<void> {
     } finally {
       input.close();
     }
-    if (choice.trim() === "2") await connectHostedCli(["hosted"]);
-    else if (choice.trim() === "1")
+    if (choice.trim() === "2") {
+      // A sign-in the owner can fix is a message, not a crash with a stack trace.
+      try {
+        await connectHostedCli(["hosted"]);
+      } catch (error) {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+        return;
+      }
+    } else if (choice.trim() === "1")
       await settings.update((value) => ({ ...value, client: { mode: "local" } }));
     else throw new Error("No connection mode selected");
     current = await settings.load();
