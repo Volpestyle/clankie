@@ -86,6 +86,20 @@ static int refuse_at(const char *stage, const char *reason, int error) {
   return refuse();
 }
 
+/* Shared defensive record guards. These do not turn observations into admission. */
+static int invalid_fd_record(const struct proc_fdinfo *record, int retry) {
+  if (record->proc_fd >= 0) return 0;
+  diagnostic("fd_list", "fd_record_invalid", 0, retry);
+  return 1;
+}
+
+static int invalid_socket_identity(const struct socket_fdinfo *socket, int tcp, int retry) {
+  if (socket->psi.soi_so != 0 && socket->psi.soi_pcb != 0 &&
+      (!tcp || socket->psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt != 0)) return 0;
+  diagnostic("socket_owner", "socket_identity_invalid", 0, retry);
+  return 1;
+}
+
 static int within_budget(void) {
   struct timespec now;
   if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
@@ -589,15 +603,15 @@ static int capture_codex_server(pid_t pid, const char *endpoint, const char *pat
   }
   int count = bytes / (int)sizeof(*fds), found = 0;
   for (int i = 0; i < count; ++i) {
-    if (fds[i].proc_fd < 0) { result = refuse_at("fd_list", "fd_record_invalid", 0); break; }
+    if (invalid_fd_record(&fds[i], budget_expired)) { result = refuse(); break; }
     if (fds[i].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
     struct socket_fdinfo socket;
     if (!socket_info(pid, fds[i].proc_fd, &socket)) {
       result = refuse_at("fd_socket", "socket_unavailable", errno); break;
     }
     if (!unix_listener(&socket, path)) continue;
-    if (socket.psi.soi_so == 0 || socket.psi.soi_pcb == 0) {
-      result = refuse_at("socket_owner", "socket_identity_invalid", 0); break;
+    if (invalid_socket_identity(&socket, 0, budget_expired)) {
+      result = refuse(); break;
     }
     if (found && !same_unix_listener(out, &socket, path)) {
       result = refuse_at("socket_owner", "multiple_owners", 0); break;
@@ -726,8 +740,7 @@ static int prove(int argc, char **argv) {
     }
     int found = 0;
     for (int j = 0; valid == 1 && j < bytes / (int)sizeof(*fds); ++j) {
-      if (fds[j].proc_fd < 0) {
-        diagnostic("fd_list", "fd_record_invalid", 0, 0);
+      if (invalid_fd_record(&fds[j], 0)) {
         valid = 0;
         break;
       }
@@ -749,9 +762,7 @@ static int prove(int argc, char **argv) {
         valid = 0;
         break;
       }
-      if (socket.psi.soi_so == 0 || socket.psi.soi_pcb == 0 ||
-          socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt == 0) {
-        diagnostic("socket_owner", "socket_identity_invalid", 0, 0);
+      if (invalid_socket_identity(&socket, 1, 0)) {
         valid = 0;
         break;
       }
