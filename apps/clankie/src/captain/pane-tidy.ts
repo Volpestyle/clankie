@@ -45,6 +45,8 @@ export const PaneTidyStateSchema = z
 type Entry = z.infer<typeof EntrySchema>;
 export type TidyFailure =
   | { outcome: "refused"; reason: "unsent_draft" | "owner_interactive" | "results_not_kept" }
+  /** Another lead conversation hired this pane; only it may close it (VUH-1763). */
+  | { outcome: "refused"; reason: "not_owner"; ownerConversationId: string }
   | {
       outcome: "failed";
       reason:
@@ -74,7 +76,9 @@ class Failure extends Error {
 const fail = (reason: Extract<TidyFailure, { outcome: "failed" }>["reason"]): never => {
   throw new Failure({ outcome: "failed", reason });
 };
-const refuse = (reason: Extract<TidyFailure, { outcome: "refused" }>["reason"]): never => {
+const refuse = (
+  reason: Exclude<Extract<TidyFailure, { outcome: "refused" }>["reason"], "not_owner">,
+): never => {
   throw new Failure({ outcome: "refused", reason });
 };
 function sessionKey(agent: HerdrAgentSnapshot): string {
@@ -273,6 +277,12 @@ export class PaneTidy {
       const owner = this.ports.provenance(agent);
       if (owner === "unknown") return fail("provenance_unknown");
       if (owner === "owner_interactive") return refuse("owner_interactive");
+      if (owner.conversationId !== authority.owner.conversationId)
+        throw new Failure({
+          outcome: "refused",
+          reason: "not_owner",
+          ownerConversationId: owner.conversationId,
+        });
       if (!(await this.ports.ownerValid(owner))) return fail("provenance_unknown");
       let reportPath: string;
       let reportText: string;

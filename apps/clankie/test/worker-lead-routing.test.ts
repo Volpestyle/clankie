@@ -7,6 +7,7 @@ import { ConversationStore } from "../src/captain/conversations.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import {
   HerdrWatchStore,
+  SeatOwnedElsewhereError,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
@@ -21,7 +22,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-function fixture(fleet?: string) {
+/** Adoption chains run on a hand-started worker; `hired` binds it as lead-a's hire instead. */
+function fixture(fleet?: string, hired = false) {
   const root = mkdtempSync(join(tmpdir(), "worker-lead-routing-"));
   roots.push(root);
   const path = join(root, "watches.json");
@@ -36,14 +38,17 @@ function fixture(fleet?: string) {
   };
   const occupantId = occupantIdForHerdrSession(agent.session!);
   const owners = new HireOwners(`${path}.owners.json`);
-  owners.bind(
-    agent.paneId,
-    { conversationId: "lead-a" },
-    agent.terminalId,
-    undefined,
-    occupantId,
-    JSON.stringify([fleet ?? "local", "codex", "native-one"]),
-  );
+  const sessionKey = JSON.stringify([fleet ?? "local", "codex", "native-one"]);
+  if (hired)
+    owners.bind(
+      agent.paneId,
+      { conversationId: "lead-a" },
+      agent.terminalId,
+      undefined,
+      occupantId,
+      sessionKey,
+    );
+  else owners.adopt(agent.paneId, agent.terminalId, occupantId, { conversationId: "lead-a" }, sessionKey);
   const runner: HerdrWatchRunner = {
     get: async () => agent,
     resolveTerminal: async () => agent,
@@ -79,6 +84,48 @@ it.each([undefined, "away"])(
     restarted.close();
   },
 );
+
+it.each([undefined, "away"])(
+  "refuses another lead steering a %s hire, naming its owner, while the owner and unowned seats proceed",
+  async (fleet) => {
+    const f = fixture(fleet, true);
+    const store = new HerdrWatchStore(f.path, { runner: f.runner, validateOwner: async () => true });
+    expect(store.seatClaim(f.agent)).toEqual({ owner: { conversationId: "lead-a" }, hired: true });
+    const refused = store.adoptSeat(f.agent.terminalId, authority("lead-b"));
+    await expect(refused).rejects.toBeInstanceOf(SeatOwnedElsewhereError);
+    await expect(refused).rejects.toMatchObject({ code: "not_owner", ownerConversationId: "lead-a" });
+    expect(store.nativeOwner(f.agent)).toEqual({ conversationId: "lead-a" });
+    await store.adoptSeat(f.agent.terminalId, authority("lead-a"));
+    expect(store.seatClaim(f.agent)).toEqual({ owner: { conversationId: "lead-a" }, hired: true });
+    // Reading and observing another lead's hire stays allowed.
+    expect(store.nativeOwner(f.agent)).toEqual({ conversationId: "lead-a" });
+    store.close();
+    const unowned = {
+      ...f.agent,
+      paneId: "w1:p9",
+      terminalId: "term_nine",
+      session: { ...f.agent.session!, value: "native-nine" },
+    };
+    const free = new HerdrWatchStore(join(f.root, "free.json"), {
+      runner: { ...f.runner, get: async () => unowned, resolveTerminal: async () => unowned },
+      validateOwner: async () => true,
+    });
+    expect(free.seatClaim(unowned)).toBeUndefined();
+    await free.adoptSeat(unowned.terminalId, authority("lead-b"));
+    expect(free.seatClaim(unowned)).toEqual({ owner: { conversationId: "lead-b" }, hired: false });
+    await free.adoptSeat(unowned.terminalId, authority("lead-c"));
+    expect(free.seatClaim(unowned)).toEqual({ owner: { conversationId: "lead-c" }, hired: false });
+    free.close();
+  },
+);
+
+it("a hire whose lead conversation is gone can be adopted by another lead", async () => {
+  const f = fixture(undefined, true);
+  const store = new HerdrWatchStore(f.path, { runner: f.runner, validateOwner: async () => false });
+  await store.adoptSeat(f.agent.terminalId, authority("lead-b"));
+  expect(store.seatClaim(f.agent)).toEqual({ owner: { conversationId: "lead-b" }, hired: true });
+  store.close();
+});
 
 it("refuses adoption after grants are revoked during discovery and preserves the original owner", async () => {
   const f = fixture();

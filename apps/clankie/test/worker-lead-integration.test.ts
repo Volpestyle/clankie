@@ -27,7 +27,15 @@ afterEach(async () => {
 });
 
 async function fixture(
-  options: { gone?: boolean; room?: boolean; denied?: boolean; remote?: boolean; unadopted?: boolean } = {},
+  options: {
+    gone?: boolean;
+    room?: boolean;
+    denied?: boolean;
+    remote?: boolean;
+    unadopted?: boolean;
+    /** A hand-started worker a lead adopted by messaging, rather than one it hired. */
+    adopted?: boolean;
+  } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-lead-integration-"));
   const seeded = new ConversationStore(join(root, "conversations"), async () => {});
@@ -65,7 +73,15 @@ async function fixture(
         }
       : {}),
   };
-  if (!options.unadopted)
+  if (options.adopted)
+    new HireOwners(join(root, "herdr-watches.json.owners.json")).adopt(
+      agent.paneId,
+      agent.terminalId,
+      occupantIdForHerdrSession(agent.session!),
+      owner,
+      JSON.stringify([options.remote ? "away" : "local", "codex", "native-one"]),
+    );
+  else if (!options.unadopted)
     new HireOwners(join(root, "herdr-watches.json.owners.json")).bind(
       agent.paneId,
       owner,
@@ -376,8 +392,38 @@ it("an unadopted remote reporter with a valid census and no parent reaches globa
   await f.captain.acknowledgeSeatEvent(event!.id, "global-default");
 });
 
-it("message_seat adopts another conversation's worker before its immediate report and persists it across restart", async () => {
+it("the census names a hire's lead and message_seat from another lead is refused naming it", async () => {
   const f = await fixture();
+  const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+  if (roster.op !== "roster") throw new Error("roster missing");
+  expect(roster.seats.find((seat) => seat.seatId === f.agent.terminalId)?.owner).toEqual({
+    conversationId: f.leads[0],
+    hired: true,
+  });
+  const call = async (lead: string, text: string) => {
+    const bank = await f.captain.laneToolBank("operator", lead);
+    const sent = await bank.tools
+      .find((tool) => tool.name === "message_seat")!
+      .call({ seat: f.agent.terminalId, message: text });
+    const part = sent.content.find((item) => item.type === "text");
+    return JSON.parse(part?.type === "text" ? part.text : "null");
+  };
+  expect(await call(f.leads[1]!, "Take over this assignment")).toMatchObject({
+    outcome: "not_owner",
+    seatId: f.agent.terminalId,
+    ownerConversationId: f.leads[0],
+    deliveryStage: "rejected",
+  });
+  expect(HerdrWatchStore.prototype.deliverToSeat).not.toHaveBeenCalled();
+  expect(await call(f.leads[0]!, "Owner follow-up")).toMatchObject({
+    outcome: "delivered",
+    seatId: f.agent.terminalId,
+  });
+  expect(HerdrWatchStore.prototype.deliverToSeat).toHaveBeenCalledOnce();
+});
+
+it("message_seat adopts another conversation's adopted worker before its immediate report and persists it across restart", async () => {
+  const f = await fixture({ adopted: true });
   const first = await delivery(f.captain, f.agent.paneId);
   const firstPoll = f.captain.pollSeatEvents(2000, undefined, f.leads[0]);
   expect(await f.captain.receiveFleetSeatMessage(f.agent.paneId, "First report", first)).toMatchObject({

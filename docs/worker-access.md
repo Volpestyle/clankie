@@ -11,8 +11,15 @@ native identity proof. Manual grants keep their selected direct tools.
 project-tool gate in ADR 0216. Projects still own roles, caps, hiring and tracker binding.
 
 Worker reports use the service's persisted hiring or adopting conversation,
-including fleet-qualified remote seats. `message_seat` from another admitted
-conversation adopts the worker under that lead. `message_clankie` cannot choose
+including fleet-qualified remote seats. Many leads run at once, so a hire
+belongs to the conversation that hired it: `message_seat`, `close_worker_pane`
+and `refresh_worker_tools` from another conversation are refused with
+`not_owner` and the owning `ownerConversationId`, and nothing is sent. Reading
+and observing that worker stay allowed. A hire whose lead conversation no longer
+exists, and a hand-started seat Clankie did not hire, can still be adopted by
+messaging it. The roster (`op: "roster"`, seat `owner`) and `clankie herdr agent
+list` (`owner`, `hired`, and `mine` when `CLANKIE_CONVERSATION_ID` is set) show
+each worker's lead, or `unowned`. `message_clankie` cannot choose
 a target or turn agent output into an owner instruction. A removed lead makes
 reports fall back to `global-default`; a retained room still requires its current
 actor and route grants. Existing receipt IDs prevent rerouting or replaying an

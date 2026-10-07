@@ -165,6 +165,7 @@ import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
   createHerdrWatchRunner,
   HerdrWatchStore,
+  SeatOwnedElsewhereError,
   type DiscordWatchOrigin,
   type HerdrAgentSnapshot,
 } from "./herdr-watch.ts";
@@ -1953,6 +1954,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     try {
       await herdrWatches.adoptSeat(seatId, authority);
     } catch (error) {
+      if (error instanceof SeatOwnedElsewhereError)
+        return {
+          outcome: "not_owner",
+          seatId,
+          ownerConversationId: error.ownerConversationId,
+          deliveryStage: "rejected",
+          detail: error.message,
+        };
       return {
         outcome: "undelivered",
         seatId,
@@ -2534,9 +2543,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             /* Conflicting historical claims confer no inspection attribution. */
           }
         }
+        const claim = observed === undefined ? undefined : herdrWatches.seatClaim(observedAgent(observed));
         const result: OperatorFleetSeat = {
           ...seat,
           conversationId: conversations.conversationIdForPersona(seat.personaId),
+          ...(claim === undefined
+            ? {}
+            : { owner: { conversationId: claim.owner.conversationId, hired: claim.hired } }),
           ...(stance === undefined ? {} : { stance }),
           ...(activity === undefined ? {} : { activity }),
           ...(lastOutcome === undefined ? {} : { lastOutcome }),

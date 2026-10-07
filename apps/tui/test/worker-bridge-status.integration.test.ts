@@ -287,8 +287,23 @@ it("adds report health to native agent-list JSON only for the same fleet and occ
   const enriched = JSON.parse(await withFleetAgentHealth(stdout, { ...f.options, connectionId: "pc" }));
   expect(enriched.result.agents[0]).toEqual({
     ...row,
+    owner: "unowned",
     workerReportBridge: seat.workerReportBridge,
     reportFlags: ["finished, unreported"],
+  });
+  // VUH-1763: the census names each worker's lead, and a lead sees which are its own.
+  f.setSeats([{ ...seat, owner: { conversationId: "global-default", hired: true } }]);
+  const asLead = (conversationId: string) =>
+    withFleetAgentHealth(stdout, {
+      ...f.options,
+      connectionId: "pc",
+      env: { ...f.options.env, CLANKIE_CONVERSATION_ID: conversationId },
+    }).then((out) => JSON.parse(out).result.agents[0]);
+  expect(await asLead("global-default")).toMatchObject({ owner: "global-default", hired: true, mine: true });
+  expect(await asLead("conv-other-lead")).toMatchObject({
+    owner: "global-default",
+    hired: true,
+    mine: false,
   });
   f.setSeats([{ ...seat, occupantId: "other-session" }]);
   expect(

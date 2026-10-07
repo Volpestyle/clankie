@@ -115,6 +115,13 @@ type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
   | (Extract<FleetSeatDelivery, { outcome: "unconfirmed" | "undelivered" }> & { readonly seatId: string })
   | { readonly outcome: "seat_offline"; readonly seatId: string }
   | { readonly outcome: "unknown_seat"; readonly seat: string }
+  /** Another conversation hired this seat; only that lead steers it (VUH-1763). */
+  | {
+      readonly outcome: "not_owner";
+      readonly seatId: string;
+      readonly ownerConversationId: string;
+      readonly detail: string;
+    }
 );
 
 export const VOICE_SELF_TOOL_NAMES = ["recall_episodes", "get_self_state", "remember_episode"] as const;

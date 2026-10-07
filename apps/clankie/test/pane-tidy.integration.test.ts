@@ -220,6 +220,18 @@ it.each([
   expect(f.closes()).toBe(0);
   f.watch.close();
 });
+it("refuses closing another lead's hire, naming its owner, before any close effect", async () => {
+  const f = await fixture();
+  expect(
+    await f.tidy.close(
+      { pane: "w1:p1", reason: "Finished", reportPath: f.reportPath },
+      { ...authority, owner: { conversationId: "other-lead" } },
+    ),
+  ).toEqual({ outcome: "refused", reason: "not_owner", ownerConversationId: "lead" });
+  expect(f.closes()).toBe(0);
+  expect(f.tidy.history()).toEqual([]);
+  f.watch.close();
+});
 it("requires kept results, accepts an authenticated saved report, and expires Undo", async () => {
   const f = await fixture();
   expect(await f.tidy.close({ pane: "w1:p1", reason: "Finished" }, authority)).toEqual({
