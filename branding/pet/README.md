@@ -239,6 +239,19 @@ so their sheets and GIF previews must be regenerated together. Review every
 new frame on both backgrounds in [the polish sheet](preview/polish-review.png)
 and motion in its corresponding `preview/<tag>.gif`.
 
+### Skid (momentum stop)
+
+`skid_left` (134–137) and `skid_right` (138–141) are appended after `wait`, so
+every earlier index, crop and duration is unchanged. Both are once tags: 70, 90,
+110, 170 ms. Frames 0–2 brake: the leading foot is planted ahead on the
+baseline, the 3/4 head leans 2–3 px back against the motion, the sprout swings
+from upright to thrown forward and dips, and a small dust puff (`B`/`b`) kicks up
+ahead of the heel and thins. Frame 3 recovers to a standing 3/4 pose with the
+sprout upright, ready for `idle`. They follow a `run_*` (or a fast sideways
+drag); the clankie.bot desk pet slides the sprite over the braking frames.
+`skid_left` mirrors `skid_right` with the stem re-lit as in `run_left`. No face
+overlay applies to them.
+
 ### `think` timing
 
 One 1.5 s loop. Six smear frames at 30 ms each come first: a blurred ring of

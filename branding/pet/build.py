@@ -53,6 +53,7 @@ SHEETS = {
             "alert", "happy", "catch", "offline", "rustle", "tap", "lead", "lift", "drop",
             *FACE_TAGS,
             "run_left", "run_right", "seed", "conduct", "read_message", "wilt", "wait",
+            "skid_left", "skid_right",
         ],
     },
     "clankie-mini": {
