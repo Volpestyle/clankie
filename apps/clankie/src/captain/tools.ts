@@ -1033,10 +1033,11 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
       "Send a Herdr seat you hired a message down its conversation lane, the way the operator's DM reaches " +
       "it: a follow-up, a correction, an answer to its question. seat is the seatId, personaId or " +
       "conversationId hire_agent returned. Outcomes: delivered (with the seat's status once it picked the " +
-      "message up), unconfirmed, undelivered, seat_offline, unknown_seat. Delivery uses the harness " +
+      "message up), unconfirmed, undelivered, seat_offline, unknown_seat, not_owner (another conversation hired " +
+      "this seat; ownerConversationId names that lead, and nothing was sent). Delivery uses the harness " +
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
       "guidance reached the active turn, not an after-turn queue. deliveryStage reports stored, delivered, consumed or responded; native queue acceptance is consumed, never model-seen. Uncertain blocks every retry until the original receipt is reconciled. " +
-      "This conversation adopts the seat as its lead; its future message_clankie reports return here. " +
+      "A seat this conversation hired, or an unowned one, is adopted with this conversation as its lead; its future message_clankie reports return here. " +
       "To answer an observed native Codex question, supply questionAnswer with its exact requestId and an answers map keyed by question ID ({answers: [text]} per ID), and omit message. Sync answers use the existing request and native first-answer arbitration. Async requestId is the function call_id; answers use attributed native user input, steering the active turn without interruption or starting its reply when idle. Async receipts prove acceptance, not first-answer arbitration. Resolved IDs are refused, and uncertain acceptance must not be retried or replaced with an ordinary message. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
@@ -1179,7 +1180,7 @@ function herdrWatchTools(
             name: "close_worker_pane",
             label: "Close a finished worker pane",
             description:
-              "Close a worker pane you judge finished, with a one-line reason. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts, owner-interactive/hand-started panes, and unkept results. Unknown styled input or native hire provenance fails closed. Does not decide whether the work is done. Never bypass a refusal with a raw close.",
+              "Close a worker pane you judge finished, with a one-line reason. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts, owner-interactive/hand-started panes, unkept results, and another lead's hire (not_owner, naming its conversation). Unknown styled input or native hire provenance fails closed. Does not decide whether the work is done. Never bypass a refusal with a raw close.",
             parameters: Type.Object({
               pane: Type.String({ minLength: 1, maxLength: 256 }),
               reason: Type.String({ minLength: 1, maxLength: 512 }),

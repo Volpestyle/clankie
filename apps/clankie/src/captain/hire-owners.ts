@@ -49,6 +49,22 @@ export class HireOwners {
     );
     return held === undefined ? undefined : ConversationOwnerSchema.parse(held.owner);
   }
+  /**
+   * The persisted lead of this exact native occupant, and whether Clankie hired
+   * it (`hired: false` is a hand-started seat a conversation adopted by messaging).
+   */
+  public claim(
+    paneId: string,
+    seatId: string,
+    occupantId: string,
+  ): { owner: ConversationOwner; hired: boolean } | undefined {
+    const held = this.state.hires.find(
+      (entry) => entry.paneId === paneId && entry.seatId === seatId && entry.occupantId === occupantId,
+    );
+    return held === undefined
+      ? undefined
+      : { owner: ConversationOwnerSchema.parse(held.owner), hired: held.hired !== false };
+  }
   public seatOwner(seatId: string, occupantId: string): ConversationOwner | undefined {
     const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
     return held === undefined ? undefined : ConversationOwnerSchema.parse(held.owner);

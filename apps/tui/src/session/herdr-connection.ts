@@ -192,8 +192,14 @@ export async function withFleetAgentHealth(stdout: string, options: HerdrConnect
           entry.occupantId === occupantIdForHerdrSession(agent.session!),
       );
       if (!seat) return row;
+      // Each worker's lead conversation (VUH-1763); `mine` separates this
+      // caller's own workers from another lead's when its conversation is known.
+      const owner = seat.owner?.conversationId ?? "unowned";
       return {
         ...fields,
+        owner,
+        ...(seat.owner === undefined ? {} : { hired: seat.owner.hired }),
+        ...(env.CLANKIE_CONVERSATION_ID ? { mine: owner === env.CLANKIE_CONVERSATION_ID } : {}),
         ...(seat.workerReportBridge ? { workerReportBridge: seat.workerReportBridge } : {}),
         ...(seat.efficiency?.flags.includes("finished, unreported")
           ? { reportFlags: ["finished, unreported"] }

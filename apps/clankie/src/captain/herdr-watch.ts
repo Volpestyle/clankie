@@ -345,6 +345,23 @@ export class HerdrAgentResponseError extends Error {
   }
 }
 
+/** Steering a seat another conversation hired; reading and observing it stay allowed. */
+export class SeatOwnedElsewhereError extends Error {
+  public readonly code = "not_owner";
+  public readonly seatId: string;
+  public readonly ownerConversationId: string;
+
+  public constructor(seatId: string, ownerConversationId: string) {
+    super(
+      `Seat ${seatId} was hired by conversation ${ownerConversationId}; only that lead steers it. ` +
+        "Coordinate with that lead instead of messaging its worker.",
+    );
+    this.name = "SeatOwnedElsewhereError";
+    this.seatId = seatId;
+    this.ownerConversationId = ownerConversationId;
+  }
+}
+
 function snapshotOf(value: unknown): HerdrAgentSnapshot {
   if (!isRecord(value)) throw new HerdrAgentResponseError("Herdr response did not include an agent");
   const paneId = value.pane_id;
@@ -1307,6 +1324,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return owner;
   }
 
+  /** The persisted lead of this exact native occupant, for the census; grants nothing. */
+  public seatClaim(agent: HerdrAgentSnapshot): { owner: ConversationOwner; hired: boolean } | undefined {
+    return agent.session === undefined
+      ? undefined
+      : this.hireOwners.claim(agent.paneId, agent.terminalId, occupantIdForHerdrSession(agent.session));
+  }
+
   /** Read-only provenance for holding a verified worker report while re-adoption is required. */
   public retainedReportOwner(agent: HerdrAgentSnapshot): ConversationOwner | undefined {
     const sessionKey = this.nativeSessionKey(agent);
@@ -1324,6 +1348,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (!isMessageableSeat(agent) || agent.session === undefined || agent.terminalId !== seatId)
       throw new Error("Exact native session attribution is unavailable");
     this.nativeOwner(agent);
+    // A seat Clankie hired steers only from its hiring conversation; another
+    // lead reads and observes it, but cannot take it over by messaging (VUH-1763).
+    // A hire whose lead conversation no longer exists stays adoptable, so it is never stranded.
+    const claim = this.seatClaim(agent);
+    if (
+      claim?.hired === true &&
+      claim.owner.conversationId !== authority.owner.conversationId &&
+      (this.validateOwner === undefined || (await this.validateOwner(claim.owner)))
+    )
+      throw new SeatOwnedElsewhereError(seatId, claim.owner.conversationId);
     await assertConversationAuthority(authority);
     const latest = await this.runner.resolveTerminal(seatId);
     if (

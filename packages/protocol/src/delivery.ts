@@ -33,7 +33,14 @@ export function harnessDeliveryStage(
 
 /** A mailbox bridge receipt alone has no native queue/turn acknowledgment. */
 export function fleetDeliveryStage(result: {
-  readonly outcome: "delivered" | "unconfirmed" | "undelivered" | "offline" | "seat_offline" | "unknown_seat";
+  readonly outcome:
+    | "delivered"
+    | "unconfirmed"
+    | "undelivered"
+    | "offline"
+    | "seat_offline"
+    | "unknown_seat"
+    | "not_owner";
   readonly state?: "queued" | "started" | "steered";
   readonly deliveryStage?: DeliveryStage;
 }): DeliveryStage {

@@ -152,6 +152,14 @@ bypass the fence, or delete receipts. Completed fresh IDs and original evidence
 stay retained permanently; follow-up uses the admitted seat. Details and a JSON
 example are in `docs/cli.md` under `hire-receipt` recovery.
 
+Each hire belongs to the conversation that hired it. `clankie herdr agent list`
+shows every worker's `owner` conversation (or `unowned`) and, from a seat with
+`CLANKIE_CONVERSATION_ID`, `mine: true|false`. Steer only your own: `message_seat`
+or `close_worker_pane` on another lead's hire returns `not_owner` naming its
+`ownerConversationId`. Coordinate with that lead or the owner instead; reading,
+`agent read` and observing stay open. A hire whose lead conversation is gone,
+or a hand-started seat, can still be adopted by messaging it.
+
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
 comes from turn events, and the owner can type into the same bound session.

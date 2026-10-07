@@ -826,6 +826,12 @@ export const OperatorFleetSeatSchema = z
     /** Present once the occupying persona's DM thread exists in the registry. */
     conversationId: OperatorConversationIdSchema.optional(),
     /**
+     * The lead conversation persisted for this exact native occupant (VUH-1763).
+     * `hired` is false for a hand-started seat a conversation adopted by
+     * messaging it. Absent means unowned. Only a hired seat's owner may steer it.
+     */
+    owner: z.object({ conversationId: OperatorConversationIdSchema, hired: z.boolean() }).strict().optional(),
+    /**
      * Absolute path the agent is working in. The commons keys its districts off
      * this (ADR 0022), and hiring offers it back as the places a new agent can
      * join. Absent when the shell cannot resolve one.
