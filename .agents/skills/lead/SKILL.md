@@ -117,7 +117,11 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
 - **On task**: work matches the accepted assignment and owned paths.
 - **Reporting**: reports reach you through the proven route. A result left
   only in the pane is a delivery fault to repair, never to resend elsewhere.
-- **Right-sized**: model and effort fit the job and the owner's mode.
+- **Right-sized**: model and effort fit the job and the owner's mode. A worker
+  that keeps struggling (repeated failed attempts, shallow fixes, going in
+  circles) gets more, not more nudges: raise its effort or move the work to a
+  stronger model, whichever the problem needs. That is your call, weighed
+  against usage headroom; the owner doesn't need to approve it.
 - **Context**: at 80% of the window, have the worker prepare a fresh-session
   handoff.
 - **Progress**: two hours with no commit, finding or report attempt on its own
