@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readlink, symlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { delimiter, dirname, join } from "node:path";
@@ -6,8 +6,8 @@ import { delimiter, dirname, join } from "node:path";
 /** Launch isolation must precede Vitest's imports (including its owner-descriptor snapshot). */
 export async function integrationEnvironment(root: string): Promise<NodeJS.ProcessEnv> {
   const home = join(root, "home");
-  const temp = join(root, "tmp");
-  await Promise.all([home, temp].map((p) => mkdir(p, { recursive: true, mode: 0o700 })));
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  const temp = await privateTemp(root);
   let path = process.env.PATH;
   try {
     // Locate existing compiler binaries without installing or updating the owner's toolchain.
@@ -47,4 +47,34 @@ export async function integrationEnvironment(root: string): Promise<NodeJS.Proce
     CI: "1",
     LANG: "en_US.UTF-8",
   };
+}
+
+/**
+ * Unix socket paths are limited to ~104 bytes on macOS. A TMPDIR under the batch
+ * root (~90 bytes) overflowed every fixture socket, failing the gate with EINVAL.
+ * POSIX gates get a private short directory under /tmp, linked from `root/tmp` so
+ * install and gate share it and it remains discoverable from the batch record.
+ */
+async function privateTemp(root: string): Promise<string> {
+  const link = join(root, "tmp");
+  if (process.platform === "win32") {
+    await mkdir(link, { recursive: true, mode: 0o700 });
+    return link;
+  }
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  let target: string | undefined;
+  try {
+    target = await readlink(link);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (target === undefined) {
+    target = await mkdtemp("/tmp/clankie-gate-");
+    await symlink(target, link);
+  }
+  // Refuse a substituted, shared or foreign directory rather than run a gate in it.
+  const stats = await lstat(target);
+  if (!stats.isDirectory() || stats.uid !== process.getuid?.() || (stats.mode & 0o077) !== 0)
+    throw Error(`Integration temp ${target} is not a private directory owned by this user`);
+  return target;
 }
