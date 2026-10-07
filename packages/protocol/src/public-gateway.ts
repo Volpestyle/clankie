@@ -52,7 +52,9 @@ import {
   PublicGatewayPushWakeResultFrameSchema,
 } from "./device-push.ts";
 import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
-import { FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
+import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
+import { OPERATOR_PERSONA_PATH } from "./discord-attention.ts";
+import { isWorkerAccountsRoute, WORKER_ACCOUNTS_PATH, WORKER_ACCOUNT_HOLDS_PATH } from "./worker-accounts.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
@@ -158,6 +160,12 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: DISCORD_SETUP_TEST_POST_PATH, target: "relay" },
   { method: "GET", path: FLEET_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: FLEET_SETTINGS_PATH, target: "relay" },
+  { method: "GET", path: FLEET_HIRE_DEFAULTS_PATH, target: "relay" },
+  { method: "POST", path: FLEET_HIRE_DEFAULTS_PATH, target: "relay" },
+  { method: "GET", path: OPERATOR_PERSONA_PATH, target: "relay" },
+  { method: "POST", path: OPERATOR_PERSONA_PATH, target: "relay" },
+  { method: "GET", path: WORKER_ACCOUNTS_PATH, target: "relay" },
+  { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH, target: "relay" },
   { method: "GET", path: PROJECTS_PATH, target: "relay" },
   { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH, target: "relay" },
 ] as const;
@@ -324,6 +332,7 @@ export function publicGatewayTargetFor(
   // Only the explicit autonomy projection may ride a query-bearing route.
   // Preserve that query for the relay's own validation; never normalize others.
   if (method === "GET" && path === `${PROJECTS_PATH}?includeAutonomy=true`) path = PROJECTS_PATH;
+  if (method === "GET" && isWorkerAccountsRoute(path)) path = WORKER_ACCOUNTS_PATH;
   if (method === "POST" && path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`)
     path = PROJECT_UPDATE_SETTINGS_PATH;
   if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))

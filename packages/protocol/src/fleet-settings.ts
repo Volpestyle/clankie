@@ -7,6 +7,8 @@ import {
 } from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
 import { FleetResourcePolicySchema } from "./fleet-resources.ts";
+import { HIRE_NO_PREFERENCE } from "./hire-profile.ts";
+import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 
 export const FLEET_SETTINGS_PATH = "/v1/operator/fleet-settings";
 export const FLEET_SETTINGS_CONTEXT_PATH = `${FLEET_SETTINGS_PATH}/context`;
@@ -137,3 +139,59 @@ export const FleetHarnessRefreshRequestSchema = FleetPrepareRequestSchema.omit({
   expectedMachineRevision: true,
 });
 export type FleetHarnessRefreshRequest = z.infer<typeof FleetHarnessRefreshRequestSchema>;
+
+/**
+ * Fleet hire defaults (VUH-1813): the harness, model and effort a hire uses
+ * when its role and request name none. Unset is "no preference": Clankie
+ * chooses per hire (ea54ebd6). Account, subagents, delegation and placement
+ * stay where they are; this route never changes them.
+ */
+export const FLEET_HIRE_DEFAULTS_PATH = `${FLEET_SETTINGS_PATH}/hire`;
+const HireDefaultsSchema = z
+  .object({
+    harness: z.enum(OPERATOR_SEAT_HARNESSES).optional(),
+    model: z.string().trim().min(1).max(200).optional(),
+    effort: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
+export const FleetHireDefaultsSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    /** Covers the whole stored hire profile, so a concurrent account or subagent edit also fences. */
+    revision: z.string().regex(/^[a-f0-9]{64}$/u),
+    hire: HireDefaultsSchema,
+  })
+  .strict();
+export type FleetHireDefaultsSnapshot = z.infer<typeof FleetHireDefaultsSnapshotSchema>;
+/** Each field takes a value or `auto` (no preference, which clears it); omitted fields stay. */
+export const UpdateFleetHireDefaultsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    changes: z
+      .object({
+        harness: z.union([z.enum(OPERATOR_SEAT_HARNESSES), z.literal(HIRE_NO_PREFERENCE)]).optional(),
+        model: z.string().trim().min(1).max(200).optional(),
+        effort: z.string().trim().min(1).max(64).optional(),
+      })
+      .strict()
+      .refine(
+        (value) => Object.values(value).some((field) => field !== undefined),
+        "No hire default changes supplied",
+      ),
+  })
+  .strict();
+export type UpdateFleetHireDefaults = z.infer<typeof UpdateFleetHireDefaultsSchema>;
+
+/** Shared wording; `noPreference` matches `clankie fleet status`. */
+export const FLEET_HIRE_DEFAULTS_WORDING = {
+  title: "Who he hires",
+  summary: "What a new worker runs when its project role doesn't say. Clankie decides anything left open.",
+  noPreference: "No preference",
+  harness: {
+    label: "Coding agent",
+    noPreferenceDetail: "Clankie picks Claude or Codex for each job, from the accounts with usage left.",
+  },
+  model: { label: "Model", noPreferenceDetail: "The harness's own choice for each job." },
+  effort: { label: "Thinking effort", noPreferenceDetail: "Clankie sets it for each job." },
+} as const;

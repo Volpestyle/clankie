@@ -39,6 +39,8 @@
     "./fleet-gates": "./src/fleet-gates.ts",
     "./autonomy": "./src/autonomy.ts",
     "./fleet-settings": "./src/fleet-settings.ts",
+    "./discord-attention": "./src/discord-attention.ts",
+    "./worker-accounts": "./src/worker-accounts.ts",
     "./activity-sharing": "./src/activity-sharing.ts",
     "./activity-sharing-crypto": "./src/activity-sharing-crypto.ts",
     "./linear-request-budget": "./src/linear-request-budget.ts"

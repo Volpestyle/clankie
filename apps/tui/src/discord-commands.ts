@@ -1,5 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import {
+  DISCORD_ATTENTION,
   DiscordSettingsSchema,
   DISCORD_SETTING_GROUPS,
   DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
@@ -408,16 +409,7 @@ export async function runDiscordWizard(
   );
 }
 
-const WAKE_TRIGGER_LABELS: Readonly<Record<"mention" | "name" | "any", string>> = {
-  mention: "Only an @mention",
-  name: "An @mention or his name",
-  any: "Every message",
-};
-const CHATTINESS_LABELS: Readonly<Record<PersonaSettings["chattiness"], string>> = {
-  quiet: "Quiet",
-  balanced: "Balanced",
-  chatty: "Chatty",
-};
+const A = DISCORD_ATTENTION;
 
 /**
  * One place for what reaches him in Discord text and how readily he joins in.
@@ -425,6 +417,7 @@ const CHATTINESS_LABELS: Readonly<Record<PersonaSettings["chattiness"], string>>
  * chattiness and reply policy stay persona-owned and are saved through the
  * persona path, so `/persona` and `clankie persona set` see the same values.
  * None of these limits how long he talks: that is always his own choice.
+ * Wording comes from `@clankie/protocol` so the app and dashboard match.
  */
 async function editDiscordAttention(
   shell: ClankieFaceShell,
@@ -437,29 +430,28 @@ async function editDiscordAttention(
     const trigger = discordWakeTrigger(snapshot.settings.wakeTrigger);
     const current = persona ? await persona.read() : undefined;
     const choice = await flow.readSelect({
-      message:
-        "What wakes him / how much he talks\nOnce someone addresses him he answers normally, at whatever length fits.",
+      message: `${A.title}\n${A.summary}`,
       allowBack: true,
       options: [
         {
           value: "wake",
-          label: "What wakes him in text",
-          hint: trigger === undefined ? "this body's default" : WAKE_TRIGGER_LABELS[trigger],
-          description: "Whether an @mention, his name, or any message reaches him.",
+          label: A.wake.label,
+          hint: A.wake.choices[trigger ?? "default"].label,
+          description: A.wake.description,
         },
         ...(current
           ? [
               {
                 value: "chattiness",
-                label: "How readily he jumps in",
-                hint: CHATTINESS_LABELS[current.chattiness],
-                description: "Only matters when nobody is talking to him.",
+                label: A.chattiness.label,
+                hint: A.chattiness.choices[current.chattiness].label,
+                description: A.chattiness.description,
               },
               {
                 value: "reply",
-                label: "Reply policy",
-                hint: current.replyPolicy === "all" ? "every message" : "@mention or his name",
-                description: "What he reads in voice, and in text when the wake trigger is unset.",
+                label: A.replyPolicy.label,
+                hint: A.replyPolicy.choices[current.replyPolicy].label,
+                description: A.replyPolicy.description,
               },
             ]
           : []),
@@ -469,33 +461,14 @@ async function editDiscordAttention(
     if (choice === undefined || choice === "done") return;
     if (choice === "wake") {
       const value = await flow.readSelect({
-        message: "What wakes him in text",
+        message: A.wake.label,
         allowBack: true,
-        ...(trigger === undefined ? { currentValue: "default" } : { currentValue: trigger }),
-        options: [
-          {
-            value: "mention",
-            label: WAKE_TRIGGER_LABELS.mention,
-            description:
-              "An @mention, a DM, a reply to him or /clankie ask. Writing his name without @mentioning him does not wake him.",
-          },
-          {
-            value: "name",
-            label: WAKE_TRIGGER_LABELS.name,
-            description:
-              "Also wakes when someone writes his name or an alias, like “hey clankie”, without an @mention.",
-          },
-          {
-            value: "any",
-            label: WAKE_TRIGGER_LABELS.any,
-            description: "Every admitted message reaches him, and he decides whether to say anything.",
-          },
-          {
-            value: "default",
-            label: "This body's default",
-            description: "Self-hosted follows the reply policy; hosted wakes on an @mention only.",
-          },
-        ],
+        currentValue: trigger ?? "default",
+        options: (["mention", "name", "any", "default"] as const).map((key) => ({
+          value: key,
+          label: A.wake.choices[key].label,
+          description: A.wake.choices[key].description,
+        })),
       });
       if (value === undefined) continue;
       await setup.updateDiscordSettings({
@@ -508,60 +481,39 @@ async function editDiscordAttention(
           snapshot.settings,
         ),
       });
-      flow.renderLine("Saved. Restart the Discord connection to apply.", "success");
+      flow.renderLine(A.saved, "success");
       continue;
     }
     if (!persona || !current) continue;
     if (choice === "chattiness") {
       const value = await flow.readSelect({
-        message:
-          "How readily he jumps in when nobody is talking to him\nOnce addressed he answers normally; how long he talks is always his call.",
+        message: `${A.chattiness.label} when nobody is talking to him\nOnce addressed he answers normally; how long he talks is always his call.`,
         allowBack: true,
         currentValue: current.chattiness,
-        options: [
-          {
-            value: "quiet",
-            label: CHATTINESS_LABELS.quiet,
-            description: "Only something notable or directly relevant to him gets his attention.",
-          },
-          {
-            value: "balanced",
-            label: CHATTINESS_LABELS.balanced,
-            description: "He joins in when he has something to add.",
-          },
-          {
-            value: "chatty",
-            label: CHATTINESS_LABELS.chatty,
-            description: "He answers small and passing messages too.",
-          },
-        ],
+        options: (["quiet", "balanced", "chatty"] as const).map((key) => ({
+          value: key,
+          label: A.chattiness.choices[key].label,
+          description: A.chattiness.choices[key].description,
+        })),
       });
       if (value === undefined) continue;
       await persona.update({ chattiness: value as PersonaSettings["chattiness"] });
-      flow.renderLine("Saved. Restart the Discord connection to apply.", "success");
+      flow.renderLine(A.saved, "success");
       continue;
     }
     const value = await flow.readSelect({
-      message: "Reply policy: what he reads in voice, and in text while the wake trigger is the default",
+      message: `${A.replyPolicy.label}: what he reads in voice, and in text while the wake trigger is the default`,
       allowBack: true,
       currentValue: current.replyPolicy,
-      options: [
-        {
-          value: "all",
-          label: "Every message",
-          description: "He sees each admitted message and decides for himself whether to speak.",
-        },
-        {
-          value: "addressed",
-          label: "An @mention or his name",
-          description:
-            "Only an @mention or one of his names, plus the next few messages after he replies, spends a model turn.",
-        },
-      ],
+      options: (["all", "addressed"] as const).map((key) => ({
+        value: key,
+        label: A.replyPolicy.choices[key].label,
+        description: A.replyPolicy.choices[key].description,
+      })),
     });
     if (value === undefined) continue;
     await persona.update({ replyPolicy: value as PersonaSettings["replyPolicy"] });
-    flow.renderLine("Saved. Restart the Discord connection to apply.", "success");
+    flow.renderLine(A.saved, "success");
   }
 }
 

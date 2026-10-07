@@ -2228,6 +2228,72 @@ paths:
         "401": { description: Owner authentication required }
         "403": { description: Caller lacks owner authority }
         "409": { description: Settings or owner authority changed before commit }
+  /v1/operator/fleet-settings/hire:
+    get:
+      tags: [Operator]
+      operationId: getFleetHireDefaults
+      summary: Read the fleet's hire defaults (harness, model, effort)
+      description: An omitted field is "no preference"; Clankie chooses per hire. The SHA-256 revision covers the whole stored hire profile, so an account, subagent, delegation or placement change also fences writes. Owner or Take Control device authority (FleetHireDefaultsSnapshotSchema).
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200": { description: "schemaVersion=1, revision and hire {harness?, model?, effort?}" }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+    post:
+      tags: [Operator]
+      operationId: updateFleetHireDefaults
+      summary: Set or clear fleet hire defaults
+      description: Accepts schemaVersion=1, expectedRevision and changes {harness?, model?, effort?}. The value `auto` clears a field (no preference, never stored); omitted fields and the rest of the hire profile are kept (UpdateFleetHireDefaultsSchema).
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Updated hire defaults snapshot }
+        "400": { description: Malformed change }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision or authority changed during the write }
+  /v1/worker-accounts:
+    get:
+      tags: [Operator]
+      operationId: getWorkerAccounts
+      summary: Read one machine's Claude and Codex worker accounts
+      description: Sign-in, identity, plan, Codex usage headroom, holds and whether Clankie would hire on each account now (MachineWorkerAccountsSchema). Omit fleet for this machine; fleet names a runtime connection, the only query accepted. Owner or Take Control device authority.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - {
+            name: fleet,
+            in: query,
+            required: false,
+            schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" },
+          }
+      responses:
+        "200": { description: The machine's accounts }
+        "400": { description: Invalid fleet }
+        "401": { description: Authentication required }
+        "409": { description: The machine could not be read }
+        "503": { description: Worker accounts unavailable }
+  /v1/worker-accounts/holds:
+    post:
+      tags: [Operator]
+      operationId: setWorkerAccountHold
+      summary: Hold or release one worker account
+      description: A held account is skipped by Clankie's automatic choice; a hire that names it may still use it. Body {machine (default local), harness, label, held, reason? (hold only)}; returns every hold (WorkerAccountHoldRequestSchema, WorkerAccountHoldsSchema). Same settings as `clankie accounts hold|release`.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Every current hold }
+        "400": { description: Invalid hold, or 64 holds already set }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "503": { description: Settings persistence unavailable }
   /v1/operator/fleet-settings/context:
     get:
       tags: [Operator]
@@ -2667,8 +2733,8 @@ paths:
       tags: [Operator]
       operationId: getOperatorPersona
       summary: Read the hosted or local owner-authored persona
-      description: Includes persona image diagnostics (files, roles, counts, sizes, video timestamps, viewable cached sheet paths, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart.
-      security: [{ operatorBearer: [] }]
+      description: Includes persona image diagnostics (files, roles, counts, sizes, video timestamps, viewable cached sheet paths, load errors), never image bytes. Status previews the current folder; the running image snapshot changes on restart. A Take Control device that is not the operator receives only chattiness and replyPolicy (PersonaAttentionSnapshotSchema). Hosted-account operator devices on the hosted bridge keep operator scope.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200": { description: Persona settings }
         "401": { description: Operator authentication required }
@@ -2676,8 +2742,8 @@ paths:
       tags: [Operator]
       operationId: updateOperatorPersona
       summary: Apply a validated partial persona update
-      description: Accepts imagesDir as a folder on the service host (empty string clears). Top-level images and sampled videos are vibe; appearance/ holds physical character references. Returns image status and a restart reminder.
-      security: [{ operatorBearer: [] }]
+      description: Accepts imagesDir as a folder on the service host (empty string clears). Top-level images and sampled videos are vibe; appearance/ holds physical character references. Returns image status and a restart reminder. A Take Control device that is not the operator may change only chattiness and replyPolicy (PersonaAttentionUpdateSchema, VUH-1813). Hosted-account operator devices on the hosted bridge keep operator scope.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
         content:

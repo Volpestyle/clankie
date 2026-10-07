@@ -26,6 +26,7 @@ import { isIP } from "node:net";
 export const SETTINGS_SCHEMA_VERSION = 1 as const;
 
 import { DiscordSettingsSchema } from "@clankie/protocol/discord-settings";
+import { PersonaChattinessSchema, PersonaReplyPolicySchema } from "@clankie/protocol/discord-attention";
 import { RuntimeHealthSettingsSchema } from "@clankie/protocol";
 export { DiscordSettingsSchema, type DiscordSettings } from "@clankie/protocol/discord-settings";
 
@@ -57,9 +58,9 @@ export const PersonaSettingsSchema = z
      * How readily he joins in when nobody addressed him. Once addressed he
      * answers normally, and how long he talks is always his own choice.
      */
-    chattiness: z.enum(["quiet", "balanced", "chatty"]).default("balanced"),
+    chattiness: PersonaChattinessSchema.default("balanced"),
     /** What he perceives in admitted text channels; silence remains his decision. */
-    replyPolicy: z.enum(["addressed", "all"]).default("all"),
+    replyPolicy: PersonaReplyPolicySchema.default("all"),
     /**
      * How many messages may pass in a channel, after he last replied there,
      * before he stops reading it live and lets it pile up until he next checks

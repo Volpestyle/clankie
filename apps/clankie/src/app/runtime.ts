@@ -7,6 +7,12 @@ import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
 import { RuntimeHealthObservationSchema } from "@clankie/protocol";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
+import { PersonaAttentionUpdateSchema } from "@clankie/protocol/discord-attention";
+import {
+  WORKER_ACCOUNTS_PATH,
+  WORKER_ACCOUNT_HOLDS_PATH,
+  WorkerAccountHoldRequestSchema,
+} from "@clankie/protocol/worker-accounts";
 import { SupportGrantStore } from "../support-access.ts";
 import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
 import { createIntegrationRoutes } from "../integrate-routes.ts";
@@ -729,21 +735,30 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
+  // The operator (including a hosted-account operator device on the hosted
+  // bridge), or a paired Take Control device, which reads and changes only
+  // talkativeness (VUH-1813).
   app.get("/v1/operator/persona", async (context) => {
-    const identity = await authenticateOperator(context.req.raw, dependencies);
-    if (!identity || identity === "unavailable")
+    if ((await authorizeOwnerSecrets(context.req.raw)) !== true)
       return context.json({ error: "operator_authentication_required" }, 401);
     const persona = (await settingsSource.load()).persona;
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (!operator || operator === "unavailable")
+      return context.json({ persona: { chattiness: persona.chattiness, replyPolicy: persona.replyPolicy } });
     return context.json({ persona, images: personaImageStatus(await loadPersonaImages(persona.imagesDir)) });
   });
   app.post("/v1/operator/persona", async (context) => {
-    const identity = await authenticateOperator(context.req.raw, dependencies);
-    if (!identity || identity === "unavailable")
+    if ((await authorizeOwnerSecrets(context.req.raw)) !== true)
       return context.json({ error: "operator_authentication_required" }, 401);
     if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
-    const patch = PersonaSettingsSchema.partial()
-      .strict()
-      .safeParse(await readJson(context.req.raw));
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    // A paired device changes talkativeness only; names, notes and the image
+    // folder (a host path) stay with the operator.
+    const patch = (
+      operator && operator !== "unavailable"
+        ? PersonaSettingsSchema.partial().strict()
+        : PersonaAttentionUpdateSchema
+    ).safeParse(await readJson(context.req.raw));
     if (!patch.success) return context.json({ error: "malformed" }, 400);
     const updated = await settingsSource.update((value) => ({
       ...value,
@@ -1301,11 +1316,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.get("/v1/worker-accounts", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+  app.get(WORKER_ACCOUNTS_PATH, async (context) => {
+    const authority = await authorizeOwnerSecrets(context.req.raw);
+    if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
     if (!dependencies.workerAccounts) return context.json({ error: "worker_accounts_unavailable" }, 503);
     const fleet = context.req.query("fleet");
     if (fleet !== undefined && !/^[a-z][a-z0-9-]{0,63}$/u.test(fleet))
@@ -1318,6 +1331,37 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         409,
       );
     }
+  });
+
+  // Hold or release one worker account (`clankie accounts hold|release`).
+  app.post(WORKER_ACCOUNT_HOLDS_PATH, bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
+    const authority = await authorizeOwnerSecrets(context.req.raw);
+    if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
+    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+    const input = WorkerAccountHoldRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!input.success) return context.json({ error: "invalid_worker_account_hold" }, 400);
+    const { machine, harness, label, held, reason } = input.data;
+    const current = await settingsSource.load();
+    if (
+      held &&
+      current.workerAccountHolds.length >= 64 &&
+      !current.workerAccountHolds.some(
+        (hold) => hold.machine === machine && hold.harness === harness && hold.label === label,
+      )
+    )
+      return context.json({ error: "too_many_worker_account_holds" }, 400);
+    const updated = await settingsSource.update((current) => {
+      const others = current.workerAccountHolds.filter(
+        (hold) => !(hold.machine === machine && hold.harness === harness && hold.label === label),
+      );
+      return {
+        ...current,
+        workerAccountHolds: held
+          ? [...others, { machine, harness, label, ...(reason === undefined ? {} : { reason }) }]
+          : others,
+      };
+    });
+    return context.json({ holds: updated.workerAccountHolds });
   });
 
   app.get("/v1/runtime-connections", async (context) => {

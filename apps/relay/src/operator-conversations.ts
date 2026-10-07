@@ -18,10 +18,25 @@ import {
 import { BODY_LEASE_STATUS_PATH, BodyLeaseStatusSchema } from "../../../packages/protocol/src/body-leases.ts";
 import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-operator.ts";
 import {
+  FLEET_HIRE_DEFAULTS_PATH,
   FLEET_SETTINGS_PATH,
+  FleetHireDefaultsSnapshotSchema,
   FleetSettingsSnapshotSchema,
+  UpdateFleetHireDefaultsSchema,
   UpdateFleetSettingsSchema,
 } from "../../../packages/protocol/src/fleet-settings.ts";
+import {
+  OPERATOR_PERSONA_PATH,
+  PersonaAttentionSnapshotSchema,
+  PersonaAttentionUpdateSchema,
+} from "../../../packages/protocol/src/discord-attention.ts";
+import {
+  MachineWorkerAccountsSchema,
+  WORKER_ACCOUNTS_PATH,
+  WORKER_ACCOUNT_HOLDS_PATH,
+  WorkerAccountHoldRequestSchema,
+  WorkerAccountHoldsSchema,
+} from "../../../packages/protocol/src/worker-accounts.ts";
 import {
   PROJECTS_PATH,
   PROJECT_UPDATE_SETTINGS_PATH,
@@ -110,9 +125,58 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: DISCORD_SETUP_TEST_POST_PATH },
   { method: "GET", path: FLEET_SETTINGS_PATH },
   { method: "POST", path: FLEET_SETTINGS_PATH },
+  { method: "GET", path: FLEET_HIRE_DEFAULTS_PATH },
+  { method: "POST", path: FLEET_HIRE_DEFAULTS_PATH },
+  { method: "GET", path: OPERATOR_PERSONA_PATH },
+  { method: "POST", path: OPERATOR_PERSONA_PATH },
+  { method: "GET", path: WORKER_ACCOUNTS_PATH },
+  { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH },
   { method: "GET", path: PROJECTS_PATH },
   { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH },
 ] as const;
+
+interface ParseSchema {
+  safeParse(value: unknown): { success: true; data: unknown } | { success: false };
+}
+/**
+ * Owner settings a device holding terminal control may read and change. Each
+ * request and answer is held to its protocol schema, so the relay never
+ * forwards more than the route names (a persona patch is talkativeness only).
+ */
+const OWNER_SETTINGS_ROUTES: Readonly<
+  Record<
+    string,
+    { readonly methods: readonly string[]; readonly update?: ParseSchema; readonly snapshot: ParseSchema }
+  >
+> = {
+  [FLEET_SETTINGS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateFleetSettingsSchema,
+    snapshot: FleetSettingsSnapshotSchema,
+  },
+  [FLEET_HIRE_DEFAULTS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateFleetHireDefaultsSchema,
+    snapshot: FleetHireDefaultsSnapshotSchema,
+  },
+  [OPERATOR_PERSONA_PATH]: {
+    methods: ["GET", "POST"],
+    update: PersonaAttentionUpdateSchema,
+    snapshot: PersonaAttentionSnapshotSchema,
+  },
+  [WORKER_ACCOUNTS_PATH]: { methods: ["GET"], snapshot: MachineWorkerAccountsSchema },
+  [WORKER_ACCOUNT_HOLDS_PATH]: {
+    methods: ["POST"],
+    update: WorkerAccountHoldRequestSchema,
+    snapshot: WorkerAccountHoldsSchema,
+  },
+  [PROJECTS_PATH]: { methods: ["GET"], snapshot: ProjectsSnapshotSchema },
+  [PROJECT_UPDATE_SETTINGS_PATH]: {
+    methods: ["POST"],
+    update: UpdateProjectSettingsSchema,
+    snapshot: ProjectsSnapshotSchema,
+  },
+};
 
 /**
  * Authenticated HTTP/NDJSON projection of the callable operator contract.
@@ -126,14 +190,13 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
   );
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
-    if (path === FLEET_SETTINGS_PATH || path === PROJECTS_PATH || path === PROJECT_UPDATE_SETTINGS_PATH) {
+    const settingsRoute = Object.hasOwn(OWNER_SETTINGS_ROUTES, path)
+      ? OWNER_SETTINGS_ROUTES[path]
+      : undefined;
+    if (settingsRoute !== undefined) {
       response.setHeader("cache-control", "no-store");
       const method = request.method;
-      if (
-        (method !== "GET" && method !== "POST") ||
-        (path === PROJECTS_PATH && method !== "GET") ||
-        (path === PROJECT_UPDATE_SETTINGS_PATH && method !== "POST")
-      ) {
+      if ((method !== "GET" && method !== "POST") || !settingsRoute.methods.includes(method)) {
         writeJson(response, 405, { error: "method_not_allowed" });
         return true;
       }
@@ -156,10 +219,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       let body: string | undefined;
       if (method === "POST") {
         const input = await readJson(request).catch(() => undefined);
-        const parsed =
-          path === FLEET_SETTINGS_PATH
-            ? UpdateFleetSettingsSchema.safeParse(input)
-            : UpdateProjectSettingsSchema.safeParse(input);
+        const parsed = settingsRoute.update?.safeParse(input) ?? { success: false as const };
         if (!parsed.success) {
           writeJson(response, 400, { error: "invalid_settings_update" });
           return true;
@@ -191,10 +251,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           writeJson(response, upstream.status, { error: "settings_upstream_refused" });
           return true;
         }
-        const parsed =
-          path === FLEET_SETTINGS_PATH
-            ? FleetSettingsSnapshotSchema.safeParse(data)
-            : ProjectsSnapshotSchema.safeParse(data);
+        const parsed = settingsRoute.snapshot.safeParse(data);
         writeJson(
           response,
           parsed.success ? 200 : 502,

@@ -12,6 +12,7 @@ import {
   type GatewayPlainRequest,
 } from "@clankie/protocol/gateway-encryption";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "@clankie/protocol/projects";
+import { isWorkerAccountsRoute } from "@clankie/protocol/worker-accounts";
 
 /** Implemented with node:crypto, Expo Crypto, or CryptoKit, never JavaScript ciphers. */
 export interface GatewayCrypto {
@@ -90,9 +91,11 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
       url.search === "?includeAutonomy=true" &&
       ((request.method === "GET" && hostPath?.[2] === PROJECTS_PATH) ||
         (request.method === "POST" && hostPath?.[2] === PROJECT_UPDATE_SETTINGS_PATH));
+    const workerAccountsQuery =
+      request.method === "GET" && hostPath !== null && isWorkerAccountsRoute(`${hostPath[2]}${url.search}`);
     if (
       hostId !== credential.hostId ||
-      (url.search && !projectQuery) ||
+      (url.search && !projectQuery && !workerAccountsQuery) ||
       url.hash ||
       url.username ||
       url.password

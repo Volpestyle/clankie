@@ -1,3 +1,4 @@
+import { DISCORD_ATTENTION } from "@clankie/protocol/discord-attention";
 import { formatPersonaImages } from "./command-format.ts";
 import { SettingsStore, type PersonaSettings } from "@clankie/settings";
 import { formatPersonaLines, personaStatus, personaUpdate, runPersonaCommand } from "./command/persona.ts";
@@ -188,11 +189,11 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
     const chattiness = await flow.readSelect({
       message:
         "How readily does he jump in when nobody is talking to him?\nOnce addressed he answers normally; how long he talks is always his call.",
-      options: [
-        { value: "quiet", label: "Quiet", hint: "only something notable or relevant to him" },
-        { value: "balanced", label: "Balanced", hint: "when he has something to add" },
-        { value: "chatty", label: "Chatty", hint: "small and passing messages too" },
-      ],
+      options: (["quiet", "balanced", "chatty"] as const).map((value) => ({
+        value,
+        label: DISCORD_ATTENTION.chattiness.choices[value].label,
+        description: DISCORD_ATTENTION.chattiness.choices[value].description,
+      })),
       allowBack: true,
     });
     const chattinessChoice = chattiness;

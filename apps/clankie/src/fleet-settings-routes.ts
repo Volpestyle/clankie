@@ -2,8 +2,13 @@ import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
+  FLEET_HIRE_DEFAULTS_PATH,
   FLEET_SETTINGS_PATH,
   FLEET_SETTINGS_CONTEXT_PATH,
+  HIRE_NO_PREFERENCE,
+  HireProfileSchema,
+  UpdateFleetHireDefaultsSchema,
+  type FleetHireDefaultsSnapshot,
   FleetSettingsContextRequestSchema,
   FleetAutonomySchema,
   UpdateFleetSettingsSchema,
@@ -30,13 +35,27 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
     fleet,
   };
 }
+class InvalidHireDefaults extends Error {}
+/** Harness, model and effort only; the revision covers the whole stored profile. */
+function fleetHireDefaultsSnapshot(settings: ClankieSettings): FleetHireDefaultsSnapshot {
+  const hire = settings.fleet.hire ?? {};
+  return {
+    schemaVersion: 1,
+    revision: createHash("sha256").update(JSON.stringify(hire)).digest("hex"),
+    hire: {
+      ...(hire.harness === undefined ? {} : { harness: hire.harness }),
+      ...(hire.model === undefined ? {} : { model: hire.model }),
+      ...(hire.effort === undefined ? {} : { effort: hire.effort }),
+    },
+  };
+}
 export function createFleetSettingsRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
   dependencies: FleetSettingsContextDependencies = {},
 ): Hono {
   const app = new Hono();
-  for (const path of [FLEET_SETTINGS_PATH, FLEET_SETTINGS_CONTEXT_PATH])
+  for (const path of [FLEET_SETTINGS_PATH, FLEET_SETTINGS_CONTEXT_PATH, FLEET_HIRE_DEFAULTS_PATH])
     app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
       const authority = await authorize(context.req.raw);
@@ -93,6 +112,49 @@ export function createFleetSettingsRoutes(
       );
       return context.json(fleetSettingsSnapshot(updated));
     } catch {
+      return context.json({ error: "fleet_settings_conflict" }, 409);
+    }
+  });
+  app.get(FLEET_HIRE_DEFAULTS_PATH, async (context) => {
+    const current = await settings.load();
+    const authority = await authorize(context.req.raw);
+    if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
+    return context.json(fleetHireDefaultsSnapshot(current));
+  });
+  app.post(FLEET_HIRE_DEFAULTS_PATH, bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
+    if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
+    const input = UpdateFleetHireDefaultsSchema.safeParse(await context.req.json().catch(() => null));
+    if (!input.success) return context.json({ error: "malformed" }, 400);
+    let before: string | undefined;
+    try {
+      const updated = await settings.update(
+        (current) => {
+          if (fleetHireDefaultsSnapshot(current).revision !== input.data.expectedRevision)
+            throw new Error("Hire defaults changed");
+          before = JSON.stringify(current);
+          // `auto` is no preference: the field is cleared, never stored (ea54ebd6).
+          const next: Record<string, unknown> = { ...current.fleet.hire };
+          for (const [field, value] of Object.entries(input.data.changes)) {
+            if (value === undefined) continue;
+            if (value === HIRE_NO_PREFERENCE) delete next[field];
+            else next[field] = value;
+          }
+          const parsedHire = HireProfileSchema.safeParse(next);
+          if (!parsedHire.success) throw new InvalidHireDefaults();
+          const hire = parsedHire.data;
+          const fleet = { ...current.fleet };
+          if (Object.keys(hire).length) fleet.hire = hire;
+          else delete fleet.hire;
+          return { ...current, fleet };
+        },
+        async () => {
+          if ((await authorize(context.req.raw)) !== true) throw new Error("Owner authority changed");
+          if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
+        },
+      );
+      return context.json(fleetHireDefaultsSnapshot(updated));
+    } catch (error) {
+      if (error instanceof InvalidHireDefaults) return context.json({ error: "malformed" }, 400);
       return context.json({ error: "fleet_settings_conflict" }, 409);
     }
   });

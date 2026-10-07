@@ -12,6 +12,12 @@ import {
   FleetAutonomySchema,
   PROJECTS_PATH,
   PROJECT_UPDATE_SETTINGS_PATH,
+  FLEET_HIRE_DEFAULTS_PATH,
+  FleetHireDefaultsSnapshotSchema,
+  OPERATOR_PERSONA_PATH,
+  PersonaAttentionSnapshotSchema,
+  WORKER_ACCOUNT_HOLDS_PATH,
+  WorkerAccountHoldsSchema,
 } from "@clankie/protocol";
 import {
   SettingsStore,
@@ -722,4 +728,86 @@ it("round-trips fleet gates across owner API, disk, project inheritance and the 
   expect((await f.settings.load()).autonomy.fleet.moneyAndAccounts).toBe("owner");
   expect((await f.settings.load()).autonomy.fleet.push).toBe(initial.fleet.push);
   expect((await f.settings.load()).autonomy.fleet.release).toEqual(initial.fleet.release);
+});
+
+it("sets hire defaults, talkativeness and worker-account holds through the owner API the app and TUI share", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    fleet: { ...current.fleet, hire: { harness: "codex", account: "work", placement: "split" } },
+  }));
+  const hire = FleetHireDefaultsSnapshotSchema.parse(
+    await (await f.request(FLEET_HIRE_DEFAULTS_PATH)).json(),
+  );
+  expect(hire.hire).toEqual({ harness: "codex" });
+  const set = await f.request(FLEET_HIRE_DEFAULTS_PATH, {
+    schemaVersion: 1,
+    expectedRevision: hire.revision,
+    changes: { harness: "auto", model: "gpt-6", effort: "high" },
+  });
+  expect(set.status).toBe(200);
+  const updated = FleetHireDefaultsSnapshotSchema.parse(await set.json());
+  expect(updated.hire).toEqual({ model: "gpt-6", effort: "high" });
+  // No preference is never stored, and fields this route does not show are kept.
+  expect((await new SettingsStore(f.settings.path).load()).fleet.hire).toEqual({
+    account: "work",
+    placement: "split",
+    model: "gpt-6",
+    effort: "high",
+  });
+  const stale = await f.request(FLEET_HIRE_DEFAULTS_PATH, {
+    schemaVersion: 1,
+    expectedRevision: hire.revision,
+    changes: { effort: "low" },
+  });
+  expect(stale.status).toBe(409);
+  expect(
+    (
+      await f.request(FLEET_HIRE_DEFAULTS_PATH, {
+        schemaVersion: 1,
+        expectedRevision: updated.revision,
+        changes: { harness: "not-a-harness" },
+      })
+    ).status,
+  ).toBe(400);
+
+  const persona = await f.request(OPERATOR_PERSONA_PATH, { chattiness: "quiet", replyPolicy: "addressed" });
+  expect(PersonaAttentionSnapshotSchema.parse(await persona.json()).persona).toEqual({
+    chattiness: "quiet",
+    replyPolicy: "addressed",
+  });
+
+  const held = await f.request(WORKER_ACCOUNT_HOLDS_PATH, {
+    harness: "codex",
+    label: "work",
+    held: true,
+    reason: "plan lapses Friday",
+  });
+  expect(WorkerAccountHoldsSchema.parse(await held.json()).holds).toEqual([
+    { machine: "local", harness: "codex", label: "work", reason: "plan lapses Friday" },
+  ]);
+  const released = await f.request(WORKER_ACCOUNT_HOLDS_PATH, {
+    machine: "local",
+    harness: "codex",
+    label: "work",
+    held: false,
+  });
+  expect(WorkerAccountHoldsSchema.parse(await released.json()).holds).toEqual([]);
+  expect(
+    (
+      await f.request(WORKER_ACCOUNT_HOLDS_PATH, {
+        harness: "codex",
+        label: "work",
+        held: false,
+        reason: "x",
+      })
+    ).status,
+  ).toBe(400);
+
+  f.revoke();
+  expect((await f.request(FLEET_HIRE_DEFAULTS_PATH)).status).toBe(401);
+  expect(
+    (await f.request(WORKER_ACCOUNT_HOLDS_PATH, { harness: "codex", label: "work", held: true })).status,
+  ).toBe(401);
+  expect((await f.request(OPERATOR_PERSONA_PATH, { chattiness: "chatty" })).status).toBe(401);
 });

@@ -6,7 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
-import { ProjectsSettingsSchema, TAKE_CONTROL_GRANTS } from "../../../packages/protocol/src/index.ts";
+import {
+  FLEET_HIRE_DEFAULTS_PATH,
+  FleetHireDefaultsSnapshotSchema,
+  MachineWorkerAccountsSchema,
+  OPERATOR_PERSONA_PATH,
+  ProjectsSettingsSchema,
+  TAKE_CONTROL_GRANTS,
+  WORKER_ACCOUNT_HOLDS_PATH,
+  WorkerAccountHoldsSchema,
+  workerAccountsRoute,
+} from "../../../packages/protocol/src/index.ts";
 import { SettingsStore } from "../../../packages/settings/src/index.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
@@ -121,6 +131,22 @@ async function fixture() {
     ),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+    workerAccounts: async (fleet) => ({
+      machine: fleet ?? "local",
+      shell: "posix",
+      observedAt: new Date(hf.now).toISOString(),
+      accounts: [
+        {
+          harness: "codex",
+          label: "work",
+          home: "/Users/owner/.codex-work",
+          signedIn: true,
+          identity: "owner@example.com",
+          headroom: 0.4,
+          usable: true,
+        },
+      ],
+    }),
   });
   cleanups.push(async () => {
     service.close();
@@ -300,5 +326,71 @@ it("revalidates real revocation during relay work and keeps unknown queries and 
     expect([400, 404]).toContain(result.status);
   }
   expect(f.forwarded).toHaveLength(count);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("carries talkativeness, hire defaults and worker-account holds for a control device, and nothing wider", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    persona: { ...current.persona, characterNotes: "private notes" },
+    fleet: { ...current.fleet, hire: { harness: "codex", account: "work" } },
+  }));
+  const call = (path: string, body?: unknown, device: keyof typeof f.tokens = "control") =>
+    fetch(`${f.relayUrl}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  const persona = await call(OPERATOR_PERSONA_PATH);
+  expect(persona.status).toBe(200);
+  // The relay answers with talkativeness only; owner notes never reach the device.
+  expect(await persona.json()).toEqual({ persona: { chattiness: "balanced", replyPolicy: "all" } });
+  expect((await call(OPERATOR_PERSONA_PATH, { chattiness: "chatty" })).status).toBe(200);
+  expect((await call(OPERATOR_PERSONA_PATH, { characterNotes: "rewritten" })).status).toBe(400);
+  expect((await call(OPERATOR_PERSONA_PATH, { displayName: "Not him", chattiness: "quiet" })).status).toBe(
+    400,
+  );
+
+  const hire = FleetHireDefaultsSnapshotSchema.parse(await (await call(FLEET_HIRE_DEFAULTS_PATH)).json());
+  expect(hire.hire).toEqual({ harness: "codex" });
+  const cleared = await call(FLEET_HIRE_DEFAULTS_PATH, {
+    schemaVersion: 1,
+    expectedRevision: hire.revision,
+    changes: { harness: "auto", effort: "high" },
+  });
+  expect(FleetHireDefaultsSnapshotSchema.parse(await cleared.json()).hire).toEqual({ effort: "high" });
+
+  const accounts = MachineWorkerAccountsSchema.parse(
+    await (await call(workerAccountsRoute("pc-work"))).json(),
+  );
+  expect(accounts.machine).toBe("pc-work");
+  expect((await call("/v1/worker-accounts?fleet=PC")).status).toBe(400);
+  const held = await call(WORKER_ACCOUNT_HOLDS_PATH, {
+    machine: "pc-work",
+    harness: "codex",
+    label: "work",
+    held: true,
+  });
+  expect(WorkerAccountHoldsSchema.parse(await held.json()).holds).toEqual([
+    { machine: "pc-work", harness: "codex", label: "work" },
+  ]);
+
+  const saved = await new SettingsStore(f.settings.path).load();
+  expect(saved.persona).toMatchObject({ chattiness: "chatty", characterNotes: "private notes" });
+  expect(saved.fleet.hire).toEqual({ account: "work", effort: "high" });
+  expect(saved.workerAccountHolds).toHaveLength(1);
+  expect(f.forwarded.every((entry) => entry.token === f.tokens.control)).toBe(true);
+
+  const forwarded = f.forwarded.length;
+  for (const device of ["chat", "steer", "hosted-read"] as const) {
+    expect((await call(OPERATOR_PERSONA_PATH, undefined, device)).status).toBe(403);
+    expect(
+      (await call(WORKER_ACCOUNT_HOLDS_PATH, { harness: "codex", label: "work", held: false }, device))
+        .status,
+    ).toBe(403);
+  }
+  expect(f.forwarded).toHaveLength(forwarded);
   expect(f.captainCalls()).toBe(0);
 });
