@@ -37,6 +37,24 @@ import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
 import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-authority.ts";
 import { RemoteObservationError } from "../remote-fleet-relay.ts";
+import { SeatLinkInterruptedError } from "../captain/seat-outbox.ts";
+
+/**
+ * A seat bridge talking to a service that is shutting down gets a 503 and a
+ * closed connection, so it backs off and reconnects to whichever process owns
+ * the port next. An empty 200 kept it pinned to the old process for 50 minutes
+ * after an update on 2026-10-07, while the replacement routed every wake away
+ * from the unbound seat.
+ */
+async function refuseWhileClosing(context: Context, handle: () => Promise<Response>): Promise<Response> {
+  try {
+    return await handle();
+  } catch (error) {
+    if (!(error instanceof SeatLinkInterruptedError)) throw error;
+    context.header("connection", "close");
+    return context.json({ error: "service_shutting_down" }, 503);
+  }
+}
 /**
  * A headless read of a lane's prompt (VUH-1086). The lane defaults to the one
  * the bearer speaks for; sections default to what the pi session starts with.
@@ -149,39 +167,43 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
   // The seat's outbox (ADR 0152). Only the operator's own bearer polls it —
   // the seat is the owner's — and only the service's own turns fill it, so no
   // other principal can put text in front of him through this door.
-  ctx.app.get(OPERATOR_SEAT_EVENTS_PATH, async (context) => {
-    const auth = await ctx.authenticateLane(context);
-    if ("denial" in auth) return auth.denial;
-    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
-    const wait = Number(context.req.query("wait") ?? 0);
-    const waitMs = Number.isFinite(wait)
-      ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
-      : 0;
-    const binding = seatBinding(context, auth.lane);
-    if ("denial" in binding) return binding.denial;
-    const events = await ctx.dependencies.captain.pollSeatEvents(
-      waitMs,
-      context.req.raw.signal,
-      binding.conversationId,
-    );
-    const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
-    return context.json(page);
-  });
+  ctx.app.get(OPERATOR_SEAT_EVENTS_PATH, (context) =>
+    refuseWhileClosing(context, async () => {
+      const auth = await ctx.authenticateLane(context);
+      if ("denial" in auth) return auth.denial;
+      if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+      const wait = Number(context.req.query("wait") ?? 0);
+      const waitMs = Number.isFinite(wait)
+        ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
+        : 0;
+      const binding = seatBinding(context, auth.lane);
+      if ("denial" in binding) return binding.denial;
+      const events = await ctx.dependencies.captain.pollSeatEvents(
+        waitMs,
+        context.req.raw.signal,
+        binding.conversationId,
+      );
+      const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
+      return context.json(page);
+    }),
+  );
 
-  ctx.app.post(`${OPERATOR_SEAT_EVENTS_PATH}/:id/ack`, async (context) => {
-    const auth = await ctx.authenticateLane(context);
-    if ("denial" in auth) return auth.denial;
-    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
-    const binding = seatBinding(context, auth.lane);
-    if ("denial" in binding) return binding.denial;
-    const acknowledged = await ctx.dependencies.captain.acknowledgeSeatEvent(
-      context.req.param("id"),
-      binding.conversationId,
-    );
-    return acknowledged
-      ? context.json({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" })
-      : context.json({ error: "unknown_event" }, 404);
-  });
+  ctx.app.post(`${OPERATOR_SEAT_EVENTS_PATH}/:id/ack`, (context) =>
+    refuseWhileClosing(context, async () => {
+      const auth = await ctx.authenticateLane(context);
+      if ("denial" in auth) return auth.denial;
+      if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+      const binding = seatBinding(context, auth.lane);
+      if ("denial" in binding) return binding.denial;
+      const acknowledged = await ctx.dependencies.captain.acknowledgeSeatEvent(
+        context.req.param("id"),
+        binding.conversationId,
+      );
+      return acknowledged
+        ? context.json({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" })
+        : context.json({ error: "unknown_event" }, 404);
+    }),
+  );
 
   ctx.app.post(`${OPERATOR_SEAT_EVENTS_PATH}/:id/reply`, async (context) => {
     const auth = await ctx.authenticateLane(context);
@@ -292,34 +314,38 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
   // lane only, or a linked fleet for its own panes — keyed by the pane the
   // bridge sits in. 404 is the pane before herdr has classified the harness;
   // the bridge retries.
-  ctx.app.get(FLEET_SEAT_EVENTS_PATH, async (context) => {
-    const pane = await fleetSeatPane(context);
-    if ("denial" in pane) return pane.denial;
-    const wait = Number(context.req.query("wait") ?? 0);
-    const waitMs = Number.isFinite(wait)
-      ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
-      : 0;
-    const events = await ctx.dependencies.captain.pollFleetSeatEvents(
-      pane.paneId,
-      waitMs,
-      context.req.raw.signal,
-    );
-    if (events === undefined) return context.json({ error: "unknown_seat" }, 404);
-    const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
-    return context.json(page);
-  });
+  ctx.app.get(FLEET_SEAT_EVENTS_PATH, (context) =>
+    refuseWhileClosing(context, async () => {
+      const pane = await fleetSeatPane(context);
+      if ("denial" in pane) return pane.denial;
+      const wait = Number(context.req.query("wait") ?? 0);
+      const waitMs = Number.isFinite(wait)
+        ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
+        : 0;
+      const events = await ctx.dependencies.captain.pollFleetSeatEvents(
+        pane.paneId,
+        waitMs,
+        context.req.raw.signal,
+      );
+      if (events === undefined) return context.json({ error: "unknown_seat" }, 404);
+      const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
+      return context.json(page);
+    }),
+  );
 
-  ctx.app.post(`${FLEET_SEAT_EVENTS_PATH}/:id/ack`, async (context) => {
-    const pane = await fleetSeatPane(context);
-    if ("denial" in pane) return pane.denial;
-    const acknowledged = await ctx.dependencies.captain.acknowledgeFleetSeatEvent(
-      pane.paneId,
-      context.req.param("id"),
-    );
-    return acknowledged
-      ? context.json({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" })
-      : context.json({ error: "unknown_event" }, 404);
-  });
+  ctx.app.post(`${FLEET_SEAT_EVENTS_PATH}/:id/ack`, (context) =>
+    refuseWhileClosing(context, async () => {
+      const pane = await fleetSeatPane(context);
+      if ("denial" in pane) return pane.denial;
+      const acknowledged = await ctx.dependencies.captain.acknowledgeFleetSeatEvent(
+        pane.paneId,
+        context.req.param("id"),
+      );
+      return acknowledged
+        ? context.json({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" })
+        : context.json({ error: "unknown_event" }, 404);
+    }),
+  );
 
   // An agent in a fleet pane writing to Clankie (ADR 0213 phase 2). It reaches
   // him as untrusted agent output and grants the sender nothing.

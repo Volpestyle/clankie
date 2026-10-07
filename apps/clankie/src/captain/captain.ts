@@ -4286,6 +4286,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     roomForkGrant,
 
     async pollSeatEvents(waitMs, signal, conversationId) {
+      // A closing service must refuse the poll, not answer an empty page: the
+      // bridge would keep its keep-alive socket on this process and never
+      // reach the replacement (2026-10-07).
+      shutdown.signal.throwIfAborted();
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
       if (waitMs > 0 || goalExecutionReason(binding.conversationId) !== undefined)
@@ -4313,10 +4317,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
           )
           .catch((error: unknown) => {
+            shutdown.signal.throwIfAborted();
             if (pollSignal.aborted) return [];
             throw error;
           });
       } catch (error) {
+        shutdown.signal.throwIfAborted();
         if (pollSignal.aborted) return [];
         throw error;
       }
@@ -4695,6 +4701,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async pollFleetSeatEvents(paneId, waitMs, signal) {
+      shutdown.signal.throwIfAborted();
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
       const seatId = await herdrWatches.seatIdForPane(paneId);
       if (seatId === undefined) return undefined;
@@ -4707,6 +4714,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {
+      shutdown.signal.throwIfAborted();
       const seatId = await herdrWatches.seatIdForPane(paneId);
       const native = await herdrRunner.get(paneId).catch(() => undefined);
       return (
@@ -4720,6 +4728,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async acknowledgeSeatEvent(eventId, conversationId) {
+      shutdown.signal.throwIfAborted();
       const binding = seatContext(conversationId);
       if (binding === undefined) return false;
       const source = await operatorNativeSource(binding.conversationId);

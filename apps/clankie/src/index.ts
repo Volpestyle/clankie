@@ -68,6 +68,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
+import { drainHttpServer } from "./http-drain.ts";
 import { MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core";
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
@@ -1966,6 +1967,8 @@ logger.info(
   "clankie listening",
 );
 
+/** How long a settled shutdown waits for the event loop to drain before exiting anyway. */
+const SETTLED_EXIT_GRACE_MS = 1_000;
 const playShutdownDeadlineMs = parsePositiveInt(process.env.CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS, 15_000);
 let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
@@ -1991,19 +1994,20 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   publicGatewayConnector?.close();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
-  deviceDoorway?.close();
+  const closeDoorwayConnections = deviceDoorway === undefined ? undefined : drainHttpServer(deviceDoorway);
   void localCompanionIssuer?.close();
   void localFleet.close().catch(() => undefined);
-  localFleetServer?.close();
+  const closeLocalFleetConnections =
+    localFleetServer === undefined ? undefined : drainHttpServer(localFleetServer);
   scheduledUpdates?.close();
   harnessLogins.close();
   fleetLinks.close();
-  fleetLinkServer?.close();
+  const closeFleetLinkConnections = drainHttpServer(fleetLinkServer);
   const bodyRequestsStopped = clankie.stopBodyRequests();
   clearInterval(minecraftEventTimer);
   void minecraftPlayHost.close();
   minecraftCapture?.close();
-  server.close();
+  const closeServerConnections = drainHttpServer(server);
   hostedDiscord?.close();
   officialDiscord?.close();
   void (async () => {
@@ -2035,9 +2039,17 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
       process.exit(1);
     }
     logger.info({ signal, exitCode, playShutdown: result.status }, "clankie shutdown settled");
-    // What is still holding the event loop open once everything has closed:
-    // the launcher escalates to SIGKILL after 10s, and this names the culprit.
+    // Nothing may keep serving once shutdown has settled: a client still on a
+    // keep-alive socket must reconnect to the replacement.
+    closeServerConnections();
+    closeDoorwayConnections?.();
+    closeLocalFleetConnections?.();
+    closeFleetLinkConnections();
+    // What is still holding the event loop open once everything has closed.
     logger.info({ signal, handles: process.getActiveResourcesInfo() }, "clankie shutdown handles");
+    // Settled means every owned resource closed; a stray handle must not keep
+    // a stopped service alive (2026-10-07: one lingered 50 minutes).
+    setTimeout(() => process.exit(exitCode), SETTLED_EXIT_GRACE_MS).unref();
   })();
 }
 process.on("SIGINT", () => requestShutdown("SIGINT"));

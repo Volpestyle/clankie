@@ -707,6 +707,13 @@ it. `clankie` (`captain`) also restarts `relay` and the Discord body, because
 those processes cache presence and bearer state from this service instance.
 Stopping is different: `stop` names one service and stops only that service.
 
+A stop sends SIGTERM to the service's process group and waits for every process
+in it, not just the recorded pnpm leader, escalating to SIGKILL for the group
+after the grace (Clankie: its play shutdown deadline plus two seconds). A
+stopping Clankie answers seat event polls and acknowledgments
+`503 service_shutting_down`, stops keeping connections alive, closes the rest
+once shutdown settles, and exits a second later even if a stray handle remains.
+
 Local HTTP services check listeners on their configured port (`PORT` for
 Clankie, `CLANKIE_RELAY_PORT` for the relay, and both `CLANKIE_ACTIVITY_PORT`
 and `CLANKIE_ACTIVITY_PRODUCER_PORT` for the activity). A scratch instance on

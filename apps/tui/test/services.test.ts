@@ -142,6 +142,54 @@ describe("service supervisor", () => {
     expect(env.npm_lifecycle_event).toBe("start");
   });
 
+  // 2026-10-07: pnpm (the recorded pid) exited on SIGTERM while the service
+  // beneath it lingered, so the stop never escalated and the old service kept
+  // answering the operator seat's bridge after the update.
+  it("kills a real pnpm service's lingering descendants when pnpm itself exits on SIGTERM", async () => {
+    const state = await stateEnv();
+    const root = state.XDG_STATE_HOME!;
+    const pidFile = join(root, "service.pid");
+    await writeFile(join(root, "pnpm-workspace.yaml"), "packages: []\n");
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "@clankie/linger-fixture",
+        private: true,
+        // `&&` keeps the shell between pnpm and node, as the real start script does.
+        scripts: { start: "node linger.cjs && true" },
+      }),
+    );
+    await writeFile(
+      join(root, "linger.cjs"),
+      `process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1e6);`,
+    );
+    const service: ManagedService = {
+      ...stubService(),
+      spawnArgs: ["--filter", "@clankie/linger-fixture", "start"],
+      commandMatches: (command) => command.includes("@clankie/linger-fixture"),
+      stopGraceMs: () => 1_500,
+      probe: async () => ({ state: existsSync(pidFile) ? "healthy" : "unreachable" }),
+    };
+    const options = {
+      repoRoot: root,
+      env: { ...process.env, ...state },
+      listProcessCommandsImpl: noProcesses,
+    };
+    await startService(service, options);
+    const servicePid = Number(await readFile(pidFile, "utf8"));
+    try {
+      const result = await stopService(service, options);
+      expect(result).toMatchObject({ stopped: true, signal: "SIGKILL" });
+      expect(() => process.kill(servicePid, 0)).toThrow();
+    } finally {
+      try {
+        process.kill(servicePid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  }, 20_000);
+
   it("gives Clankie longer than its configured play shutdown deadline", () => {
     expect(clankieStopGraceMs({})).toBe(17_000);
     expect(clankieStopGraceMs({ CLANKIE_PLAY_SHUTDOWN_DEADLINE_MS: "25000" })).toBe(27_000);

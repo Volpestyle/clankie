@@ -192,6 +192,24 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Whether anything in the process group a detached service leads is still
+ * running. The recorded pid is the group leader (pnpm for a source checkout),
+ * and it can exit on SIGTERM while the real service, two or three processes
+ * down, keeps running: on 2026-10-07 pnpm died at once, the leader check called
+ * the stop done, and the old service lingered on its keep-alive sockets for 50
+ * minutes, holding the operator seat's bridge.
+ */
+function processGroupIsAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
+    return processIsAlive(pid);
+  }
+}
+
 function readProcessCommand(pid: number): string {
   try {
     return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
@@ -513,7 +531,8 @@ export async function stopService(
   });
 
   const kill = options.killImpl ?? signalProcessGroup;
-  const isAlive = options.processIsAliveImpl ?? processIsAlive;
+  // Wait on the whole group we signal, not just its leader.
+  const isAlive = options.processIsAliveImpl ?? processGroupIsAlive;
   options.onStatus?.(`Stopping ${service.label}…`);
   kill(record.pid, "SIGTERM");
 

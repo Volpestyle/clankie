@@ -90,6 +90,12 @@ booted from it) retires itself and shows `latest.reconciled`; then update again.
 Do not run `clankie restart` while an update is mid-cutover: it refuses, and the
 update restarts services itself.
 A dirty pin or failed install leaves the old runtime untouched.
+The old service must actually leave: a stop waits on its whole process group and
+SIGKILLs the group after the grace. While closing, it answers seat polls and
+acknowledgments `503 service_shutting_down` and closes keep-alive connections, so
+seat bridges reconnect to the replacement. Two Clankie processes after an update
+(`ps -Ao pid,pgid,command | grep 'clankie.*src/index.ts'`) is a defect to report,
+not a state to work around.
 
 New service liveness starts a five-minute `/health` canary;
 `healthy: true` alone does not mean it passed. Read `latest.canary` and deploy
