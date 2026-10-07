@@ -1,5 +1,4 @@
 import { runCheckoutsCommand } from "../src/command/checkouts.ts";
-import { installMainPushGuard } from "../src/main-push-guard.ts";
 import { runComputerCommand } from "../src/command/computer.ts";
 import { runShareCommand } from "../src/command/share.ts";
 import { runDesktopCommand } from "../src/command/desktop.ts";
@@ -195,21 +194,10 @@ export async function runHeadlessCaptainCommand(
       const json = rest.includes("--json");
       const args = rest.filter((arg) => arg !== "--json");
       if (
-        args.length === 2 &&
-        args[0] === "--install-main-guard" &&
-        !args[1]!.startsWith("--") &&
-        rest.filter((arg) => arg === "--json").length <= 1
-      ) {
-        const result = await installMainPushGuard(args[1]!);
-        if (json) outputJson(stdout, result);
-        else stdout.write(`${result.detail} — ${result.repository}\n`);
-        return 0;
-      }
-      if (
         rest.filter((arg) => arg === "--json").length > 1 ||
         (args.length !== 0 && (args.length !== 2 || args[0] !== "--machine" || args[1]!.startsWith("--")))
       )
-        throw new Error("Usage: clankie doctor [--machine FLEET_ID | --install-main-guard REPO] [--json]");
+        throw new Error("Usage: clankie doctor [--machine FLEET_ID] [--json]");
       if (args.length) {
         const result = await machineDoctorCommand(args[1]!, options);
         if (json) outputJson(stdout, result);

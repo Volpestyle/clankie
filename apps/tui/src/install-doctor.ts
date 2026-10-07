@@ -78,7 +78,6 @@ interface HerdrPluginReport {
 export interface InstallDoctorReport {
   readonly ok: true;
   readonly checkouts?: import("@clankie/protocol").CheckoutReport | { status: "unavailable"; detail: string };
-  readonly mainPushGuard?: import("./main-push-guard.ts").MainPushGuardReport;
   readonly resources?: FleetResourceSnapshot | { readonly status: "unavailable"; readonly detail: string };
   readonly kind: InstallKind;
   readonly version: string;

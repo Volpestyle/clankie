@@ -78,7 +78,6 @@ The source-checkout service owns an approved-commit integration queue through
 `POST /v1/integrate` and `clankie integrate`. Landings go directly to `main`
 (ADR 0240); the queue is an optional gated path. Requests waiting during a gate share the next compatible batch;
 conflicting requests roll back and failed shared gates split to isolate failures.
-Doctor offers a tracked direct-main pre-push guard for source checkouts.
 `integrate status` and `/integrate` expose running/waiting work and the last result.
 Each batch has independent Git clones and detached sibling worktrees, private gate environments and durable tested-HEAD
 records. Exact passed trees land core before app; partial landings preserve each

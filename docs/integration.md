@@ -80,42 +80,6 @@ the same checks. Select the last known good batch; the tool does not decide
 whether a production failure invalidates a previously passed tree. History
 remains intact; no force push is used.
 
-## Direct main push guard
-
-Direct pushes to `main` are the normal path (ADR 0240), so do not install this
-guard; it remains only for a checkout that wants to require the queue.
-
-Doctor inspects the caller's clankie or clankie-app checkout and offers the
-tracked guard shipped in the launcher. Installing on this Mac requires the owner's
-approval; ordinary doctor never installs hooks:
-
-```bash
-clankie doctor --json
-clankie doctor --install-main-guard /path/to/clankie
-clankie doctor --install-main-guard /path/to/clankie-app
-```
-
-Installation uses Git's effective hook path, so linked worktrees share the
-pre-push guard. It preserves existing hooks and refuses a conflicting
-`core.hooksPath`. The guard refuses any remote `refs/heads/main` update,
-including `HEAD:main`, deletion and pushes from another local branch, and names
-the queue commands. Branch pushes continue normally. Integration clones retain
-`core.hooksPath=/dev/null`; their own pushes are unaffected, and server hooks
-still run.
-
-For an explicit owner recovery decision only:
-
-```bash
-CLANKIE_MAIN_PUSH_BYPASS=owner CLANKIE_MAIN_PUSH_REASON='Owner approved recovery' git push origin HEAD:main
-```
-
-The bypass requires a reason and appends time, OS user, ref, SHA and reason to
-`clankie-main-push-bypass.log` in the Git common directory. This is a local
-workflow guard, not server branch protection or proof of owner identity. Git's
-`--no-verify` and configuration can disable client hooks; they are not authorized
-landing routes. Doctor reports disabled, missing or conflicting hooks. The
-mechanism is ready to install; live installation waits for the owner's approval.
-
 ## Deploy holds
 
 ```bash

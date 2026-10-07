@@ -13,7 +13,6 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { deployHoldPresence } from "../src/deploy-hold-presence.ts";
-import { installMainPushGuard } from "../../tui/src/main-push-guard.ts";
 import { createIntegrationRoutes } from "../src/integrate-routes.ts";
 import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
 
@@ -443,8 +442,12 @@ it("CLI/API coalesces arrivals during a real gate, isolating a cross-repo confli
   const a = await commit(f.core.source, "a", "healthy");
   const paired = await commit(f.core.source, "paired", "must not land");
   const b = await commit(f.core.source, "b", "healthy");
-  await installMainPushGuard(f.core.source);
-  await installMainPushGuard(f.app!.source);
+  // A client hook that refuses every push; integration clones must not run it.
+  for (const source of [f.core.source, f.app!.source]) {
+    const hook = join(source, ".git", "hooks", "pre-push");
+    await writeFile(hook, "#!/bin/sh\nexit 1\n");
+    await chmod(hook, 0o755);
+  }
   const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
   await runIntegrationCommand([initial, "--id", ids[0]!, "--push", "--no-wait"], cli);
   await until(async () => (await runIntegrationCommand(["status", ids[0]!], cli)).batch?.state === "gating");

@@ -171,10 +171,6 @@ reports, credentials, and command output never enter this projection.
 
 ### `doctor`
 
-`clankie doctor --install-main-guard REPO [--json]` explicitly installs the
-tracked landing guard after owner approval. Ordinary doctor only inspects and
-offers it for the caller's clankie or clankie-app checkout.
-
 The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
 `clankie doctor` prints one line: `ready`, or the most important problem and
 its repair command. Model setup and service reachability take priority over
@@ -664,12 +660,7 @@ deploy; explicit owner overrides name the hold, actor and reason and are audited
 Requires a local source-checkout service. See [integration](integration.md) for
 evidence paths, isolation limits, uncertain sends and crash recovery.
 
-Doctor offers the tracked main push guard in clankie and clankie-app. Install
-only after the owner approves hook installation on this Mac:
-`clankie doctor --install-main-guard /path/to/repo`. Existing hooks are preserved.
-The explicit owner recovery bypass requires `CLANKIE_MAIN_PUSH_BYPASS=owner`
-and `CLANKIE_MAIN_PUSH_REASON`, and records a local audit. Integration clones
-keep client hooks disabled. See [integration](integration.md#direct-main-push-guard).
+Integration clones keep client hooks disabled.
 
 ### `restart [service]`
 
