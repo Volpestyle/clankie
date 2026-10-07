@@ -14,7 +14,6 @@ import {
   type ResourceSnapshot,
   type ResourceState,
   type ResourceWaitOptions,
-  type SimulatorAcquireOptions,
   type SimulatorReservation,
   type SimulatorUpdate,
 } from "./model.ts";
@@ -23,6 +22,14 @@ import { resourceCapacity, ResourcePressureSampler } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
 
 const abort = () => new DOMException("Fleet resource wait cancelled", "AbortError");
+type SimulatorBlock = "simulator_capacity" | "shared_capacity" | "pressure";
+/** The owner's simulator limit is zero; distinct from an unavailable registry. */
+export class SimulatorsDisabledError extends Error {
+  constructor() {
+    super("Simulator leases are disabled by owner policy");
+    this.name = "SimulatorsDisabledError";
+  }
+}
 function groupAlive(pgid: number): boolean {
   if (!Number.isSafeInteger(pgid) || pgid < 2) return false;
   try {
@@ -168,10 +175,8 @@ export function createResourceGovernor(
     return project(state);
   }
   async function acquire(
-    kind: "heavy" | "simulator",
-    options: ResourceWaitOptions & { seatId?: string; executable?: string },
-    simulator?: SimulatorAcquireOptions,
-  ): Promise<HeavyLease | SimulatorReservation> {
+    options: ResourceWaitOptions & { seatId?: string; executable: string },
+  ): Promise<HeavyLease> {
     const owner = await processIdentity();
     if (!owner) throw new Error("Fleet resource process identity unavailable");
     const signal = options.signal ? AbortSignal.any([options.signal, shutdown.signal]) : shutdown.signal;
@@ -182,17 +187,15 @@ export function createResourceGovernor(
       token = randomUUID();
     await store.transaction(async (state) => {
       await reconcile(state);
-      if (simulator && state.policy.simulatorSlots === 0)
-        throw new Error("Simulator leases are disabled by owner policy");
       if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
       state.queue.push({
         id,
         token,
-        kind,
+        kind: "heavy",
         owner,
         queuedAtMs: Date.now(),
         ...(options.seatId ? { seatId: options.seatId } : {}),
-        ...(options.executable ? { executable: options.executable } : {}),
+        executable: options.executable,
       });
     });
     let admitted = false;
@@ -202,8 +205,6 @@ export function createResourceGovernor(
         let advisory: ResourceState | undefined;
         const lease = await store.transaction(async (state) => {
           await reconcile(state);
-          if (simulator && state.policy.simulatorSlots === 0)
-            throw new Error("Simulator leases are disabled by owner policy");
           const blocked = () => {
             if (options.onWait) advisory = structuredClone(state);
             return undefined;
@@ -211,49 +212,19 @@ export function createResourceGovernor(
           if (state.queue[0]?.id !== id || state.leases.length >= resourceCapacity(state.policy))
             return blocked();
           if (!(await pressure.sample(state.policy)).healthy) return blocked();
-          if (simulator) {
-            const external =
-              typeof simulator.externalActive === "function"
-                ? await simulator.externalActive()
-                : simulator.externalActive;
-            if (!Number.isSafeInteger(external) || external < 0)
-              throw new Error("Simulator inventory unavailable");
-            if (
-              external + state.leases.filter((entry) => entry.kind === "simulator").length >=
-              state.policy.simulatorSlots
-            )
-              return blocked();
-          }
           if (signal.aborted) throw abort();
           const at = Date.now();
-          const next: HeavyLease | SimulatorReservation = simulator
-            ? {
-                id,
-                token,
-                kind: "simulator",
-                phase: "reserved",
-                seatId: simulator.seatId,
-                occupantId: simulator.occupantId,
-                ...(simulator.fleet ? { fleet: simulator.fleet } : {}),
-                ...(simulator.pane ? { pane: simulator.pane } : {}),
-                ...(simulator.binding ? { binding: structuredClone(simulator.binding) } : {}),
-                ...(simulator.ownerProcesses
-                  ? { ownerProcesses: structuredClone(simulator.ownerProcesses) }
-                  : {}),
-                createdAtMs: at,
-                lastUsedAtMs: at,
-              }
-            : {
-                id,
-                token,
-                kind: "heavy",
-                state: "starting",
-                claimOwner: owner,
-                executable: options.executable!,
-                ...(options.seatId ? { seatId: options.seatId } : {}),
-                createdAtMs: at,
-                lastUsedAtMs: at,
-              };
+          const next: HeavyLease = {
+            id,
+            token,
+            kind: "heavy",
+            state: "starting",
+            claimOwner: owner,
+            executable: options.executable,
+            ...(options.seatId ? { seatId: options.seatId } : {}),
+            createdAtMs: at,
+            lastUsedAtMs: at,
+          };
           state.queue.shift();
           state.leases.push(next);
           return structuredClone(next);
@@ -339,11 +310,11 @@ export function createResourceGovernor(
           signal.removeEventListener("abort", cancel);
         }
       }
-      lease = (await acquire("heavy", {
+      lease = await acquire({
         ...options,
         signal,
         executable: basename(command).slice(0, 128),
-      })) as HeavyLease;
+      });
       if (signal.aborted) throw abort();
       child = spawn(
         resourcePython,
@@ -446,7 +417,7 @@ export function createResourceGovernor(
       void job.finally(() => active.delete(job)).catch(() => undefined);
       return job;
     },
-    acquireSimulator(options) {
+    async tryAcquireSimulator(options) {
       if (
         !options.seatId ||
         !options.occupantId ||
@@ -454,10 +425,48 @@ export function createResourceGovernor(
         (options.ownerProcesses?.length ?? 0) > 32
       )
         throw new Error("Simulator requires an exact named seat owner");
-      const job = acquire("simulator", options, options) as Promise<SimulatorReservation>;
-      active.add(job);
-      void job.finally(() => active.delete(job)).catch(() => undefined);
-      return job;
+      if (shutdown.signal.aborted) throw abort();
+      let refusal: { reason: SimulatorBlock; state: ResourceState } | undefined;
+      const lease = await store.transaction(async (state) => {
+        await reconcile(state);
+        if (state.policy.simulatorSlots === 0) throw new SimulatorsDisabledError();
+        const blocked = (reason: SimulatorBlock) => {
+          refusal = { reason, state: structuredClone(state) };
+          return undefined;
+        };
+        // Simulators never queue: a caller that is told what holds the slots
+        // polls again, so no ticket outlives its request (VUH-1816).
+        const external = await options.externalActive();
+        if (!Number.isSafeInteger(external) || external < 0)
+          throw new Error("Simulator inventory unavailable");
+        if (
+          external + state.leases.filter((entry) => entry.kind === "simulator").length >=
+          state.policy.simulatorSlots
+        )
+          return blocked("simulator_capacity");
+        if (state.leases.length >= resourceCapacity(state.policy)) return blocked("shared_capacity");
+        if (!(await pressure.sample(state.policy)).healthy) return blocked("pressure");
+        const at = Date.now();
+        const next: SimulatorReservation = {
+          id: randomUUID(),
+          token: randomUUID(),
+          kind: "simulator",
+          phase: "reserved",
+          seatId: options.seatId,
+          occupantId: options.occupantId,
+          ...(options.fleet ? { fleet: options.fleet } : {}),
+          ...(options.pane ? { pane: options.pane } : {}),
+          ...(options.binding ? { binding: structuredClone(options.binding) } : {}),
+          ...(options.ownerProcesses ? { ownerProcesses: structuredClone(options.ownerProcesses) } : {}),
+          createdAtMs: at,
+          lastUsedAtMs: at,
+        };
+        state.leases.push(next);
+        return structuredClone(next);
+      });
+      if (lease) return { admitted: true as const, lease };
+      if (!refusal) throw new Error("Simulator admission unavailable");
+      return { admitted: false as const, reason: refusal.reason, snapshot: await project(refusal.state) };
     },
     async simulatorReservations() {
       return structuredClone(

@@ -8,11 +8,13 @@ increase capacity. Directory and pressure-probe injection exist for isolated tes
 
 Heavy commands and simulator reservations consume the same permit pool. Automatic
 capacity is the smaller of one permit per eight available cores and one per 24GiB
-of RAM, with a minimum of one. The simulator limit defaults to one. FIFO tickets
-are removed on cancellation or a proven requester exit. High pressure delays
-resource admission and refuses new builders; unavailable native observations fail
-closed. A zero simulator limit disables new simulator admission and rejects
-already queued simulator tickets; valid requests retain global FIFO ordering.
+of RAM, with a minimum of one. The simulator limit defaults to one. Heavy
+commands wait in a FIFO queue; tickets are removed on cancellation or a proven
+requester exit. Simulator requests never queue: they take a free slot when they
+ask or are told what holds the slots. High pressure delays heavy admission,
+refuses simulator admission with that reason and refuses new builders;
+unavailable native observations fail closed. A zero simulator limit refuses
+simulator admission without disturbing the heavy queue.
 Python 3 and the shipped native helper are required for OS locking and
 process observations on macOS or Linux. Availability probes the helper
 process itself, so a hosted captain running as PID 1 can perform pressure
@@ -48,8 +50,15 @@ holders; caller seat labels do not confer ownership or cleanup authority.
 
 Simulator reservations remain durable when request processes die. Only the
 simulator manager can settle native receipts and release them after confirmed
-shutdown/deletion of the exact device it created. `snapshot` does asynchronous
-reconciliation; the runtime publishes a cached result to health and roster readers.
+shutdown of the exact device, deleting it only when the lease created it
+(`Clankie-<uuid>` journal name); a leased existing device is kept. Simulator
+admission never waits: `tryAcquireSimulator` admits or returns the snapshot of
+what holds the slots, and the manager owns create and boot after admission, so
+a caller that disconnects never strands a lease (ADR 0249). The native helper's
+`simulator-referents` mode reports which of this user's processes name a device
+(PID, parent and executable only) so status can attribute external devices to
+seats. `snapshot` does asynchronous reconciliation; the runtime publishes a
+cached result to health and roster readers.
 
 The subprocess integration suite exercises actual OS locks, processes, filesystem
 receipts, cancellation and native runner registration. It never hires agents or

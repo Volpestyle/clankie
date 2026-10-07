@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import type { FleetResourceGovernor, SimulatorReservation } from "./model.ts";
+import { SimulatorsDisabledError } from "./governor.ts";
+import type { FleetResourceGovernor, ResourceSnapshot, SimulatorReservation } from "./model.ts";
 import { probeProcess } from "./process.ts";
-import { createSimctlAdapter, type SimulatorAdapter, type SimulatorDevice } from "./simctl.ts";
+import {
+  createSimctlAdapter,
+  type SimulatorAdapter,
+  type SimulatorCatalog,
+  type SimulatorDevice,
+} from "./simctl.ts";
 
 export interface SimulatorOwner {
   readonly seatId: string;
@@ -16,9 +22,17 @@ export interface SimulatorAcquireRequest {
   readonly seatId: string;
   readonly occupantId: string;
   readonly fleet?: string;
-  readonly deviceType: string;
-  readonly runtime: string;
-  readonly signal?: AbortSignal;
+  /** Required unless `deviceId` names the device to lease. */
+  readonly deviceType?: string;
+  readonly runtime?: string;
+  /** Lease this existing device, such as one the seat booted by hand. */
+  readonly deviceId?: string;
+  /** Never substitute a close model. */
+  readonly exact?: boolean;
+  /**
+   * Current owner authority. It is checked before every native effect; the
+   * caller's connection is not authority, so a disconnect never strands work.
+   */
   readonly authorize?: () => Promise<boolean>;
 }
 export interface SimulatorRequestOptions {
@@ -37,19 +51,81 @@ export interface SimulatorLeaseView {
   readonly deviceName?: string;
   readonly deviceType?: string;
   readonly runtime?: string;
+  readonly origin?: "created" | "existing";
+  readonly requestedDeviceType?: string;
 }
+export interface SimulatorHolder {
+  readonly pid: number;
+  readonly executable: string;
+  readonly seatId?: string;
+  readonly pane?: string;
+}
+export interface ExternalSimulatorView {
+  readonly udid: string;
+  readonly name: string;
+  readonly state: string;
+  readonly runtime: string;
+  readonly deviceType?: string;
+  readonly holders: readonly SimulatorHolder[];
+}
+export interface SimulatorBlockers {
+  readonly simulatorSlots: number;
+  readonly sharedSlots: number;
+  readonly leases: readonly {
+    id: string;
+    seatId: string;
+    phase: string;
+    deviceName?: string;
+    deviceId?: string;
+  }[];
+  readonly external: readonly ExternalSimulatorView[];
+  readonly heavy: readonly { seatId?: string; executable?: string; pid?: number }[];
+  readonly pressure?: {
+    reason?: "load" | "memory" | "probe-unavailable";
+    loadRatio: number;
+    availableMemoryMb: number;
+  };
+}
+export type SimulatorRejection =
+  | "owner_unavailable"
+  | "stale_owner"
+  | "inventory_unavailable"
+  | "capacity"
+  | "lease_unavailable"
+  | "service_restarting"
+  | "authorization_revoked"
+  | "simulators_disabled"
+  | "device_unavailable"
+  | "seat_not_local"
+  | "internal_error";
 export type SimulatorResult =
-  | { readonly outcome: "acquired" | "held"; readonly lease: SimulatorLeaseView }
+  | {
+      readonly outcome: "acquired" | "held" | "booting";
+      readonly lease: SimulatorLeaseView;
+      readonly retryAfterMs?: number;
+    }
   | { readonly outcome: "released" }
   | {
+      readonly outcome: "waiting";
+      readonly reason: "simulator_capacity" | "shared_capacity" | "pressure";
+      readonly blockers: SimulatorBlockers;
+      readonly retryAfterMs: number;
+      readonly hint: string;
+    }
+  | {
       readonly outcome: "rejected";
-      readonly reason:
-        | "owner_unavailable"
-        | "stale_owner"
-        | "inventory_unavailable"
-        | "capacity"
-        | "lease_unavailable";
+      readonly reason: SimulatorRejection;
+      readonly detail?: string;
+      readonly alternatives?: readonly { deviceType: string; name: string; udid?: string }[];
     };
+export interface SimulatorStatusView {
+  leases: SimulatorLeaseView[];
+  inventory: "available" | "unavailable";
+  externalActive: number | null;
+  external?: ExternalSimulatorView[];
+  simulatorSlots?: number;
+  hint?: string;
+}
 
 type SeatIdentity = Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet">;
 const sameSeat = (a: SeatIdentity, b: SeatIdentity) =>
@@ -57,7 +133,14 @@ const sameSeat = (a: SeatIdentity, b: SeatIdentity) =>
 const active = (device: SimulatorDevice) => ["Booted", "Booting", "Shutting Down"].includes(device.state);
 const known = (device: SimulatorDevice) =>
   ["Shutdown", "Booted", "Booting", "Shutting Down"].includes(device.state);
-const view = (lease: SimulatorReservation): SimulatorLeaseView => {
+/** Only devices this manager created carry this journal name; they alone are ever deleted. */
+const createdName = /^Clankie-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
+const createdBy = (lease: Pick<SimulatorReservation, "deviceName">) =>
+  lease.deviceName === undefined || createdName.test(lease.deviceName);
+/** A chip or memory suffix distinguishes otherwise identical screens (iPad Air 11-inch M3 vs M4). */
+const family = (deviceType: string) => deviceType.replace(/-(?:M|A)\d+(?:-Pro)?(?:-\d+GB)?$/u, "");
+const RETRY_MS = 5_000;
+const view = (lease: SimulatorReservation, requestedDeviceType?: string): SimulatorLeaseView => {
   const {
     id,
     seatId,
@@ -83,8 +166,27 @@ const view = (lease: SimulatorReservation): SimulatorLeaseView => {
     ...(deviceName === undefined ? {} : { deviceName }),
     ...(deviceType === undefined ? {} : { deviceType }),
     ...(runtime === undefined ? {} : { runtime }),
+    ...(deviceName === undefined ? {} : { origin: createdBy(lease) ? "created" : "existing" }),
+    ...(requestedDeviceType === undefined || requestedDeviceType === deviceType
+      ? {}
+      : { requestedDeviceType }),
   };
 };
+type Plan =
+  | { kind: "existing"; device: SimulatorDevice }
+  | { kind: "create"; deviceType: string; runtime: string }
+  | {
+      kind: "refuse";
+      detail: string;
+      alternatives?: { deviceType: string; name: string; udid?: string }[];
+    };
+const BOOTING_PHASES = new Set([
+  "reserved",
+  "create-submitted",
+  "created",
+  "boot-submitted",
+  "boot-uncertain",
+]);
 
 /** Machine-owned leases; stopping this observer never changes a simulator's lifetime. */
 export function createSimulatorManager(input: {
@@ -95,13 +197,21 @@ export function createSimulatorManager(input: {
   ) => Promise<
     { identity: SimulatorOwner; processes?: SimulatorOwner["processes"]; status: string } | undefined
   >;
+  /** Best-effort: live processes that name each external device, mapped to seats where provable. */
+  attribute?: (
+    devices: readonly SimulatorDevice[],
+    inventory: readonly SimulatorDevice[],
+  ) => Promise<ReadonlyMap<string, readonly SimulatorHolder[]>>;
   onChange?: () => void;
   clock?: () => number;
   processProbe?: typeof probeProcess;
+  /** How long acquire waits on its boot before answering `booting`; the boot continues. */
+  respondWithinMs?: number;
 }) {
   const adapter = input.adapter ?? createSimctlAdapter();
   const now = input.clock ?? Date.now;
   const probe = input.processProbe ?? probeProcess;
+  const respondWithinMs = input.respondWithinMs ?? 20_000;
   const authorized = async (authority?: SimulatorRequestOptions): Promise<boolean> => {
     if (authority?.signal?.aborted) return false;
     try {
@@ -113,10 +223,23 @@ export function createSimulatorManager(input: {
       return false;
     }
   };
-  const denied = (): SimulatorResult => ({ outcome: "rejected", reason: "owner_unavailable" });
+  const rejected = (
+    reason: SimulatorRejection,
+    detail?: string,
+    alternatives?: { deviceType: string; name: string; udid?: string }[],
+  ): SimulatorResult => ({
+    outcome: "rejected",
+    reason,
+    ...(detail === undefined ? {} : { detail }),
+    ...(alternatives?.length ? { alternatives } : {}),
+  });
+  const revoked = () => rejected("authorization_revoked", "Owner authority ended during the request.");
   let timer: ReturnType<typeof setInterval> | undefined;
+  let closed = false;
   let operations: Promise<unknown> = Promise.resolve();
   const acquisitions = new Map<string, Promise<SimulatorResult>>();
+  /** Server-owned preparation by lease id; it outlives any request that started it. */
+  const jobs = new Map<string, Promise<SimulatorResult>>();
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = operations.then(operation, operation);
     operations = result.catch(() => undefined);
@@ -148,10 +271,35 @@ export function createSimulatorManager(input: {
     return devices;
   };
   const reservations = () => input.governor.simulatorReservations();
-  const externalActive = async () => {
+  const ownedBy = (leases: readonly SimulatorReservation[]) => ({
+    ids: new Set(leases.flatMap((lease) => (lease.deviceId ? [lease.deviceId.toUpperCase()] : []))),
+    names: new Set(leases.flatMap((lease) => (lease.deviceName ? [lease.deviceName] : []))),
+  });
+  const externals = (devices: readonly SimulatorDevice[], leases: readonly SimulatorReservation[]) => {
+    const owned = ownedBy(leases).ids;
+    return devices.filter((device) => active(device) && !owned.has(device.udid.toUpperCase()));
+  };
+  const externalActive = async (excluding?: string) => {
     const [devices, leases] = await Promise.all([inventory(), reservations()]);
-    const owned = new Set(leases.flatMap((lease) => (lease.deviceId ? [lease.deviceId.toUpperCase()] : [])));
-    return devices.filter((device) => active(device) && !owned.has(device.udid.toUpperCase())).length;
+    return externals(devices, leases).filter((device) => device.udid !== excluding?.toUpperCase()).length;
+  };
+  const describeExternal = async (
+    devices: readonly SimulatorDevice[],
+    all: readonly SimulatorDevice[],
+  ): Promise<ExternalSimulatorView[]> => {
+    let holders: ReadonlyMap<string, readonly SimulatorHolder[]> = new Map();
+    if (devices.length && input.attribute)
+      holders = await input
+        .attribute(devices, all)
+        .catch(() => new Map<string, readonly SimulatorHolder[]>());
+    return devices.map((device) => ({
+      udid: device.udid,
+      name: device.name,
+      state: device.state,
+      runtime: device.runtime,
+      ...(device.deviceType === undefined ? {} : { deviceType: device.deviceType }),
+      holders: [...(holders.get(device.udid) ?? [])].slice(0, 32),
+    }));
   };
   const prove = async (identity: SeatIdentity): Promise<SimulatorOwner | undefined> => {
     const observed = await input.observeSeat?.(identity);
@@ -177,6 +325,11 @@ export function createSimulatorManager(input: {
     return found;
   };
   const held = (lease: SimulatorReservation): SimulatorResult => ({ outcome: "held", lease: view(lease) });
+  const booting = (lease: SimulatorReservation, requested?: string): SimulatorResult => ({
+    outcome: "booting",
+    lease: view(lease, requested),
+    retryAfterMs: RETRY_MS,
+  });
   // Each effect is durably marked first and is attempted once. Missing replies
   // are reconciled by UUID inventory; a name never establishes device ownership.
   const removeStopped = async (
@@ -185,6 +338,8 @@ export function createSimulatorManager(input: {
   ): Promise<SimulatorResult> => {
     if (!lease.deviceId) return held(lease);
     if (!(await authorized(authority))) return held(lease);
+    // A device that existed before its lease is returned stopped, never deleted.
+    if (!createdBy(lease)) return forget(lease);
     const previousPhase = lease.phase;
     lease = await update(lease, { phase: "delete-submitted" });
     if (!(await authorized(authority))) return held(await update(lease, { phase: previousPhase }));
@@ -203,7 +358,12 @@ export function createSimulatorManager(input: {
     cleanup = false,
     authority?: SimulatorRequestOptions,
   ): Promise<SimulatorResult> => {
-    if (!lease.deviceId) return held(lease);
+    if (!lease.deviceId) {
+      // A reservation that never submitted a native effect and whose
+      // preparation is gone (for example across a restart) frees its slot.
+      if (cleanup && lease.phase === "reserved" && !jobs.has(lease.id)) return forget(lease);
+      return held(lease);
+    }
     const devices = await inventory();
     const device = deviceFor(lease, devices);
     if (!(await authorized(authority))) return held(lease);
@@ -214,6 +374,10 @@ export function createSimulatorManager(input: {
     }
     if (["boot-submitted", "boot-uncertain"].includes(lease.phase)) {
       if (device.state === "Booted") lease = await update(lease, { phase: "booted" });
+      // An idle or abandoned lease whose device never left Shutdown is not
+      // booting; it is cleaned up like an unbooted device.
+      else if (cleanup && device.state === "Shutdown" && !jobs.has(lease.id))
+        return removeStopped(lease, authority);
       else return held(lease); // A shutdown observation alone cannot settle a lost boot request.
     }
     if (!cleanup) return held(lease);
@@ -230,18 +394,362 @@ export function createSimulatorManager(input: {
   };
   const find = async (id: string) => (await reservations()).find((lease) => lease.id === id);
 
-  const acquire = async (request: SimulatorAcquireRequest): Promise<SimulatorResult> => {
-    const owner = await prove(request);
-    if (!(await authorized(request))) return denied();
-    if (!owner) return { outcome: "rejected", reason: "owner_unavailable" };
-    const existing = (await reservations()).find((lease) => sameSeat(lease, owner));
-    if (!(await authorized(request))) return denied();
-    if (existing)
-      return matchesOwner(existing, owner) ? held(existing) : { outcome: "rejected", reason: "stale_owner" };
-    let lease: SimulatorReservation;
-    let authorityLost = false;
+  /** Prefer an idle existing device, then a close model, then a new device, else refuse. */
+  const choose = async (
+    request: SimulatorAcquireRequest,
+    devices: readonly SimulatorDevice[],
+    leases: readonly SimulatorReservation[],
+    catalog?: SimulatorCatalog,
+  ): Promise<Plan> => {
+    const owned = ownedBy(leases);
+    const free = (device: SimulatorDevice) =>
+      device.available &&
+      !owned.ids.has(device.udid.toUpperCase()) &&
+      !owned.names.has(device.name) &&
+      !createdName.test(device.name);
+    if (request.deviceId) {
+      const device = devices.find((row) => row.udid.toUpperCase() === request.deviceId!.toUpperCase());
+      if (!device) return { kind: "refuse", detail: `No simulator has UDID ${request.deviceId}.` };
+      if (!free(device))
+        return {
+          kind: "refuse",
+          detail: `${device.name} (${device.udid}) is leased, unavailable or a Clankie receipt device.`,
+        };
+      if (device.state === "Shutting Down")
+        return { kind: "refuse", detail: `${device.name} is shutting down; retry when it is Shutdown.` };
+      return { kind: "existing", device };
+    }
+    const deviceType = request.deviceType!,
+      runtime = request.runtime!;
+    const idle = devices
+      .filter((device) => device.runtime === runtime && device.state === "Shutdown" && free(device))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.udid.localeCompare(b.udid));
+    const exact = idle.find((device) => device.deviceType === deviceType);
+    if (exact) return { kind: "existing", device: exact };
+    if (!request.exact) {
+      const close = idle.find(
+        (device) => device.deviceType !== undefined && family(device.deviceType) === family(deviceType),
+      );
+      if (close) return { kind: "existing", device: close };
+    }
+    if (!catalog) return { kind: "create", deviceType, runtime };
+    const typeInstalled = catalog.deviceTypes.some((row) => row.identifier === deviceType);
+    const runtimeInstalled = catalog.runtimes.includes(runtime);
+    if (typeInstalled && runtimeInstalled) return { kind: "create", deviceType, runtime };
+    const alternatives = [
+      ...devices
+        .filter(
+          (device) =>
+            device.available &&
+            device.runtime === runtime &&
+            device.deviceType !== undefined &&
+            family(device.deviceType) === family(deviceType),
+        )
+        .map((device) => ({ deviceType: device.deviceType!, name: device.name, udid: device.udid })),
+      ...catalog.deviceTypes
+        .filter((row) => row.identifier !== deviceType && family(row.identifier) === family(deviceType))
+        .map((row) => ({ deviceType: row.identifier, name: row.name })),
+    ].slice(0, 32);
+    return {
+      kind: "refuse",
+      detail: !runtimeInstalled
+        ? `Runtime ${runtime} is not installed. Installed: ${catalog.runtimes.slice(0, 8).join(", ") || "none"}.`
+        : `Device type ${deviceType} is not installed${request.exact ? " and exact was requested" : ""}.`,
+      alternatives,
+    };
+  };
+
+  const blockersFor = async (
+    reason: "simulator_capacity" | "shared_capacity" | "pressure",
+    snapshot: ResourceSnapshot,
+  ): Promise<SimulatorResult> => {
+    const leases = await reservations();
+    const devices = await inventory().catch(() => [] as SimulatorDevice[]);
+    const external = await describeExternal(externals(devices, leases), devices);
+    const blockers: SimulatorBlockers = {
+      simulatorSlots: snapshot.capacity.simulatorSlots,
+      sharedSlots: snapshot.capacity.heavySlots,
+      leases: leases.map((lease) => ({
+        id: lease.id,
+        seatId: lease.seatId,
+        phase: lease.phase,
+        ...(lease.deviceName === undefined ? {} : { deviceName: lease.deviceName }),
+        ...(lease.deviceId === undefined ? {} : { deviceId: lease.deviceId }),
+      })),
+      external,
+      heavy: snapshot.leases
+        .filter((lease) => lease.kind === "heavy")
+        .map((lease) => ({
+          ...(lease.seatId === undefined ? {} : { seatId: lease.seatId }),
+          ...(lease.executable === undefined ? {} : { executable: lease.executable }),
+          ...(lease.pid === undefined ? {} : { pid: lease.pid }),
+        })),
+      ...(reason === "pressure"
+        ? {
+            pressure: {
+              ...(snapshot.pressure.reason === undefined ? {} : { reason: snapshot.pressure.reason }),
+              loadRatio: snapshot.pressure.loadRatio,
+              availableMemoryMb: snapshot.pressure.availableMemoryMb,
+            },
+          }
+        : {}),
+    };
+    return { outcome: "waiting", reason, blockers, retryAfterMs: RETRY_MS, hint: hintFor(reason, blockers) };
+  };
+
+  /** Each stage runs in the serial section; the long boot wait does not block other seats. */
+  const prepare = async (
+    lease: SimulatorReservation,
+    request: SimulatorAcquireRequest,
+    owner: SimulatorOwner,
+  ): Promise<SimulatorResult> => {
+    const authority: SimulatorRequestOptions =
+      request.authorize === undefined ? {} : { authorize: request.authorize };
+    const requested = request.deviceId ? undefined : request.deviceType;
+    const stage = await serial(async (): Promise<SimulatorResult | SimulatorReservation> => {
+      try {
+        const current = await prove(owner);
+        if (!current || !matchesOwner(lease, current)) {
+          await forget(lease);
+          return rejected("stale_owner");
+        }
+        if (!(await authorized(authority))) {
+          if (lease.phase === "reserved") await forget(lease);
+          return revoked();
+        }
+        if (lease.phase === "reserved") {
+          const { policy } = await input.governor.snapshot();
+          const devices = await inventory();
+          const leases = await reservations();
+          const others = leases.filter((entry) => entry.id !== lease.id);
+          let plan = await choose(request, devices, others);
+          if (plan.kind === "create")
+            plan = await choose(request, devices, others, await adapter.catalog().catch(() => undefined));
+          if (plan.kind === "refuse") {
+            await forget(lease);
+            return rejected("device_unavailable", plan.detail, plan.alternatives);
+          }
+          const excluding = plan.kind === "existing" ? plan.device.udid.toUpperCase() : undefined;
+          const occupancy =
+            externals(devices, leases).filter((device) => device.udid !== excluding).length + leases.length;
+          if (occupancy > policy.simulatorSlots) {
+            await forget(lease);
+            return rejected("capacity", "Another simulator was booted while this lease was admitted; retry.");
+          }
+          if (!(await authorized(authority))) {
+            await forget(lease);
+            return revoked();
+          }
+          if (plan.kind === "existing") {
+            const device = plan.device;
+            return update(lease, {
+              phase:
+                device.state === "Booted"
+                  ? "booted"
+                  : device.state === "Booting"
+                    ? "boot-submitted"
+                    : "created",
+              deviceId: device.udid.toUpperCase(),
+              deviceName: device.name,
+              deviceType: device.deviceType ?? request.deviceType ?? "unknown",
+              runtime: device.runtime,
+            });
+          }
+          const deviceName = `Clankie-${randomUUID()}`;
+          lease = await update(lease, {
+            phase: "create-submitted",
+            deviceName,
+            deviceType: plan.deviceType,
+            runtime: plan.runtime,
+          });
+          if (!(await authorized(authority))) {
+            await forget(lease);
+            return revoked();
+          }
+          let deviceId: string;
+          try {
+            deviceId = await adapter.create(deviceName, plan.deviceType, plan.runtime);
+          } catch {
+            return held(await update(lease, { phase: "create-uncertain" }));
+          }
+          lease = await update(lease, { phase: "created", deviceId });
+        }
+        return lease;
+      } catch {
+        return held(lease);
+      }
+    });
+    if (!("token" in stage)) return stage;
+    lease = stage;
+    if (lease.phase === "booted") return { outcome: "acquired", lease: view(lease, requested) };
+    // Mark the boot, then wait for it outside the serial section.
+    const submitted = await serial(async (): Promise<SimulatorResult | SimulatorReservation> => {
+      try {
+        if (lease.phase === "boot-submitted") return lease;
+        const devices = await inventory();
+        const created = deviceFor(lease, devices);
+        if (!created || !created.available) return held(lease);
+        if (created.state === "Booted") return update(lease, { phase: "booted" });
+        if (created.state !== "Shutdown") return held(lease);
+        const live = await prove(owner);
+        const { policy } = await input.governor.snapshot();
+        const leases = await reservations();
+        const occupancy = externals(devices, leases).length + leases.length;
+        if (!(await authorized(authority))) return revoked();
+        if (!live || !matchesOwner(lease, live) || occupancy > policy.simulatorSlots)
+          return reconcile(lease, true);
+        lease = await update(lease, { phase: "boot-submitted", lastUsedAtMs: now() });
+        if (!(await authorized(authority))) {
+          await update(lease, { phase: "created" });
+          return revoked();
+        }
+        return lease;
+      } catch {
+        return held(lease);
+      }
+    });
+    if (!("token" in submitted)) return submitted;
+    lease = submitted;
+    if (lease.phase === "booted") return { outcome: "acquired", lease: view(lease, requested) };
+    let bootFailed = false;
     try {
-      lease = await input.governor.acquireSimulator({
+      await adapter.boot(lease.deviceId!);
+    } catch {
+      bootFailed = true;
+    }
+    return serial(async () => {
+      try {
+        const current = (await find(lease.id)) ?? lease;
+        if (current.token !== lease.token) return held(lease);
+        const device = deviceFor(current, await inventory());
+        if (device?.state === "Booted" && ["boot-submitted", "boot-uncertain"].includes(current.phase)) {
+          lease = await update(current, { phase: "booted" });
+          return { outcome: "acquired", lease: view(lease, requested) } as const;
+        }
+        if (current.phase === "booted")
+          return { outcome: "acquired", lease: view(current, requested) } as const;
+        if (bootFailed && current.phase === "boot-submitted")
+          return held(await update(current, { phase: "boot-uncertain" }));
+        return held(current);
+      } catch {
+        return held(lease);
+      }
+    });
+  };
+  const startJob = (
+    lease: SimulatorReservation,
+    request: SimulatorAcquireRequest,
+    owner: SimulatorOwner,
+  ): Promise<SimulatorResult> => {
+    const running = jobs.get(lease.id);
+    if (running) return running;
+    const job = prepare(lease, request, owner)
+      .catch((): SimulatorResult => held(lease))
+      .finally(() => {
+        jobs.delete(lease.id);
+        changed();
+      });
+    jobs.set(lease.id, job);
+    return job;
+  };
+  /** Answer within the bound; the job keeps running when the answer is `booting`. */
+  const respond = async (
+    job: Promise<SimulatorResult>,
+    lease: SimulatorReservation,
+    requested?: string,
+  ): Promise<SimulatorResult> => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const pending = new Promise<undefined>((resolve) => {
+      timeout = setTimeout(() => resolve(undefined), respondWithinMs);
+    });
+    try {
+      const result = await Promise.race([job, pending]);
+      if (result) return result;
+    } finally {
+      clearTimeout(timeout);
+    }
+    return booting((await find(lease.id)) ?? lease, requested);
+  };
+  /** An existing lease: report it, resume its preparation, or say why it is stuck. */
+  const resume = async (
+    lease: SimulatorReservation,
+    request: SimulatorAcquireRequest,
+    owner: SimulatorOwner,
+  ): Promise<SimulatorResult> => {
+    const running = jobs.get(lease.id);
+    if (running) return respond(running, lease);
+    if (lease.phase === "booted") {
+      const device = lease.deviceId
+        ? (await inventory().catch(() => [] as SimulatorDevice[])).find(
+            (row) => row.udid.toUpperCase() === lease.deviceId!.toUpperCase(),
+          )
+        : undefined;
+      return device?.state === "Booted" ? { outcome: "acquired", lease: view(lease) } : held(lease);
+    }
+    // Reserved for over a minute with no preparation here, or created and
+    // stopped: the seat's own retry finishes the work instead of stranding it.
+    const abandoned = lease.phase === "reserved" && now() - lease.createdAtMs > 60_000;
+    if (abandoned || lease.phase === "created") return respond(startJob(lease, request, owner), lease);
+    if (["boot-submitted", "boot-uncertain"].includes(lease.phase) && lease.deviceId) {
+      const device = (await inventory().catch(() => [] as SimulatorDevice[])).find(
+        (row) => row.udid.toUpperCase() === lease.deviceId!.toUpperCase(),
+      );
+      if (device?.state === "Booted")
+        return serial(async () => {
+          const current = await find(lease.id);
+          if (!current) return rejected("lease_unavailable");
+          return { outcome: "acquired" as const, lease: view(await update(current, { phase: "booted" })) };
+        });
+      if (device?.state === "Booting") return booting(lease);
+      // The boot that was submitted died with its process (for example a
+      // service restart). Submitting it again for the same seat is safe.
+      if (device?.state === "Shutdown")
+        return respond(startJob(await update(lease, { phase: "created" }), request, owner), lease);
+    }
+    if (BOOTING_PHASES.has(lease.phase)) return booting(lease);
+    return held(lease);
+  };
+
+  const acquire = async (request: SimulatorAcquireRequest): Promise<SimulatorResult> => {
+    if (closed) return rejected("service_restarting", "The simulator manager is stopping.");
+    if (!request.deviceId && (!request.deviceType || !request.runtime))
+      return rejected("device_unavailable", "Give deviceType and runtime, or the deviceId to lease.");
+    const owner = await prove(request);
+    if (!(await authorized(request))) return revoked();
+    if (!owner) return rejected("owner_unavailable", "The seat's live native occupant could not be proven.");
+    const existing = (await reservations()).find((lease) => sameSeat(lease, owner));
+    if (!(await authorized(request))) return revoked();
+    if (existing) {
+      if (!matchesOwner(existing, owner)) return rejected("stale_owner");
+      if (request.deviceId && existing.deviceId?.toUpperCase() !== request.deviceId.toUpperCase())
+        return rejected(
+          "lease_unavailable",
+          `This seat already holds lease ${existing.id}; release it first.`,
+        );
+      return resume(existing, request, owner);
+    }
+    const { policy } = await input.governor.snapshot();
+    if (policy.simulatorSlots === 0)
+      return rejected("simulators_disabled", "The owner's simulator limit is 0.");
+    let devices: readonly SimulatorDevice[];
+    try {
+      devices = await inventory();
+    } catch {
+      return rejected("inventory_unavailable", "CoreSimulator inventory could not be read.");
+    }
+    // Refuse an impossible request before taking a slot.
+    const leases = await reservations();
+    let preview = await choose(request, devices, leases);
+    if (preview.kind === "create")
+      preview = await choose(request, devices, leases, await adapter.catalog().catch(() => undefined));
+    if (preview.kind === "refuse")
+      return rejected("device_unavailable", preview.detail, preview.alternatives);
+    const excluding = request.deviceId && preview.kind === "existing" ? preview.device.udid : undefined;
+    let authorityLost = false,
+      inventoryLost = false;
+    let admission: Awaited<ReturnType<FleetResourceGovernor["tryAcquireSimulator"]>>;
+    try {
+      admission = await input.governor.tryAcquireSimulator({
         seatId: owner.seatId,
         occupantId: owner.occupantId,
         ...(owner.fleet === undefined ? {} : { fleet: owner.fleet }),
@@ -249,83 +757,43 @@ export function createSimulatorManager(input: {
         ownerProcesses: [...owner.processes],
         ...(owner.binding === undefined ? {} : { binding: owner.binding }),
         externalActive: async () => {
-          const count = await externalActive();
+          let count: number;
+          try {
+            count = await externalActive(excluding);
+          } catch (error) {
+            inventoryLost = true;
+            throw error;
+          }
           if (!(await authorized(request))) {
             authorityLost = true;
             throw new Error("Simulator authorization changed");
           }
           return count;
         },
-        ...(request.signal === undefined ? {} : { signal: request.signal }),
       });
-    } catch {
-      return authorityLost ? denied() : { outcome: "rejected", reason: "capacity" };
+    } catch (error) {
+      if (authorityLost) return revoked();
+      if (inventoryLost)
+        return rejected("inventory_unavailable", "CoreSimulator inventory could not be read.");
+      if (error instanceof SimulatorsDisabledError)
+        return rejected("simulators_disabled", "The owner's simulator limit is 0.");
+      if (error instanceof DOMException && error.name === "AbortError")
+        return rejected("service_restarting", "The resource governor is stopping.");
+      throw error;
     }
-    return serial(async () => {
-      try {
-        const current = await prove(owner);
-        if (!current || !matchesOwner(lease, current)) {
-          await forget(lease);
-          return { outcome: "rejected", reason: "stale_owner" };
-        }
-        const { policy } = await input.governor.snapshot();
-        if ((await externalActive()) + (await reservations()).length > policy.simulatorSlots) {
-          await forget(lease);
-          return { outcome: "rejected", reason: "capacity" };
-        }
-        if (!(await authorized(request))) {
-          await forget(lease);
-          return denied();
-        }
-        const deviceName = `Clankie-${randomUUID()}`;
-        lease = await update(lease, {
-          phase: "create-submitted",
-          deviceName,
-          deviceType: request.deviceType,
-          runtime: request.runtime,
-        });
-        if (!(await authorized(request))) {
-          await forget(lease);
-          return denied();
-        }
-        let deviceId: string;
-        try {
-          deviceId = await adapter.create(deviceName, request.deviceType, request.runtime);
-        } catch {
-          lease = await update(lease, { phase: "create-uncertain" });
-          return held(lease);
-        }
-        lease = await update(lease, { phase: "created", deviceId });
-        const devices = await inventory();
-        const created = deviceFor(lease, devices);
-        if (!created || created.state !== "Shutdown" || !created.available) return held(lease);
-        const live = await prove(owner);
-        const occupancy = (await externalActive()) + (await reservations()).length;
-        if (!(await authorized(request))) return held(lease);
-        if (!live || !matchesOwner(lease, live) || occupancy > policy.simulatorSlots)
-          return reconcile(lease, true);
-        lease = await update(lease, { phase: "boot-submitted", lastUsedAtMs: now() });
-        if (!(await authorized(request))) return held(await update(lease, { phase: "created" }));
-        try {
-          await adapter.boot(deviceId);
-        } catch {
-          lease = await update(lease, { phase: "boot-uncertain" });
-          return held(lease);
-        }
-        const booted = deviceFor(lease, await inventory());
-        if (booted?.state !== "Booted") return held(lease);
-        lease = await update(lease, { phase: "booted" });
-        return { outcome: "acquired", lease: view(lease) };
-      } catch {
-        return held(lease);
-      }
-    });
+    if (!admission.admitted) return blockersFor(admission.reason, admission.snapshot);
+    changed();
+    return respond(
+      startJob(admission.lease, request, owner),
+      admission.lease,
+      request.deviceId ? undefined : request.deviceType,
+    );
   };
   const manager = {
     acquire(request: SimulatorAcquireRequest): Promise<SimulatorResult> {
       const key = JSON.stringify([request.fleet ?? "default", request.seatId, request.occupantId]);
       const pending = acquisitions.get(key);
-      if (pending) return pending.then(async (result) => ((await authorized(request)) ? result : denied()));
+      if (pending) return pending.then(async (result) => ((await authorized(request)) ? result : revoked()));
       const result = acquire(request).finally(() => acquisitions.delete(key));
       acquisitions.set(key, result);
       return result;
@@ -337,11 +805,11 @@ export function createSimulatorManager(input: {
     ): Promise<SimulatorResult> {
       return serial(async () => {
         const lease = await find(id);
-        if (!lease) return { outcome: "rejected", reason: "lease_unavailable" };
+        if (!lease) return rejected("lease_unavailable");
         const current = await prove(owner);
-        if (!(await authorized(authority))) return denied();
+        if (!(await authorized(authority))) return revoked();
         if (!current || !matchesOwner(lease, owner) || !matchesOwner(lease, current))
-          return { outcome: "rejected", reason: "stale_owner" };
+          return rejected("stale_owner");
         return held(await update(lease, { lastUsedAtMs: now() }));
       });
     },
@@ -352,11 +820,11 @@ export function createSimulatorManager(input: {
     ): Promise<SimulatorResult> {
       return serial(async () => {
         const lease = await find(id);
-        if (!lease) return { outcome: "rejected", reason: "lease_unavailable" };
+        if (!lease) return rejected("lease_unavailable");
         const current = await prove(owner);
-        if (!(await authorized(authority))) return denied();
+        if (!(await authorized(authority))) return revoked();
         if (!current || !matchesOwner(lease, owner) || !matchesOwner(lease, current))
-          return { outcome: "rejected", reason: "stale_owner" };
+          return rejected("stale_owner");
         try {
           return await reconcile(lease, true, authority);
         } catch {
@@ -382,17 +850,38 @@ export function createSimulatorManager(input: {
         }
       });
     },
-    async snapshot(): Promise<{
-      leases: SimulatorLeaseView[];
-      inventory: "available" | "unavailable";
-      externalActive: number | null;
-    }> {
-      const leases = (await reservations()).map(view);
+    async snapshot(): Promise<SimulatorStatusView> {
+      const leases = await reservations();
+      const views = leases.map((lease) => view(lease));
+      const simulatorSlots = (await input.governor.snapshot().catch(() => undefined))?.policy.simulatorSlots;
+      let devices: readonly SimulatorDevice[];
       try {
-        return { leases, inventory: "available", externalActive: await externalActive() };
+        devices = await inventory();
       } catch {
-        return { leases, inventory: "unavailable", externalActive: null };
+        return {
+          leases: views,
+          inventory: "unavailable",
+          externalActive: null,
+          ...(simulatorSlots === undefined ? {} : { simulatorSlots }),
+        };
       }
+      const external = await describeExternal(externals(devices, leases), devices);
+      return {
+        leases: views,
+        inventory: "available",
+        externalActive: external.length,
+        external,
+        ...(simulatorSlots === undefined ? {} : { simulatorSlots }),
+        ...(external.length ? { hint: externalHint(external) } : {}),
+      };
+    },
+    /** Booted or booting devices no lease owns, with the whole inventory; no attribution. */
+    async externalDevices(): Promise<{
+      external: readonly SimulatorDevice[];
+      inventory: readonly SimulatorDevice[];
+    }> {
+      const devices = await inventory();
+      return { external: externals(devices, await reservations()), inventory: devices };
     },
     async tick(): Promise<void> {
       await serial(async () => {
@@ -403,12 +892,17 @@ export function createSimulatorManager(input: {
             const exited =
               processes.length > 0 &&
               (await Promise.all(processes.map(probe))).every((state) => state === "exited");
-            await reconcile(lease, exited || now() - lease.lastUsedAtMs >= policy.simulatorIdleMs);
+            const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= 300_000;
+            await reconcile(lease, exited || stale || now() - lease.lastUsedAtMs >= policy.simulatorIdleMs);
           } catch {
             /* Unknown inventory or command outcome never frees a slot. */
           }
         }
       });
+    },
+    /** Resolves when every preparation this manager started has settled. */
+    async settled(): Promise<void> {
+      while (jobs.size) await Promise.allSettled(jobs.values());
     },
     start(): void {
       if (timer) return;
@@ -419,9 +913,49 @@ export function createSimulatorManager(input: {
       void manager.tick().catch(() => undefined);
     },
     close(): void {
+      closed = true;
       if (timer) clearInterval(timer);
       timer = undefined;
     },
   };
   return manager;
+}
+
+const deviceLabel = (device: ExternalSimulatorView) => {
+  const seats = [...new Set(device.holders.flatMap((holder) => (holder.seatId ? [holder.seatId] : [])))];
+  const processes = device.holders.filter((holder) => !holder.seatId);
+  return `"${device.name}" ${device.udid} (${device.state}${
+    seats.length
+      ? `; used by seat ${seats.join(", ")}`
+      : processes.length
+        ? `; named by ${processes.map((holder) => `${holder.executable} PID ${holder.pid}`).join(", ")}`
+        : "; no live process names it"
+  })`;
+};
+const externalHint = (external: readonly ExternalSimulatorView[]) =>
+  `${external.length} simulator(s) booted outside leases count against the limit and are never shut down by Clankie: ${external
+    .map(deviceLabel)
+    .join(
+      "; ",
+    )}. The seat using one can lease it with acquire {"seatId":...,"deviceId":"UDID"}, or shut it down with xcrun simctl shutdown UDID.`;
+function hintFor(
+  reason: "simulator_capacity" | "shared_capacity" | "pressure",
+  blockers: SimulatorBlockers,
+): string {
+  const leases = blockers.leases.map(
+    (lease) => `seat ${lease.seatId} (${lease.deviceName ?? "device pending"}, ${lease.phase})`,
+  );
+  if (reason === "pressure")
+    return `Machine pressure is high (${blockers.pressure?.reason ?? "unknown"}; load/core ${blockers.pressure?.loadRatio.toFixed(2)}, ${Math.round(blockers.pressure?.availableMemoryMb ?? 0)} MiB available). Retry later.`;
+  if (reason === "shared_capacity") {
+    const heavy = blockers.heavy.map((entry) =>
+      `${entry.seatId ?? (entry.pid ? `PID ${entry.pid}` : "unattributed")} ${entry.executable ?? ""}`.trim(),
+    );
+    return `All ${blockers.sharedSlots} shared heavy/simulator slots are busy: ${[...heavy.map((entry) => `heavy ${entry}`), ...leases.map((entry) => `simulator ${entry}`)].join("; ")}. Retry shortly; heavy commands finish on their own.`;
+  }
+  const parts = [
+    ...(leases.length ? [`leased to ${leases.join(", ")}`] : []),
+    ...(blockers.external.length ? [`outside leases: ${blockers.external.map(deviceLabel).join("; ")}`] : []),
+  ];
+  return `All ${blockers.simulatorSlots} simulator slot(s) are held — ${parts.join("; ") || "by an unknown holder"}. Retry after a release, ask the holding seat to release or lease its device, or ask the owner to raise --simulator-slots.`;
 }

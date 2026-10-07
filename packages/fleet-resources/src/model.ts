@@ -189,15 +189,23 @@ export interface ResourceWaitOptions {
   signal?: AbortSignal;
   onWait?: (snapshot: ResourceSnapshot) => void;
 }
-export interface SimulatorAcquireOptions extends ResourceWaitOptions {
+export interface SimulatorAcquireOptions {
   seatId: string;
   occupantId: string;
   fleet?: string;
   pane?: string;
   binding?: { socketPath: string; session?: string };
   ownerProcesses?: ProcessProof[];
-  externalActive: number | (() => Promise<number>);
+  /** Read inside the registry lock, so admission and the count agree. */
+  externalActive: () => Promise<number>;
 }
+export type SimulatorAdmission =
+  | { admitted: true; lease: SimulatorReservation }
+  | {
+      admitted: false;
+      reason: "simulator_capacity" | "shared_capacity" | "pressure";
+      snapshot: ResourceSnapshot;
+    };
 export interface FleetResourceGovernor {
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   snapshot(): Promise<ResourceSnapshot>;
@@ -211,7 +219,8 @@ export interface FleetResourceGovernor {
     args: readonly string[],
     options?: ResourceWaitOptions & { seatId?: string },
   ): Promise<number>;
-  acquireSimulator(options: SimulatorAcquireOptions): Promise<SimulatorReservation>;
+  /** Admit now or say what holds the slots; never waits (VUH-1816). */
+  tryAcquireSimulator(options: SimulatorAcquireOptions): Promise<SimulatorAdmission>;
   simulatorReservations(): Promise<SimulatorReservation[]>;
   updateSimulator(id: string, token: string, update: SimulatorUpdate): Promise<SimulatorReservation>;
   releaseSimulator(id: string, token: string): Promise<void>;

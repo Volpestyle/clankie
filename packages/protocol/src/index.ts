@@ -725,6 +725,7 @@ export {
   FleetSimulatorLeaseSchema,
   FleetSimulatorStatusSchema,
   FleetSimulatorResultSchema,
+  type FleetSimulatorStatus,
   type FleetResourcePolicy,
   type FleetResourceSnapshot,
   type FleetSimulatorRequest,

@@ -41,23 +41,48 @@ The registry belongs to the OS account and is shared across worktrees. Worker
 
 # Lease a simulator
 
-Use the owner-authorized CLI and an existing proven local native seat. The host
-observes the seat's occupant and kernel process identities; caller claims cannot
-replace that proof. Follow any task-specific owner approval before acquiring.
+Boot simulators only through `clankie simulator acquire`. Never `xcrun simctl
+boot`, Simulator.app or a test runner that boots its own device: a device
+booted outside a lease holds one of the fleet's simulator slots, and other
+lanes wait on it. Use the owner-authorized CLI from an existing proven local
+native seat; the host observes the seat's occupant and process identities.
+Follow any task-specific owner approval before acquiring.
 
 ```sh
-clankie simulator acquire '{"seatId":"SEAT","deviceType":"com.apple.CoreSimulator.SimDeviceType.iPhone-17","runtime":"com.apple.CoreSimulator.SimRuntime.iOS-26-0"}'
+clankie simulator acquire '{"seatId":"SEAT","deviceType":"com.apple.CoreSimulator.SimDeviceType.iPhone-17","runtime":"com.apple.CoreSimulator.SimRuntime.iOS-26-0"}' --wait 600
 clankie simulator status
 clankie simulator touch '{"seatId":"SEAT","id":"LEASE_ID"}'
 clankie simulator release '{"seatId":"SEAT","id":"LEASE_ID"}'
 ```
 
-Use the exact returned device UUID for subsequent simulator commands. Touch the
-lease while actively using it; its default idle timeout is ten minutes. Release
-when finished. A verified seat exit or idle expiry initiates cleanup of the exact
-device this lease created. Unowned booted devices count against admission, but
-are never shut down or deleted. Never run global shutdown, erase, delete-all or
-unavailable-device cleanup for fleet work.
+Acquire answers within about 20 seconds; `--wait SECONDS` keeps polling and
+prints progress on stderr. Acquire is idempotent per seat, so repeating it
+returns your lease. Outcomes:
+
+- `acquired`: use `lease.deviceId`, the exact UDID, for every simulator command.
+- `booting`: the service is creating or booting your device and keeps going if
+  you stop waiting. Acquire again (or `--wait`) to get it.
+- `waiting`: every slot is held. `hint` and `blockers` name the seats holding
+  leases, devices booted outside leases (and the seats whose processes use
+  them) and heavy commands. Wait, or ask the named seat to release.
+- `rejected`: `reason` is the cause. `service_restarting`: retry shortly.
+  `owner_unavailable`: your seat's live occupant could not be proven.
+  `device_unavailable`: the type or runtime is not installed; pick one of
+  `alternatives`.
+
+Acquire prefers an idle existing device of the requested type, then a close
+model of the same screen (`lease.requestedDeviceType` says one stood in; pass
+`"exact": true` to refuse instead), and creates a device only when neither
+exists. If you already booted a device by hand, lease it instead of booting
+another: `clankie simulator acquire '{"seatId":"SEAT","deviceId":"UDID"}'`.
+
+Touch the lease while actively using it; its default idle timeout is ten
+minutes. Release when finished. Release, idle expiry or a verified seat exit
+shuts the device down and deletes it only if the lease created it. Clankie
+never shuts down or deletes a device it did not lease; it names such devices
+in status and doctor and tells the lead of the seat using one. Never run
+global shutdown, erase, delete-all or unavailable-device cleanup for fleet
+work.
 
 A missing or uncertain create receipt remains held for operator review. Do not
 retry native create or infer ownership from a device name. A stopped observer

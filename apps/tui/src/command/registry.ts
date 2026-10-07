@@ -7,7 +7,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  heavy -- COMMAND [ARGS...]  Run a local heavy step with the machine-wide fleet permit",
       "  fleet resources           Inspect machine pressure, permit holders and queue (JSON)",
-      "  simulator status | acquire JSON | touch JSON | release JSON  Lease a simulator to a verified local seat",
+      "  simulator status | acquire JSON [--wait SECONDS] | touch JSON | release JSON  Lease a simulator to a verified local seat",
     ],
   },
   {

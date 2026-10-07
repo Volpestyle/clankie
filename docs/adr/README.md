@@ -95,6 +95,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0243 — Linear GraphQL is the tracker escape hatch](0243-linear-graphql-is-the-tracker-escape-hatch.md)
 - [0244 — Machines join Clankie at an access level](0244-machines-join-clankie-at-an-access-level.md)
 - [0247 — Narrow checks have one command](0247-narrow-checks-have-one-command.md)
+- [0249 — Simulator leases answer promptly and name their holders](0249-simulator-leases-answer-promptly-and-name-their-holders.md)
 
 ## Archived decisions
 

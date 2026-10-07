@@ -1,4 +1,8 @@
-import { CheckoutReportSchema } from "@clankie/protocol";
+import {
+  CheckoutReportSchema,
+  FleetSimulatorStatusSchema,
+  type FleetSimulatorStatus,
+} from "@clankie/protocol";
 import { runCheckoutsCommand } from "./checkouts.ts";
 import { FleetHealthMetricsSnapshotSchema, FLEET_HEALTH_METRICS_PATH } from "@clankie/protocol";
 import {
@@ -9,7 +13,7 @@ import { resolveOperatorCredential, resolveCaptainCredential } from "@clankie/cr
 import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import { readWorkingPreferences } from "./working-preferences.ts";
-import { runResourceStatusCommand } from "./fleet-resources.ts";
+import { runResourceStatusCommand, runSimulatorCommand } from "./fleet-resources.ts";
 import { formatSeatDeliveryAge, readSeatDeliveries } from "./seat-delivery.ts";
 import { summarizeRecovery } from "../../bin/service-recovery.ts";
 import {
@@ -118,10 +122,11 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const [report, workerObservations, resources, checkouts, seatDeliveries] = await Promise.all([
+  const [report, workerObservations, resources, simulators, checkouts, seatDeliveries] = await Promise.all([
     inspectInstall(options),
     inspectWorkerTools(options),
     inspectResources(options),
+    inspectSimulators(options),
     runCheckoutsCommand(["status"], {
       ...options,
       ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
@@ -252,6 +257,7 @@ export async function doctorCommand(
     seatDeliveries,
     workingPreferences,
     resources,
+    ...(simulators === undefined ? {} : { simulators }),
     checkouts,
     ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
     linearRequestBudget,
@@ -276,6 +282,26 @@ async function inspectResources(
       status: "unavailable",
       detail: "Fleet resource status unavailable; run `clankie fleet resources` to retry.",
     };
+  }
+}
+
+/** Optional: a legacy service or missing inventory leaves the resource lines alone. */
+async function inspectSimulators(
+  options: InspectInstallOptions & { host?: string },
+): Promise<FleetSimulatorStatus | undefined> {
+  try {
+    return FleetSimulatorStatusSchema.parse(
+      await runSimulatorCommand(["status"], {
+        ...(options.env === undefined ? {} : { env: options.env }),
+        ...(options.host === undefined ? {} : { host: options.host }),
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        ...(options.credentialStore === undefined
+          ? {}
+          : { operatorCredentialStore: options.credentialStore }),
+      }),
+    );
+  } catch {
+    return undefined;
   }
 }
 

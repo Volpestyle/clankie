@@ -1045,7 +1045,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }),
   );
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
-  app.route("/", createFleetResourceRoutes(authorizeOwnerSecrets, dependencies.fleetResources));
+  app.route(
+    "/",
+    createFleetResourceRoutes(authorizeOwnerSecrets, dependencies.fleetResources, (error) =>
+      logger.warn({ error, event: "fleet_resources.simulator_failed" }, "Simulator request failed"),
+    ),
+  );
   app.route(
     "/",
     createProjectRoutes(

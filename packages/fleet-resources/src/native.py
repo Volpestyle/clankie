@@ -155,6 +155,69 @@ def observe_processes():
     return {"schemaVersion": 1, "observations": observations}
 
 
+def simulator_referents():
+    """This user's processes whose arguments name a simulator, with their ancestry.
+
+    Needles (device UDIDs or names) arrive on stdin. Arguments are matched here
+    and never returned: replies carry only PIDs, parent PIDs and executable
+    basenames, so callers can map a holder to the pane that started it.
+    """
+    raw = sys.stdin.read(65537)
+    if len(raw) > 65536:
+        raise RuntimeError("Simulator referent request too large")
+    request = json.loads(raw)
+    if not isinstance(request, dict) or set(request) != {"needles"}:
+        raise RuntimeError("Simulator referent request unavailable")
+    needles = request["needles"]
+    if not isinstance(needles, list) or len(needles) > 256 or any(
+        not isinstance(needle, str) or not 4 <= len(needle) <= 256 or "\0" in needle for needle in needles
+    ):
+        raise RuntimeError("Simulator referent request unavailable")
+    if sys.platform != "darwin":
+        return {"schemaVersion": 1, "processes": [], "matches": {}}
+
+    def census(columns):
+        rows = subprocess.run(["/bin/ps", "-axww", "-o", columns], capture_output=True, timeout=3, check=True)
+        if len(rows.stdout) > 16 * 1024 * 1024:
+            raise RuntimeError("Process snapshot too large")
+        lines = rows.stdout.decode("utf-8", "replace").splitlines()
+        if len(lines) > 20000:
+            raise RuntimeError("Process snapshot too large")
+        return lines
+
+    table = {}
+    for line in census("pid=,ppid=,uid=,comm="):
+        fields = line.split(None, 3)
+        if len(fields) < 3:
+            continue
+        executable = os.path.basename(fields[3].strip()) if len(fields) == 4 else ""
+        table[int(fields[0])] = {"ppid": int(fields[1]), "uid": int(fields[2]),
+                                 "executable": (executable or "unknown")[:64]}
+    own = {os.getpid(), os.getppid()}
+    matches = {needle: [] for needle in needles}
+    for line in census("pid=,args="):
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2:
+            continue
+        pid = int(fields[0])
+        row = table.get(pid)
+        if pid in own or row is None or row["uid"] != os.getuid() or row["executable"] == "ps":
+            continue
+        for needle in needles:
+            if needle in fields[1] and len(matches[needle]) < 32:
+                matches[needle].append(pid)
+    processes = {}
+    for pids in matches.values():
+        for pid in pids:
+            current, depth = pid, 0
+            while current > 1 and current in table and current not in processes and depth < 64:
+                processes[current] = {"pid": current, "ppid": table[current]["ppid"],
+                                      "executable": table[current]["executable"]}
+                current, depth = table[current]["ppid"], depth + 1
+    return {"schemaVersion": 1, "processes": list(processes.values()),
+            "matches": {needle: pids for needle, pids in matches.items() if pids}}
+
+
 def group_occupied(pgid):
     """Count occupancy only, across all UIDs; this is never signal authority."""
     observer = subprocess.Popen(["/bin/ps", "-axo", "pid=,pgid=,stat="], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -292,6 +355,10 @@ if __name__ == "__main__":
             if len(sys.argv) != 2:
                 raise RuntimeError("Process identity request unavailable")
             print(json.dumps(observe_processes(), separators=(",", ":")))
+        elif mode == "simulator-referents":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Simulator referent request unavailable")
+            print(json.dumps(simulator_referents(), separators=(",", ":")))
         elif mode == "lock":
             locked_pipe(sys.argv[2])
         elif mode == "run":

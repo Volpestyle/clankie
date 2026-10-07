@@ -115,86 +115,54 @@ async function fixture() {
 }
 
 describe("machine shared heavy permits with actual OS children", () => {
-  it.each(["initial", "queued-head", "queued-after-heavy"] as const)(
-    "disabled simulator policy rejects its %s ticket without blocking or reordering heavy commands",
-    async (mode) => {
-      const f = await fixture();
-      try {
-        const active = f.start("active");
-        await eventually(() => exists(active.receipt), Boolean);
-        const first = mode === "queued-after-heavy" ? f.start("first") : undefined;
-        if (first)
-          await eventually(
-            () => f.governor.snapshot(),
-            (value) => value.queue.some((entry) => entry.seatId === "first"),
-          );
-        const disable = () =>
-          f.governor.configure({
-            ...defaultResourcePolicy(),
-            heavySlots: 1,
-            simulatorSlots: 0,
-            maxLoadRatio: 10,
-            minAvailableMemoryMb: 0,
-          });
-        if (mode === "initial") await disable();
-        let result: "acquired" | Error | undefined;
-        const simulator = f.governor
-          .acquireSimulator({
-            seatId: "simulator",
-            occupantId: "fixture-occupant",
-            externalActive: 0,
-          })
-          .then(
-            () => {
-              result = "acquired";
-            },
-            (error: Error) => {
-              result = error;
-            },
-          );
-        if (mode !== "initial") {
-          await eventually(
-            () => f.governor.snapshot(),
-            (value) => value.queue.some((entry) => entry.seatId === "simulator"),
-          );
-          await disable();
-        }
-        await eventually(
-          () => Promise.resolve(result),
-          (value) => value !== undefined,
-        );
-        await simulator;
-        expect(result).toBeInstanceOf(Error);
-        expect((result as Error).message).toBe("Simulator leases are disabled by owner policy");
-        const next = first ?? f.start("first");
-        await eventually(
-          () => f.governor.snapshot(),
-          (value) => value.queue.some((entry) => entry.seatId === "first"),
-        );
-        const last = f.start("last");
-        await eventually(
-          () => f.governor.snapshot(),
-          (value) => value.queue.some((entry) => entry.seatId === "last"),
-        );
-        expect((await f.governor.snapshot()).queue.map((entry) => entry.seatId)).toEqual(["first", "last"]);
-        expect(await exists(next.receipt)).toBe(false);
-        await f.release(active.release);
-        expect(await active.done).toBe(0);
-        await eventually(() => exists(next.receipt), Boolean);
-        expect(await exists(last.receipt)).toBe(false);
-        await f.release(next.release);
-        expect(await next.done).toBe(0);
-        await eventually(() => exists(last.receipt), Boolean);
-        await f.release(last.release);
-        expect(await last.done).toBe(0);
-        expect((await f.governor.snapshot()).capacity.used).toBe(0);
-        expect(await f.governor.simulatorReservations()).toEqual([]);
-      } finally {
-        await f.close();
-      }
-    },
-    30_000,
-  );
+  it("simulator admission never queues: a full pool and a disabled policy answer at once, leaving heavy order intact", async () => {
+    const f = await fixture();
+    try {
+      const active = f.start("active");
+      await eventually(() => exists(active.receipt), Boolean);
+      const first = f.start("first");
+      await eventually(
+        () => f.governor.snapshot(),
+        (value) => value.queue.some((entry) => entry.seatId === "first"),
+      );
+      const request = { seatId: "simulator", occupantId: "fixture-occupant", externalActive: async () => 0 };
+      // Shared slot held by a real heavy runner: the answer names it instead of waiting.
+      const blocked = await f.governor.tryAcquireSimulator(request);
+      expect(blocked).toMatchObject({ admitted: false, reason: "shared_capacity" });
+      if (blocked.admitted) throw new Error("unexpected admission");
+      expect(blocked.snapshot.leases).toEqual([
+        expect.objectContaining({ kind: "heavy", seatId: "active", pid: expect.any(Number) }),
+      ]);
+      await f.governor.configure({
+        ...defaultResourcePolicy(),
+        heavySlots: 1,
+        simulatorSlots: 0,
+        maxLoadRatio: 10,
+        minAvailableMemoryMb: 0,
+      });
+      await expect(f.governor.tryAcquireSimulator(request)).rejects.toThrow(
+        "Simulator leases are disabled by owner policy",
+      );
+      const last = f.start("last");
+      await eventually(
+        () => f.governor.snapshot(),
+        (value) => value.queue.some((entry) => entry.seatId === "last"),
+      );
+      expect((await f.governor.snapshot()).queue.map((entry) => entry.seatId)).toEqual(["first", "last"]);
+      await f.release(active.release);
+      expect(await active.done).toBe(0);
+      await eventually(() => exists(first.receipt), Boolean);
+      await f.release(first.release);
+      expect(await first.done).toBe(0);
+      await eventually(() => exists(last.receipt), Boolean);
+      await f.release(last.release);
+      expect(await last.done).toBe(0);
+      expect((await f.governor.snapshot()).capacity.used).toBe(0);
+      expect(await f.governor.simulatorReservations()).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  }, 30_000);
   it.each(["unregistered", "registered"] as const)(
     "never submits a command after its %s claim owner dies before execution permission",
     async (mode) => {

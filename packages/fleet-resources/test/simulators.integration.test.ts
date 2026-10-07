@@ -26,6 +26,8 @@ interface NativeState {
     { udid: string; name: string; state: string; isAvailable: boolean; deviceTypeIdentifier: string }[]
   >;
   fault?: { operation: string; before?: boolean; after?: boolean; state?: string };
+  bootDelayMs?: number;
+  deviceTypes?: string[];
 }
 async function stop(child: ChildProcess) {
   if (child.exitCode !== null || child.signalCode !== null) return;
@@ -33,7 +35,7 @@ async function stop(child: ChildProcess) {
   child.kill("SIGTERM");
   await exited;
 }
-async function fixture() {
+async function fixture(settings: { respondWithinMs?: number } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "clankie-simulator-fixture-"));
   const statePath = join(directory, "native.json");
   const logPath = join(directory, "commands.jsonl");
@@ -71,6 +73,7 @@ async function fixture() {
   const options = () => ({
     governor,
     adapter,
+    ...settings,
     clock: () => clock,
     observeSeat: async (identity: Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet">) => ({
       identity: { ...owner, ...identity },
@@ -134,6 +137,7 @@ async function fixture() {
   });
   return {
     directory,
+    port: address.port,
     child,
     owner,
     adapter,
@@ -212,25 +216,20 @@ it("crosses real HTTP, durable admission and child-process simctl boundaries; he
   expect(commands.filter((args) => args[0] === "delete")).toEqual([["delete", created.deviceId!]]);
 });
 
-it("concurrent named seats reserve one global simulator slot", async () => {
+it("concurrent named seats reserve one global simulator slot; the other is told who holds it", async () => {
   const f = await fixture();
-  const firstController = new AbortController();
-  const secondController = new AbortController();
-  const first = f.manager.acquire({ ...f.request, signal: firstController.signal });
-  const second = f.manager.acquire({
-    ...f.request,
-    seatId: "seat-other",
-    occupantId: "native-other",
-    signal: secondController.signal,
-  });
-  const winner = await Promise.race([first, second]);
-  expect(winner.outcome).toBe("acquired");
-  firstController.abort();
-  secondController.abort();
-  expect((await Promise.all([first, second])).map((result) => result.outcome).sort()).toEqual([
-    "acquired",
-    "rejected",
+  const first = f.manager.acquire(f.request);
+  const second = f.manager.acquire({ ...f.request, seatId: "seat-other", occupantId: "native-other" });
+  const results = await Promise.all([first, second]);
+  expect(results.map((result) => result.outcome).sort()).toEqual(["acquired", "waiting"]);
+  const waiting = results.find((result) => result.outcome === "waiting");
+  if (waiting?.outcome !== "waiting") throw new Error("expected a waiting answer");
+  expect(waiting.reason).toBe("simulator_capacity");
+  const holder = results.find((result) => result.outcome === "acquired");
+  expect(waiting.blockers.leases).toEqual([
+    expect.objectContaining({ seatId: holder && "lease" in holder ? holder.lease.seatId : "missing" }),
   ]);
+  expect(waiting.hint).toContain("leased to seat");
   expect((await f.commands()).filter((args) => args[0] === "create")).toHaveLength(1);
   expect(await f.governor.simulatorReservations()).toHaveLength(1);
 });
@@ -249,9 +248,16 @@ it("counts unmanaged booted and booting devices without shutting down or deletin
       },
     ];
   });
-  const result = await f.manager.acquire({ ...f.request, signal: AbortSignal.timeout(250) });
-  expect(result.outcome).toBe("rejected");
-  expect((await f.manager.snapshot()).externalActive).toBe(1);
+  const result = await f.manager.acquire(f.request);
+  if (result.outcome !== "waiting") throw new Error(`expected waiting, got ${result.outcome}`);
+  expect(result.blockers.external).toEqual([
+    expect.objectContaining({ udid: external, name: "Owner Phone", state: "Booting", holders: [] }),
+  ]);
+  expect(result.hint).toContain('"Owner Phone"');
+  const status = await f.manager.snapshot();
+  expect(status.externalActive).toBe(1);
+  expect(status.external?.[0]?.udid).toBe(external);
+  expect(status.hint).toContain("booted outside leases");
   await f.manager.tick();
   expect((await f.commands()).every((args) => args[0] === "list")).toBe(true);
   expect((await f.read()).devices[runtime]![0]!.udid).toBe(external);
@@ -394,7 +400,7 @@ it("revoking HTTP authorization while native preflight is awaiting cannot create
   await barrier.waiting;
   f.revoke();
   barrier.resume();
-  expect(await acquiring).toEqual({ outcome: "rejected", reason: "owner_unavailable" });
+  expect(await acquiring).toMatchObject({ outcome: "rejected", reason: "authorization_revoked" });
   expect(await f.governor.simulatorReservations()).toHaveLength(0);
   expect((await f.commands()).filter((args) => args[0] !== "list")).toHaveLength(0);
 });
@@ -406,9 +412,10 @@ it("revoking HTTP authorization after the exact Create receipt prevents boot and
   await barrier.waiting;
   f.revoke();
   barrier.resume();
-  const acquired = lease(await acquiring);
-  expect(acquired.phase).toBe("created");
-  expect(acquired.deviceId).toBeDefined();
+  expect(await acquiring).toMatchObject({ outcome: "rejected", reason: "authorization_revoked" });
+  const [acquired] = await f.governor.simulatorReservations();
+  expect(acquired!.phase).toBe("created");
+  expect(acquired!.deviceId).toBeDefined();
   await f.restart();
   await f.manager.tick();
   expect(await f.governor.simulatorReservations()).toHaveLength(1);
@@ -428,4 +435,136 @@ it("revoked HTTP authority cannot renew activity or shut down an existing simula
   expect((await f.http("/release", { id: acquired.id, owner: f.owner })).outcome).toBe("rejected");
   expect((await f.governor.simulatorReservations())[0]!.lastUsedAtMs).toBe(before.lastUsedAtMs);
   expect((await f.commands()).filter((args) => ["shutdown", "delete"].includes(args[0]!))).toHaveLength(0);
+});
+
+it("a slow boot outlives a caller that hung up: the lease stays the seat's and its next acquire returns it booted", async () => {
+  const f = await fixture({ respondWithinMs: 30_000 });
+  await f.mutate((state) => {
+    state.bootDelayMs = 1_500;
+  });
+  // The caller gives up mid-boot, as the CLI did at its timeout (VUH-1816).
+  await expect(
+    fetch(`http://127.0.0.1:${f.port}/acquire`, {
+      method: "POST",
+      body: JSON.stringify(f.request),
+      signal: AbortSignal.timeout(400),
+    }),
+  ).rejects.toThrow();
+  const pending = await f.governor.simulatorReservations();
+  expect(pending).toHaveLength(1);
+  await f.manager.settled();
+  const again = await f.manager.acquire(f.request);
+  expect(again.outcome).toBe("acquired");
+  expect(lease(again).id).toBe(pending[0]!.id);
+  expect(lease(again).phase).toBe("booted");
+  const commands = await f.commands();
+  expect(commands.filter((args) => args[0] === "create")).toHaveLength(1);
+  expect(commands.filter((args) => args[0] === "bootstatus")).toHaveLength(1);
+});
+
+it("answers booting within its bound and keeps booting server-side", async () => {
+  const f = await fixture({ respondWithinMs: 100 });
+  await f.mutate((state) => {
+    state.bootDelayMs = 1_000;
+  });
+  const first = await f.manager.acquire(f.request);
+  expect(first).toMatchObject({ outcome: "booting", retryAfterMs: 5_000 });
+  // Polling while it boots returns the same lease, never a second device.
+  expect(lease(await f.manager.acquire(f.request)).id).toBe(lease(first).id);
+  await f.manager.settled();
+  expect(await f.manager.acquire(f.request)).toMatchObject({
+    outcome: "acquired",
+    lease: { id: lease(first).id },
+  });
+  expect((await f.commands()).filter((args) => args[0] === "create")).toHaveLength(1);
+});
+
+it("prefers an idle existing device of the exact type, and returns it stopped rather than deleted", async () => {
+  const f = await fixture();
+  const existing = randomUUID().toUpperCase();
+  await f.mutate((state) => {
+    state.devices[runtime] = [
+      {
+        udid: existing,
+        name: "iPhone 17 Pro",
+        state: "Shutdown",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+      },
+    ];
+  });
+  const acquired = lease(await f.manager.acquire(f.request));
+  expect(acquired).toMatchObject({ deviceId: existing, origin: "existing", phase: "booted" });
+  expect((await f.manager.release(acquired.id, f.owner)).outcome).toBe("released");
+  const commands = (await f.commands()).filter((args) => args[0] !== "list");
+  expect(commands).toEqual([
+    ["bootstatus", existing, "-b"],
+    ["shutdown", existing],
+  ]);
+  expect((await f.read()).devices[runtime]).toEqual([
+    expect.objectContaining({ udid: existing, state: "Shutdown" }),
+  ]);
+});
+
+it("substitutes a close existing model for a missing one, and refuses with alternatives when exact", async () => {
+  const f = await fixture();
+  const m4 = randomUUID().toUpperCase();
+  const requested = "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M3";
+  await f.mutate((state) => {
+    state.devices[runtime] = [
+      {
+        udid: m4,
+        name: "iPad Air 11-inch (M4)",
+        state: "Shutdown",
+        isAvailable: true,
+        deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4",
+      },
+    ];
+    state.deviceTypes = ["com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4"];
+  });
+  const exact = await f.manager.acquire({ ...f.request, deviceType: requested, exact: true });
+  expect(exact).toMatchObject({ outcome: "rejected", reason: "device_unavailable" });
+  if (exact.outcome !== "rejected") throw new Error("expected refusal");
+  expect(exact.alternatives).toContainEqual(expect.objectContaining({ udid: m4 }));
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+  const close = lease(await f.manager.acquire({ ...f.request, deviceType: requested }));
+  expect(close).toMatchObject({ deviceId: m4, requestedDeviceType: requested, origin: "existing" });
+  expect((await f.commands()).some((args) => args[0] === "create")).toBe(false);
+});
+
+it("a seat leases a device it booted by hand by its UDID without booting or deleting it", async () => {
+  const f = await fixture();
+  const handBooted = randomUUID().toUpperCase();
+  await f.mutate((state) => {
+    state.devices[runtime] = [
+      {
+        udid: handBooted,
+        name: "large-screen",
+        state: "Booted",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+      },
+    ];
+  });
+  expect((await f.manager.acquire(f.request)).outcome).toBe("waiting");
+  const adopted = lease(
+    await f.manager.acquire({ seatId: f.owner.seatId, occupantId: f.owner.occupantId, deviceId: handBooted }),
+  );
+  expect(adopted).toMatchObject({ deviceId: handBooted, phase: "booted", origin: "existing" });
+  expect((await f.manager.snapshot()).externalActive).toBe(0);
+  expect((await f.manager.release(adopted.id, f.owner)).outcome).toBe("released");
+  expect((await f.commands()).filter((args) => args[0] !== "list")).toEqual([["shutdown", handBooted]]);
+});
+
+it("a boot that failed is resubmitted by the seat's next acquire instead of stranding the slot", async () => {
+  const f = await fixture();
+  await f.mutate((state) => {
+    state.fault = { operation: "boot", before: true };
+  });
+  const first = lease(await f.manager.acquire(f.request));
+  expect(first.phase).toBe("boot-uncertain");
+  expect((await f.read()).devices[runtime]![0]!.state).toBe("Shutdown");
+  const again = await f.manager.acquire(f.request);
+  expect(again).toMatchObject({ outcome: "acquired", lease: { id: first.id, phase: "booted" } });
+  expect((await f.commands()).filter((args) => args[0] === "bootstatus")).toHaveLength(2);
 });

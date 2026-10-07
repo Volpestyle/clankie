@@ -68,7 +68,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
       worker.expectedPluginVersion === undefined ? "" : ` / deployed ${worker.expectedPluginVersion}`;
     return `  ${marker} Worker ${clean(worker.seatId)} tools · ${status} · ${clean(worker.reason)} · ${version}${expected}${worker.behind ? " · behind" : ""}${worker.restartNeeded ? " · restart needed" : ""}${worker.remediation ? ` · ${clean(worker.remediation)}` : ""}`;
   });
-  const resources = formatResourceLines(report.resources);
+  const resources = [...formatResourceLines(report.resources), ...formatSimulatorLines(report.simulators)];
   if (report.workerTools?.error)
     workerTools.push(`  ○ Worker tools · unknown · ${clean(report.workerTools.error)}`);
   const workerReports = (report.workerReports?.workers ?? []).map((worker) => {
@@ -162,6 +162,33 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
   if (report.remediations.length) lines.push("", "Fix", ...report.remediations.map((step) => `  ${step}`));
   lines.push("", `Next: ${report.nextStep}`, "", "/doctor json shows the full report.");
   return lines.join("\n");
+}
+
+/** Devices booted outside leases hold simulator slots; name them and who uses them. */
+function formatSimulatorLines(simulators: InstallDoctorReport["simulators"]): string[] {
+  if (!simulators) return [];
+  if (simulators.inventory === "unavailable") return ["    Simulators · CoreSimulator inventory unavailable"];
+  const external = simulators.external ?? [];
+  return [
+    ...simulators.leases.map(
+      (lease) =>
+        `    Simulator lease · ${clean(lease.seatId)} · ${clean(lease.deviceName ?? "device pending")}${lease.deviceId ? ` ${clean(lease.deviceId)}` : ""} · ${clean(lease.phase)}`,
+    ),
+    ...external.map((device) => {
+      const seats = [...new Set(device.holders.flatMap((holder) => (holder.seatId ? [holder.seatId] : [])))];
+      const by = seats.length
+        ? `used by ${seats.map(clean).join(", ")}`
+        : device.holders.length
+          ? `named by ${device.holders.map((holder) => `${clean(holder.executable)} PID ${holder.pid}`).join(", ")}`
+          : "no live process names it";
+      return `  ○ Simulator outside leases · ${clean(device.name)} ${clean(device.udid)} · ${clean(device.state)} · ${by}`;
+    }),
+    ...(external.length
+      ? [
+          `    Lease one with clankie simulator acquire '{"seatId":"SEAT","deviceId":"UDID"}' or shut it down with xcrun simctl shutdown UDID.`,
+        ]
+      : []),
+  ];
 }
 
 /** Optional machine metadata is bounded and independent of captain readiness. */

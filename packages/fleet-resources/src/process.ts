@@ -171,6 +171,59 @@ export async function observeProcesses(pids: readonly number[]): Promise<Map<num
     return unknown();
   }
 }
+export interface SimulatorReferents {
+  /** Matching processes and their ancestors: PID, parent and executable basename only. */
+  readonly processes: ReadonlyMap<number, { readonly ppid: number; readonly executable: string }>;
+  /** Needle (UDID or device name) to the PIDs whose arguments contain it. */
+  readonly matches: ReadonlyMap<string, readonly number[]>;
+}
+/** Which of this user's live processes name a simulator. Arguments never leave the helper. */
+export async function observeSimulatorReferents(needles: readonly string[]): Promise<SimulatorReferents> {
+  const requested = [...new Set(needles)];
+  if (requested.length === 0) return { processes: new Map(), matches: new Map() };
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const child = execFile(
+      resourcePython,
+      ["-I", resourceNativeHelperPath(), "simulator-referents"],
+      { encoding: "utf8", timeout: 5_000, maxBuffer: 4_194_304, killSignal: "SIGKILL" },
+      (error, output) => (error ? reject(error) : resolve(output)),
+    );
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(JSON.stringify({ needles: requested }));
+  });
+  const reply: unknown = JSON.parse(stdout);
+  if (
+    !record(reply) ||
+    !keys(reply, ["schemaVersion", "processes", "matches"]) ||
+    reply.schemaVersion !== 1 ||
+    !Array.isArray(reply.processes) ||
+    !record(reply.matches)
+  )
+    throw new Error("Simulator referents unavailable");
+  const processes = new Map<number, { ppid: number; executable: string }>();
+  for (const row of reply.processes) {
+    if (
+      !record(row) ||
+      !keys(row, ["pid", "ppid", "executable"]) ||
+      !integer(row.pid, 2, 2_147_483_647) ||
+      !integer(row.ppid, 0, 2_147_483_647) ||
+      !text(row.executable)
+    )
+      throw new Error("Simulator referents unavailable");
+    processes.set(row.pid, { ppid: row.ppid, executable: row.executable });
+  }
+  const matches = new Map<string, number[]>();
+  for (const [needle, pids] of Object.entries(reply.matches)) {
+    if (
+      !requested.includes(needle) ||
+      !Array.isArray(pids) ||
+      !pids.every((pid) => integer(pid, 2, 2_147_483_647) && processes.has(pid))
+    )
+      throw new Error("Simulator referents unavailable");
+    matches.set(needle, pids as number[]);
+  }
+  return { processes, matches };
+}
 let pendingSnapshot: Promise<ProcessIdentity[]> | undefined;
 let snapshotCache: { at: number; rows: ProcessIdentity[] } | undefined;
 export async function processSnapshot(): Promise<ProcessIdentity[]> {

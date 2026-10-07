@@ -417,7 +417,10 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "simulator") {
-      outputJson(stdout, await runSimulatorCommand(rest, options));
+      outputJson(
+        stdout,
+        await runSimulatorCommand(rest, { ...options, progress: (line) => stderr.write(`${line}\n`) }),
+      );
       return 0;
     }
     if (command === "herdr") {

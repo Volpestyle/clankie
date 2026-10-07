@@ -2260,21 +2260,33 @@ body remains available. The canonical registry is the OS user's
 `~/.clankie/fleet-resources`; worker environment and settings-path overrides do
 not create independent capacity. See the [shipped skill](../.agents/skills/fleet-resources/SKILL.md).
 
-`simulator acquire JSON` accepts `seatId`, optional `fleet`, `deviceType` and
-`runtime`. The host proves the current local seat and occupant, creates a new
-device, records its exact UUID and boots it. `simulator touch JSON` and
+`simulator acquire JSON [--wait SECONDS]` accepts `seatId`, optional `fleet`,
+`deviceType` and `runtime`, or `deviceId` to lease an existing device such as
+one the seat booted by hand, and optional `exact`. The host proves the current
+local seat and occupant, then leases an idle existing device of that type, a
+close model of the same family unless `exact`, or creates and boots a new one,
+and records its exact UUID. It answers within about 20 seconds: `acquired`,
+`booting` (the service keeps booting; acquire again, it is idempotent per seat),
+`waiting` with `blockers` and a `hint` naming leases by seat, devices booted
+outside leases with the seats using them, heavy holders or pressure, or
+`rejected` with its cause (`service_restarting` is HTTP 503). `--wait` polls up
+to SECONDS, printing progress on stderr. `simulator touch JSON` and
 `simulator release JSON` accept `seatId`, optional `fleet` and lease `id`.
-`simulator status` lists receipts. The operator credential is required; native
-occupant, process proof and binding fields are rejected as caller input.
-Idle expiry or proven seat exit cleans up only the exact created device. External
-booted devices count toward the ceiling. Unknown receipts remain held for review;
-observer shutdown does not release them.
+`simulator status` lists leases and external devices with the processes and
+seats that name them; `clankie doctor` shows the same. The operator credential
+is required; native occupant, process proof and binding fields are rejected as
+caller input. Release, idle expiry or proven seat exit deletes only a device
+the lease created and shuts down one it leased. External booted devices count
+toward the ceiling and are never shut down; the lead of a seat using one is
+told once. Unknown receipts remain held for review; observer shutdown does not
+release them. See [ADR 0249](adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md).
 
 Owner HTTP routes are `GET /v1/operator/fleet-resources` and
 `GET|POST /v1/operator/fleet-resources/simulators`. POST uses the same strict JSON
 with `action: acquire|touch|release`, a 16 KiB limit and fresh authority checks
-before native effects. Unavailable resource status is 503; rejected mutations
-are 409. These routes retain the existing operator owner boundary.
+before native effects. A disconnected acquire keeps its admitted lease.
+Unavailable resource status is 503; rejected mutations are 409, or 503 while
+the service restarts. These routes retain the existing operator owner boundary.
 
 The manual `pnpm check:resources -- --run` proof starts an isolated Captain and
 service embedding plus ten bounded command processes. Run its whole lifetime

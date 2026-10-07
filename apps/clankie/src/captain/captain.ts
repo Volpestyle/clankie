@@ -442,6 +442,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   options.fleetResources?.bindSeats({
     resolve: (seatId) => herdrRunner.resolveTerminal(seatId),
     proof: (fleet, pane) => options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
+    // A seat using a simulator booted outside a lease: its lead hears it on
+    // the fleet alert channel, as the seat's own reports do (VUH-1816).
+    notify: (pane, text) => notifyFleetHealthAlert(pane, text),
     isLocalFleet: async (fleet) => {
       if (fleet === undefined || fleet === "default") return true;
       await refreshFleets();

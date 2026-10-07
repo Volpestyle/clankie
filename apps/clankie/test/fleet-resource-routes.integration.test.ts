@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { request, type Server } from "node:http";
@@ -24,6 +25,8 @@ import {
 import { createFleetResourceRoutes } from "../src/fleet-resource-routes.ts";
 import { createFleetResourceRuntime } from "../src/fleet-resource-runtime.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { runSimulatorCommand } from "../../tui/src/command/fleet-resources.ts";
+import { FileCredentialStore } from "@clankie/credential-broker";
 
 const execute = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];
@@ -56,7 +59,7 @@ function barrier() {
     },
   };
 }
-async function fixture(unavailable = false) {
+async function fixture(unavailable = false, extra: { seatScript?: string; bind?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "fleet-resource-http-"));
   const state = join(root, "simctl.json"),
     log = join(root, "simctl.jsonl");
@@ -64,7 +67,9 @@ async function fixture(unavailable = false) {
   await writeFile(log, "");
   const directory = join(root, "governor");
   if (unavailable) await writeFile(directory, "The real native lock cannot create this directory.\n");
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const child = spawn(process.execPath, ["-e", extra.seatScript ?? "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+  });
   await once(child, "spawn");
   const native = await processIdentity(child.pid!);
   if (!native) throw new Error("Actual fixture native process unavailable");
@@ -81,6 +86,7 @@ async function fixture(unavailable = false) {
   let authorized = true;
   let proofAction = async () => {};
   let inventoryAction = async () => {};
+  const notices: { pane: string; text: string }[] = [];
   const resources = await createFleetResourceRuntime({
     governor: createResourceGovernor({
       directory,
@@ -108,23 +114,28 @@ async function fixture(unavailable = false) {
       }),
     },
   });
-  resources.bindSeats({
-    resolve: async (seatId) => (seatId === "resource-seat" ? agent() : undefined),
-    isLocalFleet: async (fleet) => fleet === undefined || fleet === "default",
-    proof: async () => {
-      const current = await processIdentity(child.pid!);
-      if (!current || current.startTime !== native.startTime) return undefined;
-      await proofAction();
-      return {
-        fleet: "default",
-        pane: "w1:p1",
-        nativeOccupantId: occupantId,
-        binding: { socketPath: join(root, "fixture-secret-socket") },
-        processes: [{ pid: current.pid, startTime: current.startTime }],
-        shell: { pid: current.pid, startTime: current.startTime },
-      };
-    },
-  });
+  if (extra.bind !== false)
+    resources.bindSeats({
+      notify: async (pane, text) => {
+        notices.push({ pane, text });
+        return true;
+      },
+      resolve: async (seatId) => (seatId === "resource-seat" ? agent() : undefined),
+      isLocalFleet: async (fleet) => fleet === undefined || fleet === "default",
+      proof: async () => {
+        const current = await processIdentity(child.pid!);
+        if (!current || current.startTime !== native.startTime) return undefined;
+        await proofAction();
+        return {
+          fleet: "default",
+          pane: "w1:p1",
+          nativeOccupantId: occupantId,
+          binding: { socketPath: join(root, "fixture-secret-socket") },
+          processes: [{ pid: current.pid, startTime: current.startTime }],
+          shell: { pid: current.pid, startTime: current.startTime },
+        };
+      },
+    });
   const routes = createFleetResourceRoutes(async (incoming) => {
     const header = incoming.headers.get("authorization");
     if (!header) return "authentication_required";
@@ -191,8 +202,17 @@ async function fixture(unavailable = false) {
     await stop(child);
     await rm(root, { recursive: true, force: true });
   });
+  const mutate = async (change: (value: { devices: Record<string, unknown[]> }) => void) => {
+    const value = JSON.parse(await readFile(state, "utf8"));
+    change(value);
+    await writeFile(state, JSON.stringify(value));
+  };
   return {
     root,
+    host: `http://127.0.0.1:${address.port}`,
+    child,
+    notices,
+    mutate,
     resources,
     send,
     commands,
@@ -354,4 +374,69 @@ it("sanitizes native proof errors instead of returning private diagnostics", asy
   const response = await f.send("POST", FLEET_SIMULATORS_PATH, f.acquire);
   expect(response).toMatchObject({ status: 409, json: { outcome: "rejected", reason: "owner_unavailable" } });
   metadataOnly(response.text, f.root);
+});
+
+it("answers service_restarting (503) while seat proof is not bound, not owner_unavailable", async () => {
+  const f = await fixture(false, { bind: false });
+  const response = await f.send("POST", FLEET_SIMULATORS_PATH, f.acquire);
+  expect(response).toMatchObject({
+    status: 503,
+    json: { outcome: "rejected", reason: "service_restarting" },
+  });
+  expect(await f.commands()).toEqual([]);
+});
+
+it("names a hand-booted simulator, the seat whose process uses it, and tells that seat's lead; the CLI waits with progress", async () => {
+  const udid = randomUUID().toUpperCase();
+  // The seat's own process starts a tool that names the device, as xcodebuild
+  // or a test runner would. The native helper finds it by its arguments.
+  const f = await fixture(false, {
+    seatScript: `require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => { if (process.ppid === 1) process.exit(); }, 200)", "--udid=${udid}"], { stdio: "ignore" }); setInterval(() => {}, 1000);`,
+  });
+  await f.mutate((value) => {
+    value.devices[simulatorRuntime] = [
+      {
+        udid,
+        name: `large-screen-${udid.slice(0, 8)}`,
+        state: "Booted",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+      },
+    ];
+  });
+  await f.resources.observeSeats([{ seatId: "resource-seat", status: "working", paneId: "w1:p1" }]);
+  const status = FleetSimulatorStatusSchema.parse((await f.send("GET", FLEET_SIMULATORS_PATH)).json);
+  expect(status.externalActive).toBe(1);
+  expect(status.external?.[0]).toMatchObject({
+    udid,
+    holders: [expect.objectContaining({ seatId: "resource-seat", pane: "w1:p1", executable: "node" })],
+  });
+  metadataOnly(JSON.stringify(status), f.root);
+  await f.resources.noticeExternalSimulators();
+  await f.resources.noticeExternalSimulators();
+  expect(f.notices).toHaveLength(1);
+  expect(f.notices[0]).toMatchObject({ pane: "w1:p1" });
+  expect(f.notices[0]!.text).toContain(udid);
+
+  const progress: string[] = [];
+  const options = {
+    host: f.host,
+    env: { HOME: f.root, CLANKIE_OPERATOR_TOKEN: bearer },
+    operatorCredentialStore: new FileCredentialStore(join(f.root, "credentials.json")),
+    progress: (line: string) => progress.push(line),
+    // The owner shuts the device down while the CLI waits.
+    sleep: async () => {
+      await f.mutate((value) => {
+        (value.devices[simulatorRuntime]![0] as { state: string }).state = "Shutdown";
+      });
+    },
+  };
+  const result = FleetSimulatorResultSchema.parse(
+    await runSimulatorCommand(["acquire", JSON.stringify(f.acquire), "--wait", "30"], options),
+  );
+  expect(progress[0]).toContain("waiting (simulator_capacity)");
+  expect(progress[0]).toContain("used by seat resource-seat");
+  // The freed device is the exact idle type, so it is leased instead of creating one.
+  expect(result).toMatchObject({ outcome: "acquired", lease: { deviceId: udid, origin: "existing" } });
+  expect((await f.commands()).some((command) => command[0] === "create")).toBe(false);
 });

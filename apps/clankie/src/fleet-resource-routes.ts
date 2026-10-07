@@ -8,12 +8,13 @@ import {
   FleetSimulatorResultSchema,
   FleetSimulatorStatusSchema,
 } from "@clankie/protocol";
-import type { FleetResourceRuntime } from "./fleet-resource-runtime.ts";
+import { SimulatorRequestError, type FleetResourceRuntime } from "./fleet-resource-runtime.ts";
 
 /** Resource metadata and simulator control remain behind current owner authority. */
 export function createFleetResourceRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   resources?: FleetResourceRuntime,
+  onError?: (error: unknown) => void,
 ): Hono {
   const app = new Hono();
   for (const path of [FLEET_RESOURCES_PATH, FLEET_SIMULATORS_PATH])
@@ -40,8 +41,13 @@ export function createFleetResourceRoutes(
     const input = FleetSimulatorRequestSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed_simulator_request" }, 400);
     const request = input.data;
-    const allowed = async () =>
-      !context.req.raw.signal.aborted && (await authorize(context.req.raw)) === true;
+    if (request.action === "acquire" && !request.deviceId && (!request.deviceType || !request.runtime))
+      return context.json({ error: "malformed_simulator_request" }, 400);
+    // Owner authority is the bearer, checked before every native effect. The
+    // connection is not: an acquire whose caller disconnects keeps its lease
+    // and finishes booting, and the seat's next acquire returns it (VUH-1816).
+    const owned = async () => (await authorize(context.req.raw)) === true;
+    const allowed = async () => !context.req.raw.signal.aborted && (await owned());
     try {
       const owner = await resources!.proveSimulatorSeat({
         seatId: request.seatId,
@@ -55,19 +61,34 @@ export function createFleetResourceRoutes(
               seatId: owner.seatId,
               occupantId: owner.occupantId,
               ...(owner.fleet === undefined ? {} : { fleet: owner.fleet }),
-              deviceType: request.deviceType,
-              runtime: request.runtime,
-              ...options,
+              ...(request.deviceType === undefined ? {} : { deviceType: request.deviceType }),
+              ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
+              ...(request.deviceId === undefined ? {} : { deviceId: request.deviceId }),
+              ...(request.exact === undefined ? {} : { exact: request.exact }),
+              authorize: owned,
             })
           : request.action === "touch"
             ? await resources!.simulators.touch(request.id, owner, options)
             : await resources!.simulators.release(request.id, owner, options);
       return context.json(
         FleetSimulatorResultSchema.parse(result),
-        result.outcome === "rejected" ? 409 : 200,
+        result.outcome === "rejected" ? (result.reason === "service_restarting" ? 503 : 409) : 200,
       );
-    } catch {
-      return context.json({ outcome: "rejected", reason: "owner_unavailable" }, 409);
+    } catch (error) {
+      if (error instanceof SimulatorRequestError)
+        return context.json(
+          { outcome: "rejected", reason: error.reason, detail: error.message },
+          error.reason === "service_restarting" ? 503 : 409,
+        );
+      onError?.(error);
+      return context.json(
+        {
+          outcome: "rejected",
+          reason: "internal_error",
+          detail: "The simulator request failed unexpectedly; the Clankie service log has the cause.",
+        },
+        500,
+      );
     }
   });
   return app;

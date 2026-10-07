@@ -77,12 +77,18 @@ export const FleetResourceSnapshotSchema = z
 export type FleetResourceSnapshot = z.infer<typeof FleetResourceSnapshotSchema>;
 
 const SimulatorSeatSchema = z.object({ seatId: reference, fleet: reference.optional() }).strict();
+const udid = z.string().regex(/^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/u);
 /** Native occupant and process identities are observed by the host, never supplied here. */
 export const FleetSimulatorRequestSchema = z.discriminatedUnion("action", [
   SimulatorSeatSchema.extend({
     action: z.literal("acquire"),
-    deviceType: reference,
-    runtime: reference,
+    /** Both are required unless `deviceId` names the device. */
+    deviceType: reference.optional(),
+    runtime: reference.optional(),
+    /** Lease this existing device (for example one the seat booted by hand) instead of choosing one. */
+    deviceId: udid.optional(),
+    /** Refuse instead of substituting a close model when no exact device exists or can be created. */
+    exact: z.boolean().optional(),
   }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("touch"), id: reference }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("release"), id: reference }).strict(),
@@ -102,6 +108,30 @@ export const FleetSimulatorLeaseSchema = z
     deviceName: z.string().min(1).max(256).optional(),
     deviceType: z.string().min(1).max(256).optional(),
     runtime: z.string().min(1).max(256).optional(),
+    /** `created` devices are deleted on cleanup; `existing` devices are only shut down. */
+    origin: z.enum(["created", "existing"]).optional(),
+    /** Present when a close model stood in for the requested device type. */
+    requestedDeviceType: z.string().min(1).max(256).optional(),
+  })
+  .strict();
+/** A live process that names the device, mapped to the seat whose pane it runs in when provable. */
+const FleetSimulatorHolderSchema = z
+  .object({
+    pid: z.number().int().min(2).max(2_147_483_647),
+    executable: z.string().min(1).max(256),
+    seatId: reference.optional(),
+    pane: reference.optional(),
+  })
+  .strict();
+/** A booted or booting device that no lease owns; it still counts against the simulator limit. */
+const FleetExternalSimulatorSchema = z
+  .object({
+    udid: reference,
+    name: z.string().min(1).max(256),
+    state: z.string().min(1).max(64),
+    runtime: z.string().min(1).max(256),
+    deviceType: z.string().min(1).max(256).optional(),
+    holders: z.array(FleetSimulatorHolderSchema).max(32),
   })
   .strict();
 export const FleetSimulatorStatusSchema = z
@@ -110,21 +140,104 @@ export const FleetSimulatorStatusSchema = z
     leases: z.array(FleetSimulatorLeaseSchema).max(256),
     inventory: z.enum(["available", "unavailable"]),
     externalActive: z.number().int().nonnegative().nullable(),
+    external: z.array(FleetExternalSimulatorSchema).max(256).optional(),
+    simulatorSlots: z.number().int().min(0).max(64).optional(),
+    hint: z.string().min(1).max(1024).optional(),
   })
   .strict();
+/** What keeps an acquire from being admitted right now. */
+const FleetSimulatorBlockersSchema = z
+  .object({
+    simulatorSlots: z.number().int().min(0).max(64),
+    sharedSlots: z.number().int().min(1).max(64),
+    leases: z
+      .array(
+        z
+          .object({
+            id: reference,
+            seatId: reference,
+            phase: z.string().min(1).max(64),
+            deviceName: z.string().min(1).max(256).optional(),
+            deviceId: reference.optional(),
+          })
+          .strict(),
+      )
+      .max(256),
+    external: z.array(FleetExternalSimulatorSchema).max(256),
+    heavy: z
+      .array(
+        z
+          .object({
+            seatId: reference.optional(),
+            executable: z.string().min(1).max(256).optional(),
+            pid: z.number().int().min(2).max(2_147_483_647).optional(),
+          })
+          .strict(),
+      )
+      .max(256),
+    pressure: z
+      .object({
+        reason: z.enum(["load", "memory", "probe-unavailable"]).optional(),
+        loadRatio: z.number().finite().nonnegative(),
+        availableMemoryMb: z.number().finite().nonnegative(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+const FLEET_SIMULATOR_REJECTIONS = [
+  /** The seat's live native occupant or process ownership could not be proven. */
+  "owner_unavailable",
+  "stale_owner",
+  "inventory_unavailable",
+  "capacity",
+  "lease_unavailable",
+  /** The service is starting or stopping; retry after it is back. */
+  "service_restarting",
+  /** Owner authority ended while the request was in flight. */
+  "authorization_revoked",
+  /** The owner's simulator limit is zero. */
+  "simulators_disabled",
+  /** The requested type, runtime or device cannot be used; `alternatives` lists close existing ones. */
+  "device_unavailable",
+  /** The seat is not a proven local native seat. */
+  "seat_not_local",
+  /** An unexpected service failure; the service log has the cause. */
+  "internal_error",
+] as const;
 export const FleetSimulatorResultSchema = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.enum(["acquired", "held"]), lease: FleetSimulatorLeaseSchema }).strict(),
+  z
+    .object({
+      outcome: z.enum(["acquired", "held", "booting"]),
+      lease: FleetSimulatorLeaseSchema,
+      /** For `booting`: poll acquire again (it is idempotent per seat) after this delay. */
+      retryAfterMs: z.number().int().min(0).max(600_000).optional(),
+    })
+    .strict(),
   z.object({ outcome: z.literal("released") }).strict(),
   z
     .object({
+      outcome: z.literal("waiting"),
+      reason: z.enum(["simulator_capacity", "shared_capacity", "pressure"]),
+      blockers: FleetSimulatorBlockersSchema,
+      retryAfterMs: z.number().int().min(0).max(600_000),
+      hint: z.string().min(1).max(1024),
+    })
+    .strict(),
+  z
+    .object({
       outcome: z.literal("rejected"),
-      reason: z.enum([
-        "owner_unavailable",
-        "stale_owner",
-        "inventory_unavailable",
-        "capacity",
-        "lease_unavailable",
-      ]),
+      reason: z.enum(FLEET_SIMULATOR_REJECTIONS),
+      detail: z.string().min(1).max(1024).optional(),
+      alternatives: z
+        .array(
+          z
+            .object({ deviceType: reference, name: z.string().min(1).max(256), udid: reference.optional() })
+            .strict(),
+        )
+        .max(32)
+        .optional(),
     })
     .strict(),
 ]);
+export type FleetSimulatorStatus = z.infer<typeof FleetSimulatorStatusSchema>;
