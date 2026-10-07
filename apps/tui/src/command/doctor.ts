@@ -8,6 +8,7 @@ import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import { readWorkingPreferences } from "./working-preferences.ts";
 import { runResourceStatusCommand } from "./fleet-resources.ts";
+import { summarizeRecovery } from "../../bin/service-recovery.ts";
 import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
@@ -38,6 +39,10 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
   }
   if (endpoint?.authRequired && !endpoint.credentialStored) {
     return `The selected model needs a key — run \`clankie\`, then \`/auth ${report.selectedModel?.providerId}\`.`;
+  }
+  const stopped = report.serviceRecovery?.find((service) => service.state === "gave_up");
+  if (stopped !== undefined) {
+    return `${stopped.id} crashed ${String(stopped.crashes)} times and crash recovery left it stopped (${stopped.lastError}) — run \`clankie restart\`.`;
   }
   if (report.doorway.state === "unreachable") {
     return "Clankie is not answering — run `clankie`.";
@@ -89,6 +94,7 @@ export async function doctorCommand(
     inspectResources(options),
   ]);
   const { workerTools, workerReports } = workerObservations;
+  const serviceRecovery = summarizeRecovery(options.env ?? process.env);
   const workingPreferences = await readWorkingPreferences({
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.host === undefined ? {} : { host: options.host }),
@@ -197,6 +203,7 @@ export async function doctorCommand(
     resources,
     ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
     linearRequestBudget,
+    ...(serviceRecovery.length === 0 ? {} : { serviceRecovery }),
   };
 }
 

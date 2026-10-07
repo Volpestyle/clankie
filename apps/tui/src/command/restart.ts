@@ -6,6 +6,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   createServiceOptions,
   parseServiceTarget,
+  resolveRestartTargets,
+  resolveTargets,
   restartTarget,
   startTarget,
   stopTarget,
@@ -14,6 +16,7 @@ import {
   type ServiceTarget,
 } from "../../bin/services.ts";
 import { updateHoldingServices } from "../../bin/runtime-updater.ts";
+import { clearRecoveryIntent } from "../../bin/service-recovery.ts";
 import { commandHost, outputJson } from "./io.ts";
 import { clankieStateHome } from "../state-home.ts";
 
@@ -227,6 +230,8 @@ export async function runRestartCommand(
   }
   refuseDuringUpdate(options);
   const registryOptions = await createServiceOptions(options);
+  // The owner's restart ends any crash backoff or give-up for these services.
+  clearRecoveryIntent(resolveRestartTargets(target), options.env ?? process.env);
   const outcomes = await restartTarget(target, registryOptions);
   const clankie = outcomes.find((outcome) => outcome.id === "clankie");
   const ok = outcomes.length > 0 && outcomes.every((outcome) => outcome.ok);
@@ -249,6 +254,7 @@ export async function runStartCommand(
   if (args.length > 1) throw new Error("Usage: clankie start [service]");
   const target = parseServiceTarget(args[0]);
   refuseDuringUpdate(options);
+  clearRecoveryIntent(resolveTargets(target), options.env ?? process.env);
   const outcomes = await startTarget(target, await createServiceOptions(options));
   const ok = outcomes.length > 0 && outcomes.every((outcome) => outcome.ok);
   const stderr = options.stderr ?? process.stderr;
@@ -271,6 +277,7 @@ export async function runDownCommand(
 ): Promise<number> {
   const target = parseServiceTarget(args[0]);
   refuseDuringUpdate(options);
+  clearRecoveryIntent(resolveTargets(target), options.env ?? process.env);
   const outcomes = await stopTarget(target, await createServiceOptions(options));
   const ok = outcomes.every((outcome) => outcome.ok);
   const stderr = options.stderr ?? process.stderr;

@@ -57,7 +57,7 @@ the token is never an argument, settings value, or printed result.
 | Command                                                                                                                       | stdout                                                                                       |
 | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `doctor [--machine NAME]`                                                                                                     | Human summary; `--json` preserves the full card                                              |
-| `health`, `status`, `start`, `stop`, `restart`, `autostart …`, `awake`                                                        | JSON                                                                                         |
+| `health`, `status`, `start`, `stop`, `restart`, `recover`, `autostart …`, `awake`                                             | JSON                                                                                         |
 | `model …`, `effort …`, `image-model …`, `video-model …`                                                                       | JSON                                                                                         |
 | `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr use/create/disable`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                                                                                 | JSON                                                                                         |
@@ -78,19 +78,19 @@ Do not edit `~/.config/clankie/clankie.json`,
 
 ## Command index
 
-| Task                                                   | Commands                                                |
-| ------------------------------------------------------ | ------------------------------------------------------- |
-| [Control Activity shares](#activity-shares)            | `share list`, `share request JSON`                      |
-| [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                            |
-| [Manage service lifecycle](#service-lifecycle)         | `start`, `stop`, `restart`, `autostart`, `awake`        |
-| [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                            |
-| [Connect accounts and track work](#account-setup)      | `accounts`, `work`                                      |
-| [List shipped skills](#skill-setup)                    | `skills`                                                |
-| [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`         |
-| [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr` |
-| [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`               |
-| [Use native seats and delegated tools](#seat-commands) | `seat`, `mcp`, `access`                                 |
-| [Evaluate agent work](#evaluation-commands)            | `evaluator`                                             |
+| Task                                                   | Commands                                                    |
+| ------------------------------------------------------ | ----------------------------------------------------------- |
+| [Control Activity shares](#activity-shares)            | `share list`, `share request JSON`                          |
+| [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                                |
+| [Manage service lifecycle](#service-lifecycle)         | `start`, `stop`, `restart`, `recover`, `autostart`, `awake` |
+| [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                                |
+| [Connect accounts and track work](#account-setup)      | `accounts`, `work`                                          |
+| [List shipped skills](#skill-setup)                    | `skills`                                                    |
+| [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`             |
+| [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr`     |
+| [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`                   |
+| [Use native seats and delegated tools](#seat-commands) | `seat`, `mcp`, `access`                                     |
+| [Evaluate agent work](#evaluation-commands)            | `evaluator`                                                 |
 
 ## Commands
 
@@ -691,22 +691,26 @@ Same stdout shape as restart, with `"status": "ready"` or `"stopped"` on success
 While an accepted update is mid-cutover, its helper stops and restarts services
 itself. `start`, `stop` and `restart` refuse until it finishes rather than race
 it; `clankie update status` shows its phase. A helper no longer running holds
-nothing.
+nothing. Crash recovery ([`recover`](#recover)) waits for it the same way.
 
 ### `autostart enable` / `autostart disable` / `autostart status`
 
-Start Clankie when you log in. `enable` writes the user LaunchAgent
+Start Clankie when you log in, and bring launcher-owned services back after a
+crash. `enable` writes the user LaunchAgent
 `~/Library/LaunchAgents/bot.clankie.autostart.plist` and loads it into your
-`gui` domain. At login it runs this install's launcher as
-`clankie restart clankie`, so the service, the relay, and the selected Discord
-body start in dependency order and the launcher's supervision owns them from
-there. launchd launches it once (`RunAtLoad`, no `KeepAlive`), and only inside a
-logged-in session: a Mac waiting at the login window starts nothing. On a
-release install the agent records the `current` launcher path, so upgrades need
-no re-enable. It also records your `PATH`, `XDG_CONFIG_HOME`, and
-`XDG_STATE_HOME` as they were when you enabled it; run `enable` again after
-changing them. `enable` is idempotent (a loaded agent is booted out first) and
-`disable` unloads and removes the agent.
+`gui` domain. launchd runs this install's launcher as `clankie recover
+--autostart` at login (`RunAtLoad`) and every 30 seconds after
+(`StartInterval`, no `KeepAlive`), only inside a logged-in session: a Mac
+waiting at the login window starts nothing. The first run after each boot
+starts Clankie in dependency order (the service, the relay and the selected
+Discord body), as `clankie restart clankie` does; every later run is one
+[`recover`](#recover) pass. The launcher's supervision (ADR 0055) owns the
+processes; launchd only wakes it. On a release install the agent records the
+`current` launcher path, so upgrades need no re-enable. It also records your
+`PATH`, `XDG_CONFIG_HOME`, and `XDG_STATE_HOME` as they were when you enabled
+it; run `enable` again after changing them. `enable` is idempotent (a loaded
+agent is booted out first) and `disable` unloads and removes the agent, which
+also turns crash recovery off.
 
 ```json
 {
@@ -715,14 +719,47 @@ changing them. `enable` is idempotent (a loaded agent is booted out first) and
   "label": "bot.clankie.autostart",
   "plist": "/Users/me/Library/LaunchAgents/bot.clankie.autostart.plist",
   "loaded": true,
-  "command": ["/Users/me/.local/share/clankie/current/bin/clankie", "restart", "clankie"],
+  "command": ["/Users/me/.local/share/clankie/current/bin/clankie", "recover", "--autostart"],
   "log": "/Users/me/.local/state/clankie/autostart.log"
 }
 ```
 
-`status` is `enabled`, `disabled`, or `stale` (the agent file and launchd
-disagree; run `enable`). The job's own output lands in `log`; the services keep
-their usual per-process logs.
+`status` is `enabled`, `disabled`, or `stale`: the agent file and launchd
+disagree, or the file was written by an older install (a one-shot login
+restart with no crash recovery). Run `enable` to repair either. The job's own
+output lands in `log`; the services keep their usual per-process logs.
+
+<a id="recover"></a>
+
+### `recover [--autostart]`
+
+One crash-recovery pass. A launcher start records each service's pid and only
+a deliberate stop removes that record, so a record whose process is gone is a
+service that exited on its own. `recover` restarts it through the usual
+dependency-ordered restart (restarting `clankie` also restarts the relay and the
+Discord body) and prints what it did as JSON. It never fights intent: a
+deliberate `stop` has already removed the record, an accepted update that is
+mid-cutover owns the services (`"skipped": "update"`), and another `start`,
+`stop`, `restart` or recovery holding the service lock is left alone
+(`"skipped": "busy"`). `start`, `stop` and `restart` wait for that lock rather
+than race each other.
+
+A crash loop backs off: restart attempts within 30 minutes wait 0 s, 30 s,
+2 min, then 5 min, and a restart that dies before it is healthy counts as
+another crash. After five crashes in 30 minutes recovery gives up and leaves
+the service stopped. `clankie status` (`recovery`) and `clankie doctor`
+(`serviceRecovery`, and its one-line summary) show each service that crashed in
+the last day: `recovered`, `retrying` or `gave_up`, with the crash count and
+the error line from the end of its log. A give-up raises one macOS notification,
+since Clankie himself is down. A deliberate `start`, `stop` or `restart` clears
+the backoff and the give-up.
+
+Whenever Clankie starts after a crash, he tells you once through his
+runtime-health alert: which service crashed, when, and the last error.
+`~/.local/state/clankie/<service>-recovery.json` keeps the history (with the
+tail of the log at each crash); `<service>-recovery-alerted.json` marks what he
+has already reported. Linux has no autostart agent yet: run `clankie recover`
+from a systemd user timer (or cron) every 30 seconds for the same behaviour.
 
 <a id="awake"></a>
 

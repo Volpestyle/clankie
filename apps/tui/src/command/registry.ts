@@ -184,10 +184,14 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["stop"], lines: ["  stop [service]           Stop in reverse order (JSON; progress on stderr)"] },
   {
+    nouns: ["recover"],
+    lines: ["  recover [--autostart]    Restart launcher-owned services that crashed, with backoff (JSON)"],
+  },
+  {
     nouns: ["autostart"],
     lines: [
       "  autostart enable|disable|status",
-      "                           Start clankie + relay at login via a user LaunchAgent (JSON)",
+      "                           Start clankie at login and restart crashed services every 30s (JSON)",
     ],
   },
   {

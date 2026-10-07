@@ -68,3 +68,54 @@ The compatibility aliases `captain`, `captain-eve`, `eve`, `control-plane`, and
   next process to infer an avoidable lease lapse.
 - Settings remain the source of Discord allowlists; the launcher supplies only
   repository paths and brokered service credentials.
+
+## Amendment: crashed services come back, 2026-10-06
+
+On 2026-10-06 at 23:51Z an unhandled socket `error` from the IMAP client exited
+the clankie service (fixed separately). Nothing was resident to notice, so it
+stayed down until the owner ran `clankie restart`; the service log held 264
+earlier `Exit status 1` endings. James approved automatic recovery.
+
+**Decision.** launchd wakes the launcher; the launcher still owns the
+processes. The existing `bot.clankie.autostart` agent now runs
+`clankie recover --autostart` at load and every 30 seconds (`StartInterval`,
+still no `KeepAlive`). Each run is a short, fresh launcher process, so it
+always runs the currently pinned code and leaves nothing resident to hang or to
+outlive an update. Handing the services themselves to launchd `KeepAlive` was
+rejected: it would bypass the pid records, live-command checks, health gates
+and dependency-ordered restart above, and launchd would fight every deliberate
+stop and update cutover.
+
+- **Desired state is the pid record.** A start writes it and only a deliberate
+  stop, or a start that died before it was healthy, removes it. A record whose
+  pid is dead is a crash; a missing record is intent. Recovery restarts through
+  the same dependency-ordered restart as `clankie restart`.
+- **Never fights intent.** An accepted update mid-cutover (the existing
+  `updateHoldingServices` check) skips the pass. `start`, `stop` and `restart`
+  now share one `services.lock`; recovery never waits for it and skips a pass
+  while any operation holds it, and a holder that died is taken over.
+  `clankie autostart disable` turns recovery off.
+- **Crash loops end.** Attempts within 30 minutes wait 0 s, 30 s, 2 min, then
+  5 min; a restart that dies before it is healthy counts as another crash.
+  Five crashes in 30 minutes leave the service stopped. A deliberate `start`,
+  `stop` or `restart` clears the backoff and the give-up.
+- **Why it died, and who is told.** Each crash keeps the tail of the service's
+  log in `<service>-recovery.json` under the launcher state root. `status`
+  (`recovery`) and `doctor` (`serviceRecovery`) show recent crashes and a
+  give-up. The restarted clankie service tells the owner once through the
+  runtime-health alert path (`CLANKIE_CRASH_REPORT` names the record; the
+  service marks what it reported in a separate file the launcher never writes).
+  A give-up raises one macOS notification, since the service that would send the
+  alert is the one that is down; the alert follows when it next starts.
+- **First run after a boot** starts Clankie as the one-shot login agent did, so
+  `enable` keeps its old meaning. An agent written by an older install reads as
+  `stale` until `enable` rewrites it.
+
+Linux has no agent yet; a systemd user timer running `clankie recover` gives
+the same behaviour.
+
+Known limits: up to 30 seconds pass before a crash is noticed; the exit code of
+a detached service is not observable, so the log tail stands in for it; a
+logout that ends the session's processes is recovered and reported as a crash
+at the next login tick; and a service that hangs without exiting is not
+detected (that remains the runtime-health observer's job).

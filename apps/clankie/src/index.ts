@@ -1,3 +1,4 @@
+import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
 import { ComputerBody } from "./computer-body.ts";
@@ -1408,6 +1409,10 @@ const workerToolRefresh = createWorkerToolRefresh({
 });
 
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
+// Launcher crash recovery restarted this process: tell the owner once (ADR 0055).
+void alertRecoveredCrash(process.env.CLANKIE_CRASH_REPORT?.trim(), (text) =>
+  captain.notifyRuntimeHealthAlert(text),
+).catch((error) => logger.warn({ event: "service.crash_alert_failed", error }, "Crash alert failed"));
 const runtimeHealth = new RuntimeHealthObserver({
   settings: async () => (await settingsStore.load()).runtimeHealth,
   healthUrl: `http://127.0.0.1:${port}/health`,

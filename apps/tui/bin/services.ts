@@ -12,12 +12,15 @@ import {
   PresenceStatusSchema,
 } from "../src/observation/presence-status.ts";
 import { DEFAULT_CONTROL_PLANE_URL } from "./pairing-offer.ts";
+import { clankieStateHome } from "../src/state-home.ts";
 import {
   inspectService,
   listProcessCommands,
+  SERVICE_LOCK_BUSY,
   SERVICE_ORDER,
   startService,
   stopService,
+  withServiceLock,
   type ManagedService,
   type ServiceCommandOptions,
   type ServiceId,
@@ -217,6 +220,10 @@ const CLANKIE: ManagedService = {
       env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE ?? runtimeModule(repoRoot, "discord-bridge"),
     CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE:
       env.CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE ?? runtimeModule(repoRoot, "discord-user-session"),
+    // Its crash-recovery record (service-recovery.ts): on boot it tells the owner
+    // about any crash it has not reported yet, however it was started again.
+    CLANKIE_CRASH_REPORT:
+      env.CLANKIE_CRASH_REPORT ?? join(clankieStateHome(env), "clankie", "clankie-recovery.json"),
     ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
   probe: async ({ env, fetchImpl }) => {
@@ -645,6 +652,14 @@ export async function restartTarget(
   target: ServiceTarget,
   options: ServiceRegistryOptions,
 ): Promise<readonly ServiceOutcome[]> {
+  return await locked(options, () => restartTargetHoldingLock(target, options));
+}
+
+/** {@link restartTarget} for a caller that already holds the service lock (crash recovery). */
+export async function restartTargetHoldingLock(
+  target: ServiceTarget,
+  options: ServiceRegistryOptions,
+): Promise<readonly ServiceOutcome[]> {
   const ids = resolveRestartTargets(target);
   const stopFailures: ServiceOutcome[] = [];
   for (const id of [...ids].reverse()) {
@@ -676,19 +691,21 @@ export async function startTarget(
   target: ServiceTarget,
   options: ServiceRegistryOptions,
 ): Promise<readonly ServiceOutcome[]> {
-  const outcomes: ServiceOutcome[] = [];
-  const env = options.env ?? process.env;
-  for (const id of resolveTargets(target)) {
-    const service = managedService(id);
-    if (service.enabled?.(env) === false) continue;
-    try {
-      outcomes.push(outcomeFrom(await startService(service, options)));
-    } catch (error) {
-      outcomes.push(failureFrom(id, error));
-      break;
+  return await locked(options, async () => {
+    const outcomes: ServiceOutcome[] = [];
+    const env = options.env ?? process.env;
+    for (const id of resolveTargets(target)) {
+      const service = managedService(id);
+      if (service.enabled?.(env) === false) continue;
+      try {
+        outcomes.push(outcomeFrom(await startService(service, options)));
+      } catch (error) {
+        outcomes.push(failureFrom(id, error));
+        break;
+      }
     }
-  }
-  return outcomes;
+    return outcomes;
+  });
 }
 
 /** Stops in reverse dependency order so dependents never outlive what they call. */
@@ -696,16 +713,27 @@ export async function stopTarget(
   target: ServiceTarget,
   options: ServiceRegistryOptions,
 ): Promise<readonly ServiceOutcome[]> {
-  const outcomes: ServiceOutcome[] = [];
-  for (const id of [...resolveTargets(target)].reverse()) {
-    try {
-      await stopService(managedService(id), options);
-      outcomes.push({ id, label: managedService(id).label, ok: true, state: "unreachable" });
-    } catch (error) {
-      outcomes.push(failureFrom(id, error));
+  return await locked(options, async () => {
+    const outcomes: ServiceOutcome[] = [];
+    for (const id of [...resolveTargets(target)].reverse()) {
+      try {
+        await stopService(managedService(id), options);
+        outcomes.push({ id, label: managedService(id).label, ok: true, state: "unreachable" });
+      } catch (error) {
+        outcomes.push(failureFrom(id, error));
+      }
     }
-  }
-  return outcomes;
+    return outcomes;
+  });
+}
+
+async function locked(
+  options: ServiceRegistryOptions,
+  run: () => Promise<readonly ServiceOutcome[]>,
+): Promise<readonly ServiceOutcome[]> {
+  const result = await withServiceLock(options.env ?? process.env, run);
+  if (result === SERVICE_LOCK_BUSY) throw new Error("Service lock unavailable");
+  return result;
 }
 
 /** Inspects the named services concurrently; probes are read-only and independent. */

@@ -57,7 +57,7 @@ async function home(): Promise<{
 }
 
 describe("autostart command", () => {
-  it("enable writes a run-once login agent atomically and bootstraps it into the user domain", async () => {
+  it("enable writes a login and every-30s recovery agent atomically and bootstraps it into the user domain", async () => {
     const { root, env, plist, launcher } = await home();
     const launchctl = fakeLaunchctl();
 
@@ -74,7 +74,7 @@ describe("autostart command", () => {
       label: AUTOSTART_LABEL,
       plist,
       loaded: true,
-      command: [launcher, "restart", "clankie"],
+      command: [launcher, "recover", "--autostart"],
       log: join(root, "state", "clankie", "autostart.log"),
     });
     expect(launchctl.calls).toEqual([
@@ -84,9 +84,10 @@ describe("autostart command", () => {
     const text = await readFile(plist, "utf8");
     expect(text).toContain(`<key>Label</key><string>${AUTOSTART_LABEL}</string>`);
     expect(text).toContain(
-      `<array>\n    <string>${launcher}</string>\n    <string>restart</string>\n    <string>clankie</string>\n  </array>`,
+      `<array>\n    <string>${launcher}</string>\n    <string>recover</string>\n    <string>--autostart</string>\n  </array>`,
     );
     expect(text).toContain("<key>RunAtLoad</key><true/>");
+    expect(text).toContain("<key>StartInterval</key><integer>30</integer>");
     expect(text).toContain("<key>KeepAlive</key><false/>");
     expect(text).toContain(`<key>WorkingDirectory</key><string>${root}</string>`);
     expect(text).toContain(
@@ -165,6 +166,12 @@ describe("autostart command", () => {
       loaded: false,
       plist,
     });
+    // An agent an older install wrote (one login restart, no crash recovery)
+    // is stale while loaded, so `enable` upgrades it.
+    launchctl.loaded = true;
+    const text = await readFile(plist, "utf8");
+    await writeFile(plist, text.replace("<string>recover</string>", "<string>restart</string>"));
+    expect((await runAutostartCommand(["status"], options)).status).toBe("stale");
   });
 
   it("records a release install's current link so upgrades do not strand the agent", async () => {
@@ -187,7 +194,7 @@ describe("autostart command", () => {
       execFileImpl: launchctl.execFileImpl,
       uid: 501,
     });
-    expect(pinned.command).toEqual([join(releaseRoot, "bin", "clankie"), "restart", "clankie"]);
+    expect(pinned.command).toEqual([join(releaseRoot, "bin", "clankie"), "recover", "--autostart"]);
 
     await symlink(join("releases", "v0.2.0"), join(install, "current"));
     const followed = await runAutostartCommand(["enable"], {
@@ -195,7 +202,7 @@ describe("autostart command", () => {
       execFileImpl: launchctl.execFileImpl,
       uid: 501,
     });
-    expect(followed.command).toEqual([join(install, "current", "bin", "clankie"), "restart", "clankie"]);
+    expect(followed.command).toEqual([join(install, "current", "bin", "clankie"), "recover", "--autostart"]);
     expect(launcher).not.toBe(followed.command[0]);
   });
 

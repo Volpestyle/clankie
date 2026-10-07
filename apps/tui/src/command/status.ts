@@ -4,6 +4,7 @@ import { createCaptainRouteClient, resolveCaptainRouteToken } from "../session/o
 import { inspectOperatorCredential, type OperatorCredentialStatus } from "@clankie/credential-broker";
 import { createServiceOptions, inspectServices, type CreateServiceOptionsInput } from "../../bin/services.ts";
 import { SERVICE_ORDER, type ServiceStatus } from "../../bin/service-supervisor.ts";
+import { summarizeRecovery, type ServiceRecoverySummary } from "../../bin/service-recovery.ts";
 import { DEFAULT_CONTROL_PLANE_URL } from "../../bin/pairing-offer.ts";
 import { nextStepLine } from "../next-step.ts";
 import { DeviceDirectRouteSchema } from "@clankie/protocol";
@@ -33,6 +34,8 @@ export interface StatusCommandResult {
   readonly presence?: OperatorPresenceSnapshot;
   readonly presenceState?: "unreachable";
   readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
+  /** Launcher-owned services that crashed in the last day, or that recovery left stopped. */
+  readonly recovery?: readonly ServiceRecoverySummary[];
 }
 
 export async function statusCommand(options: StatusCommandOptions): Promise<StatusCommandResult> {
@@ -49,6 +52,7 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
   const operatorCredentialHealthy =
     operatorCredential.present && operatorCredential.consistency !== "mismatch";
   const services = await inspectServices(SERVICE_ORDER, await createServiceOptions(options));
+  const recovery = summarizeRecovery(env);
   const clankie = services.find((service) => service.id === "clankie");
   const serviceHealthy = clankie?.state === "healthy";
   const access = await phoneAccess(options, env, serviceHealthy);
@@ -94,6 +98,7 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
     operatorCredential,
     services,
     ...access,
+    ...(recovery.length === 0 ? {} : { recovery }),
   };
 }
 

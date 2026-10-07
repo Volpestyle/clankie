@@ -46,7 +46,8 @@ if (
   args[0] === "restart" ||
   args[0] === "start" ||
   args[0] === "stop" ||
-  args[0] === "down"
+  args[0] === "down" ||
+  args[0] === "recover"
 ) {
   await applyLauncherDiscordEnvironment();
 }

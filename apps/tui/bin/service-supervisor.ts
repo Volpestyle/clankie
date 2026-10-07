@@ -303,6 +303,108 @@ function readServiceRecord(
   }
 }
 
+/**
+ * The pid a launcher start recorded, whether or not it is still alive. Only a
+ * deliberate stop (or a start that failed before it was healthy) removes the
+ * record, so a record whose pid is dead is a service that exited on its own.
+ */
+export function readRecordedServicePid(
+  id: ServiceId,
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  try {
+    const record = JSON.parse(readFileSync(serviceStatePath(id, env), "utf8")) as {
+      id?: unknown;
+      pid?: unknown;
+      version?: unknown;
+    };
+    return record.version === 1 &&
+      record.id === id &&
+      typeof record.pid === "number" &&
+      Number.isSafeInteger(record.pid) &&
+      record.pid > 0
+      ? record.pid
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function serviceLogFile(id: ServiceId, env: NodeJS.ProcessEnv = process.env): string {
+  return serviceLogPath(id, env);
+}
+
+export function serviceProcessIsAlive(pid: number): boolean {
+  return processIsAlive(pid);
+}
+
+const SERVICE_LOCK_WAIT_MS = 5 * 60_000;
+/** Returned by {@link withServiceLock} when `wait: false` finds another operation running. */
+export const SERVICE_LOCK_BUSY: unique symbol = Symbol("service-lock-busy");
+
+/**
+ * One launcher operation changes the process graph at a time. Crash recovery
+ * runs from launchd beside the owner's own commands and an update helper's;
+ * without this, a recovery restart and `clankie restart` could each stop what
+ * the other just started. A lock whose holder died is stale and taken over.
+ */
+export async function withServiceLock<T>(
+  env: NodeJS.ProcessEnv,
+  run: () => Promise<T>,
+  options: { readonly wait?: boolean; readonly waitMs?: number } = {},
+): Promise<T | typeof SERVICE_LOCK_BUSY> {
+  const directory = clankieStateDirectory(env);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, "services.lock");
+  const deadline = Date.now() + (options.waitMs ?? SERVICE_LOCK_WAIT_MS);
+  for (;;) {
+    let fd: number | undefined;
+    try {
+      fd = openSync(path, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    if (fd !== undefined) {
+      try {
+        writeFileSync(fd, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`);
+      } finally {
+        closeSync(fd);
+      }
+      try {
+        return await run();
+      } finally {
+        try {
+          unlinkSync(path);
+        } catch {
+          // Already removed by a takeover after this process was presumed dead.
+        }
+      }
+    }
+    let holder: number | undefined;
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown };
+      holder = typeof value.pid === "number" ? value.pid : undefined;
+    } catch {
+      holder = undefined;
+    }
+    if (holder === undefined || !processIsAlive(holder)) {
+      // A crashed holder, or a torn write from one: retire it and retry once.
+      try {
+        unlinkSync(path);
+      } catch {
+        // Another waiter retired it first.
+      }
+      continue;
+    }
+    if (options.wait === false) return SERVICE_LOCK_BUSY;
+    if (Date.now() >= deadline)
+      throw new Error(
+        `Another clankie service operation (pid ${holder}) is still running; wait for it, then retry.`,
+      );
+    await sleep(200);
+  }
+}
+
 function writeServiceRecord(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly id: ServiceId;

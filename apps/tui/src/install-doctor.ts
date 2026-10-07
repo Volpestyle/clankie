@@ -81,6 +81,8 @@ export interface InstallDoctorReport {
   readonly kind: InstallKind;
   readonly version: string;
   readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
+  /** Launcher-owned services that crashed in the last day, or that crash recovery left stopped. */
+  readonly serviceRecovery?: readonly import("../bin/service-recovery.ts").ServiceRecoverySummary[];
   readonly repoRoot: string;
   readonly model: string | null;
   /** Whether Clankie can take a turn at all: a model, and something to authenticate it. */

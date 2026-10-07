@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -8,13 +8,17 @@ import { type ExecFileImpl } from "../install-doctor.ts";
 import { clankieStateHome } from "../state-home.ts";
 
 // `clankie autostart`: a user LaunchAgent that runs this install's launcher at
-// login. launchd only launches it once (RunAtLoad, no KeepAlive); the launcher's
-// own supervision (ADR 0055) owns the processes from there.
+// login and every 30 seconds after (RunAtLoad + StartInterval, no KeepAlive).
+// Each run is one short `clankie recover --autostart` pass: the first after a
+// boot starts Clankie, later ones restart only what crashed. The launcher's own
+// supervision (ADR 0055) still owns the processes; launchd only wakes it.
 
 export const AUTOSTART_LABEL = "bot.clankie.autostart";
 const AUTOSTART_USAGE = "Usage: clankie autostart enable|disable|status";
-/** The launcher's dependency-ordered start: the service plus everything that restarts with it. */
-const AUTOSTART_SERVICE_ARGS = ["restart", "clankie"] as const;
+/** One recovery pass; its first run after a boot starts Clankie (`clankie recover`). */
+const AUTOSTART_SERVICE_ARGS = ["recover", "--autostart"] as const;
+/** Seconds between recovery passes: how long a crashed service can stay down unnoticed. */
+export const AUTOSTART_INTERVAL_SECONDS = 30;
 /** launchd starts jobs with a bare environment; carry the shell's view of these when set. */
 const CARRIED_ENVIRONMENT = ["PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CLANKIE_STATE_HOME"] as const;
 const LAUNCHCTL_TIMEOUT_MS = 10_000;
@@ -90,7 +94,10 @@ async function disable(context: AutostartContext): Promise<AutostartCommandResul
 async function status(context: AutostartContext): Promise<AutostartCommandResult> {
   const loaded = await isLoaded(context);
   const present = await exists(context.plist);
-  const state = loaded && present ? "enabled" : loaded || present ? "stale" : "disabled";
+  // An agent an older install wrote (one login start, no crash recovery) is
+  // stale until `enable` rewrites it.
+  const current = present && (await readFile(context.plist, "utf8").catch(() => "")) === renderPlist(context);
+  const state = loaded && present && current ? "enabled" : loaded || present ? "stale" : "disabled";
   return result(context, state, loaded);
 }
 
@@ -189,6 +196,7 @@ function renderPlist(context: AutostartContext): string {
     ...[...context.command, ...AUTOSTART_SERVICE_ARGS].map((argument) => `    ${plistString(argument)}`),
     "  </array>",
     "  <key>RunAtLoad</key><true/>",
+    `  <key>StartInterval</key><integer>${String(AUTOSTART_INTERVAL_SECONDS)}</integer>`,
     "  <key>KeepAlive</key><false/>",
     `  <key>WorkingDirectory</key>${plistString(dirname(dirname(dirname(context.plist))))}`,
     `  <key>StandardOutPath</key>${plistString(context.log)}`,

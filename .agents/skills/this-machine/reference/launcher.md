@@ -11,7 +11,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | This install                           | `clankie doctor --json` (JSON; exit 0; `ok` means the card was produced)                                                                                           |
 | Account connections and Google consent | the `connected-accounts` skill; `/connect accounts` or `/connections` in the console                                                                               |
 | Can he take a turn                     | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                                                                                     |
-| Start at login                         | `clankie autostart status`, `clankie autostart enable`                                                                                                             |
+| Start at login, restart after a crash  | `clankie autostart status`, `clankie autostart enable`, `clankie recover`                                                                                          |
 | Are processes up                       | `clankie status` (JSON; `clankie health` is an alias)                                                                                                              |
 | Sustained CPU or slow health           | `clankie runtime-health status`; `clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300`; `/runtime-health` opens the settings menu |
 | Shipped skills                         | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                          |

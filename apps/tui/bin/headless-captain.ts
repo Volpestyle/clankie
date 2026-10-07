@@ -82,6 +82,7 @@ import { runMcpCommand } from "../src/command/mcp.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
 import { runGatewayCommand } from "../src/command/gateway.ts";
 import { runAutostartCommand } from "../src/command/autostart.ts";
+import { runRecoverCommand } from "../src/command/recover.ts";
 import { runAwakeCommand } from "../src/command/awake.ts";
 import { runRuntimeHealthCommand } from "../src/command/runtime-health.ts";
 import { commandHelp } from "../src/command/registry.ts";
@@ -217,6 +218,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "restart") return await runRestartCommand(rest, options);
     if (command === "start") return await runStartCommand(rest, options);
     if (command === "stop" || command === "down") return await runDownCommand(rest, options);
+    if (command === "recover") return await runRecoverCommand(rest, options);
     if (command === "autostart") {
       const result = await runAutostartCommand(rest, {
         ...(options.env === undefined ? {} : { env: options.env }),
