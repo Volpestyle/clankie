@@ -113,7 +113,7 @@ const CLAUDE_MANAGED_SETTINGS =
  */
 const WORKER_SERVER_RULE = `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`;
 
-export function claudeWorkerSettings(trackerDeny: readonly string[] = [], gates?: FleetGates): string {
+function claudeWorkerSettings(trackerDeny: readonly string[] = [], gates?: FleetGates): string {
   // Shell commands may combine everyday work, accounts and destructive work.
   // Never blanket-allow Bash from a category preference. Existing managed deny
   // rules retain precedence; all ambiguous calls reach the permission hook.
