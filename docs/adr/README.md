@@ -90,6 +90,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0238 — Hosted Claude workers trust their own workspace](0238-hosted-claude-workers-trust-their-own-workspace.md)
 - [0239 — Worker harnesses sign in with their own logins](0239-worker-harnesses-sign-in-with-their-own-logins.md)
 - [0240 — Changes land directly on main](0240-changes-land-directly-on-main.md)
+- [0241 — One official Discord bot serves every Clankie](0241-one-official-discord-bot-serves-every-clankie.md)
 
 ## Archived decisions
 
