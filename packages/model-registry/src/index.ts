@@ -91,8 +91,21 @@ export function loadBundledCatalog(): Catalog {
   return bundledCatalog;
 }
 
-/** Resolve native hire names against the actual registry; never fall back to a different model. */
-export function resolveHireModel(catalog: Catalog, harness: string, name: string): string {
+/**
+ * Resolve native hire names against the actual registry; never fall back to a
+ * different model. With no harness chosen yet (no preference), a name is valid
+ * when Claude or Codex can run it.
+ */
+export function resolveHireModel(catalog: Catalog, harness: string | undefined, name: string): string {
+  if (harness === undefined) {
+    for (const candidate of ["claude", "codex"])
+      try {
+        return resolveHireModel(catalog, candidate, name);
+      } catch {
+        // Try the next harness family; the final attempt names the failure.
+      }
+    return resolveHireModel(catalog, "any harness", name);
+  }
   const key = (value: string) =>
     value
       .toLowerCase()

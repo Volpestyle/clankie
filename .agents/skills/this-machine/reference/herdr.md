@@ -29,7 +29,11 @@ that leading the owner's session means seeing and messaging every pane.
 `clankie fleet set --harness codex --model gpt-6.1-sol --effort xhigh` updates
 fleet worker defaults one field at a time. Use `auto` for a field to remove its
 default and let Clankie choose per job; project roles take the same `auto`
-(`clankie agents role ROLE --project P --model auto --effort auto`). Other hire-profile fields and fleet
+(`clankie agents role ROLE --project P --harness auto --model auto --effort auto`).
+With no harness at any layer, Clankie picks Claude or Codex for each hire; a hire
+that still names none falls back to the machine's usable, unheld accounts (the
+only harness with one, else Codex above half its usage, else Claude) and never
+to a fixed harness. Other hire-profile fields and fleet
 resource settings are preserved. `--hire-profile FILE.json` replaces the whole
 profile; use it separately from these flags. Explicit hire choices override
 project roles, which override fleet defaults. New hires use the result; existing

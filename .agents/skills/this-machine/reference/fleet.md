@@ -116,7 +116,11 @@ Local account labels select registered profiles; on a linked machine they are
 that machine's own profiles (see below).
 Friendly model names are registry-validated, and incompatible/retired names refuse.
 A cross-family override includes its harness; `subagents: null` clears inherited
-child settings for that hire. Inspect the current schema on an older install.
+child settings for that hire. With no harness from the hire, role or fleet,
+Clankie chooses per job; passing none falls back to the hire machine's usable,
+unheld accounts (the only harness with one, else Codex when its best account
+has over half its usage left, else Claude), and refuses when none is usable.
+Inspect the current schema on an older install.
 
 Use the role already configured for the intended project. `projectId`, when
 supplied, must match the hiring conversation's verified project or canonical

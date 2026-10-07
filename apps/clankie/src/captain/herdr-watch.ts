@@ -3,7 +3,7 @@ import { createHireLayout, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import { realpath } from "node:fs/promises";
-import { ProjectHires, type ProjectHireProcessProof } from "./project-hires.ts";
+import { ProjectHires, projectHireProfile, type ProjectHireProcessProof } from "./project-hires.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { HireOwners } from "./hire-owners.ts";
 import {
@@ -94,6 +94,7 @@ import { splitFleetQualified } from "../herdr-fleet.ts";
 import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
 import {
   chooseWorkerAccount,
+  chooseWorkerHarness,
   type MachineWorkerAccounts,
   type WorkerAccountHarness,
   type WorkerAccountHold,
@@ -767,7 +768,7 @@ export interface NativeLaunchPolicy {
 export interface ProjectHirePolicy {
   settings(): Promise<ProjectsSettings>;
   project(
-    input: Readonly<SpawnOperatorSeat>,
+    input: Readonly<HireRequest>,
     settings: ProjectsSettings,
     authority?: ConversationAuthority,
   ): Promise<string | undefined>;
@@ -1640,16 +1641,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const { account: _auto, ...rest } = input;
       input = rest;
     }
-    this.hireDefaultPolicies.set(input, JSON.stringify(defaults));
+    // No layer named a harness: choose one for this hire outside a project. A
+    // project hire chooses below, once its role's fields are known.
+    const unprojected = async (): Promise<SpawnOperatorSeat | HerdrSeatSpawnResult> => {
+      const harness = input.harness ?? (await this.chooseHireHarness(input, resume));
+      if (typeof harness !== "string") return harness;
+      const seat = { ...input, harness };
+      this.hireDefaultPolicies.set(seat, JSON.stringify(defaults));
+      return seat;
+    };
     if (!this.projectPolicy && input.delegation === "native-first")
       return {
         outcome: "failed",
         reason: "not_ready",
         detail: "Native-first hiring requires a verified project and stable deliverable key.",
       };
-    if (!this.projectPolicy)
+    if (!this.projectPolicy) {
+      const seat = await unprojected();
+      if ("outcome" in seat) return seat;
       return this.spawnAdmittedSeat(
-        input,
+        seat,
         subjectOverride,
         brief,
         resume,
@@ -1657,8 +1668,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
         adopt,
         flushAdoption,
       ).then((result) =>
-        result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result,
+        result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(seat) } : result,
       );
+    }
     let allocation: string | undefined;
     try {
       if (authority) await assertConversationAuthority(authority);
@@ -1679,8 +1691,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error(
             "An earlier hire in this workspace is still being checked. Resolve it before hiring again.",
           );
+        const seat = await unprojected();
+        if ("outcome" in seat) return seat;
         return this.spawnAdmittedSeat(
-          input,
+          seat,
           subjectOverride,
           brief,
           resume,
@@ -1688,8 +1702,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
           adopt,
           flushAdoption,
         ).then((result) =>
-          result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result,
+          result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(seat) } : result,
         );
+      }
+      let hireRequest =
+        inputRequest.workingDirectory === input.workingDirectory
+          ? inputRequest
+          : { ...inputRequest, workingDirectory: input.workingDirectory };
+      // No request, role or fleet harness: choose one now, recorded as this hire's own choice.
+      const planned = projectHireProfile(settings, projectId, hireRequest, defaults);
+      if (planned.harness === undefined) {
+        const harness = await this.chooseHireHarness(planned, resume);
+        if (typeof harness !== "string") return harness;
+        hireRequest = { ...hireRequest, harness };
       }
       let live: HerdrAgentSnapshot | undefined;
       if (this.runner.list) {
@@ -1712,16 +1737,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               seat: live.terminalId,
               occupantId: occupantIdForHerdrSession(live.session),
             });
-      const reserved =
-        reused ??
-        this.projectHires.reserve(
-          settings,
-          projectId,
-          inputRequest.workingDirectory === input.workingDirectory
-            ? inputRequest
-            : { ...inputRequest, workingDirectory: input.workingDirectory },
-          defaults,
-        );
+      const reserved = reused ?? this.projectHires.reserve(settings, projectId, hireRequest, defaults);
       if (resume !== undefined && reserved.request.harness !== savedSessionHarness(resume)) {
         this.projectHires.failed(reserved.id);
         throw new Error(
@@ -1735,15 +1751,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
           detail: "The earlier hire is still starting. Wait for its result before trying again.",
         };
       allocation = reserved.id;
-      input = { ...reserved.request, harness: reserved.request.harness! };
-      this.hireDefaultPolicies.set(input, JSON.stringify(defaults));
-      this.projectAllocations.set(input, allocation);
-      this.projectContexts.set(input, { projectId, ...(authority === undefined ? {} : { authority }) });
-      if (reused) this.projectLiveReuse.add(input);
-      if (reserved.reused) this.projectRecoveryOnly.add(input);
+      const harness = reserved.request.harness;
+      if (harness === undefined) throw new Error("This hire's record names no harness; hire again.");
+      const seat: SpawnOperatorSeat = { ...reserved.request, harness };
+      this.hireDefaultPolicies.set(seat, JSON.stringify(defaults));
+      this.projectAllocations.set(seat, allocation);
+      this.projectContexts.set(seat, { projectId, ...(authority === undefined ? {} : { authority }) });
+      if (reused) this.projectLiveReuse.add(seat);
+      if (reserved.reused) this.projectRecoveryOnly.add(seat);
       this.activeProjectHires.add(allocation);
       const result = await this.spawnAdmittedSeat(
-        input,
+        seat,
         subjectOverride,
         brief,
         resume,
@@ -1753,13 +1771,60 @@ export class HerdrWatchStore implements HerdrWatchPort {
       );
       if (result.outcome === "spawned") this.projectHires.confirmed(allocation);
       else this.projectHires.failed(allocation);
-      return result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result;
+      return result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(seat) } : result;
     } catch (error) {
       if (allocation) this.projectHires.failed(allocation);
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
     } finally {
       if (allocation) this.activeProjectHires.delete(allocation);
     }
+  }
+
+  /**
+   * The harness for a hire that names none at any layer. A resumed session
+   * keeps its own. Otherwise the hire's machine decides from its usable
+   * accounts the owner has not held, within the family of any requested model
+   * (`chooseWorkerHarness`); nothing is assumed when they cannot be read.
+   */
+  private async chooseHireHarness(
+    input: HireRequest,
+    resume?: SavedAgentSession,
+  ): Promise<SpawnOperatorSeat["harness"] | HerdrSeatSpawnResult> {
+    if (resume !== undefined) return savedSessionHarness(resume) as SpawnOperatorSeat["harness"];
+    const failed = (detail: string): HerdrSeatSpawnResult => ({
+      outcome: "failed",
+      reason: "harness_unavailable",
+      detail,
+    });
+    if (this.workerAccountsReport === undefined)
+      return failed(
+        "No harness was named and this service cannot read worker accounts to choose one. Pass harness for this hire.",
+      );
+    const models = [input.model, input.subagents?.model].filter((m): m is string => m !== undefined);
+    let allowed: WorkerAccountHarness[] = ["claude", "codex"];
+    if (models.length && this.resolveModel) {
+      const fits: WorkerAccountHarness[] = [];
+      for (const harness of allowed)
+        if (
+          await Promise.all(models.map((model) => this.resolveModel!(harness, model))).then(
+            () => true,
+            () => false,
+          )
+        )
+          fits.push(harness);
+      if (fits.length) allowed = fits;
+    }
+    const machine = input.fleet ?? "this machine";
+    let report: MachineWorkerAccounts;
+    try {
+      report = await this.workerAccountsReport(input.fleet);
+    } catch (error) {
+      return failed(
+        `No harness was named and ${machine}'s worker accounts could not be read (${reasonDetail(error)}). Pass harness for this hire.`,
+      );
+    }
+    const choice = chooseWorkerHarness(machine, report, allowed);
+    return "refused" in choice ? failed(choice.refused) : choice.harness;
   }
 
   private async admitProjectLaunch(input: SpawnOperatorSeat): Promise<void> {

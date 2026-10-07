@@ -17,8 +17,19 @@ names are registry-validated and refuse when missing or retired. Project and
 role caps count starting, live and uncertain seats, and a finished turn still
 holds its pane and slot. `clankie fleet status` shows effective profiles; the
 owner edits them with `clankie agents role ROLE --project PROJECT` or
-`/agents roles`, where `auto` model or effort means no preference. With no
-preference, pass a model or effort only when you choose one for that task.
+`/agents roles`, where `auto` harness, model or effort means no preference.
+With no preference, pass a model or effort only when you choose one for that
+task.
+
+An unset harness is yours to choose per hire (status shows it as "no
+preference"). Guidance from the owner, not a rule: prefer Claude for visual and
+creative work; otherwise pick the best fit for the job and consider each
+harness's usage headroom in `worker_accounts`. Pass the harness you chose. If
+you pass none and no role or fleet names one, the hire falls back to the
+machine's usable, unheld accounts: the only harness that has one, else Codex
+when its best account has more than half its usage left, else Claude (whose
+usage cannot be observed). No usable account refuses before any pane opens. A
+resume keeps its saved session's harness.
 
 Changing `clankie model` or `clankie effort` tunes Clankie's own turns, not an
 external worker. A pane label or a brief asking for effort is not
@@ -44,7 +55,7 @@ Accounts: `worker_accounts` (omit `fleet` for this Mac, or pass one such as
 plan, Codex usage headroom (Claude usage is not observable), worker plugin per
 Claude profile, owner holds, and `usable` or the reason with its fix. Choose the
 harness and `account` per hire from it and the owner's fleet notes; nothing pins
-one. A linked machine's labels are its own: `default` plus each
+one, and no harness is assumed. A linked machine's labels are its own: `default` plus each
 `~/.claude-<label>` / `~/.codex-<label>`. An explicit label is used exactly or
 refused with the machine, profile and fix, never swapped; omitted (or `auto`),
 Clankie takes a usable, unheld account (Codex by headroom) and names what it

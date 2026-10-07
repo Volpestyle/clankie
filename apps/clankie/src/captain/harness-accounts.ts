@@ -448,6 +448,70 @@ export function chooseWorkerAccount(
   };
 }
 
+/** Codex's best observed headroom must beat this to win the fallback; Claude's usage is unobservable. */
+const UNOBSERVED_HEADROOM = 0.5;
+
+type WorkerHarnessChoice =
+  | { readonly harness: WorkerAccountHarness; readonly why: string }
+  | { readonly refused: string };
+
+/**
+ * The fallback harness for a hire that names none at any layer (no request,
+ * role or fleet harness). Clankie normally chooses per job; this runs only when
+ * he passes nothing, and it never assumes a harness. Among the machine's
+ * usable accounts the owner has not held: one harness with any is chosen; with
+ * both, Codex only when its best account has more than half its usage left,
+ * otherwise Claude, whose usage cannot be observed and counts as half.
+ * `allowed` narrows the candidates, for example to the family of a requested
+ * model. No usable account refuses with each skipped account's reason.
+ */
+export function chooseWorkerHarness(
+  machine: string,
+  report: MachineWorkerAccounts,
+  allowed: readonly WorkerAccountHarness[] = WORKER_ACCOUNT_HARNESSES,
+): WorkerHarnessChoice {
+  const best = new Map<WorkerAccountHarness, number>();
+  const skipped: string[] = [];
+  for (const account of report.accounts) {
+    if (!allowed.includes(account.harness)) continue;
+    if (!account.usable || account.held) {
+      skipped.push(
+        `${account.harness} ${account.label}: ${account.held ? `held by the owner${account.held.reason ? ` (${account.held.reason})` : ""}` : account.reason}`,
+      );
+      continue;
+    }
+    const headroom = account.headroom ?? UNOBSERVED_HEADROOM;
+    best.set(account.harness, Math.max(best.get(account.harness) ?? -1, headroom));
+  }
+  const codex = best.get("codex");
+  const claude = best.get("claude");
+  if (codex !== undefined && (claude === undefined || codex > UNOBSERVED_HEADROOM))
+    return {
+      harness: "codex",
+      why:
+        claude === undefined
+          ? `no usable, unheld Claude profile on ${machine}`
+          : `a Codex account on ${machine} has ${Math.round(codex * 100)}% usage left`,
+    };
+  if (claude !== undefined)
+    return {
+      harness: "claude",
+      why:
+        codex === undefined
+          ? `no usable, unheld Codex account on ${machine}`
+          : `Codex's best account on ${machine} has ${Math.round(codex * 100)}% usage left`,
+    };
+  const unavailable = allowed
+    .map((harness) => report.unavailable?.[harness])
+    .filter((reason): reason is string => reason !== undefined);
+  return {
+    refused:
+      `No usable ${allowed.join(" or ")} account on ${machine} to choose a harness from` +
+      `${skipped.length ? `: ${skipped.join("; ")}` : unavailable.length ? `: ${unavailable.join("; ")}` : ""}. ` +
+      "Pass harness (and account) for this hire.",
+  };
+}
+
 /**
  * A machine's worker accounts as Clankie reads them: a linked machine answers
  * through its fleet link; this Mac (and its named local sessions) answers for

@@ -430,6 +430,20 @@ export function projectHireRequest(
   request: SpawnOperatorSeat,
   defaults: HireProfile = {},
 ): SpawnOperatorSeat & { harness: NonNullable<SpawnOperatorSeat["harness"]> } {
+  const result = projectHireProfile(settings, projectId, request, defaults);
+  // The hire chooses a harness before reserving when no layer names one; never assume one here.
+  if (result.harness === undefined)
+    throw new Error("No harness was chosen for this hire. Pass harness, or set one on the role or fleet.");
+  return { ...result, harness: result.harness };
+}
+
+/** The request with its project role and fleet defaults applied; `harness` may stay unset (no preference). */
+export function projectHireProfile(
+  settings: ProjectsSettings,
+  projectId: string,
+  request: SpawnOperatorSeat,
+  defaults: HireProfile = {},
+): SpawnOperatorSeat {
   const project = settings.projects.find((p) => p.id === projectId);
   if (!project) throw new Error("Choose an existing project before hiring.");
   const role = request.role === undefined ? undefined : projectRolePolicy(project, request.role);

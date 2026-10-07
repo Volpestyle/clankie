@@ -2577,7 +2577,15 @@ clankie agents role implementer --project clankie --model auto --effort auto --s
 ```
 
 Explicit hire fields expressing the owner's words win over the role, then
-`fleet.hire` defaults, then the harness default. Omit fields to inherit; a model
+`fleet.hire` defaults; a model or effort no layer sets is left to the harness.
+No harness is assumed: with none from the hire, role or fleet, Clankie chooses a
+Claude or Codex worker for the job (`clankie fleet status` shows
+`harness: no preference` in each role's `summary`). A hire that still names none
+falls back to the hire machine's usable accounts the owner has not held: the
+only harness with one, else Codex when its best account has more than half its
+usage left, else Claude (its usage is not observable), within the family of any
+requested model. No usable account refuses with each account's reason before a
+pane opens; a resume keeps its saved harness. Omit fields to inherit; a model
 family override includes its harness (for example `claude` / `Opus`) and
 `subagents: null` clears incompatible inherited children for that hire. Friendly
 names resolve to exact IDs against the current model registry. Missing, retired,

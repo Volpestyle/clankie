@@ -50,6 +50,8 @@ export interface FleetCommandResult {
     projectId: string;
     role: string;
     profile: ReturnType<typeof effectiveHireProfile>;
+    /** One line naming every unset harness, model and effort as "no preference". */
+    summary: string;
   }>;
   readonly settingsFile: string;
   readonly restart: string;
@@ -71,6 +73,25 @@ function patchHireDefaults(current: HireProfile | undefined, patch: HirePatch): 
     if (value === "auto") delete next[field];
     else next[field] = value;
   return HireProfileSchema.parse(next);
+}
+
+/**
+ * `codex · gpt-6 · high · subagents gpt-6-mini`: the fields a role resolves to.
+ * An unset harness, model or effort is no preference; Clankie chooses per hire.
+ */
+function formatHireProfile(profile: HireProfile): string {
+  const subagents = profile.subagents;
+  return [
+    profile.harness ?? "harness: no preference",
+    profile.model ?? "model: no preference",
+    profile.effort ?? "effort: no preference",
+    profile.delegation,
+    profile.placement,
+    profile.account === undefined ? undefined : `account ${profile.account}`,
+    subagents ? `subagents ${[subagents.model, subagents.effort].filter(Boolean).join(" ")}` : undefined,
+  ]
+    .filter((value) => value !== undefined && value !== "")
+    .join(" · ");
 }
 
 function formatHireDefaults(hire: HireProfile | undefined): string {
@@ -122,11 +143,10 @@ async function result(
       (p.roles.length
         ? p.roles
         : ["planner", "designer", "builder", "tester", "reviewer", "researcher"].map((role) => ({ role }))
-      ).map((r) => ({
-        projectId: p.id,
-        role: r.role,
-        profile: effectiveHireProfile({}, projectRolePolicy(p, r.role), fleet.hire),
-      })),
+      ).map((r) => {
+        const profile = effectiveHireProfile({}, projectRolePolicy(p, r.role), fleet.hire);
+        return { projectId: p.id, role: r.role, profile, summary: formatHireProfile(profile) };
+      }),
     ),
     settingsFile: settings.path,
     restart: "clankie restart",

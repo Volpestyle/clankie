@@ -43,9 +43,14 @@ export function withoutNoPreference(value: unknown): unknown {
   }
   return profile;
 }
-export type EffectiveHireProfile = HireProfile & { harness: (typeof OPERATOR_SEAT_HARNESSES)[number] };
+/** A resolved profile; `harness` stays unset when no layer names one (no preference). */
+export type EffectiveHireProfile = HireProfile;
 
-/** Explicit hire fields win, then role fields, then fleet defaults. Nested fields inherit independently. */
+/**
+ * Explicit hire fields win, then role fields, then fleet defaults. Nested
+ * fields inherit independently. Nothing is assumed: a harness no layer names
+ * stays unset, and the hire chooses one (see `chooseWorkerHarness`).
+ */
 export function effectiveHireProfile(
   request: HireProfile,
   role: HireProfile = {},
@@ -56,7 +61,6 @@ export function effectiveHireProfile(
       Object.entries(value).filter(([k, v]) => k in HireProfileSchema.shape && v !== undefined),
     );
   const result: Record<string, unknown> = {
-    harness: "codex",
     ...defined(fleet),
     ...defined(role),
     ...defined(request),

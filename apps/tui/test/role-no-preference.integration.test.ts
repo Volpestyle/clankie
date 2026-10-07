@@ -146,3 +146,65 @@ it("clears pinned role model and effort to no preference through the CLI, projec
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * No harness anywhere is no preference too: status says so, and the hire
+ * ledger never assumes one (the hire chooses from the machine's accounts
+ * before reserving; see worker-accounts.integration.test.ts).
+ */
+it("reports an unset harness as no preference and never defaults a hire to Codex", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "harness-no-preference-")));
+  try {
+    const settings = new SettingsStore(join(root, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      fleet: { ...current.fleet, hire: { harness: "codex" } },
+      projects: ProjectsSettingsSchema.parse({
+        projects: [{ id: "game", name: "Game", roles: [{ role: "builder", harness: "codex" }] }],
+      }),
+    }));
+    await runFleetCommand(["set", "--harness", "auto"], { settings });
+    const routes = createProjectRoutes(async () => true, settings);
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    const token = mintOperatorToken();
+    await store.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+    await runAgentsCommand(["role", "builder", "--project", "game", "--harness", "auto"], {
+      env: { CLANKIE_OPERATOR_TOKEN: token },
+      operatorCredentialStore: store,
+      host: "http://clankie.test",
+      fetchImpl: (async (url: RequestInfo | URL, init?: RequestInit) =>
+        routes.request(new URL(String(url)).pathname, init)) as typeof fetch,
+    });
+
+    const fresh = await settings.load();
+    expect(fresh.fleet.hire).toEqual({});
+    expect(fresh.projects.projects[0]!.roles).toEqual([{ role: "builder" }]);
+    const status = await runFleetCommand(["status"], { settings });
+    expect(status.roleProfiles).toEqual([
+      {
+        projectId: "game",
+        role: "builder",
+        profile: {},
+        summary: "harness: no preference · model: no preference · effort: no preference",
+      },
+    ]);
+
+    const ledger = new ProjectHires(join(root, "project-hires.json"));
+    const hire = (extra: Record<string, unknown> = {}) =>
+      SpawnOperatorSeatSchema.parse({
+        schemaVersion: 1,
+        role: "builder",
+        title: "Ada",
+        workingDirectory: join(root, "Ada"),
+        ...extra,
+      });
+    expect(() => ledger.reserve(fresh.projects, "game", hire(), fresh.fleet.hire)).toThrow(
+      /No harness was chosen/u,
+    );
+    expect(
+      ledger.reserve(fresh.projects, "game", hire({ harness: "claude" }), fresh.fleet.hire).request,
+    ).toMatchObject({ harness: "claude" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

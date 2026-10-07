@@ -261,7 +261,14 @@ const PC_REPORT: MachineWorkerAccounts = {
 
 describe("a remote hire runs as the account Clankie chose on that machine", () => {
   const pc: HerdrFleet = { id: "pc", session: "default", ssh: { host: "pc.invalid", shell: "powershell" } };
-  async function hireOn(harness: "claude" | "codex", holds: readonly WorkerAccountHold[], account?: string) {
+  async function hireOn(
+    harness: "claude" | "codex" | undefined,
+    holds: readonly WorkerAccountHold[],
+    account?: string,
+    machine: MachineWorkerAccounts = PC_REPORT,
+    // The harness the pane comes up as when the hire names none.
+    expected: "claude" | "codex" = harness ?? "codex",
+  ) {
     const calls: string[][] = [];
     const run: HerdrFleetRun = async (args) => {
       calls.push([...args]);
@@ -300,9 +307,9 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
               {
                 pane_id: "w2:p9",
                 terminal_id: "term_new",
-                agent: harness,
+                agent: expected,
                 agent_status: "idle",
-                agent_session: { source: `herdr:${harness}`, kind: "id", value: "session-new" },
+                agent_session: { source: `herdr:${expected}`, kind: "id", value: "session-new" },
               },
             ],
           },
@@ -312,6 +319,13 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
     };
     const root = await mkdtemp(join(tmpdir(), "clankie-worker-accounts-hire-"));
     roots.push(root);
+    const report = async () => ({
+      ...machine,
+      accounts: machine.accounts.map((entry) => {
+        const hold = holds.find((h) => h.harness === entry.harness && h.label === entry.label);
+        return hold ? { ...entry, held: {} } : entry;
+      }),
+    });
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: routeHerdrFleets(
         {
@@ -322,17 +336,13 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
         new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5 })]]),
       ),
       remoteWorkspace: async (fleet, directory) => fleet === "pc" && directory === "C:\\src\\rivals",
-      workerAccounts: async () => ({
-        ...PC_REPORT,
-        accounts: PC_REPORT.accounts.map((entry) => {
-          const hold = holds.find((h) => h.harness === entry.harness && h.label === entry.label);
-          return hold ? { ...entry, held: {} } : entry;
-        }),
-      }),
+      workerAccounts: report,
     });
+    // The same machine view the worker_accounts tool reads, wired as the captain wires it.
+    store.workerAccountsReport = report;
     const result = await store.spawnSeat({
       schemaVersion: 1,
-      harness,
+      ...(harness === undefined ? {} : { harness }),
       title: "Reader",
       workingDirectory: "C:\\src\\rivals",
       fleet: "pc",
@@ -340,7 +350,11 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
     });
     store.close();
     const tab = calls.find((call) => call[0] === "tab");
-    return { result, env: tab?.flatMap((arg, index) => (tab[index - 1] === "--env" ? [arg] : [])) ?? [] };
+    return {
+      result,
+      calls,
+      env: tab?.flatMap((arg, index) => (tab[index - 1] === "--env" ? [arg] : [])) ?? [],
+    };
   }
 
   it("skips a signed-out default Claude profile for a signed-in one and starts there", async () => {
@@ -378,5 +392,47 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
       refused:
         "No Codex account on pc can take a hire now: default: usage exhausted; james: usage exhausted.",
     });
+  });
+
+  it("with no harness at any layer, chooses one from the machine's accounts instead of assuming Codex", async () => {
+    // Plenty of Codex usage left: Codex, on its best account.
+    const roomy = await hireOn(undefined, []);
+    expect(roomy.result).toMatchObject({ outcome: "spawned", profile: { harness: "codex" } });
+    // Codex under half its usage: Claude, on the signed-in profile, not the signed-out default.
+    const tight: MachineWorkerAccounts = {
+      ...PC_REPORT,
+      accounts: PC_REPORT.accounts.map((entry) =>
+        entry.harness === "codex" ? { ...entry, headroom: 0.3 } : entry,
+      ),
+    };
+    const low = await hireOn(undefined, [], undefined, tight, "claude");
+    expect(low.result).toMatchObject({ outcome: "spawned", profile: { harness: "claude" } });
+    expect(low.env).toContain("CLAUDE_CONFIG_DIR=C:\\Users\\volpe\\.claude-james");
+    // Every Codex account held by the owner: Claude even with full Codex usage.
+    const held = await hireOn(
+      undefined,
+      [
+        { machine: "pc", harness: "codex", label: "default" },
+        { machine: "pc", harness: "codex", label: "james" },
+      ],
+      undefined,
+      PC_REPORT,
+      "claude",
+    );
+    expect(held.result).toMatchObject({ outcome: "spawned", profile: { harness: "claude" } });
+  });
+
+  it("refuses a harness-less hire before any pane when no account can take it", async () => {
+    const out: MachineWorkerAccounts = {
+      ...PC_REPORT,
+      accounts: PC_REPORT.accounts.map((entry) => ({ ...entry, usable: false, reason: "usage exhausted" })),
+    };
+    const { result, calls } = await hireOn(undefined, [], undefined, out);
+    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+    expect((result as { detail: string }).detail).toContain(
+      "No usable claude or codex account on pc to choose a harness from",
+    );
+    expect((result as { detail: string }).detail).toContain("Pass harness");
+    expect(calls).toEqual([]);
   });
 });
