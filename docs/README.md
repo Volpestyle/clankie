@@ -16,6 +16,7 @@ This directory and the module READMEs hold the technical references.
 | [Distribution](distribution.md)                          | Installed layout, runtime ownership, release build and verification        |
 | [Fleet resources](../packages/fleet-resources/README.md) | Shared heavy permits, pressure admission and simulator ownership           |
 | [Credentials](credentials.md)                            | Secret identities, setup, rotation, and authority                          |
+| [Settings inventory](settings-inventory.md)              | Every owner setting, its API and which surfaces set it (VUH-1813)          |
 | [Always on](always-on.md)                                | Host sleep, the awake-Mac option, and the hosted-body alternative          |
 | [Memory](memory.md)                                      | Episodes, person facts, visibility, retention, and operator control        |
 | [Bundled skills](bundled-skills.md)                      | Skill sources, discovery, and worker distribution                          |
