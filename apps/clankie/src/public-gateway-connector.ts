@@ -27,7 +27,7 @@ import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
 import type { PushWakeRequest, PushWakeStatus } from "./push.ts";
 
 /** Set on every request this connector forwards to the local service. */
-export const GATEWAY_FORWARDED_HEADER = "x-clankie-gateway";
+const GATEWAY_FORWARDED_HEADER = "x-clankie-gateway";
 
 const CONNECT_TIMEOUT_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
