@@ -1,4 +1,6 @@
 # Use a distinct Compose project per owner; its volumes and network stay separate.
+# One container runs the whole body under the launcher (Clankie and its relay),
+# so the body can install official releases itself (ADR 0237).
 services:
   captain:
     image: clankie-hosted:local
@@ -7,32 +9,19 @@ services:
       dockerfile: scripts/release/clankie-linux.Dockerfile
     init: true
     restart: unless-stopped
-    stop_grace_period: 45s
+    stop_grace_period: 60s
     volumes:
       - state:/state
       - workspace:/workspace
-    # No host ports, host home, or Docker socket. Use exec/SSH or the outbound gateway.
-
-  relay:
-    image: clankie-hosted:local
-    init: true
-    restart: unless-stopped
-    depends_on:
-      captain:
-        condition: service_healthy
-        restart: true
-    network_mode: service:captain
-    volumes:
-      - state:/state
-    command: ["node", "/opt/clankie/apps/relay/src/index.js"]
     healthcheck:
       test:
         [
           "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:4321/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "sh",
+          "-c",
+          "curl -fsS -o /dev/null --max-time 5 http://127.0.0.1:4310/health && curl -fsS -o /dev/null --max-time 5 http://127.0.0.1:4321/health",
         ]
+    # No host ports, host home, or Docker socket. Use exec/SSH or the outbound gateway.
 
 volumes:
   state:

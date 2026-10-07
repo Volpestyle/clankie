@@ -59,12 +59,16 @@ JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 
 ## Updating the runtime
 
-A hosted image (`/opt/clankie`) never updates itself: its deployment replaces the
-image, so there is no update tool. On a Mac release install (`clankie doctor`
-says `kind: release`), `update_runtime` or
+On a release install (`clankie doctor` says `kind: release`), `update_runtime` or
 `clankie update` moves to the latest official release, or `--ref vX.Y.Z`, and
-answers `upToDate` when already current; read status the same way. The rest of
-this section is a source checkout.
+answers `upToDate` when already current; read status the same way. A hosted body
+is a release install too: it runs `/state/install/current`, seeded from the
+image's `/opt/clankie`, and also installs official releases on its own while
+idle (no turn, activity share or hired worker), hourly. A managed body installs
+nothing newer than its fleet-approved release: "holding releases" or "not
+approved" is the fleet's decision, not a fault, so report it and wait. Self-run
+owners switch idle installs with `clankie update auto on|off`. The rest of this
+section is a source checkout.
 
 Landed code is not live until the pinned runtime is updated. From an admitted
 machine turn, use `update_runtime` or `clankie update [--ref REF]` to fetch the
@@ -143,8 +147,8 @@ Finish the turn, then report `clankie update status` and the canary next turn.
 Plain `clankie restart` is for a wedged process or changed config with no code
 change. This loop is for self-hosted contributors. A Mac release install has
 no source: update to a newer release, or offer your person a source checkout
-(`CONTRIBUTING.md`) to fix it there. A hosted body never changes its own code;
-give your person the trace evidence instead.
+(`CONTRIBUTING.md`) to fix it there. A hosted body never changes its own code:
+give your person the trace evidence; its fix arrives as an official release.
 
 ## Restarting yourself
 

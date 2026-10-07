@@ -48,16 +48,60 @@ jobs:
             dist/clankie-darwin-arm64.tar.gz.sha256
           if-no-files-found: error
 
+  # Hosted bodies install these themselves (ADR 0237). The image's own build
+  # stage builds them, so native code matches the body's glibc.
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: x64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: >-
+          docker build --target build --build-arg CLANKIE_REVISION="$GITHUB_SHA"
+          -f scripts/release/clankie-linux.Dockerfile -t clankie-release-build .
+      - name: Extract the archive
+        run: |
+          id="$(docker create clankie-release-build)"
+          mkdir -p dist
+          docker cp "$id:/clankie/dist/clankie-linux-${{ matrix.arch }}.tar.gz" dist/
+          docker cp "$id:/clankie/dist/clankie-linux-${{ matrix.arch }}.tar.gz.sha256" dist/
+          docker rm "$id"
+          cd dist && sha256sum -c "clankie-linux-${{ matrix.arch }}.tar.gz.sha256"
+      - name: Run the archive in the hosted runtime base
+        run: >-
+          docker run --rm -e GITHUB_REF_NAME -v "$PWD/dist:/dist:ro" node:24.20.0-bookworm-slim sh -euc
+          'mkdir /t && tar -xzf /dist/clankie-linux-${{ matrix.arch }}.tar.gz -C /t &&
+          test "$(/t/clankie/bin/clankie --version)" = "clankie ${GITHUB_REF_NAME#v}"'
+          && test "$(tar -xzOf dist/clankie-linux-${{ matrix.arch }}.tar.gz clankie/release.json | jq -r .revision)" = "$GITHUB_SHA"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clankie-linux-${{ matrix.arch }}-${{ github.ref_name }}
+          path: |
+            dist/clankie-linux-${{ matrix.arch }}.tar.gz
+            dist/clankie-linux-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+
   publish:
-    needs: build
+    needs: [build, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: clankie-darwin-arm64-${{ github.ref_name }}
+          pattern: clankie-*-${{ github.ref_name }}
           path: dist
+          merge-multiple: true
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,5 +110,9 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/clankie-darwin-arm64.tar.gz \
             dist/clankie-darwin-arm64.tar.gz.sha256 \
+            dist/clankie-linux-arm64.tar.gz \
+            dist/clankie-linux-arm64.tar.gz.sha256 \
+            dist/clankie-linux-x64.tar.gz \
+            dist/clankie-linux-x64.tar.gz.sha256 \
             --generate-notes \
             --verify-tag

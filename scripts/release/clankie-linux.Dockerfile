@@ -10,7 +10,9 @@ WORKDIR /clankie
 COPY . .
 RUN pnpm install --frozen-lockfile
 # Cargo supplies the locked Herdr license inventory; no native compiler is shipped.
-RUN node scripts/build-release.mjs --hosted
+# The revision makes the seed an updatable official release (the build has no .git).
+ARG CLANKIE_REVISION
+RUN CLANKIE_REVISION="${CLANKIE_REVISION:-source-checkout}" node scripts/build-release.mjs --hosted
 
 FROM node:24.20.0-bookworm-slim
 RUN apt-get update \
@@ -23,25 +25,27 @@ RUN npm install --global @earendil-works/pi-coding-agent@0.84.2 && npm cache cle
 COPY --from=build /clankie/dist/hosted /opt/clankie
 COPY --chmod=755 scripts/release/hosted-entrypoint.sh /usr/local/bin/clankie-hosted
 COPY --chmod=755 scripts/release/hosted-body.sh /usr/local/bin/clankie-body
-RUN printf '#!/bin/sh\nexec node /opt/clankie/apps/tui/bin/clankie.js "$@"\n' > /usr/local/bin/clankie \
+COPY --chmod=755 scripts/release/hosted-release-root.sh /usr/local/bin/clankie-release-root
+# /opt/clankie is the seed; the body runs and updates /state/install/current (ADR 0237).
+RUN printf '#!/bin/sh\n[ -x /state/install/current/bin/clankie ] && exec /state/install/current/bin/clankie "$@"\nexec /opt/clankie/bin/clankie "$@"\n' > /usr/local/bin/clankie \
  && chmod 755 /usr/local/bin/clankie \
  && mkdir -p /state/home /state/config /state/runtime /workspace \
  && chown -R node:node /state /workspace
 ENV HOME=/state/home \
     SHELL=/bin/bash \
-    CLANKIE_INSTALL_ROOT=/opt/clankie \
     CLANKIE_LAUNCHER_PATH=/usr/local/bin/clankie \
     CLANKIE_STATE=/state/runtime \
     XDG_CONFIG_HOME=/state/config \
     XDG_STATE_HOME=/state/history \
     CLANKIE_CREDENTIALS_FILE=/state/credentials.json \
-    CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE=/opt/clankie/apps/discord-bridge/src/presence-runtime-module.js \
-    CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE=/opt/clankie/apps/discord-user-session/src/presence-runtime-module.js \
+    CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE=/state/install/current/apps/discord-bridge/src/presence-runtime-module.js \
+    CLANKIE_DISCORD_USER_PRESENCE_RUNTIME_MODULE=/state/install/current/apps/discord-user-session/src/presence-runtime-module.js \
     CLANKIE_BROWSER_ENABLED=false \
     CLANKIE_TLDRAW_ENABLED=false \
     CLANKIE_SERVICES=clankie,relay \
+    CLANKIE_SCHEDULED_UPDATES=1 \
     DISABLE_AUTOUPDATER=1
-ENV PATH=/opt/clankie/libexec:$PATH
+ENV PATH=/state/install/current/libexec:/opt/clankie/libexec:$PATH
 USER node
 WORKDIR /workspace
 # Import from the relocated release as the runtime user. The browser's package
@@ -55,6 +59,7 @@ RUN test "$(herdr --version)" = "herdr $(node -p 'require("/opt/clankie/release.
  && cmp /tmp/herdr-skill /opt/clankie/integrations/worker-skills/skills/herdr/SKILL.md \
  && rm /tmp/herdr-skill
 ENTRYPOINT ["clankie-hosted"]
-CMD ["node", "/opt/clankie/apps/clankie/src/index.js"]
+# The whole body under the launcher, so an update can stop and restart its services.
+CMD ["clankie-body"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s \
  CMD node -e 'fetch("http://127.0.0.1:4310/health").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'
