@@ -1,0 +1,123 @@
+{
+  "allocation-result": {
+    "attempts": 22,
+    "exitCounts": {
+      "3": 22
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Failed candidate; no allocation_failed event. Loader exits, denied setup and successes do not satisfy this producer."
+  },
+  "allocation-high-result": {
+    "attempts": 20,
+    "exitCounts": {
+      "3": 20
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Failed candidate; no allocation_failed event. Loader exits, denied setup and successes do not satisfy this producer."
+  },
+  "allocation-auto-result": {
+    "attempts": 26,
+    "exitCounts": {
+      "0": 23,
+      "-11": 1,
+      "-5": 2
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Failed candidate; no allocation_failed event. Loader exits, denied setup and successes do not satisfy this producer."
+  },
+  "allocation-fine-result": {
+    "attempts": 128,
+    "exitCounts": {
+      "-11": 8,
+      "-9": 20,
+      "-5": 30,
+      "0": 70
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Failed candidate; no allocation_failed event. Loader exits, denied setup and successes do not satisfy this producer."
+  },
+  "allocation-classic-result": {
+    "attempts": 128,
+    "exitCounts": {
+      "0": 109,
+      "-9": 4,
+      "-5": 14,
+      "-11": 1
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Failed candidate; no allocation_failed event. Loader exits, denied setup and successes do not satisfy this producer."
+  },
+  "allocation-sandbox-result": {
+    "attempts": 6,
+    "exitCounts": {
+      "-6": 4,
+      "-9": 2
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Failed candidate; no allocation_failed event. Loader exits, denied setup and successes do not satisfy this producer."
+  },
+  "allocation-entry": {
+    "attempts": 9,
+    "exitCounts": {
+      "0": 9
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  },
+  "allocation-zone": {
+    "attempts": 18,
+    "exitCounts": {
+      "0": 18
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  },
+  "allocation-afterload": {
+    "attempts": 2,
+    "exitCounts": {
+      "0": 2
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  },
+  "allocation-afterload-errno": {
+    "attempts": 3,
+    "exitCounts": {
+      "3": 3
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  },
+  "allocation-message": {
+    "attempts": 2,
+    "exitCounts": {
+      "3": 2
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  },
+  "allocation-mig": {
+    "attempts": 1,
+    "exitCounts": {
+      "3": 1
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  },
+  "allocation-filter": {
+    "attempts": 1,
+    "exitCounts": {
+      "3": 1
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  },
+  "allocation-wired": {
+    "attempts": 1,
+    "exitCounts": {
+      "7": 1
+    },
+    "nativeDiagnosticCounts": {},
+    "scope": "Unsuccessful post-load policy candidate entering production source in an isolated driver. Not an installed-helper producer or proof that allocation failure is impossible."
+  }
+}

@@ -1,0 +1,269 @@
+{
+  "host": {
+    "platform": "Darwin",
+    "kernel": "27.0.0"
+  },
+  "helper": {
+    "buildHash": "c151386ee70267534333a5f89918ff0c172e948deacf2bc423295b7f3f267ada",
+    "binaryHash": "d5a2bbdc78c9a7bca6099c9c535600f8834d623f744dac9ccbe390895014cd94"
+  },
+  "guards": {
+    "scope": "defensive, not producible; direct validation inputs, not OS records",
+    "checks": [
+      {
+        "case": "fd-zero",
+        "refused": false
+      },
+      {
+        "case": "fd-positive",
+        "refused": false
+      },
+      {
+        "case": "fd-negative",
+        "refused": true
+      },
+      {
+        "case": "fd-minimum",
+        "refused": true
+      },
+      {
+        "case": "unix-generation-unused",
+        "refused": false
+      },
+      {
+        "case": "unix-socket-zero",
+        "refused": true
+      },
+      {
+        "case": "unix-pcb-zero",
+        "refused": true
+      },
+      {
+        "case": "tcp-generation-zero",
+        "refused": true
+      },
+      {
+        "case": "tcp-complete",
+        "refused": false
+      },
+      {
+        "case": "tcp-socket-zero",
+        "refused": true
+      },
+      {
+        "case": "tcp-pcb-zero",
+        "refused": true
+      },
+      {
+        "cases": 11,
+        "failures": 0
+      }
+    ],
+    "events": [
+      {
+        "schemaVersion": 1,
+        "stage": "fd_list",
+        "reason": "fd_record_invalid",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      },
+      {
+        "schemaVersion": 1,
+        "stage": "fd_list",
+        "reason": "fd_record_invalid",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      },
+      {
+        "schemaVersion": 1,
+        "stage": "socket_owner",
+        "reason": "socket_identity_invalid",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      },
+      {
+        "schemaVersion": 1,
+        "stage": "socket_owner",
+        "reason": "socket_identity_invalid",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      },
+      {
+        "schemaVersion": 1,
+        "stage": "socket_owner",
+        "reason": "socket_identity_invalid",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      },
+      {
+        "schemaVersion": 1,
+        "stage": "socket_owner",
+        "reason": "socket_identity_invalid",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      },
+      {
+        "schemaVersion": 1,
+        "stage": "socket_owner",
+        "reason": "socket_identity_invalid",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      }
+    ],
+    "metrics": {
+      "schemaVersion": 1,
+      "startedAt": "2026-10-06T23:42:30.345Z",
+      "observedAt": "2026-10-06T23:42:30.346Z",
+      "totals": {
+        "proof": {
+          "attempts": 0,
+          "refusals": 0,
+          "byReason": {}
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "fd_record_invalid": 2,
+          "socket_identity_invalid": 5
+        },
+        "transportDiagnostics": {}
+      },
+      "windows": [
+        {
+          "minutes": 5,
+          "proof": {
+            "attempts": 0,
+            "refusals": 0,
+            "byReason": {}
+          },
+          "reports": {
+            "attempts": 0,
+            "failures": 0,
+            "byReason": {}
+          },
+          "nativeDiagnostics": {
+            "fd_record_invalid": 2,
+            "socket_identity_invalid": 5
+          },
+          "transportDiagnostics": {},
+          "proofRefusalRate": 0,
+          "proofRefusalsPerMinute": 0,
+          "reportFailureRate": 0,
+          "reportFailuresPerMinute": 0
+        },
+        {
+          "minutes": 60,
+          "proof": {
+            "attempts": 0,
+            "refusals": 0,
+            "byReason": {}
+          },
+          "reports": {
+            "attempts": 0,
+            "failures": 0,
+            "byReason": {}
+          },
+          "nativeDiagnostics": {
+            "fd_record_invalid": 2,
+            "socket_identity_invalid": 5
+          },
+          "transportDiagnostics": {},
+          "proofRefusalRate": 0,
+          "proofRefusalsPerMinute": 0,
+          "reportFailureRate": 0,
+          "reportFailuresPerMinute": 0
+        }
+      ]
+    }
+  },
+  "cycle": {
+    "kernelCycleConfirmed": true,
+    "originalTargetReaped": true,
+    "refused": true,
+    "events": [
+      {
+        "schemaVersion": 1,
+        "stage": "ancestry",
+        "reason": "ancestry_cycle",
+        "errno": 0,
+        "attempt": 1,
+        "retry": false
+      }
+    ],
+    "metrics": {
+      "schemaVersion": 1,
+      "startedAt": "2026-10-06T23:42:30.480Z",
+      "observedAt": "2026-10-06T23:42:30.480Z",
+      "totals": {
+        "proof": {
+          "attempts": 0,
+          "refusals": 0,
+          "byReason": {}
+        },
+        "reports": {
+          "attempts": 0,
+          "failures": 0,
+          "byReason": {}
+        },
+        "nativeDiagnostics": {
+          "ancestry_cycle": 1
+        },
+        "transportDiagnostics": {}
+      },
+      "windows": [
+        {
+          "minutes": 5,
+          "proof": {
+            "attempts": 0,
+            "refusals": 0,
+            "byReason": {}
+          },
+          "reports": {
+            "attempts": 0,
+            "failures": 0,
+            "byReason": {}
+          },
+          "nativeDiagnostics": {
+            "ancestry_cycle": 1
+          },
+          "transportDiagnostics": {},
+          "proofRefusalRate": 0,
+          "proofRefusalsPerMinute": 0,
+          "reportFailureRate": 0,
+          "reportFailuresPerMinute": 0
+        },
+        {
+          "minutes": 60,
+          "proof": {
+            "attempts": 0,
+            "refusals": 0,
+            "byReason": {}
+          },
+          "reports": {
+            "attempts": 0,
+            "failures": 0,
+            "byReason": {}
+          },
+          "nativeDiagnostics": {
+            "ancestry_cycle": 1
+          },
+          "transportDiagnostics": {},
+          "proofRefusalRate": 0,
+          "proofRefusalsPerMinute": 0,
+          "reportFailureRate": 0,
+          "reportFailuresPerMinute": 0
+        }
+      ]
+    }
+  }
+}
