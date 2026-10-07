@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   OPERATOR_CONVERSATION_REF_MAX,
   OperatorConversationIdSchema,
+  OperatorOwnerTurnOriginSchema,
   OPERATOR_CONVERSATION_CODE_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
@@ -23,16 +24,19 @@ export const OPERATOR_HEAD_AGENT_NAME = "clankie";
 export const OPERATOR_SEAT_EVENTS_PATH = "/v1/seat/events";
 export const OPERATOR_SEAT_EVENT_WAIT_MS_MAX = 30_000;
 /**
+ * `turn` carries a host-authenticated ordinary owner send.
  * `message` carries a fleet seat's DM or room turn, or an authenticated worker
  * report to its leading conversation. Its content grants no new authority.
  */
-export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation", "message"]);
+export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation", "message", "turn"]);
 export type OperatorSeatEventKind = z.infer<typeof OperatorSeatEventKindSchema>;
 export const OperatorSeatEventSchema = z
   .object({
     schemaVersion: z.literal(1),
     id: z.string().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     kind: OperatorSeatEventKindSchema,
+    /** Host-verified owner principal and self-reported surface identity. */
+    ownerOrigin: OperatorOwnerTurnOriginSchema.optional(),
     conversationId: OperatorConversationIdSchema,
     /** Who handed the head this: `service` for his own wakes and watches, otherwise the sending surface. */
     source: z.string().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),

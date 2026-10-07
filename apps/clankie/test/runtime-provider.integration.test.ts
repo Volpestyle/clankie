@@ -72,15 +72,20 @@ async function fixture(provider?: RuntimeProvider) {
     ...(provider === undefined ? {} : { runtimeProvider: provider }),
   });
   cleanups.push(() => captain.close());
+  const ownerCaptain = createBearerAuthenticator("fixture-owner", {
+    captainId: "fixture-captain",
+    steerSourceLane: "api" as const,
+  });
+  const contextCaptain = createBearerAuthenticator("fixture-context", {
+    captainId: "fixture-context",
+    steerSourceLane: "api" as const,
+  });
   const service = await createClankieApp({
     captain,
     deviceSessionKey: randomBytes(32),
     eventLogPath: join(root, "events.jsonl"),
     authenticateOperator: createBearerAuthenticator("fixture-owner", { operatorId: "owner" }),
-    authenticateCaptain: createBearerAuthenticator("fixture-owner", {
-      captainId: "fixture-captain",
-      steerSourceLane: "api",
-    }),
+    authenticateCaptain: async (request) => (await ownerCaptain(request)) ?? contextCaptain(request),
     ...(provider === undefined ? {} : { runtimeProvider: provider }),
   });
   const server = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port: 0 });
@@ -103,8 +108,8 @@ async function fixture(provider?: RuntimeProvider) {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(5_000),
     });
-  const command = async (body: OperatorConversationServiceRequest) => {
-    const response = await request(OPERATOR_CONVERSATION_DISPATCH_PATH, "fixture-owner", body);
+  const command = async (body: OperatorConversationServiceRequest, token = "fixture-owner") => {
+    const response = await request(OPERATOR_CONVERSATION_DISPATCH_PATH, token, body);
     expect(response.status).toBe(200);
     return OperatorConversationServiceResultSchema.parse(await response.json());
   };
@@ -142,15 +147,29 @@ it("the default public app has no quota routes and native captain turns still co
   });
   const [event] = await polled;
   expect(event?.content).toContain("Native request without hosted policy");
+  expect(event).toMatchObject({
+    kind: "turn",
+    ownerOrigin: { surfaceClientId: "fixture", principal: { kind: "operator", id: "owner" } },
+  });
   expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
   expect((await sending).op).toBe("send");
-  expect(await f.captain.replySeatEvent(event!.id, "Native answer", "global-default")).toBe(true);
+  expect(await f.captain.replySeatEvent(event!.id, "Separate tool answer", "global-default")).toBe(false);
+  expect(
+    f.captain.syncSeatTranscript("global-default", {
+      sessionId: "native-global-default",
+      entries: [{ type: "message", id: "native-answer", role: "agent", text: "Native answer" }],
+      activity: "waiting",
+    }),
+  ).toBe(true);
   await expect
     .poll(() => f.journal.read("global-default"))
     .toContainEqual(expect.objectContaining({ type: "turn", phase: "completed" }));
+  expect(
+    f.journal.read("global-default").filter((entry) => entry.type === "message" && entry.role === "captain"),
+  ).toMatchObject([{ text: "Native answer" }]);
 });
 
-it("injected quota routes keep paired-device authorization and heartbeat tracks native turn lifetime", async () => {
+it("injected quota routes keep paired-device authorization and heartbeat tracks native escalation lifetime", async () => {
   let quotaReads = 0;
   const starts: ConversationTurnContext["origin"][] = [];
   let finishes = 0;
@@ -245,21 +264,25 @@ it("injected quota routes keep paired-device authorization and heartbeat tracks 
     const current = await f.command({ schemaVersion: 1, op: "get", conversationId: "global-default" });
     if (current.op !== "get" || !current.conversation) throw new Error("Missing default conversation");
     const message = `Native operator turn: ${completion}`;
-    const sending = f.command({
-      schemaVersion: 1,
-      op: "send",
-      turn: {
+    const sending = f.command(
+      {
         schemaVersion: 1,
-        kind: "message",
-        conversationId: "global-default",
-        surfaceClientId: "fixture",
-        expectedRevision: current.conversation.revision,
-        message,
-        delivery: "queue",
+        op: "send",
+        turn: {
+          schemaVersion: 1,
+          kind: "message",
+          conversationId: "global-default",
+          surfaceClientId: "fixture",
+          expectedRevision: current.conversation.revision,
+          message,
+          delivery: "queue",
+        },
       },
-    });
+      "fixture-context",
+    );
     const [event] = await polled;
     expect(event?.content).toContain(message);
+    expect(event).toMatchObject({ kind: "escalation" });
     expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
     expect((await sending).op).toBe("send");
     expect(finishes).toBe(before);

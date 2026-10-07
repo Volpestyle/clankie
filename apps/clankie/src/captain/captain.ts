@@ -1456,7 +1456,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   function seatEventKind(
     conversationId: string,
-    context: Pick<ConversationTurnContext, "internal" | "origin">,
+    context: Pick<ConversationTurnContext, "internal" | "origin" | "ownerAuthority">,
     content: string,
   ): OperatorSeatEventKind | undefined {
     // VUH-1779: another delivery's unresolved receipt no longer holds this input.

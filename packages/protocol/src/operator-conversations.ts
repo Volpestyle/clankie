@@ -67,6 +67,23 @@ export const OperatorConversationIdSchema = z.string().trim().min(1).max(OPERATO
 export type OperatorConversationId = z.infer<typeof OperatorConversationIdSchema>;
 export const OperatorSurfaceClientIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
 export type OperatorSurfaceClientId = z.infer<typeof OperatorSurfaceClientIdSchema>;
+
+/** Owner attribution stamped by the host after authenticating an ordinary send. */
+export const OperatorOwnerTurnOriginSchema = z
+  .object({
+    /** Self-reported surface identity; it grants no authority. */
+    surfaceClientId: OperatorSurfaceClientIdSchema,
+    /** Principal verified by the host, never copied from the request body. */
+    principal: z
+      .object({
+        kind: z.enum(["operator", "device"]),
+        id: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+      })
+      .strict(),
+  })
+  .strict();
+export type OperatorOwnerTurnOrigin = z.infer<typeof OperatorOwnerTurnOriginSchema>;
+
 export const OperatorConversationCursorSchema = z.string().trim().min(1).max(4096);
 export type OperatorConversationCursor = z.infer<typeof OperatorConversationCursorSchema>;
 export const OperatorConversationRunIdSchema = z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX);
@@ -1599,6 +1616,8 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     type: z.literal("message"),
     /** `agent` is a fleet character; `external` is received context, never operator direction. */
     role: z.enum(["operator", "captain", "agent", "external"]),
+    /** Host-authenticated attribution for an ordinary owner message. */
+    ownerOrigin: OperatorOwnerTurnOriginSchema.optional(),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
     /** Coordinator message identity, retained for duplicate delivery recovery. */

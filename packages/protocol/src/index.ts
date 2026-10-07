@@ -116,6 +116,8 @@ export {
   type OperatorConversationId,
   OperatorSurfaceClientIdSchema,
   type OperatorSurfaceClientId,
+  OperatorOwnerTurnOriginSchema,
+  type OperatorOwnerTurnOrigin,
   OperatorConversationCursorSchema,
   type OperatorConversationCursor,
   OperatorConversationRunIdSchema,

@@ -2004,6 +2004,11 @@ export class ConversationStore {
         this.seatForPersona === undefined ? meta.scope.personaId : this.seatForPersona(meta.scope.personaId);
       return this.queueSeatSend(meta, seatId, turn, { personaId: meta.scope.personaId }, attachments);
     }
+    if (authority !== undefined) {
+      await authorizeQuestion(authority);
+      if (this.metas.get(meta.conversationId) !== meta)
+        throw new ConversationRefusedError("Conversation changed during owner admission");
+    }
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
       return {
@@ -2037,9 +2042,6 @@ export class ConversationStore {
       !meta.nativeSource &&
       this.questionEligible(meta.conversationId)
     ) {
-      await authorizeQuestion(authority);
-      if (this.metas.get(meta.conversationId) !== meta || turn.expectedRevision !== meta.revision)
-        throw new Error("Conversation changed during owner admission");
       this.validQuestionState(meta);
       meta.questions ??= newQuestionState();
       questionBinding = {
@@ -2431,6 +2433,14 @@ export class ConversationStore {
         role: "operator",
         text: message,
         streaming: false,
+        ...(provenance.ownerAuthority === undefined
+          ? {}
+          : {
+              ownerOrigin: {
+                surfaceClientId: provenance.surfaceClientId ?? "operator",
+                principal: { ...provenance.ownerAuthority.principal },
+              },
+            }),
         ...(provenance.attachments === undefined
           ? {}
           : { attachments: provenance.attachments.map((attachment) => attachment.file) }),

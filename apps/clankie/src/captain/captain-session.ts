@@ -375,7 +375,7 @@ export async function runOneShotDiscordTurn(
  * conversation seat. Goal continuations stay with their Pi loop.
  */
 export function seatEventKindFor(
-  context: Pick<ConversationTurnContext, "internal" | "origin">,
+  context: Pick<ConversationTurnContext, "internal" | "origin" | "ownerAuthority">,
   isHeadConversation: boolean,
 ): OperatorSeatEventKind | undefined {
   if (context.internal === true) {
@@ -384,7 +384,7 @@ export function seatEventKindFor(
       return context.origin;
     return undefined;
   }
-  return isHeadConversation ? "escalation" : undefined;
+  return isHeadConversation ? (context.ownerAuthority === undefined ? "escalation" : "turn") : undefined;
 }
 
 export function assistantText(message: { content?: unknown }): string {

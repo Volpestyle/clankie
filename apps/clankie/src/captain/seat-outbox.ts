@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  type OperatorOwnerTurnOrigin,
   OPERATOR_CONVERSATION_TEXT_MAX,
   headSeatDeliveryStage,
   type HireRecoveryEvidence,
@@ -105,6 +106,7 @@ export interface SeatDeliveryInput {
   readonly kind: OperatorSeatEventKind;
   readonly conversationId: string;
   readonly source: string;
+  readonly ownerOrigin?: OperatorOwnerTurnOrigin;
   readonly content: string;
   /** An escalation holds its run open for the seat's answer; a wake or watch settles once taken. */
   readonly wantsReply: boolean;
@@ -415,6 +417,7 @@ export class SeatOutbox {
         kind: input.kind,
         conversationId: input.conversationId,
         source: input.source,
+        ...(input.ownerOrigin === undefined ? {} : { ownerOrigin: input.ownerOrigin }),
         content: fitSeatChannel(input.content),
         createdAt: new Date(this.now()).toISOString(),
       };

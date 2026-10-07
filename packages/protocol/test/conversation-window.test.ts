@@ -116,5 +116,37 @@ describe("recent conversation window", () => {
       hasMore: false,
     };
     expect(OperatorConversationReplayPageSchema.parse(page)).toEqual(page);
+    for (const kind of ["operator", "device"] as const) {
+      const ownerOrigin = { surfaceClientId: "app-phone", principal: { kind, id: "authenticated-owner-7" } };
+      const attributed = {
+        ...page,
+        events: events([
+          { type: "message", role: "operator", text: "ordinary owner input", streaming: false, ownerOrigin },
+        ]),
+      };
+      expect(OperatorConversationReplayPageSchema.parse(attributed)).toEqual(attributed);
+      expect(
+        OperatorConversationReplayPageSchema.safeParse({
+          ...attributed,
+          events: [
+            {
+              ...attributed.events[0],
+              ownerOrigin: { ...ownerOrigin, principal: { kind: "worker", id: "worker-7" } },
+            },
+          ],
+        }).success,
+      ).toBe(false);
+      expect(
+        OperatorConversationReplayPageSchema.safeParse({
+          ...attributed,
+          events: [
+            {
+              ...attributed.events[0],
+              ownerOrigin: { ...ownerOrigin, principal: { kind, id: "x".repeat(513) } },
+            },
+          ],
+        }).success,
+      ).toBe(false);
+    }
   });
 });

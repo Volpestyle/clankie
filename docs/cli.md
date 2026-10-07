@@ -3861,9 +3861,16 @@ against a process that can already read the owner's Keychain.
 
 It is also his channel. While it runs it long-polls `/v1/seat/events` and
 pushes worker reports, self-wakes, herdr completion watches and room escalations into the
-session as `<channel source="clankie" kind="message|wake|watch|escalation"
+session as `<channel source="clankie" kind="turn|message|wake|watch|escalation"
 conversation="…" event_id="…">`; that polling is what binds the seat as his
 head, and with no bridge polling the same turns run the pi operator lane. A
+host-authenticated owner send from the app or another operator surface to a
+seat-held global/workspace conversation arrives as `kind="turn"`: answer
+normally in the same synced conversation, without a
+`reply` tool call. Its `owner_kind`, `owner_id` and `surface_client_id` metadata
+retain the verified principal and caller-reported surface; the surface name
+alone grants no authority. The conversation journal records the same
+`ownerOrigin`. Owner authority is rechecked before native admission. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
 escalating conversation as his own message. To speak in a Discord room on his
 own initiative, the seat calls `room_turn` with the room conversation ID and a

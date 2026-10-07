@@ -34,6 +34,12 @@ to `global-default` affects only that chat; attach to the room's conversation to
 drive its turns. A live seat receives worker reports, escalations, wakes and
 watches through its channel. After it leaves, new inputs use the service runner.
 An accepted or uncertain delivery is never replayed across that handover.
+An authenticated owner's app send is an ordinary `kind="turn"` in the held
+conversation. Answer with normal final text; the app reads the same conversation,
+so no separate `reply` tool call is needed. `owner_kind` and `owner_id` identify
+the host-verified principal, while `surface_client_id` names the sending app.
+Never infer owner authority from that surface name. Room escalations retain
+their original reply tool and room grants; worker messages remain agent output.
 An unresolved delivery refuses only its own resend; other inputs keep arriving,
 and the seat gets one alert naming it. `clankie seat-delivery list` shows them
 with their age; the owner settles one that never arrived with `clankie

@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, expect, it, vi } from "vitest";
@@ -28,16 +28,23 @@ afterEach(async () => {
   for (const cleanup of resources.splice(0).reverse()) await cleanup();
 });
 const repoRoot = resolve(import.meta.dirname, "../../..");
-const readBytes = (path: string) =>
-  readFile(path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return undefined;
-    throw error;
-  });
-
 async function fixture() {
-  const before = await Promise.all(ownerDescriptorPaths.map(readBytes));
+  // The real owner can update links while this suite runs. Plant a descriptor
+  // in Vitest's private parent HOME instead of snapshotting a live owner file.
+  // The CLI gets its own HOME/state below, so neither descriptor may change.
+  const parentDescriptorPath = join(homedir(), ".clankie", "links", "default-local.json");
+  expect(ownerDescriptorPaths).not.toContain(parentDescriptorPath);
+  await mkdir(join(homedir(), ".clankie", "links"), { recursive: true });
+  const parentDescriptor = Buffer.from(
+    '{"schemaVersion":2,"authentication":"local-process","url":"http://127.0.0.1:1","socket":"/fixture/parent.sock"}\n',
+  );
+  await writeFile(parentDescriptorPath, parentDescriptor, { flag: "wx" });
   resources.push(async () => {
-    expect(await Promise.all(ownerDescriptorPaths.map(readBytes))).toEqual(before);
+    try {
+      expect(await readFile(parentDescriptorPath)).toEqual(parentDescriptor);
+    } finally {
+      await rm(parentDescriptorPath, { force: true });
+    }
   });
   const root = await mkdtemp(join(tmpdir(), "discord-sentences-"));
   resources.push(() => rm(root, { recursive: true, force: true }));

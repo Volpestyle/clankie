@@ -208,6 +208,9 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               context.origin === "hook"
                 ? ctx.conversations.linearWakeReceipt(conversationId, context.runId)
                 : undefined;
+            // Surface names are caller claims; only the host-verified principal
+            // makes this an ordinary owner turn. Recheck after attachment setup.
+            if (kind === "turn") await authorizeQuestion(context.ownerAuthority);
             const delivery = await selectedOutbox.deliver({
               ...(linearOriginal
                 ? {
@@ -226,6 +229,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               kind,
               conversationId,
               source: context.surfaceClientId ?? "service",
+              ...(kind === "turn" && context.ownerAuthority !== undefined
+                ? {
+                    ownerOrigin: {
+                      surfaceClientId: context.surfaceClientId ?? "operator",
+                      principal: { ...context.ownerAuthority.principal },
+                    },
+                  }
+                : {}),
               content:
                 attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
               wantsReply: kind === "escalation",
