@@ -70,10 +70,26 @@ int main(int argc, char **argv) {
    struct timespec pause={0,10000000};nanosleep(&pause,NULL);
   }
  }
- /* A detach receipt precedes this wait; ECHILD is never an exit receipt. */
- int status;pid_t result;
- do{result=waitpid(owned,&status,0);}while(result<0&&errno==EINTR);
- if(result!=owned)return 16;
+ /* A detach receipt precedes this wait; ECHILD is never an exit receipt.
+  * Bounded: if the tracer died before detaching, keep continuing only this
+  * original lifetime once it is ours again, then kill it rather than hang. */
+ int status;pid_t result=0;
+ for(int i=0;i<1000&&result!=owned;i++){
+  result=waitpid(owned,&status,WNOHANG);
+  if(result==owned)break;
+  if(result<0&&errno!=EINTR&&errno!=ECHILD)return 16;
+  struct proc_bsdinfo now;
+  if(receipt!=1&&proc_pidinfo(owned,PROC_PIDTBSDINFO,0,&now,sizeof(now))==(int)sizeof(now)&&
+     now.pbi_start_tvsec==original.pbi_start_tvsec&&now.pbi_start_tvusec==original.pbi_start_tvusec&&
+     now.pbi_ppid==(unsigned)getpid())kill(owned,SIGCONT);
+  struct timespec pause={0,10000000};nanosleep(&pause,NULL);
+ }
+ if(result!=owned){
+  kill(owned,SIGKILL);
+  do{result=waitpid(owned,&status,0);}while(result<0&&errno==EINTR);
+  printf("unreaped killed\n");fflush(stdout);
+  return 21;
+ }
  int code=WIFEXITED(status)?WEXITSTATUS(status):17;
  printf("reaped %d\n",code);fflush(stdout);
  return code;

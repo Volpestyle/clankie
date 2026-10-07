@@ -111,3 +111,20 @@ the lead explicitly revises it; this record does not classify it as impossible.
 These cases are manual Darwin opt-ins; they add no native build or churn to
 push CI. No simulator, eval or service model turn is used. The owned worktree's
 frozen dependency install used the actual lockfile and real packages.
+
+## Rebased onto main's per-PID scan (2026-10-07)
+
+Main's helper now merges a changed process census instead of retrying it, so the
+denied retry wait is reached only when one scanned PID changes mid-observation.
+On the rebased helper the original 64-run bound missed `clock_unavailable` in
+one of two runs; a direct measurement hit it on runs 22, 28, 73, 7 and 21. The
+test now uses a 30-second owned churn window and at most 512 helper runs.
+
+One earlier run also timed out in the ancestry-cycle case and left its stopped
+target and supervisor alive, holding the fleet heavy permit for about 50
+minutes until they were killed. The supervisor's final wait is now bounded: it
+continues only the same original lifetime once reparented, then kills its own
+child and fails after ten seconds.
+
+After both changes, three consecutive runs of the manual file passed (3/3 each;
+clock hits on runs 2, 43 and 1), with the guard check and real cycle unchanged.
