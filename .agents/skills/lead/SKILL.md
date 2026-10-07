@@ -120,8 +120,10 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
 - **Right-sized**: model and effort fit the job and the owner's mode. A worker
   that keeps struggling (repeated failed attempts, shallow fixes, going in
   circles) gets more, not more nudges: raise its effort or move the work to a
-  stronger model, whichever the problem needs. That is your call, weighed
-  against usage headroom; the owner doesn't need to approve it.
+  stronger model, whichever the problem needs. Where the owner left model,
+  effort or family as no preference, that is your call, weighed against usage
+  headroom. Where the owner set one (fleet, role or their words for this
+  hire), ask before overriding it, and say what the worker is struggling with.
 - **Context**: at 80% of the window, have the worker prepare a fresh-session
   handoff.
 - **Progress**: two hours with no commit, finding or report attempt on its own
