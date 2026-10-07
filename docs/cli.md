@@ -3550,8 +3550,12 @@ gets the same projection at SessionStart (`clankie prompt --sections conversatio
 An uncertain handoff is never resent; the chat records that it may not have
 arrived. See [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md#the-log-is-the-conversation-2026-10-06).
 Failed self-wakes remain scheduled and
-retry after 5 seconds, doubling to a maximum interval of 5 minutes. Each chat
-has its own retry delay, and a replacement wake starts with a fresh delay.
+retry after 5 seconds, then 10 seconds; after three failed attempts, or at once
+when the model provider rejected Clankie's credentials, the wake is held rather
+than retried. A held wake gets one more attempt when the chat's seat next polls
+(the wake then goes to the seat), and runs again after a service restart. The log
+shows a retried wake's prompt once. Each chat has its own retry state, and a
+replacement wake starts fresh.
 `/autonomy clear` cancels the selected chat's scheduled wake; it does not cancel
 an already running turn. Worker reports retain their original delivery IDs and
 require explicit read acknowledgment after delivery.

@@ -148,6 +148,9 @@ seat cannot hold one. Carry it across turns on wakes:
 | Someone acts on a tracked issue   | signed Linear activity                     | eligible activity only, to the configured chat; your own activity does not wake you     |
 | A time you chose                  | `schedule_wake(at, reason)`                | one pending wake per conversation, and a new one replaces it; only while autonomy is on |
 
+A wake whose turn fails three times, or once with a rejected model credential,
+is held, not retried, until your seat binds or the service restarts.
+
 Keep the objective, done criteria and boundaries in the tracker issue or a
 handoff file. Before ending a turn, check that one of these sources will fire,
 and set a single `schedule_wake` only when none will. Do not use a harness's own

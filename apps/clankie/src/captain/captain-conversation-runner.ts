@@ -2,6 +2,7 @@ import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   type CaptainSessionLaneV2,
   type OperatorConversationActivityPhase,
+  type OperatorGoal,
   type OperatorSeatEventKind,
 } from "@clankie/protocol";
 import { type ClankieSettings } from "@clankie/settings";
@@ -9,7 +10,7 @@ import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-age
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { materializeOwnerAttachments, modelImagesForOwnerAttachments } from "../owner-attachments.ts";
-import { AutonomyStore } from "./autonomy.ts";
+import { AutonomyStore, WakeHeldError } from "./autonomy.ts";
 import { createDraftPacer } from "./captain-draft.ts";
 import { enforceGoalBudget } from "./captain-goals.ts";
 import {
@@ -18,7 +19,7 @@ import {
   operatorSkillName,
   resolveOperatorPrompt,
 } from "./captain-operator-format.ts";
-import { assistantText, runDurableTurn } from "./captain-session.ts";
+import { assistantText, PiRunError, runDurableTurn } from "./captain-session.ts";
 import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
 import {
   authorizeQuestion,
@@ -90,7 +91,31 @@ export interface CreateConversationRunnerContext {
   readonly refuseNativeGoal: (conversationId: string) => boolean;
 }
 
+/**
+ * One goal continuation or self-wake as a host-authored conversation turn.
+ * Throws when the turn fails; a provider refusing the credentials throws
+ * {@link WakeHeldError}, since retrying it only spends another full turn on the
+ * same refusal (2026-10-07: 15+ attempts on an expired token).
+ */
+export async function runAutonomyTurn(
+  conversations: Pick<ConversationStore, "submitInternal" | "awaitRunOutcome">,
+  conversationId: string,
+  prompt: string,
+  origin: "goal" | "wake",
+  expectedGoal?: OperatorGoal,
+): Promise<void> {
+  const result = conversations.submitInternal(conversationId, prompt, origin, expectedGoal);
+  if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
+  const outcome = await conversations.awaitRunOutcome(result.runId);
+  if (outcome.ok) return;
+  if (outcome.error instanceof PiRunError && outcome.error.credentialRejected)
+    throw new WakeHeldError("The model provider rejected Clankie's credentials", { cause: outcome.error });
+  throw new Error("Internal autonomy turn failed");
+}
+
 export function createConversationRunner(ctx: CreateConversationRunnerContext): ConversationRunner {
+  /** The last internal input published per conversation and not yet answered. */
+  const internalInputsShown = new Map<string, string>();
   return async (conversationId, incoming, publish, context) => {
     // A queued turn may start after close releases the preceding seat waiter.
     // It must not see an empty outbox and fall through into a fresh Pi turn.
@@ -258,13 +283,17 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         );
         // Internal inputs never enter the log on their own; record what the
         // service answered so the log, not this lane, carries it forward.
-        if (handoff && context.internal)
+        // A retried wake is the same input, not a new one: show it once until
+        // a turn answers it.
+        if (handoff && context.internal && internalInputsShown.get(conversationId) !== message) {
+          internalInputsShown.set(conversationId, message);
           publish({
             type: "message",
             role: "external",
             text: message.slice(0, OPERATOR_CONVERSATION_TEXT_MAX),
             streaming: false,
           });
+        }
         if (ctx.shutdown.signal.aborted) {
           ctx.shutdown.signal.throwIfAborted();
         }
@@ -595,6 +624,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             return;
           }
           context.deliveryReceipt?.("responded");
+          internalInputsShown.delete(conversationId);
           const text = lane.lastAssistantText.trim();
           await run.wait(
             "said log",

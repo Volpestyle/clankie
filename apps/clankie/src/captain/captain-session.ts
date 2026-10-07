@@ -66,12 +66,26 @@ const STALL_TICK_MS = 5_000;
  * Preserve its reason for the existing failure path. Aborts remain the caller's
  * interrupt path.
  */
+/**
+ * Whether a provider error says it refused the credentials themselves (an
+ * expired or revoked token, a bad key). Another attempt with the same
+ * credentials cannot succeed.
+ */
+export function providerRejectedCredentials(message: string): boolean {
+  return /\b401\b|authentication token has expired|\btoken[_ ]expired\b|\bunauthori[sz]ed\b|invalid[_ ]api[_ ]key|incorrect api key|authentication[_ ]error|invalid[_ ]grant|refresh token (?:has )?(?:expired|been revoked|is invalid)/iu.test(
+    message,
+  );
+}
+
 export class PiRunError extends Error {
   readonly code: string;
+  /** The provider refused the credentials; retrying the same turn cannot help. */
+  readonly credentialRejected: boolean;
 
   constructor(message: string) {
     const included = includedModelRefusal(message);
     super(included?.message ?? message);
+    this.credentialRejected = included === undefined && providerRejectedCredentials(message);
     // Receipts stay content-free; the provider's full reason remains in Pi's tree.
     this.code =
       included?.capped === true ||

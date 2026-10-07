@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { OperatorSeatEventSchema, type OperatorSeatEvent } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
-import { createConversationRunner } from "../src/captain/captain-conversation-runner.ts";
+import { createConversationRunner, runAutonomyTurn } from "../src/captain/captain-conversation-runner.ts";
 import { seatEventKindFor } from "../src/captain/captain-session.ts";
 import type { LaneSession } from "../src/captain/captain-types.ts";
 import { createWorkerReports } from "../src/captain/captain-worker-reports.ts";
@@ -72,6 +72,17 @@ class ScriptedPiSession {
     this.emit({ type: "agent_start" });
     return (async () => {
       await this.script.gate();
+      if (this.script.providerError !== undefined) {
+        // What Pi records when the provider refuses the request.
+        this.state.messages.push({
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: this.script.providerError,
+        } as never);
+        this.isStreaming = false;
+        return;
+      }
       const reply = `Service handled: ${/(?:Wake|Report) [A-Z]\b/u.exec(text)?.[0] ?? "input"}`;
       const message = { role: "assistant", content: [{ type: "text", text: reply }], stopReason: "stop" };
       this.state.messages.push(message);
@@ -87,6 +98,8 @@ class ScriptedPiSession {
 
 interface Script {
   fail: boolean;
+  /** Pi's recorded error when the provider refuses the turn. */
+  providerError?: string;
   gate: () => Promise<void>;
 }
 
@@ -191,12 +204,10 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
   const receipts = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
   const wakeRuns: number[] = [];
   const wakeSettlements: number[] = [];
-  autonomy.start(async (id, prompt, origin) => {
+  autonomy.start(async (id, prompt, origin, expectedGoal) => {
     wakeRuns.push(Date.now());
     try {
-      const result = conversations.submitInternal(id, prompt, origin);
-      if (result.status !== "accepted" || !(await conversations.awaitRunResult(result.runId)))
-        throw new Error("Internal autonomy turn failed");
+      await runAutonomyTurn(conversations, id, prompt, origin, expectedGoal);
     } finally {
       wakeSettlements.push(Date.now());
     }
@@ -441,7 +452,7 @@ it("keeps a long service handoff inside the seat channel's wire contract", async
   expect(parsed.content).not.toContain("were not delivered");
 });
 
-it("keeps failed service wakes on exponential backoff instead of a retry storm", async () => {
+it("keeps failed service wakes on exponential backoff, then holds them instead of a retry storm", async () => {
   // Timers are simulated; service I/O stays real. Freeze the clock until each
   // failure settles, because backoff starts then rather than at admission.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
@@ -462,18 +473,74 @@ it("keeps failed service wakes on exponential backoff instead of a retry storm",
   };
   await vi.advanceTimersByTimeAsync(1_000);
   await settleWake(1);
-  for (const [index, delay] of [5_000, 10_000, 20_000].entries()) {
+  for (const [index, delay] of [5_000, 10_000].entries()) {
     await vi.advanceTimersByTimeAsync(delay - 1);
     expect(f.wakeRuns).toHaveLength(index + 1);
     await vi.advanceTimersByTimeAsync(1);
     await settleWake(index + 2);
   }
-  await vi.advanceTimersByTimeAsync(24_000);
-  expect(f.wakeRuns).toHaveLength(4);
+  // Three attempts, then the wake waits for something to change.
+  await vi.advanceTimersByTimeAsync(60 * 60_000);
+  expect(f.wakeRuns).toHaveLength(3);
   const gaps = f.wakeRuns.slice(1).map((at, index) => at - f.wakeSettlements[index]!);
-  expect(gaps).toEqual([5_000, 10_000, 20_000]);
+  expect(gaps).toEqual([5_000, 10_000]);
   expect(f.sessions.flatMap((session) => session.prompts)).toEqual([]);
   expect(f.autonomy.status(ID).wake?.at).toBe("2026-10-05T17:00:00.000Z");
+  expect(f.autonomy.wakeHeld(ID)).toBe(true);
+  // Retries are the same input: the log shows the wake once.
+  expect(
+    f
+      .events(ID)
+      .filter(
+        (event) =>
+          event.type === "message" &&
+          event.role === "external" &&
+          event.text.includes("Review the pending work"),
+      ),
+  ).toHaveLength(1);
+});
+
+// 2026-10-07: an expired openai-codex token failed a self-wake 15+ times, each
+// attempt a full Pi turn that re-seeded ~49k tokens and appended the wake
+// prompt to the conversation log again.
+it("holds a wake whose provider rejected the credentials after one turn, then gives it to the seat once it binds", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+  vi.setSystemTime(new Date("2026-10-07T15:59:59Z"));
+  const f = fixture();
+  f.conversations.rememberNativeHead(ID, "claude-lead");
+  f.script.providerError = "Your authentication token has expired. Please try refreshing it.";
+  f.autonomy.scheduleWake(ID, "2026-10-07T16:00:00Z", "VUH-1779 live check");
+  const settleWake = async (count: number) => {
+    const deadline = performance.now() + 5_000;
+    while (f.wakeSettlements.length < count) {
+      if (performance.now() > deadline) throw new Error("Service wake did not settle");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  await vi.advanceTimersByTimeAsync(1_000);
+  await settleWake(1);
+  await vi.advanceTimersByTimeAsync(60 * 60_000);
+  expect(f.wakeRuns).toHaveLength(1);
+  expect(f.autonomy.wakeHeld(ID)).toBe(true);
+  const wakeEntries = () =>
+    f
+      .events(ID)
+      .filter(
+        (event) =>
+          event.type === "message" && event.role === "external" && event.text.includes("VUH-1779 live check"),
+      );
+  expect(wakeEntries()).toHaveLength(1);
+  expect(f.events(ID).filter((event) => event.type === "turn" && event.phase === "failed")).toHaveLength(1);
+
+  // The seat binds: the held wake gets one more try, which goes to the seat.
+  const poll = f.pollSeat(ID, 60_000);
+  f.autonomy.releaseHeldWake(ID);
+  await vi.advanceTimersByTimeAsync(1);
+  const [event] = await poll;
+  expect(OperatorSeatEventSchema.parse(event).content).toContain("VUH-1779 live check");
+  expect(f.wakeRuns).toHaveLength(2);
+  expect(wakeEntries()).toHaveLength(1);
 });
 
 it("VUH-1779: an unresolved head delivery refuses only its own resend; later wakes and reports still reach the seat", async () => {

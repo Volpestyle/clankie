@@ -248,6 +248,8 @@ export class ConversationStore {
   private recentPresenceError: { conversationId: string; at: number } | undefined;
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
+  /** Failures kept only for runs whose caller asked why they failed. */
+  private readonly runFailures = new Map<string, { error: unknown } | undefined>();
   private readonly deliveryAdmissions = new Map<
     string,
     {
@@ -838,6 +840,20 @@ export class ConversationStore {
 
   public awaitRunResult(runId: string): Promise<boolean> {
     return this.runs.get(runId) ?? Promise.resolve(false);
+  }
+
+  /** Like {@link awaitRunResult}, plus the error a failed run threw. Ask right after submitting. */
+  public async awaitRunOutcome(runId: string): Promise<{ ok: boolean; error?: unknown }> {
+    const run = this.runs.get(runId);
+    if (run === undefined) return { ok: false };
+    this.runFailures.set(runId, undefined);
+    try {
+      const ok = await run;
+      const failure = this.runFailures.get(runId);
+      return failure === undefined ? { ok } : { ok, error: failure.error };
+    } finally {
+      this.runFailures.delete(runId);
+    }
   }
 
   public has(conversationId: string): boolean {
@@ -2498,6 +2514,7 @@ export class ConversationStore {
         // the only thing that names the actual failure, so it rides along; the
         // stack goes to the service log for anything the summary truncates.
         console.error(`operator turn ${runId} in ${conversationId} failed`, error);
+        if (this.runFailures.has(runId)) this.runFailures.set(runId, { error });
         this.append(meta, {
           type: "turn",
           runId,

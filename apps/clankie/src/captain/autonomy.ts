@@ -14,6 +14,24 @@ import { z } from "zod";
 const MAX_TIMER_MS = 2_147_483_647;
 const WAKE_RETRY_START_MS = 5_000;
 const WAKE_RETRY_MAX_MS = 5 * 60_000;
+/**
+ * Each attempt is a whole model turn (on 2026-10-07, ~49k tokens of context
+ * and a provider request each), so a failing wake gets a few tries and then
+ * waits for something to change instead of looping every five minutes.
+ */
+const WAKE_MAX_ATTEMPTS = 3;
+
+/**
+ * A wake whose turn failed for a reason another attempt cannot fix, such as a
+ * provider rejecting its credentials. The wake is kept but not retried until
+ * the conversation's seat binds or the service restarts.
+ */
+export class WakeHeldError extends Error {
+  public constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "WakeHeldError";
+  }
+}
 export const DEFAULT_GOAL_TOKEN_BUDGET = 1_000_000;
 
 const PersistedAutonomySchema = z
@@ -56,7 +74,10 @@ export class AutonomyStore {
   private run: InternalRun | undefined;
   private readonly goalRuns = new Set<string>();
   private firingWakes = false;
-  private readonly wakeRetries = new Map<string, { wake: OperatorWake; failures: number; retryAt: number }>();
+  private readonly wakeRetries = new Map<
+    string,
+    { wake: OperatorWake; failures: number; retryAt: number; held: boolean; released?: true }
+  >();
   private stateUnreadable = false;
 
   public constructor(path: string) {
@@ -411,6 +432,7 @@ export class AutonomyStore {
     if (!this.state.enabled || this.run === undefined || this.firingWakes) return;
     const next = Object.entries(this.state.conversations)
       .flatMap(([id, record]) => (record.wake === undefined ? [] : [this.wakeDueAt(id, record.wake)]))
+      .filter((at) => Number.isFinite(at))
       .sort((a, b) => a - b)[0];
     if (next === undefined) return;
     this.timer = setTimeout(
@@ -422,7 +444,32 @@ export class AutonomyStore {
 
   private wakeDueAt(conversationId: string, wake: OperatorWake): number {
     const retry = this.wakeRetries.get(conversationId);
+    if (retry?.wake === wake && retry.held) return Number.POSITIVE_INFINITY;
     return Math.max(Date.parse(wake.at), retry?.wake === wake ? retry.retryAt : 0);
+  }
+
+  /** Whether this conversation's wake stopped retrying after a terminal or repeated failure. */
+  public wakeHeld(conversationId: string): boolean {
+    const retry = this.wakeRetries.get(conversationId);
+    return retry !== undefined && retry.held && retry.wake === this.state.conversations[conversationId]?.wake;
+  }
+
+  /**
+   * Something that could change the outcome happened (the seat bound, so the
+   * wake can go there instead of a model turn): give a held wake one more try.
+   * Only once per wake; after that it waits for a restart or a new wake.
+   */
+  public releaseHeldWake(conversationId: string): void {
+    const retry = this.wakeRetries.get(conversationId);
+    if (retry === undefined || !retry.held || retry.released) return;
+    this.wakeRetries.set(conversationId, {
+      ...retry,
+      failures: WAKE_MAX_ATTEMPTS - 1,
+      held: false,
+      released: true,
+      retryAt: Date.now(),
+    });
+    this.arm();
   }
 
   private async fireDueWakes(): Promise<void> {
@@ -445,14 +492,21 @@ export class AutonomyStore {
           this.pruneRecord(conversationId);
           this.save();
         }
-      } catch {
+      } catch (error) {
         // Retain the exact wake, but do not repeatedly admit a failed receiver
-        // or model turn every five seconds. Other conversations stay schedulable.
+        // or model turn. Other conversations stay schedulable. A failure no
+        // retry can fix, or one that keeps recurring, holds the wake.
         if (this.state.conversations[conversationId]?.wake === wake) {
           const previous = this.wakeRetries.get(conversationId);
           const failures = previous?.wake === wake ? previous.failures + 1 : 1;
           const delay = Math.min(WAKE_RETRY_MAX_MS, WAKE_RETRY_START_MS * 2 ** Math.min(failures - 1, 16));
-          this.wakeRetries.set(conversationId, { wake, failures, retryAt: Date.now() + delay });
+          this.wakeRetries.set(conversationId, {
+            wake,
+            failures,
+            retryAt: Date.now() + delay,
+            held: error instanceof WakeHeldError || failures >= WAKE_MAX_ATTEMPTS,
+            ...(previous?.wake === wake && previous.released ? { released: true as const } : {}),
+          });
         }
       }
     }

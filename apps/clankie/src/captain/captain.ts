@@ -81,7 +81,7 @@ import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
-import { createConversationRunner } from "./captain-conversation-runner.ts";
+import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
 import { createDiscordTurns } from "./captain-discord-turns.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
 import { roomForkTool } from "./room-fork-tool.ts";
@@ -2930,11 +2930,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (refuseNativeGoal(conversationId)) return;
       if (autonomy.getGoal(conversationId) !== expectedGoal || expectedGoal.status !== "active") return;
     }
-    const result = conversations.submitInternal(conversationId, prompt, origin, expectedGoal);
-    if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
-    if (!(await conversations.awaitRunResult(result.runId))) {
-      throw new Error("Internal autonomy turn failed");
-    }
+    await runAutonomyTurn(conversations, conversationId, prompt, origin, expectedGoal);
   });
 
   evaluator.start();
@@ -4296,6 +4292,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         autonomy.pauseGoal(binding.conversationId);
       conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
       void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+      // A wake held after model failures can go to the seat that just bound.
+      autonomy.releaseHeldWake(binding.conversationId);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
       try {
         let recipientBinding: string | undefined;
