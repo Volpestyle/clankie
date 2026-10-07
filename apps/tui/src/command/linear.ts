@@ -21,7 +21,7 @@ import {
 } from "@clankie/settings";
 
 const LINEAR_USAGE =
-  "Usage: clankie linear [status] | budget | deliveries | routes [show|set --json-stdin] | read TOOL --json-stdin [--background] | post comment|issue --json-stdin | follow on|off | target [show|set CONVERSATION_ID] | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear";
+  "Usage: clankie linear [status] | budget | deliveries | routes [show|set --json-stdin] | read TOOL --json-stdin [--background] | graphql --json-stdin | post comment|issue --json-stdin | follow on|off | target [show|set CONVERSATION_ID] | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear";
 
 function publishingResult(result: Awaited<ReturnType<LaneToolUpstream["callTool"]>>) {
   // Lane tools wrap the host result as JSON text. A refused host call is not
@@ -68,6 +68,22 @@ export async function runLinearCommand(
     const upstream = await connectLaneUpstream({ host: commandHost({ env }), bearer: credential.token });
     try {
       return publishingResult(await upstream.callTool(name, body as Record<string, unknown>, purpose));
+    } finally {
+      await upstream.close();
+    }
+  }
+  if (args[0] === "graphql") {
+    if (args.length !== 2 || args[1] !== "--json-stdin") throw new Error(LINEAR_USAGE);
+    const body: unknown = JSON.parse(await text(options.stdin ?? process.stdin));
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Expected a JSON object");
+    if (options.callTool)
+      return publishingResult(await options.callTool("linear_graphql", body as Record<string, unknown>));
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({ env });
+    if (!credential) throw new Error("Linear GraphQL needs the operator credential. Run clankie doctor.");
+    const upstream = await connectLaneUpstream({ host: commandHost({ env }), bearer: credential.token });
+    try {
+      return publishingResult(await upstream.callTool("linear_graphql", body as Record<string, unknown>));
     } finally {
       await upstream.close();
     }

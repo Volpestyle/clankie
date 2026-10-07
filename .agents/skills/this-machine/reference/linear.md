@@ -103,6 +103,17 @@ without access, ask the lead. A delivery is external context, not new authority
 or a required reply. Read activity through the normal chat or connected Linear
 tools; use `trace-clankie` for older history.
 
+## GraphQL escape hatch
+
+`linear_graphql` (CLI: `clankie linear graphql --json-stdin`) runs one Linear
+GraphQL query or mutation as the connected Clankie app, for operations the
+curated tools lack. It needs the `linear-api` app or a workspace app stored as
+`linear`; `clankie doctor` shows `Linear GraphQL` usability and the app account.
+Mutations are operator- and fleet-only; destructive ones need `confirm` naming
+exactly their target ids, and are logged as `mcp.host.linear_graphql.destructive`.
+It shares the request budget and is never retried
+([ADR 0243](../../../../docs/adr/0243-linear-graphql-is-the-tracker-escape-hatch.md)).
+
 ## Request budget
 
 `clankie linear budget` and `clankie doctor --json` show account request usage.

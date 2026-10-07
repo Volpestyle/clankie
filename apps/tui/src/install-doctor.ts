@@ -8,6 +8,8 @@ import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import {
   createDefaultCredentialStore,
+  LINEAR_API_PROVIDER_ID,
+  LINEAR_PROVIDER_ID,
   LINEAR_WEBHOOK_PROVIDER_ID,
   type CredentialStore,
   type RedactedCredential,
@@ -120,6 +122,16 @@ export interface InstallDoctorReport {
     readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";
     readonly directory?: string;
   };
+  /** Whether `linear_graphql` has a GraphQL-audience app credential; nothing is probed. */
+  readonly linearGraphql?:
+    | {
+        readonly usable: true;
+        readonly credential: string;
+        readonly actor: "app";
+        readonly account: string;
+        readonly workspace: string;
+      }
+    | { readonly usable: false; readonly detail: string };
   readonly mcpServers: readonly string[];
   readonly credentials: readonly InstallDoctorCredential[];
   readonly commands: { readonly [name: string]: CommandPresence };
@@ -246,6 +258,26 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
           "tracker",
         ),
       };
+  // Mirrors the service's selection: the registered API app, then a workspace
+  // app stored as `linear`. MCP OAuth is audience-restricted and never qualifies.
+  const linearGraphql: NonNullable<InstallDoctorReport["linearGraphql"]> = await (async () => {
+    if (linearServer?.enabled === false) return { usable: false, detail: "Linear is disabled" };
+    for (const [id, auth] of [
+      [LINEAR_API_PROVIDER_ID, "api"],
+      [LINEAR_PROVIDER_ID, "app"],
+    ] as const) {
+      const stored = await credentialStore.get(id).catch(() => undefined);
+      if (stored?.type === "oauth" && stored.linearAuth === auth && stored.account?.actor === "app")
+        return {
+          usable: true,
+          credential: id,
+          actor: "app",
+          account: stored.account.name,
+          workspace: stored.account.workspaceName,
+        };
+    }
+    return { usable: false, detail: "connect the Linear API app from /connect linear" };
+  })();
   const linear = linearFollowStatus(
     settings.linearWebhook,
     linearSecret?.type === "api" && linearSecret.key.trim().length > 0,
@@ -342,6 +374,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       settings.email.imapHost !== undefined,
     linear,
     tracker,
+    linearGraphql,
     mcpServers: settings.mcp.servers.filter((server) => server.enabled).map((server) => server.id),
     credentials,
     commands,

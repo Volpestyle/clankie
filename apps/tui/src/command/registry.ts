@@ -289,6 +289,7 @@ const HEADLESS_COMMAND_HELP = [
       "  linear read TOOL --json-stdin [--background]   Read Linear; automated polls yield to interactive work",
       "  linear wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES]",
       "  linear post comment|issue --json-stdin   Publish as an existing worker persona through the connected app",
+      "  linear graphql --json-stdin   Run any Linear GraphQL operation as the connected Clankie app",
     ],
   },
   {

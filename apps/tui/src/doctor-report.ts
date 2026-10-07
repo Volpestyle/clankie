@@ -110,6 +110,13 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
           }${report.tracker.directory ? ` · ${report.tracker.directory}` : ""}`,
         ]
       : []),
+    ...(report.linearGraphql === undefined
+      ? []
+      : [
+          report.linearGraphql.usable
+            ? `  ✓ Linear GraphQL · runs as ${clean(report.linearGraphql.account)} (app) in ${clean(report.linearGraphql.workspace)} · ${report.linearGraphql.credential}`
+            : `  ○ Linear GraphQL · unavailable · ${clean(report.linearGraphql.detail)}`,
+        ]),
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
     ...(report.mcpServers.length ? [`  MCP · ${report.mcpServers.join(", ")}`] : []),
     ...(report.workingPreferences === undefined

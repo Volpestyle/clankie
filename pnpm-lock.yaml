@@ -130,6 +130,9 @@ importers:
       ai:
         specifier: ^7.0.19
         version: 7.0.19(zod@4.4.3)
+      graphql:
+        specifier: 16.11.0
+        version: 16.11.0
       hono:
         specifier: 4.12.28
         version: 4.12.28
@@ -158,9 +161,6 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
-      graphql:
-        specifier: 16.11.0
-        version: 16.11.0
       mineflayer:
         specifier: 4.35.0
         version: 4.35.0

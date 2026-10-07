@@ -24,7 +24,7 @@ import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
-import { createLinearApiProvider, ISSUE_ID } from "./fixtures/linear-api-provider.ts";
+import { createLinearApiProvider, DOCUMENT_ID, ISSUE_ID } from "./fixtures/linear-api-provider.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -447,6 +447,81 @@ it("an admitted API mutation keeps an uncertain receipt until its original respo
     ).toHaveLength(1);
     expect(f.apiProvider!.rows.comments!.filter((row) => row.body === args.arguments.body)).toHaveLength(1);
     expect(f.apiProvider!.validationErrors).toEqual([]);
+  } finally {
+    held.release();
+  }
+});
+
+const removeScratch = {
+  name: "linear_graphql",
+  arguments: {
+    query: "mutation Remove($id: String!) { documentDelete(id: $id) { success } }",
+    variables: { id: DOCUMENT_ID },
+  },
+};
+const confirmedRemoval = {
+  ...removeScratch,
+  arguments: { ...removeScratch.arguments, confirm: [DOCUMENT_ID] },
+};
+
+it("a fleet worker queries and deletes a scratch document through linear_graphql with one durable receipt", async () => {
+  const f = await fixture({ api: true });
+  const session = await f.initialize();
+  const deletes = () => f.apiProvider!.seen.filter((entry) => entry.query?.includes("documentDelete"));
+  expect(await f.call(removeScratch, session)).toMatchObject({
+    outcome: "refused",
+    reason: "confirmation_required",
+    toolError: true,
+  });
+  const read = await f.call(
+    {
+      name: "linear_graphql",
+      arguments: {
+        query: "query Scratch($id: String!) { document(id: $id) { id title } }",
+        variables: { id: DOCUMENT_ID },
+      },
+    },
+    session,
+  );
+  expect(read).toMatchObject({ outcome: "ok", isError: false, toolError: false });
+  expect(JSON.parse(read.content)).toMatchObject({ data: { document: { id: DOCUMENT_ID } } });
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "off" } }));
+  expect(await f.call(confirmedRemoval, session)).toMatchObject({ outcome: "refused", toolError: true });
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "connected" } }));
+  expect(deletes()).toHaveLength(0);
+  const receiptId = randomUUID();
+  const removed = await f.call(confirmedRemoval, session, undefined, receiptId);
+  expect(removed).toMatchObject({ outcome: "ok", receiptId, isError: false, toolError: false });
+  expect(await f.call(confirmedRemoval, session, undefined, receiptId)).toEqual(removed);
+  expect(await f.call({ receiptId }, session)).toEqual(removed);
+  expect(deletes()).toHaveLength(1);
+  expect(f.apiProvider!.rows.documents).toEqual([]);
+  expect(f.apiProvider!.validationErrors).toEqual([]);
+});
+
+it("an uncertain linear_graphql mutation reconciles by receipt and is never resent", async () => {
+  const f = await fixture({ api: true });
+  const session = await f.initialize();
+  const held = f.apiProvider!.blockNextMutationResponse();
+  const receiptId = randomUUID();
+  try {
+    const pending = f.call(confirmedRemoval, session, undefined, receiptId);
+    await held.started;
+    expect(await pending).toMatchObject({ outcome: "uncertain", receiptId, toolError: false });
+    expect(await f.call(confirmedRemoval, session, undefined, receiptId)).toMatchObject({
+      outcome: "uncertain",
+      receiptId,
+    });
+    held.release();
+    await f.observed.promise;
+    expect(await f.call({ receiptId }, session)).toMatchObject({
+      outcome: "ok",
+      receiptId,
+      isError: false,
+      toolError: false,
+    });
+    expect(f.apiProvider!.seen.filter((entry) => entry.query?.includes("documentDelete"))).toHaveLength(1);
+    expect(f.apiProvider!.rows.documents).toEqual([]);
   } finally {
     held.release();
   }

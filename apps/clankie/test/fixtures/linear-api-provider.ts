@@ -13,6 +13,7 @@ export const STATE_ID = "00000000-0000-4000-8000-000000000006";
 const STATUS_ID = "00000000-0000-4000-8000-000000000007";
 export const COMMENT_ID = "00000000-0000-4000-8000-000000000008";
 export const UPDATE_ID = "00000000-0000-4000-8000-000000000009";
+export const DOCUMENT_ID = "00000000-0000-4000-8000-00000000000a";
 const timestamp = "2026-10-05T02:00:00.000Z";
 type Row = Record<string, unknown>;
 const connection = (nodes: Row[]) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
@@ -139,6 +140,16 @@ export async function createLinearApiProvider(
     ],
     projectLabels: [],
     issueRelations: [],
+    documents: [
+      {
+        id: DOCUMENT_ID,
+        title: "Scratch document",
+        content: "Disposable fixture content",
+        url: "https://linear.app/document/scratch",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    ],
     initiatives: [
       {
         id: "goal-1",
@@ -158,6 +169,7 @@ export async function createLinearApiProvider(
     comment: "comments",
     projectUpdate: "projectUpdates",
     issueLabel: "issueLabels",
+    document: "documents",
   };
   const seen: Array<{
     path: string;
@@ -346,6 +358,11 @@ export async function createLinearApiProvider(
           if (input.labelIds || input.addedLabelIds) base.labels = connection([label]);
           if (!existing) rows[list]!.push(base);
           data[key] = { success: true, [entity]: base };
+        } else if (field === "documentDelete") {
+          const index = rows.documents!.findIndex((row) => row.id === variables.id);
+          if (index === -1) throw new Error(`Unknown document ${String(variables.id)}`);
+          const [removed] = rows.documents!.splice(index, 1);
+          data[key] = { success: true, entity: removed };
         } else if (field.endsWith("Delete")) data[key] = { success: true };
         else throw new Error(`Unimplemented fixture field ${field}`);
       }
