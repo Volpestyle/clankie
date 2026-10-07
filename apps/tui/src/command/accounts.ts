@@ -13,6 +13,7 @@ import {
   AccountGoogleStartResultSchema,
   AccountGoogleCompleteRequestSchema,
   AccountGoogleCompleteResultSchema,
+  AccountsResponseSchema,
   GoogleAccountProviderSchema,
 } from "@clankie/protocol/accounts";
 import {
@@ -25,7 +26,7 @@ import { commandHost } from "./io.ts";
 import { isHostedModelEnvironment } from "@clankie/model-provider";
 
 const ACCOUNTS_USAGE =
-  "Usage: clankie accounts [list] | connect github|linear|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
+  "Usage: clankie accounts [list] | connect github|linear|email|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
 
 const APP_FLAGS = {
   "--github-client-id": ["github", "clientId"],
@@ -163,10 +164,27 @@ export async function runAccountsCommand(
     if (!parsed.success) throw new Error("Invalid Linear app credentials");
     return request("/v1/accounts/linear/app", parsed.data);
   }
+  if (args.length === 2 && args[0] === "connect" && args[1] === "email") {
+    // His Clankie mailbox (ADR 0242): the install's account authorizes it, so
+    // connecting is choosing it. A hosted body already uses it.
+    if (!options.request) {
+      const settings = options.settings ?? new SettingsStore(defaultSettingsPath(env));
+      await settings.update((current) => {
+        const { fromAddress: _imapIdentity, ...email } = current.email;
+        return { ...current, email: { ...email, provider: "clankie" as const } };
+      });
+    }
+    const listed = AccountsResponseSchema.safeParse(await request("/v1/accounts"));
+    const connection = listed.success
+      ? listed.data.connections.find((item) => item.provider === "email")
+      : undefined;
+    if (connection === undefined) throw new Error("Mailbox status unavailable");
+    return { ok: connection.status === "connected", connection };
+  }
   if (
     args.length === 2 &&
     args[0] === "disconnect" &&
-    (args[1] === "github" || args[1] === "linear" || google.success)
+    (args[1] === "github" || args[1] === "linear" || args[1] === "email" || google.success)
   )
     return request("/v1/accounts/disconnect", { provider: args[1] });
   if (args.length === 2 && args[0] === "connect" && args[1] === "github") {

@@ -5,7 +5,9 @@ Status: accepted (James, 2026-08-19). Amends
 owner's inbox; the connector now points at Clankie's own address, and the
 console-only rule survives for a different reason. Builds on
 [ADR 0082](0082-clankie-holds-the-browser.md): the persistent profile is where
-these accounts live.
+these accounts live. Its mailbox decision (a Cloudflare forward into a
+hand-made Gmail read with an app password) is superseded by
+[ADR 0242](0242-every-clankie-has-a-mailbox-we-run.md).
 
 ## Context
 

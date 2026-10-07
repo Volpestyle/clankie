@@ -1,11 +1,20 @@
 /**
- * IMAP/SMTP mailbox as a first-class captain connector. The password is
- * broker-owned (`email`); host and username live in owner-authored settings.
+ * His mailbox as a first-class captain connector, behind one port with two
+ * backends: Clankie's own mail service (ADR 0242), and the owner's IMAP/SMTP
+ * server, whose password is broker-owned (`email`) and whose host and username
+ * live in owner-authored settings.
  */
 import type { CredentialStore } from "@clankie/credential-broker";
 import type { EmailSettings, SettingsStore } from "@clankie/settings";
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
+import type { HostedMailRefusal } from "@clankie/protocol/hosted-mail";
+import {
+  describeHostedRefusal,
+  hostedFolder,
+  hostedMailParsers,
+  type HostedMailbox,
+} from "./hosted-mailbox.ts";
 
 export const EMAIL_PROVIDER_ID = "email";
 
@@ -14,6 +23,9 @@ type EmailRefusalReason =
   | "not_configured"
   /** The provider refused the stored sign-in: the owner has to reconnect. */
   | "sign_in_rejected"
+  /** Clankie's mail service refused a send at one of its outbound limits; the detail names it. */
+  | "limit_reached"
+  | "recipient_refused"
   | "provider_error";
 
 type EmailRefusal = {
@@ -104,6 +116,199 @@ const STATUS_FRESH_MS = 60_000;
 const SIGN_IN_REJECTED = "mailbox sign-in rejected — reconnect with /connect email";
 
 export function createEmailPort(options: {
+  credentials: CredentialStore;
+  settings: SettingsStore;
+  adapters?: EmailAdapters;
+  /** Clankie's mail service, when this install can reach it (hosted body or signed-in account). */
+  hosted?: HostedMailbox;
+  now?: () => number;
+}): EmailPort {
+  const imap = createImapPort(options);
+  const hosted = options.hosted === undefined ? undefined : createHostedPort(options.hosted, options);
+  async function backend(): Promise<EmailPort> {
+    const email = (await options.settings.load()).email;
+    if (email.provider === "imap" || hosted === undefined) return imap;
+    if (email.provider === "clankie") return hosted;
+    // Unset: the owner's own server when one is configured, his Clankie address otherwise.
+    if (email.imapHost !== undefined && email.username !== undefined) return imap;
+    return (await options.hosted!.available()) ? hosted : imap;
+  }
+  return {
+    status: async () => (await backend()).status(),
+    disconnect: async () => (await backend()).disconnect(),
+    list: async (input) => (await backend()).list(input),
+    read: async (uid, folder) => (await backend()).read(uid, folder),
+    search: async (query, input) => (await backend()).search(query, input),
+    send: async (input) => (await backend()).send(input),
+  };
+}
+
+function createHostedPort(
+  mailbox: HostedMailbox,
+  options: { settings: SettingsStore; now?: () => number },
+): EmailPort {
+  const now = options.now ?? Date.now;
+  let observed:
+    | { readonly address?: string; readonly status: MailboxStatus; readonly at: number }
+    | undefined;
+
+  function refuse(refusal: Parameters<typeof describeHostedRefusal>[0]): EmailRefusal {
+    return { outcome: "refused", ...describeHostedRefusal(refusal) };
+  }
+
+  async function call<T extends { readonly ok: true; readonly address: string }>(
+    schema: {
+      safeParse(value: unknown): { success: true; data: T | HostedMailRefusal } | { success: false };
+    },
+    request: Parameters<HostedMailbox["request"]>[0],
+  ): Promise<T | EmailRefusal> {
+    let answer: unknown;
+    try {
+      answer = await mailbox.request(request);
+    } catch (error) {
+      return remember({
+        outcome: "refused",
+        reason: "provider_error",
+        detail: `the mail service could not be reached (${error instanceof Error ? error.message : String(error)})`,
+      });
+    }
+    const parsed = schema.safeParse(answer);
+    if (!parsed.success)
+      return remember({
+        outcome: "refused",
+        reason: "provider_error",
+        detail: "the mail service answered unexpectedly",
+      });
+    const result = parsed.data;
+    if (!result.ok) {
+      const refusal = refuse(result);
+      // A limit, a refused recipient or a missing message is about the request, not the mailbox.
+      return result.refusal === "limit_reached" ||
+        result.refusal === "recipient_suppressed" ||
+        result.refusal === "not_found"
+        ? refusal
+        : remember(refusal);
+    }
+    observed = {
+      address: result.address,
+      status: { state: "connected", address: result.address, checkedAt: new Date(now()).toISOString() },
+      at: now(),
+    };
+    await recordAddress(options.settings, result.address);
+    return result;
+  }
+
+  function remember(refusal: EmailRefusal): EmailRefusal {
+    const address = observed?.address;
+    observed = {
+      ...(address === undefined ? {} : { address }),
+      status:
+        refusal.reason === "not_configured"
+          ? { state: "not_connected" }
+          : {
+              state: refusal.reason === "sign_in_rejected" ? "sign_in_rejected" : "unavailable",
+              address: address ?? "",
+              checkedAt: new Date(now()).toISOString(),
+            },
+      at: now(),
+    };
+    return refusal;
+  }
+
+  const folderOf = (input: string | undefined): "INBOX" | "Sent" | EmailRefusal =>
+    hostedFolder(input?.trim() || "INBOX") ?? {
+      outcome: "refused",
+      reason: "provider_error",
+      detail: "his Clankie mailbox has two folders: INBOX and Sent",
+    };
+
+  return {
+    async status() {
+      if (observed === undefined || now() - observed.at > STATUS_FRESH_MS)
+        await call(hostedMailParsers.status, { op: "status" });
+      return observed?.status ?? { state: "not_connected" };
+    },
+    async disconnect() {
+      // The address belongs to the account; choosing IMAP is how an owner stops using it.
+      await options.settings.update((current) => ({
+        ...current,
+        email: { ...current.email, provider: "imap" },
+      }));
+      observed = undefined;
+    },
+    async list(input = {}) {
+      const folder = folderOf(input.folder);
+      if (typeof folder !== "string") return folder;
+      const result = await call(hostedMailParsers.list, {
+        op: "list",
+        folder,
+        limit: clampLimit(input.limit),
+      });
+      return "outcome" in result ? result : { outcome: "ok", messages: result.messages.map(hostedHeader) };
+    },
+    async read(uid, folderInput) {
+      const folder = folderOf(folderInput);
+      if (typeof folder !== "string") return folder;
+      const result = await call(hostedMailParsers.read, { op: "read", uid, folder });
+      if ("outcome" in result)
+        return result.detail === "no such message"
+          ? { ...result, detail: `no message uid ${String(uid)}` }
+          : result;
+      const { text, ...header } = result.message;
+      return {
+        outcome: "ok",
+        message: {
+          ...hostedHeader(header),
+          text: text.length <= MAX_BODY_CHARS ? text : `${text.slice(0, MAX_BODY_CHARS)}\n… truncated`,
+        },
+      };
+    },
+    async search(query, input = {}) {
+      const folder = folderOf(input.folder);
+      if (typeof folder !== "string") return folder;
+      const result = await call(hostedMailParsers.search, {
+        op: "search",
+        query,
+        folder,
+        limit: clampLimit(input.limit),
+      });
+      return "outcome" in result ? result : { outcome: "ok", messages: result.messages.map(hostedHeader) };
+    },
+    async send(input) {
+      const result = await call(hostedMailParsers.send, { op: "send", ...input });
+      return "outcome" in result ? result : { outcome: "ok", messageId: result.messageId };
+    },
+  };
+}
+
+function hostedHeader(header: {
+  uid: number;
+  folder: string;
+  from: string;
+  to: string;
+  subject: string;
+  date?: string | undefined;
+}): EmailHeader {
+  const { date, ...rest } = header;
+  return date === undefined ? rest : { ...rest, date };
+}
+
+/**
+ * The service assigns his address; the captain prompt states it from settings
+ * (ADR 0127), so the first answer that carries it writes it there once. An
+ * address the owner set for an IMAP mailbox is never replaced.
+ */
+async function recordAddress(settings: SettingsStore, address: string): Promise<void> {
+  const email = (await settings.load()).email;
+  if (email.fromAddress === address) return;
+  if (email.provider === "imap" || (email.provider === undefined && email.fromAddress !== undefined)) return;
+  await settings.update((current) => ({
+    ...current,
+    email: { ...current.email, provider: "clankie", fromAddress: address },
+  }));
+}
+
+function createImapPort(options: {
   credentials: CredentialStore;
   settings: SettingsStore;
   adapters?: EmailAdapters;

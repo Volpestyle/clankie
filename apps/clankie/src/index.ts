@@ -129,6 +129,7 @@ import {
   reconcileDiscordVoice,
 } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
+import { accountMailbox, bodyMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
@@ -763,10 +764,34 @@ const discordTracking = new DiscordTracking({
   onError: () => logger.warn("Discord project tracking retained an unavailable or uncertain delivery"),
 });
 
+// His Clankie address (ADR 0242): a managed body signs with its host credential;
+// a self-hosted install reaches the same service with its Clankie account.
+const selfHostedMailGateway = async () =>
+  (await settingsStore.load()).publicGateway.url ?? DEFAULT_CLANKIE_GATEWAY_URL;
+const mailAccountTokens = new Map<string, ReturnType<typeof createClankieAccountTokenProvider>>();
 const email = createEmailPort({
   credentials: operatorCredentialStore,
   settings: settingsStore,
+  hosted:
+    hostedBody !== undefined
+      ? bodyMailbox((path, request) => hostedBody.signedPost(path, request))
+      : accountMailbox({
+          gatewayUrl: selfHostedMailGateway,
+          signedIn: async () =>
+            (await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID))?.type === "oauth",
+          token: async () => {
+            const gatewayUrl = await selfHostedMailGateway();
+            let tokens = mailAccountTokens.get(gatewayUrl);
+            if (tokens === undefined) {
+              tokens = createClankieAccountTokenProvider({ gatewayUrl, store: operatorCredentialStore });
+              mailAccountTokens.set(gatewayUrl, tokens);
+            }
+            return tokens();
+          },
+        }),
 });
+// A managed body learns its address at boot so the captain can say it.
+if (hostedBody !== undefined) void email.status().catch(() => undefined);
 
 const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
 let proofFleetLinks: FleetLinks | undefined;

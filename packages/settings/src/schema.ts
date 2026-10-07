@@ -584,6 +584,13 @@ const HostnameSchema = z
  */
 export const EmailSettingsSchema = z
   .object({
+    /**
+     * Which mailbox the mail tools use. `clankie`: his address on Clankie's
+     * mail service, reached with this install's Clankie account or hosted
+     * body credential (ADR 0242). `imap`: the owner's own server below.
+     * Unset picks IMAP when it is configured and the Clankie mailbox otherwise.
+     */
+    provider: z.enum(["clankie", "imap"]).optional(),
     imapHost: HostnameSchema.optional(),
     imapPort: z.number().int().min(1).max(65535).default(993),
     smtpHost: HostnameSchema.optional(),

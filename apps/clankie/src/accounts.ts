@@ -135,7 +135,7 @@ async function mailboxConnection(mailbox: Pick<EmailPort, "status">): Promise<Ac
   if (status.state === "not_connected") return { ...catalog, status: "not_connected" as const };
   return {
     ...catalog,
-    account: status.address,
+    ...(status.address.length === 0 ? {} : { account: status.address }),
     lastCheckedAt: status.checkedAt,
     ...(status.state === "connected"
       ? { status: "connected" as const }
