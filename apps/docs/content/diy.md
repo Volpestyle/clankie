@@ -110,12 +110,21 @@ explains discovery.
 
 “Hang out in our server, but only jump in when we address you.” `/discord`
 connects a server with a **Participant** or **Admin** role and picks his rooms.
-First-time bot setup is in the
+The quickest way in is the free **official Clankie bot**: sign in with
+`clankie remote-access on`, run `clankie discord official on` and
+`clankie restart`, then choose **Add to Discord** on your account page. No
+developer portal, bot token or intents setup; Clankie still runs on your
+machine with your own keys. The official bot has fair-use limits per account
+and per server, and `clankie discord official` shows them. Creating your own
+bot remains the advanced path, in the
 [Discord connection guide](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md#configure-discord).
 
 Reply policy `addressed` shows him messages that start with his name or mention
 him, plus the next few after he replies (`--live-message-window`, default 5).
 `all` shows him every admitted message. Neither forces a reply.
+`clankie discord set --wake-trigger addressed|name|any` overrides it for text:
+`addressed` is mentions and DMs only, `name` adds his name, `any` is every
+message. Unset keeps the reply policy above.
 
 ```bash
 clankie persona set --reply-policy addressed --chattiness quiet

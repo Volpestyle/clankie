@@ -4001,6 +4001,31 @@ Return stored and effective non-secret Discord configuration:
 `discord` is the stored value. `effectiveDiscord` includes environment
 overrides, whose variable names appear in `overriddenByEnvironment`.
 
+### `discord official [status|on|off]`
+
+The free official Clankie bot through the signed-in Clankie account
+(VUH-1766). `on` requires `clankie remote-access on`, refuses when this
+machine's own bot is the official application, and sets
+`discord.officialBotEnabled`; after `clankie restart` the service registers an
+ingress key with the account and the owner chooses Add to Discord at
+`installUrl`. `status` returns the fleet's route (`registered`, `discord`,
+`usage` per named limit, and `blocked` with its scope and reason). `off` clears
+the setting and removes the route, which disconnects the server.
+
+```json
+{
+  "ok": true,
+  "enabled": true,
+  "official": {
+    "registered": true,
+    "installUrl": "https://api.clankie.bot/fleet/account/?discord=self-hosted",
+    "discord": { "connected": true, "guildName": "Studio" },
+    "usage": [{ "limit": "account_messages_per_day", "used": 12, "max": 500, "resetsAtMs": 1791417600000 }]
+  },
+  "installUrl": "https://api.clankie.bot/fleet/account/?discord=self-hosted"
+}
+```
+
 ### `discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]`
 
 Read the names, IDs and kinds the active Discord account can see. The default

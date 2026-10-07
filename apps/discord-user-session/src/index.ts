@@ -3,7 +3,7 @@ import {
   createMinecraftLoginCodeDelivery,
   tryHandleMinecraftLoginCodeRequest,
 } from "@clankie/discord-presence-core";
-import { voiceRoomEvidence } from "@clankie/discord-presence-core";
+import { voiceRoomEvidence, discordTextAttention } from "@clankie/discord-presence-core";
 import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { BodyVoiceTargetSchema } from "@clankie/protocol";
 import {
@@ -225,8 +225,12 @@ const textIngress = new DiscordTextIngress(
     // wholesale, so ambient context stays off on this plane.
     contextMessageLimit: 0,
     authenticatedSurfaceUrl: process.env.CLANKIE_AUTHENTICATED_SURFACE_URL ?? "http://127.0.0.1:4310",
-    replyPolicy: storedSettings.persona.replyPolicy,
-    characterNames: characterNames(storedSettings.persona),
+    // The owner's wake trigger (VUH-1765) refines it; unset changes nothing.
+    ...discordTextAttention({
+      wakeTrigger: storedSettings.discord.wakeTrigger,
+      replyPolicy: storedSettings.persona.replyPolicy,
+      characterNames: characterNames(storedSettings.persona),
+    }),
     liveMessageWindow: storedSettings.persona.liveMessageWindow,
   },
   (event) => {

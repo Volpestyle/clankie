@@ -117,7 +117,11 @@ export class DiscordIngress {
     }
   }
 }
-export function createDiscordIngressRoutes(ingress: DiscordIngress | undefined): Hono {
+/** Anything that opens and answers one sealed ingress envelope. */
+export interface DiscordIngressPort {
+  accept(input: unknown): Response;
+}
+export function createDiscordIngressRoutes(ingress: DiscordIngressPort | undefined): Hono {
   const app = new Hono();
   app.use(
     DISCORD_INGRESS_PATH,
@@ -164,6 +168,94 @@ export function createHostedDiscordVoiceCallback(
         ? { instructions: result.instructions, briefing: result.briefing }
         : { text: result.text, isError: result.isError },
     };
+  };
+}
+/**
+ * Turn an opened ingress event into the existing Discord captain flow. Shared by
+ * hosted bodies and the free official-bot route on a self-hosted machine; only
+ * who counts as the verified owner differs.
+ */
+export function discordIngressExecutor(options: {
+  captain: CaptainPort;
+  voice?: (event: DiscordIngressEvent) => Promise<DiscordIngressResult>;
+  verifiedOwner: (event: DiscordIngressEvent) => boolean;
+  current: () => boolean;
+}): (event: DiscordIngressEvent) => Promise<DiscordIngressResult> {
+  return async (event) => {
+    if (event.kind === "voice") {
+      if (event.voice?.action !== "handoff")
+        return options.voice?.(event) ?? { state: "failed", code: "unavailable" };
+      const request = event.voice.request;
+      const result = await options.captain.submitDiscordTurn(
+        {
+          ...request,
+          deliveryId: event.deliveryId,
+          identity: {
+            ...request.identity,
+            presenceSessionId: `discord:${event.channelId}`,
+            correlationId: event.deliveryId,
+            profileHash: "hosted-discord-v1",
+            characterId: "clankie",
+            credentialRef: "hosted_discord",
+            transportKind: "bot",
+          },
+        },
+        { verifiedOwner: options.verifiedOwner(event), sourceCurrent: options.current },
+      );
+      return {
+        state: "voice",
+        result:
+          result.state === "waiting_user" && result.approvalRequired
+            ? {
+                ...result,
+                prompt: "I need you to continue that request on the authenticated operator surface.",
+              }
+            : result,
+      };
+    }
+    const result = await options.captain.submitDiscordTurn(
+      {
+        schemaVersion: 1,
+        deliveryId: event.deliveryId,
+        identity: {
+          presenceSessionId: `discord:${event.channelId}`,
+          correlationId: event.deliveryId,
+          profileHash: "hosted-discord-v1",
+          characterId: "clankie",
+          credentialRef: "hosted_discord",
+          transportKind: "bot",
+        },
+        trigger: {
+          kind: event.kind === "slash" ? "slash_handoff" : event.kind === "reply" ? "mention" : event.kind,
+          id: event.messageId,
+          ...(event.guildId === undefined ? {} : { guildId: event.guildId }),
+          channelId: event.channelId,
+          messageId: event.messageId,
+          actorId: event.actorId,
+          ...(event.content.length === 0 ? {} : { body: event.content }),
+          attachments: event.attachments,
+        },
+        contextMessages: (event.context ?? []).map((message) => ({
+          id: message.messageId,
+          authorId: message.actorId,
+          body: message.content,
+          createdAt: new Date(message.atMs).toISOString(),
+        })),
+      },
+      // This callback is host proof from the authenticated encrypted ingress,
+      // never a JSON claim or a substitute for later room grant checks.
+      { verifiedOwner: options.verifiedOwner(event), sourceCurrent: options.current },
+    );
+    if (result.state === "settled") return { state: "reply", text: result.response };
+    if (result.state === "waiting_user")
+      return {
+        state: "reply",
+        text: result.approvalRequired
+          ? "I need you to continue that request on the authenticated operator surface."
+          : result.prompt,
+      };
+    if (result.state === "failed") return { state: "failed", code: "unavailable" };
+    return { state: "silent" };
   };
 }
 export async function createHostedDiscordIngress(options: {
@@ -218,78 +310,13 @@ export async function createHostedDiscordIngress(options: {
       key,
       statePath: options.statePath,
       ...(options.onWork === undefined ? {} : { onWork: options.onWork }),
-      execute: async (event) => {
-        if (event.kind === "voice") {
-          if (event.voice?.action !== "handoff")
-            return options.voice?.(event) ?? { state: "failed", code: "unavailable" };
-          const request = event.voice.request;
-          const result = await options.captain.submitDiscordTurn(
-            {
-              ...request,
-              deliveryId: event.deliveryId,
-              identity: {
-                ...request.identity,
-                presenceSessionId: `discord:${event.channelId}`,
-                correlationId: event.deliveryId,
-                profileHash: "hosted-discord-v1",
-                characterId: "clankie",
-                credentialRef: "hosted_discord",
-                transportKind: "bot",
-              },
-            },
-            { verifiedOwner: event.owner, sourceCurrent: () => !stopped },
-          );
-          return {
-            state: "voice",
-            result:
-              result.state === "waiting_user" && result.approvalRequired
-                ? {
-                    ...result,
-                    prompt: "I need you to continue that request on the authenticated operator surface.",
-                  }
-                : result,
-          };
-        }
-        const result = await options.captain.submitDiscordTurn(
-          {
-            schemaVersion: 1,
-            deliveryId: event.deliveryId,
-            identity: {
-              presenceSessionId: `discord:${event.channelId}`,
-              correlationId: event.deliveryId,
-              profileHash: "hosted-discord-v1",
-              characterId: "clankie",
-              credentialRef: "hosted_discord",
-              transportKind: "bot",
-            },
-            trigger: {
-              kind:
-                event.kind === "slash" ? "slash_handoff" : event.kind === "reply" ? "mention" : event.kind,
-              id: event.messageId,
-              ...(event.guildId === undefined ? {} : { guildId: event.guildId }),
-              channelId: event.channelId,
-              messageId: event.messageId,
-              actorId: event.actorId,
-              ...(event.content.length === 0 ? {} : { body: event.content }),
-              attachments: event.attachments,
-            },
-            contextMessages: [],
-          },
-          // This callback is host proof from the authenticated encrypted ingress,
-          // never a JSON claim or a substitute for later room grant checks.
-          { verifiedOwner: event.owner, sourceCurrent: () => !stopped },
-        );
-        if (result.state === "settled") return { state: "reply", text: result.response };
-        if (result.state === "waiting_user")
-          return {
-            state: "reply",
-            text: result.approvalRequired
-              ? "I need you to continue that request on the authenticated operator surface."
-              : result.prompt,
-          };
-        if (result.state === "failed") return { state: "failed", code: "unavailable" };
-        return { state: "silent" };
-      },
+      execute: discordIngressExecutor({
+        captain: options.captain,
+        ...(options.voice === undefined ? {} : { voice: options.voice }),
+        // The hosted edge asserts the linked owner from the authenticated connection.
+        verifiedOwner: (event) => event.owner,
+        current: () => !stopped,
+      }),
     }),
     close() {
       stopped = true;

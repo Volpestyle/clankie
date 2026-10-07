@@ -38,7 +38,7 @@ import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
 import type { ActivitySharing } from "../activity-sharing.ts";
-import { type DiscordIngress } from "../discord-ingress.ts";
+import { type DiscordIngressPort } from "../discord-ingress.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import type { DiscordRoomVoice } from "../discord-room-voice.ts";
@@ -141,7 +141,7 @@ export interface ClankieAppDependencies {
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
-  discordIngress?: DiscordIngress;
+  discordIngress?: DiscordIngressPort;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
   /** Durable operator MCP hire/delivery receipts, retained across service restarts. */

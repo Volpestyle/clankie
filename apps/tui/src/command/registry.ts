@@ -501,6 +501,10 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["discord"],
     lines: ["  discord transcripts [--cursor CURSOR] [--limit N]  Read private retained voice text"],
   },
+  {
+    nouns: ["discord"],
+    lines: ["  discord official [status|on|off]  Free official Clankie bot through your Clankie account"],
+  },
 ] as const;
 
 export const HEADLESS_NOUNS: readonly string[] = [
