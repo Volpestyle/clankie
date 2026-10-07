@@ -41,7 +41,7 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
         },
     ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
     ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
-    ...(includeAutonomy ? { workingPreferences: true } : {}),
+    ...(includeAutonomy ? { workingPreferences: true, fleetGates: true } : {}),
     revision: projectsRevision(current.projects),
   };
 }

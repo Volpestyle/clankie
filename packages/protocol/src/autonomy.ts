@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { FleetGatesSchema, FleetGateModeSchema, FLEET_GATE_FIELDS, FLEET_GATE_PRESETS, FLEET_GATE_CATEGORIES, FLEET_GATE_MODES, fleetGateSummary, type FleetGates } from "./fleet-gates.ts";
+export * from "./fleet-gates.ts";
 
 /** Owner-selected responsibility; never a credential, machine grant or action receipt. */
 export const FleetAutonomyModeSchema = z.enum(["lead", "owner"]);
@@ -31,8 +33,9 @@ export const FLEET_WORKING_PREFERENCE_FIELDS = [
   "verification",
   "reportingStyle",
 ] as const;
-export const FLEET_AUTONOMY_FIELDS = ["closure", "machineSetup", ...FLEET_WORKING_PREFERENCE_FIELDS] as const;
+export const FLEET_AUTONOMY_FIELDS = ["closure", "machineSetup", ...FLEET_WORKING_PREFERENCE_FIELDS, ...FLEET_GATE_FIELDS] as const;
 export const FLEET_AUTONOMY_DEFAULTS = {
+  ...FLEET_GATE_PRESETS.balanced.gates,
   closure: "lead",
   machineSetup: "lead",
   commit: "lead",
@@ -40,7 +43,7 @@ export const FLEET_AUTONOMY_DEFAULTS = {
   release: { mode: "owner" },
   verification: "change_run_read",
   reportingStyle: "Short and plain.",
-} satisfies FleetWorkingPreferences & { closure: FleetAutonomyMode; machineSetup: FleetAutonomyMode };
+} satisfies FleetWorkingPreferences & FleetGates & { closure: FleetAutonomyMode; machineSetup: FleetAutonomyMode };
 
 /** New response fields stay absent on an older service; defaults are a disk concern. */
 export const FleetAutonomyWireSchema = z
@@ -48,6 +51,7 @@ export const FleetAutonomyWireSchema = z
     closure: FleetAutonomyModeSchema,
     machineSetup: FleetAutonomyModeSchema,
     ...FleetWorkingPreferencesSchema.partial().shape,
+    ...FleetGatesSchema.partial().shape,
   })
   .strict();
 export type FleetAutonomyWire = z.infer<typeof FleetAutonomyWireSchema>;
@@ -55,6 +59,10 @@ export const AutonomySettingsWireSchema = z.object({ fleet: FleetAutonomyWireSch
 
 export const FleetAutonomySchema = z
   .object({
+    everydayWork: FleetGateModeSchema.default(FLEET_AUTONOMY_DEFAULTS.everydayWork),
+    leavesMac: FleetGateModeSchema.default(FLEET_AUTONOMY_DEFAULTS.leavesMac),
+    hardToUndo: FleetGateModeSchema.default(FLEET_AUTONOMY_DEFAULTS.hardToUndo),
+    moneyAndAccounts: z.literal("owner").default("owner"),
     closure: FleetAutonomyModeSchema.default(FLEET_AUTONOMY_DEFAULTS.closure),
     machineSetup: FleetAutonomyModeSchema.default(FLEET_AUTONOMY_DEFAULTS.machineSetup),
     commit: FleetAutonomyModeSchema.default(FLEET_AUTONOMY_DEFAULTS.commit),
@@ -81,6 +89,10 @@ export type ProjectAutonomy = z.infer<typeof ProjectAutonomySchema>;
 /** Patch-only null removes one override and restores inheritance. */
 export const FleetAutonomyPatchSchema = z
   .object({
+    everydayWork: FleetGateModeSchema.nullable().optional(),
+    leavesMac: FleetGateModeSchema.nullable().optional(),
+    hardToUndo: FleetGateModeSchema.nullable().optional(),
+    moneyAndAccounts: z.literal("owner").nullable().optional(),
     closure: FleetAutonomyModeSchema.nullable().optional(),
     machineSetup: FleetAutonomyModeSchema.nullable().optional(),
     commit: FleetAutonomyModeSchema.nullable().optional(),
@@ -169,5 +181,7 @@ export function formatFleetAutonomyGuidance(policy: FleetAutonomy): string[] {
     `Release: ${fleet.release.mode}. ${FLEET_AUTONOMY_GUIDANCE.release[fleet.release.mode]}${fleet.release.mode === "time_rule" ? ` Rule: ${fleet.release.rule}` : ""}`,
     `Verification: ${fleet.verification}. ${FLEET_AUTONOMY_GUIDANCE.verification[fleet.verification]}`,
     `Reporting style: ${fleet.reportingStyle}`,
+    `Worker gates: ${fleetGateSummary(fleet)}`,
+    ...FLEET_GATE_CATEGORIES.map((category) => `${category.label}: ${fleet[category.key]}. ${FLEET_GATE_MODES[fleet[category.key]].description}`),
   ];
 }

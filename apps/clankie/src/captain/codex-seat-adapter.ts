@@ -23,6 +23,7 @@ import {
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
 import { codexAsyncQuestion, codexQuestion } from "./codex-user-input.ts";
 import type { CodexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
+import type { FleetGates } from "@clankie/protocol";
 import type { FleetSeatToolCatalogHealth } from "@clankie/protocol/tool-catalog";
 
 const exec = promisify(execFile);
@@ -46,6 +47,8 @@ export function createCodexSeatAdapter(
     listenTimeoutMs?: number;
     /** Trusted controller policy, instantiated separately for every native seat. */
     nativePolicy?: (input: SeatLaunch, view: SeatView) => CodexNativePolicy;
+    /** Current verified workspace gates; native containment policy remains final. */
+    fleetGates?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<FleetGates>;
     /** Extra server environment from the pane the seat is viewed in (a remote pane's Herdr identity). */
     viewEnv?: (view: SeatView) => Promise<Readonly<Record<string, string>>>;
     /** Persist evidence from this hired pane's exact native thread. */
@@ -292,6 +295,12 @@ export function createCodexSeatAdapter(
             launch.cwd,
             launch.env,
           );
+          if (options.fleetGates) {
+            await options.fleetGates(launch.cwd, launch.env);
+            // Codex has one approval envelope, not semantic categories. Keep
+            // native sandbox settings and require its supported approval path.
+            trackerOverrides.push('approval_policy="on-request"');
+          }
           // Only this dedicated remote launch must bootstrap before Clankie's
           // project assignment exists. Other servers retain their required flags.
           const expectedToolNames = [...new Set(view.expectedToolNames ?? [])].sort();

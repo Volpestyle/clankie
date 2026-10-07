@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { readHerdrSeatTranscript } from "@clankie/agent-transcript";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
@@ -10,7 +11,7 @@ import {
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
-const EVENTS = new Set<FleetSeatHook["event"]>(["SessionStart", "UserPromptSubmit", "Stop", "StopFailure"]);
+const EVENTS = new Set<FleetSeatHook["event"]>(["SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PermissionRequest", "Notification", "PostToolUse", "SessionEnd"]);
 
 /**
  * The worker plugin's lifecycle hook (VUH-1458): tell the service a hired
@@ -43,6 +44,7 @@ export async function runSeatHookCommand(
     transcript_path?: unknown;
     last_assistant_message?: unknown;
     error?: unknown;
+    tool_name?: unknown; tool_use_id?: unknown; tool_input?: unknown; notification_type?: unknown;
   };
   const event = hook.hook_event_name as FleetSeatHook["event"];
   if (!EVENTS.has(event) || typeof hook.session_id !== "string") return 0;
@@ -65,6 +67,10 @@ export async function runSeatHookCommand(
     schemaVersion: 1,
     event,
     sessionId: hook.session_id,
+    ...(typeof hook.tool_name === "string" ? { toolName: hook.tool_name } : {}),
+    ...(event === "PermissionRequest" ? { toolUseId: randomUUID() } : typeof hook.tool_use_id === "string" ? { toolUseId: hook.tool_use_id } : {}),
+    ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
+    ...(typeof hook.notification_type === "string" ? { notificationType: hook.notification_type } : {}),
     ...(lastMessage === undefined || lastMessage.trim() === ""
       ? {}
       : { lastMessage: lastMessage.slice(0, OPERATOR_CONVERSATION_TEXT_MAX) }),
@@ -88,12 +94,16 @@ export async function runSeatHookCommand(
       method: "POST",
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(event === "PermissionRequest" || event === "PreToolUse" ? 570_000 : 10_000),
     },
   );
   // An unknown seat is a pane Clankie is not driving; nothing to report.
   if (response.status === 404) return 0;
   if (!response.ok) throw new Error(`Seat hook was refused (${response.status})`);
+  if (event === "PermissionRequest" || event === "PreToolUse") {
+    const result = (await response.json()) as { hookOutput?: unknown };
+    if (result.hookOutput) (options.stdout ?? process.stdout).write(JSON.stringify(result.hookOutput) + "\n");
+  }
   if (event === "UserPromptSubmit") {
     const result = (await response.json()) as { additionalContext?: unknown };
     if (typeof result.additionalContext === "string" && result.additionalContext)

@@ -28,6 +28,7 @@ export * from "./issue-metrics.ts";
 export * from "./agent-roles.ts";
 export * from "./projects.ts";
 export * from "./autonomy.ts";
+export * from "./fleet-gates.ts";
 export * from "./fleet-settings.ts";
 export { OPERATOR_SEAT_HARNESSES, type OperatorSeatHarness } from "./seat-harnesses.ts";
 export { RivalsCommandSchema, RivalsStatusSchema, type RivalsCommand, type RivalsStatus } from "./rivals.ts";

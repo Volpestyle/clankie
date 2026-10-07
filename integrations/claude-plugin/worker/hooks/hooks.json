@@ -1,11 +1,17 @@
 {
   "description": "A fleet seat's lifecycle and next-turn replies, for hired or hand-started native Claude sessions. A no-op outside a linked Herdr pane.",
-  "modules": ["../mods/tool-catalog.mjs"],
+  "modules": [
+    "../mods/tool-catalog.mjs"
+  ],
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"", "timeout": 30 }
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 30
+          }
         ]
       }
     ],
@@ -40,6 +46,63 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
             "timeout": 30,
             "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 600
+          }
+        ],
+        "matcher": "AskUserQuestion"
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 30
+          }
+        ],
+        "matcher": "idle_prompt|permission_prompt"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 30
           }
         ]
       }

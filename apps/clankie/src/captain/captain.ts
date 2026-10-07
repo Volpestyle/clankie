@@ -1,3 +1,4 @@
+import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
 import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
 import {
@@ -194,6 +195,7 @@ import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
 import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } from "./port.ts";
 import {
+  localWorkspaceProject,
   nativeHireProject,
   remoteHireMachine,
   remoteWorkspaceProject,
@@ -444,9 +446,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // each settled turn (VUH-1458).
   const toolCatalogHealth = new ToolCatalogHealthStore();
   const seatHooks = new SeatHookLog(join(options.stateDir, "claude-worker-hooks.json"));
+  const hookQuestions = new ClaudeHookQuestions(join(options.stateDir, "claude-worker-question-claims.json"));
   // The seat-side half every Claude worker shares, local or on a linked fleet (VUH-1527).
+  const localFleetGates = async (cwd: string) => {
+    const current = await settings();
+    const projectId = await localWorkspaceProject(current.projects, cwd);
+    const project = current.projects.projects.find((entry) => entry.id === projectId);
+    return effectiveFleetAutonomy(current.autonomy, project?.autonomy);
+  };
   const claudeWorkerDeps = {
     hooks: seatHooks,
+    hookQuestions,
     agent: (paneId) => herdrRunner.get(paneId),
     transcript: async (agent) => herdrRunner.transcript?.(agent as HerdrAgentSnapshot),
     mailbox: {
@@ -477,6 +487,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   } satisfies Pick<ClaudeWorkerSeatDeps, "hooks" | "agent" | "transcript" | "mailbox">;
   const claudeWorkerSeats = createClaudeWorkerSeatAdapter({
     consent: () => claudeWorkerChannelConsent(),
+    fleetGates: localFleetGates,
     ...claudeWorkerDeps,
   });
   const hireRegistry = createModelRegistry();
@@ -644,6 +655,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
     seatAdapters: options.seatAdapters ?? [
       createCodexSeatAdapter({
+        fleetGates: localFleetGates,
         catalogObserved: observeCodexToolCatalog,
         ...(options.localCodexProcess === undefined
           ? {}
@@ -4571,6 +4583,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ? session.value
             : basename(session.value, ".jsonl");
       if (agent?.agent !== "claude" || sessionId !== hook.sessionId) return false;
+      const ref = { harness: "claude" as const, sessionId, paneId: agent.paneId };
+      if (hook.event === "PermissionRequest" || (hook.event === "PreToolUse" && hook.toolName === "AskUserQuestion")) {
+        const hookOutput = await hookQuestions.open(ref, hook, question => herdrWatches.forwardNativeQuestion(ref, question));
+        return { recorded: true as const, hookOutput };
+      }
+      if (["SessionEnd", "Stop", "StopFailure", "UserPromptSubmit", "PostToolUse"].includes(hook.event))
+        hookQuestions.cancel(ref, "Native question is no longer pending");
+      if (["PreToolUse", "Notification", "PostToolUse", "SessionEnd"].includes(hook.event)) return true;
       seatHooks.record(paneId, hook);
       if (hook.event !== "SessionStart")
         fleetMailboxes

@@ -328,6 +328,7 @@ export interface CaptainPort {
   ): Promise<
     | boolean
     | { readonly recorded: true; readonly additionalContext: string; readonly messageIds: readonly string[] }
+    | { readonly recorded: true; readonly hookOutput: Record<string, unknown> }
   >;
   /**
    * An agent in that pane writing to him (ADR 0213 phase 2). It wakes his

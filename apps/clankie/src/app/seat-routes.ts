@@ -474,7 +474,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       ? context.json({
           schemaVersion: 1 as const,
           recorded: true as const,
-          ...(typeof recorded === "object"
+          ...(typeof recorded === "object" && "hookOutput" in recorded ? { hookOutput: recorded.hookOutput } : {}),
+          ...(typeof recorded === "object" && "additionalContext" in recorded
             ? {
                 additionalContext: recorded.additionalContext,
                 messageIds: recorded.messageIds,

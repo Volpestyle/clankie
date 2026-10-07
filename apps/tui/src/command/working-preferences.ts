@@ -1,5 +1,6 @@
 import {
   FleetWorkingPreferencesSchema,
+  FleetGatesSchema,
   formatFleetAutonomyGuidance,
   type FleetAutonomy,
 } from "@clankie/protocol";
@@ -24,6 +25,7 @@ export async function readWorkingPreferences(
       effective: {
         closure: context.effective.closure,
         machineSetup: context.effective.machineSetup,
+        ...FleetGatesSchema.parse({ everydayWork: context.effective.everydayWork, leavesMac: context.effective.leavesMac, hardToUndo: context.effective.hardToUndo, moneyAndAccounts: context.effective.moneyAndAccounts }),
         ...FleetWorkingPreferencesSchema.parse({
           commit: context.effective.commit,
           push: context.effective.push,

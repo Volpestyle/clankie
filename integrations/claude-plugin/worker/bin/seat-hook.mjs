@@ -3,6 +3,7 @@
 // into a herdr pane reports each settled turn through `clankie seat-hook`; on
 // a machine linked to his fleet (VUH-1527) it reports over that link instead.
 // A session outside a pane has nothing to report here.
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { authorization, hasLinks, readLink, seatRoute, SUMMARY_MAX, TEXT_MAX } from "./link.mjs";
 import { codexToolCatalogReport } from "./codex-tool-catalog.mjs";
@@ -41,7 +42,7 @@ async function reportOverLink(link, pane) {
     process.exit(0);
   }
   const event = hook?.hook_event_name;
-  if (!["SessionStart", "UserPromptSubmit", "Stop", "StopFailure"].includes(event)) process.exit(0);
+  if (!["SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PermissionRequest", "Notification", "PostToolUse", "SessionEnd"].includes(event)) process.exit(0);
   if (typeof hook.session_id !== "string") process.exit(0);
   const lastMessage =
     typeof hook.last_assistant_message === "string" ? hook.last_assistant_message.trim() : "";
@@ -49,6 +50,10 @@ async function reportOverLink(link, pane) {
     schemaVersion: 1,
     event,
     sessionId: hook.session_id,
+    ...(typeof hook.tool_name === "string" ? { toolName: hook.tool_name } : {}),
+    ...(event === "PermissionRequest" ? { toolUseId: randomUUID() } : typeof hook.tool_use_id === "string" ? { toolUseId: hook.tool_use_id } : {}),
+    ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
+    ...(typeof hook.notification_type === "string" ? { notificationType: hook.notification_type } : {}),
     ...(lastMessage ? { lastMessage: lastMessage.slice(0, TEXT_MAX) } : {}),
     ...(event === "StopFailure"
       ? { error: (typeof hook.error === "string" ? hook.error : "error").slice(0, SUMMARY_MAX) }
@@ -59,8 +64,12 @@ async function reportOverLink(link, pane) {
       method: "POST",
       headers: { ...authorization(link), "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(event === "PermissionRequest" || event === "PreToolUse" ? 570_000 : 20_000),
     });
+    if (response.ok && (event === "PermissionRequest" || event === "PreToolUse")) {
+      const result = await response.json();
+      if (result.hookOutput) await new Promise((resolve, reject) => process.stdout.write(JSON.stringify(result.hookOutput) + "\n", error => error ? reject(error) : resolve()));
+    }
     if (response.ok && event === "UserPromptSubmit") {
       const result = await response.json();
       if (typeof result.additionalContext === "string" && result.additionalContext) {

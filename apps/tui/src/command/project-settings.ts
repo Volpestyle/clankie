@@ -18,6 +18,10 @@ import {
   effectiveFleetAutonomy,
   FLEET_WORKING_PREFERENCE_FIELDS,
   FleetAutonomyPatchSchema,
+  FleetGateModeSchema,
+  FleetGatesSchema,
+  FLEET_GATE_FIELDS,
+  FLEET_GATE_PRESETS,
   FleetReleasePolicySchema,
   FleetVerificationSchema,
   FleetReportingStyleSchema,
@@ -55,7 +59,7 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
   if (!list && !membership) {
@@ -163,6 +167,10 @@ interface ProjectFleetSettingsResult extends ProjectsSnapshot {
     release?: FleetAutonomy["release"] | "inherit";
     verification?: FleetAutonomy["verification"] | "inherit";
     reportingStyle?: string;
+    everydayWork?: FleetAutonomy["everydayWork"] | "inherit";
+    leavesMac?: FleetAutonomy["leavesMac"] | "inherit";
+    hardToUndo?: FleetAutonomy["hardToUndo"] | "inherit";
+    moneyAndAccounts?: "owner" | "inherit";
     effective: FleetAutonomyWire;
   };
 }
@@ -174,7 +182,7 @@ async function runProjectFleetSettings(
 ): Promise<ProjectFleetSettingsResult> {
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit]",
     );
   const changes: FleetAutonomyPatch = {};
   let releaseMode: string | undefined;
@@ -199,6 +207,18 @@ async function runProjectFleetSettings(
       changes.verification = value === "inherit" ? null : FleetVerificationSchema.parse(value);
     else if (args[index] === "--report-style" && changes.reportingStyle === undefined)
       changes.reportingStyle = value === "inherit" ? null : FleetReportingStyleSchema.parse(value);
+    else if (args[index] === "--gate-preset") {
+      if (FLEET_GATE_FIELDS.some((field) => field in changes)) throw new Error("Choose one gate preset before individual gate overrides.");
+      const preset = FLEET_GATE_PRESETS[value as keyof typeof FLEET_GATE_PRESETS];
+      if (value === "inherit") for (const field of FLEET_GATE_FIELDS) changes[field] = null;
+      else if (preset) Object.assign(changes, preset.gates);
+      else throw new Error("Unsupported gate preset.");
+    } else if (["--everyday-work", "--leaves-mac", "--hard-to-undo", "--money-and-accounts"].includes(args[index] ?? "")) {
+      const gateField = ({ "--everyday-work": "everydayWork", "--leaves-mac": "leavesMac", "--hard-to-undo": "hardToUndo", "--money-and-accounts": "moneyAndAccounts" } as const)[args[index] as "--everyday-work"];
+      const gate = value === "inherit" ? null : FleetGateModeSchema.parse(value);
+      if (gateField === "moneyAndAccounts") changes.moneyAndAccounts = gate === null ? null : FleetGatesSchema.shape.moneyAndAccounts.parse(gate);
+      else changes[gateField] = gate;
+    }
     else throw new Error("Project fleet settings require each field once with a supported value or inherit.");
   }
   if (releaseMode !== undefined || releaseRule !== undefined) {
@@ -223,6 +243,8 @@ async function runProjectFleetSettings(
     snapshot.workingPreferences !== true
   )
     throw new Error("This service does not support working preferences; update it before editing them.");
+  if (FLEET_GATE_FIELDS.some((field) => field in changes) && snapshot.fleetGates !== true)
+    throw new Error("This service does not support fleet gates; update it before editing them.");
   if (Object.keys(changes).length) {
     snapshot = await runProjectSettingsCommand(
       [
@@ -267,6 +289,12 @@ async function runProjectFleetSettings(
             reportingStyle: project.autonomy?.fleet?.reportingStyle ?? "inherit",
           }
         : {}),
+      ...(snapshot.fleetGates === true ? {
+        everydayWork: project.autonomy?.fleet?.everydayWork ?? "inherit",
+        leavesMac: project.autonomy?.fleet?.leavesMac ?? "inherit",
+        hardToUndo: project.autonomy?.fleet?.hardToUndo ?? "inherit",
+        moneyAndAccounts: project.autonomy?.fleet?.moneyAndAccounts ?? "inherit",
+      } : {}),
       effective: supported ? effective : { closure: effective.closure, machineSetup: effective.machineSetup },
     },
   };

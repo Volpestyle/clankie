@@ -680,3 +680,37 @@ it("pins preparation claims to the registered target shown during consent while 
   ).toBe(400);
   expect(f.refreshCalls()).toBe(0);
 });
+
+it("round-trips fleet gates across owner API, disk, project inheritance and the shared client schema", async () => {
+  const f = await fixture();
+  const initial = await f.client.fleetSettings();
+  expect(initial.fleetGates).toBe(true);
+  const updated = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: initial.revision,
+    changes: { everydayWork: "lead", leavesMac: "owner", hardToUndo: "owner" },
+  });
+  expect(updated.fleet.everydayWork).toBe("lead");
+  expect((await new SettingsStore(f.settings.path).load()).autonomy.fleet.leavesMac).toBe("owner");
+  const projects = await f.client.projects();
+  const overridden = await f.client.updateProjectSettings({
+    projectId: "garden",
+    expectedRevision: projects.revision,
+    changes: { autonomy: { fleet: { leavesMac: "lead" } } },
+  });
+  const context = await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" });
+  expect(context.fleetGates).toBe(true);
+  expect(context.effective).toMatchObject({ everydayWork: "lead", leavesMac: "lead", moneyAndAccounts: "owner" });
+  await f.client.updateProjectSettings({
+    projectId: "garden", expectedRevision: overridden.revision,
+    changes: { autonomy: { fleet: { leavesMac: null } } },
+  });
+  expect((await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" })).effective.leavesMac).toBe("owner");
+  const refused = await f.request("/v1/operator/fleet-settings", {
+    schemaVersion: 1, expectedRevision: updated.revision, changes: { moneyAndAccounts: "allow" },
+  });
+  expect(refused.status).toBe(400);
+  expect((await f.settings.load()).autonomy.fleet.moneyAndAccounts).toBe("owner");
+  expect((await f.settings.load()).autonomy.fleet.push).toBe(initial.fleet.push);
+  expect((await f.settings.load()).autonomy.fleet.release).toEqual(initial.fleet.release);
+});

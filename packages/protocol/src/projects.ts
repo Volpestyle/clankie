@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FleetGatesSchema } from "./fleet-gates.ts";
 import { HireProfileSchema, HireEffortSchema, withoutNoPreference } from "./hire-profile.ts";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
 import {
@@ -193,9 +194,11 @@ export const ProjectsSnapshotSchema = z
     autonomyDefaults: AutonomySettingsWireSchema.optional(),
     /** Included by the current service only in the autonomy-aware project view. */
     workingPreferences: z.literal(true).optional(),
+    fleetGates: z.literal(true).optional(),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict()
+  .refine((value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.autonomyDefaults?.fleet).success, "A fleet-gates project snapshot must include every global gate")
   .refine(
     (value) =>
       value.workingPreferences !== true ||

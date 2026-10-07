@@ -3,6 +3,7 @@ import {
   FleetAutonomyWireSchema,
   FleetAutonomyPatchSchema,
   FleetWorkingPreferencesSchema,
+  FleetGatesSchema,
 } from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
 import { FleetResourcePolicySchema } from "./fleet-resources.ts";
@@ -24,8 +25,10 @@ export const FleetSettingsSnapshotSchema = z
     fleet: FleetPolicySchema,
     /** Advertises support explicitly; absence identifies an older service. */
     workingPreferences: z.literal(true).optional(),
+    fleetGates: z.literal(true).optional(),
   })
   .strict()
+  .refine((value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.fleet).success, "A fleet-gates snapshot must include every global gate")
   .refine(
     (value) =>
       value.workingPreferences !== true ||
@@ -77,6 +80,7 @@ export const FleetSettingsContextSchema = z
     schemaVersion: z.literal(1),
     effective: FleetAutonomyWireSchema,
     workingPreferences: z.literal(true).optional(),
+    fleetGates: z.literal(true).optional(),
     projectId: ProjectIdSchema.optional(),
     machine: z
       .object({
@@ -88,6 +92,7 @@ export const FleetSettingsContextSchema = z
       .strict(),
   })
   .strict()
+  .refine((value) => value.fleetGates !== true || FleetGatesSchema.strip().safeParse(value.effective).success, "A fleet-gates context must include every effective gate")
   .refine(
     (value) =>
       value.workingPreferences !== true ||

@@ -25,6 +25,7 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
   return {
     schemaVersion: 1,
     workingPreferences: true,
+    fleetGates: true,
     revision: createHash("sha256").update(JSON.stringify(fleet)).digest("hex"),
     fleet,
   };

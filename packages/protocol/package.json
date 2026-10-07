@@ -36,6 +36,7 @@
     "./tool-catalog": "./src/tool-catalog.ts",
     "./integrate": "./src/integrate.ts",
     "./tool-output": "./src/tool-output.ts",
+    "./fleet-gates": "./src/fleet-gates.ts",
     "./autonomy": "./src/autonomy.ts",
     "./fleet-settings": "./src/fleet-settings.ts",
     "./activity-sharing": "./src/activity-sharing.ts",

@@ -13,6 +13,9 @@ import { fleetStatus, fleetUpdate, formatFleetLines, runFleetCommand } from "./c
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import {
   FLEET_AUTONOMY_GUIDANCE,
+  FLEET_GATE_CATEGORIES,
+  FLEET_GATE_PRESETS,
+  FLEET_GATE_MODES,
   HireEffortSchema,
   OPERATOR_SEAT_HARNESSES,
   FleetReportingStyleSchema,
@@ -293,6 +296,35 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     });
     if (machineSetup !== "lead" && machineSetup !== "owner") return;
     const preference: Partial<FleetAutonomy> = {};
+    const preset = await flow.readSelect({
+      message: "Fleet — approval gates",
+      options: [
+        { value: "custom", label: "Keep current gates", description: "Review each category separately." },
+        ...Object.entries(FLEET_GATE_PRESETS).map(([value, entry]) => ({ value, label: entry.label, description: entry.description })),
+      ],
+      initialValue: "custom",
+      currentValue: "custom",
+      allowBack: true,
+    });
+    if (typeof preset !== "string") return;
+    const presetGates = preset === "custom" ? current : FLEET_GATE_PRESETS[preset as keyof typeof FLEET_GATE_PRESETS]?.gates;
+    if (!presetGates) return;
+    for (const category of FLEET_GATE_CATEGORIES) {
+      if (category.key === "moneyAndAccounts") {
+        preference.moneyAndAccounts = "owner";
+        flow.renderLine(`${category.label}: ${FLEET_GATE_MODES.owner.label} — ${category.description}`);
+        continue;
+      }
+      const value = await flow.readSelect({
+        message: `Fleet — ${category.label}`,
+        options: Object.entries(FLEET_GATE_MODES).map(([value, entry]) => ({ value, label: entry.label, description: entry.description })),
+        initialValue: presetGates[category.key],
+        currentValue: current[category.key],
+        allowBack: true,
+      });
+      if (value !== "allow" && value !== "lead" && value !== "owner") return;
+      preference[category.key] = value;
+    }
     for (const field of ["commit", "push"] as const) {
       const value = await flow.readSelect({
         message: `Fleet — who may ${field} completed work`,

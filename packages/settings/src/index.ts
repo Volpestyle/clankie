@@ -61,6 +61,7 @@ export {
   type VoiceSettings,
 } from "./schema.ts";
 export { MinecraftPlaySettingsSchema, type MinecraftPlaySettings } from "@clankie/protocol";
+export * from "@clankie/protocol/fleet-gates";
 export {
   FleetAutonomyModeSchema,
   FleetReleasePolicySchema,

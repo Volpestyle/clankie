@@ -1,3 +1,4 @@
+import type { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 /**
  * Claude seats through Clankie's `clankie-worker` plugin (VUH-1458, ADR 0203).
  *
@@ -36,6 +37,7 @@ import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   type FleetSeatHook,
+  type FleetGates,
 } from "@clankie/protocol";
 import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herdr-transcript.ts";
 import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
@@ -59,6 +61,9 @@ export interface ClaudeWorkerSeatDeps {
   /** Consent for the profile this launch runs in (its CLAUDE_CONFIG_DIR, when one was chosen). */
   readonly consent: (env?: Readonly<Record<string, string>>) => Promise<ClaudeWorkerConsent>;
   readonly hooks: SeatHookLog;
+  /** Current verified workspace policy; absent preserves native permission defaults. */
+  readonly fleetGates?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<FleetGates>;
+  readonly hookQuestions?: ClaudeHookQuestions;
   readonly agent: (paneId: string) => Promise<WorkerSeatAgent | undefined>;
   readonly transcript: (agent: WorkerSeatAgent) => Promise<HerdrSeatTranscript | undefined>;
   /** The seat's mailbox: bound while its channel polls, and a message handed to it. */
@@ -108,11 +113,19 @@ const CLAUDE_MANAGED_SETTINGS =
  */
 const WORKER_SERVER_RULE = `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`;
 
-function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
+export function claudeWorkerSettings(trackerDeny: readonly string[] = [], gates?: FleetGates): string {
+  // Shell commands may combine everyday work, accounts and destructive work.
+  // Never blanket-allow Bash from a category preference. Existing managed deny
+  // rules retain precedence; all ambiguous calls reach the permission hook.
+  const localFiles = ["Read(/**)", "Edit(/**)", "Write(/**)"];
   return JSON.stringify({
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
     permissions: {
-      allow: [WORKER_SERVER_RULE],
+      allow: [WORKER_SERVER_RULE, ...(gates?.everydayWork === "allow" ? localFiles : [])],
+      ...(gates === undefined ? {} : {
+        defaultMode: "default",
+        ask: ["Bash", "WebFetch", "WebSearch", ...(gates.everydayWork === "allow" ? [] : localFiles)],
+      }),
       ...(trackerDeny.length === 0 ? {} : { deny: [...trackerDeny] }),
     },
   });
@@ -605,6 +618,16 @@ class ClaudeWorkerSeatControl implements SeatControl {
     };
   }
 
+  public pendingQuestion(requestId: string | number) {
+    return this.deps.hookQuestions?.pending(this.ref, requestId);
+  }
+
+  public async answerQuestion(answer: import("@clankie/agent-hosts").SeatQuestionAnswer, beforeDispatch?: () => Promise<void>): Promise<import("@clankie/agent-hosts").SeatQuestionResult> {
+    const agent = await this.deps.agent(this.ref.paneId).catch(() => undefined);
+    if (!agent || !this.matches(agent)) return { outcome: "offline", detail: "Native question occupant changed" };
+    return this.deps.hookQuestions?.answer(this.ref, answer, beforeDispatch) ?? { outcome: "refused", detail: "No pending Claude hook question" };
+  }
+
   public async status(): Promise<SeatStatus> {
     return (await this.observe())?.status ?? "offline";
   }
@@ -778,7 +801,8 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       try {
         const trackerDeny = await (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
-        const settings = claudeWorkerSettings(trackerDeny);
+        const gates = await deps.fleetGates?.(launch.cwd, launch.env);
+        const settings = claudeWorkerSettings(trackerDeny, gates);
         await view.start(
           "claude",
           claudeWorkerLaunchArgs(

@@ -129,6 +129,7 @@ export async function resolveFleetSettingsContext(
   return {
     schemaVersion: 1,
     workingPreferences: true,
+    fleetGates: true,
     effective: effectiveFleetAutonomy(settings.autonomy, project?.autonomy),
     ...(projectId === undefined ? {} : { projectId }),
     machine: { id: machineId, linked, targetRevision },

@@ -3,6 +3,9 @@
 Status: VUH-1649 approved; working-preference extension proposed for review
 (2026-10-05; VUH-1663).
 
+Category gate extension: [ADR 0246](0246-worker-questions-use-native-hook-answers.md)
+adds structured worker questions and four independent category gates.
+
 Extends [project owner settings](0216-projects-own-agent-roles-and-tool-policy.md)
 and [fleet access](0217-fleet-membership-gets-connected-tools.md).
 
