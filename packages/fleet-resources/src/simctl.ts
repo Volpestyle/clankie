@@ -13,6 +13,7 @@ const NativeDeviceSchema = z.object({
   state: z.string().min(1).max(64),
   isAvailable: z.boolean(),
   deviceTypeIdentifier: z.string().max(256).optional(),
+  lastUsedAt: z.unknown().optional(),
 });
 const InventorySchema = z.object({ devices: z.record(z.string(), z.array(NativeDeviceSchema)) });
 const DeviceTypesSchema = z.object({
@@ -33,6 +34,8 @@ export interface SimulatorDevice {
   readonly state: string;
   readonly available: boolean;
   readonly deviceType?: string;
+  /** Native boot-history signal; absent or malformed metadata is unknown. */
+  readonly lastUsedAt?: string;
 }
 export interface SimulatorCatalog {
   readonly deviceTypes: readonly { readonly identifier: string; readonly name: string }[];
@@ -80,6 +83,12 @@ export function createSimctlAdapter(input: { run?: SimctlRun } = {}): SimulatorA
             state: row.state,
             available: row.isAvailable,
             ...(row.deviceTypeIdentifier ? { deviceType: row.deviceTypeIdentifier } : {}),
+            ...(typeof row.lastUsedAt === "string" &&
+            row.lastUsedAt.length <= 64 &&
+            /^\d{4}-\d{2}-\d{2}T/u.test(row.lastUsedAt) &&
+            Number.isFinite(Date.parse(row.lastUsedAt))
+              ? { lastUsedAt: row.lastUsedAt }
+              : {}),
           });
         }
       }

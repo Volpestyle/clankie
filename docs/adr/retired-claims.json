@@ -45,6 +45,11 @@
       "pattern": "changes through the landing queue|do not push main directly",
       "adr": "0240",
       "now": "Changes land directly on main after narrow checks; clankie integrate is optional."
+    },
+    {
+      "pattern": "shuts the device down and deletes it only if the lease created it",
+      "adr": "0249 (VUH-1829 amendment)",
+      "now": "Release and expiry stop and retain leased simulator devices for reuse; deletion requires an explicit owner tidy."
     }
   ]
 }

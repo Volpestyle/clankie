@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { request, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -209,6 +210,7 @@ async function fixture(unavailable = false, extra: { seatScript?: string; bind?:
   };
   return {
     root,
+    log,
     host: `http://127.0.0.1:${address.port}`,
     child,
     notices,
@@ -316,7 +318,7 @@ it("serves validated metadata and crosses actual TCP/governor/process-based simu
     (await f.commands())
       .filter((command) => ["create", "bootstatus", "shutdown", "delete"].includes(command[0]!))
       .map((command) => command[0]),
-  ).toEqual(["create", "bootstatus", "shutdown", "delete"]);
+  ).toEqual(["create", "bootstatus", "shutdown"]);
 });
 
 it.each([
@@ -434,9 +436,44 @@ it("names a hand-booted simulator, the seat whose process uses it, and tells tha
   const result = FleetSimulatorResultSchema.parse(
     await runSimulatorCommand(["acquire", JSON.stringify(f.acquire), "--wait", "30"], options),
   );
-  expect(progress[0]).toContain("waiting (simulator_capacity)");
-  expect(progress[0]).toContain("used by seat resource-seat");
+  const waiting = progress.find((line) => line.includes("waiting (simulator_capacity)"));
+  expect(waiting).toContain("used by seat resource-seat");
   // The freed device is the exact idle type, so it is leased instead of creating one.
   expect(result).toMatchObject({ outcome: "acquired", lease: { deviceId: udid, origin: "existing" } });
   expect((await f.commands()).some((command) => command[0] === "create")).toBe(false);
+});
+
+it("plans through authenticated HTTP and the CLI warns before submitting a new device effect", async () => {
+  const f = await fixture();
+  const input = { ...f.acquire, action: "plan" };
+  const rejected = await f.send("POST", FLEET_SIMULATORS_PATH, input, "wrong-owner");
+  expect(rejected.status).toBe(403);
+  expect(await f.commands()).toEqual([]);
+  const planned = await f.send("POST", FLEET_SIMULATORS_PATH, input);
+  expect(FleetSimulatorResultSchema.parse(planned.json)).toEqual({
+    outcome: "planned",
+    choice: "create",
+    simulatorIdleMs: 600000,
+  });
+  expect((await f.resources.simulators.snapshot()).leases).toEqual([]);
+  expect((await f.commands()).filter((command) => command[0] !== "list")).toEqual([]);
+  const progress: string[] = [];
+  let effectsAtWarning: string[][] | undefined;
+  const result = await runSimulatorCommand(["acquire", JSON.stringify(f.acquire)], {
+    host: f.host,
+    env: { CLANKIE_OPERATOR_TOKEN: bearer },
+    progress: (line) => {
+      progress.push(line);
+      if (line.includes("first boot is expensive"))
+        effectsAtWarning = readFileSync(f.log, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((row) => JSON.parse(row))
+          .filter((command) => command[0] !== "list");
+    },
+  });
+  expect(result).toMatchObject({ outcome: "acquired" });
+  expect(effectsAtWarning).toEqual([]);
+  expect(progress.some((line) => line.includes("touch the lease"))).toBe(true);
+  expect((await f.commands()).filter((command) => command[0] === "create")).toHaveLength(1);
 });

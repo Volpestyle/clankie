@@ -3,7 +3,8 @@
 Status: Accepted (VUH-1816, 2026-10-07; decided by the implementing agent as
 its brief asked, for James's review). Amends the simulator
 lease contract in [`packages/fleet-resources`](../../packages/fleet-resources/README.md),
-which no earlier ADR recorded.
+which no earlier ADR recorded. Selection and created-device cleanup below are
+historical after the [VUH-1829 amendment](#amendment--retain-and-reuse-devices-2026-10-08).
 
 ## Context
 
@@ -91,3 +92,34 @@ may be mid-capture.
   listed as unattributed, and its owner is found by asking the fleet.
 - The CLI and the service must both be updated for the new outcomes; an older
   CLI rejects the new response shapes.
+
+## Amendment — retain and reuse devices (2026-10-08)
+
+Accepted for VUH-1829. Repeated first boots on iOS 27 drove reported load to
+180–309 on eighteen cores while idle iPhones already existed. Narrow chip-only
+fallback and deleting newly created devices caused the cost to repeat.
+
+Prefer exact idle type, then close screen model, then any idle iPhone or iPad
+of the same family and runtime. Explicit `exact` still requires that model.
+After confirmed shutdown, release, idle expiry and proven seat exit retain
+every device, including newly created ones. Only a separate explicit owner
+tidy by stopped UDID may delete devices. A fleet name never establishes
+ownership; uncertain create receipts retain their journal claim and slot.
+
+A read-only owner-authenticated plan lets the CLI warn about creation's
+expensive first boot before requesting effects and state the idle timeout.
+The plan is advisory, not a reservation or authority; acquire rechecks inventory
+and the existing native occupant/owner boundaries. Caller disconnect behavior
+and uncertain receipt handling remain as originally decided.
+
+Rejected alternatives: unconditional creation preserves the costly loop;
+automatic deletion discards the initialized device; automatically adopting
+booted external devices risks shutting down another lane. The adapter-boundary
+integration proves reuse without booting any real simulator.
+
+Within the requested family and runtime, a valid native `lastUsedAt` timestamp
+puts previously booted devices ahead of devices with unknown boot history,
+even when the latter match the requested model exactly. Among those candidates,
+exact model then close model then family determines preference. `exact: true`
+never substitutes a different model; an explicit `deviceId` remains strict.
+Missing or malformed metadata is unknown, never proof of a previous boot.

@@ -1,6 +1,6 @@
 // Executable CoreSimulator boundary fixture. It never invokes xcrun or simctl.
 import { randomUUID } from "node:crypto";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const [statePath, logPath, ...args] = process.argv.slice(2);
 appendFileSync(logPath, `${JSON.stringify(args)}\n`);
@@ -66,10 +66,12 @@ if (command === "list" && args[1] === "devicetypes" && args[2] === "--json" && a
     .find((row) => row.device.udid === args[1]);
   if (!found) fail();
   if (command === "bootstatus" && args.length === 3 && args[2] === "-b") {
-    // A slow first boot: the fixture holds bootstatus open for bootDelayMs.
+    // A slow first boot: delay or hold bootstatus on a test-owned release file.
     // It re-reads the state afterwards so concurrent fixture commands are kept.
-    if (state.bootDelayMs) {
-      await new Promise((resolve) => setTimeout(resolve, state.bootDelayMs));
+    if (state.bootDelayMs || state.bootReleasePath) {
+      if (state.bootReleasePath) {
+        while (!existsSync(state.bootReleasePath)) await new Promise((resolve) => setTimeout(resolve, 10));
+      } else await new Promise((resolve) => setTimeout(resolve, state.bootDelayMs));
       const current = JSON.parse(readFileSync(statePath, "utf8"));
       for (const key of Object.keys(state)) delete state[key];
       Object.assign(state, current);
@@ -79,6 +81,10 @@ if (command === "list" && args[1] === "devicetypes" && args[2] === "--json" && a
       if (!device) fail();
       device.state = fault?.state ?? "Booted";
     } else found.device.state = fault?.state ?? "Booted";
+    const booted = Object.values(state.devices)
+      .flat()
+      .find((row) => row.udid === args[1]);
+    if (booted.state === "Booted") booted.lastUsedAt = new Date().toISOString();
   } else if (command === "shutdown" && args.length === 2) found.device.state = fault?.state ?? "Shutdown";
   else if (command === "delete" && args.length === 2) {
     if (found.device.state !== "Shutdown") throw new Error("Fixture refuses deletion before shutdown");

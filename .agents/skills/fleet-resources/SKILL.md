@@ -71,15 +71,28 @@ returns your lease. Outcomes:
   `alternatives`.
 
 Acquire prefers an idle existing device of the requested type, then a close
-model of the same screen (`lease.requestedDeviceType` says one stood in; pass
-`"exact": true` to refuse instead), and creates a device only when neither
-exists. If you already booted a device by hand, lease it instead of booting
+model of the same screen, then another idle iPhone or iPad of the same family
+on that runtime. `lease.requestedDeviceType` says one stood in; pass
+`"exact": true` to require the exact model. It creates only when no suitable
+idle device exists. The CLI reads a plan before acquire and warns when that
+plan needs a new device: its first boot can be expensive and slow the Mac.
+`clankie simulator plan JSON` reads that advice without reserving or booting.
+The plan is advice; acquire rechecks availability and authority before effects. If you already booted a device by hand, lease it instead of booting
 another: `clankie simulator acquire '{"seatId":"SEAT","deviceId":"UDID"}'`.
+
+Within the requested family and runtime, a valid native `lastUsedAt` timestamp
+puts previously booted devices ahead of devices with unknown boot history,
+even when the latter match the requested model exactly. Among those candidates,
+exact model then close model then family determines preference. `exact: true`
+never substitutes a different model; an explicit `deviceId` remains strict.
+Missing or malformed metadata is unknown, never proof of a previous boot.
 
 Touch the lease while actively using it; its default idle timeout is ten
 minutes. Release when finished. Release, idle expiry or a verified seat exit
-shuts the device down and deletes it only if the lease created it. Clankie
-never shuts down or deletes a device it did not lease; it names such devices
+shuts the leased device down and keeps it for later reuse, including devices
+Clankie created. Deletion requires a separate, explicit owner tidy naming the
+exact stopped UDIDs; release and expiry never delete devices. Clankie
+never shuts down a device it did not lease; it names such devices
 in status and doctor and tells the lead of the seat using one. Never run
 global shutdown, erase, delete-all or unavailable-device cleanup for fleet
 work.

@@ -50,8 +50,14 @@ holders; caller seat labels do not confer ownership or cleanup authority.
 
 Simulator reservations remain durable when request processes die. Only the
 simulator manager can settle native receipts and release them after confirmed
-shutdown of the exact device, deleting it only when the lease created it
-(`Clankie-<uuid>` journal name); a leased existing device is kept. Simulator
+shutdown of the exact device. Every device is kept for later reuse, including
+ones created by Clankie; deletion requires an explicit owner tidy by exact
+stopped UDID. A historical `Clankie-<uuid>` name grants no ownership. Active
+journal claims (including a name with an uncertain create receipt) exclude
+reuse. Selection prefers exact type, close model, then any idle iPhone or iPad
+of the same family and runtime unless `exact` is requested. A read-only plan
+lets the CLI announce creation and its expensive first boot before acquire.
+Planning grants no slot or authority; acquire rechecks both before effects. Simulator
 admission never waits: `tryAcquireSimulator` admits or returns the snapshot of
 what holds the slots, and the manager owns create and boot after admission, so
 a caller that disconnects never strands a lease (ADR 0249). The native helper's
@@ -59,6 +65,13 @@ a caller that disconnects never strands a lease (ADR 0249). The native helper's
 (PID, parent and executable only) so status can attribute external devices to
 seats. `snapshot` does asynchronous reconciliation; the runtime publishes a
 cached result to health and roster readers.
+
+Within the requested family and runtime, a valid native `lastUsedAt` timestamp
+puts previously booted devices ahead of devices with unknown boot history,
+even when the latter match the requested model exactly. Among those candidates,
+exact model then close model then family determines preference. `exact: true`
+never substitutes a different model; an explicit `deviceId` remains strict.
+Missing or malformed metadata is unknown, never proof of a previous boot.
 
 The subprocess integration suite exercises actual OS locks, processes, filesystem
 receipts, cancellation and native runner registration. It never hires agents or

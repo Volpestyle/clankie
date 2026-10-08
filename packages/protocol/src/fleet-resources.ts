@@ -79,17 +79,18 @@ export type FleetResourceSnapshot = z.infer<typeof FleetResourceSnapshotSchema>;
 const SimulatorSeatSchema = z.object({ seatId: reference, fleet: reference.optional() }).strict();
 const udid = z.string().regex(/^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/u);
 /** Native occupant and process identities are observed by the host, never supplied here. */
+const SimulatorSelectionSchema = SimulatorSeatSchema.extend({
+  /** Both are required unless `deviceId` names the device. */
+  deviceType: reference.optional(),
+  runtime: reference.optional(),
+  /** Lease this existing device (for example one the seat booted by hand) instead of choosing one. */
+  deviceId: udid.optional(),
+  /** Refuse instead of substituting a close model when no exact device exists or can be created. */
+  exact: z.boolean().optional(),
+}).strict();
 export const FleetSimulatorRequestSchema = z.discriminatedUnion("action", [
-  SimulatorSeatSchema.extend({
-    action: z.literal("acquire"),
-    /** Both are required unless `deviceId` names the device. */
-    deviceType: reference.optional(),
-    runtime: reference.optional(),
-    /** Lease this existing device (for example one the seat booted by hand) instead of choosing one. */
-    deviceId: udid.optional(),
-    /** Refuse instead of substituting a close model when no exact device exists or can be created. */
-    exact: z.boolean().optional(),
-  }).strict(),
+  SimulatorSelectionSchema.extend({ action: z.literal("plan") }).strict(),
+  SimulatorSelectionSchema.extend({ action: z.literal("acquire") }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("touch"), id: reference }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("release"), id: reference }).strict(),
 ]);
@@ -108,7 +109,7 @@ export const FleetSimulatorLeaseSchema = z
     deviceName: z.string().min(1).max(256).optional(),
     deviceType: z.string().min(1).max(256).optional(),
     runtime: z.string().min(1).max(256).optional(),
-    /** `created` devices are deleted on cleanup; `existing` devices are only shut down. */
+    /** Informational device origin; release stops and retains every device. */
     origin: z.enum(["created", "existing"]).optional(),
     /** Present when a close model stood in for the requested device type. */
     requestedDeviceType: z.string().min(1).max(256).optional(),
@@ -206,6 +207,13 @@ const FLEET_SIMULATOR_REJECTIONS = [
   "internal_error",
 ] as const;
 export const FleetSimulatorResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("planned"),
+      choice: z.enum(["reuse", "create"]),
+      simulatorIdleMs: z.number().int().min(1000).max(86_400_000),
+    })
+    .strict(),
   z
     .object({
       outcome: z.enum(["acquired", "held", "booting"]),

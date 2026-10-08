@@ -2291,7 +2291,8 @@ not create independent capacity. See the [shipped skill](../.agents/skills/fleet
 `deviceType` and `runtime`, or `deviceId` to lease an existing device such as
 one the seat booted by hand, and optional `exact`. The host proves the current
 local seat and occupant, then leases an idle existing device of that type, a
-close model of the same family unless `exact`, or creates and boots a new one,
+close model, then any idle iPhone or iPad of the same family on that runtime
+unless `exact`, or creates and boots a new one,
 and records its exact UUID. It answers within about 20 seconds: `acquired`,
 `booting` (the service keeps booting; acquire again, it is idempotent per seat),
 `waiting` with `blockers` and a `hint` naming leases by seat, devices booted
@@ -2302,15 +2303,30 @@ to SECONDS, printing progress on stderr. `simulator touch JSON` and
 `simulator status` lists leases and external devices with the processes and
 seats that name them; `clankie doctor` shows the same. The operator credential
 is required; native occupant, process proof and binding fields are rejected as
-caller input. Release, idle expiry or proven seat exit deletes only a device
-the lease created and shuts down one it leased. External booted devices count
+caller input. Release, idle expiry or proven seat exit shuts down the leased
+device and retains it for reuse, including one Clankie created. Deletion is a
+separate explicit owner tidy of exact stopped UDIDs. External booted devices count
 toward the ceiling and are never shut down; the lead of a seat using one is
 told once. Unknown receipts remain held for review; observer shutdown does not
 release them. See [ADR 0249](adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md).
 
+Within the requested family and runtime, a valid native `lastUsedAt` timestamp
+puts previously booted devices ahead of devices with unknown boot history,
+even when the latter match the requested model exactly. Among those candidates,
+exact model then close model then family determines preference. `exact: true`
+never substitutes a different model; an explicit `deviceId` remains strict.
+Missing or malformed metadata is unknown, never proof of a previous boot.
+
+`simulator plan JSON` gives read-only creation/reuse advice and the current idle
+timeout. Acquire reads that plan before its native request, warns on stderr
+when creation is needed and its first boot can be expensive, and reminds the
+caller to touch while using the lease. The plan does not reserve a slot;
+acquire rechecks availability and authority. `fleet simulator` is an alias
+for `simulator`.
+
 Owner HTTP routes are `GET /v1/operator/fleet-resources` and
 `GET|POST /v1/operator/fleet-resources/simulators`. POST uses the same strict JSON
-with `action: acquire|touch|release`, a 16 KiB limit and fresh authority checks
+with `action: plan|acquire|touch|release`, a 16 KiB limit and fresh authority checks
 before native effects. A disconnected acquire keeps its admitted lease.
 Unavailable resource status is 503; rejected mutations are 409, or 503 while
 the service restarts. These routes retain the existing operator owner boundary.

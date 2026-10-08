@@ -408,6 +408,16 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "fleet") {
+      if (rest[0] === "simulator") {
+        outputJson(
+          stdout,
+          await runSimulatorCommand(rest.slice(1), {
+            ...options,
+            progress: (line) => stderr.write(`${line}\n`),
+          }),
+        );
+        return 0;
+      }
       if (rest.length === 1 && rest[0] === "resources") {
         outputJson(stdout, await runResourceStatusCommand(options));
         return 0;

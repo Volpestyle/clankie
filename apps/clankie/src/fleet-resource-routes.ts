@@ -41,7 +41,11 @@ export function createFleetResourceRoutes(
     const input = FleetSimulatorRequestSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed_simulator_request" }, 400);
     const request = input.data;
-    if (request.action === "acquire" && !request.deviceId && (!request.deviceType || !request.runtime))
+    if (
+      (request.action === "acquire" || request.action === "plan") &&
+      !request.deviceId &&
+      (!request.deviceType || !request.runtime)
+    )
       return context.json({ error: "malformed_simulator_request" }, 400);
     // Owner authority is the bearer, checked before every native effect. The
     // connection is not: an acquire whose caller disconnects keeps its lease
@@ -56,8 +60,8 @@ export function createFleetResourceRoutes(
       if (!(await allowed())) return context.json({ error: "forbidden" }, 403);
       const options = { authorize: allowed, signal: context.req.raw.signal };
       const result =
-        request.action === "acquire"
-          ? await resources!.simulators.acquire({
+        request.action === "acquire" || request.action === "plan"
+          ? await resources!.simulators[request.action]({
               seatId: owner.seatId,
               occupantId: owner.occupantId,
               ...(owner.fleet === undefined ? {} : { fleet: owner.fleet }),

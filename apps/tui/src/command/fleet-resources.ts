@@ -58,7 +58,8 @@ export async function runSimulatorCommand(
 ): Promise<unknown> {
   if (args.length === 0 || (args.length === 1 && args[0] === "status"))
     return FleetSimulatorStatusSchema.parse(await request(FLEET_SIMULATORS_PATH, undefined, options));
-  const usage = "Usage: clankie simulator status | acquire JSON [--wait SECONDS] | touch JSON | release JSON";
+  const usage =
+    "Usage: clankie simulator status | plan JSON | acquire JSON [--wait SECONDS] | touch JSON | release JSON";
   let waitSeconds = 0;
   const rest = [...args];
   const flag = rest.indexOf("--wait");
@@ -68,14 +69,38 @@ export async function runSimulatorCommand(
     if (!Number.isInteger(waitSeconds) || waitSeconds < 0 || waitSeconds > 3600) throw new Error(usage);
     rest.splice(flag, 2);
   }
-  if (rest.length !== 2 || !["acquire", "touch", "release"].includes(rest[0] ?? "")) throw new Error(usage);
+  if (rest.length !== 2 || !["plan", "acquire", "touch", "release"].includes(rest[0] ?? ""))
+    throw new Error(usage);
   const value: unknown = JSON.parse(rest[1]!);
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("Simulator request must be a JSON object");
   if ("action" in value && value.action !== rest[0]) throw new Error("Simulator command and action differ");
   const input = FleetSimulatorRequestSchema.parse({ ...value, action: rest[0] });
-  const call = async () =>
-    FleetSimulatorResultSchema.parse(await request(FLEET_SIMULATORS_PATH, input, options));
+  let creationWarned = false;
+  let idleShown = false;
+  const call = async () => {
+    if (input.action === "acquire") {
+      const plan = FleetSimulatorResultSchema.parse(
+        await request(FLEET_SIMULATORS_PATH, { ...input, action: "plan" }, options),
+      );
+      if (plan.outcome === "rejected") return plan;
+      if (plan.outcome === "planned") {
+        if (plan.choice === "create" && !creationWarned) {
+          options.progress?.(
+            "No idle matching simulator is available; if admitted now, acquire will create a new device. Its first boot is expensive and can slow the Mac.",
+          );
+          creationWarned = true;
+        }
+        if (!idleShown) {
+          options.progress?.(
+            `Idle timeout is ${plan.simulatorIdleMs / 1000} seconds; touch the lease while using it, and release when finished.`,
+          );
+          idleShown = true;
+        }
+      }
+    }
+    return FleetSimulatorResultSchema.parse(await request(FLEET_SIMULATORS_PATH, input, options));
+  };
   let result = await call();
   // Acquire is idempotent per seat: polling it re-reads this seat's lease, or
   // admits it once a slot frees. Nothing is left behind if waiting stops.
