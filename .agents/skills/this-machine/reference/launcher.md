@@ -276,7 +276,11 @@ beside it, but never the official application's own token.
 `discord.wakeTrigger` (`mention`, `name`, `any`) sets what wakes him for text:
 `mention` is an @mention, DM, reply or command and ignores his plain name,
 `name` adds it, `any` is every message; unset keeps `persona.replyPolicy`, and a
-stored `addressed` reads as `mention`. `persona.chattiness` (`quiet`,
+stored `addressed` reads as `mention`. Explicit `mention`/`name` settings stay
+strict after a reply and across inbox restarts; the persona's live-message
+window applies only when the trigger is unset. Waking grants no authority:
+server ownership, audience privacy and room skills still follow ADR 0251.
+`persona.chattiness` (`quiet`,
 `balanced`, `chatty`) is only how readily he joins in when nobody addressed him,
 never how long he talks. `/discord` → What wakes him / how much he talks edits
 all three. `ambientChannelIds` lets the hosted or

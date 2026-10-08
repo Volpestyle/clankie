@@ -201,6 +201,14 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
       owner: true,
       kind: "dm",
       content: "Please investigate this room request.",
+      context: [
+        {
+          messageId: "1",
+          actorId: "5",
+          content: "Earlier conversation, kept as context rather than a new trigger.",
+          atMs: now - 1_000,
+        },
+      ],
     });
     prepared = prepareDiscordIngress(event, registeredDiscordKeys[0]!);
     const request = prepared.seal(
@@ -234,6 +242,14 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
       body: event.content,
     });
     expect(authority?.verifiedOwner).toBe(event.owner);
+    expect(turn.contextMessages).toEqual([
+      {
+        id: "1",
+        authorId: "5",
+        body: event.context![0]!.content,
+        createdAt: new Date(now - 1_000).toISOString(),
+      },
+    ]);
     expect(typeof authority?.sourceCurrent).toBe("function");
     expect(authority?.sourceCurrent?.()).toBe(true);
     release();
@@ -272,6 +288,7 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
       deliveryId: "discord:hosted-voice-1",
       guildId: "1",
       kind: "voice",
+      context: undefined,
       owner: false,
       voice: {
         action: "handoff",
@@ -394,6 +411,7 @@ it("binds encrypted hosted room handoffs to signed owner and live source proof, 
           channelId: "23456",
           actorId: "34567",
           kind: "voice",
+          context: undefined,
           deliveryId: `discord:voice-${operation.action}`,
           voice: operation,
         });

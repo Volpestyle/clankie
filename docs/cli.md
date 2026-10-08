@@ -4787,6 +4787,9 @@ values.
 --wake-trigger` restores the body's default: self-hosted follows the persona
 `--reply-policy` (`all` → `any`, `addressed` → `name`), hosted uses `mention`.
 `addressed` is the earlier spelling of `mention` and is saved as `mention`.
+An explicit `mention` or `name` trigger also applies after he replies: ordinary
+follow-ups do not wake him through the persona's live-message window. Clearing
+the trigger preserves that window and the existing self-hosted reply policy.
 `ambient-channel-ids` (hosted and official bot only) lists channels whose recent
 chat is kept briefly, encrypted, as context for his next wake; empty means none.
 How readily he joins in once something reaches him is the persona

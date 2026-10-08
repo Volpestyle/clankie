@@ -573,6 +573,57 @@ it("leaves fresh self-hosted settings considering every admitted message", () =>
   ).toEqual({ replyPolicy: "all", characterNames: ["clankie"] });
 });
 
+it.each(["mention", "addressed", "name"] as const)(
+  "explicit %s trigger does not wake on ordinary follow-ups after replying or restarting",
+  async (trigger) => {
+    const directory = mkdtempSync(join(tmpdir(), "clankie-wake-trigger-"));
+    const path = join(directory, "inbox.sqlite");
+    let inbox = new DiscordTextInbox(path, "0");
+    const delegate = replyPort();
+    const open = () =>
+      new DiscordTextIngress(inbox.port(delegate), {
+        ...guildConfig,
+        ...discordTextAttention({
+          wakeTrigger: trigger,
+          replyPolicy: "all",
+          characterNames: ["clankie"],
+        }),
+        channelActivity: inbox.channelActivity,
+      });
+    try {
+      let ingress = open();
+      expect((await ingress.handle({ ...message, guildId: "guild" })).state).toBe("settled");
+      expect(await ingress.handle(followUp)).toEqual({ state: "dropped", reason: "not_addressed" });
+      expect(delegate.submitDiscordCaptainChannelTurn).toHaveBeenCalledTimes(1);
+      inbox.scanned("room", "201");
+      inbox.close();
+      inbox = new DiscordTextInbox(path, "0");
+      ingress = open();
+      expect(ingress.hasSpokenInChannel("room")).toBe(true);
+      const items = [historyMessage("202"), historyMessage("203", "human", "hey clankie")];
+      const channel = {
+        id: "room",
+        messages: {
+          fetch: async ({ before }: { before?: string }) =>
+            new Collection((before ? [] : items).map((item) => [item.id, item])),
+        },
+        isDMBased: () => false,
+      } as unknown as TextBasedChannel;
+      await scanDiscordTextChannel(inbox, channel, "bot", ingress);
+      expect(inbox.pending().map((row) => row.id)).toEqual(trigger === "name" ? ["203"] : []);
+      expect(await ingress.catchUp()).toEqual([]);
+      expect(delegate.submitDiscordCaptainChannelTurn).toHaveBeenCalledTimes(1);
+      // A direct reply/mention and an admitted owner DM still reach him.
+      expect((await ingress.handle({ ...followUp, id: "204", mentionsBot: true })).state).toBe("settled");
+      expect((await ingress.handle({ ...message, id: "205", mentionsBot: false })).state).toBe("settled");
+      expect(delegate.submitDiscordCaptainChannelTurn).toHaveBeenCalledTimes(3);
+    } finally {
+      inbox.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 it("keeps the cursor when a reply's addressing lookup fails transiently", async () => {
   const inbox = new DiscordTextInbox(":memory:", "200");
   try {

@@ -38,6 +38,8 @@ export interface DiscordTextIngressConfig {
    * cost-saving mode that only wakes on a mention or one of his names.
    */
   readonly replyPolicy?: DiscordReplyPolicy;
+  /** Explicit wake settings are strict; unset retains persona conversation attention. */
+  readonly wakeTrigger?: DiscordWakeTrigger;
   /** Lowercased names he answers to. Only consulted by the `addressed` policy. */
   readonly characterNames?: readonly string[];
   /**
@@ -70,18 +72,24 @@ export type DiscordReplyPolicy = "addressed" | "all";
  * policy and his names decide. `any` reads every admitted message, `name` wakes
  * on a mention or one of his names, and `mention` (stored earlier as
  * `addressed`) wakes on a mention only (a DM is always addressed). The
- * live-conversation window applies as before.
+ * live-conversation window applies only while the wake setting is unset.
  */
 export function discordTextAttention(input: {
   readonly wakeTrigger?: DiscordWakeTrigger | undefined;
   readonly replyPolicy: DiscordReplyPolicy;
   readonly characterNames: readonly string[];
-}): { readonly replyPolicy: DiscordReplyPolicy; readonly characterNames: readonly string[] } {
+}): {
+  readonly replyPolicy: DiscordReplyPolicy;
+  readonly characterNames: readonly string[];
+  readonly wakeTrigger?: DiscordWakeTrigger;
+} {
   if (input.wakeTrigger === undefined)
     return { replyPolicy: input.replyPolicy, characterNames: input.characterNames };
-  if (input.wakeTrigger === "any") return { replyPolicy: "all", characterNames: input.characterNames };
-  if (input.wakeTrigger === "name") return { replyPolicy: "addressed", characterNames: input.characterNames };
-  return { replyPolicy: "addressed", characterNames: [] };
+  if (input.wakeTrigger === "any")
+    return { replyPolicy: "all", characterNames: input.characterNames, wakeTrigger: input.wakeTrigger };
+  if (input.wakeTrigger === "name")
+    return { replyPolicy: "addressed", characterNames: input.characterNames, wakeTrigger: input.wakeTrigger };
+  return { replyPolicy: "addressed", characterNames: [], wakeTrigger: input.wakeTrigger };
 }
 
 /** Unknown values preserve the agent-first default. */
@@ -773,10 +781,11 @@ export class DiscordTextIngress {
     if ((this.config.replyPolicy ?? "all") === "addressed") {
       const addressed =
         message.mentionsBot || addressesCharacter(message.body, this.config.characterNames ?? []);
-      // Whether he is *reading* is decided in `handle`, which can buffer for a
-      // later catch-up instead of refusing. Only a channel he has never spoken
-      // in refuses outright: a room he was never in is not one he checks.
-      if (!addressed && !this.channels.has(message.channelId)) return "not_addressed";
+      // An explicit trigger must not turn into ambient model calls after a
+      // reply or restart. Unset preserves the persona's existing live window
+      // and catch-up; it only refuses a room he has never spoken in.
+      if (!addressed && (this.config.wakeTrigger !== undefined || !this.channels.has(message.channelId)))
+        return "not_addressed";
     }
     return undefined;
   }

@@ -32,7 +32,9 @@ nonce])`. Binding the recipient prevents a gateway from re-encrypting known
    existing Discord captain flow, and returns a sealed result. Poll with a fresh
    permit/envelope for the same event until reply/silent/failed; pending does not
    start another turn. The verified owner gets the existing machine-authority
-   session separation; other participants keep their existing local grants.
+   session separation. Server ownership, audience privacy and bounded room
+   skills remain subject to [ADR 0251](adr/0251-discord-owners-and-room-skills.md);
+   buffered context and a wake trigger confer no machine authority.
 
 On a crash after admission, an uncertain pending turn becomes `interrupted`.
 It is not automatically repeated: repeating a shell side effect is worse than
@@ -52,6 +54,13 @@ before it, oldest first, which the body passes to the captain as the turn's
 context messages. Context is never a trigger. Default remote text still
 requires explicit addressing; channels opt in to buffering separately
 (`discord.ambientChannelIds`).
+
+Bring-your-own bot and user-session text bridges preserve the persona's reply
+policy and live-conversation window when `wakeTrigger` is unset. An explicit
+`mention` or `name` setting admits only its selected triggers, including after a
+reply or inbox restart; ordinary follow-ups do not become new model turns.
+Direct replies, admitted DMs and commands remain addressed events. The hosted
+edge's encrypted ambient buffer and budget ledger live in `clankie-ops`.
 
 ### Self-hosted official bot
 
