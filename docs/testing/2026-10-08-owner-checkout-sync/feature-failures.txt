@@ -1,0 +1,69 @@
+Failure output extracts; fixture event logs omitted.
+
+$ clankie heavy -- pnpm check:landing
+
+ FAIL  apps/clankie/test/device-subscriptions.integration.test.ts > device subscription setup > cancels and expires pending browser sign-ins without storing credentials, and rejects supervise/provider-policy bypasses
+AssertionError: expected { ok: true, …(4) } to match object { state: 'expired' }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "state": "expired",
++   "state": "failed",
+  }
+
+ ❯ apps/clankie/test/device-subscriptions.integration.test.ts:375:7
+    373|         (v) => v.ok && v.state !== "pending" && v.state !== "committin…
+    374|       ),
+    375|     ).toMatchObject({ state: "expired" });
+       |       ^
+    376|     expect(await f.store.get("openai-codex")).toBeUndefined();
+    377|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 120 passed | 4 skipped (466)
+      Tests  1 failed | 2125 passed | 31 skipped (2160)
+   Start at  00:41:09
+   Duration  296.20s (transform 3.36s, setup 971ms, import 132.54s, tests 762.88s, environment 7ms)
+
+[ELIFECYCLE] Command failed with exit code 1.
+
+$ clankie heavy -- pnpm check:landing --exclude apps/clankie/test/device-subscriptions.integration.test.ts
+
+ FAIL  apps/clankie/test/worker-call-receipts.integration.test.ts > API-owned reads and writes retain scoped worker receipts without repeating provider calls
+AssertionError: expected { outcome: 'refused', …(3) } to match object { outcome: 'ok', …(3) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "isError": false,
+-   "outcome": "ok",
+-   "receiptId": "37a8aa77-6be5-4b92-8883-be0f72efdd0c",
+-   "toolError": false,
++   "outcome": "refused",
++   "toolError": true,
+  }
+
+ ❯ apps/clankie/test/worker-call-receipts.integration.test.ts:333:16
+    331|   const readArgs = { name: "linear_get_issue", arguments: { id: ISSUE_…
+    332|   const read = await f.call(readArgs, session, undefined, readId);
+    333|   expect(read).toMatchObject({ outcome: "ok", receiptId: readId, isErr…
+       |                ^
+    334|   const reads = f.apiProvider!.seen.length;
+    335|   expect(await f.call({ receiptId: readId }, session)).toEqual(read);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 28 passed | 2 skipped (465)
+      Tests  1 failed | 564 passed | 6 skipped (677)
+   Start at  00:54:17
+   Duration  193.62s (transform 2.70s, setup 698ms, import 67.56s, tests 696.79s, environment 2ms)
+
+[ELIFECYCLE] Command failed with exit code 1.

@@ -1,0 +1,9 @@
+Clean baseline HEAD: 3407a76a625858f62c3c43ce77959f1631c9f7fe
+Before run: git status --porcelain returned no entries.
+$ clankie heavy -- pnpm exec vitest run apps/clankie/test/device-subscriptions.integration.test.ts
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  01:21:05
+   Duration  3.68s (transform 1.60s, setup 16ms, import 2.77s, tests 809ms, environment 0ms)
+

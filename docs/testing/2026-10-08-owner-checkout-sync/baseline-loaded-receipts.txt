@@ -1,0 +1,12 @@
+Clean baseline HEAD: 3407a76a625858f62c3c43ce77959f1631c9f7fe
+Before runs: git status --porcelain returned no entries.
+Selection obtained on feature with clankie heavy -- pnpm exec vitest list --config vitest.config.ts --changed origin/main --exclude apps/clankie/test/device-subscriptions.integration.test.ts --filesOnly
+Executed with a Node spawnSync argv expansion of that selection, filtering only nonexistent baseline files. No test sources modified. vitest.config.ts: pool forks, maxWorkers 4, retry 0.
+$ clankie heavy -- node --input-type=module -e 'import {readFileSync,existsSync} from "node:fs"; import {spawnSync} from "node:child_process"; const files=readFileSync("/Users/james/dev/clankie-wt/vuh-1744-wren/.local/vuh-1744-baseline-selection.txt","utf8").split("\n").filter(p=>p.endsWith(".test.ts")&&existsSync(p)); console.log("Unmodified baseline files:",files.length); const result=spawnSync("pnpm",["exec","vitest","run","--config","vitest.config.ts","--bail","1","--exclude","apps/clankie/test/device-subscriptions.integration.test.ts",...files],{stdio:"inherit"}); process.exit(result.status??1);'
+
+Unmodified baseline files: 464
+ Test Files  453 passed | 11 skipped (464)
+      Tests  4148 passed | 31 skipped (4179)
+   Start at  01:26:36
+   Duration  358.83s (transform 10.99s, setup 3.18s, import 443.44s, tests 939.82s, environment 27ms)
+

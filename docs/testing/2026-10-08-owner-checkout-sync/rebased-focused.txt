@@ -1,0 +1,8 @@
+Candidate51497bc2, based on mainb60e2104.
+$ clankie heavy -- pnpm exec vitest run apps/clankie/test/opencode-fleet-lifecycle.integration.test.ts apps/clankie/test/checkout-freshness.integration.test.ts apps/clankie/test/owner-checkout-sync.integration.test.ts packages/settings/test/checkouts.integration.test.ts apps/clankie/test/project-hire-precondition.integration.test.ts apps/clankie/test/device-subscriptions.integration.test.ts apps/clankie/test/worker-call-receipts.integration.test.ts apps/clankie/test/worker-bridge-health.integration.test.ts apps/clankie/test/worker-bridge-concurrency.integration.test.ts apps/clankie/test/worker-mcp.test.ts
+
+ Test Files  10 passed (10)
+      Tests  85 passed | 1 skipped (86)
+   Start at  01:58:07
+   Duration  55.12s (transform 6.67s, setup 128ms, import 13.49s, tests 124.10s, environment 0ms)
+

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -205,11 +205,32 @@ it("remote observer enforces fetched main and cleanliness in a real child proces
       "advance",
     ]);
     await checkoutGit(writer, ["push", "origin", "main"]);
+    const before = (await checkoutGit(owner, ["rev-parse", "HEAD"])).trim();
+    const alias = join(root, "owner-alias");
+    await symlink(owner, alias, "dir");
+    for (const census of [null, [alias]]) {
+      const protectedStart = JSON.parse(
+        (await exec(process.execPath, ["-e", remoteCheckoutProgram(owner, census)])).stdout,
+      );
+      expect(protectedStart.outcome).toBe("refused");
+      expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(before);
+    }
+    await mkdir(join(root, ".clankie"));
+    await symlink(owner, join(root, ".clankie", "pinned"), "dir");
+    const runtimeStart = JSON.parse(
+      (
+        await exec(process.execPath, ["-e", remoteCheckoutProgram(owner)], {
+          env: { ...process.env, HOME: root },
+        })
+      ).stdout,
+    );
+    expect(runtimeStart.outcome).toBe("refused");
+    expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(before);
     expect(await observe()).toMatchObject({
-      outcome: "refused",
-      reason: expect.stringContaining("origin/main"),
+      outcome: "fresh",
+      head: (await checkoutGit(writer, ["rev-parse", "HEAD"])).trim(),
     });
-    expect((await syncOwnerCheckout(owner)).outcome).toBe("updated");
+    expect((await syncOwnerCheckout(owner)).outcome).toBe("current");
     await writeFile(join(owner, "draft.txt"), "dirty\n");
     expect(await observe()).toMatchObject({
       outcome: "refused",

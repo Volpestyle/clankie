@@ -2040,15 +2040,42 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (resume === undefined) {
       const remote = remoteFleets.find((fleet) => fleet.id === request.fleet);
       const shell = remote && deps.fleets?.shell?.(remote);
+      const paneDirectories = async () => {
+        if (!herdrRunner.list) throw Error("Live checkout census unavailable");
+        const panes = await herdrRunner.list(request.fleet === "default" ? undefined : request.fleet);
+        return [
+          ...new Set(
+            panes.flatMap((pane) => {
+              if (!pane.workingDirectory) throw Error("Live pane checkout is unknown");
+              return [
+                pane.workingDirectory,
+                ...(pane.foregroundWorkingDirectory ? [pane.foregroundWorkingDirectory] : []),
+              ];
+            }),
+          ),
+        ];
+      };
+      const assertInactive = async (root: string) => {
+        for (const managed of await managedWorktreePaths({ runtimeRoot: options.repoRoot })) {
+          if (projectPathContains(managed, root, "posix") || projectPathContains(root, managed, "posix"))
+            throw Error("Start checkout is a managed runtime; preserve its pinned HEAD");
+        }
+        for (const directory of await paneDirectories()) {
+          if (projectPathContains(root, await realpath(directory), "posix"))
+            throw Error("Start checkout belongs to a live pane; preserve its HEAD");
+        }
+      };
+      // Canonicalize remote cwd aliases on that machine, never against Mac paths.
+      const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
       const freshness = remote
         ? shell
-          ? await verifyRemoteHireCheckout(remote, shell, request.workingDirectory)
+          ? await verifyRemoteHireCheckout(remote, shell, request.workingDirectory, remoteDirectories)
           : {
               outcome: "refused" as const,
               path: request.workingDirectory,
               reason: "Remote checkout observer unavailable",
             }
-        : await verifyHireCheckout(request.workingDirectory);
+        : await verifyHireCheckout(request.workingDirectory, assertInactive);
       if (freshness.outcome === "refused")
         return {
           outcome: "failed",

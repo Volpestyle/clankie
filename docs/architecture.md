@@ -828,8 +828,13 @@ Git observations, safe fast-forward, and new-hire freshness admission.
 `/v1/checkouts` reports enrolled local repositories; `/v1/checkouts/sync` and
 `/v1/checkouts/prune` require operator authentication. Confirmed integration
 pushes and main runtime updates persist checkout-sync results. Fresh hires
-verify fetched main on their actual machine before any launch; saved resumes
-retain their directory. Tidy's exact-worktree removal preserves `.local`
+verify fetched main on their actual machine before any launch. Clean behind-only
+starts, including detached HEAD, fast-forward after a live-pane census; dirty, divergent,
+managed-runtime, live or unverified starts stay protected. Saved resumes retain
+their directory. The service's `owner-checkout-sync.ts` observes enrolled local
+owner refs every five seconds and fetches once a minute: direct pushes trigger
+the same safe sync, including catch-up on startup. Blocking edits and ages
+produce a service notice and structured log. Tidy's exact-worktree removal preserves `.local`
 evidence in the configured state directory and rechecks complete local pane
 and Git inventories. Managed pin/runtime/update namespaces and the running
 service checkout are protected independently of developer-root enrollment.

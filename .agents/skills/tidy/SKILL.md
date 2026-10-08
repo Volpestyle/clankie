@@ -76,9 +76,11 @@ removal refusal as permission to force it. Keep live workers' owned trees even
 when their pane still reports the main checkout as its cwd. The read-only list
 is a candidate inventory, not ownership proof.
 
-After an integrator confirms a push, run `clankie checkouts sync` for registered
-local owner repositories (or select one with `--repository`). It fetches main
-and fast-forwards only an owner checkout on `main` with no local commits and no
+The running service observes registered local owner refs every five seconds
+and fetches once a minute, so direct pushes sync automatically. Startup catches
+up pushes missed while stopped. `clankie checkouts sync` (optionally selecting
+`--repository`) is the immediate/manual recovery route. It fetches main and
+fast-forwards only an owner checkout on `main` with no local commits and no
 edits overlapping incoming paths. Disjoint local edits survive. `blocked`
 results name files and their age; preserve those files and report the blocker.
 `clankie checkouts status`, doctor, and roster checkout cards use cached
@@ -86,7 +88,10 @@ results name files and their age; preserve those files and report the blocker.
 `includeCheckouts: true`, cache owner discovery and inspection together for
 30 seconds, and retain at most 128 cwd observations. Default fleet reads do no
 checkout Git work. Sync and hire admission require a successful fetch.
-New hires need a clean checkout containing fetched `origin/main`, on that
-machine. A dirty-start refusal names up to 20 blocking paths, including
+New hires fetch `origin/main` on that machine. A clean behind-only start,
+including detached HEAD, fast-forwards after checking its live pane census.
+Dirty and divergent starts refuse. Live and managed-runtime checkouts never auto-advance. Ignored files
+are never overwritten, stashed or deleted. Fresh topic branches are accepted.
+A dirty-start refusal names up to 20 blocking paths, including
 untracked directories. Preserve those files; create a fresh owned deliverable
 worktree from fetched `origin/main`. Resuming a saved session keeps its exact directory.

@@ -130,14 +130,14 @@ it("protects untracked and ignored incoming paths, local commits, non-main branc
   await checkoutGit(f.owner, ["remote", "set-url", "origin", join(f.root, "missing.git")]);
   expect((await syncOwnerCheckout(f.owner)).outcome).toBe("unavailable");
 });
-it("hire admission fetches actual main, refuses stale or dirty starts and accepts current topic branches", async () => {
+it("hire admission advances clean behind-only main/detached starts and refuses dirty or divergent work", async () => {
   const f = await fixture();
   expect((await verifyHireCheckout(f.owner)).outcome).toBe("fresh");
   const old = join(f.root, "old");
   await checkoutGit(f.owner, ["worktree", "add", "--detach", old, f.base]);
   const target = await f.advance();
-  expect(await verifyHireCheckout(old)).toMatchObject({ outcome: "refused", remoteMain: target });
-  expect((await syncOwnerCheckout(f.owner)).outcome).toBe("updated");
+  expect(await verifyHireCheckout(old)).toMatchObject({ outcome: "fresh", head: target, remoteMain: target });
+  expect(await verifyHireCheckout(f.owner)).toMatchObject({ outcome: "fresh", head: target });
   const topic = join(f.root, "topic");
   await checkoutGit(f.owner, ["worktree", "add", "-b", "topic", topic, "origin/main"]);
   expect((await verifyHireCheckout(topic)).outcome).toBe("fresh");
@@ -285,4 +285,42 @@ it("finds linked worktrees with unlanded commits or uncommitted files by content
       ],
     }).checkouts[0]!.unreconciled,
   ).toHaveLength(2);
+});
+
+it("behind hire preserves live, divergent and ignored-collision work and advances a clean topic", async () => {
+  const f = await fixture();
+  const live = join(f.root, "live");
+  const collision = join(f.root, "collision");
+  const divergent = join(f.root, "divergent");
+  const topic = join(f.root, "old-topic");
+  for (const path of [live, collision, divergent])
+    await checkoutGit(f.owner, ["worktree", "add", "--detach", path, f.base]);
+  await checkoutGit(f.owner, ["worktree", "add", "-b", "old-topic", topic, f.base]);
+  await writeFile(join(collision, "ignored.txt"), "private notes\n");
+  await writeFile(join(divergent, "draft.txt"), "local commit\n");
+  await checkoutGit(divergent, ["add", "draft.txt"]);
+  await checkoutGit(divergent, [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-m",
+    "local work",
+  ]);
+  const localHead = (await checkoutGit(divergent, ["rev-parse", "HEAD"])).trim();
+  await f.advance("ignored.txt");
+  expect(
+    await verifyHireCheckout(live, async () => {
+      throw Error("Live pane owns checkout");
+    }),
+  ).toMatchObject({ outcome: "refused", reason: expect.stringContaining("Live pane") });
+  expect((await verifyHireCheckout(collision)).outcome).toBe("refused");
+  expect((await verifyHireCheckout(divergent)).outcome).toBe("refused");
+  expect((await verifyHireCheckout(topic)).outcome).toBe("fresh");
+  expect((await checkoutGit(live, ["rev-parse", "HEAD"])).trim()).toBe(f.base);
+  expect((await checkoutGit(collision, ["rev-parse", "HEAD"])).trim()).toBe(f.base);
+  expect((await checkoutGit(divergent, ["rev-parse", "HEAD"])).trim()).toBe(localHead);
+  expect(await readFile(join(collision, "ignored.txt"), "utf8")).toBe("private notes\n");
+  expect(await checkoutGit(collision, ["stash", "list"])).toBe("");
 });

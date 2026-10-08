@@ -304,7 +304,10 @@ export interface HireCheckoutFreshness {
   reason?: string | undefined;
 }
 /** New work starts clean and contains the fetched origin/main, including fresh topic branches. */
-export async function verifyHireCheckout(path: string): Promise<HireCheckoutFreshness> {
+export async function verifyHireCheckout(
+  path: string,
+  beforeAdvance: (root: string) => Promise<void> = async () => {},
+): Promise<HireCheckoutFreshness> {
   let root: string;
   try {
     root = (await checkoutGit(path, ["rev-parse", "--show-toplevel"])).trim();
@@ -321,7 +324,7 @@ export async function verifyHireCheckout(path: string): Promise<HireCheckoutFres
   }
   try {
     const remoteMain = await fetchCheckoutMain(root);
-    const head = (await checkoutGit(root, ["rev-parse", "HEAD"])).trim();
+    let head = (await checkoutGit(root, ["rev-parse", "HEAD"])).trim();
     const dirty = (
       await checkoutGit(root, ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal"])
     )
@@ -344,13 +347,42 @@ export async function verifyHireCheckout(path: string): Promise<HireCheckoutFres
     try {
       await checkoutGit(root, ["merge-base", "--is-ancestor", remoteMain, head]);
     } catch {
-      return {
-        outcome: "refused",
-        path: root,
-        head,
+      // A behind-only checkout has no local commits to reconcile. Git keeps
+      // ignored collisions and concurrent index edits safe; never reset/stash.
+      try {
+        await checkoutGit(root, ["merge-base", "--is-ancestor", head, remoteMain]);
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== 1) throw error;
+        return {
+          outcome: "refused",
+          path: root,
+          head,
+          remoteMain,
+          reason:
+            "Start checkout does not contain fetched origin/main; it diverges, so preserve its local commits",
+        };
+      }
+      await beforeAdvance(root);
+      if (
+        (await checkoutGit(root, ["rev-parse", "HEAD"])).trim() !== head ||
+        (await checkoutGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]))
+      )
+        throw Error("Start checkout changed during freshness verification");
+      await checkoutGit(root, [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "merge.autoStash=false",
+        "merge",
+        "--ff-only",
+        "--no-autostash",
+        "--no-overwrite-ignore",
         remoteMain,
-        reason: "Start checkout does not contain fetched origin/main; sync or create a fresh worktree",
-      };
+      ]);
+      head = (await checkoutGit(root, ["rev-parse", "HEAD"])).trim();
+      await checkoutGit(root, ["merge-base", "--is-ancestor", remoteMain, head]);
+      if (await checkoutGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]))
+        throw Error("Start checkout changed during fast-forward");
     }
     return { outcome: "fresh", path: root, head, remoteMain };
   } catch (error) {

@@ -227,7 +227,7 @@ export async function remoteOpenCodeFixture(options: {
     // observation rather than manufacturing a fresh checkout receipt.
     if (
       command.replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture") ===
-      remoteProgramCommand(fleet.ssh.shell, "node", ["-e", remoteCheckoutProgram(root)]).replaceAll(
+      remoteProgramCommand(fleet.ssh.shell, "node", ["-e", remoteCheckoutProgram(root, [root])]).replaceAll(
         /clankie-launch-[a-f0-9]{16}/gu,
         "clankie-launch-fixture",
       )

@@ -79,6 +79,11 @@ pane, and reports when delivery is uncertain. Agents on other machines join
 through a fleet link. The [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
 lists support and limits.
 
+Registered local owner checkouts follow main automatically while the service
+runs, preserving local edits and reporting anything that blocks advancement.
+New hires fetch main and advance a clean, unused checkout that is merely behind;
+dirty or divergent work stays protected. Saved sessions keep their directory.
+
 Agents can also message Clankie and each other (`message_clankie`,
 `message_peer`). Those messages are agent output and carry no owner authority;
 `/fleet` can switch peer messages off. A busy-looking agent or a claim of "done"

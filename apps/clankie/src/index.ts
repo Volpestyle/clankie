@@ -189,6 +189,7 @@ import {
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { loadRuntimeProvider } from "./runtime-provider.ts";
 import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
+import { startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
@@ -1935,6 +1936,25 @@ const playHost = new PlayHost({
   logger,
 });
 const playAbort = new AbortController();
+const ownerCheckoutSync = startOwnerCheckoutSync({
+  repositories: async () =>
+    (await settingsStore.load()).projects.projects.flatMap((project) => [
+      ...project.workspaces
+        .filter((workspace) => workspace.machineId === "local")
+        .map((workspace) => workspace.path),
+      ...project.worktreeRoots.filter((root) => root.machineId === "local").map((root) => root.repoPath),
+    ]),
+  report: (result) => {
+    if (result.outcome === "updated")
+      logger.info({ event: "checkouts.auto_sync", ...result }, "Owner checkout advanced after main changed");
+    else {
+      logger.warn({ event: "checkouts.auto_sync_blocked", ...result }, "Owner checkout sync needs attention");
+      captain.recordRuntimeHealthNotice(
+        `Owner checkout ${result.path}: ${result.reason}. ${result.blockers.map((file) => `${JSON.stringify(file.path)} (${file.ageSeconds ?? "unknown"} seconds old)`).join(", ")}`,
+      );
+    }
+  },
+});
 
 const listenHost = "127.0.0.1";
 const webSocketServer = new WebSocketServer({
@@ -2049,6 +2069,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   const closeLocalFleetConnections =
     localFleetServer === undefined ? undefined : drainHttpServer(localFleetServer);
   scheduledUpdates?.close();
+  void ownerCheckoutSync.close();
   harnessLogins.close();
   fleetLinks.close();
   const closeFleetLinkConnections = drainHttpServer(fleetLinkServer);

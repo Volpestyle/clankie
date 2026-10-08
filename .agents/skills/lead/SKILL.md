@@ -196,11 +196,16 @@ state is a project status update, never a lead-only file. Sizing records, Linear
 - A user pause or redirect stops new dispatch; productive jobs stay safe.
 - Open dashboards or rearrange terminals only when asked.
 
-After a confirmed integrator push, run `clankie checkouts sync` for the selected
-registered local owner repositories (`--repository` selects one). The integration
-queue records this automatically. Preserve and report blocked owner edits or
-local commits. New hires require a clean checkout containing fetched
-`origin/main`; roster and doctor checkout counts use cached refs.
+The running service automatically syncs registered local owner checkouts after
+main advances: it observes shared `origin/main` refs every five seconds and
+fetches once a minute for pushes from other clones or machines. Startup catches
+up missed pushes. Sync preserves disjoint owner edits; blocked files and their
+age appear in a service notice and log. `clankie checkouts sync --repository PATH`
+remains the immediate/manual recovery route, including when the service is off.
+New hires fetch main and safely fast-forward a clean, inactive behind-only
+checkout, including detached HEAD. Dirty and divergent starts refuse; live and
+managed-runtime checkouts never auto-advance. Fresh topic branches are accepted. Roster and doctor
+checkout counts use cached refs.
 Dirty-start refusals name the blocking paths, including untracked files.
 Preserve owner scratch files and create a clean deliverable worktree from
 fetched `origin/main`; a refusal does not authorize deleting or ignoring them.

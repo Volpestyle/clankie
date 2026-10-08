@@ -5603,9 +5603,14 @@ and no local edits overlapping incoming paths. Disjoint staged and unstaged
 edits survive. A refusal lists blocking files with their modification age in
 seconds. No stash, reset, rebase, force, or automatic commit is used. Confirmed
 `clankie integrate` pushes run the same sync and retain its result in the batch;
-updates targeting `origin/main` also run it and retain the result. Manual
-integrators run sync after each confirmed push. A blocked owner checkout does
-not undo a successful push or prevent the fetched runtime from updating.
+updates targeting `origin/main` also run it and retain the result. The running
+service observes shared `origin/main` refs every five seconds and
+fetches once a minute to catch pushes from separate clones or machines. It syncs
+registered local owner checkouts automatically on startup and after main advances.
+Blocked syncs produce a service notice and structured log with blocking files and
+age; repeated observations of the same blocker are quiet. Manual sync remains
+available when the service is stopped or for immediate recovery. A blocked owner
+checkout does not undo a successful push or prevent the fetched runtime from updating.
 
 `clankie checkouts decide --repository OWNER_CHECKOUT --path WORKTREE
 --decision worth_landing|safe_to_drop --reason TEXT` records a judgment of a
@@ -5626,8 +5631,11 @@ is retained under `worktree-evidence/` in Clankie’s configured state directory
 (default `~/.clankie/captain/worktree-evidence/`).
 
 New local and SSH hires fetch and verify their start checkout on that machine.
-Dirty checkouts, missing remote main, failed fetches and a HEAD that does not
-contain fetched `origin/main` refuse admission before launch. Clean topic
+A clean behind-only checkout, including detached HEAD, fast-forwards to fetched
+`origin/main` after a fresh census confirms no live pane uses it (including
+foreground cwd and symlink aliases). Ignored files are never overwritten.
+Dirty or divergent checkouts, failed fetches and missing main refuse before launch.
+Advancement also refuses managed runtimes or unavailable/live ownership checks. Clean topic
 branches based on current main are valid. Non-Git workspaces remain usable for
 other tasks; saved-session resumes keep the exact saved cwd.
 

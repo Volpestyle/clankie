@@ -1,0 +1,42 @@
+Candidate959922ee based on mainc8169521, including Saga Knip, Juno6912e691, Ashb60e2104.
+$ clankie heavy -- pnpm check:landing
+No exclusions or retries.
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && node scripts/check-doc-links.mjs && node scripts/check-retired-claims.mjs && pnpm typecheck && vitest run --config vitest.config.ts --changed ${CLANKIE_LANDING_BASE:-origin/main} --bail 1 --passWithNoTests
+$ node scripts/herdr-skill.mjs --check
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+All matched files use the correct format.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+$ turbo run typecheck
+ Tasks:    29 successful, 29 total
+ Test Files  456 passed | 11 skipped (467)
+      Tests  4171 passed | 32 skipped (4203)
+   Start at  02:44:27
+   Duration  332.59s (transform 4.44s, setup 2.50s, import 357.43s, tests 931.30s, environment 21ms)
+
+
+
+Final current-main gate: candidate 8da6776bb7c37b5a151ca74293120f24cb09e5a3, based on 0a6f1f681812e608d3942ff3af571b5ca6f1c71d.
+Source includes seat-capability negotiation, Saga c8169521, Ash b60e2104 and Juno 6912e691. No Knip diff belongs to this change.
+$ clankie heavy -- pnpm check:landing
+No exclusions or retries. Output excerpt; fixture event logs omitted.
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && node scripts/check-doc-links.mjs && node scripts/check-retired-claims.mjs && pnpm typecheck && vitest run --config vitest.config.ts --changed ${CLANKIE_LANDING_BASE:-origin/main} --bail 1 --passWithNoTests
+$ node scripts/herdr-skill.mjs --check
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+All matched files use the correct format.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+$ turbo run typecheck
+ Tasks:    29 successful, 29 total
+ Test Files  457 passed | 11 skipped (468)
+      Tests  4174 passed | 32 skipped (4206)
+   Start at  02:54:38
+   Duration  330.68s (transform 4.40s, setup 2.66s, import 360.95s, tests 918.60s, environment 22ms)
+
+
