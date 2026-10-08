@@ -1,5 +1,50 @@
 # VUH-1699 / VUH-1702 — idle CPU and alert verification
 
+## Follow-up: deployed canary and candidate reconciliation
+
+The deployed `60ef342706a9571eab9c3888ab51c059c5e5833b` canary passed
+2026-10-08 01:55:24.814–02:00:25.447Z: **4.978% CPU mean**, **5.807 ms
+health p95**, 31 samples over five minutes. The preceding deployed
+`829e974bdc38db8446565bf430f906b8d6bdad89` canary measured **7.884%**.
+[Retained canary metadata](canary-follow-up.json) comes from the completed
+update receipt and `clankie update status`'s `canaryCpu`; the unchanged budgets
+are 10% CPU and 250 ms health. The canary released its own hold.
+
+This meets VUH-1699's single-digit service CPU target after the historical 43%
+measurement. It does not attribute each optimization, measure helper CPU, or
+establish a controlled ten-bridge population. Ambient fleet traffic varies;
+a later healthy status sample was 15.7% CPU / 198 ms health under heavy machine
+load. No restart, deployment, overload, threshold change or lane steering was
+performed for this follow-up. The update's separate harness-refresh result
+remains incomplete; a passed canary does not prove native alert delivery.
+
+Both old worktrees were clean. Compared with fetched `origin/main`
+`f8d400eff2b2dd45ac41c802c9e77cc1adac960f`:
+
+| Candidate                                                                              | Disposition                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `night/vuh-1702-runtime-health-alert`, HEAD `1571531d8148552dfa1952542c2b6b2d7074429b` | `git cherry origin/main` is empty; HEAD is the merge base. Every commit is already on main, including conversation recording without a seat. Preserve it without replay.                                                                                                                        |
+| Oren `521c93caa43c9713a857cf890a4155695341a8b5`                                        | `git cherry` reports `-`: fleet health/counters are patch-equivalent on main.                                                                                                                                                                                                                   |
+| Oren `855d5119f1ec7d6627c2c634cc6495928866f410`                                        | `git cherry` reports `+`, but the detector was composed in `1419c9b0` and subsequently improved with fresh bounded health probes and Night's conversation recording. Abandon this original patch as a landing candidate: replay would restore superseded code, not complete missing acceptance. |
+| Oren `804ea36cba31359bbdc7bff74e3fe0332ff873bd`                                        | `git cherry` reports `-`: retained native receipt handling is patch-equivalent on main.                                                                                                                                                                                                         |
+
+No source cherry-pick is needed: main already contains the best combined
+implementation. VUH-1702 remains In Progress for an incident reaching the
+owner's actual TUI and its next owning-lead Linear check-in. Existing real
+CPU/slow-HTTP integration and exact-default five-minute evidence below prove
+the detector and protocol receiver, not those remaining live acceptance steps.
+The VUH-1701 parent remains open: children 1702, 1703, 1704, 1707 and 1708 are
+not Done. Earlier open-state statements below describe their capture dates.
+
+Follow-up verification through `clankie heavy`: four focused integration files,
+14 tests passed (9.63 s): `runtime-health-observer`, `runtime-health-conversation`,
+`runtime-health-native` and `runtime-health-sample`. They cover real CPU work,
+slow HTTP, content-free hosted telemetry, API/CLI revision guards, status/doctor,
+one conversation alarm/recovery with no service model turn, exact native mailbox
+acknowledgments, and bounded fresh HTTP probes. The native receiver is still a
+protocol client; this run uses accelerated dwell, not a new five-minute live
+incident. The earlier exact-default run remains separate evidence.
+
 Source baseline: `4b9c935fe0ecf711ae41be7673c302479380dada`.
 The live service was inspected without restarting, deploying, signalling or opening
 an inspector. Profiling used a separate process with CPU profiling at startup.
