@@ -38,6 +38,12 @@ own runtime.
 curl -fsSL https://clankie.bot/install | sh
 ```
 
+When a Mac release includes the approved companion pin, installation also
+writes `Clankie.app` to `/Applications` and opens it with a private local
+pairing handoff. For a terminal-only install, add `sh -s -- --no-app` to the
+command above; updates remember that choice. Companion distribution is still
+gated on the signed app release ([distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md#mac-companion-app)).
+
 Open a new Terminal window, run `clankie`, and choose **Run Clankie on this
 Mac**. The launcher starts his service and opens the console, and `/setup`
 walks you through the rest:

@@ -17,6 +17,9 @@ import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
+import { releaseUrl } from "./release-source.ts";
+export { releaseUrl } from "./release-source.ts";
+import { prepareMacApp, type MacAppTransaction } from "./mac-app.ts";
 import { boundedString, commitString, object, operationId } from "./update-files.ts";
 import {
   errorText,
@@ -51,14 +54,6 @@ export function releaseVersion(value: unknown): string {
   const version = boundedString(value, 64);
   if (!VERSION.test(version)) throw Error("Invalid release version");
   return version;
-}
-
-/** Official sources only: HTTPS, or loopback HTTP for a local fixture. */
-export function releaseUrl(value: unknown): string {
-  const url = new URL(boundedString(value, 2048));
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname === "127.0.0.1"))
-    throw Error("Release source must be HTTPS");
-  return url.toString();
 }
 
 /** A release's own small, owned, regular file; releases are readable, not private. */
@@ -177,6 +172,8 @@ interface ReleaseUpdatePorts {
   /** The release's own supervisor, as `runtimeUpdateServices` drives a checkout. */
   readonly services: (release: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;
   readonly refreshHarnesses?: (release: string) => Promise<{ ok: boolean }>;
+  readonly applicationsDirectory?: string | undefined;
+  readonly launchApp?: (release: string, path: string) => Promise<void>;
   readonly now?: () => Date;
 }
 
@@ -259,6 +256,7 @@ export async function executeReleaseUpdate(
   let stopAttempted = false;
   let oldStopped = false;
   let switched = false;
+  let app: MacAppTransaction | null = null;
   try {
     if (currentRelease(plan.installRoot) !== plan.oldRelease)
       return persist("refused", { reason: "current-release-changed" });
@@ -267,6 +265,11 @@ export async function executeReleaseUpdate(
     // Managed policy must keep working: never install a release its provider cannot serve.
     if (plan.providerApis && !plan.providerApis.includes(releaseManifest(staged).runtimeProviderApi))
       return persist("refused", { reason: "provider-api-unsupported" });
+    app = await prepareMacApp(staged, plan.installRoot, {
+      target: plan.target,
+      applicationsDirectory: ports.applicationsDirectory,
+      fetchImpl: ports.fetchImpl,
+    });
     if (existsSync(target)) {
       // An earlier install of this version is reused only when it is that exact release.
       if (releaseManifest(target).revision !== plan.newCommit)
@@ -287,6 +290,10 @@ export async function executeReleaseUpdate(
     switched = true;
     persist("restarting");
     if (!(await service(target, "restart", plan.newCommit))) throw Error("New services failed health checks");
+    app?.activate();
+    if (app) await ports.launchApp?.(target, app.path);
+    app?.finish();
+    app = null;
     let harnessRefresh: RuntimeUpdateResult["harnessRefresh"];
     if (ports.refreshHarnesses) {
       try {
@@ -315,6 +322,8 @@ export async function executeReleaseUpdate(
         : {}),
     });
   } catch (failure) {
+    app?.rollback();
+    app = null;
     const error = errorText(failure);
     if (!oldStopped)
       return persist(stopAttempted ? "stop-unconfirmed" : "failed", {
@@ -351,5 +360,7 @@ export async function executeReleaseUpdate(
         rollbackHealthy: false,
       });
     }
+  } finally {
+    app?.rollback();
   }
 }

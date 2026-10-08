@@ -30,6 +30,47 @@ panes with an older plugin get a once-only save/restart/resume flag. Their
 harnesses are never restarted by installation. See [harness linking](cli.md#linking-native-fleet-harnesses)
 for receipts, source setup and manual remediation.
 
+## Mac companion app
+
+A Mac release with an approved `scripts/release/mac-app.json` pin installs
+`Clankie.app` into `/Applications`, then opens it with the service's private
+local pairing handoff. Pass `--no-app` to keep a terminal-only installation:
+
+```sh
+curl -fsSL https://clankie.bot/install | sh -s -- --no-app
+```
+
+This preference is retained for `clankie update`; rerun the installer without
+`--no-app` to enable app installation. Linux releases and source-checkout
+updates do not install the app. Older releases without the app helper retain
+legacy behavior. To add the app when upgrading from a release whose update
+helper predates companion installation, rerun `install.sh` once; subsequent
+updates use the app-aware helper. `CLANKIE_APPLICATIONS_DIR` selects a different app destination
+(for an owner-chosen directory or an isolated integration fixture).
+
+The pin records `{ schemaVersion: 1, app: { version, url, sha256 } }`.
+The archive is a gzip tar containing only `Clankie.app/`. The artifact is
+versioned independently of the runtime; unchanged pins skip the download and
+replacement. App downloads are checksum-verified before either the app or
+runtime changes. Replacement stages beside the destination and retains the old
+bundle until activation succeeds; a failed runtime health check also retains
+the previous app. An unmanaged existing app or a symlink destination is refused.
+Installation never removes app data, credentials or device identity, and never
+quits a running app; it uses the new bundle on its next launch.
+
+Pairing uses `clankie pair --local-companion`, which writes the capability only
+to the existing private handoff file. It is never put in command arguments or
+installer output. If the handoff or open fails, the verified app remains
+installed; run that command and open the app to finish. Release-update evidence
+records only `{ paired: true|false }` in `app-handoff.json`.
+
+**Distribution remains gated:** the checked-in pin is currently `app: null`.
+No companion download is enabled until VUH-1727 produces a signed, notarized,
+published artifact and its approved SHA-256. This installer change does not
+sign, notarize, publish or release an app. Actual first-launch redemption and
+pet appearance require VUH-1833; fixture integration proves installation,
+update/rollback and invocation of the private handoff, not a signed app launch.
+
 ## Updating
 
 `clankie update` moves a release install to the latest official release; Clankie

@@ -51,6 +51,7 @@ const runtimeProviderApi = JSON.parse(
 const entrypoints = [
   "apps/tui/bin/clankie.ts",
   "apps/tui/bin/release-update-helper.ts",
+  "apps/tui/bin/mac-app-install.ts",
   "apps/clankie/src/index.ts",
   "apps/clankie/src/herdr-runtime.ts",
   "apps/clankie/src/captain/remote-opencode-helper.ts",
@@ -212,6 +213,7 @@ async function copyRuntimeAssets(targetRoot) {
     ["apps/clankie/src/captain/instructions.md", "apps/clankie/src/instructions.md"],
     ["apps/discord-activity/src/client.html", "apps/discord-activity/src/client.html"],
     ["LICENSE", "LICENSE"],
+    ["scripts/release/mac-app.json", "scripts/release/mac-app.json"],
     ["README.md", "README.md"],
     ["docs/bundled-skills.md", "docs/bundled-skills.md"],
     ["docs/cli.md", "docs/cli.md"],

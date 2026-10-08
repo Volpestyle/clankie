@@ -300,6 +300,12 @@ never root; never print, message or copy its secret into a shared location.
 The companion redeems only through the native primary loopback listener;
 repeating the handoff preserves its active device ID. This is the service
 contract; signed app distribution and installer wiring remain separate work.
+Official Mac installs with an approved `scripts/release/mac-app.json` pin put
+`Clankie.app` in `/Applications`; `install.sh --no-app` persists opt-out for
+release updates. Linux and source updates never install it. The current pin is
+null pending signed distribution; never invent an artifact URL or digest.
+Installer/update handoff uses `clankie pair --local-companion` without printing
+its capability. Signing, notarization and publishing remain separate gates.
 For device setup, read `/v1/captain/readiness`; never create an app-owned setup
 flag. Subscription start/status/cancel routes are documented in
 `docs/model-keys.md` under the service root. Headless operator access uses

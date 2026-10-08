@@ -3,6 +3,7 @@ set -eu
 
 repository="Volpestyle/clankie"
 requested_version="latest"
+app_action="install"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -11,8 +12,12 @@ while [ "$#" -gt 0 ]; do
       requested_version="$2"
       shift 2
       ;;
+    --no-app)
+      app_action="no-app"
+      shift
+      ;;
     -h|--help)
-      echo "Usage: install.sh [--version vX.Y.Z]"
+      echo "Usage: install.sh [--version vX.Y.Z] [--no-app]"
       exit 0
       ;;
     *)
@@ -85,6 +90,16 @@ target="$install_root/releases/$version"
 if [ ! -e "$target" ]; then
   mv "$temporary/clankie" "$target"
 fi
+# The verified release supplies this helper and its own Node; older releases skip it.
+app_helper="$target/apps/tui/bin/mac-app-install.js"
+app_launch="no"
+if [ -f "$app_helper" ]; then
+  app_result=$("$target/libexec/node" "$app_helper" "$target" "$install_root" "$app_action")
+  printf '%s\n' "$app_result"
+  case "$app_result" in
+    'Clankie.app installed from its verified release pin.') app_launch="yes" ;;
+  esac
+fi
 ln -sfn "releases/$version" "$install_root/current"
 for command in clankie clankie-herdr; do
   ln -sfn "$install_root/current/bin/$command" "$bin_dir/$command"
@@ -131,4 +146,9 @@ if [ -t 0 ] && [ -t 1 ]; then
   "$bin_link" harness install
 else
   echo "Run clankie harness install in a terminal to review optional harness linking."
+fi
+
+# Skip launch when no artifact is pinned or the owner opted out. Pairing output is private.
+if [ "$app_launch" = "yes" ]; then
+  "$target/libexec/node" "$app_helper" "$target" "$install_root" launch
 fi

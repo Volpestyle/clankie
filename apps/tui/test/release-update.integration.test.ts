@@ -65,6 +65,7 @@ if (action === "down" && ${JSON.stringify(replaceCurrentOnDown)}) {
 }
 if (action === "update") print({ runtime: { root, commit: ${JSON.stringify(revision)}, instanceId: randomUUID(), pid: process.pid } });
 else if (action === "harness") print({ ok: true });
+else if (action === "pair") print({ ok: true, localCompanion: true });
 else if (action === "restart" && ${JSON.stringify(restart)} === "fail") print({ ok: false, services: [{ id: target, label: target, ok: false, error: "fixture restart failed" }] }, 1);
 else print({ ok: true, services: [{ id: target, label: target, ok: true, state: action === "down" ? "unreachable" : "healthy" }] });
 `,
@@ -74,6 +75,9 @@ else print({ ok: true, services: [{ id: target, label: target, ok: true, state: 
 
 async function fixture(
   input: {
+    readonly app?: boolean;
+    readonly badAppChecksum?: boolean;
+    readonly noApp?: boolean;
     readonly restart?: "ok" | "fail";
     readonly badChecksum?: boolean;
     readonly replaceCurrentOnDown?: "old" | "new";
@@ -110,7 +114,7 @@ async function fixture(
   const archiveName = `clankie-${input.target ?? "darwin-arm64"}.tar.gz`;
   const archive = join(home, archiveName);
   execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
-  const digest = input.badChecksum
+  let digest = input.badChecksum
     ? "0".repeat(64)
     : createHash("sha256").update(readFileSync(archive)).digest("hex");
   const server: Server = createServer((request, response) => {
@@ -118,6 +122,7 @@ async function fixture(
       response.writeHead(status);
       response.end(body);
     };
+    if (request.url === "/app.tar.gz") return send(200, readFileSync(join(home, "app.tar.gz")));
     if (request.url === "/api/releases/latest") return send(200, JSON.stringify({ tag_name: "v1.1.0" }));
     if (request.url === "/api/commits/v1.1.0") return send(200, JSON.stringify({ sha: "b".repeat(40) }));
     if (request.url === `/download/v1.1.0/${archiveName}`) return send(200, readFileSync(archive));
@@ -128,7 +133,41 @@ async function fixture(
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   cleanup.push(() => server.close());
   const port = (server.address() as { port: number }).port;
-  const env = { HOME: home, PATH: process.env.PATH, RELEASE_CALLS: join(home, "calls.jsonl") };
+  const applications = join(home, "Applications");
+  if (input.noApp) writeFileSync(join(install, "app-policy.json"), '{"disabled":true}');
+  if (input.app) {
+    const appSource = join(home, "app-source");
+    mkdirSync(join(appSource, "Clankie.app/Contents/MacOS"), { recursive: true });
+    writeFileSync(join(appSource, "Clankie.app/Contents/Info.plist"), "fixture app plist");
+    writeFileSync(join(appSource, "Clankie.app/Contents/MacOS/Clankie"), "fixture executable");
+    execFileSync("tar", ["-czf", join(home, "app.tar.gz"), "-C", appSource, "Clankie.app"]);
+    const sha256 = input.badAppChecksum
+      ? "0".repeat(64)
+      : createHash("sha256")
+          .update(readFileSync(join(home, "app.tar.gz")))
+          .digest("hex");
+    const pinRoot = join(published, "clankie/scripts/release");
+    mkdirSync(pinRoot, { recursive: true });
+    writeFileSync(
+      join(pinRoot, "mac-app.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        app: { version: "v1.0.0", url: `http://127.0.0.1:${port}/app.tar.gz`, sha256 },
+      }),
+    );
+    execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
+    digest = createHash("sha256").update(readFileSync(archive)).digest("hex");
+  }
+  const commands = join(home, "commands");
+  mkdirSync(commands);
+  writeFileSync(join(commands, "open"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(commands, "open"), 0o755);
+  const env = {
+    CLANKIE_APPLICATIONS_DIR: applications,
+    HOME: home,
+    PATH: `${commands}:${process.env.PATH}`,
+    RELEASE_CALLS: join(home, "calls.jsonl"),
+  };
   const updater = (releaseRoot: string) =>
     createReleaseUpdater({
       releaseRoot,
@@ -155,7 +194,7 @@ async function fixture(
           .split("\n")
           .map((line) => JSON.parse(line))
       : [];
-  return { home, install, old, updater, settled, calls };
+  return { home, install, old, updater, settled, calls, applications };
 }
 
 it("updates a release install to the latest official release and then reports it current", async () => {
@@ -349,4 +388,47 @@ it("retains another release selected while the failed new services stop", async 
       .filter((call) => call.action === "restart")
       .map((call) => call.root),
   ).toEqual([realpathSync(join(f.install, "releases", "v1.1.0"))]);
+});
+
+it("release helper installs the pinned fixture app and prepares a private handoff", async () => {
+  const f = await fixture({ app: true });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
+  expect(readFileSync(join(f.applications, "Clankie.app/Contents/MacOS/Clankie"), "utf8")).toContain(
+    "fixture",
+  );
+  expect(f.calls()).toContainEqual(expect.objectContaining({ action: "pair", target: "--local-companion" }));
+  expect(
+    JSON.parse(readFileSync(join(f.home, ".clankie/updates", accepted.pending!, "app-handoff.json"), "utf8")),
+  ).toEqual({ paired: true });
+});
+
+it.each([{ noApp: true }, { target: "linux-arm64" }])(
+  "release helper skips the app for %j",
+  async (input) => {
+    const f = await fixture({ app: true, ...input });
+    const accepted = await f.updater(f.old).request("main", authority);
+    expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy" });
+    expect(existsSync(join(f.applications, "Clankie.app"))).toBe(false);
+    expect(f.calls().filter((call) => call.action === "pair")).toEqual([]);
+  },
+);
+
+it("app checksum mismatch aborts a release before runtime cutover", async () => {
+  const f = await fixture({ app: true, badAppChecksum: true });
+  const accepted = await f.updater(f.old).request("main", authority);
+  const result = await f.settled(accepted.pending!);
+  expect(result).toMatchObject({ phase: "failed", reason: "pre-cutover-failed" });
+  expect(result.error).toContain("Mac app checksum");
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+  expect(f.calls()).toEqual([]);
+  expect(existsSync(join(f.applications, "Clankie.app"))).toBe(false);
+});
+
+it("failed runtime health leaves the staged app uninstalled", async () => {
+  const f = await fixture({ app: true, restart: "fail" });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "rolled-back" });
+  expect(existsSync(join(f.applications, "Clankie.app"))).toBe(false);
+  expect(existsSync(join(f.applications, ".clankie-app-install.lock"))).toBe(false);
 });

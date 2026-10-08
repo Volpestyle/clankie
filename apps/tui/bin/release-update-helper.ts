@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { closeSync, openSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { launchMacApp } from "./mac-app.ts";
 import { executeReleaseUpdate, parseReleasePlan } from "./release-update.ts";
 import { readRuntimeUpdate, runtimeUpdateServices } from "./runtime-update.ts";
 import { object, operationId, readPrivateJson } from "./update-files.ts";
@@ -38,6 +39,14 @@ const cli = async (release: string, args: readonly string[]): Promise<unknown> =
   return JSON.parse(stdout);
 };
 const result = await executeReleaseUpdate(plan, {
+  applicationsDirectory: process.env.CLANKIE_APPLICATIONS_DIR,
+  launchApp: async (release, path) => {
+    const paired = await launchMacApp(release, path, { ...process.env, CLANKIE_UPDATE_OPERATION: plan.id });
+    writeFileSync(join(directory, "app-handoff.json"), JSON.stringify({ paired }) + "\n", {
+      mode: 0o600,
+      flag: "wx",
+    });
+  },
   services: (release, action) => runtimeUpdateServices(release, action, cli),
   refreshHarnesses: async (release) => {
     let refreshed: unknown;
