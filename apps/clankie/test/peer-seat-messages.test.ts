@@ -73,6 +73,7 @@ function fixture(fleet = "default") {
   const dispatched = vi.fn();
   const observedNative = vi.fn();
   const audit = vi.fn();
+  const confirmed = vi.fn();
   const deliver = vi.fn(
     async (seatId: string, text: string, options: PeerDeliveryOptions): Promise<FleetSeatDelivery> => {
       if (options.reconcileOnly) {
@@ -96,6 +97,7 @@ function fixture(fleet = "default") {
       seats: async () => [...seats.values()],
       deliver,
       record: audit,
+      confirmed,
     });
   const peer = create();
   async function input(
@@ -131,6 +133,7 @@ function fixture(fleet = "default") {
     dispatched,
     observedNative,
     audit,
+    confirmed,
     setEnabled: (value: boolean) => {
       enabled = value;
     },
@@ -589,4 +592,54 @@ it.each(["invalid JSON", "tampered receipt"])("fails closed on an %s journal", a
   ).resolves.toBeUndefined();
   expect(f.deliver).toHaveBeenCalledTimes(1);
   expect(f.observedNative).not.toHaveBeenCalled();
+});
+
+it("projects a confirmed native peer exchange once, preserving its exact words and delivery identity", async () => {
+  const f = fixture();
+  const input = await f.input();
+  const receipt = await f.peer.send(f.authority, input);
+  expect(receipt.deliveryStage).toBe("consumed");
+  expect(f.confirmed.mock.calls).toEqual([
+    [
+      {
+        sender: f.sender.terminalId,
+        recipient: f.recipient.terminalId,
+        text: input.text,
+        deliveryId: input.delivery.id,
+        senderOccupantId: f.authority.proof.nativeOccupantId,
+        recipientOccupantId: occupantIdForHerdrSession(f.recipient.session!),
+      },
+    ],
+  ]);
+  await f.peer.send(f.authority, input);
+  await f.peer.reconcile(f.authority, input.delivery, receipt.fingerprint);
+  expect(f.confirmed).toHaveBeenCalledTimes(1);
+});
+
+it.each(["undelivered", "unconfirmed", "stored"] as const)(
+  "does not project a %s peer attempt as an exchange",
+  async (outcome) => {
+    const f = fixture();
+    f.setResult(
+      outcome === "stored"
+        ? { outcome: "delivered", deliveryStage: "stored" }
+        : { outcome, detail: "Fixture native boundary" },
+    );
+    const input = await f.input();
+    await f.peer.send(f.authority, input);
+    expect(f.confirmed).not.toHaveBeenCalled();
+  },
+);
+
+it("projects an uncertain original only when native reconciliation confirms it", async () => {
+  const f = fixture();
+  f.setResult({ outcome: "unconfirmed", detail: "Native receipt pending" });
+  const input = await f.input();
+  const original = await f.peer.send(f.authority, input);
+  expect(f.confirmed).not.toHaveBeenCalled();
+  f.setObserved({ outcome: "delivered", state: "queued" });
+  await f.peer.reconcile(f.authority, input.delivery, original.fingerprint);
+  await f.peer.reconcile(f.authority, input.delivery, original.fingerprint);
+  expect(f.confirmed).toHaveBeenCalledTimes(1);
+  expect(f.dispatched).toHaveBeenCalledTimes(1);
 });

@@ -967,6 +967,9 @@ export const OperatorFleetEdgeSchema = z
      */
     conversationId: OperatorConversationIdSchema.optional(),
     entryId: OperatorConversationCursorSchema.optional(),
+    /** Confirmed native peer delivery: identity and a verbatim bounded excerpt. */
+    deliveryId: z.string().uuid().optional(),
+    text: z.string().max(1000).optional(),
   })
   .strict();
 export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;
@@ -977,6 +980,19 @@ export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;
  * the window rather than by the wire.
  */
 export const OPERATOR_FLEET_EDGE_MAX = 128;
+
+/** A confirmed lead action; Clankie is not a fabricated worker seat. */
+export const OperatorLeadVisitSchema = z
+  .object({
+    id: z.string().uuid(),
+    kind: z.enum(["message", "close"]),
+    toSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    toPersonaId: OperatorAgentPersonaIdSchema.optional(),
+    at: z.string().datetime(),
+    text: z.string().max(1000).optional(),
+  })
+  .strict();
+export type OperatorLeadVisit = z.infer<typeof OperatorLeadVisitSchema>;
 
 /** A full live-fleet read plus the cursor that wakes its next long poll. */
 export const OPERATOR_FLEET_WAIT_MS_MAX = 30_000;
@@ -1046,6 +1062,7 @@ export const OperatorFleetSnapshotSchema = z
       .max(OPERATOR_CONVERSATION_LIST_MAX)
       .optional(),
     closedPanes: z.array(ClosedWorkerPaneSchema).max(128).optional(),
+    leadVisits: z.array(OperatorLeadVisitSchema).max(64).optional(),
     seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     workerReports: z.array(WorkerReportSummarySchema).max(1000).optional(),
     personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),

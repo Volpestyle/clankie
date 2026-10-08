@@ -10,6 +10,7 @@ import {
   PROMPT_EDGE_WINDOW_MS,
   REPLY_WINDOW_MS,
   SeatMessageWindow,
+  LeadVisitWindow,
   deriveFleetEdges,
   type EdgeSeat,
 } from "../src/captain/fleet-edges.ts";
@@ -273,4 +274,53 @@ describe("a room turn as a seat-to-seat message", () => {
     expect(messages).toEqual([]);
     await close();
   });
+});
+
+it("retains native delivery identity and own words without inventing a conversation cursor", () => {
+  const id = "281a6d9c-5dc2-43b3-8947-088f40726c49";
+  const messages = [
+    {
+      kind: "prompt" as const,
+      fromSeatId: ATLAS.seatId,
+      toSeatId: DEV.seatId,
+      deliveryId: id,
+      text: "Please review the shared interface.",
+      at: T0,
+    },
+  ];
+  const edges = deriveFleetEdges([ATLAS, DEV], [], messages);
+  expect(edges).toMatchObject([{ deliveryId: id, text: messages[0]!.text }]);
+  expect(edges[0]!.entryId).toBeUndefined();
+  expect(edges[0]!.conversationId).toBeUndefined();
+  expect(deriveFleetEdges([ATLAS], [], messages)).toEqual([]);
+});
+
+it("bounds lead visits independently of worker edges, including confirmed closure", () => {
+  const window = new LeadVisitWindow();
+  for (let i = 0; i < 70; i++)
+    window.record({
+      id: "281a6d9c-5dc2-43b3-8947-088f40726c49",
+      kind: "close",
+      toSeatId: DEV.seatId,
+      at: new Date(T0 + i).toISOString(),
+    });
+  expect(window.recent(T0 + 70)).toHaveLength(64);
+  expect(window.recent(T0 + PROMPT_EDGE_WINDOW_MS + 70)).toEqual([]);
+});
+
+it("does not attach a confirmed native exchange to a replacement occupant in the same seat", () => {
+  const sender = { ...ATLAS, occupantId: "sender-original" };
+  const recipient = { ...DEV, occupantId: "recipient-original" };
+  const event = {
+    kind: "prompt" as const,
+    fromSeatId: sender.seatId,
+    toSeatId: recipient.seatId,
+    fromOccupantId: sender.occupantId,
+    toOccupantId: recipient.occupantId,
+    at: T0,
+    text: "Original words",
+  };
+  expect(deriveFleetEdges([sender, recipient], [], [event])).toHaveLength(1);
+  expect(deriveFleetEdges([{ ...sender, occupantId: "replacement" }, recipient], [], [event])).toEqual([]);
+  expect(deriveFleetEdges([sender, { ...recipient, occupantId: "replacement" }], [], [event])).toEqual([]);
 });

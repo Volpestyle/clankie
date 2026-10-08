@@ -1,4 +1,4 @@
-import { OPERATOR_FLEET_EDGE_MAX, type OperatorFleetEdge } from "@clankie/protocol";
+import { OPERATOR_FLEET_EDGE_MAX, type OperatorFleetEdge, type OperatorLeadVisit } from "@clankie/protocol";
 
 /**
  * How many prompt edges the captain remembers, and for how long. Herdr does not
@@ -57,8 +57,12 @@ export interface ObservedSeatMessage {
   readonly kind: "prompt" | "reply";
   readonly fromSeatId: string;
   readonly toSeatId: string;
-  readonly conversationId: string;
-  readonly entryId: string;
+  readonly conversationId?: string;
+  readonly entryId?: string;
+  readonly fromOccupantId?: string;
+  readonly toOccupantId?: string;
+  readonly deliveryId?: string;
+  readonly text?: string;
   readonly at: number;
 }
 
@@ -142,6 +146,7 @@ export class SeatMessageWindow {
 
 /** A seat as the edge derivation needs it: its own pane, and its parent's. */
 export interface EdgeSeat {
+  readonly occupantId?: string;
   readonly seatId: string;
   readonly paneId: string;
   readonly parentPaneId?: string;
@@ -166,6 +171,7 @@ export function deriveFleetEdges(
 ): readonly OperatorFleetEdge[] {
   const seatByPane = new Map(seats.map((seat) => [seat.paneId, seat.seatId]));
   const live = new Set(seats.map((seat) => seat.seatId));
+  const occupants = new Map(seats.map((seat) => [seat.seatId, seat.occupantId]));
   const edges: OperatorFleetEdge[] = [];
   const seen = new Set<string>();
   const add = (
@@ -173,14 +179,14 @@ export function deriveFleetEdges(
     fromSeatId: string,
     toSeatId: string,
     at: string,
-    said?: { readonly conversationId: string; readonly entryId: string },
+    said?: Pick<OperatorFleetEdge, "conversationId" | "entryId" | "deliveryId" | "text">,
   ): void => {
     // A seat never relates to itself: an agent prompting its own pane is a
     // person typing, not a relationship between two fleet members.
     if (fromSeatId === toSeatId || edges.length >= OPERATOR_FLEET_EDGE_MAX) return;
     // Only the same event twice is a duplicate. Two prompts between one pair
     // are two prompts, and the snapshot says so.
-    const key = [kind, fromSeatId, toSeatId, at].join("|");
+    const key = [kind, fromSeatId, toSeatId, at, said?.deliveryId ?? said?.entryId ?? ""].join("|");
     if (seen.has(key)) return;
     seen.add(key);
     edges.push({ kind, fromSeatId, toSeatId, at, ...said });
@@ -198,9 +204,15 @@ export function deriveFleetEdges(
   // say which entry each one was.
   for (const message of messages) {
     if (!live.has(message.fromSeatId) || !live.has(message.toSeatId)) continue;
+    if (message.fromOccupantId !== undefined && occupants.get(message.fromSeatId) !== message.fromOccupantId)
+      continue;
+    if (message.toOccupantId !== undefined && occupants.get(message.toSeatId) !== message.toOccupantId)
+      continue;
     add(message.kind, message.fromSeatId, message.toSeatId, new Date(message.at).toISOString(), {
       conversationId: message.conversationId,
       entryId: message.entryId,
+      deliveryId: message.deliveryId,
+      text: message.text,
     });
   }
   for (const seat of seats) {
@@ -225,4 +237,19 @@ export function parentSeatIds(seats: readonly EdgeSeat[]): ReadonlyMap<string, s
     parents.set(seat.seatId, parentSeatId);
   }
   return parents;
+}
+
+/** Bounded confirmed lead actions, separate from relationships between seats. */
+export class LeadVisitWindow {
+  private readonly visits: OperatorLeadVisit[] = [];
+  record(visit: OperatorLeadVisit): void {
+    this.visits.push(visit);
+    if (this.visits.length > PROMPT_EDGE_WINDOW_MAX)
+      this.visits.splice(0, this.visits.length - PROMPT_EDGE_WINDOW_MAX);
+  }
+  recent(now = Date.now()): readonly OperatorLeadVisit[] {
+    while (this.visits[0] && Date.parse(this.visits[0].at) <= now - PROMPT_EDGE_WINDOW_MS)
+      this.visits.shift();
+    return [...this.visits];
+  }
 }

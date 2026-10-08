@@ -774,3 +774,5 @@ export {
   type StopNativeTaskResult,
 } from "./pending-native-messages.ts";
 export * from "./machine-access.ts";
+
+export { OperatorLeadVisitSchema, type OperatorLeadVisit } from "./operator-conversations.ts";

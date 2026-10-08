@@ -2378,6 +2378,14 @@ ticket. Actual native failures identify their cause; see the
 [resource governor reference](../packages/fleet-resources/README.md).
 
 `fleet resources` returns current capacity, pressure, holders and queue as JSON.
+The operator fleet snapshot also carries recent confirmed native peer exchanges
+in `edges`: `deliveryId` is the original native delivery UUID and `text` is up to
+1,000 verbatim characters. Attempts, uncertain receipts and next-turn storage
+produce no exchange. `leadVisits` separately records confirmed captain messages
+and native pane closures; Clankie is not inserted into the worker roster. Both
+windows hold at most 64 events for five minutes and start empty after restart.
+These are delivery/action facts, not proof of task completion.
+
 The operator fleet snapshot carries the cached `resources` field; the TUI
 `/status` and `/doctor` show holders by seat label or actual PID. Sampling does
 not run on `/health`. Resource metadata contains no arguments or credentials.

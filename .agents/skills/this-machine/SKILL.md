@@ -245,3 +245,11 @@ exact receipts; no fallback or replay. Native observer acknowledgments do not
 prove queue drain: after any attempted input, Stop keeps the lease held. Read the
 [desktop-control skill](../desktop-control/SKILL.md) before driving. Real
 Mac/Windows driving remains an owner-run live gap.
+
+### Fleet exchanges
+
+The fleet snapshot's `edges` include confirmed native peer delivery UUIDs and
+verbatim bounded excerpts. `leadVisits` records confirmed captain deliveries and
+pane closure separately. Uncertain, refused and merely stored peer attempts earn
+no exchange; read the original receipt to reconcile, never resend for a visual.
+These bounded five-minute facts describe delivery, not work completion.

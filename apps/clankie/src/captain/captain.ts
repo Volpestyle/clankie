@@ -160,6 +160,7 @@ import {
   parentSeatIds,
   PromptEdgeWindow,
   SeatMessageWindow,
+  LeadVisitWindow,
   type EdgeSeat,
 } from "./fleet-edges.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
@@ -1017,6 +1018,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // Messages the captain carried between seats itself, and the replies they
   // drew. Same bounds and the same volatility as the prompt ring (ADR 0163).
   const seatMessages = new SeatMessageWindow();
+  const leadVisits = new LeadVisitWindow();
+  const recordLeadVisit = (seatId: string, kind: "message" | "close", text?: string) => {
+    const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
+    leadVisits.record({
+      id: randomUUID(),
+      kind,
+      toSeatId: seatId,
+      at: new Date().toISOString(),
+      ...(seat?.personaId === undefined ? {} : { toPersonaId: seat.personaId }),
+      ...(text === undefined ? {} : { text: text.slice(0, 1000) }),
+    });
+    fleetChanges.touch();
+  };
   const stopFleetChanges =
     deps.herdrAvailable?.() === false
       ? () => fleetChanges.close()
@@ -2183,6 +2197,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // before publishing the hire, so it cannot revoke the admitted controller.
     herdrWatches.trackSeat(adopted.seatId);
     if (resume === undefined) desktop.recordHire();
+    if (
+      brief &&
+      result.deliveryStage !== "stored" &&
+      (result.control?.mode === "adapter" || result.control?.mode === "channel")
+    )
+      recordLeadVisit(adopted.seatId, "message", brief);
     fleetChanges.touch();
     const roleAssignment =
       adoptedRoleWrite?.outcome === "pending"
@@ -2199,7 +2219,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
-    close: (seatId, guard, nativeOnly) => herdrWatches.closeSeat(seatId, guard, nativeOnly),
+    close: async (seatId, guard, nativeOnly) => {
+      const closed = await herdrWatches.closeSeat(seatId, guard, nativeOnly);
+      if (closed) recordLeadVisit(seatId, "close");
+      return closed;
+    },
     untrack: (seatId) => herdrWatches.untrackSeat(seatId),
     hire: hireSeat,
     ...(deps.agentSessions?.resolve ? { resolve: (ref: string) => deps.agentSessions!.resolve!(ref) } : {}),
@@ -2372,6 +2396,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // What a seat has been asked to do today is a fact about the seat, so the
     // roster's cursor moves for it the way it moves for a stance (ADR 0150).
     if (delivery?.outcome === "delivered") {
+      if (context.source === "captain" && delivery.deliveryStage !== "stored")
+        recordLeadVisit(seatId, "message", message);
       seatLedger.promptSent(seatId);
       fleetChanges.touch();
     }
@@ -2922,6 +2948,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     liveEdgeSeats = fleet.seats.map((observed) => ({
       seatId: observed.seatId,
       paneId: observed.paneId,
+      ...(observed.session === undefined ? {} : { occupantId: occupantIdForHerdrSession(observed.session) }),
       ...(observed.parentPaneId === undefined ? {} : { parentPaneId: observed.parentPaneId }),
     }));
     // The agent name a seat is sitting under. It is the persona's binding key,
@@ -3380,6 +3407,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           goals,
           assignments,
           closedPanes: [...paneTidy.history()],
+          leadVisits: [...leadVisits.recent()],
           seats: [...seats],
           workerReports: reportSummaries(),
           personas: fleetPersonas,
@@ -3917,6 +3945,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
         deliveryOptions,
       ),
+    confirmed: ({ sender, recipient, text, deliveryId, senderOccupantId, recipientOccupantId }) => {
+      seatMessages.record({
+        kind: "prompt",
+        fromSeatId: sender,
+        toSeatId: recipient,
+        deliveryId,
+        fromOccupantId: senderOccupantId,
+        toOccupantId: recipientOccupantId,
+        text: text.slice(0, 1000),
+        at: Date.now(),
+      });
+      fleetChanges.touch();
+    },
     record: ({ message, receipt }) =>
       conversations.publishFleetPeerExchange(
         `${message}\n\nPeer delivery receipt: ${JSON.stringify(receipt)}`,

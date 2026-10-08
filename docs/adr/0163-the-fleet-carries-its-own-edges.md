@@ -170,3 +170,24 @@ when the ring drops it.
   so that degrades to today's behaviour rather than to a wrong graph.
 - A captain restart empties the prompt window. This is visible — wires vanish —
   and correct: the captain cannot vouch for a prompt it never saw.
+
+## Amendment: native peer delivery (VUH-1735, 2026-10-08)
+
+Native `message_peer` receipts publish a prompt edge on the first confirmed
+native acceptance, including acceptance discovered by original-ID reconciliation.
+An attempt, refusal, uncertain receipt or next-turn storage does not publish one.
+Receipt rereads never replay an exchange. The same five-minute, 64-message window
+and live-roster endpoint checks apply.
+
+Native peer edges carry their delivery UUID and up to 1,000 verbatim characters
+of the sender's text. They have no fabricated transcript cursor: the existing
+audit message is context, not the sender's own conversation entry. Room edges
+keep their real conversation and entry references. Surfaces may shorten these
+words, but must not invent an exchange or quote.
+
+Confirmed captain deliveries and native pane closure also publish bounded
+`leadVisits`, separately from seat-to-seat edges. They identify the recipient
+seat and its observed persona when available. A captain delivery carries a
+verbatim excerpt; a confirmed close carries no invented speech. Owner DMs and
+room traffic do not become Clankie's own words. Surfaces that lack a known
+recipient location omit the visit rather than guessing one.
