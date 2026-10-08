@@ -1,0 +1,40 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 1 queued)
+Finished in 29ms on 3 files using 18 threads.
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1840
+
+ ❯ apps/clankie/test/joined-screen.integration.test.ts (12 tests | 1 failed) 17791ms
+   × a restarted native process cannot clear an older uncertain session by claiming an empty queue 715ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/joined-screen.integration.test.ts > a restarted native process cannot clear an older uncertain session by claiming an empty queue
+ZodError: [
+  {
+    "origin": "string",
+    "code": "invalid_format",
+    "format": "uuid",
+    "pattern": "/^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/",
+    "path": [
+      "session"
+    ],
+    "message": "Invalid UUID"
+  }
+]
+ ❯ LentScreenNative.stop apps/tui/bin/joined-screen-host.ts:241:8
+    239|         busy: z.boolean(),
+    240|       })
+    241|       .parse(await this.call("stop"));
+       |        ^
+    242|     await guard();
+    243|     // A fresh helper cannot attest to an older process/session, even …
+ ❯ ComputerBody.dispatch apps/clankie/src/computer-body.ts:209:17
+ ❯ run apps/tui/bin/joined-screen-host.ts:440:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 16 passed (17)
+   Start at  08:00:18
+   Duration  18.48s (transform 1.50s, setup 28ms, import 2.71s, tests 20.31s, environment 0ms)

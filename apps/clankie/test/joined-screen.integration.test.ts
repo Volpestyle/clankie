@@ -308,7 +308,7 @@ test("real encrypted computer API requires local session consent, preserves read
   }
 });
 
-test("input opt-in supports one exact receipt, refuses raw primitives, and keeps an uncertain Stop held without replay", async () => {
+test("input opt-in supports one exact receipt, refuses unbounded primitives, and keeps an uncertain Stop held without replay", async () => {
   const f = await screenFixture("drive", "uncertain");
   try {
     const leaseId = (await f.request({ action: "acquire" })).body.lease.leaseId;
@@ -316,7 +316,7 @@ test("input opt-in supports one exact receipt, refuses raw primitives, and keeps
       (await f.request({ action: "capture", leaseId, target: { appId: "123", windowId: "456" } })).body;
     for (const input of [
       { kind: "key", keys: "Enter" },
-      { kind: "drag", from: { x: 1, y: 1 }, to: { x: 2, y: 2 } },
+      { kind: "key", keys: "Meta+Space" },
       { kind: "scroll", direction: "down", amount: 1 },
     ]) {
       const shot = await capture();
@@ -579,6 +579,125 @@ test("unknown local control and lost app stdin fence input and leave an uncertai
     f.controls.end();
     expect((await f.request({ action: "status" })).body.lease.state).toBe("recovery_required");
     expect((await f.actions()).filter((value) => value.action === "input")).toHaveLength(0);
+  } finally {
+    await f.stop();
+  }
+});
+
+test("bounded raw primitives use exact receipts and never release a post-input lease on claimed clean proof", async () => {
+  for (const input of [
+    { kind: "key", keys: "ArrowRight" },
+    { kind: "drag", from: { x: 1, y: 1 }, to: { x: 100, y: 50 } },
+    { kind: "scroll", direction: "down", amount: 3, at: { x: 30, y: 30 } },
+  ]) {
+    const f = await screenFixture("drive", "false_clean");
+    try {
+      const leaseId = (await f.request({ action: "acquire" })).body.lease.leaseId;
+      const shot = (
+        await f.request({ action: "capture", leaseId, target: { appId: "123", windowId: "456" } })
+      ).body;
+      const command = {
+        action: "input",
+        leaseId,
+        screenshotId: shot.screenshotId,
+        requestId: randomUUID(),
+        inputs: [{ ...input, foreground: true, expect: { field: "document_text", equals: "after" } }],
+      };
+      const receipt = (await f.request(command)).body;
+      expect(receipt.outcome).toBe("confirmed");
+      expect((await f.request(command)).body).toEqual(receipt);
+      expect((await f.actions()).filter((value) => value.action === "input")).toHaveLength(1);
+      expect((await f.request({ action: "release", leaseId })).body.outcome).toBe("rejected");
+      expect((await f.request({ action: "status" })).body.lease.state).toBe("recovery_required");
+    } finally {
+      await f.stop();
+    }
+  }
+});
+
+test("untouched Stop refuses foreign session, lease, pending events, held controls, busy or lost observer proof", async () => {
+  for (const proof of ["wrong_session", "wrong_lease", "pending", "held", "busy", "observer_lost"]) {
+    const f = await screenFixture("observe", proof);
+    try {
+      const leaseId = (await f.request({ action: "acquire" })).body.lease.leaseId;
+      expect((await f.request({ action: "release", leaseId })).body.outcome).toBe("rejected");
+      expect((await f.request({ action: "status" })).body.lease.state).toBe("recovery_required");
+    } finally {
+      await f.stop();
+    }
+  }
+});
+
+test("synthetic person takeover during a drag cancels remaining motion, preserves held recovery and never replays", async () => {
+  const f = await screenFixture("drive-takeover", "false_clean");
+  try {
+    const leaseId = (await f.request({ action: "acquire" })).body.lease.leaseId;
+    const shot = (await f.request({ action: "capture", leaseId, target: { appId: "123", windowId: "456" } }))
+      .body;
+    const command = {
+      action: "input",
+      leaseId,
+      screenshotId: shot.screenshotId,
+      requestId: randomUUID(),
+      inputs: [
+        {
+          kind: "drag",
+          from: { x: 1, y: 1 },
+          to: { x: 100, y: 50 },
+          foreground: true,
+          expect: { field: "document_text", equals: "after" },
+        },
+      ],
+    };
+    await f.request(command);
+    const before = await f.actions();
+    expect(before.filter((value) => value.action === "native_step").map((value) => value.step)).toEqual([
+      "down",
+      "cleanup",
+    ]);
+    expect((await f.request({ action: "status" })).body.lease.state).toBe("recovery_required");
+    await f.request(command);
+    expect((await f.actions()).filter((value) => value.action === "input")).toHaveLength(1);
+    expect((await f.request({ action: "recover" })).body.outcome).toBe("rejected");
+  } finally {
+    await f.stop();
+  }
+});
+
+test("the supervised parent Stop reaches an in-flight synthetic drag before its remaining motion", async () => {
+  const f = await screenFixture("drive-slow", "false_clean", true);
+  try {
+    const leaseId = (await f.request({ action: "acquire" })).body.lease.leaseId;
+    const shot = (await f.request({ action: "capture", leaseId, target: { appId: "123", windowId: "456" } }))
+      .body;
+    const running = f.request({
+      action: "input",
+      leaseId,
+      screenshotId: shot.screenshotId,
+      requestId: randomUUID(),
+      inputs: [
+        {
+          kind: "drag",
+          from: { x: 1, y: 1 },
+          to: { x: 100, y: 50 },
+          foreground: true,
+          expect: { field: "document_text", equals: "after" },
+        },
+      ],
+    });
+    await until(async () =>
+      (await f.actions()).some((value) => value.action === "native_step" && value.step === "down"),
+    );
+    const id = randomUUID();
+    f.controls.write(JSON.stringify({ id, action: "screen_stop" }) + "\n");
+    await running;
+    await until(() => f.events.some((value) => value.event === "screen" && value.id === id));
+    expect(f.events.find((value) => value.event === "screen" && value.id === id)).toMatchObject({
+      result: { outcome: "held" },
+    });
+    expect(
+      (await f.actions()).filter((value) => value.action === "native_step").map((value) => value.step),
+    ).toEqual(["down", "cleanup"]);
   } finally {
     await f.stop();
   }

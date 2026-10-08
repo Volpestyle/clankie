@@ -6,7 +6,11 @@ import { deflateSync } from "node:zlib";
 const [choice, journal, stopProof = "certain"] = process.argv.slice(2);
 let bound = "",
   consent = false,
-  effects = 0;
+  effects = 0,
+  session = "",
+  busy = false,
+  pending = 0,
+  held = 0;
 const table = Array.from({ length: 256 }, (_, value) => {
   for (let i = 0; i < 8; i++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
   return value >>> 0;
@@ -41,7 +45,7 @@ const png = Buffer.concat([
   chunk("IEND", Buffer.alloc(0)),
 ]);
 let text = "before";
-for await (const line of createInterface({ input: process.stdin })) {
+createInterface({ input: process.stdin }).on("line", async (line) => {
   const request = JSON.parse(line),
     { id, action, value } = request;
   appendFileSync(
@@ -51,6 +55,7 @@ for await (const line of createInterface({ input: process.stdin })) {
   let result = {},
     ok = true;
   if (action === "consent") {
+    session = request.session;
     consent = choice !== "deny";
     result = { approved: consent, allowInput: choice.startsWith("drive") };
     if (choice === "wait") await new Promise((resolve) => setTimeout(resolve, 250));
@@ -86,12 +91,50 @@ for await (const line of createInterface({ input: process.stdin })) {
   } else if (action === "input") {
     if (!consent || !choice.startsWith("drive")) ok = false;
     else {
-      text = value.input.expect.equals;
-      result = { outcome: "confirmed", detail: "Synthetic changed fixture value" };
+      busy = true;
+      if (["key", "drag", "scroll"].includes(value.input.kind)) {
+        pending = 1;
+        held = value.input.kind === "scroll" ? 0 : 1;
+        appendFileSync(
+          journal,
+          JSON.stringify({ action: "native_step", step: "down", kind: value.input.kind }) + "\n",
+        );
+        if (choice === "drive-takeover") {
+          consent = false;
+          process.stdout.write(JSON.stringify({ event: "stopped" }) + "\n");
+        }
+        await new Promise((resolve) => setTimeout(resolve, choice === "drive-slow" ? 200 : 20));
+        if (consent)
+          appendFileSync(
+            journal,
+            JSON.stringify({ action: "native_step", step: "motion", kind: value.input.kind }) + "\n",
+          );
+        appendFileSync(
+          journal,
+          JSON.stringify({ action: "native_step", step: "cleanup", kind: value.input.kind }) + "\n",
+        );
+        held = 0;
+        pending = 0;
+      }
+      if (consent) text = value.input.expect.equals;
+      result = {
+        outcome: consent ? "confirmed" : "uncertain",
+        detail: "Synthetic acknowledgment/effect; not native queue-drain proof",
+      };
+      busy = false;
     }
   } else if (action === "stop") {
     consent = false;
-    result = { quiescent: stopProof === "certain" && effects === 0 };
+    result = {
+      quiescent: (stopProof === "certain" && effects === 0) || stopProof === "false_clean",
+      session: stopProof === "wrong_session" ? randomUUID() : session,
+      leaseId: stopProof === "wrong_lease" ? "other-lease" : bound,
+      observer: stopProof !== "observer_lost",
+      uncertain: effects > 0 && stopProof !== "false_clean",
+      pending: stopProof === "pending" ? 1 : pending,
+      held: stopProof === "held" ? 1 : held,
+      busy: stopProof === "busy" || busy,
+    };
   } else if (action !== "heartbeat") ok = false;
   process.stdout.write(JSON.stringify({ id, ok, result }) + "\n");
-}
+});

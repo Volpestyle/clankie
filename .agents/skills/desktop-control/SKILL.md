@@ -49,9 +49,11 @@ screen. A hosted Clankie can use this body without a local owner desktop.
 `screen` level only permits asking. The host owner confirms observation for
 one session locally and separately allows input. Keep the visible pet and Stop
 available. Capture, save and read the actual image before choosing one native
-accessibility press or literal text append. Use explicit `foreground: true`
-and an exact changed `expect` field. Raw key, drag and scroll refuse in this
-landing (VUH-1840). Stop on person takeover, access reduction or uncertain
+accessibility press/text append or bounded navigation key/drag/scroll. Use explicit `foreground: true`
+and an exact changed `expect` field. Keys are named navigation keys only; no chords or Return.
+Scroll requires an `at` image-pixel anchor and 1–10 ticks; drag remains in the
+captured window. Native acknowledgments never release a post-input lease: true
+queue drain stays unknown/held (VUH-1840). Stop on person takeover, access reduction or uncertain
 results. Preserve the original request UUID; never replay unknown input.
 Recovery remains usable after reduction, but unknown native quiescence holds
 the lease. Real Mac/PC driving proof is open; do not infer it from an HTTP

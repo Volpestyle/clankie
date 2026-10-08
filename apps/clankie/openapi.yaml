@@ -5473,8 +5473,10 @@ paths:
         fallback, including from a hosted service. The host requires fresh screen policy
         within the original join ceiling and local per-session consent; input is off
         until locally allowed. Its visible pet Stop fences queued input. Authored Mac
-        and Windows hosts support accessibility press/text with exact changed-field
-        receipts; raw key/drag/scroll refuse. Frame chunks share the authenticated join
+        and Windows hosts support accessibility press/text and bounded navigation
+        key/drag/scroll with exact changed-field receipts. Keys use a named allowlist;
+        scroll requires an image-pixel anchor and 1-10 ticks. Native observer
+        acknowledgments never release a post-input lease; true queue drain remains unknown. Frame chunks share the authenticated join
         carrier within existing caps. Real Mac/PC driving and native stop proof are live gaps.
       security: [{ operatorBearer: [] }]
       requestBody:

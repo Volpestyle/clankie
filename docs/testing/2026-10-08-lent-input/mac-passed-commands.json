@@ -1,0 +1,6 @@
+{
+  "command": "clankie heavy -- sh -c 'xcrun swift-format format -i apps/tui/native/lent-screen.swift && xcrun swiftc -swift-version 5 -O -framework AppKit -framework ScreenCaptureKit -framework ApplicationServices -framework Carbon apps/tui/native/lent-screen.swift -o /tmp/vuh-1840-screen-compile-only-verified'",
+  "exitCode": 0,
+  "sourceSha256": "99105c5c73222e32091159ee5d660be07f6bbdde9e187613809082b73244f9a4",
+  "binaryExecuted": false
+}

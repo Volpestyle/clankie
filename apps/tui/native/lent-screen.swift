@@ -57,6 +57,273 @@ struct Snapshot {
   var pet: NSPanel?
   var snapshots: [String: Snapshot] = [:]
   var timer: Timer?
+  var tap: CFMachPort?
+  var source: CFRunLoopSource?
+  var pending: [Int64: CGEventType] = [:]
+  var heldKey: CGKeyCode?
+  var heldButton = false
+  var drainUnknown = false
+  var foreign: UInt64 = 0
+  var lastPerson = ProcessInfo.processInfo.systemUptime
+  var nativeBusy = false
+  func observerReady() -> Bool {
+    guard let tap else { return false }
+    return CGEvent.tapIsEnabled(tap: tap)
+  }
+  func installObserver() -> Bool {
+    if observerReady() { return true }
+    if tap != nil {
+      drainUnknown = true
+      return false
+    }
+    let types: [CGEventType] = [
+      .keyDown, .keyUp, .flagsChanged, .leftMouseDown, .leftMouseUp,
+      .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp, .mouseMoved,
+      .scrollWheel, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
+    ]
+    let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+    tap = CGEvent.tapCreate(
+      tap: .cgAnnotatedSessionEventTap, place: .tailAppendEventTap,
+      options: .listenOnly, eventsOfInterest: mask,
+      callback: { _, kind, event, pointer in
+        guard let pointer else { return Unmanaged.passUnretained(event) }
+        MainActor.assumeIsolated {
+          let host = Unmanaged<Host>.fromOpaque(pointer).takeUnretainedValue()
+          if kind == .tapDisabledByTimeout || kind == .tapDisabledByUserInput {
+            host.drainUnknown = true
+            host.fence()
+          } else {
+            let identity = event.getIntegerValueField(.eventSourceUserData)
+            if let expected = host.pending[identity], expected == kind,
+              event.getIntegerValueField(.eventSourceUnixProcessID) == Int64(getpid())
+            {
+              host.pending.removeValue(forKey: identity)
+            } else {
+              host.foreign &+= 1
+              host.lastPerson = ProcessInfo.processInfo.systemUptime
+              host.fence()
+            }
+          }
+        }
+        return Unmanaged.passUnretained(event)
+      }, userInfo: Unmanaged.passUnretained(self).toOpaque())
+    guard let tap else { return false }
+    source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+    guard let source else {
+      drainUnknown = true
+      return false
+    }
+    CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+    CGEvent.tapEnable(tap: tap, enable: true)
+    return observerReady()
+  }
+  func drainProof() -> [String: Any] {
+    let clean =
+      observerReady() && !drainUnknown && !injected && !busy && !nativeBusy
+      && pending.isEmpty && heldKey == nil && !heldButton
+    return [
+      "quiescent": clean, "session": session, "leaseId": lease,
+      "observer": observerReady(), "uncertain": drainUnknown || injected,
+      "pending": pending.count, "held": (heldKey == nil ? 0 : 1) + (heldButton ? 1 : 0),
+      "busy": busy || nativeBusy,
+    ]
+  }
+  func post(_ event: CGEvent, _ kind: CGEventType, cleanup: Bool = false) async throws {
+    guard cleanup || (observerReady() && !drainUnknown && consent) else {
+      throw NSError(domain: "observer", code: 1)
+    }
+    var identity = Int64.random(in: 1...Int64.max)
+    while pending[identity] != nil { identity = Int64.random(in: 1...Int64.max) }
+    pending[identity] = kind
+    event.setIntegerValueField(.eventSourceUserData, value: identity)
+    injected = true  // A tap acknowledgment is not target-queue drain proof.
+    event.post(tap: .cgSessionEventTap)
+    if !observerReady() || drainUnknown {
+      drainUnknown = true
+      throw NSError(domain: "cleanup_unknown", code: 1)
+    }
+    let deadline = ProcessInfo.processInfo.systemUptime + 1
+    while pending[identity] != nil {
+      guard observerReady(), !drainUnknown, ProcessInfo.processInfo.systemUptime < deadline else {
+        drainUnknown = true
+        throw NSError(domain: "delivery", code: 1)
+      }
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
+  }
+  func cleanupInput() async {
+    do {
+      if let key = heldKey {
+        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false) else {
+          throw NSError(domain: "cleanup", code: 1)
+        }
+        try await post(event, .keyUp, cleanup: true)
+        heldKey = nil
+      }
+      if heldButton {
+        guard let location = CGEvent(source: nil)?.location,
+          let event = CGEvent(
+            mouseEventSource: nil, mouseType: .leftMouseUp,
+            mouseCursorPosition: location, mouseButton: .left)
+        else {
+          throw NSError(domain: "cleanup", code: 2)
+        }
+        try await post(event, .leftMouseUp, cleanup: true)
+        heldButton = false
+      }
+    } catch { drainUnknown = true }
+  }
+  func rawInput(
+    _ input: [String: Any], _ screenshot: [String: Any], _ snapshot: Snapshot,
+    _ token: String
+  ) async throws {
+    guard CGPreflightPostEventAccess(), observerReady(), !drainUnknown else {
+      throw NSError(domain: "input_permission", code: 1)
+    }
+    func check() throws {
+      guard valid(token, input: true),
+        let app = NSRunningApplication(processIdentifier: snapshot.app.processIdentifier),
+        app.launchDate == snapshot.launched, app.bundleIdentifier == snapshot.app.bundleIdentifier,
+        !app.isTerminated, allowed(app),
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
+          == snapshot.app.processIdentifier,
+        let current = axWindow(snapshot.window), let original = snapshot.axWindow,
+        CFEqual(current, original), frame(current) == snapshot.window.frame,
+        let focusedWindow = attr(AXUIElementCreateApplication(snapshot.app.processIdentifier), kAXFocusedWindowAttribute),
+        CFEqual(focusedWindow, current),
+        let focused = attr(
+          AXUIElementCreateApplication(snapshot.app.processIdentifier), kAXFocusedUIElementAttribute
+        ),
+        CFGetTypeID(focused) == AXUIElementGetTypeID(),
+        text(focused as! AXUIElement, kAXSubroleAttribute) != kAXSecureTextFieldSubrole,
+        let focusedOwner = attr(focused as! AXUIElement, kAXWindowAttribute), CFEqual(focusedOwner, current)
+      else {
+        throw NSError(domain: "input_target", code: 1)
+      }
+    }
+    func checkPoint(_ point: CGPoint) throws {
+      var hit: AXUIElement?
+      guard
+        AXUIElementCopyElementAtPosition(
+          AXUIElementCreateSystemWide(), Float(point.x),
+          Float(point.y), &hit) == .success, let hit,
+        text(hit, kAXSubroleAttribute) != kAXSecureTextFieldSubrole,
+        let owner = attr(hit, kAXWindowAttribute), let original = snapshot.axWindow,
+        CFEqual(owner, original)
+      else { throw NSError(domain: "point_target", code: 1) }
+    }
+    func point(_ value: Any?) throws -> CGPoint {
+      guard let at = value as? [String: Any], let x = at["x"] as? Double,
+        let y = at["y"] as? Double, let width = screenshot["width"] as? Double,
+        let height = screenshot["height"] as? Double, x.isFinite, y.isFinite,
+        x >= 0, y >= 0, x < width, y < height
+      else { throw NSError(domain: "point", code: 1) }
+      let point = CGPoint(
+        x: snapshot.window.frame.minX + x * snapshot.window.frame.width / width,
+        y: snapshot.window.frame.minY + y * snapshot.window.frame.height / height)
+      try checkPoint(point)
+      return point
+    }
+    try check()
+    guard
+      CGEvent(source: nil)?.flags.intersection([
+        .maskCommand, .maskControl, .maskAlternate, .maskShift, .maskSecondaryFn,
+      ]).isEmpty == true,
+      !CGEventSource.buttonState(.combinedSessionState, button: .left),
+      !CGEventSource.buttonState(.combinedSessionState, button: .right),
+      !CGEventSource.buttonState(.combinedSessionState, button: .center)
+    else {
+      throw NSError(domain: "person_keys", code: 1)
+    }
+    guard let application = snapshot.axWindow.flatMap(windowPID),
+      let focused = attr(AXUIElementCreateApplication(application), kAXFocusedUIElementAttribute),
+      CFGetTypeID(focused) == AXUIElementGetTypeID(),
+      text(focused as! AXUIElement, kAXSubroleAttribute) != kAXSecureTextFieldSubrole
+    else {
+      throw NSError(domain: "secure_focus", code: 1)
+    }
+    nativeBusy = true
+    do {
+      let kind = input["kind"] as? String
+      if kind == "key" {
+        let keys: [String: CGKeyCode] = [
+          "ArrowLeft": 123, "ArrowRight": 124, "ArrowDown": 125,
+          "ArrowUp": 126, "Tab": 48, "Space": 49, "Home": 115, "End": 119, "PageUp": 116,
+          "PageDown": 121,
+        ]
+        guard let name = input["keys"] as? String, let key = keys[name],
+          let down = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false)
+        else {
+          throw NSError(domain: "key", code: 1)
+        }
+        down.flags = []
+        up.flags = []
+        heldKey = key
+        try await post(down, .keyDown)
+        try check()
+        try await post(up, .keyUp, cleanup: true)
+        heldKey = nil
+      } else if kind == "scroll" {
+        guard let amount = input["amount"] as? Int, amount >= 1, amount <= 10,
+          let direction = input["direction"] as? String
+        else { throw NSError(domain: "scroll", code: 1) }
+        let at = try point(input["at"])
+        let vertical = direction == "up" ? amount : direction == "down" ? -amount : 0
+        let horizontal = direction == "left" ? amount : direction == "right" ? -amount : 0
+        guard vertical != 0 || horizontal != 0,
+          let event = CGEvent(
+            scrollWheelEvent2Source: nil, units: .line, wheelCount: 2,
+            wheel1: Int32(vertical), wheel2: Int32(horizontal), wheel3: 0)
+        else {
+          throw NSError(domain: "scroll", code: 2)
+        }
+        event.location = at
+        try await post(event, .scrollWheel)
+      } else if kind == "drag" {
+        let from = try point(input["from"])
+        let to = try point(input["to"])
+        guard
+          let down = CGEvent(
+            mouseEventSource: nil, mouseType: .leftMouseDown,
+            mouseCursorPosition: from, mouseButton: .left)
+        else { throw NSError(domain: "drag", code: 1) }
+        heldButton = true
+        try await post(down, .leftMouseDown)
+        for index in 1...8 {
+          try check()
+          let fraction = Double(index) / 8
+          let at = CGPoint(
+            x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction)
+          try checkPoint(at)
+          guard
+            let event = CGEvent(
+              mouseEventSource: nil, mouseType: .leftMouseDragged,
+              mouseCursorPosition: at, mouseButton: .left)
+          else { throw NSError(domain: "drag", code: 2) }
+          try await post(event, .leftMouseDragged)
+          try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        try check()
+        guard
+          let up = CGEvent(
+            mouseEventSource: nil, mouseType: .leftMouseUp,
+            mouseCursorPosition: to, mouseButton: .left)
+        else { throw NSError(domain: "drag", code: 3) }
+        try await post(up, .leftMouseUp, cleanup: true)
+        heldButton = false
+      } else {
+        throw NSError(domain: "kind", code: 1)
+      }
+      try check()
+      nativeBusy = false
+    } catch {
+      fence()
+      await cleanupInput()
+      nativeBusy = false
+      throw error
+    }
+  }
   func fence() {
     let was = consent
     consent = false
@@ -79,7 +346,7 @@ struct Snapshot {
     let valid =
       token == session && !session.isEmpty && consent && pet?.isVisible == true && console()
       && CGPreflightListenEventAccess() && ProcessInfo.processInfo.systemUptime - heartbeat < 2
-      && activity() == person && (!input || allowInput)
+      && observerReady() && foreign == person && (!input || allowInput)
     if !valid { fence() }
     return valid
   }
@@ -208,12 +475,16 @@ struct Snapshot {
       return
     }
     if action == "stop" {
+      guard token == session, !lease.isEmpty else {
+        reply(id, false)
+        return
+      }
       fence()
-      reply(id, true, ["quiescent": !injected && !busy])
+      reply(id, true, drainProof())
       return
     }
     if action == "end" {
-      guard !injected && !busy else {
+      guard drainProof()["quiescent"] as? Bool == true, token == session else {
         reply(id, false)
         return
       }
@@ -237,7 +508,7 @@ struct Snapshot {
         let alert = NSAlert()
         alert.messageText = "Lend this screen to Clankie?"
         alert.informativeText =
-          "Session: \(conversation.prefix(512))\nObserve is read-only. Allow input lets Clankie press accessible controls and append text. Stop or your own input ends consent. Sign-ins, codes, payments and destructive actions stay with you."
+          "Session: \(conversation.prefix(512))\nObserve is read-only. Allow input lets Clankie press accessible controls, append text, use navigation keys, drag and scroll. Stop or your own input ends consent. Sign-ins, codes, payments and destructive actions stay with you."
         alert.addButton(withTitle: "Observe only")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Allow input")
@@ -246,6 +517,7 @@ struct Snapshot {
         consent = choice == .alertFirstButtonReturn || choice == .alertThirdButtonReturn
         allowInput = choice == .alertThirdButtonReturn
         if !CGPreflightScreenCaptureAccess() || !CGPreflightListenEventAccess()
+          || !installObserver()
           || (allowInput && !AXIsProcessTrusted())
         {
           consent = false
@@ -255,7 +527,8 @@ struct Snapshot {
           session = token
           injected = false
           heartbeat = ProcessInfo.processInfo.systemUptime
-          person = activity()
+          person = foreign
+          lastPerson = ProcessInfo.processInfo.systemUptime
           showPet()
         }
         reply(id, true, ["approved": consent, "allowInput": allowInput])
@@ -348,8 +621,7 @@ struct Snapshot {
           screenshot["leaseId"] as? String == lease,
           snapshot.app.launchDate == snapshot.launched, allowed(snapshot.app),
           ProcessInfo.processInfo.systemUptime - snapshot.captured < 30,
-          CGEventSource.secondsSinceLastEventType(
-            .combinedSessionState, eventType: CGEventType(rawValue: UInt32.max)!) >= 2
+          ProcessInfo.processInfo.systemUptime - lastPerson >= 2
         else { throw NSError(domain: "input", code: 1) }
         let target: [String: Any] = [
           "appId": String(snapshot.app.processIdentifier),
@@ -372,7 +644,10 @@ struct Snapshot {
           CFEqual(front, windowAX)
         else { throw NSError(domain: "foreground", code: 1) }
         var result = AXError.failure
-        if kind == "type" {
+        if ["key", "drag", "scroll"].contains(kind) {
+          try await rawInput(input, screenshot, snapshot, token)
+          result = .success
+        } else if kind == "type" {
           guard input["clear"] as? Bool != true, let append = input["text"] as? String,
             append.count <= 2048,
             !append.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),

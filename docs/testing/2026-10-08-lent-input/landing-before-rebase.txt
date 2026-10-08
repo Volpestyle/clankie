@@ -1,0 +1,345 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 7 queued)
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && node scripts/check-doc-links.mjs && node scripts/check-retired-claims.mjs && pnpm typecheck && vitest run --config vitest.config.ts --changed ${CLANKIE_LANDING_BASE:-origin/main} --bail 1 --passWithNoTests
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.3 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 1235ms on 2972 files using 18 threads.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.44
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.182
+    Checking cfg-if v1.0.4
+   Compiling version_check v0.9.5
+   Compiling typenum v1.19.0
+    Checking subtle v2.6.1
+    Checking const-oid v0.9.6
+   Compiling shlex v1.3.0
+   Compiling find-msvc-tools v0.1.9
+    Checking base64ct v1.8.3
+   Compiling serde_core v1.0.228
+    Checking pin-project-lite v0.2.17
+   Compiling zerocopy v0.8.40
+    Checking base16ct v0.2.0
+   Compiling semver v1.0.27
+    Checking memchr v2.8.0
+   Compiling serde v1.0.228
+    Checking once_cell v1.21.3
+   Compiling log v0.4.29
+   Compiling crossbeam-utils v0.8.21
+   Compiling hax-lib v0.3.6
+    Checking pem-rfc7468 v0.7.0
+   Compiling rustc_version v0.4.1
+    Checking futures-sink v0.3.32
+    Checking futures-core v0.3.32
+   Compiling pkg-config v0.3.32
+   Compiling generic-array v0.14.7
+    Checking smallvec v1.15.1
+    Checking opaque-debug v0.3.1
+    Checking rand_core v0.9.5
+    Checking futures-task v0.3.32
+    Checking futures-io v0.3.32
+    Checking futures-channel v0.3.32
+    Checking itoa v1.0.17
+   Compiling anyhow v1.0.102
+    Checking slab v0.4.12
+   Compiling thiserror v2.0.18
+   Compiling zmij v1.0.21
+   Compiling curve25519-dalek v4.1.3
+    Checking untrusted v0.9.0
+   Compiling libcrux-intrinsics v0.0.6
+    Checking scopeguard v1.2.0
+   Compiling parking_lot_core v0.8.6
+    Checking rand v0.9.2
+    Checking instant v0.1.13
+    Checking lock_api v0.4.14
+   Compiling serde_json v1.0.149
+   Compiling rustls v0.23.37
+   Compiling rayon-core v1.13.0
+   Compiling thiserror v1.0.69
+   Compiling libcrux-sha3 v0.0.8
+    Checking bytes v1.11.1
+   Compiling same-file v1.0.6
+   Compiling nasm-rs v0.3.2
+    Checking tracing-core v0.1.36
+    Checking getrandom v0.2.17
+    Checking cpufeatures v0.2.17
+    Checking crossbeam-epoch v0.9.18
+   Compiling jobserver v0.1.34
+    Checking libcrux-platform v0.0.3
+   Compiling walkdir v2.5.0
+    Checking rand_core v0.6.4
+   Compiling getrandom v0.3.4
+   Compiling httparse v1.10.1
+    Checking ff v0.13.1
+   Compiling autocfg v1.5.0
+    Checking parking_lot v0.11.2
+    Checking socket2 v0.6.2
+   Compiling cc v1.2.56
+    Checking crossbeam-deque v0.8.6
+    Checking mio v1.1.1
+   Compiling syn v2.0.117
+    Checking group v0.13.0
+    Checking rand_core v0.10.1
+    Checking pin-utils v0.1.0
+    Checking regex-syntax v0.8.10
+    Checking bytemuck v1.25.0
+    Checking either v1.15.0
+   Compiling parking_lot_core v0.9.12
+    Checking http v1.4.0
+    Checking data-encoding v2.10.0
+    Checking utf-8 v0.7.6
+    Checking byteorder v1.5.0
+    Checking safe_arch v0.7.4
+    Checking lazy_static v1.5.0
+    Checking tracing-log v0.2.0
+    Checking thread_local v1.1.9
+    Checking wide v0.7.33
+    Checking sharded-slab v0.1.7
+   Compiling hex-literal v0.3.4
+    Checking nu-ansi-term v0.50.3
+   Compiling num-traits v0.2.19
+    Checking gcd v2.3.0
+    Checking crossbeam-channel v0.5.15
+    Checking base64 v0.22.1
+    Checking rayon v1.11.0
+    Checking parking_lot v0.12.5
+   Compiling cmake v0.1.57
+    Checking regex-automata v0.4.14
+   Compiling ring v0.17.14
+   Compiling openh264-sys2 v0.9.6
+    Checking serde_bytes v0.11.19
+   Compiling audiopus_sys v0.2.2
+   Compiling turbojpeg-sys v1.1.1
+    Checking matchers v0.2.0
+    Checking ppv-lite86 v0.2.21
+    Checking rand_chacha v0.3.1
+    Checking rand v0.8.5
+   Compiling zeroize_derive v1.4.3
+   Compiling serde_derive v1.0.228
+   Compiling hax-lib-macros v0.3.6
+   Compiling tls_codec_derive v0.4.2
+   Compiling futures-macro v0.3.32
+   Compiling thiserror-impl v2.0.18
+   Compiling thiserror-impl v1.0.69
+   Compiling tokio-macros v2.6.1
+   Compiling tracing-attributes v0.1.31
+   Compiling num-derive v0.4.2
+    Checking zeroize v1.8.2
+    Checking tokio v1.49.0
+    Checking futures-util v0.3.32
+    Checking libcrux-secrets v0.0.5
+    Checking der v0.7.10
+    Checking rustls-pki-types v1.14.0
+    Checking hpke-rs-crypto v0.6.1
+    Checking libcrux-traits v0.0.6
+    Checking tracing v0.1.44
+    Checking rustls-webpki v0.103.9
+    Checking webpki-roots v1.0.6
+    Checking webpki-roots v0.26.11
+    Checking tracing-subscriber v0.3.22
+    Checking crypto-common v0.1.7
+    Checking block-buffer v0.10.4
+    Checking inout v0.1.4
+    Checking crypto-bigint v0.5.5
+    Checking digest v0.10.7
+    Checking cipher v0.4.4
+    Checking universal-hash v0.5.1
+    Checking aead v0.5.2
+    Checking polyval v0.6.2
+    Checking poly1305 v0.8.0
+    Checking spki v0.7.3
+    Checking aes v0.8.4
+    Checking chacha20 v0.9.1
+    Checking ctr v0.9.2
+    Checking salsa20 v0.10.2
+    Checking hmac v0.12.1
+    Checking signature v2.2.0
+    Checking sha2 v0.10.9
+    Checking pkcs8 v0.10.2
+    Checking ghash v0.5.1
+    Checking hkdf v0.12.4
+    Checking rfc6979 v0.4.0
+    Checking ed25519 v2.2.3
+    Checking chacha20poly1305 v0.10.1
+    Checking aes-gcm v0.10.3
+    Checking pbkdf2 v0.12.2
+    Checking sha1 v0.10.6
+    Checking sec1 v0.7.3
+    Checking scrypt v0.11.0
+    Checking ed25519-dalek v2.2.0
+    Checking elliptic-curve v0.13.8
+    Checking x25519-dalek v2.0.1
+    Checking primeorder v0.13.6
+    Checking ecdsa v0.16.9
+    Checking k256 v0.13.4
+    Checking p384 v0.13.1
+    Checking p256 v0.13.2
+    Checking tls_codec v0.4.2
+    Checking futures-executor v0.3.32
+    Checking hpke-rs-rust-crypto v0.6.1
+    Checking futures v0.3.32
+    Checking fluvio-wasm-timer v0.2.5
+    Checking tungstenite v0.24.0
+    Checking tokio-rustls v0.26.4
+    Checking openmls_traits v0.5.0
+    Checking hpke-rs v0.6.1
+    Checking tokio-tungstenite v0.24.0
+    Checking openmls_memory_storage v0.5.0
+    Checking openmls_basic_credential v0.5.0
+    Checking openmls v0.8.1
+    Checking openmls_rust_crypto v0.5.1
+    Checking openh264 v0.9.3
+    Checking audiopus v0.3.0-rc.0
+    Checking turbojpeg v1.4.0
+    Checking davey v0.1.4
+    Checking clankvox v0.3.0 (/Users/james/dev/clankie-wt/vuh-1840/apps/vox)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.38s
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+Configuration hints (1)
+integrations/codex-plugin/skills/**    knip.json  Remove from ignore
+Checked 549 markdown files; local links resolve; ADR numbers have no new collisions.
+$ turbo run typecheck
+• turbo 2.10.4
+
+   • Packages in scope: @clankie/agent-hosts, @clankie/agent-transcript, @clankie/api-client, @clankie/clankie, @clankie/credential-broker, @clankie/discord-activity, @clankie/discord-bridge, @clankie/discord-presence-core, @clankie/discord-user-session, @clankie/docs, @clankie/fleet-resources, @clankie/game-extension, @clankie/interactive-environment, @clankie/media-connector, @clankie/minecraft, @clankie/minecraft-mcp, @clankie/model-provider, @clankie/model-registry, @clankie/observability, @clankie/persona-images, @clankie/play, @clankie/play-voice, @clankie/pokemon, @clankie/protocol, @clankie/relay, @clankie/rendered-surface-client, @clankie/settings, @clankie/tui, @clankie/vec3, @clankie/vox, @clankie/vox-client, @clankie/work-items
+   • Running typecheck in 32 packages
+   • Remote caching disabled, using shared worktree cache
+
+@clankie/fleet-resources:typecheck: cache hit, replaying logs cc05c78f035d6869
+@clankie/fleet-resources:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/persona-images:typecheck: cache hit, replaying logs fddd7a121810ee34
+@clankie/protocol:typecheck: cache hit, replaying logs 5356af4f10df04d8
+@clankie/game-extension:typecheck: cache hit, replaying logs 29a385c08dde7253
+@clankie/model-registry:typecheck: cache hit, replaying logs 12947e1ffd9e0f50
+@clankie/protocol:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/game-extension:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/model-registry:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/persona-images:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/observability:typecheck: cache hit, replaying logs bc740f900684bad1
+@clankie/vox:typecheck: cache hit, replaying logs d352db51883219da
+@clankie/vox-client:typecheck: cache hit, replaying logs 90fc8d792ab0f4d5
+@clankie/vox-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox:typecheck: $ cargo check --locked --all-targets --all-features
+@clankie/vox:typecheck:     Checking clankvox v0.3.0 (/Users/james/dev/clankie-wt/lead-landing/apps/vox)
+@clankie/vox:typecheck:     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.12s
+@clankie/observability:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/media-connector:typecheck: cache hit, replaying logs 7d3abc8a0b8446a8
+@clankie/media-connector:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/work-items:typecheck: cache hit, replaying logs 573dadc256a25d05
+@clankie/work-items:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/interactive-environment:typecheck: cache hit, replaying logs e06b0057d493b013
+@clankie/interactive-environment:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/settings:typecheck: cache hit, replaying logs 6050e08b32dd00ff
+@clankie/credential-broker:typecheck: cache hit, replaying logs 9c20421dafb49209
+@clankie/settings:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/credential-broker:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play:typecheck: cache hit, replaying logs 3b27886a3c352746
+@clankie/play:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-transcript:typecheck: cache hit, replaying logs 2e70330fcd9296cc
+@clankie/agent-transcript:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/api-client:typecheck: cache hit, replaying logs 74871296360c773f
+@clankie/api-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-hosts:typecheck: cache hit, replaying logs 0bee178d5935352f
+@clankie/agent-hosts:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/minecraft-mcp:typecheck: cache hit, replaying logs a35012cb9c2add39
+@clankie/minecraft-mcp:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/model-provider:typecheck: cache hit, replaying logs 09535998b8e3dd90
+@clankie/model-provider:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/rendered-surface-client:typecheck: cache hit, replaying logs 42b49097dc0defa8
+@clankie/rendered-surface-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/tui:typecheck: cache miss, executing e0ed8d602d3529b9
+@clankie/play-voice:typecheck: cache hit, replaying logs 3f672f3d13552732
+@clankie/play-voice:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/relay:typecheck: cache hit, replaying logs 4907b7515583fb8b
+@clankie/relay:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-activity:typecheck: cache hit, replaying logs 12597b26ffb94757
+@clankie/discord-activity:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-presence-core:typecheck: cache hit, replaying logs 015a0740b5fa9b1f
+@clankie/discord-presence-core:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/minecraft:typecheck: cache hit, replaying logs ed9d7d489393887f
+@clankie/minecraft:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/pokemon:typecheck: cache hit, replaying logs 769668c26ee020fc
+@clankie/pokemon:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-bridge:typecheck: cache hit, replaying logs aa5c24a862186e5a
+@clankie/discord-bridge:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-user-session:typecheck: cache hit, replaying logs 29657d8f77a3eb6b
+@clankie/discord-user-session:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/clankie:typecheck: cache miss, executing ec0190f138d23b00
+@clankie/tui:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/clankie:typecheck: $ tsc --noEmit -p tsconfig.json
+
+ Tasks:    30 successful, 30 total
+Cached:    28 cached, 30 total
+  Time:    16.522s 
+
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1840
+
+clankie: Usage: clankie seat-delivery list | settle RECEIPT_ID abandoned-unknown [--conversation CONVERSATION_ID]
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-541cbe86-32b","offerId":"pairing-offer-78611d6e-c19","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-541cbe86-32b","msg":"device activated"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-541cbe86-32b","operatorId":"owner","msg":"device revoked"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-923b8a41-d80","offerId":"pairing-offer-92f8b80b-ed2","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-923b8a41-d80","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:09.395Z","service":"clankie","version":"0.2.0","deviceId":"device-e83f268d-d1e","offerId":"pairing-offer-2bbfb0fb-3b6","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:09.396Z","service":"clankie","version":"0.2.0","deviceId":"device-e83f268d-d1e","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:09.515Z","service":"clankie","version":"0.2.0","deviceId":"device-e83f268d-d1e","operatorId":"owner","msg":"device revoked"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-2a6fa33a-e34","offerId":"pairing-offer-181b87d4-777","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-2a6fa33a-e34","msg":"device activated"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-8e735463-ed1","offerId":"pairing-offer-7b084291-5b8","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-8e735463-ed1","msg":"device activated"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-4c52333e-763","offerId":"pairing-offer-a5c4b64e-657","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-4c52333e-763","msg":"device activated"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-25f1dcc1-d9c","offerId":"pairing-offer-39d55427-fa9","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-25f1dcc1-d9c","msg":"device activated"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-964626ea-a76","offerId":"pairing-offer-3423c299-c9d","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-964626ea-a76","msg":"device activated"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-62190365-3ef","offerId":"pairing-offer-d6b5ed53-bcb","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-62190365-3ef","msg":"device activated"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-defd120b-252","offerId":"pairing-offer-2eb34966-337","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-09-21T14:13:20.000Z","service":"clankie","version":"0.2.0","deviceId":"device-defd120b-252","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:10.950Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-c29e378f-69b","operatorId":"owner","expiresAt":"2026-10-08T13:16:10.950Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:10.959Z","service":"clankie","version":"0.2.0","deviceId":"device-92f50e44-942","offerId":"pairing-offer-c29e378f-69b","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:10.961Z","service":"clankie","version":"0.2.0","deviceId":"device-92f50e44-942","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:10.970Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-32498609-6be","operatorId":"owner","expiresAt":"2026-10-08T13:16:10.970Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:10.971Z","service":"clankie","version":"0.2.0","deviceId":"device-5c9628be-c16","offerId":"pairing-offer-32498609-6be","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:10.972Z","service":"clankie","version":"0.2.0","deviceId":"device-5c9628be-c16","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.030Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-6459da31-e45","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.027Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.031Z","service":"clankie","version":"0.2.0","deviceId":"device-dd6f41a1-b9f","offerId":"pairing-offer-6459da31-e45","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.034Z","service":"clankie","version":"0.2.0","deviceId":"device-dd6f41a1-b9f","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.056Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-4221c6f0-7b2","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.055Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.060Z","service":"clankie","version":"0.2.0","deviceId":"device-1cda862e-2ed","offerId":"pairing-offer-4221c6f0-7b2","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.062Z","service":"clankie","version":"0.2.0","deviceId":"device-1cda862e-2ed","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.072Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-084d600b-189","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.072Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.076Z","service":"clankie","version":"0.2.0","deviceId":"device-109d95df-49b","offerId":"pairing-offer-084d600b-189","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.080Z","service":"clankie","version":"0.2.0","deviceId":"device-109d95df-49b","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.108Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-3bd778a5-7b5","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.108Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.112Z","service":"clankie","version":"0.2.0","deviceId":"device-e579fd81-eff","offerId":"pairing-offer-3bd778a5-7b5","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.113Z","service":"clankie","version":"0.2.0","deviceId":"device-e579fd81-eff","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.113Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-44fa84b1-87e","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.113Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.114Z","service":"clankie","version":"0.2.0","deviceId":"device-a5e4a701-bec","offerId":"pairing-offer-44fa84b1-87e","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.115Z","service":"clankie","version":"0.2.0","deviceId":"device-a5e4a701-bec","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.627Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-3e689595-781","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.626Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.631Z","service":"clankie","version":"0.2.0","deviceId":"device-309f832d-a61","offerId":"pairing-offer-3e689595-781","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.635Z","service":"clankie","version":"0.2.0","deviceId":"device-309f832d-a61","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.644Z","service":"clankie","version":"0.2.0","deviceId":"device-309f832d-a61","operatorId":"owner","msg":"device revoked"}
+{"level":30,"time":"2026-10-08T13:11:11.771Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-7352a56f-170","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.770Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.772Z","service":"clankie","version":"0.2.0","deviceId":"device-0dd9e849-d8a","offerId":"pairing-offer-7352a56f-170","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.773Z","service":"clankie","version":"0.2.0","deviceId":"device-0dd9e849-d8a","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.868Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-5e369a6a-a68","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.868Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.869Z","service":"clankie","version":"0.2.0","deviceId":"device-dfd06cd7-3ed","offerId":"pairing-offer-5e369a6a-a68","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.870Z","service":"clankie","version":"0.2.0","deviceId":"device-dfd06cd7-3ed","msg":"device activated"}
+{"level":30,"time":"2026-10-08T13:11:11.937Z","service":"clankie","version":"0.2.0","offerId":"pairing-offer-d583fe55-913","operatorId":"owner","expiresAt":"2026-10-08T13:16:11.936Z","msg":"pairing offer minted"}
+{"level":30,"time":"2026-10-08T13:11:11.938Z","service":"clankie","version":"0.2.0","deviceId":"device-d27c642d-8b6","offerId":"pairing-offer-d583fe55-913","msg":"pairing offer redeemed"}
+{"level":30,"time":"2026-10-08T13:11:11.938Z","service":"clankie","version":"0.2.0","deviceId":"device-d27c642d-8b6","msg":"device activated"}
+
+ Test Files  19 passed (19)
+      Tests  266 passed (266)
+   Start at  08:11:05
+   Duration  19.30s (transform 1.01s, setup 137ms, import 22.75s, tests 34.65s, environment 1ms)

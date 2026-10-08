@@ -1,0 +1,64 @@
+{
+  "sourceSha256": "f2091c3cd65357026656817dc75b8ee986dae4e91c901b73eab5df470a1407c5",
+  "transcript": [
+    {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "volpe@supedupsilly",
+        "powershell.exe -NoProfile -NonInteractive -EncodedCommand JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnADsAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAPQBKAG8AaQBuAC0AUABhAHQAaAAgACgAWwBJAE8ALgBQAGEAdABoAF0AOgA6AEcAZQB0AFQAZQBtAHAAUABhAHQAaAAoACkAKQAgACcAdgB1AGgALQAxADgANAAwAC0AbgBhAHQAaQB2AGUALQBjADQAMwBiAGQAOQBmADYALQAzADAAMAAxAC0ANABjADgAZQAtADgAYQAzADkALQBkADcAMwBjADAAZQAyADIAYwA0ADEAYgAnADsAIABpAGYAKABUAGUAcwB0AC0AUABhAHQAaAAgAC0ATABpAHQAZQByAGEAbABQAGEAdABoACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5ACkAewB0AGgAcgBvAHcAIAAnAGUAeABpAHMAdABpAG4AZwBfAHQAZQBtAHAAXwByAGUAZgB1AHMAZQBkACcAfQA7ACAATgBlAHcALQBJAHQAZQBtACAALQBJAHQAZQBtAFQAeQBwAGUAIABEAGkAcgBlAGMAdABvAHIAeQAgAC0AUABhAHQAaAAgACQAdABhAHMAawBEAGkAcgBlAGMAdABvAHIAeQAgAHwAIABPAHUAdAAtAE4AdQBsAGwAOwAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5AA=="
+      ],
+      "powershell": "$ErrorActionPreference='Stop'; $taskDirectory=Join-Path ([IO.Path]::GetTempPath()) 'vuh-1840-native-c43bd9f6-3001-4c8e-8a39-d73c0e22c41b'; if(Test-Path -LiteralPath $taskDirectory){throw 'existing_temp_refused'}; New-Item -ItemType Directory -Path $taskDirectory | Out-Null; Write-Output $taskDirectory",
+      "exit": 0,
+      "stdout": "C:\\Users\\volpe\\AppData\\Local\\Temp\\vuh-1840-native-c43bd9f6-3001-4c8e-8a39-d73c0e22c41b\n",
+      "stderr": "#< CLIXML\n<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><Obj S=\"progress\" RefId=\"0\"><TN RefId=\"0\"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N=\"SourceId\">1</I64><PR N=\"Record\"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S=\"progress\" RefId=\"1\"><TNRef RefId=\"0\" /><MS><I64 N=\"SourceId\">1</I64><PR N=\"Record\"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>"
+    },
+    {
+      "command": [
+        "scp",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "/Users/james/dev/clankie-wt/vuh-1840/apps/tui/native/LentScreen.cs",
+        "volpe@supedupsilly:C:/Users/volpe/AppData/Local/Temp/vuh-1840-native-c43bd9f6-3001-4c8e-8a39-d73c0e22c41b/LentScreen.cs"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "volpe@supedupsilly",
+        "powershell.exe -NoProfile -NonInteractive -EncodedCommand JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnADsAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAPQAnAEMAOgBcAFUAcwBlAHIAcwBcAHYAbwBsAHAAZQBcAEEAcABwAEQAYQB0AGEAXABMAG8AYwBhAGwAXABUAGUAbQBwAFwAdgB1AGgALQAxADgANAAwAC0AbgBhAHQAaQB2AGUALQBjADQAMwBiAGQAOQBmADYALQAzADAAMAAxAC0ANABjADgAZQAtADgAYQAzADkALQBkADcAMwBjADAAZQAyADIAYwA0ADEAYgAnADsAIAB0AHIAeQAgAHsAIAAkAGYAcgBhAG0AZQB3AG8AcgBrAD0AWwBSAHUAbgB0AGkAbQBlAC4ASQBuAHQAZQByAG8AcABTAGUAcgB2AGkAYwBlAHMALgBSAHUAbgB0AGkAbQBlAEUAbgB2AGkAcgBvAG4AbQBlAG4AdABdADoAOgBHAGUAdABSAHUAbgB0AGkAbQBlAEQAaQByAGUAYwB0AG8AcgB5ACgAKQA7ACAAJAByAGUAZgBlAHIAZQBuAGMAZQBzAD0AQAAoACcAUwB5AHMAdABlAG0ALgBXAGkAbgBkAG8AdwBzAC4ARgBvAHIAbQBzAC4AZABsAGwAJwAsACcAUwB5AHMAdABlAG0ALgBEAHIAYQB3AGkAbgBnAC4AZABsAGwAJwAsACcAUwB5AHMAdABlAG0ALgBXAGUAYgAuAEUAeAB0AGUAbgBzAGkAbwBuAHMALgBkAGwAbAAnACwAJwBTAHkAcwB0AGUAbQAuAEMAbwByAGUALgBkAGwAbAAnACkAOwAgACQAcgBlAGYAZQByAGUAbgBjAGUAcwAgACsAPQAgAEAAKAAnAFUASQBBAHUAdABvAG0AYQB0AGkAbwBuAEMAbABpAGUAbgB0AC4AZABsAGwAJwAsACcAVQBJAEEAdQB0AG8AbQBhAHQAaQBvAG4AVAB5AHAAZQBzAC4AZABsAGwAJwAsACcAVwBpAG4AZABvAHcAcwBCAGEAcwBlAC4AZABsAGwAJwApACAAfAAgAEYAbwByAEUAYQBjAGgALQBPAGIAagBlAGMAdAAgAHsAIABKAG8AaQBuAC0AUABhAHQAaAAgACQAZgByAGEAbQBlAHcAbwByAGsAIAAoACcAVwBQAEYAXAAnACAAKwAgACQAXwApACAAfQA7ACAAQQBkAGQALQBUAHkAcABlACAALQBQAGEAdABoACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAdABhAHMAawBEAGkAcgBlAGMAdABvAHIAeQAgACcATABlAG4AdABTAGMAcgBlAGUAbgAuAGMAcwAnACkAIAAtAE8AdQB0AHAAdQB0AEEAcwBzAGUAbQBiAGwAeQAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAIAAnAEwAZQBuAHQAUwBjAHIAZQBlAG4ALgBkAGwAbAAnACkAIAAtAE8AdQB0AHAAdQB0AFQAeQBwAGUAIABMAGkAYgByAGEAcgB5ACAALQBSAGUAZgBlAHIAZQBuAGMAZQBkAEEAcwBzAGUAbQBiAGwAaQBlAHMAIAAkAHIAZQBmAGUAcgBlAG4AYwBlAHMAOwAgAEcAZQB0AC0ARgBpAGwAZQBIAGEAcwBoACAALQBBAGwAZwBvAHIAaQB0AGgAbQAgAFMASABBADIANQA2ACAALQBMAGkAdABlAHIAYQBsAFAAYQB0AGgAIAAoAEoAbwBpAG4ALQBQAGEAdABoACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5ACAAJwBMAGUAbgB0AFMAYwByAGUAZQBuAC4AYwBzACcAKQAgAHwAIABTAGUAbABlAGMAdAAtAE8AYgBqAGUAYwB0ACAAQQBsAGcAbwByAGkAdABoAG0ALABIAGEAcwBoADsAIABpAGYAKABAACgAWwBBAHAAcABEAG8AbQBhAGkAbgBdADoAOgBDAHUAcgByAGUAbgB0AEQAbwBtAGEAaQBuAC4ARwBlAHQAQQBzAHMAZQBtAGIAbABpAGUAcwAoACkAIAB8ACAAVwBoAGUAcgBlAC0ATwBiAGoAZQBjAHQAIAB7ACAAJABfAC4ATABvAGMAYQB0AGkAbwBuACAALQBlAHEAIAAoAEoAbwBpAG4ALQBQAGEAdABoACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5ACAAJwBMAGUAbgB0AFMAYwByAGUAZQBuAC4AZABsAGwAJwApACAAfQApAC4AQwBvAHUAbgB0ACAALQBuAGUAIAAwACkAewB0AGgAcgBvAHcAIAAnAHUAbgBlAHgAcABlAGMAdABlAGQAXwB0AHkAcABlAF8AbABvAGEAZAAnAH0AOwAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJwBDAE8ATQBQAEkATABFAF8ATwBLADsAIABUAFkAUABFAF8ATgBPAFQAXwBMAE8AQQBEAEUARAA9AFQAcgB1AGUAOwAgAHQAeQBwAGUAIABuAG8AdAAgAGkAbgB2AG8AawBlAGQAJwAgAH0AIABjAGEAdABjAGgAIAB7ACAAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAkAF8ALgBFAHgAYwBlAHAAdABpAG8AbgAuAE0AZQBzAHMAYQBnAGUAOwAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJABfAC4AVABvAFMAdAByAGkAbgBnACgAKQA7ACAAZQB4AGkAdAAgADEAIAB9AA=="
+      ],
+      "powershell": "$ErrorActionPreference='Stop'; $taskDirectory='C:\\Users\\volpe\\AppData\\Local\\Temp\\vuh-1840-native-c43bd9f6-3001-4c8e-8a39-d73c0e22c41b'; try { $framework=[Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory(); $references=@('System.Windows.Forms.dll','System.Drawing.dll','System.Web.Extensions.dll','System.Core.dll'); $references += @('UIAutomationClient.dll','UIAutomationTypes.dll','WindowsBase.dll') | ForEach-Object { Join-Path $framework ('WPF\\' + $_) }; Add-Type -Path (Join-Path $taskDirectory 'LentScreen.cs') -OutputAssembly (Join-Path $taskDirectory 'LentScreen.dll') -OutputType Library -ReferencedAssemblies $references; Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $taskDirectory 'LentScreen.cs') | Select-Object Algorithm,Hash; if(@([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.Location -eq (Join-Path $taskDirectory 'LentScreen.dll') }).Count -ne 0){throw 'unexpected_type_load'}; Write-Output 'COMPILE_OK; TYPE_NOT_LOADED=True; type not invoked' } catch { Write-Output $_.Exception.Message; Write-Output $_.ToString(); exit 1 }",
+      "exit": 0,
+      "stdout": "\nAlgorithm Hash                                                            \n--------- ----                                                            \nSHA256    F2091C3CD65357026656817DC75B8EE986DAE4E91C901B73EAB5DF470A1407C5\nCOMPILE_OK; TYPE_NOT_LOADED=True; type not invoked\n\n\n",
+      "stderr": "#< CLIXML\n<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><Obj S=\"progress\" RefId=\"0\"><TN RefId=\"0\"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N=\"SourceId\">1</I64><PR N=\"Record\"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S=\"progress\" RefId=\"1\"><TNRef RefId=\"0\" /><MS><I64 N=\"SourceId\">2</I64><PR N=\"Record\"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>"
+    },
+    {
+      "command": [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "volpe@supedupsilly",
+        "powershell.exe -NoProfile -NonInteractive -EncodedCommand JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnADsAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAPQAnAEMAOgBcAFUAcwBlAHIAcwBcAHYAbwBsAHAAZQBcAEEAcABwAEQAYQB0AGEAXABMAG8AYwBhAGwAXABUAGUAbQBwAFwAdgB1AGgALQAxADgANAAwAC0AbgBhAHQAaQB2AGUALQBjADQAMwBiAGQAOQBmADYALQAzADAAMAAxAC0ANABjADgAZQAtADgAYQAzADkALQBkADcAMwBjADAAZQAyADIAYwA0ADEAYgAnADsAIABSAGUAbQBvAHYAZQAtAEkAdABlAG0AIAAtAEwAaQB0AGUAcgBhAGwAUABhAHQAaAAgACQAdABhAHMAawBEAGkAcgBlAGMAdABvAHIAeQAgAC0AUgBlAGMAdQByAHMAZQAgAC0ARgBvAHIAYwBlADsAIABXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACgAJwBUAEUATQBQAF8AUgBFAE0ATwBWAEUARAA9ACcAIAArACAAKAAtAG4AbwB0ACAAKABUAGUAcwB0AC0AUABhAHQAaAAgAC0ATABpAHQAZQByAGEAbABQAGEAdABoACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5ACkAKQApAA=="
+      ],
+      "powershell": "$ErrorActionPreference='Stop'; $taskDirectory='C:\\Users\\volpe\\AppData\\Local\\Temp\\vuh-1840-native-c43bd9f6-3001-4c8e-8a39-d73c0e22c41b'; Remove-Item -LiteralPath $taskDirectory -Recurse -Force; Write-Output ('TEMP_REMOVED=' + (-not (Test-Path -LiteralPath $taskDirectory)))",
+      "exit": 0,
+      "stdout": "TEMP_REMOVED=True\n",
+      "stderr": "#< CLIXML\n<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><Obj S=\"progress\" RefId=\"0\"><TN RefId=\"0\"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N=\"SourceId\">1</I64><PR N=\"Record\"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S=\"progress\" RefId=\"1\"><TNRef RefId=\"0\" /><MS><I64 N=\"SourceId\">1</I64><PR N=\"Record\"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>"
+    }
+  ]
+}

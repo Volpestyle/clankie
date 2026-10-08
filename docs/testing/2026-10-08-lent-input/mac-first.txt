@@ -1,0 +1,2 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 6 queued)
+sh: swift-format: command not found

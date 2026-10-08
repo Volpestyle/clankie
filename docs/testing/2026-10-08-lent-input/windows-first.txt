@@ -1,0 +1,22 @@
+clankie heavy: waiting for machine capacity (load; 1/2 held, 4 queued)
+compile exit: 1
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(206) : Cannot await in the body of a catch clause
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(205) :             RawCheck(snapshot,token);
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(206) : >>>         } catch { Fence(); await CleanupInput(); throw; }
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(207) :         finally { nativeBusy=false; }
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(206) : Cannot await in the body of a catch clause
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(205) :             RawCheck(snapshot,token);
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(206) : >>>         } catch { Fence(); await CleanupInput(); throw; }
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1840-native-3f2f1a4c-b648-49ca-8d74-0845ca073413\LentScreen.cs(207) :         finally { nativeBusy=false; }
+
+
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">2</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>
+TEMP_REMOVED=True

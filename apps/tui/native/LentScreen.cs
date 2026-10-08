@@ -7,8 +7,10 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Automation;
 using System.Windows.Forms;
@@ -32,14 +34,49 @@ public sealed class ClankieLentScreen : Form {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder value, int max);
     delegate bool EnumWindow(IntPtr window, IntPtr param);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr param);
+    [StructLayout(LayoutKind.Sequential)] struct Point { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
+    [StructLayout(LayoutKind.Sequential)] struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
+    [StructLayout(LayoutKind.Explicit)] struct Union { [FieldOffset(0)] public Keyboard keyboard; [FieldOffset(0)] public Mouse mouse; }
+    [StructLayout(LayoutKind.Sequential)] struct NativeInput { public uint type; public Union value; }
+    [StructLayout(LayoutKind.Sequential)] struct KeyboardHook { public uint key, scan, flags, time; public UIntPtr extra; }
+    [StructLayout(LayoutKind.Sequential)] struct MouseHook { public Point point; public uint data, flags, time; public UIntPtr extra; }
+    [StructLayout(LayoutKind.Sequential)] struct RawDevice { public ushort page, usage; public uint flags; public IntPtr target; }
+    [StructLayout(LayoutKind.Sequential)] struct RawHeader { public uint type, size; public IntPtr device, param; }
+    [DllImport("user32.dll", SetLastError=true)] static extern bool RegisterRawInputDevices(RawDevice[] devices, uint count, uint size);
+    [DllImport("user32.dll")] static extern uint GetRawInputData(IntPtr input, uint command, out RawHeader data, ref uint size, uint headerSize);
+    bool rawObserver;
+    protected override void WndProc(ref Message message) {
+        if(message.Msg==0xff && consent) {
+            RawHeader header; uint size=(uint)Marshal.SizeOf(typeof(RawHeader));
+            if(GetRawInputData(message.LParam,0x10000005,out header,ref size,(uint)Marshal.SizeOf(typeof(RawHeader)))==UInt32.MaxValue) drainUnknown=true;
+            foreign++; lastPerson=Stopwatch.GetTimestamp(); Fence();
+        }
+        base.WndProc(ref message);
+    }
+    delegate IntPtr Hook(int code, IntPtr message, IntPtr data);
+    [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SetWindowsHookEx(int type, Hook callback, IntPtr module, uint thread);
+    [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
+    [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, NativeInput[] values, int size);
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
     readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 24 * 1024 * 1024 };
     readonly Label label = new Label { Left=12, Top=12, Width=370, Height=40 };
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval=100 };
     readonly Dictionary<string, Snapshot> snapshots = new Dictionary<string, Snapshot>();
     string session="", lease="";
-    bool consent, input, injected;
+    bool consent, input, injected, busy, nativeBusy, drainUnknown;
+    long foreign, baseline, lastPerson;
+    IntPtr keyboardHook, mouseHook;
+    Hook keyboardCallback, mouseCallback;
+    readonly Dictionary<ulong,int> pending = new Dictionary<ulong,int>();
+    readonly RandomNumberGenerator identities = RandomNumberGenerator.Create();
+    ushort? heldKey;
+    bool heldButton;
     long heartbeat;
-    uint person;
+
     sealed class Snapshot {
         public IntPtr window; public int pid; public DateTime launched; public Rect bounds; public long captured;
         public AutomationElement root;
@@ -57,6 +94,120 @@ public sealed class ClankieLentScreen : Form {
         consent=false; input=false; snapshots.Clear(); label.Text="🐾 Clankie stopped · lease may be held";
         if(was) Console.WriteLine("{\"event\":\"stopped\"}");
     }
+    bool ObserverReady() { return rawObserver && keyboardHook!=IntPtr.Zero && mouseHook!=IntPtr.Zero && !drainUnknown; }
+    void Acknowledge(ulong identity, int message, bool own) {
+        int expected;
+        if(own && pending.TryGetValue(identity,out expected) && expected==message) pending.Remove(identity);
+        else { foreign++; lastPerson=Stopwatch.GetTimestamp(); Fence(); }
+    }
+    bool InstallObserver() {
+        if(ObserverReady()) return true;
+        if(keyboardHook!=IntPtr.Zero || mouseHook!=IntPtr.Zero) { drainUnknown=true; return false; }
+        keyboardCallback=(code,message,data)=> {
+            if(code==0) { var value=(KeyboardHook)Marshal.PtrToStructure(data,typeof(KeyboardHook)); Acknowledge(value.extra.ToUInt64(),message.ToInt32(),(value.flags&16)!=0); }
+            return CallNextHookEx(keyboardHook,code,message,data);
+        };
+        mouseCallback=(code,message,data)=> {
+            if(code==0) { var value=(MouseHook)Marshal.PtrToStructure(data,typeof(MouseHook)); Acknowledge(value.extra.ToUInt64(),message.ToInt32(),(value.flags&1)!=0); }
+            return CallNextHookEx(mouseHook,code,message,data);
+        };
+        rawObserver=RegisterRawInputDevices(new[]{new RawDevice {page=1,usage=6,flags=256,target=Handle},new RawDevice {page=1,usage=2,flags=256,target=Handle}},2,(uint)Marshal.SizeOf(typeof(RawDevice)));
+        if(!rawObserver) return false;
+        var module=GetModuleHandle(null);
+        keyboardHook=SetWindowsHookEx(13,keyboardCallback,module,0);
+        mouseHook=SetWindowsHookEx(14,mouseCallback,module,0);
+        return ObserverReady();
+    }
+    object StopProof() {
+        // Low-level hooks run BEFORE target queue insertion. Never claim drain after an effect.
+        bool clean=ObserverReady() && !injected && !busy && !nativeBusy && pending.Count==0 && !heldKey.HasValue && !heldButton;
+        return Obj("quiescent",clean,"session",session,"leaseId",lease,"observer",ObserverReady(),
+            "uncertain",drainUnknown || injected,"pending",pending.Count,"held",(heldKey.HasValue?1:0)+(heldButton?1:0),"busy",busy || nativeBusy);
+    }
+    async Task Post(NativeInput value, int expected, bool cleanup) {
+        if(!cleanup && (!ObserverReady() || !consent)) throw new InvalidOperationException();
+        ulong identity; var identityBytes=new byte[8]; do { identities.GetBytes(identityBytes); identity=BitConverter.ToUInt64(identityBytes,0); } while(identity==0 || pending.ContainsKey(identity));
+        pending.Add(identity,expected);
+        if(value.type==1) value.value.keyboard.extra=new UIntPtr(identity); else value.value.mouse.extra=new UIntPtr(identity);
+        injected=true;
+        if(SendInput(1,new[]{value},Marshal.SizeOf(typeof(NativeInput)))!=1) { drainUnknown=true; throw new InvalidOperationException(); }
+        long deadline=Stopwatch.GetTimestamp()+Stopwatch.Frequency;
+        while(pending.ContainsKey(identity)) {
+            if(!ObserverReady() || Stopwatch.GetTimestamp()>=deadline) { drainUnknown=true; throw new InvalidOperationException(); }
+            await Task.Delay(5);
+        }
+    }
+    NativeInput KeyEvent(ushort key, bool up) { return new NativeInput {type=1,value=new Union {keyboard=new Keyboard {key=key,flags=(up?2u:0u)|((key>=33 && key<=40)?1u:0u)}}}; }
+    NativeInput MouseEvent(uint flags, Point at, uint data, bool move) {
+        var mouse=new Mouse {flags=flags,data=data};
+        if(move) {
+            int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+            if(width<=1 || height<=1 || at.x<left || at.y<top || at.x>=left+width || at.y>=top+height) throw new InvalidOperationException();
+            mouse.x=(int)Math.Round((at.x-left)*65535.0/(width-1)); mouse.y=(int)Math.Round((at.y-top)*65535.0/(height-1));
+            mouse.flags|=0x8001u|0x4000u;
+        }
+        return new NativeInput {type=0,value=new Union {mouse=mouse}};
+    }
+    async Task CleanupInput() {
+        try {
+            if(heldKey.HasValue) { await Post(KeyEvent(heldKey.Value,true),0x101,true); heldKey=null; }
+            if(heldButton) { Point at; if(!GetCursorPos(out at)) throw new InvalidOperationException(); await Post(MouseEvent(4,at,0,false),0x202,true); heldButton=false; }
+        } catch { drainUnknown=true; }
+    }
+    void RawCheck(Snapshot snapshot,string token) {
+        Rect bounds; uint pid; GetWindowThreadProcessId(snapshot.window,out pid);
+        var focused=AutomationElement.FocusedElement;
+        if(!Valid(token,true) || GetForegroundWindow()!=snapshot.window || pid!=snapshot.pid ||
+            !GetWindowRect(snapshot.window,out bounds) || !Same(bounds,snapshot.bounds) || App(snapshot.pid).StartTime!=snapshot.launched ||
+            focused==null || focused.Current.IsPassword || !InWindow(focused,snapshot.root)) throw new InvalidOperationException();
+        int[] modifiers={16,17,18,91,92}; if(modifiers.Any(key=>(GetAsyncKeyState(key)&0x8000)!=0)) throw new InvalidOperationException();
+    }
+    Point RawPoint(object raw, Dictionary<string,object> screenshot, Snapshot snapshot) {
+        var at=(Dictionary<string,object>)raw; double x=Convert.ToDouble(at["x"]),y=Convert.ToDouble(at["y"]),width=Convert.ToDouble(screenshot["width"]),height=Convert.ToDouble(screenshot["height"]);
+        if(Double.IsNaN(x) || Double.IsInfinity(x) || Double.IsNaN(y) || Double.IsInfinity(y) || x<0 || y<0 || x>=width || y>=height) throw new InvalidOperationException();
+        var point=new Point {x=snapshot.bounds.left+(int)Math.Floor(x*(snapshot.bounds.right-snapshot.bounds.left)/width),y=snapshot.bounds.top+(int)Math.Floor(y*(snapshot.bounds.bottom-snapshot.bounds.top)/height)};
+        CheckPoint(point,snapshot); return point;
+    }
+    void CheckPoint(Point point, Snapshot snapshot) {
+        var hit=AutomationElement.FromPoint(new System.Windows.Point(point.x,point.y));
+        if(hit==null || hit.Current.IsPassword || !InWindow(hit,snapshot.root)) throw new InvalidOperationException();
+    }
+    async Task RawInput(Dictionary<string,object> value,Dictionary<string,object> screenshot,Snapshot snapshot,string token) {
+        RawCheck(snapshot,token);
+        if(!ObserverReady() || new[]{1,2,4,5,6}.Any(key=>(GetAsyncKeyState(key)&0x8000)!=0)) throw new InvalidOperationException();
+        nativeBusy=true; bool failed=false;
+        try {
+            string kind=(string)value["kind"];
+            if(kind=="key") {
+                var keys=new Dictionary<string,ushort>{{"ArrowLeft",37},{"ArrowRight",39},{"ArrowUp",38},{"ArrowDown",40},{"Tab",9},{"Space",32},{"Home",36},{"End",35},{"PageUp",33},{"PageDown",34}};
+                ushort key; if(!keys.TryGetValue((string)value["keys"],out key)) throw new InvalidOperationException();
+                heldKey=key; await Post(KeyEvent(key,false),0x100,false); RawCheck(snapshot,token);
+                await Post(KeyEvent(key,true),0x101,true); heldKey=null;
+            } else if(kind=="drag") {
+                Point from=RawPoint(value["from"],screenshot,snapshot),to=RawPoint(value["to"],screenshot,snapshot);
+                // Position first; mouse move acknowledgment cannot be mistaken for button acknowledgment.
+                await Post(MouseEvent(0,from,0,true),0x200,false); RawCheck(snapshot,token);
+                heldButton=true; await Post(MouseEvent(2,from,0,false),0x201,false);
+                for(int i=1;i<=8;i++) {
+                    RawCheck(snapshot,token); var at=new Point {x=from.x+(to.x-from.x)*i/8,y=from.y+(to.y-from.y)*i/8}; CheckPoint(at,snapshot);
+                    await Post(MouseEvent(0,at,0,true),0x200,false); await Task.Delay(20);
+                }
+                RawCheck(snapshot,token); await Post(MouseEvent(4,to,0,false),0x202,true); heldButton=false;
+            } else if(kind=="scroll") {
+                int amount=Convert.ToInt32(value["amount"]); if(amount<1 || amount>10 || !value.ContainsKey("at")) throw new InvalidOperationException();
+                Point at=RawPoint(value["at"],screenshot,snapshot); string direction=(string)value["direction"];
+                await Post(MouseEvent(0,at,0,true),0x200,false); RawCheck(snapshot,token);
+                bool horizontal=direction=="left" || direction=="right";
+                if(!horizontal && direction!="up" && direction!="down") throw new InvalidOperationException();
+                int delta=(direction=="left" || direction=="down"?-1:1)*amount*120;
+                await Post(MouseEvent(horizontal?0x1000u:0x800u,at,unchecked((uint)delta),false),horizontal?0x20e:0x20a,false);
+            } else throw new InvalidOperationException();
+            RawCheck(snapshot,token);
+        } catch { Fence(); failed=true; }
+        if(failed) await CleanupInput();
+        nativeBusy=false;
+        if(failed) throw new InvalidOperationException();
+    }
     static uint Activity() { var value=new LastInput {size=(uint)Marshal.SizeOf(typeof(LastInput))}; if(!GetLastInputInfo(ref value)) throw new InvalidOperationException(); return value.tick; }
     static bool ConsoleSession() {
         if(Process.GetCurrentProcess().SessionId != WTSGetActiveConsoleSessionId()) return false;
@@ -67,7 +218,7 @@ public sealed class ClankieLentScreen : Form {
     }
     bool Valid(string token, bool needsInput) {
         bool valid = token==session && session!="" && consent && Visible && ConsoleSession() &&
-          (Stopwatch.GetTimestamp()-heartbeat)/(double)Stopwatch.Frequency < 2 && Activity()==person && (!needsInput || input);
+          (Stopwatch.GetTimestamp()-heartbeat)/(double)Stopwatch.Frequency < 2 && ObserverReady() && foreign==baseline && (!needsInput || input);
         if(!valid) Fence(); return valid;
     }
     static Process App(int pid) {
@@ -135,21 +286,23 @@ public sealed class ClankieLentScreen : Form {
             if(Automation.Compare(element,root)) return true;
         return false;
     }
-    void HandleRequest(string line) {
-        string id="", action="";
+    async void HandleRequest(string line) {
+        string id="", action=""; bool ownsBusy=false;
         try {
             var message=json.Deserialize<Dictionary<string,object>>(line);
             id=(string)message["id"]; Guid.Parse(id); action=(string)message["action"];
             string token=(string)message["session"]; var value=(Dictionary<string,object>)message["value"];
             if(action=="heartbeat") { heartbeat=Stopwatch.GetTimestamp(); Reply(id,true,Obj()); return; }
-            if(action=="stop") { Fence(); Reply(id,true,Obj("quiescent",!injected)); return; }
-            if(action=="end") { if(injected) throw new InvalidOperationException(); Fence(); lease=""; session=""; Reply(id,true,Obj()); return; }
+            if(action=="stop") { if(token!=session || lease=="") throw new InvalidOperationException(); Fence(); Reply(id,true,StopProof()); return; }
+            if(action=="end") { if(injected || busy || nativeBusy || pending.Count!=0 || heldKey.HasValue || heldButton || token!=session) throw new InvalidOperationException(); Fence(); lease=""; session=""; Reply(id,true,Obj()); return; }
+            if(busy) throw new InvalidOperationException();
+            busy=true; ownsBusy=true;
             if(action=="consent") {
                 if(consent || lease!="" || !ConsoleSession()) throw new InvalidOperationException();
                 string conversation=(string)value["conversationId"];
                 var choice=Consent(conversation);
-                consent=choice!=DialogResult.Cancel; input=choice==DialogResult.No;
-                if(consent) { session=token; injected=false; heartbeat=Stopwatch.GetTimestamp(); person=Activity(); label.Text=input?"🐾 Clankie is driving":"🐾 Clankie is observing · input off"; Show(); }
+                consent=choice!=DialogResult.Cancel && InstallObserver(); input=consent && choice==DialogResult.No;
+                if(consent) { session=token; injected=false; heartbeat=Stopwatch.GetTimestamp(); baseline=foreign; lastPerson=Stopwatch.GetTimestamp(); label.Text=input?"🐾 Clankie is driving":"🐾 Clankie is observing · input off"; Show(); }
                 Reply(id,true,Obj("approved",consent,"allowInput",input)); return;
             }
             if(!Valid(token,false)) throw new InvalidOperationException();
@@ -174,7 +327,7 @@ public sealed class ClankieLentScreen : Form {
                 Reply(id,true,Obj("png",Convert.ToBase64String(png),"reference",reference,"elements",elements,"accessibility",access,"coordinates",Obj("space","global_display_points","origin","top_left","bounds",Obj("x",bounds.left,"y",bounds.top,"width",width,"height",height)))); return;
             }
             if(action=="input") {
-                if(!Valid(token,true) || unchecked((uint)Environment.TickCount)-Activity()<2000) throw new InvalidOperationException();
+                if(!Valid(token,true) || (Stopwatch.GetTimestamp()-lastPerson)/(double)Stopwatch.Frequency<2) throw new InvalidOperationException();
                 var snapshot=snapshots[(string)value["reference"]]; var inputValue=(Dictionary<string,object>)value["input"];
                 var screenshot=(Dictionary<string,object>)value["screenshot"]; var expect=(Dictionary<string,object>)inputValue["expect"];
                 if((Stopwatch.GetTimestamp()-snapshot.captured)/(double)Stopwatch.Frequency >= 30 || !(bool)inputValue["foreground"] || (string)screenshot["leaseId"]!=lease || App(snapshot.pid).StartTime!=snapshot.launched) throw new InvalidOperationException();
@@ -189,7 +342,9 @@ public sealed class ClankieLentScreen : Form {
                 if(GetForegroundWindow()!=snapshot.window && !SetForegroundWindow(snapshot.window)) throw new InvalidOperationException();
                 if(GetForegroundWindow()!=snapshot.window || !Valid(token,true)) throw new InvalidOperationException();
                 string kind=(string)inputValue["kind"];
-                if(kind=="type") {
+                if(kind=="key" || kind=="drag" || kind=="scroll") {
+                    await RawInput(inputValue,screenshot,snapshot,token);
+                } else if(kind=="type") {
                     string append=(string)inputValue["text"]; if((bool)inputValue["clear"] || append.Length>2048 || append.Any(Char.IsControl)) throw new InvalidOperationException();
                     var focused=AutomationElement.FocusedElement; object pattern;
                     if(focused==null || focused.Current.IsPassword || !InWindow(focused,snapshot.root) || !focused.TryGetCurrentPattern(ValuePattern.Pattern,out pattern)) throw new InvalidOperationException();
@@ -215,12 +370,13 @@ public sealed class ClankieLentScreen : Form {
             }
             throw new InvalidOperationException();
         } catch { if(action=="input") Fence(); if(id!="") Reply(id,false,Obj()); }
+        finally { if(ownsBusy) busy=false; }
     }
     static bool Same(Rect a,Rect b) { return a.left==b.left && a.top==b.top && a.right==b.right && a.bottom==b.bottom; }
     protected override bool ShowWithoutActivation { get { return true; } }
     DialogResult Consent(string conversation) {
         using(var prompt=new Form {Text="Lend this screen to Clankie?",Width=520,Height=230,FormBorderStyle=FormBorderStyle.FixedDialog,StartPosition=FormStartPosition.CenterScreen,TopMost=true}) {
-            prompt.Controls.Add(new Label {Left=12,Top=12,Width=480,Height=115,Text="Session: "+conversation+"\nObserve is read-only. Allow input lets Clankie press accessible controls and append text. Your input or Stop ends consent. Sign-ins, codes, payments and destructive actions stay with you."});
+            prompt.Controls.Add(new Label {Left=12,Top=12,Width=480,Height=115,Text="Session: "+conversation+"\nObserve is read-only. Allow input lets Clankie press accessible controls, append text, use navigation keys, drag and scroll. Your input or Stop ends consent. Sign-ins, codes, payments and destructive actions stay with you."});
             var observe=new Button {Left=12,Top=130,Width=140,Text="Observe only",DialogResult=DialogResult.Yes};
             var cancel=new Button {Left=162,Top=130,Width=100,Text="Cancel",DialogResult=DialogResult.Cancel};
             var drive=new Button {Left=272,Top=130,Width=140,Text="Allow input",DialogResult=DialogResult.No};

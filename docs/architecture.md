@@ -538,11 +538,12 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   carries strict commands and bounded frame chunks. The host intersects its
   original screen ceiling with fresh policy, asks locally for session consent,
   defaults to observation, and shows a pet with Stop. Authored macOS/Windows
-  helpers accept accessibility press/text with exact effect receipts; raw key,
-  drag and scroll refuse. Reduction, carrier loss, person takeover or lost
+  helpers accept accessibility press/text and bounded navigation key/drag/scroll
+  with exact effect receipts and observer acknowledgments. Reduction, carrier loss, person takeover or lost
   consent fences queued input. Uncertain native stop keeps the lease held.
-  Real Mac/PC task and Stop proof remain live gaps (VUH-1803); raw primitives
-  and native quiescence proof are VUH-1840. See
+  Both parent and helper retain the post-input lease even after observer
+  acknowledgments; those cannot prove target-queue drain. Real Mac/PC task and
+  Stop proof remain live gaps (VUH-1803); true native queue drain is VUH-1840. See
   [lent screens](desktop-control.md#lend-a-joined-screen).
 - **Machine tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
   attach to the operator console and to Discord turns authorized by the

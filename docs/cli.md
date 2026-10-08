@@ -5835,9 +5835,11 @@ clankie computer request '{"conversationId":"global-default","machineId":"join-U
 On the joining host, `join` / `join resume` must stay running with the authored
 native helper available. A screen-level join approval permits asking; the local
 owner confirms observation for each session and separately allows input. The
-visible pet offers Stop. Only one accessibility press or text append runs per
-fresh capture, with `foreground: true` and a changed exact `expect` field. Raw
-key, drag and scroll refuse. Never retry unknown input under a new UUID. Stop
+visible pet offers Stop. Only one accessibility press/text append or bounded
+key/drag/scroll runs per fresh capture, with `foreground: true` and a changed
+exact `expect` field. Navigation keys use the documented named allowlist; scroll
+requires `at` and 1–10 ticks; drag stays within the captured window. Observer
+acknowledgments never release a post-input lease; Stop leaves it held. Never retry unknown input under a new UUID. Stop
 and recovery remain usable after reducing access; uncertain quiescence keeps
 the host lease held. Mac/Windows live driving proof remains open. Setup and
 limits: [lend a joined screen](desktop-control.md#lend-a-joined-screen).

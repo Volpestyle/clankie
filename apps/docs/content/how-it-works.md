@@ -100,8 +100,8 @@ in Terminal. In the console, `/chats`, `/agents`, `/rooms`, `/history`, and
 A joined screen can provide Clankie's computer body, including for a hosted
 Clankie. The owner confirms each session locally and chooses observation or
 input. A visible pet offers Stop; access reduction and loss of consent stop
-queued input. The first host supports accessibility press and text with exact
-receipts. Real Mac and Windows driving checks remain open.
+queued input. The host supports bounded native input with exact receipts. Observer
+acknowledgments cannot prove queue drain, so Stop retains a post-input lease. Real Mac and Windows driving checks remain open.
 
 ## Where the service and data live
 

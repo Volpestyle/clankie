@@ -240,7 +240,8 @@ is the default. Desktop parents can supervise `join resume --json` with local
 `join status --json` reads registration and `join leave --json` revokes it.
 An unavailable or held Stop is not quiescence proof. See the
 [CLI contract](../../../docs/cli.md#lent-computer-selection).
-Native accessibility press/text only, exact receipts, no raw
-key/drag/scroll, no fallback or replay. Read the
+Native accessibility press/text and bounded navigation key/drag/scroll require
+exact receipts; no fallback or replay. Native observer acknowledgments do not
+prove queue drain: after any attempted input, Stop keeps the lease held. Read the
 [desktop-control skill](../desktop-control/SKILL.md) before driving. Real
 Mac/Windows driving remains an owner-run live gap.

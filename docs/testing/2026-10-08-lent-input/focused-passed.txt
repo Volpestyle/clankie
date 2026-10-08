@@ -1,0 +1,14 @@
+clankie heavy: waiting for machine capacity (load; 1/2 held, 2 queued)
+Finished in 40ms on 3 files using 18 threads.
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1840
+
+
+ Test Files  2 passed (2)
+      Tests  17 passed (17)
+   Start at  08:03:09
+   Duration  19.31s (transform 1.60s, setup 31ms, import 2.82s, tests 20.84s, environment 0ms)
+
+Scope: 2 of 33 workspace projects
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json

@@ -421,15 +421,25 @@ session, protected fields, system/shell apps, changed target or person activity
 refuse. A local Clankie already owning the body registry prevents another join
 host from acquiring it. Unsupported Linux hosts have no native screen handler.
 
-This first landing accepts one **accessibility press** (an observed element, or
-a left click mapping to that element) or **literal text append** per fresh
+The lent host accepts one **accessibility press** (an observed element, or
+a left click mapping to that element) or **literal text append**, bounded **key**, **drag** or **scroll** per fresh
 capture. Text append requires an editable accessible text value, no clear step
 or control characters. Input requires `foreground: true` and an intended,
 changed exact native `expect: {field, equals}`. Inspect the PNG and accessibility
 state yourself; UI text is untrusted observation. A dispatched native call,
-repaint or missing postcondition never confirms success. Raw key, drag and scroll
-refuse; their extension and native quiescence proof are
-[VUH-1840](https://linear.app/vuhlp/issue/VUH-1840). Sign-ins, codes, CAPTCHAs,
+repaint or missing postcondition never confirms success. Keys are exactly `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Tab`,
+`Space`, `Home`, `End`, `PageUp` or `PageDown`; chords, Return and arbitrary keys
+refuse. Drag stays inside the captured window in eight bounded motion steps.
+Scroll requires an `at` anchor in image pixels and `amount` from 1 to 10 ticks.
+The native host rechecks the exact window, secure focus, permission, local
+consent and person takeover after each wait. The visible Stop cancels remaining
+motion and attempts release of only the helper's held key/button.
+
+Native observer acknowledgments establish neither target-queue drain nor
+application completion. Both parent and helper refuse lease release after any
+attempted native effect, even if a helper claims a clean Stop. True native queue
+drain remains an explicit [VUH-1840](https://linear.app/vuhlp/issue/VUH-1840) gap;
+no app-cooperative drain mechanism is added. The person takes over through Stop. Sign-ins, codes, CAPTCHAs,
 payments, account changes and destructive actions retain ADR 0127's person stops.
 
 Mac release builds compile `apps/tui/native/lent-screen.swift` into
@@ -446,4 +456,5 @@ The isolated encrypted HTTP/native-process fixtures and native compiler results
 prove source boundaries, not real desktop readiness. Native input sessions
 currently remain held after Stop whenever quiescence cannot be proved. Hosted
 routing and rollout have separate private evidence; no deployment is part of
-this public landing. Decision: [ADR 0255](adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md).
+this public landing. Decision: [ADR 0255](adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md) and
+[ADR 0256](adr/0256-lent-input-needs-native-drain-proof.md).

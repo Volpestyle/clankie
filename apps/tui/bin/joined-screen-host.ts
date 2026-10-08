@@ -45,6 +45,8 @@ class LentScreenNative implements ComputerAdapter {
   private readonly heartbeat: NodeJS.Timeout;
   private stopped = false;
   private bound = false;
+  private boundLease = "";
+  private attemptedInput = false;
   get available(): boolean {
     return !this.stopped;
   }
@@ -144,10 +146,12 @@ class LentScreenNative implements ComputerAdapter {
   async end(): Promise<void> {
     await this.call("end");
     this.bound = false;
+    this.boundLease = "";
   }
   async bind(leaseId: string): Promise<void> {
     z.strictObject({ bound: z.literal(true) }).parse(await this.call("bind", { leaseId }));
     this.bound = true;
+    this.boundLease = leaseId;
   }
   async inventory(guard: () => Promise<void>) {
     await guard();
@@ -191,13 +195,28 @@ class LentScreenNative implements ComputerAdapter {
       !input.foreground ||
       !input.expect ||
       input.expect.equals === observation.accessibility?.[input.expect.field] ||
-      !["click", "element", "type"].includes(input.kind)
+      !["click", "element", "type", "key", "drag", "scroll"].includes(input.kind) ||
+      (input.kind === "key" &&
+        ![
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+          "Tab",
+          "Space",
+          "Home",
+          "End",
+          "PageUp",
+          "PageDown",
+        ].includes(input.keys)) ||
+      (input.kind === "scroll" && (!input.at || input.amount > 10))
     )
       return {
         outcome: "failed" as const,
         detail:
           "Requires session input opt-in, explicit foreground and a changed exact accessibility effect; unsupported primitives refuse",
       };
+    this.attemptedInput = true; // Observer acknowledgment cannot prove target-queue drain.
     const result = z
       .strictObject({ outcome: z.enum(["confirmed", "failed", "uncertain"]), detail: z.string().max(4096) })
       .parse(await this.call("input", { input, screenshot, reference: observation.reference }));
@@ -208,10 +227,34 @@ class LentScreenNative implements ComputerAdapter {
   async stop(guard: () => Promise<void>): Promise<boolean> {
     this.fence();
     await guard();
-    const result = z.strictObject({ quiescent: z.boolean() }).parse(await this.call("stop"));
+    const proof = z
+      .strictObject({
+        quiescent: z.boolean(),
+        session: z.string().uuid(),
+        leaseId: z.string(),
+        observer: z.boolean(),
+        uncertain: z.boolean(),
+        pending: z.number().int().nonnegative(),
+        held: z.number().int().nonnegative(),
+        busy: z.boolean(),
+      })
+      .safeParse(await this.call("stop").catch(() => undefined));
     await guard();
+    if (!proof.success) return false;
+    const result = proof.data;
     // A fresh helper cannot attest to an older process/session, even if it has no queue.
-    return this.bound && result.quiescent;
+    return (
+      !this.attemptedInput &&
+      this.bound &&
+      result.session === this.session &&
+      result.leaseId === this.boundLease &&
+      result.quiescent &&
+      result.observer &&
+      !result.uncertain &&
+      result.pending === 0 &&
+      result.held === 0 &&
+      !result.busy
+    );
   }
   async close(): Promise<void> {
     this.policy = false;
