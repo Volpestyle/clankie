@@ -1,3 +1,5 @@
+import { playDecisionFields } from "./play-decision.ts";
+import { runPlayKernel, settlePlayDecision, playFailureBackoff, playSpeechReady } from "./play-kernel.ts";
 import {
   EnvironmentActionResultSchema,
   GbaEmulatorActionSchema,
@@ -62,19 +64,12 @@ export type FreePlayAction = z.infer<typeof FreePlayActionSchema>;
 
 const FreePlayDecisionSchema = z
   .object({
-    /** Why this action, in Clankie's own voice. */
-    monologue: z.string().min(1).max(FREE_PLAY_MONOLOGUE_MAX),
-    /**
-     * A standing goal that outlives the turn. A string sets it, null clears it,
-     * and omission keeps it for custom/non-structured minds.
-     */
-    objective: z.string().max(FREE_PLAY_OBJECTIVE_MAX).nullish(),
-    /**
-     * What he will do on the NEXT turn — a concrete action, not the objective.
-     * This is the field follow-through is scored against, which is only
-     * meaningful now that the goal lives somewhere else.
-     */
-    intent: z.string().min(1).max(FREE_PLAY_INTENT_MAX),
+    ...playDecisionFields({
+      monologue: FREE_PLAY_MONOLOGUE_MAX,
+      intent: FREE_PLAY_INTENT_MAX,
+      notes: FREE_PLAY_NOTES_MAX,
+      objective: FREE_PLAY_OBJECTIVE_MAX,
+    }),
     /**
      * What he says back to whoever spoke to him this turn.
      *
@@ -90,14 +85,6 @@ const FreePlayDecisionSchema = z
      * the difference between a character and a narrator.
      */
     speak: z.string().max(FREE_PLAY_SPEAK_MAX).nullish(),
-    /**
-     * His notes, rewritten by him each turn. Nothing else writes this: it is
-     * memory he chose to keep, not a summary the harness imposed.
-     */
-    // Nullish, not required: a model that omits the field means "leave my notes
-    // alone", and losing an entire turn over a missing optional field would be a
-    // harsh reading of a decision that is otherwise valid.
-    notes: z.string().max(FREE_PLAY_NOTES_MAX).nullish(),
     action: FreePlayActionSchema,
   })
   .strict();
@@ -675,574 +662,606 @@ export async function runFreePlay(input: RunFreePlayInput): Promise<FreePlayResu
     (input.budget?.maxCostUsd !== undefined &&
       (usage.estimatedCostUsd === null || usage.estimatedCostUsd >= input.budget.maxCostUsd));
 
-  for (let turn = 0; turn < input.turns; turn += 1) {
-    if (input.shouldStop?.() === true) break;
-    if (budgetReached()) {
+  await runPlayKernel({
+    maxTurns: input.turns,
+    shouldStop: () => input.shouldStop?.() === true,
+    budgetReached,
+    onBudget: () => {
       outcome = "budget_exhausted";
-      break;
-    }
-    let observations = observe(input.io);
-    const decisionFingerprint = semanticStateFingerprint(observations, input.framebufferSha256?.() ?? null);
-    if (retiredLoopStates !== null && !retiredLoopStates.has(decisionFingerprint)) {
-      retiredLoopStates = null;
-    }
-    const objectiveRecovery = retiredLoopStates !== null;
-    const progressBefore = evidenceProgress(progress.snapshot());
-    const sinceNewTile = progressBefore.turnsSinceNewTile;
-    const recurringForTurns = recurringStateTurns(semanticStates);
-    longestRecurringRun = Math.max(longestRecurringRun, recurringForTurns ?? 0);
-    const stalledForTurns =
-      sinceNewTile >= FREE_PLAY_STALL_TURNS && positionOf(observations) !== null ? sinceNewTile : null;
-    const repeatingForTurns = repeat !== null && repeat.turns >= FREE_PLAY_REPEAT_TURNS ? repeat.turns : null;
-    const shownObjectiveForTurns =
-      objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS ? objectiveForTurns : null;
-    const shownLocaleForTurns =
-      currentMap !== null && localeForTurns >= FREE_PLAY_STALL_TURNS ? localeForTurns : null;
-    let refusedHere = progress.refusedFrom(positionOf(observations));
-    let provenance = input.provenance?.() ?? null;
-    let knownHardFailures = hardFailuresFor(hardFailures, observations, provenance);
-    let verifiedInteractions = verifiedInteractionsFor(verifiedInteractionMemory, observations, provenance);
-    const decisionStartedAt = clock().toISOString();
-    const evidence: FreePlayTurnEvidence = {
-      decision: stateEvidence(observations, input.provenance),
-      immediatePreAction: null,
-      postAction: null,
-      actionResult: null,
-      progressBefore,
-      progressAfter: null,
-      signals: {
-        refusedHere,
-        knownHardFailures,
-        stalledForTurns,
-        repeatingForTurns,
-        recurringForTurns,
-        objectiveForTurns: shownObjectiveForTurns,
-        localeForTurns: shownLocaleForTurns,
-        previousObjective: objective,
-        previousNotes: notes,
-        retiredObjective,
-        objectiveRecovery,
-        verifiedInteractions,
-        decisionPreemptions: 0,
-        stateRedecisions: 0,
-      },
-      timing: {
-        decisionStartedAt,
-        decisionSettledAt: decisionStartedAt,
-        actionStartedAt: null,
-        actionSettledAt: null,
-      },
-    };
-    const record: FreePlayTurn = {
-      turn,
-      usage: emptyFreePlayUsage(),
-      observationSha256: sha256(canonicalJson(observations)),
-      framebufferSha256: input.framebufferSha256?.() ?? null,
-      monologue: null,
-      intent: null,
-      action: null,
-      outcome: "mind_failed",
-      detail: null,
-      effect: null,
-      effectAdvice: null,
-      notes,
-      objective,
-      objectiveRetired: null,
-      interjection: null,
-      reply: null,
-      speak: null,
-      speakSuppressed: false,
-      speakWanted: false,
-    };
-
-    // Taken before the first proposal. A later offer aborts that proposal and
-    // replaces this with the newest words without consuming a numbered turn.
-    let interjection = input.interjections?.take() ?? null;
-    record.interjection = interjection;
-
-    const callUsage = (
-      metered: boolean | undefined,
-    ): { report: FreePlayUsageReporter; finish: () => void } => {
-      let reported = false;
-      let finished = false;
-      const report: FreePlayUsageReporter = (value) => {
-        if (finished || reported) return;
-        const validated = FreePlayUsageSchema.parse(value);
-        reported = true;
-        addFreePlayUsage(record.usage!, validated);
-        addFreePlayUsage(usage, validated);
-      };
-      return {
-        report,
-        finish: () => {
-          if (!reported && metered) report(unreportedFreePlayUsage());
-          finished = true;
+    },
+    prepare: async (turn) => {
+      let observations = observe(input.io);
+      const decisionFingerprint = semanticStateFingerprint(observations, input.framebufferSha256?.() ?? null);
+      if (retiredLoopStates !== null && !retiredLoopStates.has(decisionFingerprint)) {
+        retiredLoopStates = null;
+      }
+      const objectiveRecovery = retiredLoopStates !== null;
+      const progressBefore = evidenceProgress(progress.snapshot());
+      const sinceNewTile = progressBefore.turnsSinceNewTile;
+      const recurringForTurns = recurringStateTurns(semanticStates);
+      longestRecurringRun = Math.max(longestRecurringRun, recurringForTurns ?? 0);
+      const stalledForTurns =
+        sinceNewTile >= FREE_PLAY_STALL_TURNS && positionOf(observations) !== null ? sinceNewTile : null;
+      const repeatingForTurns =
+        repeat !== null && repeat.turns >= FREE_PLAY_REPEAT_TURNS ? repeat.turns : null;
+      const shownObjectiveForTurns =
+        objective !== null && objectiveForTurns >= FREE_PLAY_STALL_TURNS ? objectiveForTurns : null;
+      const shownLocaleForTurns =
+        currentMap !== null && localeForTurns >= FREE_PLAY_STALL_TURNS ? localeForTurns : null;
+      let refusedHere = progress.refusedFrom(positionOf(observations));
+      let provenance = input.provenance?.() ?? null;
+      let knownHardFailures = hardFailuresFor(hardFailures, observations, provenance);
+      let verifiedInteractions = verifiedInteractionsFor(verifiedInteractionMemory, observations, provenance);
+      const decisionStartedAt = clock().toISOString();
+      const evidence: FreePlayTurnEvidence = {
+        decision: stateEvidence(observations, input.provenance),
+        immediatePreAction: null,
+        postAction: null,
+        actionResult: null,
+        progressBefore,
+        progressAfter: null,
+        signals: {
+          refusedHere,
+          knownHardFailures,
+          stalledForTurns,
+          repeatingForTurns,
+          recurringForTurns,
+          objectiveForTurns: shownObjectiveForTurns,
+          localeForTurns: shownLocaleForTurns,
+          previousObjective: objective,
+          previousNotes: notes,
+          retiredObjective,
+          objectiveRecovery,
+          verifiedInteractions,
+          decisionPreemptions: 0,
+          stateRedecisions: 0,
+        },
+        timing: {
+          decisionStartedAt,
+          decisionSettledAt: decisionStartedAt,
+          actionStartedAt: null,
+          actionSettledAt: null,
         },
       };
-    };
-    if (stalledForTurns !== null || repeatingForTurns !== null || recurringForTurns !== null) {
-      notable("stuck", turn, Math.max(stalledForTurns ?? 0, repeatingForTurns ?? 0, recurringForTurns ?? 0));
-    }
-    let preActionObservations: GbaEmulatorObservation[] = [];
-    let raw: unknown;
-    let mindFailed = false;
-    let mindFailure: unknown;
-    let objectiveWasStale = false;
-    const retiredForView = retiredObjective;
-    while (true) {
-      const interrupted = new AbortController();
-      const mayPreempt = evidence.signals.decisionPreemptions < 2;
-      const unsubscribe = mayPreempt
-        ? input.interjections?.subscribe(() => interrupted.abort("room_interjection"))
-        : undefined;
-      const accounting = callUsage(input.mind.metered);
-      try {
-        input.onPhase?.("thinking");
-        objectiveWasStale =
-          objective !== null &&
-          objectiveForTurns >= FREE_PLAY_STALL_TURNS &&
-          recurringForTurns !== null &&
-          positionOf(observations) !== null;
-        const decision = input.mind.decide(
-          {
-            turn,
-            observations,
-            framePng: framePngAt(input.framePng, positionOf(observations)),
-            refusedHere,
-            knownHardFailures,
-            verifiedInteractions,
-            // Only when he has a position to be stuck at: mid-battle and mid-warp
-            // the tile counter stalls for reasons that need no telling.
-            stalledForTurns,
-            repeatingForTurns,
-            recurringForTurns,
-            objectiveForTurns: shownObjectiveForTurns,
-            localeForTurns: shownLocaleForTurns,
-            retiredObjective: retiredForView,
-            objectiveRecovery,
-            learnedTransitions: progress.transitionsFrom(positionOf(observations)),
-            notes,
-            objective,
-            interjection,
-            turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
-            audience: input.audience ?? null,
-            history: [...history],
-          },
-          interrupted.signal,
-          accounting.report,
-        );
-        raw =
-          input.interjections === undefined
-            ? await decision
-            : await Promise.race([decision, rejectOnAbort(interrupted.signal)]);
-      } catch (error) {
-        mindFailed = !interrupted.signal.aborted;
-        mindFailure = error;
-      } finally {
-        unsubscribe?.();
-        accounting.finish();
-      }
-      if (budgetReached() || input.shouldStop?.() === true) {
-        outcome = budgetReached() ? "budget_exhausted" : undefined;
-        record.outcome = outcome ?? "stopped";
-        break;
-      }
-      const currentObservations = observe(input.io);
-      const stateChanged =
-        !mindFailed &&
-        !interrupted.signal.aborted &&
-        decisionStateFingerprint(currentObservations) !== decisionStateFingerprint(observations);
-      if (stateChanged && evidence.signals.stateRedecisions >= 2) {
-        record.outcome = "state_changed";
-        record.detail = "game changed repeatedly while deciding; no action dispatched";
-        break;
-      }
-      if (
-        stateChanged ||
-        (mayPreempt && (interrupted.signal.aborted || input.interjections?.hasPending() === true))
-      ) {
-        if (stateChanged) evidence.signals.stateRedecisions += 1;
-        else evidence.signals.decisionPreemptions += 1;
-        // After the voice bound, newer lines stay queued for the next turn.
-        if (mayPreempt) interjection = input.interjections?.take() ?? interjection;
-        record.interjection = interjection;
-        observations = currentObservations;
-        provenance = input.provenance?.() ?? null;
-        refusedHere = progress.refusedFrom(positionOf(observations));
-        knownHardFailures = hardFailuresFor(hardFailures, observations, provenance);
-        verifiedInteractions = verifiedInteractionsFor(verifiedInteractionMemory, observations, provenance);
-        const framebufferSha256 = input.framebufferSha256?.() ?? null;
-        record.observationSha256 = sha256(canonicalJson(observations));
-        record.framebufferSha256 = framebufferSha256;
-        evidence.decision = stateEvidence(observations, input.provenance);
-        evidence.signals.refusedHere = refusedHere;
-        evidence.signals.knownHardFailures = knownHardFailures;
-        evidence.signals.verifiedInteractions = verifiedInteractions;
-        mindFailed = false;
-        continue;
-      }
-      preActionObservations = currentObservations;
-      break;
-    }
-    evidence.timing.decisionSettledAt = clock().toISOString();
-    if (
-      record.outcome === "state_changed" ||
-      record.outcome === "budget_exhausted" ||
-      record.outcome === "stopped"
-    ) {
-      turns.push(finalize(record, evidence, input.onTurn));
-      if (record.outcome !== "state_changed") break;
-      continue;
-    }
-    if (mindFailed) {
-      record.detail = bounded(mindFailure);
-      turns.push(finalize(record, evidence, input.onTurn));
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= 5) {
-        outcome = "mind_unavailable";
-        notable("mind_unavailable", turn, consecutiveFailures);
-        break;
-      }
-      if (turn + 1 < input.turns)
-        await (input.sleep ?? ((ms) => waitForRetry(ms, input.shouldStop)))(
-          1000 * 2 ** (consecutiveFailures - 1),
-        );
-      continue;
-    }
-    retiredObjective = null;
-
-    const parsed = FreePlayDecisionSchema.safeParse(raw);
-    if (!parsed.success) {
-      record.outcome = "invalid_decision";
-      record.detail = bounded(parsed.error.issues.map((issue) => issue.path.join(".")).join(","));
-      turns.push(finalize(record, evidence, input.onTurn));
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= 5) {
-        outcome = "mind_unavailable";
-        notable("mind_unavailable", turn, consecutiveFailures);
-        break;
-      }
-      if (turn + 1 < input.turns)
-        await (input.sleep ?? ((ms) => waitForRetry(ms, input.shouldStop)))(
-          1000 * 2 ** (consecutiveFailures - 1),
-        );
-      continue;
-    }
-
-    consecutiveFailures = 0;
-    record.monologue = parsed.data.monologue;
-    record.intent = parsed.data.intent;
-    // He keeps his notes unless he rewrites them, so silence is not amnesia.
-    if (parsed.data.notes !== null && parsed.data.notes !== undefined) notes = parsed.data.notes;
-    record.notes = notes;
-    const priorObjective = objective;
-    // Omission keeps an objective for custom minds; structured minds use null
-    // to clear it and restate the string to keep it.
-    if (parsed.data.objective !== undefined) {
-      const proposed = parsed.data.objective?.trim() || null;
-      // Retirement is about the loop, not the exact wording of the goal. Keep
-      // the slot empty until play reaches a semantic state outside that loop,
-      // so paraphrasing the stale objective cannot resurrect it one turn later.
-      objective = objectiveRecovery && proposed !== null ? null : proposed;
-    }
-    const objectiveChanged = objective !== priorObjective;
-    objectiveForTurns = objective === null ? 0 : objectiveChanged ? 1 : objectiveForTurns + 1;
-    if (objectiveWasStale && !objectiveChanged && priorObjective !== null) {
-      if (staleObjectiveWarned) {
-        objective = null;
-        objectiveForTurns = 0;
-        staleObjectiveWarned = false;
-        retiredObjective = priorObjective;
-        retiredLoopStates = new Set(semanticStates);
-        record.objectiveRetired = priorObjective;
-        objectivesRetired += 1;
-        if (objectivesRetired >= 2) notable("objectives_retired", turn, objectivesRetired);
-      } else {
-        staleObjectiveWarned = true;
-      }
-    } else {
-      staleObjectiveWarned = false;
-    }
-    record.objective = objective;
-    record.reply = parsed.data.reply ?? null;
-
-    record.action = parsed.data.action;
-    const chosen = parsed.data.action;
-    input.onPhase?.("acting");
-    evidence.immediatePreAction = stateEvidence(preActionObservations, input.provenance);
-    evidence.timing.actionStartedAt = clock().toISOString();
-
-    let accepted = false;
-    let actionOutcome: Record<string, unknown> | undefined;
-    let rejection: Described | null = null;
-    let failure: { errorCode: string; retryable: boolean } | null = null;
-    /**
-     * The screen as it stands the instant before the action, which is not the
-     * screen he was shown when he decided.
-     *
-     * `record.framebufferSha256` is sampled at observation, and the console now
-     * keeps running while he thinks (ADR 0047) — so diffing from it attributes
-     * every drop of ambient animation across a ten-second decision to whatever
-     * he did at the end of it. On 2026-08-15 that told him a fruitless A press
-     * had changed the screen, and cost him the next turn to work out it had
-     * not. Sampling here narrows the window back to the action itself.
-     */
-    const frameBefore = input.framebufferSha256?.() ?? null;
-    try {
-      const remembered = hardFailuresFor(
-        hardFailures,
-        preActionObservations,
-        input.provenance?.() ?? null,
-      ).find((failure) => canonicalJson(failure.action) === canonicalJson(chosen));
-      if (remembered !== undefined) {
-        record.outcome = "rejected_by_adapter";
-        record.detail = `known_non_retryable:${remembered.errorCode}`;
-        rejection = described(
-          "rejected, nothing ran",
-          `unchanged capability evidence already produced ${remembered.errorCode}`,
-        );
-        evidence.actionResult = {
-          source: "body",
-          status: "rejected",
-          summary: `known_non_retryable:${remembered.errorCode}`,
-          advice: "the body was not called again because its capability evidence has not changed",
-        };
-      } else {
-        const result = await input.io.act(chosen);
-        evidence.actionResult = { source: "environment", result };
-        // A rejection arrives as a status, not only as a throw: the adapter fails
-        // closed on an illegal button, an exceeded frame bound, a missing
-        // capability, or a stale goal version. Both shapes are legitimate answers
-        // rather than crashes, so both keep the playthrough running.
-        if (result.status === "completed") {
-          record.outcome = "accepted";
-          accepted = true;
-          actionOutcome = result.outcome as Record<string, unknown>;
-          record.detail = bounded(JSON.stringify(result.outcome));
-        } else {
-          record.outcome = "rejected_by_adapter";
-          record.detail = bounded(`${result.status}:${describeRejection(result)}`);
-          rejection = describeRejectionForPlayer(
-            result.status === "failed" ? result.errorCode : null,
-            describeRejection(result),
-          );
-          if (result.status === "failed") {
-            failure = { errorCode: result.errorCode, retryable: result.retryable };
-          }
-        }
-      }
-    } catch (error) {
-      record.outcome = "rejected_by_adapter";
-      record.detail = bounded(error);
-      rejection = describeRejectionForPlayer(
-        error instanceof EnvironmentAdapterActionError ? error.errorCode : null,
-        bounded(error),
-      );
-      evidence.actionResult = exceptionEvidence(error);
-      if (error instanceof EnvironmentAdapterActionError) {
-        failure = { errorCode: error.errorCode, retryable: error.retryable };
-      }
-    }
-
-    // Re-observe and diff, so the turn records what changed rather than only
-    // that the adapter took the button. The frame digest is sampled from just
-    // before the action to just after it, so the comparison spans what this
-    // turn did to the screen and not the idling the console did meanwhile.
-    //
-    // A rejected action never ran, so diffing around it would invent an effect
-    // — the worst case was a refused advance_dialog reading as "read no new
-    // text", a success-shaped sentence about an action that did not happen.
-    // The rejection reason IS the effect of that turn, and it is the one line
-    // the model actually sees (detail stays journal-only).
-    const frameAfter = input.framebufferSha256?.() ?? null;
-    const afterObservations = observe(input.io);
-    evidence.postAction = stateEvidence(afterObservations, input.provenance);
-    evidence.timing.actionSettledAt = clock().toISOString();
-    const effect =
-      rejection !== null
-        ? { ...rejection, refused: null, position: positionOf(preActionObservations), enteredMap: false }
-        : observeEffect({
-            before: preActionObservations,
-            after: afterObservations,
-            action: chosen,
-            outcome: actionOutcome,
-            screenChanged: frameBefore !== null && frameAfter !== null ? frameAfter !== frameBefore : null,
-          });
-    progress.record(effect, accepted);
-    evidence.progressAfter = evidenceProgress(progress.snapshot());
-    if (accepted) {
-      progress.recordTransition(preActionObservations, chosen, afterObservations);
-      rememberVerifiedInteraction(
-        verifiedInteractionMemory,
-        preActionObservations,
-        afterObservations,
-        input.provenance?.() ?? null,
-        chosen,
-      );
-    }
-    semanticStates.push(semanticStateFingerprint(afterObservations, frameAfter));
-    if (semanticStates.length > FREE_PLAY_STALL_TURNS) semanticStates.shift();
-    longestRecurringRun = Math.max(longestRecurringRun, recurringStateTurns(semanticStates) ?? 0);
-    const afterPosition = positionOf(afterObservations);
-    if (afterPosition === null) {
-      localeForTurns += 1;
-    } else if (afterPosition.mapId === currentMap) {
-      localeForTurns += 1;
-    } else {
-      currentMap = afterPosition.mapId;
-      localeForTurns = 0;
-    }
-    // Only the observation is stored. `effect.advice` is the harness coaching
-    // his next press, and everything downstream of this record is an audience:
-    // the overlay, the story card, and the play voice seam that hands a voice
-    // room what just happened. A room told "hold the direction longer to move"
-    // hears him directing *them*, which is how he ended up sounding like the
-    // spectators were the ones playing. The advice goes to the mind alone.
-    record.effect = effect.summary.slice(0, 200);
-    record.effectAdvice = effect.advice === undefined ? null : effect.advice.slice(0, 300);
-    const mindEffect = mindEffectLine(effect);
-    if (failure !== null && !failure.retryable) {
-      const key = stableHardFailureKey(
-        preActionObservations,
-        input.provenance?.() ?? null,
-        chosen,
-        failure.errorCode,
-      );
-      if (key !== null) {
-        hardFailures.delete(key);
-        hardFailures.set(key, {
-          action: chosen,
-          errorCode: failure.errorCode,
-          effect: mindEffect.slice(0, 500),
-        });
-        if (hardFailures.size > FREE_PLAY_HARD_FAILURE_LIMIT) {
-          const oldest = hardFailures.keys().next().value;
-          if (oldest !== undefined) hardFailures.delete(oldest);
-        }
-      }
-    }
-
-    // Same result, whatever he tried: the state-independent stuck signal. Keyed
-    // on the observed effect alone, not on the action that produced it — an
-    // alternating loop is still a loop. On 2026-08-18 he read "Press START to
-    // open the MENU!" four times across nine turns by alternating `a` and
-    // `advance_dialog`; keying on the pair meant the counter reset every turn
-    // and he was never told (ADR 0092). Effect-only subsumes the old pair
-    // signature: identical action *and* effect is identical effect.
-    //
-    // Keyed on the observation rather than the fuller line he reads, which
-    // discriminates identically — advice never varies except with the branch
-    // that set it.
-    const signature = canonicalJson({ effect: record.effect });
-    // Annotated: without it the loop-carried assignment below makes this
-    // variable's type depend on itself.
-    const priorRepeats: number = repeat !== null && repeat.signature === signature ? repeat.turns : 0;
-    repeat = { signature, turns: priorRepeats + 1 };
-    longestUnchangedRun = Math.max(longestUnchangedRun, repeat.turns);
-
-    // Whether the rate gate could let an unprompted remark through this turn.
-    // Computed before Voice is consulted, because a consultation whose only
-    // possible aside would be dropped by this same gate is a model call bought
-    // for nothing.
-    const ready = lastSpokeTurn === null || turn - lastSpokeTurn >= cooldown;
-
-    // Voice decides speech when one is wired; the player's own speak/reply are
-    // the single-agent fallback (ADR 0056). Voice cannot act, which is what
-    // makes "an interjection is not a route" structural rather than a prompt.
-    // It runs after the action settles so "what just happened" is the turn's
-    // real effect — commentary about a move belongs after the move lands.
-    // While a room composes for itself (ADR 0074), neither author here runs —
-    // not Voice, and not the player's own fallback quip. Both would be a second
-    // author for one character in one moment: in the channel if the seam
-    // carried them, on the overlay if it did not.
-    const roomAuthors = input.roomAuthors?.() === true;
-    // His own volition, read before anyone decides who authors the words.
-    // ADR 0074 moves *authorship* to the room; it does not move the judgement
-    // of whether this moment was worth remarking on at all. Keeping that
-    // judgement is what lets the play voice seam report the turns he thought
-    // were worth a word, instead of narrating every turn's diagnostics.
-    const ownWish = parsed.data.speak ?? null;
-    let wants = roomAuthors ? null : ownWish;
-    if (input.voice !== undefined && roomAuthors) {
-      // Not consulted at all: the room is already speaking in his voice.
-      volition.skipped += 1;
-    } else if (input.voice !== undefined && interjection === null && !ready) {
-      // Not consulted at all: nobody spoke, and the gate could not open.
-      volition.skipped += 1;
-    } else if (input.voice !== undefined && !budgetReached() && input.shouldStop?.() !== true) {
-      const voiceView: VoiceView = {
+      const record: FreePlayTurn = {
         turn,
-        framePng: input.framePng?.() ?? null,
-        monologue: record.monologue,
-        effect: record.effect,
-        intent: record.intent,
+        usage: emptyFreePlayUsage(),
+        observationSha256: sha256(canonicalJson(observations)),
+        framebufferSha256: input.framebufferSha256?.() ?? null,
+        monologue: null,
+        intent: null,
+        action: null,
+        outcome: "mind_failed",
+        detail: null,
+        effect: null,
+        effectAdvice: null,
+        notes,
         objective,
-        heard: interjection,
-        turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
-        audience: input.audience ?? null,
-        recentlySaid: [...recentlySaid],
+        objectiveRetired: null,
+        interjection: null,
+        reply: null,
+        speak: null,
+        speakSuppressed: false,
+        speakWanted: false,
       };
-      if (voiceHasSomethingToConsider(voiceView)) {
-        try {
-          input.onPhase?.("thinking");
-          const accounting = callUsage(input.voice.metered);
-          let voiceRaw: unknown;
-          try {
-            voiceRaw = await input.voice.decide(voiceView, accounting.report);
-          } finally {
-            accounting.finish();
+
+      // Taken before the first proposal. A later offer aborts that proposal and
+      // replaces this with the newest words without consuming a numbered turn.
+      let interjection = input.interjections?.take() ?? null;
+      record.interjection = interjection;
+
+      const callUsage = (
+        metered: boolean | undefined,
+      ): { report: FreePlayUsageReporter; finish: () => void } => {
+        let reported = false;
+        let finished = false;
+        const report: FreePlayUsageReporter = (value) => {
+          if (finished || reported) return;
+          const validated = FreePlayUsageSchema.parse(value);
+          reported = true;
+          addFreePlayUsage(record.usage!, validated);
+          addFreePlayUsage(usage, validated);
+        };
+        return {
+          report,
+          finish: () => {
+            if (!reported && metered) report(unreportedFreePlayUsage());
+            finished = true;
+          },
+        };
+      };
+      if (stalledForTurns !== null || repeatingForTurns !== null || recurringForTurns !== null) {
+        notable(
+          "stuck",
+          turn,
+          Math.max(stalledForTurns ?? 0, repeatingForTurns ?? 0, recurringForTurns ?? 0),
+        );
+      }
+      let preActionObservations: GbaEmulatorObservation[] = [];
+      let chosenDecision!: z.infer<typeof FreePlayDecisionSchema>;
+      let accepted = false;
+      let actionOutcome: Record<string, unknown> | undefined;
+      let rejection: Described | null = null;
+      let failure: { errorCode: string; retryable: boolean } | null = null;
+      let frameBefore: string | null = null;
+      let afterObservations: GbaEmulatorObservation[] = [];
+      let mindEffect = "";
+      return {
+        decide: async () => {
+          let raw: unknown;
+          let mindFailed = false;
+          let mindFailure: unknown;
+          let objectiveWasStale = false;
+          const retiredForView = retiredObjective;
+          let currentObservations: GbaEmulatorObservation[] = [];
+          const settledDecision = await settlePlayDecision({
+            interjections: input.interjections,
+            abortOnInterjection: true,
+            shouldStop: () => budgetReached() || input.shouldStop?.() === true,
+            propose: async (signal) => {
+              const accounting = callUsage(input.mind.metered);
+              try {
+                input.onPhase?.("thinking");
+                objectiveWasStale =
+                  objective !== null &&
+                  objectiveForTurns >= FREE_PLAY_STALL_TURNS &&
+                  recurringForTurns !== null &&
+                  positionOf(observations) !== null;
+                const decision = input.mind.decide(
+                  {
+                    turn,
+                    observations,
+                    framePng: framePngAt(input.framePng, positionOf(observations)),
+                    refusedHere,
+                    knownHardFailures,
+                    verifiedInteractions,
+                    // Only when he has a position to be stuck at: mid-battle and mid-warp
+                    // the tile counter stalls for reasons that need no telling.
+                    stalledForTurns,
+                    repeatingForTurns,
+                    recurringForTurns,
+                    objectiveForTurns: shownObjectiveForTurns,
+                    localeForTurns: shownLocaleForTurns,
+                    retiredObjective: retiredForView,
+                    objectiveRecovery,
+                    learnedTransitions: progress.transitionsFrom(positionOf(observations)),
+                    notes,
+                    objective,
+                    interjection,
+                    turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
+                    audience: input.audience ?? null,
+                    history: [...history],
+                  },
+                  signal,
+                  accounting.report,
+                );
+                raw =
+                  input.interjections === undefined
+                    ? await decision
+                    : await Promise.race([decision, rejectOnAbort(signal)]);
+              } catch (error) {
+                mindFailed = !signal.aborted;
+                mindFailure = error;
+              } finally {
+                accounting.finish();
+              }
+            },
+            inspect: async (attempt) => {
+              currentObservations = observe(input.io);
+              const stateChanged =
+                !mindFailed &&
+                !attempt.signal.aborted &&
+                decisionStateFingerprint(currentObservations) !== decisionStateFingerprint(observations);
+              if (stateChanged) return "state";
+              if (attempt.mayPreempt && (attempt.interrupted || input.interjections?.hasPending() === true))
+                return "interjection";
+              preActionObservations = currentObservations;
+              return "settled";
+            },
+            onCounters: (preemptions, stateRedecisions) => {
+              evidence.signals.decisionPreemptions = preemptions;
+              evidence.signals.stateRedecisions = stateRedecisions;
+            },
+            retry: async (attempt) => {
+              // After the voice bound, newer lines stay queued for the next turn.
+              if (attempt.mayPreempt) interjection = input.interjections?.take() ?? interjection;
+              record.interjection = interjection;
+              observations = currentObservations;
+              provenance = input.provenance?.() ?? null;
+              refusedHere = progress.refusedFrom(positionOf(observations));
+              knownHardFailures = hardFailuresFor(hardFailures, observations, provenance);
+              verifiedInteractions = verifiedInteractionsFor(
+                verifiedInteractionMemory,
+                observations,
+                provenance,
+              );
+              const framebufferSha256 = input.framebufferSha256?.() ?? null;
+              record.observationSha256 = sha256(canonicalJson(observations));
+              record.framebufferSha256 = framebufferSha256;
+              evidence.decision = stateEvidence(observations, input.provenance);
+              evidence.signals.refusedHere = refusedHere;
+              evidence.signals.knownHardFailures = knownHardFailures;
+              evidence.signals.verifiedInteractions = verifiedInteractions;
+              mindFailed = false;
+            },
+          });
+          if (settledDecision === "stopped") {
+            outcome = budgetReached() ? "budget_exhausted" : undefined;
+            record.outcome = outcome ?? "stopped";
+          } else if (settledDecision === "stale") {
+            record.outcome = "state_changed";
+            record.detail = "game changed repeatedly while deciding; no action dispatched";
           }
-          const spoken = VoiceDecisionSchema.safeParse(voiceRaw);
-          if (spoken.success) {
-            wants = spoken.data.speak ?? null;
-            if (spoken.data.reply !== null && spoken.data.reply !== undefined) {
-              record.reply = spoken.data.reply;
+          evidence.timing.decisionSettledAt = clock().toISOString();
+          if (
+            record.outcome === "state_changed" ||
+            record.outcome === "budget_exhausted" ||
+            record.outcome === "stopped"
+          ) {
+            turns.push(finalize(record, evidence, input.onTurn));
+            return record.outcome === "state_changed" ? "skip" : "stop";
+          }
+          if (mindFailed) {
+            record.detail = bounded(mindFailure);
+            turns.push(finalize(record, evidence, input.onTurn));
+            consecutiveFailures += 1;
+            if (consecutiveFailures >= 5) {
+              outcome = "mind_unavailable";
+              notable("mind_unavailable", turn, consecutiveFailures);
+              return "stop";
+            }
+            if (turn + 1 < input.turns)
+              await (input.sleep ?? ((ms) => waitForRetry(ms, input.shouldStop)))(
+                playFailureBackoff(consecutiveFailures),
+              );
+            return "skip";
+          }
+          retiredObjective = null;
+
+          const parsed = FreePlayDecisionSchema.safeParse(raw);
+          if (!parsed.success) {
+            record.outcome = "invalid_decision";
+            record.detail = bounded(parsed.error.issues.map((issue) => issue.path.join(".")).join(","));
+            turns.push(finalize(record, evidence, input.onTurn));
+            consecutiveFailures += 1;
+            if (consecutiveFailures >= 5) {
+              outcome = "mind_unavailable";
+              notable("mind_unavailable", turn, consecutiveFailures);
+              return "stop";
+            }
+            if (turn + 1 < input.turns)
+              await (input.sleep ?? ((ms) => waitForRetry(ms, input.shouldStop)))(
+                playFailureBackoff(consecutiveFailures),
+              );
+            return "skip";
+          }
+
+          consecutiveFailures = 0;
+          chosenDecision = parsed.data;
+          record.monologue = parsed.data.monologue;
+          record.intent = parsed.data.intent;
+          // He keeps his notes unless he rewrites them, so silence is not amnesia.
+          if (parsed.data.notes !== null && parsed.data.notes !== undefined) notes = parsed.data.notes;
+          record.notes = notes;
+          const priorObjective = objective;
+          // Omission keeps an objective for custom minds; structured minds use null
+          // to clear it and restate the string to keep it.
+          if (parsed.data.objective !== undefined) {
+            const proposed = parsed.data.objective?.trim() || null;
+            // Retirement is about the loop, not the exact wording of the goal. Keep
+            // the slot empty until play reaches a semantic state outside that loop,
+            // so paraphrasing the stale objective cannot resurrect it one turn later.
+            objective = objectiveRecovery && proposed !== null ? null : proposed;
+          }
+          const objectiveChanged = objective !== priorObjective;
+          objectiveForTurns = objective === null ? 0 : objectiveChanged ? 1 : objectiveForTurns + 1;
+          if (objectiveWasStale && !objectiveChanged && priorObjective !== null) {
+            if (staleObjectiveWarned) {
+              objective = null;
+              objectiveForTurns = 0;
+              staleObjectiveWarned = false;
+              retiredObjective = priorObjective;
+              retiredLoopStates = new Set(semanticStates);
+              record.objectiveRetired = priorObjective;
+              objectivesRetired += 1;
+              if (objectivesRetired >= 2) notable("objectives_retired", turn, objectivesRetired);
+            } else {
+              staleObjectiveWarned = true;
+            }
+          } else {
+            staleObjectiveWarned = false;
+          }
+          record.objective = objective;
+          record.reply = parsed.data.reply ?? null;
+
+          record.action = parsed.data.action;
+          return "act";
+        },
+        act: async () => {
+          const chosen = chosenDecision.action;
+          input.onPhase?.("acting");
+          evidence.immediatePreAction = stateEvidence(preActionObservations, input.provenance);
+          evidence.timing.actionStartedAt = clock().toISOString();
+
+          /**
+           * The screen as it stands the instant before the action, which is not the
+           * screen he was shown when he decided.
+           *
+           * `record.framebufferSha256` is sampled at observation, and the console now
+           * keeps running while he thinks (ADR 0047) — so diffing from it attributes
+           * every drop of ambient animation across a ten-second decision to whatever
+           * he did at the end of it. On 2026-08-15 that told him a fruitless A press
+           * had changed the screen, and cost him the next turn to work out it had
+           * not. Sampling here narrows the window back to the action itself.
+           */
+          frameBefore = input.framebufferSha256?.() ?? null;
+          try {
+            const remembered = hardFailuresFor(
+              hardFailures,
+              preActionObservations,
+              input.provenance?.() ?? null,
+            ).find((failure) => canonicalJson(failure.action) === canonicalJson(chosen));
+            if (remembered !== undefined) {
+              record.outcome = "rejected_by_adapter";
+              record.detail = `known_non_retryable:${remembered.errorCode}`;
+              rejection = described(
+                "rejected, nothing ran",
+                `unchanged capability evidence already produced ${remembered.errorCode}`,
+              );
+              evidence.actionResult = {
+                source: "body",
+                status: "rejected",
+                summary: `known_non_retryable:${remembered.errorCode}`,
+                advice: "the body was not called again because its capability evidence has not changed",
+              };
+            } else {
+              const result = await input.io.act(chosen);
+              evidence.actionResult = { source: "environment", result };
+              // A rejection arrives as a status, not only as a throw: the adapter fails
+              // closed on an illegal button, an exceeded frame bound, a missing
+              // capability, or a stale goal version. Both shapes are legitimate answers
+              // rather than crashes, so both keep the playthrough running.
+              if (result.status === "completed") {
+                record.outcome = "accepted";
+                accepted = true;
+                actionOutcome = result.outcome as Record<string, unknown>;
+                record.detail = bounded(JSON.stringify(result.outcome));
+              } else {
+                record.outcome = "rejected_by_adapter";
+                record.detail = bounded(`${result.status}:${describeRejection(result)}`);
+                rejection = describeRejectionForPlayer(
+                  result.status === "failed" ? result.errorCode : null,
+                  describeRejection(result),
+                );
+                if (result.status === "failed") {
+                  failure = { errorCode: result.errorCode, retryable: result.retryable };
+                }
+              }
+            }
+          } catch (error) {
+            record.outcome = "rejected_by_adapter";
+            record.detail = bounded(error);
+            rejection = describeRejectionForPlayer(
+              error instanceof EnvironmentAdapterActionError ? error.errorCode : null,
+              bounded(error),
+            );
+            evidence.actionResult = exceptionEvidence(error);
+            if (error instanceof EnvironmentAdapterActionError) {
+              failure = { errorCode: error.errorCode, retryable: error.retryable };
             }
           }
-        } catch {
-          // A voice failure must not cost the turn. He plays on in silence.
-        }
-      }
-    }
+        },
+        verify: async () => {
+          const chosen = chosenDecision.action;
+          // Re-observe and diff, so the turn records what changed rather than only
+          // that the adapter took the button. The frame digest is sampled from just
+          // before the action to just after it, so the comparison spans what this
+          // turn did to the screen and not the idling the console did meanwhile.
+          //
+          // A rejected action never ran, so diffing around it would invent an effect
+          // — the worst case was a refused advance_dialog reading as "read no new
+          // text", a success-shaped sentence about an action that did not happen.
+          // The rejection reason IS the effect of that turn, and it is the one line
+          // the model actually sees (detail stays journal-only).
+          const frameAfter = input.framebufferSha256?.() ?? null;
+          afterObservations = observe(input.io);
+          evidence.postAction = stateEvidence(afterObservations, input.provenance);
+          evidence.timing.actionSettledAt = clock().toISOString();
+          const effect =
+            rejection !== null
+              ? {
+                  ...rejection,
+                  refused: null,
+                  position: positionOf(preActionObservations),
+                  enteredMap: false,
+                }
+              : observeEffect({
+                  before: preActionObservations,
+                  after: afterObservations,
+                  action: chosen,
+                  outcome: actionOutcome,
+                  screenChanged:
+                    frameBefore !== null && frameAfter !== null ? frameAfter !== frameBefore : null,
+                });
+          progress.record(effect, accepted);
+          evidence.progressAfter = evidenceProgress(progress.snapshot());
+          if (accepted) {
+            progress.recordTransition(preActionObservations, chosen, afterObservations);
+            rememberVerifiedInteraction(
+              verifiedInteractionMemory,
+              preActionObservations,
+              afterObservations,
+              input.provenance?.() ?? null,
+              chosen,
+            );
+          }
+          semanticStates.push(semanticStateFingerprint(afterObservations, frameAfter));
+          if (semanticStates.length > FREE_PLAY_STALL_TURNS) semanticStates.shift();
+          longestRecurringRun = Math.max(longestRecurringRun, recurringStateTurns(semanticStates) ?? 0);
+          const afterPosition = positionOf(afterObservations);
+          if (afterPosition === null) {
+            localeForTurns += 1;
+          } else if (afterPosition.mapId === currentMap) {
+            localeForTurns += 1;
+          } else {
+            currentMap = afterPosition.mapId;
+            localeForTurns = 0;
+          }
+          // Only the observation is stored. `effect.advice` is the harness coaching
+          // his next press, and everything downstream of this record is an audience:
+          // the overlay, the story card, and the play voice seam that hands a voice
+          // room what just happened. A room told "hold the direction longer to move"
+          // hears him directing *them*, which is how he ended up sounding like the
+          // spectators were the ones playing. The advice goes to the mind alone.
+          record.effect = effect.summary.slice(0, 200);
+          record.effectAdvice = effect.advice === undefined ? null : effect.advice.slice(0, 300);
+          mindEffect = mindEffectLine(effect);
+          if (failure !== null && !failure.retryable) {
+            const key = stableHardFailureKey(
+              preActionObservations,
+              input.provenance?.() ?? null,
+              chosen,
+              failure.errorCode,
+            );
+            if (key !== null) {
+              hardFailures.delete(key);
+              hardFailures.set(key, {
+                action: chosen,
+                errorCode: failure.errorCode,
+                effect: mindEffect.slice(0, 500),
+              });
+              if (hardFailures.size > FREE_PLAY_HARD_FAILURE_LIMIT) {
+                const oldest = hardFailures.keys().next().value;
+                if (oldest !== undefined) hardFailures.delete(oldest);
+              }
+            }
+          }
 
-    // Every turn is an opportunity; the gate only limits how often he takes it.
-    volition.offered += 1;
-    if (wants !== null && wants.trim().length > 0) {
-      if (ready) {
-        record.speak = wants;
-        lastSpokeTurn = turn;
-        volition.taken += 1;
-        recentlySaid.push(wants);
-        if (recentlySaid.length > 3) recentlySaid.shift();
-      } else {
-        // Held, not dropped silently: a gate that never binds is a gate nobody
-        // needs, and one that always binds is a muzzle. Both show up here.
-        record.speakSuppressed = true;
-        volition.suppressed += 1;
-      }
-    }
-    // Recorded whoever ends up holding the pen: when the room authors, `wants`
-    // is deliberately null and this is the only surviving trace that he judged
-    // the moment worth a word.
-    const wished = roomAuthors ? ownWish : wants;
-    record.speakWanted = wished !== null && wished.trim().length > 0;
+          // Same result, whatever he tried: the state-independent stuck signal. Keyed
+          // on the observed effect alone, not on the action that produced it — an
+          // alternating loop is still a loop. On 2026-08-18 he read "Press START to
+          // open the MENU!" four times across nine turns by alternating `a` and
+          // `advance_dialog`; keying on the pair meant the counter reset every turn
+          // and he was never told (ADR 0092). Effect-only subsumes the old pair
+          // signature: identical action *and* effect is identical effect.
+          //
+          // Keyed on the observation rather than the fuller line he reads, which
+          // discriminates identically — advice never varies except with the branch
+          // that set it.
+          const signature = canonicalJson({ effect: record.effect });
+          // Annotated: without it the loop-carried assignment below makes this
+          // variable's type depend on itself.
+          const priorRepeats: number = repeat !== null && repeat.signature === signature ? repeat.turns : 0;
+          repeat = { signature, turns: priorRepeats + 1 };
+          longestUnchangedRun = Math.max(longestUnchangedRun, repeat.turns);
+        },
+        remember: async () => {
+          // Whether the rate gate could let an unprompted remark through this turn.
+          // Computed before Voice is consulted, because a consultation whose only
+          // possible aside would be dropped by this same gate is a model call bought
+          // for nothing.
+          const ready = playSpeechReady(lastSpokeTurn, turn, cooldown);
 
-    history.push({
-      intent: parsed.data.intent,
-      action: parsed.data.action,
-      outcome: record.outcome,
-      effect: mindEffect,
-    });
-    if (history.length > historyLimit) history.shift();
-    const settledTurn = finalize(record, evidence, input.onTurn);
-    turns.push(settledTurn);
-    input.onSettledTurn?.({
-      turn: settledTurn,
-      before: preActionObservations,
-      after: afterObservations,
-      progress: progress.snapshot(),
-    });
-  }
+          // Voice decides speech when one is wired; the player's own speak/reply are
+          // the single-agent fallback (ADR 0056). Voice cannot act, which is what
+          // makes "an interjection is not a route" structural rather than a prompt.
+          // It runs after the action settles so "what just happened" is the turn's
+          // real effect — commentary about a move belongs after the move lands.
+          // While a room composes for itself (ADR 0074), neither author here runs —
+          // not Voice, and not the player's own fallback quip. Both would be a second
+          // author for one character in one moment: in the channel if the seam
+          // carried them, on the overlay if it did not.
+          const roomAuthors = input.roomAuthors?.() === true;
+          // His own volition, read before anyone decides who authors the words.
+          // ADR 0074 moves *authorship* to the room; it does not move the judgement
+          // of whether this moment was worth remarking on at all. Keeping that
+          // judgement is what lets the play voice seam report the turns he thought
+          // were worth a word, instead of narrating every turn's diagnostics.
+          const ownWish = chosenDecision.speak ?? null;
+          let wants = roomAuthors ? null : ownWish;
+          if (input.voice !== undefined && roomAuthors) {
+            // Not consulted at all: the room is already speaking in his voice.
+            volition.skipped += 1;
+          } else if (input.voice !== undefined && interjection === null && !ready) {
+            // Not consulted at all: nobody spoke, and the gate could not open.
+            volition.skipped += 1;
+          } else if (input.voice !== undefined && !budgetReached() && input.shouldStop?.() !== true) {
+            const voiceView: VoiceView = {
+              turn,
+              framePng: input.framePng?.() ?? null,
+              monologue: record.monologue,
+              effect: record.effect,
+              intent: record.intent,
+              objective,
+              heard: interjection,
+              turnsSinceSpoke: lastSpokeTurn === null ? null : turn - lastSpokeTurn,
+              audience: input.audience ?? null,
+              recentlySaid: [...recentlySaid],
+            };
+            if (voiceHasSomethingToConsider(voiceView)) {
+              try {
+                input.onPhase?.("thinking");
+                const accounting = callUsage(input.voice.metered);
+                let voiceRaw: unknown;
+                try {
+                  voiceRaw = await input.voice.decide(voiceView, accounting.report);
+                } finally {
+                  accounting.finish();
+                }
+                const spoken = VoiceDecisionSchema.safeParse(voiceRaw);
+                if (spoken.success) {
+                  wants = spoken.data.speak ?? null;
+                  if (spoken.data.reply !== null && spoken.data.reply !== undefined) {
+                    record.reply = spoken.data.reply;
+                  }
+                }
+              } catch {
+                // A voice failure must not cost the turn. He plays on in silence.
+              }
+            }
+          }
+
+          // Every turn is an opportunity; the gate only limits how often he takes it.
+          volition.offered += 1;
+          if (wants !== null && wants.trim().length > 0) {
+            if (ready) {
+              record.speak = wants;
+              lastSpokeTurn = turn;
+              volition.taken += 1;
+              recentlySaid.push(wants);
+              if (recentlySaid.length > 3) recentlySaid.shift();
+            } else {
+              // Held, not dropped silently: a gate that never binds is a gate nobody
+              // needs, and one that always binds is a muzzle. Both show up here.
+              record.speakSuppressed = true;
+              volition.suppressed += 1;
+            }
+          }
+          // Recorded whoever ends up holding the pen: when the room authors, `wants`
+          // is deliberately null and this is the only surviving trace that he judged
+          // the moment worth a word.
+          const wished = roomAuthors ? ownWish : wants;
+          record.speakWanted = wished !== null && wished.trim().length > 0;
+
+          history.push({
+            intent: chosenDecision.intent,
+            action: chosenDecision.action,
+            outcome: record.outcome,
+            effect: mindEffect,
+          });
+          if (history.length > historyLimit) history.shift();
+          const settledTurn = finalize(record, evidence, input.onTurn);
+          turns.push(settledTurn);
+          input.onSettledTurn?.({
+            turn: settledTurn,
+            before: preActionObservations,
+            after: afterObservations,
+            progress: progress.snapshot(),
+          });
+        },
+      };
+    },
+  });
 
   if (outcome === undefined && budgetReached()) outcome = "budget_exhausted";
   if (outcome === "budget_exhausted") notable("budget_exhausted", turns.length, usage.chargedTokens);

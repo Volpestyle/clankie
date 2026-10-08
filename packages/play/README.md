@@ -1,6 +1,6 @@
 # @clankie/play
 
-The half of Clankie that plays a Pokémon game, and the durable trail it leaves.
+Clankie’s shared turn-based play kernel, model transport and durable trail for Pokémon and Minecraft.
 
 This package holds no emulator. His body is a seat in a hosted PokeAgents
 world ([ADR 0145](../../docs/adr/0145-the-world-is-the-only-body.md)), and
@@ -8,16 +8,19 @@ everything here sits above `GbaDriverIo` — one interface in
 [`src/body-seam.ts`](src/body-seam.ts) that the seat implements. The loop never
 learns what is behind it. The [Pokémon extension](../../integrations/pokemon/README.md)
 owns its connector and execution composition through the shared game-extension
-lifecycle; this package retains the Pokémon mind and durable journal.
+lifecycle; the [Minecraft adapter](../../integrations/minecraft/README.md) supplies its native play policy. This package retains the Pokémon adapter alongside their shared scheduler, transport and journal readers ([ADR 0253](../../docs/adr/0253-turn-based-games-share-a-play-kernel.md)).
 
 ## What is in here
 
 | Module                 | What it owns                                                                                                                                                     |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `free-play.ts`         | The turn loop: observe, decide, act, diff, record. Progress, stall detection, learned transitions, and the interjection queue.                                   |
+| `play-kernel.ts`       | Shared numbered turns, bounded proposal replacement, failure backoff and speech cooldown.                                                                        |
+| `play-model.ts`        | Shared streamed model requests, deadlines, cancellation and provider pricing.                                                                                    |
+| `play-journal.ts`      | One append-only identity/version envelope for native game payloads.                                                                                              |
+| `free-play.ts`         | The Pokémon adapter: observe, decide, act, diff, record. Progress, stall detection, learned transitions, and the interjection queue.                             |
 | `free-play-mind.ts`    | The model-backed decision-maker and the voice agent, built from the same persona so the two halves are one character.                                            |
 | `free-play-voice.ts`   | What he says out loud, and when volition lets him ([ADR 0056](../../docs/adr/0056-voice-is-a-separate-agent-from-the-player.md)).                                |
-| `free-play-journal.ts` | The append-only V3 journal every sitting writes ([ADR 0068](../../docs/adr/0068-a-playthrough-leaves-a-durable-trail.md)).                                       |
+| `free-play-journal.ts` | The append-only journal and compatible Pokémon/Minecraft readers ([ADR 0068](../../docs/adr/0068-a-playthrough-leaves-a-durable-trail.md)).                      |
 | `play-journey.ts`      | Journey identity, and the notes and objective the next sitting inherits ([ADR 0126](../../docs/adr/0126-game-state-history-and-memory-have-separate-owners.md)). |
 | `play-story.ts`        | The bounded story a journal projects for the console and captain.                                                                                                |
 

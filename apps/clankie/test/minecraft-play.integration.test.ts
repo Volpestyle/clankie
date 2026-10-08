@@ -1,3 +1,4 @@
+import { evaluateFreePlayJournal } from "../../../packages/play/src/free-play-evaluator.ts";
 /** Real HTTP model/body boundaries, filesystem journal, and authenticated play-voice WS. */
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -6,7 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createLanguageModel } from "@clankie/model-provider";
-import { InterjectionQueue } from "@clankie/play";
+import {
+  InterjectionQueue,
+  parseFreePlayJournal,
+  projectPlayStory,
+  listPlayJourneyRuns,
+  latestPlayJourneyContinuity,
+} from "@clankie/play";
 import { createPlayVoiceClient, createPlayVoiceListener } from "@clankie/play-voice";
 import {
   MinecraftActionRequestSchema,
@@ -263,6 +270,97 @@ async function journal(path: string) {
 }
 
 describe("Minecraft loop across its production boundaries", () => {
+  it("feeds the shared journal evaluator, story and journey readers with native Minecraft evidence", async () => {
+    const f = await fixture({ answers: [answer("dig"), answer("wait")] });
+    try {
+      const result = await runMinecraftPlay({ ...f.input, budget: { ...f.input.budget, maxTurns: 2 } });
+      const contents = await readFile(result.journalPath, "utf8");
+      const raw = await journal(result.journalPath);
+      expect(
+        raw.every(
+          (line) =>
+            line.runId === raw[0].runId &&
+            line.environmentId === "minecraft" &&
+            line.environmentSessionId === session.sessionId &&
+            line.venue === "world" &&
+            line.journeyId === f.input.journeyId,
+        ),
+      ).toBe(true);
+      expect(raw.map((line) => line.schemaVersion)).toEqual(
+        raw.map((line) => (line.kind === "header" ? 3 : 2)),
+      );
+      const lines = parseFreePlayJournal(contents);
+      const evaluation = evaluateFreePlayJournal({ journal: contents });
+      expect(evaluation.aggregate).toMatchObject({
+        turns: 2,
+        retiredActionTurns: 0,
+        outcomes: { settled: 1, waited: 1 },
+      });
+      expect(evaluation.turns[0]).toMatchObject({
+        decision: { action: { type: "dig" }, actionRetired: false, outcome: "settled" },
+        evidence: null,
+        gameEvidence: {
+          before: { session },
+          action: { state: "completed", evidence: { outcome: "verified" } },
+        },
+      });
+      expect(evaluation.aggregate.summary?.usage).toMatchObject({
+        calls: 2,
+        inputTokens: 200,
+        outputTokens: 40,
+        chargedTokens: 240,
+        unreportedCalls: 0,
+      });
+      const story = projectPlayStory({ sessionId: session.sessionId, environmentId: "minecraft", lines });
+      expect(story).toMatchObject({
+        environmentId: "minecraft",
+        turnsTaken: 2,
+        objective: "my goal",
+        maps: [],
+      });
+      expect(story.moments[0]?.effect).toContain("verified");
+      expect(listPlayJourneyRuns(f.input.journalRoot, f.input.journeyId)).toHaveLength(1);
+      expect(latestPlayJourneyContinuity(f.input.journalRoot, f.input.journeyId)).toEqual({
+        notes: "Remember the verified result.",
+        objective: "my goal",
+      });
+      const corrupt = contents.replace('"environmentId":"minecraft"', '"environmentId":"pokemon-firered"');
+      expect(() => parseFreePlayJournal(corrupt)).toThrow();
+    } finally {
+      await f.close();
+    }
+  });
+  it("keeps native movement distinct from Pokémon tile scoring", async () => {
+    const f = await fixture({ answers: [answer("goto")] });
+    try {
+      const result = await runMinecraftPlay(f.input);
+      const evaluation = evaluateFreePlayJournal({ journal: await readFile(result.journalPath, "utf8") });
+      expect(evaluation.turns[0]).toMatchObject({
+        decision: { action: { type: "goto" }, actionRetired: false },
+        movement: { attempted: true, effectiveness: "unknown", start: null, end: null },
+        gameEvidence: { action: { evidence: { outcome: "unknown", reason: "local_report_only" } } },
+      });
+      expect(evaluation.aggregate.retiredActionTurns).toBe(0);
+    } finally {
+      await f.close();
+    }
+  });
+  it("retains a stale decision as a native journal outcome without inventing action evidence", async () => {
+    const f = await fixture({ answers: [answer("dig"), answer()], health: (count) => (count >= 2 ? 4 : 20) });
+    try {
+      const result = await runMinecraftPlay({ ...f.input, budget: { ...f.input.budget, maxTurns: 2 } });
+      const evaluation = evaluateFreePlayJournal({ journal: await readFile(result.journalPath, "utf8") });
+      expect(evaluation.aggregate.outcomes).toEqual({ stale_decision: 1, waited: 1 });
+      expect(evaluation.turns[0]).toMatchObject({
+        decision: { outcome: "stale_decision", action: { type: "dig" }, actionRetired: false },
+        evidence: null,
+        gameEvidence: { action: null },
+      });
+      expect(f.actions).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  });
   it("remembers verified effects, journals usage/journey and offers authored experiences to the real voice bridge", async () => {
     const f = await fixture({
       answers: [answer("dig", "first"), answer("chat", "second"), answer("wait", "third")],

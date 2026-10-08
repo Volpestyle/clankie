@@ -1,4 +1,8 @@
-import { EmbodimentEnvironmentIdSchema, EnvironmentSessionIdSchema } from "@clankie/protocol";
+import {
+  PlayEnvironmentIdSchema,
+  EmbodimentEnvironmentIdSchema,
+  EnvironmentSessionIdSchema,
+} from "@clankie/protocol";
 import { z } from "zod";
 
 /**
@@ -62,7 +66,7 @@ export const PlayStoryCardSchema = z
   .object({
     schemaVersion: z.literal(PLAY_SIGHT_SCHEMA_VERSION),
     sessionId: EnvironmentSessionIdSchema,
-    environmentId: EmbodimentEnvironmentIdSchema,
+    environmentId: PlayEnvironmentIdSchema,
     scenarioId: z.string().min(1).max(200),
     startedAt: z.string().datetime(),
     turnsTaken: z.number().int().nonnegative(),

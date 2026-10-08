@@ -12,7 +12,7 @@ need live acceptance; local conformance and a configured viewer do not prove the
 
 Use the `minecraft_*` tools in the owning conversation. Clankie's existing mind
 chooses the actions; the service-owned MCP motor supplies navigation and physics.
-His continuous play mind drives by default. A chosen native worker can drive
+His continuous play mind drives by default. Pokémon and Minecraft share a turn-based kernel, but retain their native actions and verification. The existing offline journal evaluator also reads Minecraft sittings: `pnpm --filter @clankie/play gameplay:evaluate-journal <journal.jsonl>`. Native action evidence remains in the journal; Pokémon tile/scene verdicts are unknown for Minecraft. A chosen native worker can drive
 this same stay through an explicit `minecraft_driver` handoff, using the existing
 fleet `clankie_tools` / `clankie_call` bridge; never bypass it with raw motor MCP.
 Call `minecraft_join`

@@ -1,9 +1,4 @@
-/**
- * Clankie's play mind: the half of him that plays a Pokémon game, and the
- * durable trail it leaves. It holds no emulator — the body is a seat in a
- * hosted PokeAgents world, reached through `@clankie/play`'s consumer
- * ([ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)).
- */
+/** Shared turn-based play kernel and trail; game adapters retain native motor semantics. */
 export { EnvironmentAdapterActionError, type GbaDriverIo, type GbaDriverView } from "./body-seam.ts";
 export { canonicalJson, sha256 } from "./digest.ts";
 export {
@@ -35,4 +30,19 @@ export {
 export { createModelFreePlayMind, createModelVoice } from "./free-play-mind.ts";
 export type { ClankieVoice } from "./free-play-voice.ts";
 
-export { type FreePlayUsage, type FreePlayUsageReporter } from "./free-play-usage.ts";
+export {
+  emptyFreePlayUsage,
+  unreportedFreePlayUsage,
+  addFreePlayUsage,
+  type FreePlayUsage,
+  type FreePlayUsageReporter,
+} from "./free-play-usage.ts";
+
+export { createModelPlayMind, withPlayAbort, type PlayProviderOptions } from "./play-model.ts";
+export type { FreePlayPricing } from "./free-play-usage.ts";
+
+export { runPlayKernel, settlePlayDecision, playFailureBackoff, playSpeechReady } from "./play-kernel.ts";
+
+export { playDecisionFields } from "./play-decision.ts";
+
+export { openPlayJournalSink } from "./play-journal.ts";

@@ -15,6 +15,10 @@ import { CaptainSessionLaneV2Schema, EnvironmentSessionIdSchema } from "./captai
 export const EmbodimentEnvironmentIdSchema = z.enum(["pokemon-firered", "pokemon-emerald"]);
 export type EmbodimentEnvironmentId = z.infer<typeof EmbodimentEnvironmentIdSchema>;
 
+/** Read-only play metadata; this never expands the embodiment motor catalog. */
+export const PlayEnvironmentIdSchema = z.enum(["pokemon-firered", "pokemon-emerald", "minecraft"]);
+export type PlayEnvironmentId = z.infer<typeof PlayEnvironmentIdSchema>;
+
 /**
  * Which body a recorded playthrough ran on. He has one body now — a seat in a
  * hosted world — but play journals on disk predate that, so the reader keeps

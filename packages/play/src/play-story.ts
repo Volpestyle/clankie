@@ -12,12 +12,12 @@ import {
   type PlayStoryCard,
   type PlayStoryMoment,
 } from "@clankie/interactive-environment";
-import type { EmbodimentEnvironmentId } from "@clankie/protocol";
+import type { PlayEnvironmentId } from "@clankie/protocol";
 import type { FreePlayJournalLine } from "./free-play-journal.ts";
 
 export interface ProjectPlayStoryInput {
   readonly sessionId: string;
-  readonly environmentId: EmbodimentEnvironmentId;
+  readonly environmentId: PlayEnvironmentId;
   readonly lines: readonly FreePlayJournalLine[];
   /** Latest runner-observed maps; the journal does not store them per turn. */
   readonly maps?: readonly string[];
@@ -40,7 +40,7 @@ export function projectPlayStory(input: ProjectPlayStoryInput): PlayStoryCard {
     const toward = line.turn.objective?.trim();
     moments.push({
       at: line.at,
-      effect,
+      effect: effect.slice(0, 200),
       toward: toward === undefined || toward.length === 0 ? null : toward.slice(0, 160),
     });
   }

@@ -1,8 +1,8 @@
-/** Compatibility exports; Minecraft play adapts the shared kernel in its extension. */
 export {
   runMinecraftPlay,
   type RunMinecraftPlayInput,
   type MinecraftPlayNotable,
   type MinecraftPlayResult,
   type MinecraftPlayTurn,
-} from "@clankie/minecraft";
+} from "./play.ts";
+export { createModelMinecraftPlayMind, type MinecraftPlayMind } from "./minecraft-play-mind.ts";

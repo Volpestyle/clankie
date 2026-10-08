@@ -1,3 +1,9 @@
+import {
+  MinecraftJournalHeaderExtrasSchema,
+  projectMinecraftJournalPayload,
+  type MinecraftJournalLine,
+} from "./minecraft-play-journal.ts";
+import { PlayJournalIdentitySchema, openPlayJournalSink, journalPayload } from "./play-journal.ts";
 /**
  * The durable trail of a playthrough: every decided turn, then a summary.
  *
@@ -15,10 +21,14 @@
  * observability artifact and is never rewritten or pruned by code.
  */
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { EmbodimentEnvironmentIdSchema, EmbodimentVenueSchema } from "@clankie/protocol";
+import {
+  EmbodimentEnvironmentIdSchema,
+  PlayEnvironmentIdSchema,
+  EmbodimentVenueSchema,
+} from "@clankie/protocol";
 import { z } from "zod";
 import { FreePlayUsageSchema } from "./free-play-usage.ts";
 import {
@@ -55,7 +65,7 @@ export type PlayJourneyId = z.infer<typeof PlayJourneyIdSchema>;
 export const FreePlayJournalHeaderV3Schema = FreePlayJournalHeaderV2Schema.extend({
   schemaVersion: z.literal(3),
   journeyId: PlayJourneyIdSchema,
-  environmentId: EmbodimentEnvironmentIdSchema,
+  environmentId: PlayEnvironmentIdSchema,
   venue: EmbodimentVenueSchema,
 });
 const FreePlayJournalHeaderSchema = z.union([
@@ -182,7 +192,7 @@ const FreePlayJournalLineSchema = z.union([
   FreePlayJournalSummaryV1Schema,
   FreePlayJournalSummaryV2Schema,
 ]);
-export type FreePlayJournalLine = z.infer<typeof FreePlayJournalLineSchema>;
+export type FreePlayJournalLine = z.infer<typeof FreePlayJournalLineSchema> | MinecraftJournalLine;
 
 /** One well-known operator-local home. */
 export function defaultGbaPlayJournalDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -247,16 +257,24 @@ export interface FreePlayJournal {
 export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJournal {
   const clock = input.clock ?? (() => new Date());
   const startedAt = clock();
-  const stamp = startedAt.toISOString().replace(/[:.]/gu, "-");
-  const safeRunId = input.runId.replace(/[^a-zA-Z0-9_-]/gu, "-").slice(0, 120);
-  const journalStem = `${stamp}-${safeRunId}`;
-  const journalPath = path.join(input.rootDir, `${journalStem}.jsonl`);
+  const sink = openPlayJournalSink({
+    rootDir: input.rootDir,
+    identity: {
+      runId: input.runId,
+      journeyId: input.journeyId,
+      environmentId: input.environmentId,
+      environmentSessionId: input.environmentSessionId,
+      venue: input.venue,
+    },
+    clock,
+  });
+  const journalPath = sink.path;
+  const journalStem = path.basename(journalPath, ".jsonl");
   const screenshotDir = path.join(input.rootDir, ".screenshots", journalStem);
   let turnScreenshots = 0;
 
   mkdirSync(input.rootDir, { recursive: true });
-  appendLine(
-    journalPath,
+  sink.append(
     FreePlayJournalHeaderSchema.parse({
       kind: "header",
       schemaVersion: 3,
@@ -274,7 +292,7 @@ export function openFreePlayJournal(input: OpenFreePlayJournalInput): FreePlayJo
 
   const append = (line: FreePlayJournalLine): void => {
     try {
-      appendLine(journalPath, line);
+      sink.append(line);
     } catch (error) {
       if (input.onError === undefined) throw error;
       input.onError(error);
@@ -402,14 +420,38 @@ function pngDimensions(bytes: Buffer): { width: number; height: number } {
 
 /** Parse a journal file's lines. Corrupt lines throw: a lying record is worse than none. */
 export function parseFreePlayJournal(contents: string): FreePlayJournalLine[] {
-  return contents
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => FreePlayJournalLineSchema.parse(JSON.parse(line)));
-}
-
-function appendLine(journalPath: string, line: FreePlayJournalLine): void {
-  const serialized = `${JSON.stringify(line)}\n`;
-  if (Buffer.byteLength(serialized) > 256 * 1_024) throw new Error("free_play_journal_line_too_large");
-  appendFileSync(journalPath, serialized, { encoding: "utf8", mode: 0o600 });
+  const result: FreePlayJournalLine[] = [];
+  let identity: z.infer<typeof PlayJournalIdentitySchema> | undefined;
+  for (const text of contents.split("\n").filter((line) => line.trim().length > 0)) {
+    if (Buffer.byteLength(text) > 256 * 1024) throw new Error("free_play_journal_line_too_large");
+    const raw = z.record(z.string(), z.unknown()).parse(JSON.parse(text));
+    if (raw.at !== undefined) z.string().datetime().parse(raw.at);
+    if (raw.journeyId !== undefined) {
+      const current = PlayJournalIdentitySchema.parse({
+        runId: raw.runId,
+        journeyId: raw.journeyId,
+        environmentId: raw.environmentId,
+        environmentSessionId: raw.environmentSessionId,
+        venue: raw.venue,
+      });
+      if (identity !== undefined && JSON.stringify(identity) !== JSON.stringify(current))
+        throw new Error("play_journal_identity_changed");
+      identity = current;
+    }
+    const payload = journalPayload(raw);
+    if (raw.environmentId === "minecraft") {
+      if (raw.kind === "header") {
+        const { at, connectionGeneration, budget, ...header } = raw;
+        MinecraftJournalHeaderExtrasSchema.parse({ at, connectionGeneration, budget });
+        result.push(FreePlayJournalHeaderV3Schema.parse(header));
+      } else {
+        const projected = projectMinecraftJournalPayload(payload);
+        if (projected !== null) result.push(projected);
+      }
+    } else if (payload.kind === "header" && raw.journeyId !== undefined) {
+      const { at: _at, ...header } = payload;
+      result.push(FreePlayJournalLineSchema.parse(header));
+    } else result.push(FreePlayJournalLineSchema.parse(payload));
+  }
+  return result;
 }

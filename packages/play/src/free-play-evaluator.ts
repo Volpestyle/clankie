@@ -48,8 +48,20 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
     // verdicts read `unknown` because this evaluator cannot reason about a
     // vocabulary it no longer has, which is a different answer from "he did
     // nothing" — `actionRetired` says which one the reader is looking at.
-    const action = liveFreePlayAction(line.turn.action);
-    const movement = movementEvidence(action, line.turn.outcome, start, end);
+    const minecraft = "game" in line && line.game === "minecraft";
+    const action = "game" in line ? null : liveFreePlayAction(line.turn.action);
+    const nativeMovement =
+      "game" in line && (line.turn.action?.type === "goto" || line.turn.action?.type === "follow");
+    const movement =
+      "game" in line
+        ? {
+            attempted: nativeMovement,
+            start: null,
+            target: null,
+            end: null,
+            effectiveness: nativeMovement ? ("unknown" as const) : ("not_applicable" as const),
+          }
+        : movementEvidence(action, line.turn.outcome, start, end);
     return {
       turn: line.turn.turn,
       at: line.at,
@@ -60,12 +72,13 @@ export function evaluateFreePlayJournal(input: EvaluateFreePlayJournalInput) {
         intent: line.turn.intent,
         notes: line.turn.notes,
         action: line.turn.action,
-        actionRetired: line.turn.action !== null && action === null,
+        actionRetired: !minecraft && line.turn.action !== null && action === null,
         outcome: line.turn.outcome,
         effect: line.turn.effect,
         effectAdvice: line.turn.effectAdvice,
       },
       evidence,
+      ...("gameEvidence" in line ? { gameEvidence: line.gameEvidence } : {}),
       movement,
       communication: {
         deliveryId: line.speechDeliveryId ?? null,
@@ -206,7 +219,7 @@ function sceneAppropriateness(
   line: Extract<FreePlayJournalLine, { kind: "turn" }>,
   action: FreePlayAction | null,
 ): AppropriatenessVerdict {
-  if (line.schemaVersion !== 2 || action === null) return "unknown";
+  if (line.schemaVersion !== 2 || line.evidence === null || action === null) return "unknown";
   const scene = line.evidence.decision.observations.find((observation) => observation.kind === "scene") as
     | { data?: { mode?: string; inputReady?: boolean; waitingForDialogAdvance?: boolean } }
     | undefined;

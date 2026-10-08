@@ -1,10 +1,9 @@
 import type { LanguageModel } from "ai";
-import { streamObject } from "ai";
-import { pricedFreePlayUsage, type FreePlayPricing, type FreePlayUsageReporter } from "./free-play-usage.ts";
+import type { FreePlayPricing } from "./free-play-usage.ts";
+import { createModelPlayMind, type PlayProviderOptions } from "./play-model.ts";
 
 /** Derived from the SDK signature so it tracks their type, not a guessed name. */
-type StreamProviderOptions = NonNullable<Parameters<typeof streamObject>[0]["providerOptions"]>;
-const DEFAULT_FREE_PLAY_MODEL_REQUEST_TIMEOUT_MS = 60_000;
+type StreamProviderOptions = PlayProviderOptions;
 import { z } from "zod";
 import {
   VoiceDecisionSchema,
@@ -97,17 +96,6 @@ function jsonAnswerContract(schema: z.ZodType): string {
     JSON.stringify(z.toJSONSchema(schema)),
   ].join("\n");
 }
-
-/**
- * Marks the system prompt as a prompt-cache breakpoint on Anthropic-routed
- * providers. The persona and the surface rules are identical on every turn of
- * a session, and a playthrough makes this call several times a minute — so
- * each turn should pay for that prefix once per cache window, not in full.
- * The namespace is provider-scoped: every other configured family ignores it.
- */
-const SYSTEM_CACHE_OPTIONS: StreamProviderOptions = {
-  anthropic: { cacheControl: { type: "ephemeral" } },
-};
 
 /**
  * A press long enough to commit a step rather than only turn.
@@ -355,69 +343,16 @@ export function createModelFreePlayMind(options: ModelFreePlayMindOptions): Free
     .filter((part): part is string => part !== undefined && part.trim().length > 0)
     .join("\n\n");
 
+  const mind = createModelPlayMind<FreePlayView, z.infer<typeof FreePlayWireDecisionSchema>>({
+    ...options,
+    schema: FreePlayWireDecisionSchema,
+    system,
+    render: (view) => ({ text: renderView(view), framePng: view.framePng }),
+  });
   return {
     metered: true,
-    async decide(
-      view: FreePlayView,
-      signal?: AbortSignal,
-      onUsage?: FreePlayUsageReporter,
-    ): Promise<unknown> {
-      // Streamed on purpose. The Codex OAuth endpoint rejects a non-streaming
-      // request outright with `{"detail":"Stream must be set to true"}`, and
-      // streaming is accepted by every other configured provider, so this is
-      // the portable call. The final object is still awaited whole — nothing
-      // downstream consumes partial decisions.
-      const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
-      const requestSignal = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
-      const failure = streamFailure();
-      const stream = streamObject({
-        model: options.model,
-        schema: FreePlayWireDecisionSchema,
-        // Carried as a system *message* rather than a bare string so the cache
-        // breakpoint rides along; `instructions` accepts either.
-        instructions: { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
-        // The screen goes in as an image alongside the decoded state. Looking at
-        // the room is how he learns where the furniture is; the decoded state is
-        // for the values a screenshot reads badly.
-        messages: [
-          {
-            role: "user",
-            content:
-              view.framePng === null
-                ? [{ type: "text" as const, text: renderView(view) }]
-                : [
-                    { type: "text" as const, text: renderView(view) },
-                    // A `file` part, not the deprecated `image` part.
-                    {
-                      type: "file" as const,
-                      mediaType: "image/png",
-                      data: view.framePng,
-                    },
-                  ],
-          },
-        ],
-        maxRetries: options.maxRetries ?? 0,
-        abortSignal: requestSignal,
-        providerOptions: options.providerOptions ?? {},
-        onError: failure.report,
-        onFinish: (event) => onUsage?.(pricedFreePlayUsage(event.usage, options.pricing)),
-      });
-
-      const settled = Promise.race([stream.object, failure.promise]);
-      // Claim the rejection now. Without a handler attached before the drain
-      // throws, a failed call surfaces as an unsettled top-level await instead
-      // of an error the loop can record.
-      settled.catch(() => undefined);
-      try {
-        // The SDK does not issue the request until the stream is consumed, so
-        // awaiting the object alone deadlocks. Drain it, discarding partials.
-        for await (const _partial of stream.partialObjectStream) {
-          // nothing downstream consumes a partial decision
-        }
-      } catch {
-        // The same failure is reported by awaiting the settled object below.
-      }
-      return toDecision(await settleWithinDeadline(settled, requestSignal));
+    async decide(view, signal, onUsage) {
+      return toDecision((await mind.decide(view, signal, onUsage)).decision);
     },
   };
 }
@@ -646,103 +581,19 @@ export function createModelVoice(options: ModelVoiceOptions): ClankieVoice {
     .filter((part): part is string => part !== undefined && part.trim().length > 0)
     .join("\n\n");
 
+  const mind = createModelPlayMind<VoiceView, z.infer<typeof VoiceDecisionSchema>>({
+    ...options,
+    schema: VoiceDecisionSchema,
+    system,
+    render: (view) => ({
+      text: renderVoiceView(view),
+      framePng: (options.showFrame ?? true) ? view.framePng : null,
+    }),
+  });
   return {
     metered: true,
-    async decide(view: VoiceView, onUsage?: FreePlayUsageReporter): Promise<unknown> {
-      const showFrame = options.showFrame ?? true;
-      const deadline = modelRequestAbortSignal(options.requestTimeoutMs);
-      const failure = streamFailure();
-      const stream = streamObject({
-        model: options.model,
-        schema: VoiceDecisionSchema,
-        instructions: { role: "system" as const, content: system, providerOptions: SYSTEM_CACHE_OPTIONS },
-        messages: [
-          {
-            role: "user",
-            content:
-              view.framePng === null || !showFrame
-                ? [{ type: "text" as const, text: renderVoiceView(view) }]
-                : [
-                    { type: "text" as const, text: renderVoiceView(view) },
-                    { type: "file" as const, mediaType: "image/png", data: view.framePng },
-                  ],
-          },
-        ],
-        maxRetries: options.maxRetries ?? 0,
-        abortSignal: deadline,
-        providerOptions: options.providerOptions ?? {},
-        onError: failure.report,
-        onFinish: (event) => onUsage?.(pricedFreePlayUsage(event.usage, options.pricing)),
-      });
-
-      const settled = Promise.race([stream.object, failure.promise]);
-      settled.catch(() => undefined);
-      try {
-        for await (const _partial of stream.partialObjectStream) {
-          // nothing downstream consumes a partial decision
-        }
-      } catch {
-        // Reported by awaiting the settled object below.
-      }
-      return await settleWithinDeadline(settled, deadline);
+    async decide(view, onUsage) {
+      return (await mind.decide(view, undefined, onUsage)).decision;
     },
   };
-}
-
-/**
- * The provider's own error, as soon as the SDK reports it. A failed call (a 400,
- * a refused effort, a bad key) arrives as a stream error part, and `object` then
- * never settles, so without this the turn waited out the whole deadline before
- * failing with none of the provider's reason. The deadline's timer does not
- * hold the process open either, so a one-shot caller such as `verify-model`
- * exited 13 with an unsettled await instead of reporting the failure.
- */
-function streamFailure(): { promise: Promise<never>; report: (event: { error: unknown }) => void } {
-  let report: (event: { error: unknown }) => void = () => undefined;
-  const promise = new Promise<never>((_resolve, reject) => {
-    report = ({ error }) => {
-      reject(error);
-    };
-  });
-  promise.catch(() => undefined);
-  return { promise, report };
-}
-
-function modelRequestAbortSignal(timeoutMs: number | undefined): AbortSignal {
-  const resolved = timeoutMs ?? DEFAULT_FREE_PLAY_MODEL_REQUEST_TIMEOUT_MS;
-  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
-    throw new RangeError("free_play_model_request_timeout_invalid");
-  }
-  return AbortSignal.timeout(resolved);
-}
-
-/**
- * Awaits a model result without ever outliving the request deadline.
- *
- * Handing `abortSignal` to the SDK is not enough on its own, because honouring
- * it is the SDK's to do and there are paths where it cannot. On 2026-08-02 a
- * prompt the SDK rejected during standardization was routed into the stream as
- * an error part and the stream was closed — the drain below finished normally
- * and `stream.object` never settled at all, so there was nothing for the abort
- * to interrupt. `decide` never returned, the turn never failed, and an
- * asked-play session hung for three hours while Clankie sat silent in voice.
- *
- * So the deadline is enforced here as well as there. Whatever the provider
- * layer does or fails to do, the turn ends and the loop records it.
- */
-async function settleWithinDeadline<T>(settled: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) throw deadlineExceeded(signal);
-  return await new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      reject(deadlineExceeded(signal));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    settled.then(resolve, reject).finally(() => {
-      signal.removeEventListener("abort", onAbort);
-    });
-  });
-}
-
-function deadlineExceeded(signal: AbortSignal): Error {
-  return new Error("free_play_model_request_deadline_exceeded", { cause: signal.reason });
 }

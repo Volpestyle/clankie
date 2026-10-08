@@ -561,6 +561,8 @@ export {
 export {
   EmbodimentEnvironmentIdSchema,
   type EmbodimentEnvironmentId,
+  PlayEnvironmentIdSchema,
+  type PlayEnvironmentId,
   EmbodimentVenueSchema,
   type EmbodimentVenue,
   WorldJoinRefusalReasonSchema,
