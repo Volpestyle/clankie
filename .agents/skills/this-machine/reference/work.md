@@ -171,8 +171,10 @@ An owner may enroll a dedicated root for a repo's future linked worktrees:
 The repo must already be an exact approved workspace in that project. Add
 `--machine ID --platform windows|posix` for a registered remote machine.
 The service proves canonical paths and native Git registration; a root is never
-ordinary folder-containment authority. This changes project membership policy,
-not tool grants. Do not run it as a workaround for an unapproved workspace.
+ordinary folder-containment authority. A large sibling-worktree inventory does
+not change a valid candidate's project membership; keep the candidate's native
+Git identity checks rather than pruning others' worktrees to enable a hire.
+This changes project membership policy, not tool grants. Do not run it as a workaround for an unapproved workspace.
 Remove only the enrollment with `clankie project remove-worktree-root NAME
 --worktree-root ROOT` and the same machine/platform flags. Remove root enrollments
 before their repo workspace. Neither command deletes filesystem content.

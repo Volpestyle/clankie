@@ -5520,6 +5520,8 @@ under the enrolled repository's `worktrees` metadata, the `.git` backlink, and t
 repository's current `git worktree list`. A plain folder, copied `.git` pointer,
 foreign repository, alias, or changed repository identity does not qualify. Missing
 or invalid roots deny their own matches; unrelated registrations continue working.
+A repository with more than 256 registered worktrees still admits a valid candidate;
+sibling count does not confer or remove its project authority.
 
 Remove an enrollment with `clankie project remove-worktree-root NAME --worktree-root ROOT`
 (and the same remote machine/platform flags if needed). Remove a repo's enrolled

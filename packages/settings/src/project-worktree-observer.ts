@@ -79,7 +79,8 @@ export const observeLocalProjectGitWorktree: ObserveProjectGitWorktree = async (
     const gitDirectoryBacklink = await canonical(resolve(candidate.gitDirectory, backlink), false);
     const fields = (await git(root.repoPath, ["worktree", "list", "--porcelain", "-z"])).split("\0");
     const paths = fields.filter((field) => field.startsWith("worktree ")).map((field) => field.slice(9));
-    if (!paths.length || paths.length > 256 || new Set(paths).size !== paths.length) return undefined;
+    // git() bounds output bytes and execution time; sibling count is not authority.
+    if (!paths.length || new Set(paths).size !== paths.length) return undefined;
     // A stale unrelated worktree entry must not prevent a valid registered worktree.
     // Only the matching candidate is authority; the full list is retained for race equality.
     if (!paths.every((path) => canonicalProjectPath(path, platform))) return undefined;
