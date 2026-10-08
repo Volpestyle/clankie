@@ -12,6 +12,7 @@ export interface FleetSeatMessageContext {
   readonly source: string;
   readonly recipientBinding?: string;
   readonly delivery?: "steer" | "queue";
+  readonly workHandoff?: import("@clankie/protocol").WorkHandoffIntent;
   readonly freeAgent?: import("@clankie/protocol").FreeAgentIntent;
 }
 

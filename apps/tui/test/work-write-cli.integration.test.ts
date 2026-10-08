@@ -76,6 +76,17 @@ it("writes through the CLI, owner HTTP route and files, then reconciles a lost r
     CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
   };
   const command = (args: string[]) => runWorkCommand(args, { env, cwd: root });
+  const original = await readFile(itemPath, "utf8");
+  const handoff = {
+    personaId: "original-persona",
+    seatId: "original-seat",
+    occupantId: "original-occupant",
+    projectId: "original-project",
+  };
+  expect(
+    await command(["write", "T-1", "--owner", "Sol", "--work-handoff", JSON.stringify(handoff)]),
+  ).toMatchObject({ ok: false, body: { outcome: "refused" } });
+  expect(await readFile(itemPath, "utf8")).toBe(original);
   const assigned = await command(["write", "T-1", "--owner", "Sol"]);
   expect(assigned, JSON.stringify(assigned)).toMatchObject({
     ok: true,

@@ -158,6 +158,9 @@ export type FleetHealthAlertDelivery =
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  prepareWorkHandoffIntent?(
+    intent: import("@clankie/protocol").WorkHandoffIntent,
+  ): ReturnType<typeof import("./free-agent-intent.ts").prepareWorkHandoffIntent>;
   prepareFreeAgentIntent?(
     intent: import("@clankie/protocol").FreeAgentIntent,
   ): ReturnType<typeof import("./free-agent-intent.ts").prepareFreeAgentIntent>;

@@ -87,13 +87,20 @@ export class WorkWriteReceipts {
     scope: WorkWriteScope,
     command: WorkItemWriteCommand,
     freeAgent?: import("@clankie/protocol").FreeAgentIntent,
+    workHandoff?: import("@clankie/protocol").WorkHandoffIntent,
   ): WorkItemWriteReceipt | undefined {
     WorkItemWriteReceiptRequestSchema.shape.requestId.parse(id);
     const originalScope = WorkWriteScopeSchema.parse(scope);
     const originalCommand = WorkItemWriteCommandSchema.parse(command);
     const records = this.store.load();
     const fingerprint = deliveryFingerprint(
-      JSON.stringify(freeAgent === undefined ? originalCommand : { command: originalCommand, freeAgent }),
+      JSON.stringify(
+        workHandoff !== undefined
+          ? { command: originalCommand, workHandoff }
+          : freeAgent === undefined
+            ? originalCommand
+            : { command: originalCommand, freeAgent },
+      ),
     );
     const previous = records.get(id);
     if (previous !== undefined) {

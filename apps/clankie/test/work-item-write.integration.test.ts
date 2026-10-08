@@ -20,12 +20,13 @@ import type {
 import { writeConvention } from "@clankie/work-items";
 import { expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
-import { createStubCaptain, type LaneTool } from "../src/captain/port.ts";
+import { createStubCaptain, type CaptainPort, type LaneTool } from "../src/captain/port.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { createMcpHost, type McpHostOptions } from "../src/mcp-host.ts";
 import { LinearWriteReceipts, linearWriteIssue } from "../src/linear-webhook.ts";
 import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
+import { personaProjectRoleFixture } from "./persona-project-role-fixture.ts";
 import { WorkItemsResultSchema as frozenWorkItemsResult } from "../../../packages/protocol/test/fixtures/work-items-8d982a93.ts";
 import { parseProtocolResponse as frozenReadResponse } from "../../../packages/protocol/test/fixtures/response-8d982a93.ts";
 
@@ -95,7 +96,7 @@ async function listen(service: Awaited<ReturnType<typeof createClankieApp>>) {
   };
 }
 
-async function fixture() {
+async function fixture(primary = "alpha", recipientCaptain?: CaptainPort) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "work-owner-integration-")));
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new PausableCredentials(join(root, "credentials.json"));
@@ -268,13 +269,13 @@ async function fixture() {
     verifiedAt: new Date().toISOString(),
   };
   await credentials.set("linear", { type: "api", key: providerToken, account });
-  const paths = Object.fromEntries(["alpha", "beta"].map((id) => [id, join(root, id)]));
-  for (const id of ["alpha", "beta"] as const) {
+  const paths = Object.fromEntries([primary, "beta"].map((id) => [id, join(root, id)]));
+  for (const id of [primary, "beta"]) {
     await mkdir(paths[id]!, { recursive: true });
     await writeConvention(paths[id]!, {
       schemaVersion: 1,
       backend: "linear",
-      linear: { team: "VUH", project: id === "alpha" ? "Alpha" : "Beta", label: boardLabel },
+      linear: { team: "VUH", project: id === primary ? "Alpha" : "Beta", label: boardLabel },
       decidedBy: "owner",
       decidedAt: new Date().toISOString(),
     });
@@ -283,7 +284,7 @@ async function fixture() {
     ...current,
     projects: {
       ...current.projects,
-      projects: ["alpha", "beta"].map((id) => ({
+      projects: [primary, "beta"].map((id) => ({
         id,
         name: id,
         workspaces: [{ id: "repo", machineId: "local", platform: "posix" as const, path: paths[id]! }],
@@ -376,7 +377,7 @@ async function fixture() {
     await host.warm();
     const workItems = createWorkItemsService({
       stateDirectory: join(root, "state"),
-      workspace: () => paths.alpha,
+      workspace: () => paths[primary],
       mcpHost: host,
       localMachineId: "local",
       projects: async () => (await settings.load()).projects,
@@ -387,7 +388,7 @@ async function fixture() {
     });
     endpoint = await listen(
       await createClankieApp({
-        captain: createStubCaptain(),
+        captain: recipientCaptain ?? createStubCaptain(),
         workItems,
         settings,
         eventLogPath: eventPath,
@@ -440,7 +441,7 @@ async function fixture() {
       command: WorkItemWriteCommand,
       extra: Partial<WorkItemWriteRequest> = {},
     ): WorkItemWriteRequest => ({
-      repoId: projectWorkRepoId("alpha"),
+      repoId: projectWorkRepoId(primary),
       itemId: issue.id,
       requestId: randomUUID(),
       command,
@@ -781,6 +782,37 @@ it("keeps a confirmed write applied when its followup read fails and preserves u
     expect(await f.read(lost)).toMatchObject({ requestId: lost.requestId, outcome: "uncertain" });
     expect(await f.write(lost)).toMatchObject({ requestId: lost.requestId, outcome: "uncertain" });
     expect(await f.effects()).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
+it("the owner HTTP write carries the real busy recipient fence to the provider effect and rejects replacement", async () => {
+  const native = await personaProjectRoleFixture();
+  native.panes[0]!.agent_status = "working";
+  const f = await fixture("repo", native.captain);
+  const workHandoff = {
+    personaId: native.ids[0]!,
+    seatId: native.panes[0]!.terminal_id,
+    occupantId: native.proofs[0]!.nativeOccupantId,
+    projectId: "repo",
+  };
+  try {
+    const request = f.request({ action: "assign", owner: "Pixel Smith" }, { workHandoff });
+    expect(await f.write(request)).toMatchObject({ outcome: "applied", item: { owner: "Pixel Smith" } });
+    expect(await f.effects()).toHaveLength(1);
+    expect(await f.write(request)).toMatchObject({ outcome: "applied" });
+    expect(await f.effects()).toHaveLength(1);
+    expect(
+      await f.write(f.request({ action: "assign", owner: "Other name" }, { workHandoff })),
+    ).toMatchObject({ outcome: "refused" });
+    const held = f.holdCredentialsAfterScope();
+    const next = f.write(f.request({ action: "assign", owner: "Pixel Smith" }, { workHandoff }));
+    await held.entered;
+    native.panes[0]!.agent_session.value = "replacement-native-session";
+    held.release();
+    expect(await next).toMatchObject({ outcome: "refused" });
+    expect(await f.effects()).toHaveLength(1);
   } finally {
     await f.close();
   }

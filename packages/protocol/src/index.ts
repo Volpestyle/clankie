@@ -1,3 +1,4 @@
+export * from "./work-handoff.ts";
 export * from "./free-agent.ts";
 export * from "./worker-reports.ts";
 export * from "./game-extensions.ts";

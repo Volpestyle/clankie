@@ -461,6 +461,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     prepareFree?: (
       intent: import("@clankie/protocol").FreeAgentIntent,
     ) => Promise<{ assertCurrent(): void; guard(): Promise<void>; ownerName: string | undefined }>,
+    prepareWorkHandoff?: (
+      intent: import("@clankie/protocol").WorkHandoffIntent,
+    ) => Promise<{ assertCurrent(): void; guard(): Promise<void>; ownerName: string | undefined }>,
   ): Promise<WorkItemWriteReceipt> => {
     const key = JSON.stringify([request.repoId, request.itemId]);
     const operation = async (): Promise<WorkItemWriteReceipt> => {
@@ -469,15 +472,25 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       let confirmed = false;
       try {
         const { target, account, scope } = await writeScope(request, authority);
+        const intent = request.freeAgent ?? request.workHandoff;
         if (
-          request.freeAgent &&
+          intent &&
           (request.command.action !== "assign" ||
-            request.freeAgent.helpTarget ||
-            request.repoId !== projectWorkRepoId(request.freeAgent.projectId))
+            request.freeAgent?.helpTarget ||
+            request.repoId !== projectWorkRepoId(intent.projectId))
         )
           throw new Error("This drop does not match the original project's work tracker.");
-        const free = request.freeAgent ? await prepareFree?.(request.freeAgent) : undefined;
-        if (request.freeAgent && !free) throw new Error("Free-agent drops are unavailable on this host.");
+        const free = request.freeAgent
+          ? await prepareFree?.(request.freeAgent)
+          : request.workHandoff
+            ? await prepareWorkHandoff?.(request.workHandoff)
+            : undefined;
+        if (intent && !free)
+          throw new Error(
+            request.workHandoff
+              ? "Work handoffs are unavailable on this host."
+              : "Free-agent drops are unavailable on this host.",
+          );
         if (
           free &&
           (request.command.action !== "assign" ||
@@ -485,7 +498,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             request.command.owner !== free.ownerName)
         )
           throw new Error("This drop changed the original agent assigned to the work.");
-        const previous = writeReceipts.begin(request.requestId, scope, request.command, request.freeAgent);
+        const previous = writeReceipts.begin(
+          request.requestId,
+          scope,
+          request.command,
+          request.freeAgent,
+          request.workHandoff,
+        );
         if (previous) return previous;
         begun = true;
         const beforeWrite = () => {

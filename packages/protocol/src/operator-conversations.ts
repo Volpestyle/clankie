@@ -1,3 +1,4 @@
+import { WorkHandoffIntentSchema } from "./work-handoff.ts";
 import { FreeAgentIntentSchema } from "./free-agent.ts";
 import { MailIssueReferenceSchema } from "./mail-reference.ts";
 import { CheckoutStatusSchema, WorktreeReconciliationSchema } from "./checkouts.ts";
@@ -2030,6 +2031,7 @@ const SubmitOperatorConversationTurnBaseSchema = z.object({
 export const SubmitOperatorConversationTurnSchema = SubmitOperatorConversationTurnBaseSchema.extend({
   kind: z.literal("message"),
   freeAgent: FreeAgentIntentSchema.optional(),
+  workHandoff: WorkHandoffIntentSchema.optional(),
   /** May be empty only when the message carries attachments. */
   message: z.string().trim().max(OPERATOR_CONVERSATION_MESSAGE_MAX),
   /** Steer a live Clankie turn or wait for a separate turn. Omitted preserves automatic admission. */
@@ -2043,6 +2045,12 @@ export const SubmitOperatorConversationTurnSchema = SubmitOperatorConversationTu
 })
   .strict()
   .superRefine((turn, context) => {
+    if (turn.freeAgent && turn.workHandoff)
+      context.addIssue({
+        code: "custom",
+        path: ["workHandoff"],
+        message: "Choose one native recipient precondition",
+      });
     if (turn.message.length === 0 && turn.attachments === undefined) {
       context.addIssue({ code: "custom", path: ["message"], message: "message or attachments required" });
     }

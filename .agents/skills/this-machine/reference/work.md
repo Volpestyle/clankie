@@ -188,7 +188,7 @@ before their repo workspace. Neither command deletes filesystem content.
 ## Giving a free hand work from World
 
 World holds an original drop for four seconds with Undo before any write. Busy
-agents remain play only. A real drop requires confirmed idle, no assignment or
+agents remain play only when picked up themselves. A real free-agent drop requires confirmed idle, no assignment or
 active goal and observed zero running children; an unknown count is not zero.
 The optional `freeAgent` field on existing role, conversation and owner work
 writes binds persona, native seat/occupant and project. CLI equivalents append
@@ -202,3 +202,16 @@ replay either effect. A teammate drop uses the exact conversation's `co-w`
 quick-action catalog entry and actual native pane ID in the same project/session.
 Display names are tracker data, never native addresses. A ground drop is local
 idle play toward the campfire and writes no machine position.
+
+## Handing a work piece to a current worker
+
+Picking up the work itself is an explicit owner handoff and may address a busy
+current non-lead worker. The app holds the original item and recipient for four
+seconds with Undo; empty ground returns the visual object without effects.
+Hand to and VoiceOver use that same original intent. API `workHandoff` and CLI
+`--work-handoff JSON` on `work write ID --owner NAME` / `send` bind exact persona, native seat,
+occupant and confirmed project. Never combine it with `freeAgent`, infer a
+recipient from its name, or strip it after refusal. Missing Take Control, tracker
+scope, native recipient or original thread refuses before the owner write. The
+assignment and original note retain separate receipts; uncertainty is checked,
+never replayed or reversed.

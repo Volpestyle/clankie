@@ -306,6 +306,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           request as WorkItemWriteRequest,
           authority,
           ctx.dependencies.captain?.prepareFreeAgentIntent,
+          ctx.dependencies.captain?.prepareWorkHandoffIntent,
         )
       : await ctx.dependencies.workItems.readOwnerReceipt(request, authority);
     if (write) {

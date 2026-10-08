@@ -2979,6 +2979,17 @@ Clients must never strip the field and retry a refused or uncertain drop.
 The app holds the original action for four seconds with Undo before dispatch;
 there is no inverse command or compensating write.
 
+An explicit work-piece handoff may address a busy current worker. Use
+`work write ID --owner NAME --work-handoff JSON` and
+`send --conversation ID --work-handoff JSON` with the same exact `personaId`,
+`seatId`, `occupantId` and `projectId`. The API field is `workHandoff`; it is
+mutually exclusive with `freeAgent` and never relaxes that free-agent contract.
+The host rechecks native identity and confirmed project membership before the
+owner write and original note. Missing or changed recipients refuse; owner
+authentication, tracker scope and receipt identity remain required. An applied
+assignment followed by an uncertain note stays uncertain, without replay or
+compensation.
+
 `clankie agents role ROLE --project PROJECT` edits a project hire profile through
 its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
 `--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,

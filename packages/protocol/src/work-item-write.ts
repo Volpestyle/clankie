@@ -1,3 +1,4 @@
+import { WorkHandoffIntentSchema } from "./work-handoff.ts";
 import { FreeAgentIntentSchema } from "./free-agent.ts";
 import { z } from "zod";
 import { WORK_ITEM_LABEL_MAX, WorkItemSchema, WorkRepoSchema } from "./work-items.ts";
@@ -32,7 +33,13 @@ export type WorkItemWriteReceiptRequest = z.infer<typeof WorkItemWriteReceiptReq
 export const WorkItemWriteRequestSchema = WorkItemWriteReceiptRequestSchema.extend({
   command: WorkItemWriteCommandSchema,
   freeAgent: FreeAgentIntentSchema.optional(),
-}).strict();
+  workHandoff: WorkHandoffIntentSchema.optional(),
+})
+  .strict()
+  .refine(
+    (request) => !(request.freeAgent && request.workHandoff),
+    "Choose one native recipient precondition",
+  );
 export type WorkItemWriteRequest = z.infer<typeof WorkItemWriteRequestSchema>;
 
 export const WorkItemWriteReceiptSchema = z

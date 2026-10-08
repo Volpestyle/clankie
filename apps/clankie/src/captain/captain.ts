@@ -1,4 +1,7 @@
-import { prepareFreeAgentIntent as prepareFreeIntent } from "./free-agent-intent.ts";
+import {
+  prepareWorkHandoffIntent as prepareWorkIntent,
+  prepareFreeAgentIntent as prepareFreeIntent,
+} from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
 import { machineCodingTools } from "./machine-coding-tools.ts";
 import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
@@ -2284,12 +2287,63 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
   }
 
+  function prepareWorkHandoffIntent(intent: import("@clankie/protocol").WorkHandoffIntent) {
+    return prepareWorkIntent(
+      {
+        settingsStore,
+        options,
+        refreshFleet: async () => {
+          await refreshFleet({ force: true });
+          return liveSeats;
+        },
+        seats: () => liveSeats,
+        personaForOccupant: (id) => personas.personaForOccupant(id),
+      },
+      intent,
+    );
+  }
+
   async function deliverToSeat(
     seatId: string,
     message: string,
     context: FleetSeatMessageContext,
     deliveryOptions?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
+    if (context.workHandoff) {
+      const intent = context.workHandoff;
+      if (
+        context.freeAgent ||
+        intent.seatId !== seatId ||
+        context.source !== "operator" ||
+        context.delivery === "queue"
+      )
+        return {
+          outcome: "undelivered",
+          deliveryStage: "rejected",
+          detail: "This work handoff changed its original recipient.",
+        };
+      const recipient = await prepareWorkHandoffIntent(intent);
+      const previous = deliveryOptions;
+      deliveryOptions = {
+        ...previous,
+        source: "operator",
+        guard: async () => {
+          await previous?.guard?.();
+          await recipient.guard();
+        },
+        fence: async (agent) => {
+          if (previous?.fence && !(await previous.fence(agent))) return false;
+          await recipient.guard();
+          recipient.assertCurrent();
+          return (
+            !!agent?.session &&
+            agent.terminalId === intent.seatId &&
+            occupantIdForHerdrSession(agent.session) === intent.occupantId
+          );
+        },
+      };
+      await deliveryOptions.guard!();
+    }
     if (context.freeAgent) {
       const intent = context.freeAgent;
       if (intent.seatId !== seatId || context.source !== "operator" || context.delivery === "queue")
@@ -4602,6 +4656,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         });
     },
 
+    prepareWorkHandoffIntent,
     prepareFreeAgentIntent,
     serveOperatorConversation: createOperatorService({
       prepareFreeAgentIntent,

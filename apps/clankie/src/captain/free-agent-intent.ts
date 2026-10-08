@@ -12,9 +12,22 @@ interface Context {
   personaForOccupant(occupantId: string): string | undefined;
 }
 /** Capture project proof, then retain a synchronous fence for the actual effect. */
-export async function prepareFreeAgentIntent(
+export async function prepareFreeAgentIntent(ctx: Context, intent: FreeAgentIntent) {
+  return prepareAgentIntent(ctx, intent, true);
+}
+
+/** Busy workers retain the same native identity and project fence without claiming to be free. */
+export function prepareWorkHandoffIntent(
+  ctx: Context,
+  intent: import("@clankie/protocol").WorkHandoffIntent,
+) {
+  return prepareAgentIntent(ctx, intent, false);
+}
+
+async function prepareAgentIntent(
   ctx: Context,
   intent: FreeAgentIntent,
+  requireFree: boolean,
 ): Promise<{
   assertCurrent(): void;
   guard(): Promise<void>;
@@ -22,7 +35,9 @@ export async function prepareFreeAgentIntent(
 }> {
   const refuse = (): never => {
     throw new ConversationRefusedError(
-      "The original agent or project changed, or the agent is no longer free. Nothing was dispatched.",
+      requireFree
+        ? "The original agent or project changed, or the agent is no longer free. Nothing was dispatched."
+        : "The original work recipient or project changed. Nothing was dispatched.",
     );
   };
   const target = (
@@ -43,7 +58,7 @@ export async function prepareFreeAgentIntent(
   };
   const identity = (seats: readonly OperatorFleetSeat[]) => {
     const helper = target(intent, seats);
-    if (!freeFleetAgent(helper)) refuse();
+    if (requireFree && !freeFleetAgent(helper)) refuse();
     if (intent.helpTarget) {
       const teammate = target(intent.helpTarget, seats);
       if (

@@ -59,6 +59,7 @@ export async function runSendCommand(
       stdin: { type: "boolean" },
       attach: { type: "string", multiple: true },
       "free-agent": { type: "string" },
+      "work-handoff": { type: "string" },
     },
   });
   if (values.stdin === true && positionals.length > 0)
@@ -78,6 +79,7 @@ export async function runSendCommand(
     message,
     delivery: values.delivery,
     ...(values["free-agent"] === undefined ? {} : { freeAgent: JSON.parse(values["free-agent"]) }),
+    ...(values["work-handoff"] === undefined ? {} : { workHandoff: JSON.parse(values["work-handoff"]) }),
     // Validated with stand-in references; the real ones exist only after upload.
     ...(files.length === 0
       ? {}
