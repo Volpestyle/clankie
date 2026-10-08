@@ -1,5 +1,9 @@
 # Rivals shared play ownership
 
+Verified on main under VUH-1849. The landing gate passed: 31 workspace typecheck
+tasks and 7,564 tests (57 existing skips), with no exception or new exclusion.
+The covering run passed all 16 tests, including 10 new HTTP boundary cases.
+
 VUH-1849 adopts the common game-extension lifecycle without changing Rivals'
 native real-time tactical policy. Its registered skill/session-server descriptor
 uses the existing `gameplay` settings and broker credential. Core captures the

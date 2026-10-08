@@ -15,7 +15,29 @@ Dead code: PASS — pnpm deadcode (one pre-existing ignore configuration hint).
 Initial type attempts failed only on fixture argument order/type-name collision, corrected.
 First covering attempt: 15 passed / 1 failed; existing route assertion expected no identity.
 Corrected assertion verifies the authenticated conversation binding; all 16 now pass.
-The landing gate result will be appended after completion.
+Landing gate: PASS, exit 0 on cfccd041e2e738e54ed9f05d35e438ca9dc6bc9c.
+Command: clankie heavy -- env TURBO_BINARY_PATH=/Users/james/dev/clankie-wt/vuh-1849-rowan/.local/turbo-serial pnpm check:landing
+The local launcher execs the pinned Turbo 2.10.4 binary with --concurrency=1.
+It serializes workspace compilers; it changes no check, source or test selection.
+Bundled skill verification, format (including Vox), lint (including Vox), dead code,
+doc links and retired claims: PASS.
+Workspace typecheck: 31 successful / 31 total; 29 valid cache hits, 2 executed.
+Vitest: 827 files passed / 22 skipped (849 selected).
+Tests: 7564 passed / 57 skipped (7621 selected).
+Test start: 2026-10-08 11:51:02 America/Chicago. Duration: 533.97s.
+Log: .local/landing-first.log. No gate failure, waiver, retry or new exclusion.
+
+Final runtime checkpoint: fc0f0319fbec27046d3bf98381dd019411b762fc.
+Rebased onto fetched origin/main dcd8043894e9d1d5736d202932a8b453a3b6edd3.
+The move from tested cfccd041 to fc0f0319 changes only two existing Ash evidence docs:
+  docs/testing/2026-10-08-worker-parent-routing/README.md
+  docs/testing/2026-10-08-worker-parent-routing/verification.json
+Every runtime, test, package and lockfile input is unchanged; valid gate evidence is reused.
+The final result/evidence commit changes only this archive.
+Final format and doc checks: PASS, exit 0; .local/docs-final.log.
+Three changed Markdown/JSON files formatted; 557 Markdown files have valid local links,
+no new ADR number collision and no retired-claim violation.
+Clankie's temporary landing exception is retired; all check:landing failures block.
 
 Scope: controlled real authenticated loopback session-server HTTP and real broker/settings/lease persistence.
 No live PC, controller/game body, deployment, restart, paid model or eval.
