@@ -217,6 +217,8 @@ management across conversations is in [launcher details](reference/launcher.md#m
 - [Worker bridges and fleet tools](reference/fleet-tools.md): connected tools,
   bridge health in doctor and the roster, report routing, preparing linked
   machines, Windows fleets.
+- [Machine access](reference/machine-access.md): owner-chosen portal, workers,
+  shell and screen levels; live policy checks and joined-host proof limits.
 - [Machines and Herdr](reference/herdr.md): machines, which session he uses and
   changing it, messages to external Codex, delivery receipt stages.
 - [The seat](reference/seat.md): Claude Code, Codex or OpenCode in his operator seat.

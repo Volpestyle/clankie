@@ -76,7 +76,9 @@ storage without one; `clankie doctor` shows which.
 watch and type into. Clankie hires and messages Claude Code, Codex, Pi, OpenCode,
 and Grok Build through each harness's own channel, never by typing into the
 pane, and reports when delivery is uncertain. Agents on other machines join
-through a fleet link. The [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
+through a fleet link. In Machines, the owner chooses portal, workers, shell or
+screen access. Current self-hosted limits are service preferences; joined-host
+enforcement and OS isolation have separate acceptance checks. The [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
 lists support and limits.
 
 Registered local owner checkouts follow main automatically while the service

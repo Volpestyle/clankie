@@ -854,6 +854,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private closed = false;
   private readonly nativeLaunchPolicy: NativeLaunchPolicy | undefined;
   private readonly fleetResources: FleetResourceRuntime | undefined;
+  private readonly requireWorkerAccess: ((fleet?: string) => Promise<void>) | undefined;
   private readonly hireDefaults: (() => Promise<HireProfile>) | undefined;
   private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
   private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
@@ -873,6 +874,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly channelReceipt?: HerdrWatchStore["channelReceipt"];
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly fleetResources?: FleetResourceRuntime;
+      readonly requireWorkerAccess?: (fleet?: string) => Promise<void>;
       readonly projectHirePolicy?: ProjectHirePolicy;
       readonly fleetHireTools?: () => Promise<readonly string[]>;
       readonly hireDefaults?: () => Promise<HireProfile>;
@@ -951,6 +953,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.hireOwners = new HireOwners(`${path}.owners.json`);
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
     this.fleetResources = options.fleetResources;
+    this.requireWorkerAccess = options.requireWorkerAccess;
     this.projectHires = new ProjectHires(`${path}.project-hires.json`);
     this.projectPolicy = options.projectHirePolicy;
     this.fleetHireTools = options.fleetHireTools;
@@ -1198,6 +1201,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
     uncontrolled?: () => Promise<FleetSeatDelivery>,
     options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
+    if (this.requireWorkerAccess) {
+      const original = options;
+      const guard = async () => {
+        await original?.guard?.();
+        await this.requireWorkerAccess!(splitFleetQualified(seatId)?.fleet);
+      };
+      try {
+        await this.requireWorkerAccess(splitFleetQualified(seatId)?.fleet);
+      } catch (error) {
+        return { outcome: "undelivered", deliveryStage: "rejected", detail: reasonDetail(error) };
+      }
+      options = { ...original, guard };
+    }
     if (this.closed && options)
       return { outcome: "offline", deliveryStage: "unavailable", detail: "Native seat delivery is closed." };
     if (this.closed)
@@ -1323,6 +1339,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     const guard = async () => {
       await assertConversationAuthority(authority);
+      await this.requireWorkerAccess?.(splitFleetQualified(agent.paneId)?.fleet);
       const current = await this.runner.resolveTerminal(seatId);
       if (
         !current?.session ||
@@ -1440,6 +1457,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const identity = JSON.stringify([original.terminalId, original.agent, original.session]);
     const current = async () => {
       await input.beforeDispatch?.();
+      await this.requireWorkerAccess?.(splitFleetQualified(original.paneId)?.fleet);
       const fresh = await this.runner.get(paneId);
       if (
         this.closed ||
@@ -1789,6 +1807,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     flushAdoption?: () => Promise<void>,
   ): Promise<HerdrSeatSpawnResult> {
     const defaults = (await this.hireDefaults?.()) ?? {};
+    try {
+      await this.requireWorkerAccess?.(inputRequest.fleet);
+    } catch (error) {
+      return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+    }
     let input = { ...inputRequest, ...effectiveHireProfile(inputRequest, {}, defaults) };
     // `auto` is "no preference" over any role or fleet default: Clankie picks per machine.
     if (input.account === HIRE_NO_PREFERENCE) {
@@ -2005,6 +2028,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   private async admitProjectLaunch(input: SpawnOperatorSeat, dispatched = false): Promise<void> {
+    await this.requireWorkerAccess?.(input.fleet);
     const defaultPolicy = this.hireDefaultPolicies.get(input);
     if (defaultPolicy !== undefined && defaultPolicy !== JSON.stringify((await this.hireDefaults?.()) ?? {}))
       throw new Error(
@@ -3751,6 +3775,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }): Promise<HerdrSeatMoveResult> {
     if (this.closed) return { outcome: "failed", reason: "herdr_unreachable" };
     const fleet = splitFleetQualified(input.seatId)?.fleet;
+    try {
+      await this.requireWorkerAccess?.(fleet);
+    } catch (error) {
+      return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+    }
     if (fleet === undefined && !existsSync(input.workingDirectory)) {
       return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
     }
@@ -3779,6 +3808,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (authority !== undefined) await assertConversationAuthority(authority);
     const guard = async () => {
       await assertConversationAuthority(authority);
+      await this.requireWorkerAccess?.(fleet);
       const latest = await this.runner.resolveTerminal(input.seatId);
       if (
         latest?.session === undefined ||

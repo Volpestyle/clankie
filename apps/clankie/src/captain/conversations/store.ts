@@ -167,6 +167,7 @@ import {
   renamePersona,
   roomConversation,
   runWithConversationDriver,
+  waitForDriverAdmission,
   seatIds,
   syncHeadTranscript,
   syncNativeSeatTranscript,
@@ -1457,6 +1458,10 @@ export class ConversationStore {
     prepare?: () => Promise<void>,
   ): Promise<T> {
     return pollConversationDriver(this, conversationId, poll, signal, prepare);
+  }
+
+  public async waitForDriverAdmission(conversationId: string, signal?: AbortSignal): Promise<void> {
+    return waitForDriverAdmission(this, conversationId, signal);
   }
 
   /**

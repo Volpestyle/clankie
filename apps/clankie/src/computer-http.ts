@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
+import { MachineAccessRefused } from "@clankie/protocol";
 import { ComputerRequestSchema } from "@clankie/interactive-environment";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
 import type { ComputerBody } from "./computer-body.ts";
@@ -48,7 +49,18 @@ export function registerComputerRoutes(
     try {
       const result = await options.body.dispatch(identity, parsed.data.command);
       return context.json(result as Record<string, unknown>, 200, { "cache-control": "no-store" });
-    } catch {
+    } catch (error) {
+      if (error instanceof MachineAccessRefused)
+        return context.json(
+          {
+            error: error.code,
+            machine: error.machine,
+            accessLevel: error.accessLevel,
+            required: error.required,
+            detail: error.message,
+          },
+          403,
+        );
       // Never expose native logs, private snapshot IDs, or filesystem paths in an error.
       return context.json(
         {

@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { AgentHostConnectionSchema, type SettingsStore } from "@clankie/settings";
-import type { Machine, MachineInventory } from "@clankie/protocol";
+import { MachineAccessChangeSchema, type Machine, type MachineInventory } from "@clankie/protocol";
+import { machineAccessLevel } from "./machine-access.ts";
 import { remoteProgramCommand } from "./herdr-fleet.ts";
 import { parseHerdrAgentList } from "./captain/herdr-census.ts";
 
@@ -151,6 +152,7 @@ export class Machines {
         throw new Error("Machine ID is pinned to another host; use a new ID");
       return {
         ...current,
+        machineAccess: existing ? current.machineAccess : { ...current.machineAccess, [input.id]: "portal" },
         agentHosts: {
           connections: [...current.agentHosts.connections.filter((entry) => entry.id !== input.id), input],
         },
@@ -177,6 +179,11 @@ export class Machines {
         if (connection.machine === machine.id) removed.push(connection.id);
       return {
         ...current,
+        machineAccess: Object.fromEntries(
+          Object.entries(current.machineAccess).filter(
+            ([id]) => id !== machine.id && !machine.aliases.includes(id),
+          ),
+        ),
         machines: current.machines.filter((entry) => entry !== machine),
         agentHosts: {
           connections: current.agentHosts.connections.filter(
@@ -196,6 +203,20 @@ export class Machines {
 
   invalidate() {
     this.cached = undefined;
+  }
+
+  async setAccess(id: string, raw: unknown) {
+    const input = MachineAccessChangeSchema.parse(raw);
+    let selected = id;
+    await this.options.settings.update((current) => {
+      const machine = current.machines.find((entry) => entry.id === id || entry.aliases.includes(id));
+      if (id !== "local" && !machine) throw new Error("Unknown machine");
+      selected = machine?.id ?? "local";
+      return { ...current, machineAccess: { ...current.machineAccess, [selected]: input.accessLevel } };
+    });
+    this.cached = undefined;
+    await this.options.changed(selected);
+    return { id: selected, ...input, accessEnforcement: "service-preference" as const };
   }
 
   async list(refresh = false): Promise<MachineInventory> {
@@ -231,6 +252,10 @@ export class Machines {
         }),
       ),
     ];
+    for (const machine of configured) {
+      machine.accessLevel = machineAccessLevel(settings, machine.id);
+      machine.accessEnforcement = "service-preference";
+    }
     let configTimer: ReturnType<typeof setTimeout> | undefined;
     const config = await Promise.race([
       (this.options.sshConfig?.() ?? readSshConfig()).catch(() => ""),
@@ -254,6 +279,8 @@ export class Machines {
         shell: "posix",
         transport: "ssh",
         configured: false,
+        accessLevel: "portal",
+        accessEnforcement: "service-preference",
         state: "discovering",
         workerCount: null,
         sessions: [],

@@ -52,6 +52,10 @@ export async function changeRuntime(deps: Dependencies, command: "connect" | "di
 }
 
 export async function manageConnections(deps: Dependencies, command: OperatorConnectionCommand) {
+  if (command.action === "set_machine_access") {
+    if (!deps.runtimes) throw new Error("Machines unavailable");
+    await deps.runtimes.machines.setAccess(command.id, { accessLevel: command.accessLevel });
+  }
   if (command.action === "discover") await deps.runtimes?.machines.list(true);
   if (command.action === "add_machine") {
     if (!deps.runtimes) throw new Error("Machines unavailable");

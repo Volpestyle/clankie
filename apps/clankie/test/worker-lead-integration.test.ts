@@ -113,6 +113,19 @@ async function fixture(
     wait: async () => ({ ...agent, status: "idle" }),
   };
   const settings = new SettingsStore(join(root, "settings.json"));
+  if (options.remote) {
+    await settings.update((current) => ({
+      ...current,
+      machines: [{ id: "away", ssh: "fixture.invalid", shell: "posix", aliases: [] }],
+      machineAccess: { away: "shell" },
+      execution: {
+        ...current.execution,
+        connections: [
+          { id: "away", machine: "away", session: "default", kind: "herdr", enabled: true, capabilities: [] },
+        ],
+      },
+    }));
+  }
   if (options.room && !options.denied)
     await settings.update((current) => ({
       ...current,

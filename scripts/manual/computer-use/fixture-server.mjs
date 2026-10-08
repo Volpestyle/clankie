@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const report = "sku,quantity\nred,2\nblue,3\ntotal,5\n";
@@ -24,6 +24,16 @@ export async function startFixtureServer(directory, options = {}) {
   };
   const statePath = join(directory, "fixture-state.json");
   await writeFile(statePath, JSON.stringify(state), { mode: 0o600, flag: "wx" });
+  let writes = Promise.resolve();
+  const persist = () => {
+    const snapshot = JSON.stringify(state);
+    writes = writes.then(async () => {
+      const temporary = `${statePath}.${randomUUID()}.tmp`;
+      await writeFile(temporary, snapshot, { mode: 0o600, flag: "wx" });
+      await rename(temporary, statePath);
+    });
+    return writes;
+  };
   const server = createServer(async (req, res) => {
     try {
       const path = new URL(req.url, "http://127.0.0.1").pathname;
@@ -69,7 +79,7 @@ export async function startFixtureServer(directory, options = {}) {
           state.fields[data.index] = data.value;
           if (data.index === 0) await options.onFirstInput?.();
         }
-        await writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
+        await persist();
         send(
           200,
           "application/json",
@@ -83,7 +93,7 @@ export async function startFixtureServer(directory, options = {}) {
       }
       if (path === "/report.csv") {
         state.downloads++;
-        await writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
+        await persist();
         res.setHeader("content-disposition", 'attachment; filename="report.csv"');
         send(200, "text/csv", report);
         return;

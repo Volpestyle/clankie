@@ -125,7 +125,10 @@ This repository is public. Both neighbors are private and consume
   withhold private work and fleet context even when an owner asks, and machine
   turns there are one-shot. Official-bot owner DMs and proven owner-only rooms
   may hold a separate durable tool-bearing lane. Private outreach requires
-  an owner-only audience. Voice is as capable as its room.
+  an owner-only audience. Voice is as capable as its room. Each machine also
+  has an independent owner-chosen portal/workers/shell/screen ceiling (ADR
+  0244); actor or room grants cannot raise it. Bounded service-owned I/O does
+  not grant general shell access.
 - No harness possesses Clankie. He plays from his own credentialed PokeAgents
   seat, and every other harness takes its own through PokeAgents' MCP, CLI, or
   skill. MCP is a transport projection, not authority or gameplay semantics.

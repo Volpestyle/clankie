@@ -66,6 +66,7 @@ type Ref = NonNullable<ReturnType<BodyLeaseStore["recoveryReference"]>>;
 export class ComputerBody {
   private readonly adapter: ComputerAdapter;
   private readonly store: BodyLeaseStore;
+  private readonly requireScreen: (() => Promise<void>) | undefined;
   private readonly journalPath: string;
   private journal: z.infer<typeof JournalSchema>;
   private active = false;
@@ -77,9 +78,15 @@ export class ComputerBody {
     { screenshot: ComputerScreenshot; observation: ComputerObservation }
   >();
 
-  constructor(adapter: ComputerAdapter, store: BodyLeaseStore, directory: string) {
+  constructor(
+    adapter: ComputerAdapter,
+    store: BodyLeaseStore,
+    directory: string,
+    requireScreen?: () => Promise<void>,
+  ) {
     this.adapter = adapter;
     this.store = store;
+    this.requireScreen = requireScreen;
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     this.journalPath = join(directory, "computer-inputs.json");
     this.journal = { bodyId: adapter.bodyId, leaseId: "", requests: {} };
@@ -128,6 +135,7 @@ export class ComputerBody {
   async dispatch(identity: BodyConversationIdentity, raw: unknown): Promise<unknown> {
     const command = ComputerCommandSchema.parse(raw);
     await this.authorized(identity);
+    if (!["status", "release", "revoke", "recover"].includes(command.action)) await this.requireScreen?.();
     if (command.action === "status") {
       const lease = this.store.status("computer");
       return {
@@ -247,6 +255,7 @@ export class ComputerBody {
     let uncertain = false;
     const guard = async () => {
       await this.authorized(identity);
+      await this.requireScreen?.();
       if (this.store.validate(ref, begun.operationId).outcome !== "valid")
         throw new Error("Computer lease expired or revoked");
     };

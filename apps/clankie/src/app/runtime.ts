@@ -1,4 +1,5 @@
 import { createPersonaVoiceSettingsRoutes } from "../persona-voice-settings-routes.ts";
+import { createMachineAccessRoutes } from "../machine-access-routes.ts";
 import { isDeepStrictEqual } from "node:util";
 import { roomForkIdOf } from "../captain/captain-discord-turns.ts";
 import { hostedActivityViewer } from "../hosted-activity-viewer.ts";
@@ -1235,6 +1236,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "invalid_machine", detail: String(error) }, 400);
     }
   });
+  app.route(
+    "/",
+    createMachineAccessRoutes({
+      machines: dependencies.runtimes?.machines,
+      authenticateOperator: dependencies.authenticateOperator,
+    }),
+  );
   app.delete("/v1/machines/:id", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")

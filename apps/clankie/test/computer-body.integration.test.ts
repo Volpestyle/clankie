@@ -15,6 +15,8 @@ import {
   ComputerScreenshotSchema,
 } from "@clankie/interactive-environment";
 import { BodyLeaseStore } from "../src/body-leases.ts";
+import { SettingsStore } from "@clankie/settings";
+import { requireMachineAccess } from "../src/machine-access.ts";
 import { ComputerBody } from "../src/computer-body.ts";
 import { registerComputerRoutes } from "../src/computer-http.ts";
 import { FixtureComputer } from "./support/computer-browser.ts";
@@ -30,16 +32,23 @@ async function fixture(
     loseTransport?: boolean;
     expireAfterFirst?: boolean;
     revokeLeaseAfterFirst?: boolean;
+    lowerAccessAfterFirst?: boolean;
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "clankie-computer-integration-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const settings = new SettingsStore(join(directory, "settings.json"));
   const grants = new Set(["conversation-a", "conversation-b"]);
   let driver: FixtureComputer;
   let revoke: (() => Promise<void>) | undefined;
   const site = await startFixtureServer(directory, {
     onFirstInput: async () => {
       if (options.revokeAfterFirst) grants.delete("conversation-a");
+      if (options.lowerAccessAfterFirst)
+        await settings.update((current) => ({
+          ...current,
+          machineAccess: { ...current.machineAccess, local: "workers" },
+        }));
       if (options.revokeLeaseAfterFirst) await revoke?.();
       if (options.loseTransport) await driver.page.close();
       if (options.expireAfterFirst) await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -50,7 +59,9 @@ async function fixture(
   cleanup.push(() => driver.close());
   const store = new BodyLeaseStore(join(directory, "lease"));
   cleanup.push(() => store.close());
-  const body = new ComputerBody(driver, store, join(directory, "journal"));
+  const body = new ComputerBody(driver, store, join(directory, "journal"), () =>
+    requireMachineAccess(settings, "local", "screen"),
+  );
   const bearer = randomUUID();
   const app = new Hono();
   registerComputerRoutes(app, {
@@ -105,6 +116,7 @@ async function fixture(
     call({ action: "input", leaseId: lease.leaseId, screenshotId, requestId, inputs });
   return {
     directory,
+    settings,
     driver,
     site,
     store,
@@ -120,6 +132,32 @@ async function fixture(
 }
 
 describe("computer contract across real HTTP, Chromium, PNG and lease files", () => {
+  it("lowering access during real input stops the next effect and still permits lease recovery", async () => {
+    const f = await fixture({ lowerAccessAfterFirst: true });
+    await f.driver.page.locator("#first").focus();
+    const image = await f.capture();
+    const receipt = ComputerReceiptSchema.parse(
+      (
+        await f.input(image.screenshotId, [
+          { kind: "type", text: "first", clear: true },
+          { kind: "key", keys: "Tab" },
+          { kind: "type", text: "second", clear: true },
+        ])
+      ).data,
+    );
+    expect(receipt.outcome).toBe("failed");
+    expect((await f.site.state()).fields).toEqual(["first", ""]);
+    const refused = await f.call({ action: "inventory", leaseId: f.lease.leaseId });
+    expect(refused.status).toBe(403);
+    expect(refused.data).toMatchObject({
+      error: "machine_access_refused",
+      machine: "local",
+      accessLevel: "workers",
+      required: "screen",
+    });
+    expect((await f.call({ action: "status" })).status).toBe(200);
+    expect((await f.call({ action: "recover" })).status).toBe(200);
+  });
   it("accepts an authenticated lease revocation while a real input is in flight and refuses the next input", async () => {
     const f = await fixture({ revokeLeaseAfterFirst: true });
     await f.driver.page.locator("#first").focus();
@@ -291,7 +329,8 @@ describe("computer contract across real HTTP, Chromium, PNG and lease files", ()
     const requestId = randomUUID();
     const receipt = ComputerReceiptSchema.parse((await f.input(image.screenshotId, inputs, requestId)).data);
     expect(receipt.outcome).toBe("uncertain");
-    expect((await f.site.state()).fields).toEqual(["first", ""]);
+    // Losing the browser transport can precede the receiver's durable write.
+    await expect.poll(async () => (await f.site.state()).fields).toEqual(["first", ""]);
     expect((await f.input(image.screenshotId, inputs, requestId)).data).toEqual(receipt);
     expect((await f.call({ action: "release", leaseId: f.lease.leaseId })).data.reason).toBe(
       "recovery_required",

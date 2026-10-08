@@ -1,4 +1,5 @@
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
+import { MachineAccessSettingsSchema } from "@clankie/protocol";
 import { DesktopSettingsSchema } from "./desktop.ts";
 import {
   AutonomySettingsSchema,
@@ -683,6 +684,7 @@ export const ClankieSettingsSchema = z
       )
       .max(64)
       .default([]),
+    machineAccess: MachineAccessSettingsSchema,
     machines: z
       .array(
         AgentHostConnectionSchema.extend({

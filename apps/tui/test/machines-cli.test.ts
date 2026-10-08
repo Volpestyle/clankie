@@ -17,7 +17,7 @@ test("machines human rows distinguish unreachable counts and candidates", () => 
       { id: "laptop", transport: "ssh", configured: false, state: "available", workerCount: 0, sessions: [] },
     ],
   });
-  expect(result).toContain("pc  work  unreachable  ?");
+  expect(result).toContain("pc  unreported  work  unreachable  ?");
   expect(result).toContain("laptop (candidate)");
   expect(result).toContain("Default workspace changes require clankie restart captain");
   expect(isHeadlessCaptainCommand("machines")).toBe(true);

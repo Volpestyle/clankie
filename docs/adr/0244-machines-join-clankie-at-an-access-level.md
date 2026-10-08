@@ -44,6 +44,43 @@ Each level includes the ones above it. The level says what Clankie may do on
 a machine. ADR 0133's grants still decide who may ask him to. A joined machine
 enforces its own level and refuses anything above it.
 
+### Access contract (VUH-1801)
+
+The four names are the complete ordered vocabulary. Owners choose one level,
+not a list of tools or arbitrary commands. `portal` is the default for an
+unknown or newly registered remote machine. The local self-hosted machine
+retains `screen` when no level was stored, preserving existing installations.
+An invalid level or unavailable policy never grants an operation.
+
+Machine permission is a ceiling independent of speaker authority. Discord
+ownership and room skill grants follow [ADR 0251](0251-discord-owners-and-room-skills.md): becoming an owner does not
+raise a machine's level, and a room skill never grants shell or screen access.
+Worker directory grants and native pane proof remain additional requirements.
+A bounded service adapter using fixed, service-owned I/O is a product
+capability, not the caller's general shell. Its skill, actor and audience
+checks stay separate from this machine ceiling.
+
+The owner API, paired-device command, CLI and TUI use the same level contract.
+The inventory reports the selected level and whether enforcement is a service
+preference or a host boundary. Changes require owner authority; workers and
+joined clients cannot raise their own level. The local default is a specific
+migration rule, never a default for unknown remote hosts.
+
+Enforcement checks current policy at execution, including after queued work
+waits. Catalog visibility is not authority. Lowering a level stops new effects
+above it, but does not terminate existing workers or recall completed effects.
+Recovery/stop paths remain available so revocation cannot strand an active
+screen lease. Refusals name the machine, selected level and required level.
+
+Join transport and its authenticated host registration are VUH-1800. A joined
+receiver must check its own owner-approved ceiling before dispatching a typed
+worker, shell or screen operation; an incoming level or service assertion
+cannot raise that ceiling. Until that receiver ships and is exercised, a
+service-side policy check is not joined-host enforcement evidence. Similarly,
+lowering the self-hosted Mac remains a service preference until VUH-1804 adds
+an OS boundary. A shell with the owner's credentials can otherwise bypass
+Clankie's own tool restrictions.
+
 **A self-hosted Mac keeps full access by default.** Existing installs keep
 working. An owner can lower it. A lowered local level is called a sandbox only
 when the OS enforces it (a separate user, a sandbox profile or a VM). The

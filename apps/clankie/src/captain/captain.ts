@@ -1,3 +1,5 @@
+import { requireRuntimeMachineAccess } from "../machine-access.ts";
+import { machineCodingTools } from "./machine-coding-tools.ts";
 import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
 import {
   discordAllowedToolNames,
@@ -266,6 +268,10 @@ const WORKER_RESULT_BRIEF =
 const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to compact (session too small)"]);
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
+  const settingsStore = options.settings ?? new SettingsStore();
+  const requireAccess =
+    options.requireMachineAccess ??
+    ((fleet, required) => requireRuntimeMachineAccess(settingsStore, fleet, required));
   function trackConversationRunner(runner: ConversationRunner): ConversationRunner {
     const heartbeat = options.runtimeProvider?.heartbeat;
     if (heartbeat === undefined) return runner;
@@ -571,6 +577,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return selectHireProject(source, destination, input.projectId);
   };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    requireWorkerAccess: (fleet) => requireAccess(fleet, "workers"),
     ...(deps.fleets?.shell === undefined
       ? {}
       : {
@@ -918,7 +925,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
   const seatLedger: SeatLedger = createSeatLedger(seatLedgerPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
-  const settingsStore = options.settings ?? new SettingsStore();
   const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
   const desktopDeps = {
     ...deps,
@@ -1367,7 +1373,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           model: selection.model,
           thinkingLevel: selection.thinkingLevel,
           modelRuntime: models,
-          customTools: evalTools?.customTools ?? authored,
+          customTools: evalTools?.customTools ?? [
+            ...authored,
+            ...(systemTools ? machineCodingTools(cwd, settingsStore) : []),
+          ],
           ...(evalTools !== undefined
             ? { tools: evalTools.tools }
             : systemTools
@@ -1377,7 +1386,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           sessionManager,
           settingsManager: piSettings,
           // Coding tools (read/bash/edit/write) run unsandboxed as the service
-          // user. The operator console always has them. Discord gets them only from
+          // user. Every call checks the local machine ceiling. Discord gets them only from
           // the authenticated authority plan: per-user grants stay one-shot in
           // shared rooms, while proven owner-only audiences may bind them durably.
           // An explicit allowlist removes builtins from the callable registry;
@@ -2349,6 +2358,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             );
       if (!selected || (selected.harness !== "claude" && selected.harness !== "codex") || !selected.session)
         return undefined;
+      const machineFleet = splitFleetQualified(selected.paneId)?.fleet;
+      const requiredAccess = input.routeMode === "owner" ? "shell" : "workers";
+      try {
+        await requireAccess(machineFleet, requiredAccess);
+      } catch {
+        return undefined;
+      }
       const source = observedAgent(selected);
       const parentSessionId = nativeSessionId(source);
       const binding = inboundBinding(source);
@@ -2372,6 +2388,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         recipientBinding: binding,
         assertCurrent: async () => {
           shutdown.signal.throwIfAborted();
+          await requireAccess(machineFleet, requiredAccess);
           const next = await observeFleet(true);
           const latest = [...(next.head === undefined ? [] : [next.head]), ...next.seats].find(
             (candidate) => candidate.occupantId === selected.occupantId,
@@ -3131,6 +3148,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return outcome(false, "stopped_or_invalid");
       if (!(await validateConversationOwner(owner))) return outcome(false, "owner_unavailable");
       await guard();
+      await conversations.waitForDriverAdmission(owner.conversationId, shutdown.signal);
+      await guard();
       const outbox = seatOutbox(owner.conversationId);
       // VUH-1779: only this alert's own unresolved original holds it back.
       if (outbox.uncertainFor(text)) return outcome(false, "owner_receipt_unresolved");
@@ -3610,6 +3629,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   async function workerReportRoute(
     agent: HerdrAgentSnapshot,
     fleet: Awaited<ReturnType<typeof observeFleet>>,
+    admit = false,
   ): Promise<{
     owner: ConversationOwner;
     diagnostic: WorkerReportRouting;
@@ -3690,6 +3710,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (parentOwner?.conversationId !== attached || parentOwner.discord === undefined)
     )
       throw new Error("Parent room attachment lacks original Discord authority");
+    if (admit && attached !== undefined)
+      await conversations.waitForDriverAdmission(attached, shutdown.signal);
     if (
       attached !== undefined &&
       (seatOutboxes.get(attached)?.bound() || seatOutboxes.get(attached)?.uncertain())
@@ -4788,6 +4810,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       shutdown.signal.throwIfAborted();
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
+      // Register pending native intent before asynchronous policy preparation;
+      // conversation driver admission still fences actual delivery.
+      const outbox = seatOutbox(binding.conversationId);
       if (waitMs > 0 || goalExecutionReason(binding.conversationId) !== undefined)
         autonomy.pauseGoal(binding.conversationId);
       conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
@@ -4797,16 +4822,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
       try {
         let recipientBinding: string | undefined;
+        let machineFleet: string | undefined;
         return await conversations
           .pollConversationDriver(
             binding.conversationId,
             () => {
-              const pending = seatOutbox(binding.conversationId).poll(
-                waitMs,
-                pollSignal,
-                recipientBinding,
-                capabilities,
-              );
+              const pending = outbox.poll(waitMs, pollSignal, recipientBinding, capabilities);
               deliverServiceHandoff(binding.conversationId);
               void recoverWorkerReports(binding.conversationId).catch(() => undefined);
               return pending;
@@ -4815,10 +4836,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             async () => {
               const source = await operatorNativeSource(binding.conversationId);
               pollSignal.throwIfAborted();
+              machineFleet = source === undefined ? undefined : splitFleetQualified(source.paneId)?.fleet;
               recipientBinding = inboundBinding(source);
               if (source !== undefined) conversations.rememberNativeSource(binding.conversationId, source);
+              await requireAccess(machineFleet, "shell");
             },
           )
+          .then(async (events) => {
+            await requireAccess(machineFleet, "shell");
+            return events;
+          })
           .catch((error: unknown) => {
             shutdown.signal.throwIfAborted();
             if (pollSignal.aborted) return [];
@@ -5046,7 +5073,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           try {
             owner = herdrWatches.nativeOwner(agent);
             originalCensus = await observeFleet();
-            route = await workerReportRoute(agent, originalCensus);
+            route = await workerReportRoute(agent, originalCensus, true);
           } catch {
             return inboundReceipts.refuse(agent.paneId, delivery, text);
           }

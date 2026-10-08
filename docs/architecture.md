@@ -517,6 +517,18 @@ address — no tool call, no guess, and silence if the selection cannot be resol
 
 ## Where things run
 
+- **Machine access.** Owners choose cumulative portal, workers, shell or screen
+  access through `clankie machines access NAME LEVEL`, Settings → Machines or
+  `PATCH /v1/machines/:id/access` ([ADR 0244](adr/0244-machines-join-clankie-at-an-access-level.md)).
+  Existing local installs retain screen; ungranted remote machines start at
+  portal. Native coding tools recheck the local shell ceiling on every call;
+  worker launches, deliveries and native child admission check the selected
+  machine after waits. Owner-pane event admission checks shell before and after
+  its poll; desktop input checks screen before each effect. Actor
+  and audience proof remain independent. Bounded service-owned I/O does not
+  confer general shell access. Inventory reports `service-preference`, not an
+  OS sandbox: joined-host proof belongs to VUH-1800, OS isolation to VUH-1804.
+  Lowering a level does not terminate existing workers; recovery remains usable.
 - **Machine tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
   attach to the operator console and to Discord turns authorized by the
   machine-control grants

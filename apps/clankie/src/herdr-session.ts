@@ -1,4 +1,5 @@
 import { Machines } from "./machines.ts";
+import { requireRuntimeMachineAccess } from "./machine-access.ts";
 import { z } from "zod";
 import { realpath, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -306,6 +307,10 @@ export class ExecutionConnections {
       ...(options.env ? { env: options.env } : {}),
     });
     this.onChange(() => this.machines.invalidate());
+  }
+
+  async requireAccess(id: string | undefined, level: import("@clankie/protocol").MachineAccessLevel) {
+    return requireRuntimeMachineAccess(this.options.settings, id, level);
   }
 
   /** The one transport per fleet; a changed host or session replaces it. */

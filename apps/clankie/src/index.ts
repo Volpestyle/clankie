@@ -1,4 +1,5 @@
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
+import { requireMachineAccess } from "./machine-access.ts";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
 import { ComputerBody } from "./computer-body.ts";
@@ -976,7 +977,9 @@ const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
 const computer =
   process.platform === "darwin"
-    ? new ComputerBody(new PeekabooComputerAdapter(), bodyLeaseStore, join(stateRoot, "body"))
+    ? new ComputerBody(new PeekabooComputerAdapter(), bodyLeaseStore, join(stateRoot, "body"), () =>
+        requireMachineAccess(settingsStore, "local", "screen"),
+      )
     : undefined;
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
@@ -1339,6 +1342,7 @@ const captain = createCaptain(
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
     settings: settingsStore,
+    requireMachineAccess: (fleet, required) => runtimes.requireAccess(fleet, required),
     personaImages,
     linearFollowing,
     linearWakeReceived: (references) => linearWakeReads.received(references),

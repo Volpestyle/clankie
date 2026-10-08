@@ -23,6 +23,11 @@ import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
 export interface CaptainOptions {
+  /** Current owner-selected machine ceiling, separate from Discord actor authority. */
+  readonly requireMachineAccess?: (
+    fleet: string | undefined,
+    required: import("@clankie/protocol").MachineAccessLevel,
+  ) => Promise<void>;
   /** Content-free native alert outcome; no raw provider exception or message text. */
   readonly onHealthAlertDelivery?: (result: {
     fingerprint: string;

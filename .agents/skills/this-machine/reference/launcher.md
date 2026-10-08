@@ -48,6 +48,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Say what you are doing (for agents)    | `clankie stance working --activity testing --for 60` (`reading`, `editing`, `testing`, `planning`, `waiting`; optional note)                                       |
 | Public doorway                         | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                                                                             |
 | Pick up model/provider config          | `clankie restart`                                                                                                                                                  |
+| Machine access                         | `clankie machines access NAME portal\|workers\|shell\|screen`                                                                                                      |
 | Machines / discovery / sessions        | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                             |
 | Pair a device / list / revoke          | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                                                                              |
 | Rotate operator credential             | `clankie operator-credential rotate --json`                                                                                                                        |

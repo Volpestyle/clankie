@@ -623,7 +623,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "machines",
       aliases: [],
-      description: "Discover machines, connect sessions and manage workers",
+      description: "Discover machines, choose access levels, connect sessions and manage workers",
       takesArgument: true,
       argumentHint: "[discover | add NAME --ssh HOST | sessions NAME | remove NAME]",
       async run(argument, shell): Promise<void> {

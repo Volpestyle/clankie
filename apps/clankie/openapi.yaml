@@ -42,6 +42,46 @@ tags:
 security: []
 
 paths:
+  /v1/machines/{id}/access:
+    patch:
+      tags: [Operator]
+      operationId: setMachineAccess
+      summary: Set the owner-chosen machine capability ceiling
+      description: |
+        Cumulative portal, workers, shell and screen levels. Existing local installs
+        retain screen; ungranted remote machines start at portal. Current enforcement
+        is a service preference, not OS isolation or joined-host proof. Actor and
+        directory grants remain independent. Workers cannot raise their own level.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        description: Maximum 4096 bytes.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accessLevel]
+              properties:
+                accessLevel:
+                  type: string
+                  enum: [portal, workers, shell, screen]
+      responses:
+        "200":
+          description: Persisted canonical machine ID, accessLevel and accessEnforcement (service-preference)
+        "400":
+          description: Unknown machine or invalid access request
+        "401":
+          description: Operator authentication required
+        "413":
+          description: Request too large
+        "503":
+          description: Operator authentication or machine registry unavailable
   /v1/checkouts:
     get:
       tags: [Operator]

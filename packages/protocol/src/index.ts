@@ -769,3 +769,4 @@ export {
   type PendingNativeMessagesResult,
   type StopNativeTaskResult,
 } from "./pending-native-messages.ts";
+export * from "./machine-access.ts";

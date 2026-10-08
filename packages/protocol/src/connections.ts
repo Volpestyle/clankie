@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MachineAccessLevelSchema } from "./machine-access.ts";
 
 const connectionId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u);
 const label = z.string().max(4096);
@@ -18,6 +19,8 @@ export const MachineSchema = z
   .object({
     id: connectionId,
     transport: z.enum(["local", "ssh"]),
+    accessLevel: MachineAccessLevelSchema.optional(),
+    accessEnforcement: z.literal("service-preference").optional(),
     ssh: label.optional(),
     shell: z.enum(["posix", "powershell"]).optional(),
     configured: z.boolean(),
@@ -48,6 +51,13 @@ export const OperatorConnectionCommandSchema = z.discriminatedUnion("action", [
     })
     .strict(),
   z.object({ action: z.literal("remove_machine"), id: connectionId }).strict(),
+  z
+    .object({
+      action: z.literal("set_machine_access"),
+      id: connectionId,
+      accessLevel: MachineAccessLevelSchema,
+    })
+    .strict(),
   z
     .object({
       action: z.literal("connect_runtime"),

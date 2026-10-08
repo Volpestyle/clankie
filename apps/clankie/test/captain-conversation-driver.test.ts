@@ -426,9 +426,9 @@ it("the attached project receives worker reports, watches, self wakes and escala
   });
   let poll = captain.pollSeatEvents(10_000, undefined, id);
   // Surfaces see who takes the turns; no head pane is listed, so the harness stays unnamed.
-  expect(
-    await captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: id }),
-  ).toMatchObject({ conversation: { driver: {} } });
+  await expect
+    .poll(() => captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: id }))
+    .toMatchObject({ conversation: { driver: {} } });
   const binding = (await captain.fleetSeatMessageBinding(agent.paneId))!;
   const delivery = { id: randomUUID(), binding };
   expect(await captain.receiveFleetSeatMessage(agent.paneId, "Completed the work", delivery)).toMatchObject({

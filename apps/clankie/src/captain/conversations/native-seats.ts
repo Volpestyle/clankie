@@ -288,6 +288,22 @@ export async function pollConversationDriver<T>(
   return started;
 }
 
+/** Routing observations must wait for any native proof/policy preparation. */
+export async function waitForDriverAdmission(
+  ctx: ConversationStore,
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  for (;;) {
+    const admissions = ctx["driverAdmissions"].get(conversationId);
+    if (admissions === undefined || admissions.size === 0) break;
+    const ready = Promise.all(admissions);
+    if (signal === undefined) await ready;
+    else await waitForConversationRun(ready, signal);
+  }
+  signal?.throwIfAborted();
+}
+
 /**
  * Choose the live execution driver at admission, then pin its exact dispatch.
  * Only a definite pre-delivery refusal may choose again. The selection and
@@ -302,12 +318,11 @@ export async function runWithConversationDriver<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   for (;;) {
+    // With no pending admission, selection must stay synchronous with its
+    // service reservation; yielding here would let an attach race past it.
     for (;;) {
-      const admissions = ctx["driverAdmissions"].get(conversationId);
-      if (admissions === undefined || admissions.size === 0) break;
-      const ready = Promise.all(admissions);
-      if (signal === undefined) await ready;
-      else await waitForConversationRun(ready, signal);
+      if (!ctx["driverAdmissions"].get(conversationId)?.size) break;
+      await waitForDriverAdmission(ctx, conversationId, signal);
     }
     signal?.throwIfAborted();
     if (!ctx["metas"].has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);

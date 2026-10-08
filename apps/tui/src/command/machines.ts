@@ -1,10 +1,10 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
-import { MachineInventorySchema, type MachineInventory } from "@clankie/protocol";
+import { MachineAccessChangeSchema, MachineInventorySchema, type MachineInventory } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 
 const MACHINES_USAGE =
-  "Usage: clankie machines [list|discover] [--json]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines remove NAME\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
+  "Usage: clankie machines [list|discover] [--json]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines access NAME portal|workers|shell|screen\n       clankie machines remove NAME\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
 export const MACHINE_RESTART_HINT =
   "Named machine connections apply immediately. Default workspace changes require clankie restart captain.";
 export async function runMachinesCommand(
@@ -22,7 +22,11 @@ export async function runMachinesCommand(
     method = "GET",
     body: string | undefined;
   if (verb === "discover" && values.length === 1) path += "?discover=true";
-  else if (verb === "add" && name) {
+  else if (verb === "access" && name && rest.length === 1) {
+    body = JSON.stringify(MachineAccessChangeSchema.parse({ accessLevel: rest[0] }));
+    method = "PATCH";
+    path += `/${encodeURIComponent(name)}/access`;
+  } else if (verb === "add" && name) {
     const flags = new Map<string, string>();
     for (let i = 0; i < rest.length; i += 2) {
       if (!["--ssh", "--shell"].includes(rest[i]!) || !rest[i + 1] || flags.has(rest[i]!))
@@ -66,10 +70,10 @@ export async function runMachinesCommand(
 }
 export function formatMachines(inventory: MachineInventory): string {
   return [
-    "MACHINE  HERDR SESSION  STATE  WORKERS",
+    "MACHINE  ACCESS  HERDR SESSION  STATE  WORKERS",
     ...inventory.machines.map(
       (machine) =>
-        `${machine.id}${machine.configured ? "" : " (candidate)"}  ${machine.sessions.map((session) => session.name).join(", ") || "—"}  ${machine.state}  ${machine.workerCount ?? "?"}`,
+        `${machine.id}${machine.configured ? "" : " (candidate)"}  ${machine.accessLevel ?? "unreported"}  ${machine.sessions.map((session) => session.name).join(", ") || "—"}  ${machine.state}  ${machine.workerCount ?? "?"}`,
     ),
     MACHINE_RESTART_HINT,
   ].join("\n");

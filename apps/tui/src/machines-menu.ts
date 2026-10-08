@@ -1,4 +1,4 @@
-import { MachineInventorySchema, type Machine } from "@clankie/protocol";
+import { MACHINE_ACCESS_LEVELS, MachineInventorySchema, type Machine } from "@clankie/protocol";
 import type { ClankieFaceShell } from "./shell/shell.ts";
 import type { SetupFlow } from "./shell/setup-flow.ts";
 
@@ -52,7 +52,7 @@ export async function machinesSection(
         ...inventory.machines.map((machine) => ({
           value: `machine:${machine.id}`,
           label: machine.id === "local" ? "This machine" : machine.id,
-          hint: `${machine.configured ? "" : "discovered · "}${machine.state} · ${machine.workerCount ?? "?"} agents`,
+          hint: `${machine.configured ? "" : "discovered · "}${machine.accessLevel ?? "unreported"} · ${machine.state} · ${machine.workerCount ?? "?"} agents`,
         })),
         { value: "add", label: "Add a machine by name…", hint: "SSH target or config alias" },
       ],
@@ -121,6 +121,11 @@ async function machineDetail(
     const choice = await flow.readSelect({
       message: `${id} · ${machine.state} · ${machine.workerCount ?? "?"} agents`,
       options: [
+        {
+          value: "access",
+          label: "Access level…",
+          hint: `${machine.accessLevel ?? "unreported"} · ${machine.accessEnforcement === "service-preference" ? "service preference" : "enforcement unreported"}`,
+        },
         ...machine.sessions.map((session, index) => ({
           value: `session:${index}`,
           label: session.name,
@@ -135,6 +140,29 @@ async function machineDetail(
       allowBack: true,
     });
     if (choice === undefined) return;
+    if (choice === "access") {
+      const access = await flow.readSelect({
+        message: `What may Clankie do on ${id}?`,
+        options: MACHINE_ACCESS_LEVELS.map((value) => ({
+          value,
+          label: value,
+          hint: {
+            portal: "Talk only",
+            workers: "Workers in approved directories",
+            shell: "Workers and shell",
+            screen: "Workers, shell and desktop control",
+          }[value],
+        })),
+        allowBack: true,
+      });
+      if (access !== undefined)
+        await attempt(
+          flow,
+          () => services.machines(["access", id, access]),
+          `${id}: ${access} access saved. This is a service preference, not an OS sandbox.`,
+        );
+      continue;
+    }
     if (choice === "transcripts") {
       await services.openSessions?.(id);
       continue;

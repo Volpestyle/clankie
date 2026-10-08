@@ -2558,7 +2558,7 @@ clankie fleet set --verification review_and_seal --report-style "Short and plain
 ### `machines [list|discover] [--json]`
 
 A machine is where agents run; a device is a paired phone or desktop portal.
-`machines` prints one row per machine: Herdr sessions, state and worker count
+`machines` prints one row per machine: access level, Herdr sessions, state and worker count
 (`?` when unavailable). `--json` returns `{ observedAt, machines }` from
 `GET /v1/machines`. Discovery reads local Herdr sessions and literal aliases in
 the owner's SSH config (including bounded `Include` expansion). Probes use BatchMode and strict known-host checking,
@@ -2569,10 +2569,24 @@ are cached for fifteen seconds; `discover` refreshes them.
 
 ```bash
 clankie machines add pc --ssh my-pc --shell powershell
+clankie machines access pc workers
 clankie machines sessions pc
 clankie machines sessions pc --connect work --id pc-work
 clankie machines remove pc
 ```
+
+Owners choose cumulative `portal`, `workers`, `shell` or `screen` with
+`clankie machines access NAME LEVEL`, or Settings → Machines / `/machines`.
+Existing local installs retain screen; new or ungranted remote machines start
+at portal. `PATCH /v1/machines/:id/access` takes `{ "accessLevel": "workers" }`
+and requires the operator bearer. Inventory includes `accessLevel` and
+`accessEnforcement`; older servers display `unreported` rather than an inferred
+grant. Current enforcement is `service-preference`, not an OS sandbox. Actor,
+room and workspace grants remain independent; bounded service-owned I/O is
+not general shell permission. Policy is checked on each native tool call,
+after worker waits and before screen effects. Revocation leaves recovery
+available and does not terminate existing workers. Joined-host proof is
+VUH-1800; OS isolation is VUH-1804.
 
 Adding registers transcript access immediately and lists available sessions.
 Connecting names an existing Herdr session; it does not start one. Removal
@@ -2594,7 +2608,8 @@ continue to use `pair` and `devices`.
 
 The paired operator `connections` operation uses the existing `steer` grant for
 `discover`, `add_machine` (`id`, `ssh`, optional `shell`), `remove_machine` and
-`connect_runtime` (`id`, `session`, optional `machine`, default `local`). Its
+`connect_runtime` (`id`, `session`, optional `machine`, default `local`), and
+`set_machine_access` (`id`, `accessLevel`). Its
 inventory includes `machines` and a `machine` ID on every runtime row. Paired
 metadata omits local socket paths.
 

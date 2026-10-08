@@ -285,6 +285,26 @@ async function fixture(
     timeoutMs: 3000,
   });
   const settings = new SettingsStore(join(root, "settings.json"));
+  if (ssh) {
+    await settings.update((current) => ({
+      ...current,
+      machines: [{ id: "fixture-box", ssh: ssh.fleet.ssh.host, shell: ssh.fleet.ssh.shell, aliases: [] }],
+      machineAccess: { "fixture-box": "workers" },
+      execution: {
+        ...current.execution,
+        connections: [
+          {
+            id: ssh.fleet.id,
+            machine: "fixture-box",
+            session: ssh.fleet.session,
+            kind: "herdr",
+            enabled: true,
+            capabilities: ["code"],
+          },
+        ],
+      },
+    }));
+  }
   if (preferencesOnly)
     await settings.update((current) => ({
       ...current,
