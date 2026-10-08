@@ -89,6 +89,8 @@ it.each(["seat", "aggregate"] as const)(
         scope === "seat" ? "w1:p1" : undefined,
       );
     try {
+      for (let count = 0; count < 100; count++) refusal();
+      now += 60_000;
       const poll = outbox.poll(5_000, undefined, binding);
       refusal();
       const [original] = await poll;
@@ -108,7 +110,7 @@ it.each(["seat", "aggregate"] as const)(
       metrics.observeProof("fleet", { source: "proof", reason: "missing_binding" }, "w3:p1");
       refusal();
       expect(attempts).toBe(1);
-      expect(metrics.snapshot().totals.proof.attempts).toBe(fillerCount + 4);
+      expect(metrics.snapshot().totals.proof.attempts).toBe(fillerCount + 104);
       expect(outbox.acknowledge("invented-original", binding)).toBe(false);
       expect(outbox.acknowledge(original!.id, "c".repeat(64))).toBe(false);
       expect(outbox.recoveryAcknowledged(original!.id)).toBe(false);
@@ -120,6 +122,10 @@ it.each(["seat", "aggregate"] as const)(
         refusal();
       }
       expect(attempts).toBe(1);
+      now += 60_000;
+      // The original high-volume bucket has expired. A fresh qualifying
+      // sample must persist again before another deliberate dispatch.
+      for (let count = 0; count < 100; count++) refusal();
       now += 60_000;
       refusal();
       expect(attempts).toBe(2);
@@ -224,7 +230,7 @@ it("counts terminal real socket refusals, keeps diagnostics separate, and serves
       proofRefusalRate: 1,
       proofRefusalsPerMinute: 4 / 60,
     });
-    expect(alerts).toEqual(["w1:p1:1"]);
+    expect(alerts).toEqual([]);
     const content = JSON.stringify(snapshot);
     expect(content).not.toMatch(
       /PID_PATH_ARGV_SENTINEL|private-sensitive|private-argv|w1:p1|\/private\/sensitive|\bpid\b/u,
@@ -237,6 +243,91 @@ it("counts terminal real socket refusals, keeps diagnostics separate, and serves
     expect(metrics.snapshot().totals.proof.attempts).toBe(4);
   } finally {
     await closeNativeProcessObservers();
+    if (server instanceof HttpServer) server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it("counts a sparse recorded startup sample without paging and requires a sustained real TCP refusal sample", async () => {
+  let now = Date.parse("2026-10-08T03:53:56Z");
+  const alerts: import("@clankie/protocol").FleetHealthMetricsWindow[] = [];
+  const metrics = new FleetHealthMetrics({
+    now: () => now,
+    onAggregateProofAlert: (rates) => {
+      alerts.push(rates);
+      return true;
+    },
+  });
+  // Golden contract input grounded in the owner's live 2/194 startup sample.
+  // These observations do not claim a fresh native producer run.
+  for (let count = 0; count < 192; count++) metrics.observeProof("fleet", { source: "proof_success" });
+  for (let count = 0; count < 2; count++)
+    metrics.observeProof("fleet", { source: "proof", reason: "not_member" });
+  now += 60_000;
+  expect(metrics.snapshot().windows[0].proof).toEqual({
+    attempts: 194,
+    refusals: 2,
+    byReason: { not_member: 2 },
+  });
+  expect(alerts).toEqual([]);
+  const proof = localFleetProof({
+    platform: "darwin",
+    herdrBinary: "herdr",
+    binding: async () => undefined,
+    diagnostics: (event, pane) => metrics.observeProof("fleet", event, pane),
+  });
+  const app = new Hono();
+  registerFleetHealthMetricsRoutes(app, {
+    captain: createStubCaptain(),
+    authenticateOperator: createBearerAuthenticator("policy-test", { operatorId: "owner" }),
+    fleetHealthMetrics: metrics,
+  });
+  const server = serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request, environment) => {
+      if (new URL(request.url).pathname === "/proof")
+        return Response.json({ accepted: await proof(environment.incoming.socket, "") }, { status: 403 });
+      return app.fetch(request);
+    },
+  });
+  if (!server.listening) await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing real policy TCP listener");
+  const host = `http://127.0.0.1:${address.port}`;
+  const refuse = async () => {
+    const response = await fetch(`${host}/proof`);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ accepted: false });
+  };
+  try {
+    // Expiration resets persistence; an old elevated sample cannot qualify a new one.
+    now += 5 * 60_000;
+    for (let count = 0; count < 99; count++) await refuse();
+    now += 60_000;
+    await refuse();
+    expect(alerts).toEqual([]);
+    now += 59_999;
+    await refuse();
+    expect(alerts).toEqual([]);
+    now += 1;
+    await refuse();
+    expect(alerts).toHaveLength(1);
+    const response = await fetch(`${host}${FLEET_HEALTH_METRICS_PATH}`, {
+      headers: { authorization: "Bearer policy-test" },
+    });
+    const snapshot = FleetHealthMetricsSnapshotSchema.parse(await response.json());
+    expect(alerts[0]).toEqual(snapshot.windows[0]);
+    expect(snapshot.windows[0].proof).toEqual({
+      attempts: 102,
+      refusals: 102,
+      byReason: { invalid_pane: 102 },
+    });
+    await Promise.resolve();
+    now += 60_000;
+    await refuse();
+    expect(alerts).toHaveLength(1);
+  } finally {
     if (server instanceof HttpServer) server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

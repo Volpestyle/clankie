@@ -313,6 +313,9 @@ it("records an aggregate proof flood for the default owner without a current nat
       const response = await fetch(`http://127.0.0.1:${address.port}`);
       expect(await response.json()).toEqual({ accepted: false });
     };
+    for (let count = 0; count < 100; count++) await refuse();
+    expect(attempts).toHaveLength(0);
+    now += 60_000;
     await refuse();
     expect(await attempts[0]).toBe(true);
     await Promise.resolve();
@@ -330,7 +333,7 @@ it("records an aggregate proof flood for the default owner without a current nat
     if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Missing replay page");
     expect(
       replay.result.events.filter((event) => event.type === "message" && event.role === "external"),
-    ).toMatchObject([{ text: "Fleet aggregate proof alert: 1/1 refused." }]);
+    ).toMatchObject([{ text: "Fleet aggregate proof alert: 101/101 refused." }]);
     expect(
       new ConversationJournal(join(f.root, "conversations"))
         .read("global-default")
@@ -1056,6 +1059,9 @@ it("proof threshold retries an unavailable native alert, then cools down only af
       const response = await fetch(`http://127.0.0.1:${address.port}`);
       expect(await response.json()).toEqual({ accepted: false });
     };
+    for (let count = 0; count < 100; count++) await refuse();
+    expect(attempts).toHaveLength(0);
+    now += 60_000;
     await refuse();
     expect(attempts).toHaveLength(1);
     expect(await attempts[0]).toBe(false);
@@ -1065,7 +1071,7 @@ it("proof threshold retries an unavailable native alert, then cools down only af
     const poll = f.captain.pollSeatEvents(3000, undefined, "global-default");
     await refuse();
     const [event] = await poll;
-    expect(event?.content).toBe("Fleet proof alert: 2/2 refused.");
+    expect(event?.content).toBe("Fleet proof alert: 102/102 refused.");
     expect(attempts).toHaveLength(2);
     expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
     expect(await attempts[1]).toBe(true);
@@ -1076,9 +1082,9 @@ it("proof threshold retries an unavailable native alert, then cools down only af
     expect(attempts).toHaveLength(2);
     expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
     expect(metrics.snapshot().totals.proof).toEqual({
-      attempts: 3,
-      refusals: 3,
-      byReason: { missing_binding: 3 },
+      attempts: 103,
+      refusals: 103,
+      byReason: { missing_binding: 103 },
     });
   } finally {
     if ("closeAllConnections" in server) server.closeAllConnections();

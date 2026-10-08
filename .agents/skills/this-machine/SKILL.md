@@ -121,6 +121,12 @@ in [launcher details](reference/launcher.md#updating-the-runtime).
 
 ## One body, several conversations
 
+Fleet proof alerts use five-minute windows: above 1%, at least 100 checks and
+five refusals, elevated for a minute. All startup/load refusals still count.
+Worker alerts use that pane's window; aggregate alerts use the same source as
+`clankie metrics --fleet` and include pane-less requests. Compare the source and
+timestamp before interpreting different alert and doctor counts.
+
 `request_user_input` is Clankie's one owner ask tool on every source surface,
 including native seats over MCP and Discord. Use a decision with options and
 recommendation, an approval for an action the effective `autonomy.fleet` settings

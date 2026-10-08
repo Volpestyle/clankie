@@ -20,6 +20,7 @@ type AlertState = {
   attemptAt?: number;
   alertPending?: boolean;
   acknowledged?: () => boolean;
+  elevatedSince?: number;
 };
 const MINUTE = 60_000;
 function empty(): Counters {
@@ -164,6 +165,13 @@ export class FleetHealthMetrics {
     pane?: string,
   ): void {
     const rates = window(5, seat.buckets, minute);
+    // Count every refusal, including cold startup and overload. Page only on
+    // a meaningful sample that stays elevated for a minute; caller claims and
+    // machine load must never suppress a real outage's telemetry or alert.
+    const elevated =
+      rates.proof.attempts >= 100 && rates.proof.refusals >= 5 && rates.proofRefusalRate > 0.01;
+    if (!elevated) delete seat.elevatedSince;
+    else seat.elevatedSince ??= this.now();
     if (seat.alertPending && seat.acknowledged) {
       try {
         // Read only the original acknowledgment. Never redispatch a held alert.
@@ -178,7 +186,8 @@ export class FleetHealthMetrics {
     }
     if (
       event.source === "proof" &&
-      rates.proofRefusalRate > 0.01 &&
+      elevated &&
+      this.now() - seat.elevatedSince! >= MINUTE &&
       !seat.alertPending &&
       (seat.attemptAt === undefined || minute - seat.attemptAt >= 1) &&
       (seat.alertAt === undefined || minute - seat.alertAt >= 5)

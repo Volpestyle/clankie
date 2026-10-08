@@ -1120,7 +1120,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     await captain
       .notifyFleetHealthAlert(
         undefined,
-        `Fleet proof refusals exceeded 1% across all local proof checks over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Reasons: ${reasons}. This includes requests without a current owned seat. Inspect clankie metrics --fleet and clankie doctor.`,
+        `Fleet proof refusals stayed above 1% for a minute. Aggregate 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). Reasons: ${reasons}. This is the clankie metrics --fleet source and includes requests without a current owned seat.`,
         (result) => {
           delivery = result;
         },
@@ -1133,7 +1133,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     await captain
       .notifyFleetHealthAlert(
         pane,
-        `Fleet proof refusals exceeded 1% over 5 minutes at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts}. Inspect clankie metrics --fleet and doctor.`,
+        `Fleet proof refusals stayed above 1% for a minute. This worker's 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). clankie metrics --fleet and doctor show the aggregate across all callers, so their counts can differ.`,
         (result) => {
           delivery = result;
         },

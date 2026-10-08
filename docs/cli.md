@@ -3311,9 +3311,16 @@ report attempts and failures, and fixed native/transport reason counters. The
 five- and sixty-minute windows show failure fractions and failures per minute;
 counters contain no process IDs, paths, argv, report bodies or credentials.
 Doctor includes the same windows. More than 1% terminal proof refusals in five
-minutes produces an aggregate alert in the owner's default conversation,
+minutes produces an alert once that window has at least 100 attempts and five
+refusals and stays elevated for at least one minute. Every refusal still counts;
+startup and high machine load do not exempt callers. Sparse or transient bursts
+remain visible in metrics without paging the owner. The aggregate alert goes to the owner's default conversation,
 including refusals without an identifiable or currently owned pane. A live seat
-also alerts its current owning lead. Aggregate alerts are retained as service
+also alerts its current owning lead under the same sample/persistence rule.
+Alert text labels its source: a worker's window counts only that caller pane;
+the aggregate window matches `clankie metrics --fleet` at the alert timestamp.
+Later metric reads can differ as checks arrive and minute buckets expire.
+Aggregate alerts are retained as service
 notices even when no native seat can receive them. A definitively unavailable
 native route starts the aggregate five-minute cooldown after retaining that
 notice; an exact native acknowledgment starts the cooldown for delivered alerts.
