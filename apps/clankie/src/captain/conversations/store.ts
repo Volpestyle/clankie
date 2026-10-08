@@ -1421,6 +1421,15 @@ export class ConversationStore {
     return nativeSource(this, conversationId);
   }
 
+  /** Host-synchronized native transcript identity, including seats outside the fleet roster. */
+  public nativeSeatSessionKey(conversationId: string): string | undefined {
+    const meta = this.metas.get(conversationId);
+    const key = meta?.nativeSeatSessionKey ?? meta?.seatTranscript?.sessionKey;
+    // Native hooks and local Herdr transcript reads name the same session
+    // differently. Preserve host qualification and path identities verbatim.
+    return key?.replace(/^herdr:(claude|opencode):id:/u, "$1:");
+  }
+
   /** Reuse the current persona thread after legacy seat-scope migration. */
   public nativeConversationForSeat(source: HerdrAgentSnapshot): OperatorConversation | undefined {
     return nativeConversationForSeat(this, source);

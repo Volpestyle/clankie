@@ -149,10 +149,29 @@ export function linearWakeReceipt(ctx: ConversationStore, id: string, runId: str
   return {
     messageId: checkpoint.wakeId,
     prepare: (native: NonNullable<typeof receipt.native>) => {
-      receipt.native = native;
+      // A standalone operator can poll without a fleet binding. Pin the
+      // host-synchronized transcript identity before the outbox offers it;
+      // an absent binding is never permission for a replacement seat.
+      const recipientSessionKey = ctx.nativeSeatSessionKey(id);
+      receipt.native = {
+        ...native,
+        ...(native.recipientBinding === undefined && recipientSessionKey !== undefined
+          ? { recipientSessionKey }
+          : {}),
+      };
       ctx["saveMeta"](meta);
     },
   };
+}
+
+/** Missing identity is refused; the exact absent outbox binding still needs its native session. */
+export function sameLinearWakeRecipient(
+  original: { recipientBinding?: string; recipientSessionKey?: string },
+  current: { binding?: string | undefined; sessionKey?: string | undefined },
+): boolean {
+  return original.recipientBinding !== undefined
+    ? original.recipientBinding === current.binding
+    : original.recipientSessionKey !== undefined && original.recipientSessionKey === current.sessionKey;
 }
 
 export async function receiveLinearWake(

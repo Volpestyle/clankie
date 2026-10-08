@@ -1191,6 +1191,11 @@ authentication. `clankie linear deliveries` reads `GET /v1/linear/deliveries`:
 offered wake ID, conversation ID, included event IDs/projects/routes, native
 original receipt, and `receivedAt` when the target confirms. An offered batch
 can have failed before delivery; `offeredAt` is not a consumption receipt.
+Native originals retain the exact recipient binding, or the host-synchronized
+`recipientSessionKey` when no fleet binding exists. The target's `linear_wake`
+`received` call must match that saved identity and the original outbox ID and
+fingerprint. A changed session or an old original with neither identity is
+refused; transport acknowledgment alone never marks notifications read.
 
 | Following     | Chat history                   | Automatic model turns                  |
 | ------------- | ------------------------------ | -------------------------------------- |

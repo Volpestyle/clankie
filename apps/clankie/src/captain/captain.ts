@@ -223,6 +223,7 @@ import { RoomHandoffBursts } from "./room-handoff-bursts.ts";
 import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
 import { RoomConversations } from "./room-conversations.ts";
+import { sameLinearWakeRecipient } from "./conversations/linear-wakes.ts";
 import { captainRoutingExtension } from "./routing.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
@@ -922,7 +923,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         conversations.receiveLinearWake(id, wakeId, async (original) => {
           const source = await operatorNativeSource(id);
           const binding = inboundBinding(source);
-          if (!binding || binding !== original.recipientBinding) return false;
+          const nativeId = source === undefined ? undefined : nativeSessionId(source);
+          // A resolved live source wins over a potentially stale transcript
+          // checkpoint. Only a standalone seat uses the synchronized identity.
+          const sessionKey =
+            source === undefined
+              ? conversations.nativeSeatSessionKey(id)
+              : nativeId === undefined
+                ? undefined
+                : `${source.agent}:${nativeId}`;
+          if (
+            !sameLinearWakeRecipient(original, {
+              ...(binding === undefined ? {} : { binding }),
+              ...(sessionKey === undefined ? {} : { sessionKey }),
+            })
+          )
+            return false;
           shutdown.signal.throwIfAborted();
           return seatOutbox(id).confirmReceived(original);
         }),

@@ -13,7 +13,12 @@ export function syncConversationTranscript(
   workingDirectory?: string,
 ): void {
   const meta = conversationId === undefined ? undefined : ctx["metas"].get(conversationId);
-  if (meta === undefined || transcript.entries.length === 0) return;
+  if (meta === undefined) return;
+  if (agentRole === "captain" && meta.nativeSeatSessionKey !== transcript.sessionKey) {
+    meta.nativeSeatSessionKey = transcript.sessionKey;
+    ctx["saveMeta"](meta);
+  }
+  if (transcript.entries.length === 0) return;
   transcript = {
     ...transcript,
     entries: transcript.entries.filter((entry) => entry.type !== "message" || !entry.internal),

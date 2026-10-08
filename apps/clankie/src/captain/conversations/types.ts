@@ -176,11 +176,18 @@ export interface ConversationMeta {
       eventIds: string[];
       offeredAt: string;
       receivedAt?: string;
-      native?: { messageId: string; fingerprint: string; recipientBinding?: string };
+      native?: {
+        messageId: string;
+        fingerprint: string;
+        recipientBinding?: string;
+        recipientSessionKey?: string;
+      };
     }
   >;
   /** Harness-native messages already folded into this durable persona thread. */
   seatTranscript?: SeatTranscriptCheckpoint;
+  /** Latest host-synchronized native head, even when its transcript has no new entries. */
+  nativeSeatSessionKey?: string;
   roomTranscripts?: Record<string, SeatTranscriptCheckpoint>;
   /** Native launcher sessions are pinned to one service conversation. */
   nativeSeatSessions?: Record<string, "current" | "retired">;

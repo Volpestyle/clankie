@@ -16,6 +16,7 @@ import { createClankieApp } from "../src/app.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { createConversationRunner } from "../src/captain/captain-conversation-runner.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import { sameLinearWakeRecipient } from "../src/captain/conversations/linear-wakes.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { LaneLog } from "../src/captain/lane-log.ts";
@@ -49,7 +50,9 @@ async function listen(app: Awaited<ReturnType<typeof createClankieApp>>) {
 
 /** Owned signed ingress → production runner/store/outbox → authenticated seat wire → real SDK tool
  * → stateful provider MCP, with persistent original/read receipts. No model or live account calls. */
-async function fixture(options: { oldBudgetWindow?: boolean } = {}) {
+async function fixture(
+  options: { oldBudgetWindow?: boolean; noBinding?: boolean; noSession?: boolean } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "linear-wake-receipts-"));
   cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -259,15 +262,19 @@ async function fixture(options: { oldBudgetWindow?: boolean } = {}) {
   if (created.op !== "create") throw new Error("Lead chat missing");
   const leadId = created.conversation.conversationId;
   for (const id of [leadId, "global-default"]) {
-    recipients.set(id, (id === leadId ? "b" : "a").repeat(64));
+    if (!options.noBinding) recipients.set(id, (id === leadId ? "b" : "a").repeat(64));
     store.rememberNativeHead(id, `owned-native-${id}`);
+    if (options.noBinding && !options.noSession) store.syncNativeSeatTranscript(id, `owned-native-${id}`, []);
   }
   const received = (id: string, wakeId: string) =>
     store.receiveLinearWake(
       id,
       wakeId,
       async (original) =>
-        original.recipientBinding === recipients.get(id) && outbox(id).confirmReceived(original),
+        sameLinearWakeRecipient(original, {
+          binding: recipients.get(id),
+          sessionKey: store.nativeSeatSessionKey(id),
+        }) && outbox(id).confirmReceived(original),
     );
   const service = await createClankieApp({
     settings,
@@ -466,6 +473,53 @@ async function wake(f: Awaited<ReturnType<typeof fixture>>, id: string, raw: str
   expect(events).toHaveLength(1);
   return events[0]!;
 }
+
+it("pins a binding-free native wake to its synchronized session and marks read only after exact consumption", async () => {
+  const f = await fixture({ noBinding: true });
+  const e = f.event();
+  f.notifications.push(e.notification);
+  const channel = await wake(f, "global-default", e.raw);
+  await f.ack("global-default", channel.id);
+  expect(f.notifications[0]!.readAt).toBeNull();
+  const before = (await f.deliveries()).deliveries.find(
+    (item: { wakeId: string }) => item.wakeId === channel.id,
+  );
+  expect(before.native).toMatchObject({ recipientSessionKey: "claude:owned-native-global-default" });
+  expect(before.native.recipientBinding).toBeUndefined();
+  expect(before.receivedAt).toBeUndefined();
+  await f.reload();
+  f.store().syncHeadTranscript("owned-head", {
+    sessionKey: "herdr:claude:id:owned-native-global-default",
+    entries: [],
+  });
+  expect((await f.confirm("global-default", channel.id)).isError).not.toBe(true);
+  expect(f.marks).toEqual([e.notification.id]);
+  expect(f.notifications[0]!.readAt).toEqual(expect.any(String));
+});
+
+it("refuses a replacement synchronized session for a binding-free original", async () => {
+  const f = await fixture({ noBinding: true });
+  const e = f.event();
+  f.notifications.push(e.notification);
+  const channel = await wake(f, "global-default", e.raw);
+  await f.ack("global-default", channel.id);
+  expect(f.store().syncNativeSeatTranscript("global-default", "replacement-native-session", [])).toBe(true);
+  await expect(f.confirm("global-default", channel.id)).rejects.toThrow("could not be confirmed");
+  expect(f.marks).toEqual([]);
+  expect(f.notifications[0]!.readAt).toBeNull();
+});
+
+it("never treats an identity-free original as a wildcard for a later synchronized seat", async () => {
+  const f = await fixture({ noBinding: true, noSession: true });
+  const e = f.event();
+  f.notifications.push(e.notification);
+  const channel = await wake(f, "global-default", e.raw);
+  await f.ack("global-default", channel.id);
+  f.store().syncNativeSeatTranscript("global-default", "later-native-session", []);
+  await expect(f.confirm("global-default", channel.id)).rejects.toThrow("could not be confirmed");
+  expect(f.marks).toEqual([]);
+  expect(f.notifications[0]!.readAt).toBeNull();
+});
 
 it("routes sparse signed issue/update comments to the configured lead and confirms read only from that target seat", async () => {
   const f = await fixture();

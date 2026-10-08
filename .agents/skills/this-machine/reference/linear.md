@@ -39,6 +39,10 @@ unread. Only matching signed notifications for events included in that batch
 are marked read. Delayed inbox creation is retried for ten minutes; uncertain
 read mutations settle by read-only observation, without another write or wake.
 `clankie linear deliveries` records destinations and consumption receipts.
+For a native seat outside the fleet roster, a wake without `recipientBinding`
+retains its host-synchronized `recipientSessionKey`. Confirmation requires that
+exact current session and the original outbox ID/fingerprint; a missing saved
+identity is refused. Old identity-free wakes cannot be retroactively confirmed.
 
 Use `linear_wake({ action: "set", projectChats: [{ projectId: "UUID", name: "Project name", conversationId: "CHAT_ID" }] })`
 or `clankie linear routes set --json-stdin` with the array to replace destinations.
