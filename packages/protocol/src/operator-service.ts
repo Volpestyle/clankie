@@ -1,3 +1,4 @@
+import { FreeAgentIntentSchema, type FreeAgentIntent } from "./free-agent.ts";
 import {
   PendingNativeMessageActionSchema,
   PendingNativeMessagesResultSchema,
@@ -388,6 +389,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       personaId: OperatorAgentPersonaIdSchema,
       role: OperatorAgentRoleSchema.nullable(),
       projectId: ProjectIdSchema.optional(),
+      freeAgent: FreeAgentIntentSchema.optional(),
     })
     .strict(),
   /**
@@ -1252,6 +1254,7 @@ export interface OperatorConversationServiceClient {
     personaId: string,
     role: OperatorAgentRole | null,
     projectId?: string,
+    freeAgent?: FreeAgentIntent,
   ): Promise<OperatorAgentPersona>;
   /** Observable terminals in Herdr's native hierarchy; absent on older injected clients. */
   terminalCatalog?(): Promise<readonly OperatorTerminalSession[]>;
@@ -1599,13 +1602,14 @@ export function createOperatorConversationServiceClient(
       }
       return result.persona;
     },
-    async setPersonaRole(personaId, role, projectId) {
+    async setPersonaRole(personaId, role, projectId, freeAgent) {
       const result = await dispatch({
         op: "set_persona_role",
         schemaVersion: 1,
         personaId,
         role,
         ...(projectId === undefined ? {} : { projectId }),
+        ...(freeAgent === undefined ? {} : { freeAgent }),
       });
       if (result.op !== "set_persona_role") {
         throw new Error(`Unexpected ${result.op} result for set_persona_role`);

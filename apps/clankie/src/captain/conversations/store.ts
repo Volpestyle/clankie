@@ -2103,6 +2103,16 @@ export class ConversationStore {
       throw new ConversationRefusedError(
         "This is a read-only room transcript. Send messages in Discord; work started from a Discord room reports back through that room.",
       );
+    if (
+      turn.freeAgent &&
+      (turn.delivery === "queue" ||
+        turn.attachments ||
+        meta.scope.kind !== "persona" ||
+        meta.scope.personaId !== turn.freeAgent.personaId)
+    )
+      throw new ConversationRefusedError(
+        "A free-agent drop must address its original persona without queued delivery or attachments",
+      );
     const attachments = await this.sendAttachments(meta, turn);
     if (turn.delivery === "queue" && meta.nativeSource && this.nativeMessageHost) {
       return this.queueSeatSend(
@@ -2472,6 +2482,7 @@ export class ConversationStore {
         : await this.sendToSeat?.(seatId, message, {
             conversationId: meta.conversationId,
             source: "operator",
+            ...(turn.freeAgent === undefined ? {} : { freeAgent: turn.freeAgent }),
             ...(turn.delivery === undefined ? {} : { delivery: turn.delivery }),
           });
     if (typeof delivery === "object" && delivery.outcome !== "delivered" && delivery.outcome !== "offline") {

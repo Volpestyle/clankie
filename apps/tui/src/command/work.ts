@@ -190,6 +190,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         "--remove-label",
         "--add-blocker",
         "--request-id",
+        "--free-agent",
       ]);
       for (const [flag, values] of parsed.flags)
         if (!allowed.has(flag) || values.length !== 1) throw new Error(WORK_USAGE);
@@ -200,6 +201,9 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
           itemId: rest[0],
           requestId: one(parsed, "--request-id") ?? randomUUID(),
           command: commands[0],
+          ...(one(parsed, "--free-agent") === undefined
+            ? {}
+            : { freeAgent: JSON.parse(one(parsed, "--free-agent")!) }),
         },
       };
     }

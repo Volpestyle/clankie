@@ -58,6 +58,7 @@ export async function runSendCommand(
       delivery: { type: "string", default: "steer" },
       stdin: { type: "boolean" },
       attach: { type: "string", multiple: true },
+      "free-agent": { type: "string" },
     },
   });
   if (values.stdin === true && positionals.length > 0)
@@ -76,6 +77,7 @@ export async function runSendCommand(
     expectedRevision: 0,
     message,
     delivery: values.delivery,
+    ...(values["free-agent"] === undefined ? {} : { freeAgent: JSON.parse(values["free-agent"]) }),
     // Validated with stand-in references; the real ones exist only after upload.
     ...(files.length === 0
       ? {}

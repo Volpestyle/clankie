@@ -74,9 +74,16 @@ const sessions = new Map<string, SessionState<Map<string, SubagentCall>>>();
 const paths = new Map<string, string>();
 
 /** Bounded, incremental subagent summary for one local Claude session; undefined when it has no file. */
-export function readClaudeSubagents(session: HerdrAgentSession): OperatorSeatSubagents | undefined {
+export function readClaudeSubagents(
+  session: HerdrAgentSession,
+  options: { requireComplete?: boolean } = {},
+): OperatorSeatSubagents | undefined {
   const journal = readJournal("claude", session, sessions, () => new Map(), foldClaudeSubagentLine);
-  return journal === undefined ? undefined : summarize(journal.state.data);
+  return journal === undefined ||
+    (options.requireComplete &&
+      (journal.state.size > COLD_READ_BYTES || journal.state.data.size >= MAX_CALLS))
+    ? undefined
+    : summarize(journal.state.data);
 }
 
 /** Same bounded append reader for each native subagent projection. */
@@ -242,6 +249,7 @@ interface CodexIndex {
   readonly pending: Map<string, string>;
   revision: number;
   refreshing: Promise<void> | undefined;
+  incomplete: boolean;
 }
 const codexIndexes = new Map<string, CodexIndex>();
 const codexDiscoveries = new Map<
@@ -261,11 +269,14 @@ const codexDiscoveries = new Map<
  * headers in that seat's own Codex home. Only matching children's tails are
  * read. Parent collection/status records settle them on this very fleet read.
  */
-export function readCodexSubagents(session: HerdrAgentSession): Promise<OperatorSeatSubagents | undefined> {
-  const key = `${session.kind}:${session.value}`;
+export function readCodexSubagents(
+  session: HerdrAgentSession,
+  options: { freshDiscovery?: boolean } = {},
+): Promise<OperatorSeatSubagents | undefined> {
+  const key = `${session.kind}:${session.value}:${options.freshDiscovery === true}`;
   const existing = codexReads.get(key);
   if (existing !== undefined) return existing;
-  const pending = readCodexSubagentsAsync(session).finally(() => {
+  const pending = readCodexSubagentsAsync(session, options.freshDiscovery === true).finally(() => {
     if (codexReads.get(key) === pending) codexReads.delete(key);
   });
   codexReads.set(key, pending);
@@ -274,6 +285,7 @@ export function readCodexSubagents(session: HerdrAgentSession): Promise<Operator
 
 async function readCodexSubagentsAsync(
   session: HerdrAgentSession,
+  freshDiscovery: boolean,
 ): Promise<OperatorSeatSubagents | undefined> {
   const journal = await readJournalAsync(
     session,
@@ -281,10 +293,10 @@ async function readCodexSubagentsAsync(
     () => ({ order: 0, signals: new Map(), invocations: new Map(), children: new Map() }),
     foldCodexSubagentLine,
   );
-  if (journal === undefined) return undefined;
+  if (journal === undefined || (freshDiscovery && journal.stats.size > COLD_READ_BYTES)) return undefined;
   const parent = await codexMetadataAsync(journal.path, journal.stats);
   if (parent === undefined) return undefined;
-  const children = (await codexChildrenAsync(journal.path, parent, journal.stats))
+  const children = (await codexChildrenAsync(journal.path, parent, journal.stats, freshDiscovery))
     .sort((a, b) => a.metadata.startedAt - b.metadata.startedAt)
     .slice(-MAX_CALLS);
   const calls = new Map<string, SubagentCall>();
@@ -940,17 +952,30 @@ async function refreshCodexIndex(root: string, index: CodexIndex): Promise<void>
     const changed = new Set<string>();
     const files: string[] = [];
     let visited = 0;
+    index.incomplete = false;
     const visit = async (path: string): Promise<void> => {
-      if (++visited > MAX_HEADERS) return;
+      if (++visited > MAX_HEADERS) {
+        index.incomplete = true;
+        return;
+      }
       const stats = await lstat(path).catch(() => undefined);
-      if (stats === undefined || !stats.isDirectory()) return;
+      if (stats === undefined || !stats.isDirectory()) {
+        index.incomplete = true;
+        return;
+      }
       const current = fingerprint(stats);
       let cached = index.directories.get(path);
       if (cached?.fingerprint !== current) {
         // Never traverse a replaced directory through an ancestor symlink.
-        if ((await realpath(path).catch(() => undefined)) !== path) return;
+        if ((await realpath(path).catch(() => undefined)) !== path) {
+          index.incomplete = true;
+          return;
+        }
         const entries = await readdir(path, { withFileTypes: true }).catch(() => undefined);
-        if (entries === undefined) return;
+        if (entries === undefined) {
+          index.incomplete = true;
+          return;
+        }
         cached = {
           fingerprint: current,
           directories: entries
@@ -970,6 +995,7 @@ async function refreshCodexIndex(root: string, index: CodexIndex): Promise<void>
     };
     await visit(root);
     for (const path of index.directories.keys()) if (!directories.has(path)) index.directories.delete(path);
+    if (files.length > MAX_HEADERS) index.incomplete = true;
     const selected = new Set(files.sort().reverse().slice(0, MAX_HEADERS));
     for (const path of index.metadata.keys()) {
       if (!selected.has(path)) {
@@ -1054,7 +1080,12 @@ function codexRelevantDirectories(root: string, parentPath: string, children: re
   return directories;
 }
 
-async function codexChildrenAsync(parentPath: string, parent: CodexMetadata, parentStats: Stats) {
+async function codexChildrenAsync(
+  parentPath: string,
+  parent: CodexMetadata,
+  parentStats: Stats,
+  freshDiscovery = false,
+) {
   const canonicalParent = await realpath(parentPath);
   const root = codexRoot(canonicalParent);
   let index = codexIndexes.get(root);
@@ -1065,6 +1096,7 @@ async function codexChildrenAsync(parentPath: string, parent: CodexMetadata, par
       pending: new Map(),
       revision: 0,
       refreshing: undefined,
+      incomplete: false,
     };
     codexIndexes.set(root, index);
     if (codexIndexes.size > MAX_SESSIONS) codexIndexes.delete(codexIndexes.keys().next().value!);
@@ -1088,13 +1120,24 @@ async function codexChildrenAsync(parentPath: string, parent: CodexMetadata, par
   const current = `${fingerprint(parentStats)}\n${stamps.join("\n")}`;
   const now = Date.now();
   const fresh =
+    !freshDiscovery &&
     cached?.index === index &&
     cached.parentId === parent.id &&
     cached.fingerprint === current &&
     now >= cached.checkedAt &&
     now - cached.checkedAt < CODEX_DISCOVERY_REFRESH_MS;
   if (fresh && cached.revision === index.revision) return cached.children;
-  if (!fresh) await refreshCodexIndex(root, index);
+  if (!fresh) {
+    if (freshDiscovery) await index.refreshing;
+    await refreshCodexIndex(root, index);
+  }
+  if (
+    freshDiscovery &&
+    (index.incomplete ||
+      index.pending.size > 0 ||
+      [...index.metadata.values()].filter((row) => row.parentId === parent.id).length >= MAX_CALLS)
+  )
+    throw new Error("Native child census is incomplete");
   const children = [...index.metadata.entries()]
     .filter(([, metadata]) => metadata.parentId === parent.id)
     .map(([path, metadata]) => ({ path, metadata }))

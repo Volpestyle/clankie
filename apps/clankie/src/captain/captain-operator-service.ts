@@ -42,6 +42,9 @@ import { SeatOutbox } from "./seat-outbox.ts";
 import type { createStanceStore } from "./stances.ts";
 
 export interface CreateOperatorServiceContext {
+  readonly prepareFreeAgentIntent: (
+    intent: import("@clankie/protocol").FreeAgentIntent,
+  ) => ReturnType<typeof import("./free-agent-intent.ts").prepareFreeAgentIntent>;
   readonly personas: PersonaStore;
   readonly settingsStore: SettingsStore;
   readonly deps: CaptainDeps;
@@ -517,6 +520,14 @@ export function createOperatorService(
       if (!ctx.personas.all([], () => undefined).some((persona) => persona.personaId === request.personaId))
         throw new Error(`Unknown agent ${request.personaId}`);
       const projectId = request.projectId ?? DEFAULT_PROJECT_ID;
+      if (
+        request.freeAgent &&
+        (request.freeAgent.personaId !== request.personaId ||
+          request.freeAgent.projectId !== projectId ||
+          request.freeAgent.helpTarget)
+      )
+        throw new ConversationRefusedError("The role drop does not match its original agent and project");
+      const free = request.freeAgent ? await ctx.prepareFreeAgentIntent(request.freeAgent) : undefined;
       const seats = (await ctx.refreshFleet({ force: true })).filter(
         (seat) => seat.personaId === request.personaId,
       );
@@ -562,6 +573,7 @@ export function createOperatorService(
         throw new ConversationRefusedError(`Agent is not a confirmed current member of project ${projectId}`);
       if (projectsRevision(settings.settings.projects) !== snapshot.projectsRevision)
         throw new ConversationRefusedError("Project settings changed before role assignment");
+      await free?.guard();
       const updated = await ctx.personas.setProjectRole(
         {
           schemaVersion: 1,
@@ -572,6 +584,7 @@ export function createOperatorService(
         () => {
           try {
             settings.assertCurrent();
+            free?.assertCurrent();
           } catch {
             throw new ConversationRefusedError("Project settings changed before role assignment");
           }

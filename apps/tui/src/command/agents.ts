@@ -1,3 +1,4 @@
+import { FreeAgentIntentSchema } from "@clankie/protocol";
 import { readMessageStatus } from "../../../../integrations/claude-plugin/worker/bin/message-status.mjs";
 import { runProjectRoleCommand } from "./project-role.ts";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
@@ -245,7 +246,7 @@ export async function runAgentsCommand(
     return runProjectRoleCommand(args.slice(1), options);
   const roleFlags =
     args[0] === "role"
-      ? flags(firstFlag < 0 ? [] : args.slice(firstFlag), ["--project"])
+      ? flags(firstFlag < 0 ? [] : args.slice(firstFlag), ["--project", "--free-agent"])
       : new Map<string, string>();
   const projectId = roleFlags.has("--project")
     ? ProjectIdSchema.parse(roleFlags.get("--project"))
@@ -277,6 +278,9 @@ export async function runAgentsCommand(
       resolvePersona(personas, roleArguments.slice(0, -1).join(" ")),
       parseRole(roleArguments.at(-1)!),
       projectId,
+      roleFlags.has("--free-agent")
+        ? FreeAgentIntentSchema.parse(JSON.parse(roleFlags.get("--free-agent")!))
+        : undefined,
     );
   }
   let path: string,

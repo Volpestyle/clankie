@@ -24,6 +24,8 @@ export interface PeerSeatAuthority {
   validate(): Promise<boolean>;
 }
 export interface PeerDeliveryOptions {
+  /** An owner restriction does not turn an operator message into peer output. */
+  readonly source?: "operator" | "peer";
   /** Owner send intent, absent for peer messages and automatic delivery. */
   readonly delivery?: "steer" | "queue";
   /** Host-only native author/admission check, combined with any peer fence. */

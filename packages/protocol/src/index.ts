@@ -1,3 +1,4 @@
+export * from "./free-agent.ts";
 export * from "./worker-reports.ts";
 export * from "./game-extensions.ts";
 export * from "./seat-efficiency.ts";

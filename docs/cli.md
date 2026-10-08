@@ -2957,6 +2957,20 @@ project member. Existing contacts' `role` remains the default-project compatibil
 view; the confirmed project membership snapshot carries the selected project's
 current saved role, including a cleared role.
 
+World drops add an optional owner-write precondition to the existing routes:
+`agents role ... --free-agent JSON`, `send --conversation ID --free-agent JSON`
+and `work assign ... --free-agent JSON`. The JSON contains the exact `personaId`,
+`seatId`, `occupantId` and `projectId`; a catalog-authored help message also
+carries `helpTarget` with the original teammate's IDs and `paneId`.
+The API field is `freeAgent`. It grants no authority: owner authentication,
+project/tracker proof and existing delivery receipts still apply. The host
+requires confirmed idle, no assignment or active goal, and observed zero running
+children at its effect fence. Unknown or changed proof refuses the action.
+Omitting the field preserves ordinary explicit owner commands, including the TUI.
+Clients must never strip the field and retry a refused or uncertain drop.
+The app holds the original action for four seconds with Undo before dispatch;
+there is no inverse command or compensating write.
+
 `clankie agents role ROLE --project PROJECT` edits a project hire profile through
 its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
 `--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,

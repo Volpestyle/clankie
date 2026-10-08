@@ -243,6 +243,7 @@ interface ConversationTurnSeat {
 /** Where a turn runs and who it arrived from. */
 export interface ConversationTurnContext {
   readonly delivery?: "steer" | "queue";
+  readonly freeAgent?: import("@clankie/protocol").FreeAgentIntent;
   /** Actual native admission, independent of the model turn's eventual result. */
   readonly deliveryOutcome?: (outcome: DeliveryAdmission) => void;
   readonly ownerAuthority?: QuestionAuthority;

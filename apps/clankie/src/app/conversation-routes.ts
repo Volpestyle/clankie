@@ -302,7 +302,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       }
     }
     const result = write
-      ? await ctx.dependencies.workItems.handleOwnerWrite(request as WorkItemWriteRequest, authority)
+      ? await ctx.dependencies.workItems.handleOwnerWrite(
+          request as WorkItemWriteRequest,
+          authority,
+          ctx.dependencies.captain?.prepareFreeAgentIntent,
+        )
       : await ctx.dependencies.workItems.readOwnerReceipt(request, authority);
     if (write) {
       try {

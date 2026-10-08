@@ -1,3 +1,4 @@
+import { projectWorkRepoId } from "./project-work-items.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -457,6 +458,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   const handleOwnerWrite = async (
     request: WorkItemWriteRequest,
     authority: WorkWriteAuthority,
+    prepareFree?: (
+      intent: import("@clankie/protocol").FreeAgentIntent,
+    ) => Promise<{ assertCurrent(): void; guard(): Promise<void>; ownerName: string | undefined }>,
   ): Promise<WorkItemWriteReceipt> => {
     const key = JSON.stringify([request.repoId, request.itemId]);
     const operation = async (): Promise<WorkItemWriteReceipt> => {
@@ -465,15 +469,33 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       let confirmed = false;
       try {
         const { target, account, scope } = await writeScope(request, authority);
-        const previous = writeReceipts.begin(request.requestId, scope, request.command);
+        if (
+          request.freeAgent &&
+          (request.command.action !== "assign" ||
+            request.freeAgent.helpTarget ||
+            request.repoId !== projectWorkRepoId(request.freeAgent.projectId))
+        )
+          throw new Error("This drop does not match the original project's work tracker.");
+        const free = request.freeAgent ? await prepareFree?.(request.freeAgent) : undefined;
+        if (request.freeAgent && !free) throw new Error("Free-agent drops are unavailable on this host.");
+        if (
+          free &&
+          (request.command.action !== "assign" ||
+            free.ownerName === undefined ||
+            request.command.owner !== free.ownerName)
+        )
+          throw new Error("This drop changed the original agent assigned to the work.");
+        const previous = writeReceipts.begin(request.requestId, scope, request.command, request.freeAgent);
         if (previous) return previous;
         begun = true;
         const beforeWrite = () => {
+          free?.assertCurrent();
           if (!authority.current()) throw new Error("Owner authority expired or was revoked.");
           target.assertCurrent();
         };
         const fence = async () => {
           await authorizeWrite(authority);
+          await free?.guard();
           beforeWrite();
           return beforeWrite;
         };
@@ -488,7 +510,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         const writeDeps: { -readonly [K in keyof TrackerDeps]: TrackerDeps[K] } = {
           ...dependencies,
           scopedWrites: true,
-          beforeWrite,
+          beforeWrite: async () => {
+            await free?.guard();
+            beforeWrite();
+          },
           effectConfirmed,
           ...(target.convention.backend === "default" ||
           target.convention.backend === "markdown" ||
@@ -529,6 +554,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         if (target.convention.backend === "linear" && dependencies.linear === undefined) {
           writeDeps.beforeWrite = async () => {
             await authorizeWrite(authority);
+            await free?.guard();
             if ((await accountBinding("linear")) !== account)
               throw new Error("Connected Linear account or local tracker changed.");
             beforeWrite();
@@ -542,6 +568,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             request: async (method, path, body) => {
               if (method !== "GET") {
                 await authorizeWrite(authority);
+                await free?.guard();
                 if ((await accountBinding("github")) !== account)
                   throw new Error("Connected GitHub account changed.");
                 beforeWrite();

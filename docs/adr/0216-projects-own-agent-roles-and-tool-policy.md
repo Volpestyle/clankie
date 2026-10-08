@@ -209,3 +209,21 @@ Native Codex/Claude/OpenCode and registered private Codex paths have determinist
 coverage. Installed Pi rewrites its command title, so generic Node cannot prove
 the installed script: trusted Pi launch provenance remains engineering within
 VUH-1558. Remote process proof remains VUH-1563. Live owner cutover is unrun.
+
+## Owner World drops (VUH-1639)
+
+Existing role, conversation and tracker writes accept an optional `freeAgent`
+precondition: original persona, native seat/occupant, project and, for help, exact
+teammate/pane. It never grants authority. The host refreshes native/project proof
+and requires confirmed idle, no assignment or active goal and observed zero
+running children again at the existing effect fences. Unreadable, truncated or
+otherwise incomplete addressed child observations refuse. This landing proves
+bounded local Claude/Codex reads; unsupported child observers remain refused.
+Names are tracker data, never native routing. Existing omission keeps explicit
+owner/API/CLI/TUI behavior unchanged.
+
+The app waits four seconds with Undo before submitting once. Changed or hidden
+sources cancel before submission. Work assignment and the pickup note remain
+separate receipts; there is no inverse API, compensation or uncertain replay.
+The private app records the gesture decision in its ADR 0072. The shared `co-w`
+skill adds optional quick-action metadata without changing its CLI or workflow.

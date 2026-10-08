@@ -1,3 +1,4 @@
+import { FreeAgentIntentSchema } from "./free-agent.ts";
 import { MailIssueReferenceSchema } from "./mail-reference.ts";
 import { CheckoutStatusSchema, WorktreeReconciliationSchema } from "./checkouts.ts";
 import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
@@ -2011,6 +2012,7 @@ const SubmitOperatorConversationTurnBaseSchema = z.object({
 /** Revision-fenced operator message submit. */
 export const SubmitOperatorConversationTurnSchema = SubmitOperatorConversationTurnBaseSchema.extend({
   kind: z.literal("message"),
+  freeAgent: FreeAgentIntentSchema.optional(),
   /** May be empty only when the message carries attachments. */
   message: z.string().trim().max(OPERATOR_CONVERSATION_MESSAGE_MAX),
   /** Steer a live Clankie turn or wait for a separate turn. Omitted preserves automatic admission. */

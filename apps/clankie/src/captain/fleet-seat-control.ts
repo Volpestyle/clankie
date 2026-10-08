@@ -225,7 +225,7 @@ export function createFleetSeatControl(
           authorized || options?.delivery
             ? await control.send(text, {
                 ...(authorized ? { beforeDispatch: authorized } : {}),
-                ...(options?.fence === undefined ? {} : { source: "peer" }),
+                ...(options?.fence === undefined ? {} : { source: options.source ?? "peer" }),
                 ...(options?.delivery === undefined ? {} : { delivery: options.delivery }),
                 ...(options?.recipientBinding === undefined
                   ? {}

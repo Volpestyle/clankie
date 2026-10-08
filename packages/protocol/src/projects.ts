@@ -501,14 +501,18 @@ export async function readFleetProjectMembership(
   ) => Promise<{ status: number; json(): Promise<unknown> }>,
   signal?: AbortSignal,
 ): Promise<FleetProjectMembershipSnapshot | undefined> {
-  signal?.throwIfAborted();
+  // React Native's AbortSignal implements aborted/events, but not throwIfAborted.
+  const assertActive = () => {
+    if (signal?.aborted) throw signal.reason ?? new Error("Membership read aborted");
+  };
+  assertActive();
   const input = ReadFleetProjectMembershipSchema.parse(request);
   const response = await send(FLEET_PROJECT_MEMBERSHIP_PATH, input, signal);
-  signal?.throwIfAborted();
+  assertActive();
   if ([404, 405, 501].includes(response.status)) return undefined;
   if (response.status !== 200) throw new Error(`Membership read refused (${response.status})`);
   const result = FleetProjectMembershipSnapshotSchema.parse(await response.json());
-  signal?.throwIfAborted();
+  assertActive();
   if (
     JSON.stringify(result.seats.map(({ membership: _membership, ...seat }) => seat)) !==
     JSON.stringify(input.seats)

@@ -184,3 +184,21 @@ still does not qualify.
 Remove only the enrollment with `clankie project remove-worktree-root NAME
 --worktree-root ROOT` and the same machine/platform flags. Remove root enrollments
 before their repo workspace. Neither command deletes filesystem content.
+
+## Giving a free hand work from World
+
+World holds an original drop for four seconds with Undo before any write. Busy
+agents remain play only. A real drop requires confirmed idle, no assignment or
+active goal and observed zero running children; an unknown count is not zero.
+The optional `freeAgent` field on existing role, conversation and owner work
+writes binds persona, native seat/occupant and project. CLI equivalents append
+`--free-agent JSON` to `agents role`, `send` or `work assign`. It is a restriction,
+never authority; the host refreshes addressed native child and membership proof
+at its existing effect fences. Ordinary commands without it retain their behavior.
+
+Work assignment and the original “Please pick up…” note have separate receipts.
+Report an applied assignment with an uncertain note plainly; never reverse or
+replay either effect. A teammate drop uses the exact conversation's `co-w`
+quick-action catalog entry and actual native pane ID in the same project/session.
+Display names are tracker data, never native addresses. A ground drop is local
+idle play toward the campfire and writes no machine position.

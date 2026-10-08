@@ -1,3 +1,4 @@
+import { prepareFreeAgentIntent as prepareFreeIntent } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
 import { machineCodingTools } from "./machine-coding-tools.ts";
 import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
@@ -48,7 +49,7 @@ import {
   startFleetRounds,
 } from "./fleet-review.ts";
 import { FleetEfficiencyReviewSchema, type FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
-import { readCodexGoal } from "@clankie/agent-transcript";
+import { readCodexGoal, readClaudeSubagents, readCodexSubagents } from "@clankie/agent-transcript";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
@@ -2218,12 +2219,91 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * own messages all take it: harness control, native queue or the seat's bound
    * mailbox. A missing or uncertain channel never permits terminal typing.
    */
+  function prepareFreeAgentIntent(intent: import("@clankie/protocol").FreeAgentIntent) {
+    return prepareFreeIntent(
+      {
+        settingsStore,
+        options,
+        refreshFleet: async () => {
+          await refreshFleet({ force: true });
+          const helper = liveSeats.find(
+            (seat) => seat.seatId === intent.seatId && seat.occupantId === intent.occupantId,
+          );
+          if (!helper) return liveSeats;
+          const addressed =
+            conversations.conversationIdForPersona(helper.personaId) !== undefined ||
+            conversations.conversationIdForSeat(helper.seatId) !== undefined;
+          const native =
+            addressed && helper.fleet === undefined
+              ? await herdrRunner.resolveTerminal(helper.seatId).catch(() => undefined)
+              : undefined;
+          let subagents: import("@clankie/protocol").OperatorSeatSubagents | undefined;
+          if (native?.session && occupantIdForHerdrSession(native.session) === intent.occupantId) {
+            try {
+              subagents =
+                helper.harness === "codex"
+                  ? await readCodexSubagents(native.session, { freshDiscovery: true })
+                  : helper.harness === "claude"
+                    ? readClaudeSubagents(native.session, { requireComplete: true })
+                    : undefined;
+            } catch {
+              /* Unknown census never proves zero children. */
+            }
+          }
+          liveSeats = liveSeats.map((seat) => (seat === helper ? { ...seat, subagents } : seat));
+          return liveSeats;
+        },
+        seats: () => liveSeats,
+        personaForOccupant: (id) => personas.personaForOccupant(id),
+      },
+      intent,
+    );
+  }
+
   async function deliverToSeat(
     seatId: string,
     message: string,
     context: FleetSeatMessageContext,
     deliveryOptions?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
+    if (context.freeAgent) {
+      const intent = context.freeAgent;
+      if (intent.seatId !== seatId || context.source !== "operator" || context.delivery === "queue")
+        return {
+          outcome: "undelivered",
+          deliveryStage: "rejected",
+          detail: "This drop changed its original recipient.",
+        };
+      const free = await prepareFreeAgentIntent(intent);
+      const previous = deliveryOptions;
+      deliveryOptions = {
+        ...previous,
+        source: "operator",
+        guard: async () => {
+          await previous?.guard?.();
+          await free.guard();
+        },
+        fence: async (agent) => {
+          const teammate = intent.helpTarget
+            ? await herdrRunner.resolveTerminal(intent.helpTarget.seatId).catch(() => undefined)
+            : undefined;
+          if (previous?.fence && !(await previous.fence(agent))) return false;
+          await free.guard();
+          free.assertCurrent();
+          return (
+            !!agent?.session &&
+            agent.terminalId === intent.seatId &&
+            occupantIdForHerdrSession(agent.session) === intent.occupantId &&
+            /^(idle|resting)$/u.test(agent.status) &&
+            (!intent.helpTarget ||
+              (!!teammate?.session &&
+                teammate.paneId === intent.helpTarget.paneId &&
+                occupantIdForHerdrSession(teammate.session) === intent.helpTarget.occupantId))
+          );
+        },
+      };
+      await deliveryOptions.guard!();
+    }
     const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
     const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
     if (prior && deliveryOptions?.stableReceiptKey === undefined) return prior;
@@ -4481,7 +4561,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         });
     },
 
+    prepareFreeAgentIntent,
     serveOperatorConversation: createOperatorService({
+      prepareFreeAgentIntent,
       get personas() {
         return personas;
       },
