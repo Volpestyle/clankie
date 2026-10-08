@@ -124,9 +124,13 @@ Go Live. It is off by default and still needs a stored `discord_user_session`
 token, allowlists, the durable opt-in, and `activeBody=user_session` before
 the launcher starts it.
 
-`discord.systemActorUserIds` is the Discord users whose text turns get bash,
-files, and herdr. Empty means nobody — Discord stays social. It is not
-`ownerUserId` (DM policy) and not `ambientUserIds` (slash commands).
+`discord.servers` records each server's role and owners (`me`, `everyone` or a
+Discord `role`). Just me uses `ownerUserId`; role membership comes from the body.
+`discord.roomSkills` adds the bounded `house-hunting` adapter to a room without
+shell or fleet tools. Legacy guild/channel machine IDs stop granting authority
+on load; the recorded household grant migrates to its named skill. Individual
+`systemActorUserIds` remain explicit compatibility grants. Owner outreach needs
+an owner-only audience. See [ADR 0251](../../docs/adr/0251-discord-owners-and-room-skills.md).
 
 `discord.toolProgressChannelIds` is the guild channels where requested text
 turns show the content-free tool-activity card. It is empty by default and the

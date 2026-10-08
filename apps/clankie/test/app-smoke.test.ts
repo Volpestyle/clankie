@@ -235,14 +235,32 @@ describe("clankie app smoke", () => {
         entries: [{ at, kind: "heard", text: "CONSOLE_PRIVATE" }],
       },
     ];
-    const compose = async (captain: Parameters<typeof createStubCaptain>[0]) => {
+    const compose = async (captain: Parameters<typeof createStubCaptain>[0], ownerRoom = true) => {
       const clankie = await createClankieApp({
         captain: createStubCaptain({
           voiceLaneInstructions: () => composeVoiceLaneInstructions(captainInstructions()),
           ...captain,
         }),
         clock: () => now,
-        settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }) },
+        settings: {
+          load: async () =>
+            ClankieSettingsSchema.parse({
+              schemaVersion: 1,
+              discord: {
+                servers: [{ serverId: "12345", owners: ownerRoom ? "everyone" : "me" }],
+              },
+            }),
+        },
+        discordPresenceRuntime: {
+          execute: async () => {
+            throw new Error("briefing must not write");
+          },
+          serverAction: async () => ({
+            ok: true,
+            message: "Channel metadata",
+            data: { id: "67890", guild_id: "12345", permission_overwrites: [] },
+          }),
+        },
         authenticateCaptain: (request) =>
           Promise.resolve(
             request.headers.get("authorization") === "Bearer captain"
@@ -324,6 +342,25 @@ describe("clankie app smoke", () => {
     const degraded = await compose({ observeLanes: () => new Promise(() => undefined) });
     expect(degraded).toContain("- Your fleet could not be read just now; ask_clankie can check it.");
     expect(degraded).not.toContain("Last text chat");
+    let privateReads = 0;
+    const mixed = await compose(
+      {
+        serveOperatorConversation: async () => {
+          privateReads += 1;
+          throw new Error("private fleet read");
+        },
+        observeLanes: async () => {
+          privateReads += 1;
+          return lanes;
+        },
+      },
+      false,
+    );
+    expect(privateReads).toBe(0);
+    expect(mixed).not.toContain("Land batch 12");
+    expect(mixed).not.toContain("Fix the voice register");
+    expect(mixed).not.toContain("we cookin");
+    expect(mixed).toContain("even when an owner asks");
   });
 
   it("boots with a stub captain and answers health, a channel turn, and episode recall", async () => {

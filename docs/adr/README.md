@@ -97,6 +97,8 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0247 — Narrow checks have one command](0247-narrow-checks-have-one-command.md)
 - [0249 — Simulator leases answer promptly and name their holders](0249-simulator-leases-answer-promptly-and-name-their-holders.md)
 
+- [0251 — Discord servers have owners; rooms can grant skills](0251-discord-owners-and-room-skills.md)
+
 ## Archived decisions
 
 **Archived** means superseded or retired for the scope named below. These records

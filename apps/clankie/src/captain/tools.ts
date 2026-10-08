@@ -27,6 +27,7 @@ import {
   type CallBrowserToolResult,
   type BodyLeaseResult,
   type CaptainTurnMedia,
+  type DiscordStreamWatchObservation,
   type DrawDiagramResult,
   type OperatorDeliveredFile,
   isAttachableTurnMediaRef,
@@ -138,6 +139,28 @@ export function toolJson(value: unknown): { content: [{ type: "text"; text: stri
 }
 
 const json = toolJson;
+
+/** A Discord turn can observe only its host-bound room's shares. */
+function turnShares(
+  observation: DiscordStreamWatchObservation,
+  turn: TurnContext,
+  lane: CaptainSessionLaneV2,
+): DiscordStreamWatchObservation {
+  if (lane === "operator") return observation;
+  const streams = observation.streams.filter(
+    (stream) =>
+      turn.channelId !== undefined && stream.channelId === turn.channelId && stream.guildId === turn.guildId,
+  );
+  const allowed = new Map(streams.map((stream) => [stream.streamKey, stream.userId]));
+  const samples = observation.frames?.length
+    ? observation.frames
+    : observation.frame
+      ? [observation.frame]
+      : [];
+  const frames = samples.filter((frame) => allowed.get(frame.streamKey) === frame.userId);
+  const { frame: _frame, frames: _frames, decoderDetail: _decoderDetail, ...rest } = observation;
+  return { ...rest, streams, ...(frames.length ? { frames, frame: frames.at(-1) } : {}) };
+}
 
 /**
  * The captain's authored tool bank. Coding tools (read/bash/edit/write) are
@@ -496,7 +519,7 @@ export function captainTools(
             parameters: Type.Object({}),
             executionMode: "sequential",
             execute: async () => {
-              const observation = await streamWatch.current();
+              const observation = turnShares(await streamWatch.current(), turn, lane);
               if (observation.streams.length === 0) {
                 return json({
                   outcome: "none",
@@ -672,7 +695,9 @@ export function captainTools(
           voiceHistory,
           recentVoiceSpeech: voiceSpeech,
           finishedRenders: renders,
-          ...(shares === undefined ? {} : { activeStreams: shares.streams, shareDecoder: shares.decoder }),
+          ...(shares === undefined
+            ? {}
+            : { activeStreams: turnShares(shares, turn, lane).streams, shareDecoder: shares.decoder }),
         });
       },
     }),
@@ -1512,7 +1537,7 @@ function discordServerTools(
   turn: TurnContext,
   lane: CaptainSessionLaneV2,
 ): ToolDefinition[] {
-  if (deps.discordActions === undefined || (lane !== "operator" && !lane.startsWith("discord_"))) return [];
+  if (deps.discordActions === undefined || (lane !== "operator" && turn.shell !== true)) return [];
   return [
     defineTool({
       name: "discord_server_action",

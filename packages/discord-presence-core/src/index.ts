@@ -336,6 +336,8 @@ export {
 export {
   discordServerAuthority,
   executeDiscordServerAction,
+  discordActorOwnsServer,
+  discordOwnerAudience,
   type DiscordServerAuthority,
   type DiscordServerRequest,
 } from "./server-actions.ts";

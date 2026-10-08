@@ -15,11 +15,49 @@ export const DiscordTrackingLevelSchema = z.enum([
   "all_issues",
 ]);
 
+export const DiscordServerPolicySchema = z
+  .object({
+    serverId: SnowflakeSchema,
+    role: DiscordRoleSchema.default("participant"),
+    owners: z.enum(["me", "everyone", "role"]).default("me"),
+    ownerRoleId: SnowflakeSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (value) => value.owners !== "role" || value.ownerRoleId !== undefined,
+    "Choose the Discord role that owns Clankie.",
+  );
+export const DiscordRoomSkillGrantSchema = z
+  .object({
+    serverId: SnowflakeSchema,
+    channelId: SnowflakeSchema,
+    skill: z.enum(["house-hunting"]),
+    /** Migration-only binding to the existing household; otherwise isolated per room. */
+    household: z.enum(["existing"]).optional(),
+  })
+  .strict();
+
 export const DiscordSettingsSchema = z
   .object({
     /** One connected server. Discord permissions decide the rooms Clankie can inhabit. */
     serverId: SnowflakeSchema.optional(),
     role: DiscordRoleSchema.default("participant"),
+    servers: z
+      .array(DiscordServerPolicySchema)
+      .max(64)
+      .default([])
+      .refine(
+        (values) => new Set(values.map((v) => v.serverId)).size === values.length,
+        "Duplicate server policy",
+      ),
+    roomSkills: z
+      .array(DiscordRoomSkillGrantSchema)
+      .max(64)
+      .default([])
+      .refine(
+        (values) => new Set(values.map((v) => `${v.serverId}:${v.channelId}`)).size === values.length,
+        "Duplicate room grant",
+      ),
     fleetEnabled: z.boolean().default(false),
     /** Participant fleet messages use this existing room; raw IDs stay in Advanced. */
     fleetChannelId: SnowflakeSchema.optional(),
@@ -43,24 +81,14 @@ export const DiscordSettingsSchema = z
     ambientUserIds: SnowflakeListSchema,
     approvalRoleIds: SnowflakeListSchema,
     ownerUserId: SnowflakeSchema.optional(),
-    /**
-     * Discord users whose text turns get the operator's machine tools
-     * (bash, read, write, edit — and therefore herdr). Empty means nobody:
-     * Discord stays social. The operator console is always privileged and
-     * does not consult this list. Distinct from `ownerUserId` (DM policy)
-     * and `ambientUserIds` (slash-command tier) so those policies can move
-     * without handing out a shell. An official-bot DM with one of these users
-     * is a private durable operator lane; their turns in an ordinary shared
-     * room remain one-shot.
-     */
+    /** Explicit individual compatibility grants; owners come from per-server policies.
+     * Private official-bot DMs may be durable; mixed rooms stay one-shot. */
     systemActorUserIds: SnowflakeListSchema,
     /**
-     * Guilds whose admitted members share durable machine access. This is an
-     * explicit remote-shell grant to every human the Discord gateway admits in
-     * the selected rooms; it never inherits from the text/voice ingress lists.
+     * Retired compatibility input. Never grants machine authority (ADR 0251).
      */
     systemActorGuildIds: SnowflakeListSchema,
-    /** Optional room refinement below `systemActorGuildIds`; empty means every admitted room in those guilds. */
+    /** Retired compatibility input; migrated skill rooms use roomSkills. */
     systemActorChannelIds: SnowflakeListSchema,
 
     textIngressEnabled: z.boolean().default(false),
@@ -200,22 +228,83 @@ export function discordServerSettings(
           userSessionGuildIds: [],
         }
       : settings;
+  const policy = settings.servers.find((entry) => entry.serverId === settings.serverId);
+  const role = previous && previous.role !== settings.role ? settings.role : (policy?.role ?? settings.role);
+  const servers = policy
+    ? settings.servers.map((entry) => (entry.serverId === settings.serverId ? { ...entry, role } : entry))
+    : [...settings.servers, { serverId: settings.serverId, role, owners: "me" as const }];
+  const guilds = [...new Set([settings.serverId, ...servers.map((entry) => entry.serverId)])];
   return {
     ...settings,
+    role,
+    servers,
     guildId: settings.serverId,
-    swarmGuildId: settings.role === "admin" ? settings.serverId : undefined,
+    swarmGuildId: role === "admin" ? settings.serverId : undefined,
     teamVisible: settings.fleetEnabled,
     textIngressEnabled: true,
-    ingressGuildIds: [settings.serverId],
+    ingressGuildIds: guilds,
     ingressChannelIds: [],
-    presenceGuildIds: [settings.serverId],
+    presenceGuildIds: guilds,
     presenceChannelIds: [],
     voiceEnabled: true,
-    voiceGuildIds: [settings.serverId],
+    voiceGuildIds: guilds,
     voiceChannelIds: [],
     voiceChannelId: undefined,
     voiceJoinPolicy: "guild_members",
-    userSessionGuildIds: [settings.serverId],
+    userSessionGuildIds: guilds,
     // The lab body’s recorded opt-in is a separate trust ceiling, retained in Advanced.
+  };
+}
+
+/** Read-time upgrade; only recorded legacy configurations receive personal migration bindings. */
+export function migrateDiscordOwnership(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const value = raw as Record<string, unknown>;
+  if (!value.discord || typeof value.discord !== "object" || Array.isArray(value.discord)) return raw;
+  const discord = value.discord as Record<string, unknown>;
+  if (Object.hasOwn(discord, "servers")) return raw;
+  const list = (key: string): string[] => (Array.isArray(discord[key]) ? (discord[key] as string[]) : []);
+  const ids = new Set([
+    ...list("ingressGuildIds"),
+    ...list("systemActorGuildIds"),
+    ...[discord.serverId, discord.swarmGuildId, discord.guildId].filter(
+      (id): id is string => typeof id === "string",
+    ),
+  ]);
+  const household =
+    list("systemActorGuildIds").includes("1052402897645752351") ||
+    list("systemActorChannelIds").includes("1551975693582336060");
+  if (household) ids.add("1052402897645752351");
+  return {
+    ...value,
+    discord: {
+      ...discord,
+      servers: [...ids].map((serverId) => ({
+        serverId,
+        role:
+          serverId === "866430493889134672"
+            ? "admin"
+            : serverId === "1052402897645752351"
+              ? "participant"
+              : serverId === discord.swarmGuildId
+                ? "admin"
+                : serverId === discord.serverId
+                  ? (discord.role ?? "participant")
+                  : "participant",
+        owners: "me",
+      })),
+      roomSkills: household
+        ? [
+            {
+              serverId: "1052402897645752351",
+              channelId: "1551975693582336060",
+              skill: "house-hunting",
+              household: "existing",
+            },
+          ]
+        : [],
+      systemActorGuildIds: [],
+      systemActorChannelIds: [],
+    },
   };
 }

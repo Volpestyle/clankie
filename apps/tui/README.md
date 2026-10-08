@@ -267,7 +267,7 @@ credential holder.
 - `/connect` configures Linear and email and can open Discord setup. `/discord`
   connects a server with Participant or Admin, fleet display on/off and a
   tracking level. Its invitation requests the role's permissions and its checks
-  flag missing grants. Channel and role IDs, body diagnostics and machine grants
+  flag missing grants. Server owners and room skills have common choices. Raw IDs, body diagnostics and individual grants
   stay under **Advanced**. Normal setup has no channel or Discord-role pickers.
   The explicit diagnostic CLI is `clankie discord setup test-post --channel NAME`.
 - `/setup` is where a new owner starts, and the console opens it on its own

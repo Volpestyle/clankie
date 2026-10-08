@@ -4555,6 +4555,16 @@ can still carry a live explicit statement; absence means unknown.
 
 Return stored and effective non-secret Discord configuration:
 
+Server ownership and room skill grants use the same revision-fenced Discord
+settings API. `discord owners --server ID --owners me|everyone|role
+[--owner-role ID] [--role participant|admin]` sets one server policy;
+`discord room-skill --server ID --channel ID --skill house-hunting|off` adds or
+removes the bounded household capability. `me` uses `ownerUserId`; `role` needs
+an authenticated membership check. Admin never grants the machine to members.
+Legacy guild/channel machine IDs are retired. `discord set --servers JSON
+--room-skills JSON` remains the Advanced repair path. See
+[Discord authority](discord-rooms.md) and [ADR 0251](adr/0251-discord-owners-and-room-skills.md).
+
 ```json
 {
   "ok": true,
@@ -4634,7 +4644,8 @@ See [Discord settings](discord-rooms.md) and
 Read the connected server, Clankie's role, fleet toggle, tracking level and
 setup checks. TUI `/discord` uses the same host definition and revision-fenced
 writer. The server is chosen by name; channel and Discord-role pickers do not
-appear in normal setup. Raw IDs and machine-access grants live under Advanced.
+appear in normal setup. Raw IDs and individual compatibility grants live under Advanced.
+Server owners and room skills are common controls.
 
 ```sh
 clankie discord setup choices connect

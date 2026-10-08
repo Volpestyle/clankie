@@ -62,6 +62,9 @@ vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
   },
   DefaultResourceLoader: class {
     async reload() {}
+    getExtensions() {
+      return { extensions: [] };
+    }
     getSkills() {
       return { skills: [] };
     }
@@ -125,7 +128,12 @@ async function fixture(granted = false, runNativeRoomHandoff?: NativeRoomHandoff
   if (granted)
     await settings.update((current) => ({
       ...current,
-      discord: { ...current.discord, systemActorUserIds: ["11111"] },
+      discord: {
+        ...current.discord,
+        ownerUserId: "11111",
+        servers: [{ serverId: "12345", role: "participant", owners: "me" }],
+        systemActorUserIds: ["11111"],
+      },
     }));
   const route = vi.fn(() => true);
   const execute = vi.fn(async (_input: unknown, guard?: () => Promise<void>) => {
@@ -137,7 +145,25 @@ async function fixture(granted = false, runNativeRoomHandoff?: NativeRoomHandoff
       herdrAvailable: () => false,
       memory: {},
       conversationRouteAuthorized: route,
-      discordActions: { execute },
+      discordActions: {
+        execute,
+        serverAction: async (action: { path: string }) => ({
+          ok: true,
+          message: "metadata",
+          data:
+            action.path === "/users/@me"
+              ? { id: "22222", bot: true }
+              : action.path === "/guilds/12345"
+                ? { id: "12345", owner_id: "11111" }
+                : action.path === "/guilds/12345/roles"
+                  ? [{ id: "12345", permissions: "0" }]
+                  : {
+                      id: action.path.split("/").at(-1),
+                      guild_id: "12345",
+                      permission_overwrites: [{ id: "12345", type: 0, allow: "0", deny: "1024" }],
+                    },
+        }),
+      },
     } as unknown as CaptainDeps,
     {
       ...(runNativeRoomHandoff === undefined ? {} : { runNativeRoomHandoff }),
@@ -303,18 +329,19 @@ it("discovery persists observed text, voice and DM names and retains names acros
   });
 });
 
-it("an unproven room poller cannot receive children while other rooms and global retain their drivers", async () => {
+it("a social room bypasses an unproven native poller while global retains its driver", async () => {
   const { captain, conversationId } = await fixture();
   expect(captain.seatContext(conversationId)?.conversationId).toBe(conversationId);
   const controller = new AbortController();
   const poll = captain.pollSeatEvents(1000, controller.signal, conversationId);
   expect(await captain.submitDiscordTurn(request("room-request"))).toMatchObject({
-    state: "failed",
-    code: "native_room_child_unavailable",
+    state: "settled",
+    response: "Service answer",
   });
   controller.abort();
   expect(await poll).toEqual([]);
-  expect(fake.prompts).toEqual([]);
+  expect(fake.prompts).toHaveLength(1);
+  expect(fake.prompts[0]).toContain("room-request");
   expect(await captain.submitDiscordTurn(request("other-room-request", "98765"))).toMatchObject({
     state: "settled",
     response: "Service answer",
@@ -336,8 +363,8 @@ it("an unproven room poller cannot receive children while other rooms and global
   expect(globalEvent).toMatchObject({ conversationId: "global-default" });
   expect(await captain.replySeatEvent(globalEvent!.id, "Global answer")).toBe(true);
   expect(await captain.pollSeatEvents(0, undefined, conversationId)).toEqual([]);
-  expect(fake.prompts).toHaveLength(1);
-  expect(fake.prompts[0]).toContain("other-room-request");
+  expect(fake.prompts).toHaveLength(2);
+  expect(fake.prompts[1]).toContain("other-room-request");
 });
 
 it("attaching a room never grants operator send, reset or tools to that external room", async () => {
@@ -371,7 +398,7 @@ it("attaching a room never grants operator send, reset or tools to that external
 });
 
 it("an uncertain native child receipt never starts a second service answer", async () => {
-  const { captain } = await fixture(false, async () => ({
+  const { captain } = await fixture(true, async () => ({
     outcome: "uncertain",
     detail: "Native task taken",
   }));
@@ -537,7 +564,7 @@ it.each(["before dispatch", "before reply"])(
     const revoke = () =>
       settings.update((current) => ({
         ...current,
-        discord: { ...current.discord, systemActorUserIds: [] },
+        discord: { ...current.discord, ownerUserId: undefined, systemActorUserIds: [] },
       }));
     const controller = new AbortController();
     const poll = captain.pollSeatEvents(1000, controller.signal, conversationId);
@@ -637,7 +664,7 @@ it("refuses a room wake when its machine actor is revoked during the final censu
   await pending;
   await settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, systemActorUserIds: [] },
+    discord: { ...current.discord, ownerUserId: undefined, systemActorUserIds: [] },
   }));
   release();
   await denied;

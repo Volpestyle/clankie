@@ -55,18 +55,8 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
         kind: "ids",
         help: "These people can ask Clankie to use his computer.",
       },
-      {
-        key: "systemActorGuildIds",
-        label: "Machine access server IDs",
-        kind: "ids",
-        help: "People Clankie can hear in these servers can ask him to use his computer.",
-      },
-      {
-        key: "systemActorChannelIds",
-        label: "Channels that allow computer access",
-        kind: "ids",
-        help: "Leave empty to allow every permitted channel in those servers.",
-      },
+      { key: "servers", label: "Server ownership policies (JSON; Advanced)", kind: "text" },
+      { key: "roomSkills", label: "Room skills (JSON; Advanced)", kind: "text" },
     ],
   },
   {

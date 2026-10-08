@@ -14,6 +14,7 @@ import {
 } from "@clankie/protocol";
 import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordSetupApi } from "@clankie/api-client";
+import { DiscordSetupClient } from "@clankie/api-client";
 import { runDiscordSetup, showDiscordSetup } from "./discord-setup.ts";
 import { formatDiscordRoomStatus } from "./discord-room-view.ts";
 import { parseDiscordSettingValue } from "./command/discord.ts";
@@ -417,6 +418,10 @@ export async function runDiscordWizard(
         ? editAllDiscordSettings(shell, services)
         : runDiscordAdvancedWizard(shell, services),
     () => editDiscordAttention(shell, setup, persona),
+    {
+      owners: () => editServerOwners(shell, { ...services, setup }),
+      roomSkill: () => editRoomSkill(shell, { ...services, setup }),
+    },
   );
 }
 
@@ -572,10 +577,16 @@ export async function runDiscordAdvancedWizard(
           },
           {
             value: "system",
-            label: "Machine control from Discord",
-            hint: "trusted DMs, servers, and rooms",
+            label: "Server owners",
+            hint: "Just me / Everyone / Discord role",
             description:
-              "Named users get private operator DMs and one-shot access elsewhere; trusted server rooms share a durable operator lane.",
+              "Choose who owns Clankie in each server. Admin manages Discord; it never grants machine access to other members.",
+          },
+          {
+            value: "room-skill",
+            label: "This room can use",
+            hint: "House hunting",
+            description: "Grant household tools without granting the machine.",
           },
           {
             value: "ingress",
@@ -634,7 +645,8 @@ export async function runDiscordAdvancedWizard(
       if (choice === "all") await editAllDiscordSettings(shell, services);
       else if (choice === "credentials") await editCredentials(shell, services);
       else if (choice === "core") await editCore(shell, services);
-      else if (choice === "system") await editSystemActors(shell, services);
+      else if (choice === "system") await editServerOwners(shell, services);
+      else if (choice === "room-skill") await editRoomSkill(shell, services);
       else if (choice === "ingress") await editIngress(shell, services);
       else if (choice === "voice") await editVoice(shell, services);
       else if (choice === "active") await editActiveBody(shell, services);
@@ -827,51 +839,129 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   flow.renderLine("Saved server, application, and roles.", "success");
 }
 
-async function editSystemActors(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
-  const flow = shell.setupFlow;
+async function editServerOwners(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
   const snapshot = await discordSnapshot(services);
-  const current = snapshot.settings;
-
-  const typed = await flow.readText({
-    message:
-      "Discord user ids with machine access (comma separated) — their official-bot DMs are durable; shared-room turns stay one-shot. Blank keeps, `none` clears.",
-    placeholder: current.systemActorUserIds.join(",") || current.ownerUserId || "your Discord user id",
-    validate: validateSnowflakeList,
+  const directory = await (services.setup
+    ? new DiscordSetupClient(services.setup).directory({ kind: "servers" })
+    : undefined);
+  const options =
+    directory?.entries.map((entry) => ({
+      value: entry.id,
+      label: stripVTControlCharacters(entry.name).replace(/[\r\n\t]/gu, " "),
+    })) ?? snapshot.settings.servers.map((entry) => ({ value: entry.serverId, label: entry.serverId }));
+  const serverId = await shell.setupFlow.readSelect({ message: "Server", options, allowBack: true });
+  if (!serverId) return;
+  const previous = snapshot.settings.servers.find((entry) => entry.serverId === serverId);
+  const role = await shell.setupFlow.readSelect({
+    message: "Clankie's role",
+    options: [
+      { value: "participant", label: "Participant" },
+      { value: "admin", label: "Admin · dedicated server" },
+    ],
+    allowBack: true,
   });
-  if (typed === undefined) return;
-
-  const systemActorUserIds = resolveIdList(typed, current.systemActorUserIds);
-  const guilds = await flow.readText({
-    message:
-      "Server ids whose admitted members all get durable machine access (comma separated). Blank keeps, `none` clears.",
-    placeholder: current.systemActorGuildIds.join(",") || "private server id",
-    validate: validateSnowflakeList,
+  if (!role) return;
+  const owners = await shell.setupFlow.readSelect({
+    message: "Owners here",
+    options: [
+      { value: "me", label: "Just me" },
+      { value: "everyone", label: "Everyone", hint: "Everyone gets machine access" },
+      { value: "role", label: "A Discord role" },
+    ],
+    allowBack: true,
   });
-  if (guilds === undefined) return;
-
-  const systemActorGuildIds = resolveIdList(guilds, current.systemActorGuildIds);
-  const channels = await flow.readText({
-    message:
-      "Optional channel ids inside those servers — blank keeps the current refinement; `none` trusts every admitted channel.",
-    placeholder: current.systemActorChannelIds.join(",") || "blank = every admitted channel",
-    validate: validateSnowflakeList,
-  });
-  if (channels === undefined) return;
-
-  const systemActorChannelIds =
-    systemActorGuildIds.length === 0 ? [] : resolveIdList(channels, current.systemActorChannelIds);
-  await apply(services, snapshot, (discord) => ({
-    ...discord,
-    systemActorUserIds,
-    systemActorGuildIds,
-    systemActorChannelIds,
+  if (!owners) return;
+  let ownerRoleId: string | undefined;
+  if (owners === "role") {
+    const roles = await (services.setup
+      ? new DiscordSetupClient(services.setup).directory({ kind: "roles", guildId: serverId })
+      : undefined);
+    ownerRoleId = await shell.setupFlow.readSelect({
+      message: "Owner role",
+      options:
+        roles?.entries.map((entry) => ({
+          value: entry.id,
+          label: stripVTControlCharacters(entry.name).replace(/[\r\n\t]/gu, " "),
+        })) ?? [],
+      allowBack: true,
+    });
+    if (!ownerRoleId) return;
+  }
+  await apply(services, snapshot, (current) => ({
+    ...current,
+    ...(serverId === current.serverId ? { role: role as "participant" | "admin" } : {}),
+    servers: [
+      ...current.servers.filter((entry) => entry.serverId !== serverId),
+      {
+        ...previous,
+        serverId,
+        role: role as "participant" | "admin",
+        owners: owners as "me" | "everyone" | "role",
+        ownerRoleId,
+      },
+    ],
   }));
-  flow.renderLine(
-    systemActorUserIds.length === 0 && systemActorGuildIds.length === 0
-      ? "Saved machine-control grants (empty — Discord stays social)."
-      : `Saved machine-control grants (${String(systemActorUserIds.length)} user${systemActorUserIds.length === 1 ? "" : "s"}, ${String(systemActorGuildIds.length)} server${systemActorGuildIds.length === 1 ? "" : "s"}).`,
-    "success",
-  );
+  shell.setupFlow.renderLine("Saved server owners and role.", "success");
+}
+
+async function editRoomSkill(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
+  const snapshot = await discordSnapshot(services);
+  const servers = await (services.setup
+    ? new DiscordSetupClient(services.setup).directory({ kind: "servers" })
+    : undefined);
+  const serverId = await shell.setupFlow.readSelect({
+    message: "Server",
+    options:
+      servers?.entries.map((entry) => ({
+        value: entry.id,
+        label: stripVTControlCharacters(entry.name).replace(/[\r\n\t]/gu, " "),
+      })) ?? [],
+    allowBack: true,
+  });
+  if (!serverId) return;
+  const rooms = await (services.setup
+    ? new DiscordSetupClient(services.setup).directory({ kind: "channels", guildId: serverId })
+    : undefined);
+  const channelId = await shell.setupFlow.readSelect({
+    message: "Room",
+    options:
+      rooms?.entries.map((entry) => ({
+        value: entry.id,
+        label: stripVTControlCharacters(entry.name).replace(/[\r\n\t]/gu, " "),
+      })) ?? [],
+    allowBack: true,
+  });
+  if (!channelId) return;
+  const skill = await shell.setupFlow.readSelect({
+    message: "This room can use",
+    options: [
+      { value: "house-hunting", label: "House hunting" },
+      { value: "off", label: "No additional skill" },
+    ],
+    allowBack: true,
+  });
+  if (!skill) return;
+  await apply(services, snapshot, (current) => ({
+    ...current,
+    roomSkills: [
+      ...current.roomSkills.filter((entry) => entry.serverId !== serverId || entry.channelId !== channelId),
+      ...(skill === "off"
+        ? []
+        : [
+            {
+              serverId,
+              channelId,
+              skill: "house-hunting" as const,
+              ...(current.roomSkills.find(
+                (entry) => entry.serverId === serverId && entry.channelId === channelId,
+              )?.household === "existing"
+                ? { household: "existing" as const }
+                : {}),
+            },
+          ]),
+    ],
+  }));
+  shell.setupFlow.renderLine("Saved this room's skill.", "success");
 }
 
 async function editIngress(shell: ClankieFaceShell, services: DiscordCommandServices): Promise<void> {
@@ -1332,14 +1422,19 @@ async function editAllDiscordSettings(
     options: fields.map((entry) => ({
       value: entry.key,
       label: entry.label,
-      hint: String(current[entry.key] ?? "unset"),
+      hint: ["servers", "roomSkills"].includes(entry.key)
+        ? JSON.stringify(current[entry.key])
+        : String(current[entry.key] ?? "unset"),
     })),
   });
   if (field === undefined) return;
   const key = field as keyof DiscordSettings;
   const raw = await shell.setupFlow.readText({
-    message: `${key} — lists use commas; 'none' clears; blank keeps`,
-    placeholder: String(current[key] ?? "unset"),
+    message: `${key} — ${key === "servers" || key === "roomSkills" ? "JSON array" : "lists use commas"}; 'none' clears; blank keeps`,
+    placeholder:
+      key === "servers" || key === "roomSkills"
+        ? JSON.stringify(current[key])
+        : String(current[key] ?? "unset"),
     validate: (value) => {
       if (!value.trim()) return undefined;
       try {

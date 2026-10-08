@@ -61,6 +61,10 @@ job to its command. JSON is on stdout and progress on stderr. The most common:
 | Machines and Herdr sessions | `clankie machines --json`, `clankie herdr status --json`             |
 | Restart / stop a service    | `clankie start`, `stop` or `restart [service]`                       |
 
+Discord server owners and room skills use `clankie discord owners` and
+`clankie discord room-skill` (see [Discord setup](reference/launcher.md)). A room
+skill never grants the machine; trusted guild/channel shell grants are retired.
+
 Fleet, persona, voice, Discord fields, worker holds, Linear follow/wake, `awake`
 and `update auto` use the owner settings API. Read the current snapshot, then
 send its revision; a conflict requires a fresh read and a reviewed change.

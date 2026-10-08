@@ -275,6 +275,8 @@ describe("discord settings resolution", () => {
 
   it("carries Discord machine grants and lets the environment override them", () => {
     expect(DiscordSettingsSchema.parse({})).toMatchObject({
+      servers: [],
+      roomSkills: [],
       systemActorUserIds: [],
       systemActorGuildIds: [],
       systemActorChannelIds: [],
@@ -289,9 +291,10 @@ describe("discord settings resolution", () => {
     });
     expect(discordSettingsToEnvironment(allowlisted)).toMatchObject({
       DISCORD_SYSTEM_ACTOR_USER_IDS: "555555555555555555",
-      DISCORD_SYSTEM_ACTOR_GUILD_IDS: "666666666666666666",
-      DISCORD_SYSTEM_ACTOR_CHANNEL_IDS: "777777777777777777",
     });
+
+    expect(discordSettingsToEnvironment(allowlisted).DISCORD_SYSTEM_ACTOR_GUILD_IDS).toBeUndefined();
+    expect(discordSettingsToEnvironment(allowlisted).DISCORD_SYSTEM_ACTOR_CHANNEL_IDS).toBeUndefined();
 
     const overridden = resolveDiscordSettings(allowlisted, {
       DISCORD_SYSTEM_ACTOR_USER_IDS: "111111111111111111,222222222222222222",

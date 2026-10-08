@@ -314,6 +314,8 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
           "fleetChannelId",
           "trackingLevel",
           "teamVisible",
+          "servers",
+          "roomSkills",
         ] as const)
           if (
             !Object.hasOwn(incoming, key) &&

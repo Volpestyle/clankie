@@ -34,6 +34,9 @@ vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
   },
   DefaultResourceLoader: class {
     async reload() {}
+    getExtensions() {
+      return { extensions: [] };
+    }
     getSkills() {
       return { skills: [] };
     }

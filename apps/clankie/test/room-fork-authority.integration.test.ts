@@ -107,7 +107,12 @@ async function fixture() {
   const settings = new SettingsStore(join(root, "settings.json"));
   await settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, ownerUserId: OWNER, systemActorUserIds: [OWNER] },
+    discord: {
+      ...current.discord,
+      servers: [{ serverId: GUILD, role: "participant", owners: "me" }],
+      ownerUserId: OWNER,
+      systemActorUserIds: [OWNER],
+    },
   }));
 
   let app: ClankieApp | undefined;
@@ -171,6 +176,25 @@ async function fixture() {
       owner: Parameters<NonNullable<CaptainDeps["conversationRouteAuthorized"]>>[0],
     ) => app?.conversationBodyRouteAuthorized(owner) ?? false,
     discordActions: {
+      serverAction: async (action: { path: string }) => ({
+        ok: true,
+        message: "Owner-only room metadata",
+        data:
+          action.path === "/users/@me"
+            ? { id: "30001", bot: true }
+            : action.path === `/guilds/${GUILD}`
+              ? { id: GUILD, owner_id: OWNER }
+              : action.path === `/guilds/${GUILD}/roles`
+                ? [{ id: GUILD, permissions: "0" }]
+                : {
+                    id: CHANNEL,
+                    guild_id: GUILD,
+                    permission_overwrites: [
+                      { id: GUILD, type: 0, allow: "0", deny: "1024" },
+                      { id: "30001", type: 1, allow: "1024", deny: "0" },
+                    ],
+                  },
+      }),
       execute: async (input: DiscordCaptainActionInput, guard?: () => Promise<void>) => {
         await guard?.();
         return bodyExecute(input);
@@ -286,9 +310,9 @@ it("posts an owner-directed reply to another member's message, with its file, un
     payload: { kind: "reply_with_media", channelId: CHANNEL, messageId: ASKED, filename: "realtor-brief.md" },
   });
   expect(result.messageId).toBe(`discord-${String(effects.length)}`);
-  // The room grants no machine access, so the fork has no shell even though the owner does.
+  // The fork is owner-authored and the host proved every reader is an owner.
   const fork = prompts.slice(promptsBefore).find((prompt) => prompt.body.includes("[Owner brief]"))!;
-  expect(fork.tools).not.toContain("bash");
+  expect(fork.tools).toContain("bash");
 });
 
 it("posts an owner-directed message that answers nobody, and refuses once the room's body is gone", async () => {

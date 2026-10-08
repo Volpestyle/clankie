@@ -1,6 +1,7 @@
 # ADR 0133: A machine grant belongs to a Discord lane
 
-Status: accepted (James, 2026-08-26). Amends
+Status: accepted (James, 2026-08-26). Trusted guild/channel grants superseded by
+[ADR 0251](0251-discord-owners-and-room-skills.md); the sections below are historical where they conflict. Amends
 [ADR 0086](0086-clankie-holds-a-shell.md),
 [ADR 0095](0095-discord-system-actors.md),
 [ADR 0105](0105-voice-is-as-capable-as-the-room-it-is-in.md), and

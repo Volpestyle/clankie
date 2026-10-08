@@ -49,7 +49,7 @@ describe("Discord turn authority", () => {
       kind: "system_lane",
       durable: true,
       systemTools: true,
-      sessionKey: `${input.baseSessionKey}:authority:system`,
+      sessionKey: `${input.baseSessionKey}:authority:system-v2:null`,
       grant: "dm_user",
     });
     // The lab user body can observe group DMs, so actor identity alone cannot
@@ -59,43 +59,35 @@ describe("Discord turn authority", () => {
     );
   });
 
-  it("grants every actor in a trusted guild room one durable system lane", () => {
-    const trusted = settings({ systemActorGuildIds: [GUILD] });
+  it("retired trusted guild and channel ids never grant a machine", () => {
+    expect(
+      plan({ settings: settings({ systemActorGuildIds: [GUILD], systemActorChannelIds: [CHANNEL] }) }),
+    ).toMatchObject({
+      kind: "social",
+      systemTools: false,
+    });
+  });
+
+  it("Everyone ownership grants a durable lane shared by admitted members", () => {
+    const trusted = {
+      ...settings(),
+      servers: [{ serverId: GUILD, role: "participant" as const, owners: "everyone" as const }],
+    };
     const first = plan({ settings: trusted });
-    const second = plan({ actorId: "111111111111111111", settings: trusted });
-    expect(first).toMatchObject({
-      kind: "system_lane",
-      durable: true,
-      systemTools: true,
-      grant: "guild",
-    });
-    expect(second).toEqual(first);
-    expect(first.sessionKey).toBe(`${BASE}:authority:system`);
+    expect(first).toMatchObject({ kind: "system_lane", systemTools: true, grant: "guild" });
+    expect(plan({ actorId: "111111111111111111", settings: trusted })).toEqual(first);
+    expect(plan({ durable: false, settings: trusted }).durable).toBe(false);
+    expect(plan().sessionKey).not.toBe(first.sessionKey);
   });
 
-  it("uses the optional channel list as refinement below a trusted guild", () => {
-    const trusted = settings({
-      systemActorGuildIds: [GUILD],
-      systemActorChannelIds: [CHANNEL],
-    });
-    expect(plan({ settings: trusted }).kind).toBe("system_lane");
-    expect(plan({ channelId: "888888888888888888", settings: trusted }).kind).toBe("social");
-    expect(plan({ guildId: "999999999999999999", settings: trusted }).kind).toBe("social");
-  });
-
-  it("never makes a source-declared one-shot durable", () => {
-    expect(plan({ durable: false, settings: settings({ systemActorGuildIds: [GUILD] }) })).toMatchObject({
-      kind: "system_turn",
-      durable: false,
-      systemTools: true,
-    });
-  });
-
-  it("routes the next message away from a revoked tool-bearing lane", () => {
-    const granted = plan({ settings: settings({ systemActorGuildIds: [GUILD] }) });
-    const revoked = plan();
-    expect(granted.sessionKey).not.toBe(revoked.sessionKey);
-    expect(revoked).toMatchObject({ kind: "social", systemTools: false });
+  it("a role owner needs host-proven membership, and mixed audiences stay one-shot", () => {
+    const trusted = {
+      ...settings(),
+      servers: [{ serverId: GUILD, role: "admin" as const, owners: "role" as const, ownerRoleId: "12345" }],
+    };
+    expect(plan({ settings: trusted }).systemTools).toBe(false);
+    expect(plan({ settings: trusted, serverOwner: true }).kind).toBe("system_turn");
+    expect(plan({ settings: trusted, serverOwner: true, ownerAudience: true }).kind).toBe("system_lane");
   });
 });
 

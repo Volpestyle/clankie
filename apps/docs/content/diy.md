@@ -159,16 +159,15 @@ Raw audio is never saved.
 
 ### Who gets a shell
 
-Machine access is granted separately from room access, under `/discord` →
-Advanced (`--system-actor-user-ids`, `--system-actor-guild-ids`,
-`--system-actor-channel-ids`). It is a real shell as the service user; letting
-him into a room grants none of it.
+Each server has a role (Participant or Admin) and owners (Just me, Everyone,
+or a Discord role), selected in `/discord`. Admin governs server management;
+ownership governs machine access. Everyone else keeps social tools.
 
-A granted person gets machine tools for their own turns in shared rooms and a
-continuing work session in a DM with the official bot. A trusted server (or
-selected channels in it) gives every admitted member a continuing work session.
-Everyone else stays social. See [ADR 0105](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0105-voice-is-as-capable-as-the-room-it-is-in.md)
-and [ADR 0133](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0133-a-machine-grant-belongs-to-a-discord-lane.md).
+A room can add house hunting through “This room can use”, with bounded household
+tools and no shell. Mixed rooms omit private work and fleet context even when
+an owner asks. Private outreach requires an owner-only audience. Legacy trusted
+guild/channel machine grants are retired; individual actor grants remain in
+Advanced for compatibility. See [ADR 0251](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0251-discord-owners-and-room-skills.md).
 
 ### Play and share
 

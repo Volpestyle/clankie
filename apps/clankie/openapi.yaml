@@ -512,7 +512,7 @@ paths:
     get:
       tags: [Discord]
       operationId: discordSettings
-      summary: Read the server role, fleet and tracking setup with Advanced settings
+      summary: Read Discord server roles, owners, room skills, fleet and tracking
       description: >-
         Operator-authorized non-secret settings, their revision and the shared
         setup definition. Normal setup connects a server with participant or
@@ -530,7 +530,7 @@ paths:
       operationId: discordSettingsUpdate
       summary: Save revision-fenced non-secret Discord settings
       description: >-
-        Requires settings and expectedRevision. Connecting a server projects its
+        Requires settings and expectedRevision. servers records role and owners (me, everyone or role with ownerRoleId); roomSkills records a serverId, channelId and known skill. Omitted ownership fields from older clients are preserved. Legacy guild/channel machine grants are retired. Connecting a server projects its
         ingress, presence and voice scope while preserving machine grants and
         lab opt-in. Stale writes are refused. Saving never posts to Discord.
         Admin actions refuse server deletion and ownership transfer at the body.

@@ -91,7 +91,14 @@ async function fixture() {
     }),
   };
   const settings = new SettingsStore(join(root, "settings.json"));
-  await settings.update((current) => ({ ...current, discord: { ...current.discord, ownerUserId: OWNER } }));
+  await settings.update((current) => ({
+    ...current,
+    discord: {
+      ...current.discord,
+      servers: [{ serverId: GUILD, role: "participant", owners: "me" }],
+      ownerUserId: OWNER,
+    },
+  }));
   const posts: DiscordCaptainActionInput[] = [];
   const deps = {
     herdrAvailable: () => false,
@@ -104,6 +111,25 @@ async function fixture() {
     mcp: { catalog: async () => [] },
     browser: { catalog: async () => ({ available: false, tools: [] }) },
     discordActions: {
+      serverAction: async (action: { path: string }) => ({
+        ok: true,
+        message: "Owner-only room metadata",
+        data:
+          action.path === "/users/@me"
+            ? { id: "30001", bot: true }
+            : action.path === `/guilds/${GUILD}`
+              ? { id: GUILD, owner_id: OWNER }
+              : action.path === `/guilds/${GUILD}/roles`
+                ? [{ id: GUILD, permissions: "0" }]
+                : {
+                    id: CHANNEL,
+                    guild_id: GUILD,
+                    permission_overwrites: [
+                      { id: GUILD, type: 0, allow: "0", deny: "1024" },
+                      { id: "30001", type: 1, allow: "1024", deny: "0" },
+                    ],
+                  },
+      }),
       execute: async (input: DiscordCaptainActionInput, guard?: () => Promise<void>) => {
         await guard?.();
         // Typing and progress cards are cosmetic; only posts are the room's words.

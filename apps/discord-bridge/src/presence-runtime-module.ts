@@ -2,6 +2,7 @@ import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@cla
 import {
   parseDiscordIdSet,
   executeDiscordServerAction,
+  discordOwnerAudience,
   planDiscordChannelCreate,
   planDiscordForumPostCreate,
   planDiscordGuildChannels,
@@ -108,7 +109,11 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
         input,
         authority,
         async (action) => {
-          rest ??= await guildRest(authority.serverId!);
+          const requestedGuild = /^\/guilds\/(\d{5,32})(?:\/|$)/u.exec(action.path)?.[1];
+          const grantGuild =
+            requestedGuild ?? origin?.sourceGuildId ?? authority.serverId ?? authority.servers[0]?.serverId;
+          if (!grantGuild) throw new Error("discord_server_required");
+          rest ??= await guildRest(grantGuild);
           if (action.method !== "GET") {
             // Membership reads and credential resolution can yield while the
             // owner revokes this action. Recheck immediately before dispatch.
@@ -124,6 +129,11 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
                   "teamVisible",
                 ] as const
               ).some((field) => current[field] !== authority[field])
+            )
+              throw new Error("discord_server_authority_changed");
+            if (
+              JSON.stringify(current.servers) !== JSON.stringify(authority.servers) ||
+              current.ownerUserId !== authority.ownerUserId
             )
               throw new Error("discord_server_authority_changed");
           }
@@ -164,6 +174,13 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
     async provisionChannel(input) {
       const guildId = await provisionGuildId(env);
       const rest = await guildRest(guildId);
+      const authority = await readDiscordServerSettings(env);
+      const policy = authority.servers.find((entry) => entry.serverId === guildId);
+      const request = async (action: DiscordServerAction) => rest.get(action.path as `/${string}`);
+      const current = async () => {
+        if (JSON.stringify(await readDiscordServerSettings(env)) !== JSON.stringify(authority))
+          throw new Error("discord_server_authority_changed");
+      };
       let channelId: string;
       let threadId: string | undefined;
       if (input.room === undefined) {
@@ -172,8 +189,24 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
           name: input.name,
           ...(input.topic === undefined ? {} : { topic: input.topic }),
         });
+        const self = (await rest.get("/users/@me")) as { id?: unknown; bot?: unknown };
+        if (typeof self.id !== "string" || self.bot !== true)
+          throw new Error("discord_body_identity_required");
+        const permission_overwrites =
+          policy?.owners === "everyone"
+            ? []
+            : [
+                { id: guildId, type: 0, deny: "1024", allow: "0" },
+                { id: self.id, type: 1, allow: "1024", deny: "0" },
+                ...(policy?.owners === "role" && policy.ownerRoleId
+                  ? [{ id: policy.ownerRoleId, type: 0, allow: "1024", deny: "0" }]
+                  : authority.ownerUserId
+                    ? [{ id: authority.ownerUserId, type: 1, allow: "1024", deny: "0" }]
+                    : []),
+              ];
+        await current();
         const channel = (await rest.post(channelPlan.path as `/${string}`, {
-          body: channelPlan.body,
+          body: { ...channelPlan.body, permission_overwrites },
         })) as { id?: unknown };
         if (typeof channel.id !== "string") throw new Error("discord_channel_provision_failed");
         channelId = channel.id;
@@ -190,8 +223,11 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
           throw new Error("discord_channel_not_in_swarm_guild");
         }
         channelId = room.channelId;
+        if (!(await discordOwnerAudience(authority, guildId, channelId, request)))
+          throw new Error("discord_owner_audience_required");
         if (room.kind === "forum") {
           const postPlan = planDiscordForumPostCreate({ forumId: room.channelId, name: input.name });
+          await current();
           const thread = (await rest.post(postPlan.path as `/${string}`, {
             body: postPlan.body,
           })) as { id?: unknown };
@@ -199,6 +235,9 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
           threadId = thread.id;
         }
       }
+      if (!(await discordOwnerAudience(authority, guildId, channelId, request)))
+        throw new Error("discord_owner_audience_required");
+      await current();
       const webhookPlan = planDiscordWebhookCreate({ channelId, name: input.name });
       const webhook = (await rest.post(webhookPlan.path as `/${string}`, {
         body: webhookPlan.body,
@@ -245,6 +284,8 @@ async function provisionGuildId(env: NodeJS.ProcessEnv = process.env): Promise<s
   }
   const swarm = discordManagedGuildId(env);
   if (!swarm) throw new Error("discord_swarm_guild_unset");
+  if (authority.servers.find((entry) => entry.serverId === swarm)?.role !== "admin")
+    throw new Error("discord_channel_provision_requires_admin");
   return swarm;
 }
 

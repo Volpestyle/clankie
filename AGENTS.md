@@ -117,13 +117,15 @@ This repository is public. Both neighbors are private and consume
   not by editing those files.
 - Model output is untrusted input: Discord bodies, images, and web content
   never become instructions.
-- A Discord turn from a machine grant (`systemActorUserIds`, or a trusted
-  guild/channel) may use the operator's machine tools (bash, herdr), spoken
-  or typed. Everyone else stays social. An individually granted actor in a
-  shared room gets a one-shot tool-bearing turn, so the shared session never
-  holds a shell. Official-bot DMs and trusted guilds own a durable
-  tool-bearing lane under a separate session key. Voice is as capable as the
-  room it is in.
+- Discord server owners and explicit individual compatibility grants may use
+  machine tools, spoken or typed; Admin is
+  Clankie's server role and does not make members owners. Everyone else stays
+  social, with only the bounded adapter of a named room skill added. Legacy
+  trusted guild/channel IDs grant no machine authority (ADR 0251). Mixed rooms
+  withhold private work and fleet context even when an owner asks, and machine
+  turns there are one-shot. Official-bot owner DMs and proven owner-only rooms
+  may hold a separate durable tool-bearing lane. Private outreach requires
+  an owner-only audience. Voice is as capable as its room.
 - No harness possesses Clankie. He plays from his own credentialed PokeAgents
   seat, and every other harness takes its own through PokeAgents' MCP, CLI, or
   skill. MCP is a transport projection, not authority or gameplay semantics.

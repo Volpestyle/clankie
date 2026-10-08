@@ -28,6 +28,9 @@ vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
   createAgentSession: async () => ({ session: fake.sessionFactory?.() ?? fake.session }),
   DefaultResourceLoader: class {
     async reload() {}
+    getExtensions() {
+      return { extensions: [] };
+    }
     getSkills() {
       return { skills: [] };
     }

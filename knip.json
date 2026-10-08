@@ -99,7 +99,7 @@
       "ignoreExportsUsedInFile": true
     },
     "apps/tui": {
-      "entry": ["bin/runtime-update-helper.mjs", "bin/release-update-helper.ts"]
+      "entry": ["bin/runtime-update-helper.mjs", "bin/release-update-helper.ts", "bin/mac-app-install.ts"]
     },
     "packages/vec3": {
       "entry": ["test/**/*.test.ts"]

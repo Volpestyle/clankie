@@ -4,8 +4,8 @@ import type { LaneLog } from "../src/captain/lane-log.ts";
 import { captainTools } from "../src/captain/tools.ts";
 
 describe("captain observe_share tool", () => {
-  it("gives the model chronological share frames for coarse motion", async () => {
-    const frames = [1, 2, 3, 4].map((second) => ({
+  it("gives chronological frames from its own room and excludes another room's latest frame", async () => {
+    const frames = [1, 2, 3].map((second) => ({
       streamKey: "guild:g1:c1:u1",
       userId: "u1",
       width: 1280,
@@ -35,16 +35,38 @@ describe("captain observe_share tool", () => {
                 hasFrame: true,
                 updatedAt: "2026-08-15T00:00:04.000Z",
               },
+              {
+                schemaVersion: 1 as const,
+                streamKey: "guild:g2:c2:u2",
+                kind: "guild" as const,
+                guildId: "g2",
+                channelId: "c2",
+                userId: "u2",
+                watching: true,
+                hasFrame: true,
+                updatedAt: "2026-08-15T00:00:04.000Z",
+              },
             ],
-            frame: frames.at(-1),
-            frames,
+            frame: {
+              ...frames[0]!,
+              streamKey: "guild:g2:c2:u2",
+              userId: "u2",
+              jpegBase64: "private-other-room",
+            },
+            frames: [
+              ...frames,
+              { ...frames[0]!, streamKey: "guild:g2:c2:u2", userId: "u2", jpegBase64: "private-other-room" },
+            ],
             decoder: "ready" as const,
           }),
       },
     } as unknown as CaptainDeps;
-    const observe = captainTools(deps, {}, {} as LaneLog, "discord_voice").find(
-      (tool) => tool.name === "observe_share",
-    );
+    const observe = captainTools(
+      deps,
+      { guildId: "g1", channelId: "c1" },
+      {} as LaneLog,
+      "discord_voice",
+    ).find((tool) => tool.name === "observe_share");
     if (observe === undefined) throw new Error("observe_share is missing");
 
     const result = await observe.execute("call-1", {}, undefined, undefined, {} as never);
@@ -53,6 +75,8 @@ describe("captain observe_share tool", () => {
       type: "text",
       text: expect.stringContaining("oldest_to_newest"),
     });
+    expect(JSON.stringify(result)).not.toContain("private-other-room");
+    expect(JSON.stringify(result)).not.toContain("g2");
     expect(result.content.slice(1)).toEqual(
       frames.map((frame) => ({ type: "image", data: frame.jpegBase64, mimeType: "image/jpeg" })),
     );

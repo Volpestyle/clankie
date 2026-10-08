@@ -245,14 +245,22 @@ provider audio, and actual Discord audibility when reporting verification.
 
 ## Discord server setup
 
-Discord setup connects one server with Participant or Admin, fleet display and
-a tracking level. Participant follows Discord permissions. Admin controls the
-dedicated server through `discord_server_action`, including channels, categories,
-roles, webhooks and members, without another permission request. The adapter
-refuses server deletion and ownership transfer. This role never grants machine
-tools. Participant projection posts use the given channel under Advanced;
-Admin project mirrors may be channels or forums. `discord_tracking_project`
-lets Clankie choose that representation before the first event.
+Discord servers have a role and owners. `clankie discord owners --server ID
+--owners me|everyone|role [--owner-role ID] [--role participant|admin]` uses the
+revision-fenced API; Just me is the default. Role ownership requires membership
+proved by the body. Admin manages its dedicated server through
+`discord_server_action`, never grants machine access to other members, and
+never deletes the server or transfers ownership. Fleet and tracking remain on
+the selected projection server; outreach requires an owner-only audience.
+
+`clankie discord room-skill --server ID --channel ID --skill house-hunting|off`
+grants the bounded household adapter. It exposes criteria, ledger, feedback and
+listing research, never shell, arbitrary files, fleet or connected account tools.
+Use `house_hunting` in that room instead of the installed skill's shell examples.
+Mixed rooms keep owner work/fleet/machine detail private even when an owner asks.
+Legacy trusted guild/channel IDs no longer grant machine tools. Migration is on
+load; do not edit live settings by hand. App/dashboard pickers are follow-ups.
+
 Managed (hosted) Discord connections are in [Hosted Clankie](hosted.md#managed-discord-connection).
 
 A self-hosted machine can use the free official Clankie bot instead of its own

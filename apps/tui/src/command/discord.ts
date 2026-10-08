@@ -32,6 +32,8 @@ const DISCORD_USAGE = [
   "       clankie discord rooms",
   "       clankie discord definition",
   "       clankie discord setup [check | choices connect|fleet|tracking]",
+  "       clankie discord owners --server ID --owners me|everyone|role [--owner-role ID] [--role participant|admin]",
+  "       clankie discord room-skill --server ID --channel ID --skill house-hunting|off",
   "       clankie discord setup connect [--server NAME] [--role participant|admin]",
   "       clankie discord setup invite [--role participant|admin]",
   "       clankie discord setup fleet --enabled on|off",
@@ -106,8 +108,11 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     showList("approval roles", settings.approvalRoleIds),
     show("owner user id", settings.ownerUserId),
     showList("system actors", settings.systemActorUserIds),
-    showList("system guilds", settings.systemActorGuildIds),
-    showList("system channels", settings.systemActorChannelIds),
+    ...settings.servers.map(
+      (entry) =>
+        `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}`,
+    ),
+    ...settings.roomSkills.map((entry) => `room ${entry.serverId}/${entry.channelId}: ${entry.skill}`),
     "",
     `text ingress: ${settings.textIngressEnabled ? "enabled" : "disabled"}`,
     showList("  ingress guilds", settings.ingressGuildIds),
@@ -198,6 +203,9 @@ export function parseDiscordSettingValue(
   raw: string,
   current: DiscordSettings,
 ): unknown {
+  if (field === "servers" || field === "roomSkills") return raw === "none" ? [] : JSON.parse(raw);
+  if (field === "systemActorGuildIds" || field === "systemActorChannelIds")
+    throw new Error("Use server owners and room skills; trusted guild/channel machine grants are retired.");
   const example = current[field] ?? emptySettings().discord[field];
   if (Array.isArray(example)) {
     return raw.toLowerCase() === "none"
@@ -276,6 +284,68 @@ export async function runDiscordCommand(
   | DiscordOfficialResult
 > {
   const verb = args[0];
+  if (verb === "owners" || verb === "room-skill") {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      allowPositionals: true,
+      options: {
+        server: { type: "string" },
+        owners: { type: "string" },
+        "owner-role": { type: "string" },
+        role: { type: "string" },
+        channel: { type: "string" },
+        skill: { type: "string" },
+      },
+    });
+    if (positionals.length || !values.server) throw new Error(DISCORD_USAGE);
+    if (verb === "owners") {
+      if (!values.owners || values.channel || values.skill) throw new Error(DISCORD_USAGE);
+      return discordTransform(
+        (current) => ({
+          ...current,
+          servers: [
+            ...current.servers.filter((entry) => entry.serverId !== values.server),
+            {
+              serverId: values.server!,
+              owners: values.owners as "me" | "everyone" | "role",
+              role: (values.role ??
+                current.servers.find((entry) => entry.serverId === values.server)?.role ??
+                "participant") as "participant" | "admin",
+              ...(values["owner-role"] ? { ownerRoleId: values["owner-role"] } : {}),
+            },
+          ],
+        }),
+        options,
+      );
+    }
+    if (!values.channel || !values.skill || values.owners || values["owner-role"] || values.role)
+      throw new Error(DISCORD_USAGE);
+    return discordTransform(
+      (current) => ({
+        ...current,
+        roomSkills: [
+          ...current.roomSkills.filter(
+            (entry) => entry.serverId !== values.server || entry.channelId !== values.channel,
+          ),
+          ...(values.skill === "off"
+            ? []
+            : [
+                {
+                  serverId: values.server!,
+                  channelId: values.channel!,
+                  skill: values.skill as "house-hunting",
+                  ...(current.roomSkills.find(
+                    (entry) => entry.serverId === values.server && entry.channelId === values.channel,
+                  )?.household
+                    ? { household: "existing" as const }
+                    : {}),
+                },
+              ]),
+        ],
+      }),
+      options,
+    );
+  }
   if (verb === "official")
     return await runDiscordOfficialCommand(args.slice(1), {
       ...(options.env === undefined ? {} : { env: options.env }),

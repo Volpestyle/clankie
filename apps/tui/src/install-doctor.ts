@@ -106,7 +106,8 @@ export interface InstallDoctorReport {
     readonly voiceEnabled: boolean;
     readonly userSessionEnabled: boolean;
     readonly machineGrantUsers: number;
-    readonly machineGrantGuilds: number;
+    readonly serverOwnershipPolicies: number;
+    readonly roomSkillGrants: number;
   };
   readonly voice: {
     readonly realtimeProvider: ClankieSettings["voice"]["realtimeProvider"];
@@ -379,7 +380,8 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       voiceEnabled: settings.discord.voiceEnabled,
       userSessionEnabled: settings.discord.userSessionEnabled,
       machineGrantUsers: settings.discord.systemActorUserIds.length,
-      machineGrantGuilds: settings.discord.systemActorGuildIds.length,
+      serverOwnershipPolicies: settings.discord.servers.length,
+      roomSkillGrants: settings.discord.roomSkills.length,
     },
     voice: {
       realtimeProvider: settings.voice.realtimeProvider,

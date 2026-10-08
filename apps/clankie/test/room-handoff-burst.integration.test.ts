@@ -145,8 +145,9 @@ it("a sender's burst steers their running handoff while other speakers and grant
     work.push(other);
     await vi.waitFor(() => expect(calls).toHaveLength(2), { timeout: 10_000 });
     expect(calls[1]!.text).toContain("what's for lunch");
-    // The sibling sees the other request only as quoted context marked as in flight.
-    expect(calls[1]!.text).toContain("another thread is answering this request");
+    // A public-room sibling receives no private in-flight work context.
+    expect(calls[1]!.text).not.toContain("another thread is answering this request");
+    expect(calls[1]!.text).not.toContain("can you check the build");
 
     // The first run reads the steered follow-up before it ends.
     calls[0]!.finish("checking");

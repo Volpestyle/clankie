@@ -71,7 +71,7 @@ CLI. This table is generated from the console's command registry.
 and a tracking level, and requests exactly that role's permissions. Setup marks
 proven missing permissions **needs** and unknown ones **not checked**. Admin
 controls its dedicated server except deleting it or transferring ownership. Raw
-IDs and machine grants live under Advanced. Opening or saving setup never posts.
+Server owners and room skills have their own choices; raw IDs and individual grants live under Advanced. Opening or saving setup never posts.
 
 ## Account connections
 

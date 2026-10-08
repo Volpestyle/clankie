@@ -14,7 +14,7 @@ import { toolJson } from "./tools.ts";
 const SKILL_SEARCH = "skill_search";
 
 type CaptainResourceOptions = NonNullable<ConstructorParameters<typeof DefaultResourceLoader>[0]> &
-  Parameters<typeof clankieSkillRoots>[0] & { quieted: Set<string> };
+  Parameters<typeof clankieSkillRoots>[0] & { quieted: Set<string>; privateContext?: boolean };
 
 export class CaptainResourceLoader extends DefaultResourceLoader {
   private readonly discovery: CaptainResourceOptions;
@@ -25,6 +25,7 @@ export class CaptainResourceLoader extends DefaultResourceLoader {
   }
 
   override getSkills() {
+    if (this.discovery.privateContext === false) return { skills: [], diagnostics: [] };
     const base = loadSkills({
       cwd: this.discovery.cwd,
       agentDir: this.discovery.agentDir,
@@ -42,7 +43,9 @@ export class CaptainResourceLoader extends DefaultResourceLoader {
   }
 
   override getAgentsFiles() {
-    return { agentsFiles: loadProjectContextFiles(this.discovery) };
+    return {
+      agentsFiles: this.discovery.privateContext === false ? [] : loadProjectContextFiles(this.discovery),
+    };
   }
 }
 

@@ -37,14 +37,37 @@ function fixture(local = false) {
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   vi.spyOn(AutonomyStore.prototype, "start").mockImplementation(() => {});
   const create = () =>
-    createCaptain({ memory: {} } as CaptainDeps, {
-      repoRoot: root,
-      stateDir: root,
-      workingDirectory: root,
-      settings: new SettingsStore(join(root, "settings.json")),
-      discordEnvironment: {},
-      personaImages: async () => ({ images: [], hash: "fake", files: [] }),
-    });
+    createCaptain(
+      {
+        memory: {},
+        discordActions: {
+          serverAction: async (action: { path: string }) => ({
+            ok: true,
+            message: "Owner-only room metadata",
+            data:
+              action.path === "/users/@me"
+                ? { id: "30001", bot: true }
+                : action.path === "/guilds/12345"
+                  ? { id: "12345", owner_id: "11111" }
+                  : action.path === "/guilds/12345/roles"
+                    ? [{ id: "12345", permissions: "0" }]
+                    : {
+                        id: "67890",
+                        guild_id: "12345",
+                        permission_overwrites: [{ id: "12345", type: 0, allow: "0", deny: "1024" }],
+                      },
+          }),
+        },
+      } as unknown as CaptainDeps,
+      {
+        repoRoot: root,
+        stateDir: root,
+        workingDirectory: root,
+        settings: new SettingsStore(join(root, "settings.json")),
+        discordEnvironment: {},
+        personaImages: async () => ({ images: [], hash: "fake", files: [] }),
+      },
+    );
   const captain = create();
   const settings = new SettingsStore(join(root, "settings.json"));
   fixtures.push({ captain, root });
@@ -103,7 +126,12 @@ it("retains original room attribution authority and refuses it after the actor's
   const { captain, principal, proof, settings } = fixture();
   await settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, systemActorUserIds: ["11111"] },
+    discord: {
+      ...current.discord,
+      ownerUserId: "11111",
+      servers: [{ serverId: "12345", role: "participant", owners: "me" }],
+      systemActorUserIds: ["11111"],
+    },
   }));
   const conversationId = captain.bodyRoomConversation("discord_presence", "12345:67890");
   const owner = {
@@ -123,7 +151,7 @@ it("retains original room attribution authority and refuses it after the actor's
   expect(source.recipient.owner).toEqual(owner);
   await settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, systemActorUserIds: [] },
+    discord: { ...current.discord, ownerUserId: undefined, systemActorUserIds: [] },
   }));
   expect(await source.authorize()).toBe(false);
 });

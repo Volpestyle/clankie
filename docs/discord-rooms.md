@@ -17,9 +17,8 @@ clear busy result when full. Finished jobs collapse so active work and seats
 remain visible. Spoken answers retain the room's normal floor.
 Replies return to the original asking room. Approval requests still continue on
 the authenticated operator surface. With a Codex head, all non-owner room work
-runs on Pi with the room's own tools, including individual, channel and server
-grants. Only the verified owner's work uses native Codex children. Claude uses
-restricted native children. See
+runs on Pi with the room's own tools, including explicit actor and server ownership grants. Mixed audiences and skill
+rooms always use Pi; only owner-only rooms can use native children. See
 [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md) and the
 [verification record](testing/2026-10-05-room-handoffs/README.md).
 
@@ -113,11 +112,58 @@ issues) and `all_issues`. Private event and destination mappings survive
 turning tracking off. Unconfirmed mutations stay uncertain without automatic
 replay. Disabling fleet display retains its selected server and room webhooks.
 
-Settings are `serverId`, `role`, `fleetEnabled`, `fleetChannelId` and
-`trackingLevel`. Legacy non-secret fields remain available under Advanced.
-Connecting a server projects it into the body's ingress, presence and voice
-server lists and clears channel filters, preserving machine grants and the
-lab body's explicit opt-in. Environment overrides are reported by status.
+Each server has a role (`participant` or `admin`) and owners: Just me (`me`,
+the configured `ownerUserId`), Everyone (`everyone`), or a Discord role (`role`
+with `ownerRoleId`). `discord.servers` records these choices. Admin manages the
+server but gives its members no machine authority. The selected `serverId`
+retains fleet and tracking settings; other connected policies remain independent.
+
+`discord.roomSkills` adds one named skill to a room. The initial `house-hunting`
+adapter reads and maintains that room's household criteria and listing ledger,
+using the installed skill's listing API and social browser. It accepts structured
+operations, never a command, executable, arbitrary path or credential. Households
+are isolated per room; only the recorded legacy migration retains the existing
+household. A skill room has no shell, fleet tools or owner work context.
+
+The CLI writes the same revision-fenced `GET`/`POST /v1/discord/settings` API:
+
+```sh
+clankie discord owners --server SERVER_ID --owners me --role participant
+clankie discord owners --server SERVER_ID --owners role --owner-role ROLE_ID
+clankie discord room-skill --server SERVER_ID --channel CHANNEL_ID --skill house-hunting
+clankie discord room-skill --server SERVER_ID --channel CHANNEL_ID --skill off
+```
+
+TUI `/discord` offers **Server owners** and **This room can use**, using names
+from the connected account. Raw policy JSON and IDs stay under Advanced. App
+and hosted dashboard ownership/skill pickers are follow-ups in their respective
+repositories; their existing setup controls retain the new fields when saving.
+
+Ownership is resolved on each delivery. Discord role membership comes from the
+credential-owning body, never from message text. An owner in a mixed room keeps
+one-shot machine tools, but the context withholds private work and fleet detail,
+including when an owner asks. Non-owners get social tools and exactly the room's
+skill adapter. Skill and mixed-room turns use fresh Pi sessions with bounded
+room history. Revocation rechecks settings at tool execution.
+
+Owner outreach, room relays, tracking messages and fleet webhooks require an
+owner-only audience. Everyone-owned servers satisfy that ownership condition;
+private rooms otherwise need live channel overwrites, guild-owner and role
+permission evidence. Administrator bypasses overwrites, so a non-owner admin
+role makes the audience unsafe. Missing evidence refuses delivery with
+`discord_owner_audience_required`. Being an Admin server alone is insufficient.
+
+Household feedback records the authenticated Discord speaker ID. Old
+name-attributed rejections stay readable and excluded; explicit owner-confirmed
+legacy bindings are tracked in [VUH-1834](https://linear.app/vuhlp/issue/VUH-1834).
+Display names are never proof of authorship.
+
+Legacy `systemActorGuildIds` and `systemActorChannelIds`, including environment
+overrides, no longer grant machine authority. Existing settings normalize on
+load and persist on the next normal write. Only the recorded house-hunting room
+migrates to its named skill; other old room grants fail closed. Explicit individual
+`systemActorUserIds` remain compatibility grants. See
+[ADR 0251](adr/0251-discord-owners-and-room-skills.md).
 
 `POST /v1/discord/setup/test-post` remains an explicit owner diagnostic using
 `guildId`, `channelId` and `expectedRevision`. It requires settings-level

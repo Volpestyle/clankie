@@ -1,3 +1,4 @@
+import type { DiscordSessionAccess } from "./room-skill-tools.ts";
 import { CAPTAIN_SILENT_REPLY_SENTINEL, type DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { FinishedRender } from "../media-generation.ts";
@@ -20,6 +21,7 @@ export function replyIsUnderway(streamedText: string): boolean {
 }
 
 export interface NormalizedDiscordTurn {
+  readonly access?: DiscordSessionAccess;
   /** Both planes continue a durable session per channel (ADR 0118). */
   readonly sessionKey: string;
   readonly durable: boolean;

@@ -1,4 +1,5 @@
 import { runVoiceSelfTool, VoiceSelfToolRequestSchema } from "../voice-self-tools.ts";
+import { discordOwnerAudience } from "@clankie/discord-presence-core";
 import {
   readVoiceAwareness,
   renderVoiceAwareness,
@@ -13,7 +14,7 @@ import {
   type EmbodimentEnvironmentId,
   type EmbodimentSession,
 } from "@clankie/protocol";
-import { personaInstructions, type ClankieSettings } from "@clankie/settings";
+import { personaInstructions, resolveDiscordSettings, type ClankieSettings } from "@clankie/settings";
 import { Hono } from "hono";
 import { z } from "zod";
 import { CaptainPresenceManager, type CaptainPresenceLease } from "../captain-presence.ts";
@@ -223,8 +224,35 @@ export function registerVoiceBriefingRoute(ctx: VoiceBriefingRouteContext) {
     if (!parsed.success) return context.json({ error: "invalid_discord_voice_briefing" }, 400);
     const request = parsed.data;
     let persona: ClankieSettings["persona"];
+    let privateContext = false;
     try {
-      persona = (await ctx.settingsSource.load()).persona;
+      const stored = await ctx.settingsSource.load();
+      persona = stored.persona;
+      const discord = resolveDiscordSettings(
+        stored.discord,
+        ctx.dependencies.discordEnvironment ?? process.env,
+      ).settings;
+      const runtime =
+        captain.discordTransportKind === "user_session"
+          ? ctx.dependencies.discordUserPresenceRuntime
+          : ctx.dependencies.discordPresenceRuntime;
+      if (runtime?.serverAction) {
+        privateContext = await discordOwnerAudience(
+          discord,
+          request.guildId,
+          request.channelId,
+          async (action) => {
+            const result = await runtime.serverAction!(action);
+            if (!result.ok) throw new Error("Discord audience unavailable");
+            return result.data;
+          },
+        );
+      }
+      const fresh = resolveDiscordSettings(
+        (await ctx.settingsSource.load()).discord,
+        ctx.dependencies.discordEnvironment ?? process.env,
+      ).settings;
+      privateContext &&= JSON.stringify(fresh) === JSON.stringify(discord);
     } catch {
       // A malformed settings file fails closed rather than briefing a default
       // character the owner did not author.
@@ -234,10 +262,12 @@ export function registerVoiceBriefingRoute(ctx: VoiceBriefingRouteContext) {
     // What he is up to rides in the instructions, not the seeded briefing: the
     // session never truncates instructions, and the briefing is the oldest item
     // a long call drops. Bounded on its own so it can never crowd out the rules.
-    const awareness = boundVoiceBriefingText(
-      renderVoiceAwareness(await readVoiceAwareness(ctx.dependencies.captain), request.guildId, now),
-      VOICE_AWARENESS_MAX_CHARACTERS,
-    );
+    const awareness = privateContext
+      ? boundVoiceBriefingText(
+          renderVoiceAwareness(await readVoiceAwareness(ctx.dependencies.captain), request.guildId, now),
+          VOICE_AWARENESS_MAX_CHARACTERS,
+        )
+      : "This room may include non-owners. Keep private work, fleet assignments, and other rooms' contents out of the conversation, even when an owner asks.";
     const instructions = boundVoiceBriefingText(
       [
         personaInstructions(persona, "social"),
@@ -248,11 +278,19 @@ export function registerVoiceBriefingRoute(ctx: VoiceBriefingRouteContext) {
       ].join("\n\n"),
       DISCORD_VOICE_INSTRUCTIONS_MAX_CHARACTERS,
     );
+    const shares = privateContext ? ctx.discordStreamWatch.current() : undefined;
     const sections = [
       renderVoiceBriefingSelfState(
         ctx.captainPresence.snapshot(),
         ctx.discordPresenceSessions.list(),
-        ctx.discordStreamWatch.current(),
+        shares
+          ? {
+              ...shares,
+              streams: shares.streams.filter(
+                (stream) => stream.guildId === request.guildId && stream.channelId === request.channelId,
+              ),
+            }
+          : undefined,
       ),
     ];
     const liveEmbodiment = ctx.embodiment.liveSession();

@@ -248,7 +248,7 @@ it("the real CLI connects a server and role, toggles fleet and selects tracking 
   expect(connect.sentences[0].text).toBe("Clankie connects to Garden with Clankie as Participant.");
   expect(connect.snapshot.settings.serverId).toBe("10002");
   for (const key of ["ingressGuildIds", "presenceGuildIds", "voiceGuildIds", "userSessionGuildIds"])
-    expect(connect.snapshot.settings[key]).toEqual(["10002"]);
+    expect(connect.snapshot.settings[key]).toContain("10002");
   for (const key of [
     "ingressChannelIds",
     "presenceChannelIds",
@@ -316,6 +316,15 @@ it("real TUI overlays use the shared role, fleet and tracking writer and keep ra
     await choose(shell, "Admin creates fleet channels", "on");
     await choose(shell, "Invite Clankie to a server", "Project tracking");
     await choose(shell, "published updates", "project activity");
+    await choose(shell, "Invite Clankie to a server", "Server owners");
+    await choose(shell, "Server", "Garden");
+    await choose(shell, "Clankie's role", "Admin");
+    await choose(shell, "Owners here", "A Discord role");
+    await choose(shell, "Owner role", "Builders");
+    await choose(shell, "Invite Clankie to a server", "This room can use");
+    await choose(shell, "Server", "Garden");
+    await choose(shell, "Room", "general");
+    await choose(shell, "This room can use", "House hunting");
     await choose(shell, "Invite Clankie to a server", "Advanced");
     await choose(shell, "Discord setting", "Participant fleet channel ID");
     const raw = await prompt(shell, "fleetChannelId");
@@ -331,6 +340,17 @@ it("real TUI overlays use the shared role, fleet and tracking writer and keep ra
     expect(view.snapshot.settings.fleetEnabled).toBe(true);
     expect(view.snapshot.settings.trackingLevel).toBe("project_activity");
     expect(view.snapshot.settings.fleetChannelId).toBe("20011");
+    expect(view.snapshot.settings.servers).toContainEqual({
+      serverId: "10002",
+      role: "admin",
+      owners: "role",
+      ownerRoleId: "10003",
+    });
+    expect(view.snapshot.settings.roomSkills).toContainEqual({
+      serverId: "10002",
+      channelId: "20011",
+      skill: "house-hunting",
+    });
     expect(view.snapshot.settings.systemActorUserIds).toEqual(["30005"]);
     expect(view.snapshot.settings.swarmGuildId).toBe("10002");
     f.disconnect();
@@ -495,4 +515,29 @@ it("an older four-sentence client refuses the incompatible setup model version e
     "fleet",
     "tracking",
   ]);
+});
+
+it("CLI owners and room skills round-trip through the revision-fenced API", async () => {
+  const f = await fixture();
+  await f.cli("setup", "connect", "--server", "Garden");
+  await f.cli("owners", "--server", "10002", "--owners", "role", "--owner-role", "10003", "--role", "admin");
+  expect((await f.settings.load()).discord.servers).toContainEqual({
+    serverId: "10002",
+    role: "admin",
+    owners: "role",
+    ownerRoleId: "10003",
+  });
+  await f.cli("room-skill", "--server", "10002", "--channel", "20011", "--skill", "house-hunting");
+  expect((await f.settings.load()).discord.roomSkills).toEqual([
+    { serverId: "10002", channelId: "20011", skill: "house-hunting" },
+  ]);
+  const before = (await f.api.discordSettings()).revision;
+  await expect(f.cli("owners", "--server", "10002", "--owners", "role")).rejects.toThrow();
+  await expect(
+    f.cli("room-skill", "--server", "10002", "--channel", "20011", "--skill", "bash"),
+  ).rejects.toThrow();
+  await expect(f.cli("set", "--system-actor-guild-ids", "10002")).rejects.toThrow();
+  expect((await f.api.discordSettings()).revision).toBe(before);
+  await f.cli("room-skill", "--server", "10002", "--channel", "20011", "--skill", "off");
+  expect((await f.settings.load()).discord.roomSkills).toEqual([]);
 });

@@ -288,14 +288,42 @@ it("validates a persisted exact room against current grants and never falls back
   const settings = new SettingsStore(join(stateDir, "settings.json"));
   await settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, systemActorUserIds: ["789012345678901234"] },
+    discord: {
+      ...current.discord,
+      ownerUserId: "789012345678901234",
+      servers: [{ serverId: "123456789012345678", role: "participant", owners: "me" }],
+      systemActorUserIds: ["789012345678901234"],
+    },
   }));
   const start = vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const censusRead = vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
   const submit = vi.spyOn(ConversationStore.prototype, "submitInternal");
   let routePresent = true;
   const captain = createCaptain(
-    { conversationRouteAuthorized: () => routePresent } as unknown as CaptainDeps,
+    {
+      conversationRouteAuthorized: () => routePresent,
+      discordActions: {
+        serverAction: async (action: { path: string }) => ({
+          ok: true,
+          message: "Owner-only room metadata",
+          data:
+            action.path === "/users/@me"
+              ? { id: "30001", bot: true }
+              : action.path === "/guilds/123456789012345678"
+                ? { id: "123456789012345678", owner_id: "789012345678901234" }
+                : action.path === "/guilds/123456789012345678/roles"
+                  ? [{ id: "123456789012345678", permissions: "0" }]
+                  : {
+                      id: "456789012345678901",
+                      guild_id: "123456789012345678",
+                      permission_overwrites: [
+                        { id: "123456789012345678", type: 0, allow: "0", deny: "1024" },
+                        { id: "30001", type: 1, allow: "1024", deny: "0" },
+                      ],
+                    },
+        }),
+      },
+    } as unknown as CaptainDeps,
     {
       repoRoot: stateDir,
       stateDir,
@@ -353,7 +381,7 @@ it("validates a persisted exact room against current grants and never falls back
     await captain.setDesignatedConversationHead(conversationId, "global-default");
     await settings.update((current) => ({
       ...current,
-      discord: { ...current.discord, systemActorUserIds: [] },
+      discord: { ...current.discord, ownerUserId: undefined, systemActorUserIds: [] },
     }));
     expect(await captain.validateConversationOwner(owner)).toBe(false);
     expect(await captain.wakeConversation(owner, "worker completed")).toBe(false);

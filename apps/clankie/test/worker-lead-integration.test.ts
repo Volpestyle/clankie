@@ -116,7 +116,12 @@ async function fixture(
   if (options.room && !options.denied)
     await settings.update((current) => ({
       ...current,
-      discord: { ...current.discord, systemActorUserIds: ["11111"] },
+      discord: {
+        ...current.discord,
+        ownerUserId: "11111",
+        servers: [{ serverId: "12345", role: "participant", owners: "me" }],
+        systemActorUserIds: ["11111"],
+      },
     }));
   const execute = vi.fn(async (_input: unknown, guard?: () => Promise<void>) => {
     await guard?.();
@@ -184,7 +189,25 @@ async function fixture(
     browser: { catalog: async () => ({ available: false, tools: [] }) },
     mcp: { catalog: async () => [], call: async () => ({ outcome: "ok", content: "", isError: false }) },
     conversationRouteAuthorized: route,
-    discordActions: { execute },
+    discordActions: {
+      execute,
+      serverAction: async (action: { path: string }) => ({
+        ok: true,
+        message: "metadata",
+        data:
+          action.path === "/users/@me"
+            ? { id: "22222", bot: true }
+            : action.path === "/guilds/12345"
+              ? { id: "12345", owner_id: "11111" }
+              : action.path === "/guilds/12345/roles"
+                ? [{ id: "12345", permissions: "0" }]
+                : {
+                    id: action.path.split("/").at(-1),
+                    guild_id: "12345",
+                    permission_overwrites: [{ id: "12345", type: 0, allow: "0", deny: "1024" }],
+                  },
+      }),
+    },
     ...(options.remote
       ? {
           fleets: {

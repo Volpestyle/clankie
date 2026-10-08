@@ -251,6 +251,13 @@ export class DiscordTracking {
         if (!labels.some((label) => label.trim().toLowerCase() === expected)) continue;
       }
       const memberId = discord.role === "admin" ? await this.verifiedMember(discord) : undefined;
+      const ownerPolicy = discord.servers.find((entry) => entry.serverId === discord.serverId);
+      const ownerOverwrites =
+        ownerPolicy?.owners === "role" && ownerPolicy.ownerRoleId
+          ? [{ id: ownerPolicy.ownerRoleId, type: 0, allow: "1024", deny: "0" }]
+          : discord.ownerUserId
+            ? [{ id: discord.ownerUserId, type: 1, allow: "1024", deny: "0" }]
+            : [];
       const guard = async () => {
         await validateRead();
         const fresh = (await this.options.settings()).discord;
@@ -295,10 +302,14 @@ export class DiscordTracking {
                 name: channelName(project.name),
                 type: mode === "forum" ? 15 : 0,
                 topic: `Clankie tracking for ${project.name}`,
-                permission_overwrites: [
-                  { id: discord.serverId, type: 0, deny: "1024", allow: "0" },
-                  { id: memberId!, type: 1, allow: "1024", deny: "0" },
-                ],
+                permission_overwrites:
+                  ownerPolicy?.owners === "everyone"
+                    ? []
+                    : [
+                        { id: discord.serverId, type: 0, deny: "1024", allow: "0" },
+                        { id: memberId!, type: 1, allow: "1024", deny: "0" },
+                        ...ownerOverwrites,
+                      ],
               },
             },
             true,

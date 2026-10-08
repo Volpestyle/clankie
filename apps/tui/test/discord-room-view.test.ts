@@ -2,9 +2,12 @@ import { expect, it } from "vitest";
 import { DiscordSettingsSchema, type DiscordRoomStatus } from "@clankie/protocol";
 import { DISCORD_EDITABLE_FIELDS } from "../src/discord-commands.ts";
 import { formatDiscordRoomStatus } from "../src/discord-room-view.ts";
-it("the TUI field editor exposes every canonical Discord field", () => {
+it("the TUI field editor exposes canonical settings without retired machine grants", () => {
+  const retired = new Set(["systemActorGuildIds", "systemActorChannelIds"]);
   expect(new Set(DISCORD_EDITABLE_FIELDS).size).toBe(DISCORD_EDITABLE_FIELDS.length);
-  expect(new Set(DISCORD_EDITABLE_FIELDS)).toEqual(new Set(Object.keys(DiscordSettingsSchema.shape)));
+  expect(new Set(DISCORD_EDITABLE_FIELDS)).toEqual(
+    new Set(Object.keys(DiscordSettingsSchema.shape).filter((field) => !retired.has(field))),
+  );
 });
 it("shows explicit silence/failure and private guidance without claiming pending deliveries were answered", () => {
   const room: DiscordRoomStatus = {

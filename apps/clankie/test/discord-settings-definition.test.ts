@@ -128,7 +128,11 @@ it("API and CLI receive the same server, role, fleet and tracking setup and all 
   expect(setup.machineName).toBe("his cloud computer");
   expect(
     setup.definition.advancedGroups.flatMap((group) => group.fields.map((field) => field.key)).sort(),
-  ).toEqual(Object.keys(DiscordSettingsSchema.shape).sort());
+  ).toEqual(
+    Object.keys(DiscordSettingsSchema.shape)
+      .filter((key) => !["systemActorGuildIds", "systemActorChannelIds"].includes(key))
+      .sort(),
+  );
   const sentences = setup.definition.sentences.map((sentence) =>
     sentence.parts
       .map((part) =>

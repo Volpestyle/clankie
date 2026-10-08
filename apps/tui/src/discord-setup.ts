@@ -139,6 +139,7 @@ export async function runDiscordSetup(
   api: DiscordSetupApi,
   advanced: () => Promise<void>,
   attention?: () => Promise<void>,
+  ownership?: { owners(): Promise<void>; roomSkill(): Promise<void> },
 ): Promise<void> {
   const client = new DiscordSetupClient(api);
   const flow = shell.setupFlow;
@@ -149,6 +150,20 @@ export async function runDiscordSetup(
       const choice = await flow.readSelect({
         message: "Discord",
         options: [
+          ...(ownership
+            ? [
+                {
+                  value: "owners",
+                  label: "Server owners",
+                  description: "Just me, everyone, or a Discord role.",
+                },
+                {
+                  value: "room-skill",
+                  label: "This room can use",
+                  description: "House hunting, without machine access.",
+                },
+              ]
+            : []),
           ...view.sentences.map((sentence) => ({
             value: sentence.id,
             label: plain(sentence.text),
@@ -180,6 +195,14 @@ export async function runDiscordSetup(
         ],
       });
       if (!choice || choice === "done") return;
+      if (choice === "owners" && ownership) {
+        await ownership.owners();
+        continue;
+      }
+      if (choice === "room-skill" && ownership) {
+        await ownership.roomSkill();
+        continue;
+      }
       if (choice === "check") {
         shell.insertCommandResult("/discord", formatDiscordSetup(await client.read()), "success");
         continue;

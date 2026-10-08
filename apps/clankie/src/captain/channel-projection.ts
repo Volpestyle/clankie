@@ -27,6 +27,7 @@ export function createChannelProjection(
     readonly swarmGuildId?: ChannelProjection["swarmGuildId"];
     /** Fresh owner settings gate existing credentials as well as provisioning. */
     readonly fleetSettings?: () => Promise<DiscordSettings>;
+    readonly ownerAudience?: (guildId: string, channelId: string) => Promise<boolean>;
     readonly participantPost?: (channelId: string, content: string) => Promise<void>;
   } = {},
 ): ChannelProjection {
@@ -50,6 +51,15 @@ export function createChannelProjection(
   return {
     post: async (input) => {
       await requireAdmin(input.guildId);
+      if (options.fleetSettings !== undefined) {
+        const target = await resolve(fetchImpl)(input);
+        if (
+          target.guildId !== input.guildId ||
+          !(await options.ownerAudience?.(target.guildId, input.threadId ?? target.channelId))
+        )
+          throw new Error("discord_owner_audience_required");
+        await requireAdmin(target.guildId);
+      }
       await post(fetchImpl)(input);
     },
     resolve: async (input) => {

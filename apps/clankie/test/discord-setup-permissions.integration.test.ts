@@ -452,7 +452,8 @@ it("only an explicit authenticated owner mutation posts once, with stale account
   f.afterPermissions(async () => {
     await f.settings.update((current) => ({
       ...current,
-      discord: { ...current.discord, teamVisible: false },
+      // Mutate the owner setting, not its derived legacy body projection.
+      discord: { ...current.discord, fleetEnabled: true },
     }));
   });
   expect((await mutate("fixture-owner")).status).toBe(409);

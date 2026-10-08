@@ -1,3 +1,5 @@
+import type { DiscordSessionAccess } from "./room-skill-tools.ts";
+import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import {
   CAPTAIN_LANE_ENTRIES_MAX,
@@ -57,6 +59,7 @@ export interface CreateDiscordTurnsContext {
     sideConversation?: boolean,
     _conversationId?: string,
     run?: ConversationServiceRun,
+    access?: DiscordSessionAccess,
   ) => Promise<LaneSession>;
   readonly workingDirectory: string;
   readonly options: CaptainOptions;
@@ -88,13 +91,31 @@ export interface CreateDiscordTurnsContext {
   readonly roomForks: RoomForkReceipts;
 }
 export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
+  async function conversationDiscordSettings(origin: DiscordWatchOrigin) {
+    const discord = resolveDiscordSettings(
+      (await ctx.settings()).discord,
+      ctx.options.discordEnvironment,
+    ).settings;
+    if (
+      origin.guildId &&
+      ctx.deps.discordActions &&
+      (await discordActorOwnsServer(discord, origin.guildId, origin.actorId, async (action) => {
+        const result = await ctx.deps.discordActions!.serverAction(action);
+        if (!result.ok) throw new Error("Discord membership unavailable");
+        return result.data;
+      }))
+    )
+      return { ...discord, systemActorUserIds: [...discord.systemActorUserIds, origin.actorId] };
+    return discord;
+  }
+
   /** The session a planned Discord turn runs in, whether a message or a watch woke it. */
   function discordLane(
     normalized: NormalizedDiscordTurn,
     systemTools: boolean,
     run?: ConversationServiceRun,
   ): Promise<LaneSession> {
-    if (!normalized.durable) {
+    if (!normalized.durable || normalized.access !== undefined) {
       // One-shot for context, durable for evidence: a fresh session per turn
       // (nothing carries forward), but written to disk under the room's own
       // directory so what he actually did — every tool call and result — is
@@ -115,6 +136,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         false,
         undefined,
         run,
+        normalized.access,
       );
     }
     // Voice keeps the directory it has always written to; text rooms get
@@ -165,15 +187,31 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     )
       return false;
     const discord =
-      admission === undefined
-        ? resolveDiscordSettings((await ctx.settings()).discord, ctx.options.discordEnvironment).settings
-        : await admission.readSettings();
+      admission === undefined ? await conversationDiscordSettings(origin) : await admission.readSettings();
     if (
       admission?.sourceCurrent !== undefined
         ? !admission.sourceCurrent()
         : ctx.deps.conversationRouteAuthorized?.(owner) === false
     )
       return false;
+    if (
+      admission === undefined &&
+      mode === "machine" &&
+      origin.guildId === undefined &&
+      origin.transportKind !== "bot"
+    )
+      return false;
+    if (admission === undefined && mode === "machine" && origin.guildId !== undefined) {
+      if (
+        !ctx.deps.discordActions ||
+        !(await discordOwnerAudience(discord, origin.guildId, origin.channelId, async (action) => {
+          const result = await ctx.deps.discordActions!.serverAction(action);
+          if (!result.ok) throw new Error("Discord audience unavailable");
+          return result.data;
+        }))
+      )
+        return false;
+    }
     return (
       mode === "social" ||
       planDiscordTurnSession({
@@ -293,13 +331,10 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
   ): Promise<boolean> {
     const origin = owner.discord!;
     // No body reply port means this route cannot accept an asynchronous turn.
-    if (ctx.deps.discordActions === undefined) return false;
+    if (ctx.deps.discordActions?.execute === undefined) return false;
     const scope = ctx.conversations.conversation(owner.conversationId)?.scope;
     if (scope?.kind !== "room") return false;
-    const { settings: discord } = resolveDiscordSettings(
-      (await ctx.settings()).discord,
-      ctx.options.discordEnvironment,
-    );
+    const discord = await conversationDiscordSettings(origin);
     const plan = planConversationWakeSession(
       {
         baseSessionKey: origin.baseSessionKey,
@@ -329,6 +364,11 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       prompt,
       images: [],
       heard: "[Herdr watch settled]",
+      access: {
+        privateContext: mode === "machine",
+        actorId: origin.actorId,
+        authorize: () => validateConversationOwner(owner, mode),
+      },
       actorId: origin.actorId,
       ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
       channelId: origin.channelId,
@@ -953,11 +993,14 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       deliveryId: `room-fork-${id}`,
       transportKind: "bot",
     };
-    // The room's own grant decides the turn's tools, never the owner's personal
-    // machine access: the turn speaks in a shared room.
-    const systemTools =
-      discord.systemActorGuildIds.includes(guildId) &&
-      (discord.systemActorChannelIds.length === 0 || discord.systemActorChannelIds.includes(channelId));
+    // An owner-directed turn may bring private work only to a proven owner audience.
+    const ownerAudience = await discordOwnerAudience(discord, guildId, channelId, async (action) => {
+      const result = await ctx.deps.discordActions!.serverAction(action);
+      if (!result.ok) throw new Error("Discord audience unavailable");
+      return result.data;
+    });
+    if (!ownerAudience) return refuse("discord_owner_audience_required");
+    const systemTools = true;
     const owner: ConversationOwner = { conversationId: input.room, discord: origin };
     const mode = systemTools ? "machine" : "social";
     if (roomForksRunning.has(id)) return { state: "uncertain", room: input.room, code: "room_fork_running" };
@@ -1019,6 +1062,11 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
           prompt,
           images: [],
           heard: "[Owner-directed room turn]",
+          access: {
+            privateContext: true,
+            actorId: origin.actorId,
+            authorize: () => validateConversationOwner(owner, mode),
+          },
           actorId: origin.actorId,
           guildId,
           channelId,

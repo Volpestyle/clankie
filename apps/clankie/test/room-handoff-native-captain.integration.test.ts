@@ -84,11 +84,17 @@ it.each(["claude", "codex"] as const)(
           }),
     );
     const settings = new SettingsStore(join(root, "settings.json"));
-    if (harness === "codex")
-      await settings.update((current) => ({
-        ...current,
-        discord: { ...current.discord, ownerUserId: "11111", systemActorUserIds: ["11111"] },
-      }));
+    await settings.update((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        ownerUserId: "11111",
+        servers: [
+          { serverId: "12345", role: "participant", owners: harness === "claude" ? "everyone" : "me" },
+        ],
+        systemActorUserIds: ["11111"],
+      },
+    }));
     const native: HerdrAgentSnapshot = {
       paneId: "w1:p1",
       terminalId: "term-native-head",
@@ -138,6 +144,24 @@ it.each(["claude", "codex"] as const)(
         herdrAvailable: () => true,
         embodiment: {},
         conversationRouteAuthorized: () => true,
+        discordActions: {
+          serverAction: async (action: { path: string }) => ({
+            ok: true,
+            message: "Owner-only room metadata",
+            data:
+              action.path === "/users/@me"
+                ? { id: "30001", bot: true }
+                : action.path === "/guilds/12345"
+                  ? { id: "12345", owner_id: "11111" }
+                  : action.path === "/guilds/12345/roles"
+                    ? [{ id: "12345", permissions: "0" }]
+                    : {
+                        id: "67890",
+                        guild_id: "12345",
+                        permission_overwrites: [{ id: "12345", type: 0, allow: "0", deny: "1024" }],
+                      },
+          }),
+        },
         memory: {
           recallEpisodeCard: async (lane: Parameters<typeof memory.episodeRecallCard>[0]["lane"]) =>
             memory.episodeRecallCard({ lane }),

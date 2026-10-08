@@ -88,6 +88,7 @@ describe("channel provisioning against the managed server", () => {
   async function runtimeWithFakeRest(): Promise<{
     runtime: Awaited<ReturnType<typeof loadRuntime>>;
     calls: string[];
+    posts: unknown[];
   }> {
     const directory = await mkdtemp(join(tmpdir(), "discord-provision-broker-"));
     const path = join(directory, "credentials.json");
@@ -105,16 +106,34 @@ describe("channel provisioning against the managed server", () => {
     // wearing two names.
     process.env.DISCORD_GUILD_ID = "10101";
     process.env.DISCORD_SWARM_GUILD_ID = "20202";
+    process.env.DISCORD_OWNER_USER_ID = "11111";
+    process.env.DISCORD_SERVERS = JSON.stringify([{ serverId: "20202", role: "admin", owners: "me" }]);
     process.env.DISCORD_PRESENCE_GUILD_IDS = "30303";
     delete process.env.DISCORD_PRESENCE_CHANNEL_IDS;
     const calls: string[] = [];
+    const posts: unknown[] = [];
     const rest = {
       get: (route: string) => {
         calls.push(`GET ${route}`);
+        if (route === "/users/@me") return Promise.resolve({ id: "30001", bot: true });
+        if (route === "/guilds/20202") return Promise.resolve({ id: "20202", owner_id: "11111" });
+        if (route === "/guilds/20202/roles") return Promise.resolve([{ id: "20202", permissions: "0" }]);
+        if (route.startsWith("/channels/"))
+          return Promise.resolve({
+            id: route.split("/")[2],
+            guild_id: "20202",
+            type: 0,
+            permission_overwrites: [
+              { id: "20202", type: 0, deny: "1024", allow: "0" },
+              { id: "30001", type: 1, deny: "0", allow: "1024" },
+              { id: "11111", type: 1, deny: "0", allow: "1024" },
+            ],
+          });
         return Promise.resolve(GUILD_ROOMS);
       },
-      post: (route: string) => {
+      post: (route: string, options: { body: unknown }) => {
         calls.push(`POST ${route}`);
+        posts.push(options.body);
         return Promise.resolve(
           route.endsWith("/webhooks")
             ? { id: "webhook-1", token: "webhook-secret" }
@@ -124,7 +143,7 @@ describe("channel provisioning against the managed server", () => {
         );
       },
     };
-    return { runtime: await loadRuntime(rest), calls };
+    return { runtime: await loadRuntime(rest), calls, posts };
   }
 
   async function loadRuntime(rest: unknown) {
@@ -133,13 +152,19 @@ describe("channel provisioning against the managed server", () => {
   }
 
   it("provisions only into the managed server, never the command server or an inhabited guild", async () => {
-    const { runtime } = await runtimeWithFakeRest();
+    const { runtime, calls } = await runtimeWithFakeRest();
     expect(runtime.swarmGuildId()).toBe("20202");
     // Every route it builds names the managed server, though the command server and
     // an inhabited presence guild are both configured and one of them would
     // have answered before the managed server existed as its own field.
     expect((await runtime.provisionChannel({ name: "Atlas slowness" })).guildId).toBe("20202");
 
+    const writes = calls.filter((call) => call.startsWith("POST ")).length;
+    process.env.DISCORD_SERVERS = JSON.stringify([{ serverId: "20202", role: "participant", owners: "me" }]);
+    await expect(runtime.provisionChannel({ name: "Revoked admin" })).rejects.toThrow(
+      "discord_channel_provision_requires_admin",
+    );
+    expect(calls.filter((call) => call.startsWith("POST "))).toHaveLength(writes);
     delete process.env.DISCORD_SWARM_GUILD_ID;
     const { createDiscordPresenceRuntime } = await import("../src/presence-runtime-module.ts");
     const unset = createDiscordPresenceRuntime({ rest: {} as never });
@@ -156,7 +181,9 @@ describe("channel provisioning against the managed server", () => {
       { kind: "channel", channelId: "43", name: "fleet" },
       { kind: "channel", channelId: "42", name: "general" },
     ]);
-    expect(calls).toEqual(["GET /guilds/20202/channels"]);
+    expect(calls.filter((call) => call.startsWith("POST ") || call.endsWith("/channels"))).toEqual([
+      "GET /guilds/20202/channels",
+    ]);
   });
 
   it("puts the webhook on a room the server already has, making no channel", async () => {
@@ -173,7 +200,10 @@ describe("channel provisioning against the managed server", () => {
       webhookToken: "webhook-secret",
     });
     // No POST to /guilds/…/channels: the room was already there.
-    expect(calls).toEqual(["GET /guilds/20202/channels", "POST /channels/43/webhooks"]);
+    expect(calls.filter((call) => call.startsWith("POST ") || call.endsWith("/channels"))).toEqual([
+      "GET /guilds/20202/channels",
+      "POST /channels/43/webhooks",
+    ]);
   });
 
   it("creates one post in a selected forum and targets the parent webhook at that thread", async () => {
@@ -190,7 +220,7 @@ describe("channel provisioning against the managed server", () => {
       webhookId: "webhook-1",
       webhookToken: "webhook-secret",
     });
-    expect(calls).toEqual([
+    expect(calls.filter((call) => call.startsWith("POST ") || call.endsWith("/channels"))).toEqual([
       "GET /guilds/20202/channels",
       "POST /channels/45/threads",
       "POST /channels/45/webhooks",
@@ -207,16 +237,29 @@ describe("channel provisioning against the managed server", () => {
     ).rejects.toThrow(/discord_channel_not_in_swarm_guild/);
     // The guild-scoped grant would otherwise reach a room in a guild Clankie
     // only inhabits, which the swarm fence is supposed to be the whole of.
-    expect(calls).toEqual(["GET /guilds/20202/channels"]);
+    expect(calls.filter((call) => call.startsWith("POST ") || call.endsWith("/channels"))).toEqual([
+      "GET /guilds/20202/channels",
+    ]);
   });
 
   it("makes the channel and its webhook when no existing room is named", async () => {
-    const { runtime, calls } = await runtimeWithFakeRest();
+    const { runtime, calls, posts } = await runtimeWithFakeRest();
     expect(await runtime.provisionChannel({ name: "Atlas slowness" })).toMatchObject({
       guildId: "20202",
       channelId: "new-channel",
       webhookId: "webhook-1",
     });
-    expect(calls).toEqual(["POST /guilds/20202/channels", "POST /channels/new-channel/webhooks"]);
+    expect(posts[0]).toMatchObject({
+      permission_overwrites: [
+        { id: "20202", type: 0, deny: "1024", allow: "0" },
+        { id: "30001", type: 1, deny: "0", allow: "1024" },
+        { id: "11111", type: 1, deny: "0", allow: "1024" },
+      ],
+    });
+    expect(calls).toContain("GET /users/@me");
+    expect(calls.filter((call) => call.startsWith("POST ") || call.endsWith("/channels"))).toEqual([
+      "POST /guilds/20202/channels",
+      "POST /channels/new-channel/webhooks",
+    ]);
   });
 });

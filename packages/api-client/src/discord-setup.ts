@@ -45,7 +45,11 @@ export function discordPickerIds(snapshot: DiscordSettingsSnapshot, part: Discor
     ...new Set(
       part.fields.flatMap((field) => {
         const value = snapshot.settings[field];
-        return Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+        return Array.isArray(value)
+          ? (value as unknown[]).filter((id): id is string => typeof id === "string")
+          : typeof value === "string"
+            ? [value]
+            : [];
       }),
     ),
   ];
@@ -244,7 +248,7 @@ export class DiscordSetupClient {
       directories: [...view.directories.filter((directory) => directory.kind !== "channels"), channels],
     });
   }
-  private async directory(
+  async directory(
     query: Pick<DiscordDirectoryRequest, "kind" | "guildId">,
   ): Promise<DiscordDirectorySnapshot> {
     const result = await this.api.discordDirectory({ ...query, limit: 200 });
@@ -385,7 +389,7 @@ export class DiscordSetupClient {
     }
     const saved = await this.api.updateDiscordSettings({
       expectedRevision: snapshot.revision,
-      settings: discordServerSettings(DiscordSettingsSchema.parse(settings)),
+      settings: discordServerSettings(DiscordSettingsSchema.parse(settings), snapshot.settings),
     });
     return this.read(saved);
   }

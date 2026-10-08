@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { DiscordServerActionSchema, DiscordServerActionResultSchema } from "@clankie/protocol";
 import { SettingsStore, discordSettingsToEnvironment, resolveDiscordSettings } from "@clankie/settings";
-import { discordServerAuthority, executeDiscordServerAction } from "@clankie/discord-presence-core";
+import {
+  discordServerAuthority,
+  executeDiscordServerAction,
+  discordOwnerAudience,
+  discordActorOwnsServer,
+} from "@clankie/discord-presence-core";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { createDiscordPresenceRuntime } from "../../discord-bridge/src/presence-runtime-module.ts";
 import { createChannelProjection } from "../src/captain/channel-projection.ts";
@@ -30,6 +35,11 @@ async function fixture() {
   const settings = new SettingsStore(join(root, "settings.json"));
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
   let loseProvisionReceipt = false;
+  let overwrites: Array<{ id: string; type: number; allow: string; deny: string }> = [];
+  let roles = [{ id: SERVER, permissions: "0" }];
+  const ownerRole = "60001",
+    owner = "50001";
+  let members: Record<string, string[]> = { [owner]: [ownerRole], "50002": [] };
   let pausedMembership: { reached: () => void; released: Promise<void> } | undefined;
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -54,18 +64,39 @@ async function fixture() {
     response.setHeader("content-type", "application/json");
     response.end(
       JSON.stringify(
-        call.method === "GET" && call.path.startsWith("/channels/")
-          ? { id: call.path.split("/")[2], guild_id: call.path === `/channels/${OTHER}` ? "10002" : SERVER }
-          : call.method === "POST" && call.path.endsWith("/webhooks")
-            ? {
-                id: "40001",
-                guild_id: SERVER,
-                channel_id: call.path.split("/")[2],
-                token: "private-fixture-webhook",
-              }
-            : call.path.startsWith("/webhooks/")
-              ? { id: "40001", guild_id: SERVER, channel_id: CHANNEL, token: "private-fixture-webhook" }
-              : { id: "30001", ...(call.body && typeof call.body === "object" ? call.body : {}) },
+        call.method === "GET" && call.path === "/users/@me"
+          ? { id: "90001", bot: true }
+          : call.method === "GET" && call.path === `/guilds/${SERVER}`
+            ? { id: SERVER, owner_id: owner }
+            : call.method === "GET" && call.path === `/guilds/${SERVER}/roles`
+              ? roles
+              : call.method === "GET" && call.path.startsWith(`/guilds/${SERVER}/members/`)
+                ? {
+                    user: { id: call.path.split("/").at(-1) },
+                    roles: members[call.path.split("/").at(-1)!] ?? [],
+                  }
+                : call.method === "GET" && call.path.startsWith("/channels/")
+                  ? {
+                      id: call.path.split("/")[2],
+                      guild_id: call.path === `/channels/${OTHER}` ? "10002" : SERVER,
+                      type: 0,
+                      permission_overwrites: overwrites,
+                    }
+                  : call.method === "POST" && call.path.endsWith("/webhooks")
+                    ? {
+                        id: "40001",
+                        guild_id: SERVER,
+                        channel_id: call.path.split("/")[2],
+                        token: "private-fixture-webhook",
+                      }
+                    : call.path.startsWith("/webhooks/")
+                      ? {
+                          id: "40001",
+                          guild_id: SERVER,
+                          channel_id: CHANNEL,
+                          token: "private-fixture-webhook",
+                        }
+                      : { id: "30001", ...(call.body && typeof call.body === "object" ? call.body : {}) },
       ),
     );
   });
@@ -96,12 +127,29 @@ async function fixture() {
           observeNative?.(result);
           return result;
         },
+        { source: "operator" },
       ),
     );
   };
+  const audience = async (channelId: string) =>
+    discordOwnerAudience((await settings.load()).discord, SERVER, channelId, async (action) => {
+      const response = await fetch(`${url}${action.path}`);
+      return response.json();
+    });
+  const owns = async (actorId: string) =>
+    discordActorOwnsServer((await settings.load()).discord, SERVER, actorId, async (action) => {
+      const response = await fetch(`${url}${action.path}`);
+      return response.json();
+    });
   await settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, serverId: SERVER, role: "admin", fleetEnabled: true },
+    discord: {
+      ...current.discord,
+      serverId: SERVER,
+      role: "admin",
+      fleetEnabled: true,
+      servers: [{ serverId: SERVER, role: "admin", owners: "everyone" }],
+    },
   }));
   return {
     root,
@@ -109,6 +157,23 @@ async function fixture() {
     settings,
     calls,
     execute,
+    audience,
+    owns,
+    privateRoom: () => {
+      overwrites = [
+        { id: SERVER, type: 0, allow: "0", deny: "1024" },
+        { id: ownerRole, type: 0, allow: "1024", deny: "0" },
+      ];
+    },
+    publicRoom: () => {
+      overwrites = [];
+    },
+    nonOwnerAdmin: () => {
+      roles = [...roles, { id: "60002", permissions: "8" }];
+    },
+    removeRole: (actorId: string) => {
+      members = { ...members, [actorId]: [] };
+    },
     pauseMembership: () => {
       let reached!: () => void;
       let release!: () => void;
@@ -206,7 +271,10 @@ it("Participant uses only the designated projection channel and tracking is inde
   expect(
     (await f.execute({ method: "POST", path: `/channels/${CHANNEL}/messages`, body: { content: "off" } })).ok,
   ).toBe(false);
-  expect(f.calls).toHaveLength(before);
+  // Resolve the channel's server policy, but never send the denied update.
+  expect(f.calls.slice(before)).toEqual([
+    expect.objectContaining({ method: "GET", path: `/channels/${CHANNEL}` }),
+  ]);
   const effective = resolveDiscordSettings((await f.settings.load()).discord, {}).settings;
   expect(effective.ingressGuildIds).toEqual([SERVER]);
   expect(effective.ingressChannelIds).toEqual([]);
@@ -433,6 +501,7 @@ it("existing Admin fleet groups provision once, retain their mirror across toggl
   };
   const projection = createChannelProjection({
     fetch: nativeFetch,
+    ownerAudience: (_guild, channel) => f.audience(channel),
     fleetSettings: async () => resolveDiscordSettings((await f.settings.load()).discord, {}).settings,
     swarmGuildId: () => SERVER,
     provision: async ({ name }) => {
@@ -576,7 +645,14 @@ it("existing Admin fleet groups provision once, retain their mirror across toggl
 
   await f.settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, role: "admin", serverId: SERVER },
+    discord: {
+      ...current.discord,
+      role: "admin",
+      serverId: SERVER,
+      servers: current.discord.servers.map((entry) =>
+        entry.serverId === SERVER ? { ...entry, role: "admin" } : entry,
+      ),
+    },
   }));
   f.loseProvisionReceipt();
   const uncertain = await group("Unconfirmed crew group");
@@ -642,5 +718,38 @@ it("the production bot adapter refuses a mutation revoked during its native memb
     pause.release();
   }
   expect((await pending).ok).toBe(false);
-  expect(f.calls).toEqual([{ method: "GET", path: `/channels/${CHANNEL}` }]);
+  expect(f.calls.length).toBeGreaterThan(0);
+  expect(f.calls.every((call) => call.method === "GET" && call.path === `/channels/${CHANNEL}`)).toBe(true);
+});
+
+it("host membership proves role ownership and outreach refuses every unproven reader", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    discord: {
+      ...current.discord,
+      servers: [{ serverId: SERVER, role: "admin", owners: "role", ownerRoleId: "60001" }],
+    },
+  }));
+  expect(await f.owns("50001")).toBe(true);
+  expect(await f.owns("50002")).toBe(false);
+  // Admin alone and an owner's request do not prove the audience.
+  const outreach = () =>
+    f.execute({
+      method: "POST",
+      path: `/channels/${CHANNEL}/messages`,
+      body: { content: "Private fleet update" },
+    });
+  expect((await outreach()).ok).toBe(false);
+  expect(f.calls.some((call) => call.method === "POST")).toBe(false);
+  f.privateRoom();
+  expect(await f.audience(CHANNEL)).toBe(true);
+  expect((await outreach()).ok).toBe(true);
+  f.nonOwnerAdmin();
+  expect(await f.audience(CHANNEL)).toBe(false);
+  const published = f.calls.filter((call) => call.method === "POST").length;
+  expect((await outreach()).ok).toBe(false);
+  expect(f.calls.filter((call) => call.method === "POST")).toHaveLength(published);
+  f.removeRole("50001");
+  expect(await f.owns("50001")).toBe(false);
 });

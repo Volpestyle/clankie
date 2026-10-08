@@ -59,7 +59,13 @@ async function fixture() {
   });
   await settings.update((current) => ({
     ...current,
-    discord: { ...current.discord, serverId: "10001", role: "admin", trackingLevel: "project_updates" },
+    discord: {
+      ...current.discord,
+      serverId: "10001",
+      role: "admin",
+      ownerUserId: "40001",
+      trackingLevel: "project_updates",
+    },
     projects: {
       ...current.projects,
       projects: [
@@ -101,8 +107,13 @@ async function fixture() {
   });
   let permissionEvidence: "valid" | "missing" | "guild" | "body" | "admin" = "valid";
   const effects: DiscordServerAction[] = [];
-  const channels = new Map<string, { id: string; guild_id: string; type: number }>([
-    ["20001", { id: "20001", guild_id: "10001", type: 0 }],
+  const privateOverwrites = [
+    { id: "10001", type: 0, deny: "1024", allow: "0" },
+    { id: memberId, type: 1, allow: "1024", deny: "0" },
+    { id: "40001", type: 1, allow: "1024", deny: "0" },
+  ];
+  const channels = new Map<string, Record<string, unknown>>([
+    ["20001", { id: "20001", guild_id: "10001", type: 0, permission_overwrites: privateOverwrites }],
     ["20002", { id: "20002", guild_id: "99999", type: 0 }],
   ]);
   let nextId = 50000;
@@ -146,14 +157,34 @@ async function fixture() {
       const path = request.url!;
       if (request.method === "GET") {
         response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify(channels.get(path.split("/")[2]!) ?? {}));
+        response.end(
+          JSON.stringify(
+            path === "/users/@me"
+              ? { id: memberId, bot: true }
+              : path === "/guilds/10001"
+                ? { id: "10001", owner_id: "40001" }
+                : path === "/guilds/10001/roles"
+                  ? [
+                      { id: "10001", permissions: "0" },
+                      { id: "10002", permissions: "8", tags: { bot_id: memberId } },
+                    ]
+                  : (channels.get(path.split("/")[2]!) ?? {}),
+          ),
+        );
         return;
       }
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       effects.push({ method: request.method as DiscordServerAction["method"], path, body });
       const id = String(nextId++);
-      if (path.endsWith("/channels")) channels.set(id, { id, guild_id: "10001", type: Number(body.type) });
-      if (path.endsWith("/threads")) channels.set(id, { id, guild_id: "10001", type: 11 });
+      if (path.endsWith("/channels"))
+        channels.set(id, {
+          id,
+          guild_id: "10001",
+          type: Number(body.type),
+          permission_overwrites: body.permission_overwrites,
+        });
+      if (path.endsWith("/threads"))
+        channels.set(id, { id, guild_id: "10001", type: 11, parent_id: path.split("/")[2] });
       if (loseReceipt) {
         request.socket.destroy();
         return;
@@ -316,10 +347,7 @@ async function fixture() {
     },
     issueReads: () => issueReads,
     accountReads: () => accountReads,
-    privateOverwrites: [
-      { id: "10001", type: 0, deny: "1024", allow: "0" },
-      { id: memberId, type: 1, allow: "1024", deny: "0" },
-    ],
+    privateOverwrites,
     setPermissionEvidence(value: typeof permissionEvidence) {
       permissionEvidence = value;
     },

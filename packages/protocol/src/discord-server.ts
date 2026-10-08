@@ -9,8 +9,11 @@ export const DiscordServerActionSchema = z
       .string()
       .max(512)
       .regex(
-        /^\/(?:guilds\/(?:@server|\d{5,32})|channels\/\d{5,32}|webhooks\/\d{5,32})(?:\/(?:[a-z][a-z_-]*|\d{5,32}|@me))*$/u,
+        /^\/(?:users\/@me|guilds\/(?:@server|\d{5,32})|channels\/\d{5,32}|webhooks\/\d{5,32})(?:\/(?:[a-z][a-z_-]*|\d{5,32}|@me))*$/u,
       )
+      .refine((path) => !path.startsWith("/users/") || path === "/users/@me", {
+        message: "Only the body's own identity may be read.",
+      })
       .refine((path) => !path.startsWith("/webhooks/") || /^\/webhooks\/\d{5,32}$/u.test(path), {
         message: "Webhook bearer routes are never accepted.",
       }),

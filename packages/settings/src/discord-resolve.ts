@@ -43,6 +43,15 @@ export function resolveDiscordSettings(
   const merged: Record<string, unknown> = { ...stored };
   const { overridden, takeString, takeList, takeBoolean, takeInteger } = envOverrideReaders(env);
 
+  for (const [field, name] of [
+    ["servers", "DISCORD_SERVERS"],
+    ["roomSkills", "DISCORD_ROOM_SKILLS"],
+  ] as const) {
+    if (env[name]?.trim()) {
+      merged[field] = JSON.parse(env[name]!);
+      overridden.push(name);
+    }
+  }
   takeString(merged, "serverId", "DISCORD_SERVER_ID");
   takeString(merged, "role", "DISCORD_ROLE");
   takeBoolean(merged, "fleetEnabled", "DISCORD_FLEET_ENABLED");
@@ -97,7 +106,7 @@ export function resolveDiscordSettings(
   takeString(merged, "activityTunnelHostname", "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME");
 
   return {
-    settings: discordServerSettings(DiscordSettingsSchema.parse(merged)),
+    settings: discordServerSettings(DiscordSettingsSchema.parse(merged), stored),
     overriddenByEnvironment: overridden,
   };
 }
@@ -156,6 +165,8 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
     if (values.length > 0) env[name] = values.join(",");
   };
 
+  env.DISCORD_SERVERS = JSON.stringify(settings.servers);
+  env.DISCORD_ROOM_SKILLS = JSON.stringify(settings.roomSkills);
   put("DISCORD_SERVER_ID", settings.serverId);
   env.DISCORD_ROLE = settings.role;
   env.DISCORD_FLEET_ENABLED = String(settings.fleetEnabled);
@@ -170,8 +181,6 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   putList("DISCORD_APPROVAL_ROLE_IDS", settings.approvalRoleIds);
   put("DISCORD_OWNER_USER_ID", settings.ownerUserId);
   putList("DISCORD_SYSTEM_ACTOR_USER_IDS", settings.systemActorUserIds);
-  putList("DISCORD_SYSTEM_ACTOR_GUILD_IDS", settings.systemActorGuildIds);
-  putList("DISCORD_SYSTEM_ACTOR_CHANNEL_IDS", settings.systemActorChannelIds);
 
   if (settings.textIngressEnabled) env["DISCORD_TEXT_INGRESS_ENABLED"] = "true";
   putList("DISCORD_INGRESS_GUILD_IDS", settings.ingressGuildIds);

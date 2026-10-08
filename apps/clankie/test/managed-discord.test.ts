@@ -517,7 +517,7 @@ it("retries policy conflicts from current disk and survives outage/restart with 
   await held.started.promise;
   await f.settings.update((current) => ({
     ...current,
-    discord: discordServerSettings({ ...current.discord, role: "admin" }),
+    discord: discordServerSettings({ ...current.discord, role: "admin" }, current.discord),
   }));
   f.setRemoteRevision("b".repeat(64));
   held.release.resolve();

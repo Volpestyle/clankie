@@ -1,3 +1,4 @@
+import { migrateDiscordOwnership, discordServerSettings } from "@clankie/protocol/discord-settings";
 import { statSync, type BigIntStats } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -118,7 +119,9 @@ export class SettingsStore {
     // Retired sections, unchanged legacy Linear defaults and legacy working
     // preferences migrate on read; the next ordinary write persists the format.
     const settings = machineSettings(
-      migrateLegacyFleetWorkingPreferences(migrateLinearWakeDefaults(dropRetiredSettings(parsed))),
+      migrateDiscordOwnership(
+        migrateLegacyFleetWorkingPreferences(migrateLinearWakeDefaults(dropRetiredSettings(parsed))),
+      ),
     );
     this.parsed = { raw, normalized: JSON.stringify(settings) };
     return settings;
@@ -255,7 +258,9 @@ function machineSettings(raw: unknown, previous?: ClankieSettings): ClankieSetti
   data.agentHosts.connections = data.machines.flatMap(({ id, ssh, shell, aliases }) =>
     [id, ...aliases].map((name) => ({ id: name, ssh, shell })),
   );
-  return ClankieSettingsSchema.parse(data);
+  const settings = ClankieSettingsSchema.parse(data);
+  settings.discord = discordServerSettings(settings.discord, previous?.discord);
+  return settings;
 }
 
 function storedMachineSettings(settings: ClankieSettings) {

@@ -377,7 +377,8 @@ it("real Pi room children bound admission fairly, keep grants under a bound Code
     const guildFriend = captain.submitDiscordTurn(request(9));
     work.push(guildFriend);
     await vi.waitFor(() => expect(calls).toHaveLength(9));
-    expect(calls[8]!.body.tools?.some((tool) => tool.function.name === "bash")).toBe(true);
+    // Retired guild IDs cannot promote this unrelated actor to a machine turn.
+    expect(calls[8]!.body.tools?.some((tool) => tool.function.name === "bash")).toBe(false);
     expect(captain.operatorSeatReady?.()).toBe(true);
     calls[8]!.finish();
     expect(await guildFriend).toMatchObject({ state: "settled", response: "answer-10009" });

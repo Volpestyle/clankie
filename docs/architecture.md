@@ -522,12 +522,12 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   machine-control grants
   ([ADR 0095](adr/0095-discord-system-actors.md),
   [ADR 0105](adr/0105-voice-is-as-capable-as-the-room-it-is-in.md),
-  [ADR 0133](adr/0133-a-machine-grant-belongs-to-a-discord-lane.md)). An
-  individually granted actor gets a one-shot tool-bearing turn in shared rooms
-  and a durable tool-bearing lane in an official-bot DM. Explicitly trusted
-  guilds, optionally narrowed to channels, give every admitted member the same
-  durable tool-bearing lane. Social and system histories have separate session
-  keys, so revocation routes the next message away from the old tool bank. They
+  [ADR 0251](adr/0251-discord-owners-and-room-skills.md)). Owners are selected
+  per server: Just me, Everyone, or a Discord role proved by the body. Mixed
+  audiences receive fresh turns without private fleet/work context. Private
+  owner audiences may use machine lanes; room skills add bounded tools to
+  social abilities. Legacy guild/channel IDs never grant a machine. Policy
+  keys and fresh skill handoffs keep revoked grants out of warm sessions. They
   land in the conversation's workspace — the directory a workspace-scoped
   operator conversation names, this repository for every other lane
   ([ADR 0104](adr/0104-clankie-works-where-you-launched-him.md)). Voice join/leave
@@ -676,9 +676,11 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   `/discord` Active body picks which process is the mouth; the launcher
   starts only that one ([ADR 0048](adr/0048-discord-user-session-transport.md)).
   Who may ask him to drive this machine from Discord is configured under
-  `discord.systemActorUserIds`, `systemActorGuildIds`, and
-  `systemActorChannelIds`
-  ([ADR 0133](adr/0133-a-machine-grant-belongs-to-a-discord-lane.md)).
+  `discord.servers` (role and owners). `discord.roomSkills` adds a bounded
+  named capability without a shell. Mixed audiences withhold private owner
+  context; outreach requires a proven owner-only audience. Explicit actor
+  compatibility grants remain; trusted guild/channel machine grants are retired
+  ([ADR 0251](adr/0251-discord-owners-and-room-skills.md)).
 
 ## Shared bodies and present state
 
