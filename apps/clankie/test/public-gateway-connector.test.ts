@@ -812,6 +812,47 @@ describe("push wakes over the same socket", () => {
     await expect(wake).resolves.toBe("unavailable");
   });
 
+  it("refuses a route this body doesn't serve on its own, keeping the tunnel for everything else", async () => {
+    const gateway = await fakeGateway();
+    await startedConnector(gateway.origin);
+    const connection = await gateway.nextConnection();
+    let closed = false;
+    connection.socket.once("close", () => {
+      closed = true;
+    });
+    // A newer gateway asking an older body for a route it has never heard of (VUH-1830).
+    connection.send({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "request",
+      requestId: "request_unknown01",
+      target: "control",
+      method: "POST",
+      path: "/v1/hosted/not-a-route",
+      headers: [{ name: "content-type", value: "application/json" }],
+    });
+    const refused = await connection.framesThrough("response_end");
+    expect(refused[0]).toMatchObject({ kind: "response_start", requestId: "request_unknown01", status: 404 });
+    const body = refused
+      .filter((frame): frame is PublicGatewayResponseChunkFrame => frame.kind === "response_chunk")
+      .map((frame) => Buffer.from(frame.bodyBase64, "base64").toString())
+      .join("");
+    expect(JSON.parse(body)).toEqual({ error: "route_unavailable" });
+    // The same tunnel still answers the next request.
+    connection.send({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "request",
+      requestId: "request_after001",
+      target: "relay",
+      method: "POST",
+      path: "/operator/v1/tail",
+      headers: [{ name: "content-type", value: "application/json" }],
+      bodyBase64: Buffer.from('{"schemaVersion":1,"op":"tail"}').toString("base64"),
+    });
+    const after = await connection.framesThrough("response_end");
+    expect(after[0]).toMatchObject({ kind: "response_start", requestId: "request_after001" });
+    expect(closed).toBe(false);
+  });
+
   it("closes the socket when the gateway sends a host-owned wake frame", async () => {
     const gateway = await fakeGateway();
     await startedConnector(gateway.origin);

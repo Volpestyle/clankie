@@ -477,12 +477,15 @@ export class PublicGatewayConnector {
       socket.close(1008, "gateway sent a host-owned frame");
       return;
     }
-    if (
-      this.inFlight.size >= PUBLIC_GATEWAY_IN_FLIGHT_MAX ||
-      this.inFlight.has(frame.requestId) ||
-      publicGatewayTargetFor(frame.method, frame.path, this.gatewayRoutes) !== frame.target
-    ) {
+    if (this.inFlight.size >= PUBLIC_GATEWAY_IN_FLIGHT_MAX || this.inFlight.has(frame.requestId)) {
       socket.close(1008, "gateway request is outside the public contract");
+      return;
+    }
+    // A route this body doesn't serve (a newer gateway or fleet calling an
+    // older body) is refused on its own: closing the tunnel would also drop
+    // every other exchange in flight (VUH-1830).
+    if (publicGatewayTargetFor(frame.method, frame.path, this.gatewayRoutes) !== frame.target) {
+      void sendJsonError(socket, frame.requestId, "route_unavailable", 404).catch(() => undefined);
       return;
     }
     const abort = new AbortController();
@@ -688,13 +691,18 @@ function sendFrame(socket: WebSocket, frame: PublicGatewayTunnelFrame): Promise<
   });
 }
 
-async function sendJsonError(socket: WebSocket, requestId: string, error: string): Promise<void> {
+async function sendJsonError(
+  socket: WebSocket,
+  requestId: string,
+  error: string,
+  status = 502,
+): Promise<void> {
   const body = Buffer.from(JSON.stringify({ error }));
   await sendFrame(socket, {
     schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
     kind: "response_start",
     requestId,
-    status: 502,
+    status,
     headers: [{ name: "content-type", value: "application/json" }],
   });
   await sendFrame(socket, {
