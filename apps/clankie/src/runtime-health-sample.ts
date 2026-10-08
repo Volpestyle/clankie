@@ -64,7 +64,11 @@ export function requestRuntimeHealth(input: {
       (response) => {
         if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300) {
           response.destroy();
-          reject(Error("runtime-health-http-unhealthy"));
+          reject(
+            Object.assign(Error("runtime-health-http-unhealthy"), {
+              code: `HTTP_${response.statusCode ?? "UNKNOWN"}`,
+            }),
+          );
           return;
         }
         const body: Buffer[] = [];

@@ -119,7 +119,11 @@ New service liveness starts a five-minute `/health` canary;
 `healthy: true` alone does not mean it passed. Read `latest.canary` and deploy
 holds in update status. A pending canary holds further landings. A failed canary
 keeps the new pin running, retains its hold, names `previousHealthyCommit`, and
-records alert delivery state; do not claim a rollback or successful delivery
+records the failed check, underlying transport error and alert delivery state;
+unavailable samples retry while pending, failing after three sample intervals
+without verified health (30 seconds by default) or at the window's end.
+Recovered samples clear the temporary error; failed samples never count as
+healthy observation. Do not claim a rollback or successful delivery
 from a claimed receipt. Rollback is the owner's decision. A full pass clears
 only its own canary hold. Source installs then inspect runtime-worktree retention:
 keep current and immediate previous, protect live/canary/recovery dependencies,
@@ -140,8 +144,12 @@ observation with `--window-seconds`, `--sample-seconds`, `--cpu-percent`, and
 window. Only unhealthy, stale or slow `/health` holds; captain CPU (100% is one
 core) is report-only. Compare `canaryCpu` with its `previous` runtime's mean on
 this machine instead of judging the absolute advisory `cpuPercent`. Older
-`runtime-canary-cpu-budget-exceeded` holds are released with `clankie integrate
-release UUID --actor NAME --reason TEXT`.
+`runtime-canary-cpu-budget-exceeded` holds and failed health canary holds can be
+explicitly released after review with `clankie integrate release UUID --actor
+NAME --reason TEXT`. Read the full UUID from update status or `clankie integrate
+holds`; release audits the actor and reason, leaving the historical failure
+intact. An owner update override leaves the hold recorded and authorizes only
+that update; a later passing canary never releases an older failed hold.
 
 `source-managed: needs setup in <home>` is a refused installer refresh, not a
 failed active thread refresh. Update status names the local/remote homes in

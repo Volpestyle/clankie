@@ -23,6 +23,7 @@ const runtime = {
 };
 const holds = new DeployHolds(join(root, "integration"));
 const errors: string[] = [];
+let healthRequests = 0;
 let sample: ReturnType<typeof createRuntimeHealthSampler>;
 const canary = new RuntimeCanary({
   updatesDirectory,
@@ -40,11 +41,18 @@ const server = createServer((request, response) => {
     response.writeHead(404).end();
     return;
   }
+  healthRequests++;
+  if (mode === "timeout" || (mode === "first-timeout" && healthRequests === 1)) return;
+  if (mode === "first-reset" && healthRequests === 1) {
+    request.socket.destroy();
+    return;
+  }
+  const unhealthy = mode === "unhealthy" || (mode === "first-unhealthy" && healthRequests === 1);
   const answer = () => {
-    response.writeHead(mode === "unhealthy" ? 503 : 200, { "content-type": "application/json" });
+    response.writeHead(unhealthy ? 503 : 200, { "content-type": "application/json" });
     response.end(
       JSON.stringify({
-        ok: mode !== "unhealthy",
+        ok: !unhealthy,
         service: "clankie",
         runtime: mode === "wrong-identity" ? { ...runtime, instanceId: randomUUID() } : runtime,
       }),
@@ -56,7 +64,10 @@ const server = createServer((request, response) => {
 await canary.recover();
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = (server.address() as { port: number }).port;
-sample = createRuntimeHealthSampler({ healthUrl: `http://127.0.0.1:${port}/health`, timeoutMs: 1000 });
+sample = createRuntimeHealthSampler({
+  healthUrl: `http://127.0.0.1:${port}/health`,
+  timeoutMs: mode.includes("timeout") ? 200 : 1000,
+});
 const burn = setInterval(() => {
   if (mode !== "cpu") return;
   const start = performance.now();
@@ -79,6 +90,7 @@ process.on("message", (message: unknown) => {
           holds: await holds.list(),
           policy: canary.policy(),
           errors,
+          healthRequests,
           checkpoint: existsSync(join(updatesDirectory, "healthy-canary.json"))
             ? readPrivateJson(join(updatesDirectory, "healthy-canary.json"))
             : undefined,

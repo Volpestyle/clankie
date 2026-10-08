@@ -447,7 +447,7 @@ per-profile receipt in `harness-refresh.json` beside the transaction record.
 
 After the new service responds with its exact boot identity, a persistent
 post-update canary observes it for five minutes. It holds only on an unhealthy
-new service: missing, stale or wrong-identity `/health`, a sampling gap, or
+new service: sustained missing, stale or wrong-identity `/health`, a sampling gap, or
 `/health` p95 over its 250 ms default budget, sampled every 10 seconds. Health
 latency includes TCP setup and the complete response on a fresh loopback HTTP
 connection. Captain-process CPU (100% means one core) is recorded but never
@@ -480,6 +480,23 @@ is unreadable. Complete effect evidence stays in private
 Recovery of an already passed canary inspects retention again. A held
 `maintenance.lock` or `retention-pending.json` requires owner reconciliation;
 neither age nor a timeout authorizes deletion or replay of a removal.
+
+An unavailable sample stays pending and is retried at the configured interval.
+No verified health for three sample intervals (30 seconds by default), or
+unavailability at the window's end, fails the canary. A recovery before that
+deadline clears the temporary error; failed samples never count as healthy
+samples. Pending and failed records name the failed check and underlying local
+transport error (including timeout causes), without retaining response bodies.
+
+To clear a failed canary's hold after reviewing runtime health, read its full
+hold UUID with `clankie update status --json` or `clankie integrate holds`.
+Explicitly release that UUID with
+`clankie integrate release UUID --actor NAME --reason "why this hold is safe to release"`;
+the release is audited. This does not change the historical failed canary or
+claim it passed. Alternatively, the authenticated owner can authorize one
+update with `clankie update --override-holds --reason "why proceeding is safe"`.
+That override is audited per hold and leaves the holds recorded. A later
+canary's pass releases only its own hold, never this failed candidate's hold.
 
 `clankie update canary` reads the policy and last canary. Configure the next
 update with `--window-seconds N`, `--sample-seconds N`, `--cpu-percent N`

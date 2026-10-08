@@ -124,6 +124,22 @@ and the advisory `cpuPercent`, which stays in the policy schema so existing poli
 files and older runtimes still parse. No pre-cutover baseline sampler or CPU alert
 was added. Legacy CPU-only holds are released explicitly by the owner.
 
+## Retry transient canary unavailability (VUH-1845, 2026-10-08)
+
+The first unavailable health sample previously failed the canary immediately;
+an otherwise healthy update failed after nine seconds with zero samples. Keep
+the existing three-interval sampling-gap budget, but retry unavailable checks
+within it and the full observation window. Recovery clears the temporary error;
+only verified samples count toward the canary. Sustained unavailability retains
+the underlying check name and transport error code in the existing error field,
+without response bodies or a metadata schema change. CPU remains advisory.
+
+A failed canary never clears itself merely because the runtime later looks
+healthy. An explicit audited hold release removes its hold; an owner update
+override authorizes one update and leaves the old hold recorded. See the
+[launcher procedure](../cli.md) for both commands. Neither changes the
+historical failed result or rolls back the runtime.
+
 ## Source update repair (VUH-1737, 2026-10-06)
 
 The source updater previously resolved bare `main` from the owner's checkout.

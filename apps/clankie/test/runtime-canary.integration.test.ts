@@ -23,6 +23,7 @@ interface Snapshot {
   holds: DeployHold[];
   policy: RuntimeCanaryPolicy;
   errors: string[];
+  healthRequests: number;
   checkpoint?: { commit: string };
 }
 const roots: string[] = [];
@@ -344,7 +345,8 @@ it("arms a restarting target before health admission, snapshots policy, and star
 });
 
 it("restarts a pending observation from a fresh process and does not count downtime or old samples", async () => {
-  const f = await fixture({ policy: { windowMs: 2400 } });
+  // This proves restart accounting, not a subsecond sampling-gap budget under concurrent imports.
+  const f = await fixture({ policy: { windowMs: 2400, sampleIntervalMs: 400 } });
   const first = await start(f.root);
   await new Promise((resolve) => setTimeout(resolve, 400));
   const previous = await first.status();
@@ -366,7 +368,46 @@ it("restarts a pending observation from a fresh process and does not count downt
   ).toBeGreaterThanOrEqual(2400);
 });
 
-it.each(["wrong-identity", "unhealthy"])(
+it.each(["first-unhealthy", "first-reset", "first-timeout"])(
+  "retries %s over real HTTP and passes the full window without an alert",
+  async (mode) => {
+    const f = await fixture({ policy: { sampleIntervalMs: 300 } });
+    const service = await start(f.root, mode);
+    let missed = await service.status();
+    const deadline = Date.now() + 8000;
+    while (!missed.result.canary?.error && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      missed = await service.status();
+    }
+    expect(missed.result.canary).toMatchObject({
+      state: "pending",
+      samples: 0,
+      error: expect.stringContaining(
+        mode === "first-unhealthy"
+          ? "runtime-health-http-unhealthy"
+          : mode === "first-timeout"
+            ? "TimeoutError"
+            : "ECONNRESET",
+      ),
+    });
+    expect(missed.holds.map((hold) => hold.id)).toContain(f.id);
+    if (mode === "first-unhealthy") expect(missed.result.canary!.error).toContain("HTTP_503");
+    expect(await alerts(f.root)).toEqual([]);
+    const passed = await waitFor(service, "passed");
+    expect(passed.healthRequests).toBeGreaterThanOrEqual(3);
+    expect(passed.result.canary!.samples).toBeGreaterThanOrEqual(2);
+    expect(passed.result.canary!.samples).toBe(passed.healthRequests - 1);
+    expect(passed.result.canary!.error).toBeUndefined();
+    expect(
+      Date.parse(passed.result.canary!.completedAt!) - Date.parse(passed.result.canary!.startedAt!),
+    ).toBeGreaterThanOrEqual(1200);
+    expect(passed.holds.map((hold) => hold.id)).not.toContain(f.id);
+    expect(passed.checkpoint?.commit).toBe("b".repeat(40));
+    expect(await alerts(f.root)).toEqual([]);
+  },
+);
+
+it.each(["wrong-identity", "unhealthy", "timeout"])(
   "refuses %s health without changing the installed runtime",
   async (mode) => {
     const f = await fixture();
@@ -375,12 +416,54 @@ it.each(["wrong-identity", "unhealthy"])(
     expect(failed.result).toMatchObject({
       phase: "healthy",
       healthy: true,
-      canary: { state: "failed", error: "runtime-canary-health-unavailable" },
+      canary: {
+        state: "failed",
+        error: expect.stringContaining(
+          mode === "wrong-identity"
+            ? "runtime-health-boot-identity-mismatch"
+            : mode === "timeout"
+              ? "TimeoutError"
+              : "runtime-health-http-unhealthy",
+        ),
+      },
     });
+    expect(failed.healthRequests).toBeGreaterThanOrEqual(2);
+    expect(
+      Date.parse(failed.result.canary!.completedAt!) - Date.parse(failed.result.canary!.startedAt!),
+    ).toBeGreaterThanOrEqual(policy.sampleIntervalMs * 3);
     expect(failed.holds.map((hold) => hold.id)).toContain(f.id);
-    expect(await alerts(f.root)).toHaveLength(1);
+    const notices = await alerts(f.root);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.text).toContain(failed.result.canary!.error);
+    if (mode === "unhealthy") {
+      await service.call("mode", "idle");
+      await new Promise((resolve) => setTimeout(resolve, policy.sampleIntervalMs * 2));
+      const recoveredRuntime = await service.status();
+      expect(recoveredRuntime.result.canary?.state).toBe("failed");
+      expect(recoveredRuntime.holds.map((hold) => hold.id)).toContain(f.id);
+      expect(recoveredRuntime.checkpoint?.commit).toBe("a".repeat(40));
+      expect(await alerts(f.root)).toHaveLength(1);
+    }
   },
 );
+
+it("bounds sustained unavailability by the window when it is shorter than three intervals", async () => {
+  const f = await fixture({ policy: { sampleIntervalMs: 600 } });
+  const service = await start(f.root, "unhealthy");
+  const failed = await waitFor(service, "failed");
+  expect(failed.result.canary).toMatchObject({
+    state: "failed",
+    samples: 0,
+    error: expect.stringContaining("runtime-health-http-unhealthy"),
+  });
+  expect(
+    Date.parse(failed.result.canary!.completedAt!) - Date.parse(failed.result.canary!.startedAt!),
+  ).toBeGreaterThanOrEqual(policy.windowMs);
+  expect(failed.healthRequests).toBeGreaterThanOrEqual(2);
+  expect(failed.holds.map((hold) => hold.id)).toContain(f.id);
+  expect(failed.checkpoint?.commit).toBe("a".repeat(40));
+  expect(await alerts(f.root)).toHaveLength(1);
+});
 
 it("rejects an unsafe policy and exposes a claimed notification's delivery uncertainty without replay", async () => {
   const f = await fixture();

@@ -57,6 +57,32 @@ interface Session {
   cpuTotal: number;
   cpuDurationMs: number;
   lastSampleAt?: number;
+  unavailableSince?: number;
+}
+
+// Persist local check names and transport codes, never response bodies or arbitrary error payloads.
+function sampleFailure(error: unknown): string {
+  if (error instanceof z.ZodError)
+    return `invalid-health-sample (${error.issues.map((issue) => `${issue.path.join(".")}: ${issue.code}`).join(", ")})`.slice(
+      0,
+      900,
+    );
+  if (!(error instanceof Error)) return "unknown-sampling-error";
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current instanceof Error; depth++) {
+    const code = "code" in current && typeof current.code === "string" ? current.code : undefined;
+    const name = /^runtime-(?:health|canary)-[a-z-]+$/u.test(current.message)
+      ? current.message
+      : ["Error", "AbortError", "TimeoutError", "SyntaxError", "TypeError", "RangeError"].includes(
+            current.name,
+          )
+        ? current.name
+        : "Error";
+    parts.push(`${name}${code && /^[A-Z_0-9]+$/u.test(code) ? ` (${code})` : ""}`);
+    current = current.cause;
+  }
+  return parts.join(" <- ").slice(0, 900);
 }
 
 /** Survives a service restart through private operation records and the existing deploy holds. */
@@ -334,6 +360,7 @@ export class RuntimeCanary {
     const session = this.session;
     if (!session || !result?.canary || result.canary.state !== "pending") return;
     let sample: RuntimeHealthSample;
+    const attemptStartedAt = performance.now();
     try {
       sample = RuntimeHealthSampleSchema.parse(await this.options.sample(this.options.runtime));
       if (
@@ -348,19 +375,36 @@ export class RuntimeCanary {
         Math.max(5000, session.policy.sampleIntervalMs * 2)
       )
         throw Error("runtime-canary-sample-stale");
-    } catch {
-      if (!this.closed) await this.fail(result, result.canary, "runtime-canary-health-unavailable");
+    } catch (error) {
+      if (this.closed) return;
+      session.unavailableSince ??= session.lastSampleAt ?? attemptStartedAt;
+      const now = performance.now();
+      const diagnostic = `runtime-canary-health-unavailable: ${sampleFailure(error)}`;
+      // Keep the existing three-interval availability budget, but allow transient misses to recover.
+      // A completely unavailable first observation is bounded by the full window as well.
+      if (
+        now - session.unavailableSince >= session.policy.sampleIntervalMs * 3 ||
+        now - session.startedAt >= session.policy.windowMs
+      )
+        await this.fail(result, result.canary, diagnostic);
+      else await this.save(result, { ...result.canary, error: diagnostic });
       return;
     }
     if (this.closed) return;
     const now = performance.now();
-    if (
-      session.lastSampleAt !== undefined &&
-      now - session.lastSampleAt > session.policy.sampleIntervalMs * 3
-    ) {
-      await this.fail(result, result.canary, "runtime-canary-sampling-gap");
+    const lastVerifiedAt = session.lastSampleAt ?? session.unavailableSince;
+    if (lastVerifiedAt !== undefined && now - lastVerifiedAt >= session.policy.sampleIntervalMs * 3) {
+      await this.fail(
+        result,
+        result.canary,
+        `runtime-canary-sampling-gap: ${Math.round(now - lastVerifiedAt)}ms without verified health (budget ${session.policy.sampleIntervalMs * 3}ms)${result.canary.error ? `; last failure ${result.canary.error}` : ""}`.slice(
+          0,
+          1024,
+        ),
+      );
       return;
     }
+    delete session.unavailableSince;
     session.lastSampleAt = now;
     session.latencies.push(sample.healthLatencyMs);
     session.cpuTotal += sample.cpuPercent * sample.intervalMs;
@@ -368,12 +412,13 @@ export class RuntimeCanary {
     const sorted = [...session.latencies].sort((a, b) => a - b);
     const healthP95Ms = sorted[Math.ceil(sorted.length * 0.95) - 1]!;
     const cpuMeanPercent = session.cpuTotal / session.cpuDurationMs;
-    const canary: RuntimeCanaryResult = {
+    const canary = {
       ...result.canary,
       samples: session.latencies.length,
       cpuMeanPercent,
       healthP95Ms,
     };
+    delete canary.error;
     if (now - session.startedAt < session.policy.windowMs) {
       await this.save(result, canary);
       return;
