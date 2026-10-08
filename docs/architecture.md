@@ -520,7 +520,7 @@ address — no tool call, no guess, and silence if the selection cannot be resol
 - **Machine access.** Owners choose cumulative portal, workers, shell or screen
   access through `clankie machines access NAME LEVEL`, Settings → Machines or
   `PATCH /v1/machines/:id/access` ([ADR 0244](adr/0244-machines-join-clankie-at-an-access-level.md)).
-  Existing local installs retain screen; ungranted remote machines start at
+  Existing local installs retain screen; existing linked fleets without a stored choice migrate to workers. New remote machines start at
   portal. Native coding tools recheck the local shell ceiling on every call;
   worker launches, deliveries and native child admission check the selected
   machine after waits. Owner-pane event admission checks shell before and after

@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { MachineAccessRefusalSchema, type MachineAccessRefusal } from "@clankie/protocol";
 import { MachineAccessRefused, machineAccessAllows, type MachineAccessLevel } from "@clankie/protocol";
 import { localSandboxAccess, type ClankieSettings, type SettingsStore } from "@clankie/settings";
 
@@ -32,7 +36,7 @@ export async function requireMachineAccess(
 ): Promise<void> {
   const policy = await settings.loadFenced();
   const level = machineAccessLevel(policy.settings, id, joined);
-  if (!machineAccessAllows(level, required)) throw new MachineAccessRefused(id, level, required);
+  if (!machineAccessAllows(level, required)) await refuseMachineAccess(settings, id, level, required);
   policy.assertCurrent();
 }
 
@@ -52,6 +56,65 @@ export async function requireRuntimeMachineAccess(
     throw new Error("Remote runtime has no proven machine");
   const machine = connection.machine ?? "local";
   const level = machineAccessLevel(policy.settings, machine, joined);
-  if (!machineAccessAllows(level, required)) throw new MachineAccessRefused(machine, level, required);
+  if (!machineAccessAllows(level, required)) await refuseMachineAccess(settings, machine, level, required);
   policy.assertCurrent();
+}
+
+/** One durable owner observation per machine/required level; repeated refusals coalesce. */
+async function refuseMachineAccess(
+  settings: SettingsStore,
+  machine: string,
+  level: MachineAccessLevel,
+  required: MachineAccessLevel,
+): Promise<never> {
+  const error = new MachineAccessRefused(machine, level, required);
+  const directory = `${settings.path}.access-refusals`;
+  try {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const path = join(directory, `${encodeURIComponent(machine)}-${required}.json`);
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    await writeFile(
+      temporary,
+      JSON.stringify({
+        machine,
+        accessLevel: level,
+        required,
+        observedAt: new Date().toISOString(),
+        fix: `Owner: clankie machines access ${machine} ${required} (joined/OS ceilings may require new approval).`,
+      }),
+      { mode: 0o600 },
+    );
+    await rename(temporary, path);
+  } catch (failure) {
+    throw new Error(`${error.message} Owner refusal observation could not be saved: ${String(failure)}`, {
+      cause: error,
+    });
+  }
+  throw error;
+}
+
+export async function readMachineAccessRefusals(
+  settings: SettingsStore,
+  joined?: JoinedMachineRegistry,
+): Promise<MachineAccessRefusal[]> {
+  const directory = `${settings.path}.access-refusals`;
+  let files: string[];
+  try {
+    files = await readdir(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const policy = await settings.load();
+  const records = await Promise.all(
+    files
+      .filter((file) => file.endsWith(".json"))
+      .map(async (file) =>
+        MachineAccessRefusalSchema.parse(JSON.parse(await readFile(join(directory, file), "utf8"))),
+      ),
+  );
+  // Keep the original evidence on disk; resolved observations disappear from doctor.
+  return records.filter(
+    (record) => !machineAccessAllows(machineAccessLevel(policy, record.machine, joined), record.required),
+  );
 }

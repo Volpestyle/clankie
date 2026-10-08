@@ -255,6 +255,20 @@ function machineSettings(raw: unknown, previous?: ClankieSettings): ClankieSetti
       connection.ssh = { host: machine.ssh, shell: machine.shell };
     } else connection.machine = "local";
   }
+  // A saved execution connection proves this machine was already linked for
+  // native fleet use. New Machines.add/join writes always store an explicit
+  // level. Never overwrite that owner choice (including portal), or infer
+  // shell/screen from SSH alone. Materialize once on the next settings write.
+  if (data.machineAccess === undefined) data.machineAccess = {};
+  for (const connection of data.execution.connections) {
+    if (
+      connection.enabled !== false &&
+      connection.machine &&
+      connection.machine !== "local" &&
+      !Object.hasOwn(data.machineAccess, connection.machine)
+    )
+      data.machineAccess[connection.machine] = "workers";
+  }
   data.agentHosts.connections = data.machines.flatMap(({ id, ssh, shell, aliases }) =>
     [id, ...aliases].map((name) => ({ id: name, ssh, shell })),
   );

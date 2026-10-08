@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { MachineAccessRefusalSchema } from "@clankie/protocol";
+import { runMachinesCommand } from "./machines.ts";
 import {
   CheckoutReportSchema,
   FleetSimulatorStatusSchema,
@@ -35,6 +38,12 @@ export type { ExecFileImpl, InstallDoctorReport };
 
 /** Readiness first; optional rooms never hide the reason a first turn fails. */
 export function formatDoctorSummary(report: InstallDoctorReport): string {
+  const refusal =
+    report.machineAccessRefusals && "refusals" in report.machineAccessRefusals
+      ? report.machineAccessRefusals.refusals[0]
+      : undefined;
+  if (refusal)
+    return `Machine ${refusal.machine} refused ${refusal.required} access (${refusal.accessLevel}). ${refusal.fix}`;
   const staleBridge =
     report.seatBridges && "bridges" in report.seatBridges
       ? report.seatBridges.bridges.find((bridge) => bridge.state === "stale")
@@ -118,6 +127,13 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
 
 /** Machine cards remain available verbatim via --json; observations are not tool acceptance. */
 export function formatMachineDoctorSummary(report: Record<string, unknown>): string {
+  const refusals = report.machineAccessRefusals as
+    | { refusals?: import("@clankie/protocol").MachineAccessRefusal[] }
+    | undefined;
+  if (refusals?.refusals?.[0]) {
+    const refusal = refusals.refusals[0];
+    return `Machine ${refusal.machine} refused ${refusal.required} access (${refusal.accessLevel}). ${refusal.fix}`;
+  }
   const harnesses = report.harnesses as
     | { codex?: { sourceSetup?: { state: string; detail?: string; fix?: string } } }
     | undefined;
@@ -274,6 +290,10 @@ export async function doctorCommand(
   }
   return {
     ...report,
+    machineAccessRefusals: await inspectMachineAccessRefusals({
+      ...options,
+      ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
+    }),
     remoteHarnesses,
     toolCatalogHealth,
     workerTools,
@@ -401,6 +421,7 @@ export async function machineDoctorCommand(
       : undefined;
   return {
     machine,
+    machineAccessRefusals: await inspectMachineAccessRefusals(options, connection?.machine ?? machine),
     harnesses: results[0]!.status === "fulfilled" ? results[0]!.value.harnesses : value(results[0]!),
     membership: value(results[1]!),
     ...(inventory.status === "rejected"
@@ -409,4 +430,20 @@ export async function machineDoctorCommand(
         ? {}
         : { linkState: connection.linkState }),
   };
+}
+
+async function inspectMachineAccessRefusals(
+  options: Parameters<typeof runMachinesCommand>[1],
+  machine?: string,
+) {
+  try {
+    const report = z
+      .object({ refusals: z.array(MachineAccessRefusalSchema) })
+      .parse(await runMachinesCommand(["access-refusals"], options));
+    return {
+      refusals: report.refusals.filter((record) => machine === undefined || record.machine === machine),
+    };
+  } catch (error) {
+    return { status: "unavailable" as const, detail: String(error) };
+  }
 }

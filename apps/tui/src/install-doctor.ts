@@ -121,6 +121,9 @@ export interface InstallDoctorReport {
   };
   readonly emailConfigured: boolean;
   readonly linear?: ReturnType<typeof linearFollowStatus>;
+  readonly machineAccessRefusals?:
+    | { refusals: import("@clankie/protocol").MachineAccessRefusal[] }
+    | { status: "unavailable"; detail: string };
   readonly linearRequestBudget?:
     | import("@clankie/protocol/linear-request-budget").LinearRequestBudgetReport
     | { readonly status: "unavailable"; readonly detail: string };

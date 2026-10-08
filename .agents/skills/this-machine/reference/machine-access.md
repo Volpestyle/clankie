@@ -76,3 +76,13 @@ gateway cannot read or forge work or broker capabilities. Never print or copy
 its broker capability into evidence.
 The gateway's machine routes require separate clankie-ops delivery; do not claim
 production readiness from the loopback integration fixture.
+
+Existing SSH machines with a saved enabled fleet connection and no recorded
+access choice migrate to `workers`; the next settings write persists that
+choice. Explicit levels (including `portal`) stay unchanged. New registrations
+and unknown hosts remain `portal`; SSH alone grants no shell or screen access.
+Access refusals are retained per machine and required level and appear in
+`clankie doctor` / `clankie doctor --machine FLEET --json`. The authenticated
+read is `GET /v1/machines/access-refusals`, also available as
+`clankie machines access-refusals --json`; it names the machine and owner fix.
+Resolved refusals leave the doctor view after the owner's grant covers them.

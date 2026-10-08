@@ -215,7 +215,7 @@ A **machine** is where agents run; a **device** is a paired phone or desktop.
 `clankie machines add pc --ssh my-pc` adds another computer over SSH. Owners
 choose cumulative portal, workers, shell or screen with
 `clankie machines access pc workers` or Settings → Machines. Existing local
-installs retain screen; ungranted remote machines start at portal. These are
+installs retain screen; existing linked fleets retain worker access, and new remote machines start at portal. Access refusals and the owner fix appear in `clankie doctor`. These are
 authority preferences. An installed Mac can additionally use
 `clankie machines sandbox prepare LEVEL --workspace DIR`: a private home and
 an owner relaunch activate an inherited OS boundary. It needs owner credential,

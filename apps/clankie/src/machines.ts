@@ -12,7 +12,7 @@ import {
   type MachineInventory,
 } from "@clankie/protocol";
 import { JoinedMachineIdSchema } from "@clankie/protocol/machine-join";
-import { machineAccessLevel } from "./machine-access.ts";
+import { readMachineAccessRefusals, machineAccessLevel } from "./machine-access.ts";
 import { verifiedLocalSandbox } from "@clankie/settings";
 import { remoteProgramCommand } from "./herdr-fleet.ts";
 import { parseHerdrAgentList } from "./captain/herdr-census.ts";
@@ -272,6 +272,10 @@ export class Machines {
             ? ("joined-host" as const)
             : ("service-preference" as const),
     };
+  }
+
+  async accessRefusals() {
+    return { refusals: await readMachineAccessRefusals(this.options.settings, this.joined) };
   }
 
   async list(refresh = false): Promise<MachineInventory> {

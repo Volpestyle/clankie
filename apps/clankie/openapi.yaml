@@ -179,6 +179,36 @@ paths:
         "200": { description: sealedResponse containing ok acknowledgement }
         "403": { description: Already revoked }
         "503": { description: Leave unconfirmed; retain credential }
+  /v1/machines/access-refusals:
+    get:
+      summary: Read unresolved machine access refusals for the owner
+      operationId: getMachineAccessRefusals
+      security:
+        - operatorBearer: []
+      responses:
+        "200":
+          description: Durable observations, coalesced by machine and required level; resolved grants disappear
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refusals]
+                properties:
+                  refusals:
+                    type: array
+                    items:
+                      type: object
+                      required: [machine, accessLevel, required, observedAt, fix]
+                      properties:
+                        machine: { type: string }
+                        accessLevel: { type: string, enum: [portal, workers, shell, screen] }
+                        required: { type: string, enum: [portal, workers, shell, screen] }
+                        observedAt: { type: string, format: date-time }
+                        fix: { type: string }
+        "401":
+          description: Owner authentication required
+        "503":
+          description: Machine inventory or authentication unavailable
   /v1/machines/{id}/access:
     patch:
       tags: [Operator]

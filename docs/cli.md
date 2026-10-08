@@ -5991,3 +5991,8 @@ readiness. `join leave --json` is finite: it revokes the encrypted transport,
 then deletes the local broker credential and reports `{ok: true, left: true}`.
 A failure has a nonzero exit status; uncertain removal is never reported as
 success. Revoke alone is not proof that an outstanding screen effect stopped.
+
+`clankie machines access-refusals --json` reads durable access-level refusals
+with the machine, selected and required levels, observation time and owner fix.
+Doctor includes unresolved observations; an owner's sufficient access grant
+removes them from the view. This read never raises machine authority.

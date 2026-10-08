@@ -80,7 +80,8 @@ export async function runMachinesCommand(
   let path = "/v1/machines",
     method = "GET",
     body: string | undefined;
-  if (verb === "discover" && values.length === 1) path += "?discover=true";
+  if (verb === "access-refusals" && values.length === 1) path += "/access-refusals";
+  else if (verb === "discover" && values.length === 1) path += "?discover=true";
   else if (verb === "access" && name && rest.length === 1) {
     body = JSON.stringify(MachineAccessChangeSchema.parse({ accessLevel: rest[0] }));
     method = "PATCH";

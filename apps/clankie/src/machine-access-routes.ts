@@ -9,6 +9,14 @@ export function createMachineAccessRoutes(options: {
   authenticateOperator?: OperatorAuthenticator | undefined;
 }) {
   const app = new Hono();
+  app.get("/v1/machines/access-refusals", async (context) => {
+    if (!options.authenticateOperator)
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!(await options.authenticateOperator(context.req.raw)))
+      return context.json({ error: "operator_authentication_required" }, 401);
+    if (!options.machines) return context.json({ error: "machines_unavailable" }, 503);
+    return context.json(await options.machines.accessRefusals());
+  });
   app.patch("/v1/machines/:id/access", bodyLimit({ maxSize: 4096 }), async (context) => {
     if (!options.authenticateOperator)
       return context.json({ error: "operator_authentication_unavailable" }, 503);

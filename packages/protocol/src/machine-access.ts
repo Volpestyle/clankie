@@ -34,3 +34,14 @@ export class MachineAccessRefused extends Error {
     this.required = required;
   }
 }
+
+export const MachineAccessRefusalSchema = z
+  .object({
+    machine: z.string(),
+    accessLevel: MachineAccessLevelSchema,
+    required: MachineAccessLevelSchema,
+    observedAt: z.string().datetime(),
+    fix: z.string(),
+  })
+  .strict();
+export type MachineAccessRefusal = z.infer<typeof MachineAccessRefusalSchema>;

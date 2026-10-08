@@ -123,3 +123,13 @@ flowchart LR
 - A real self-hosted sandbox is OS work, not a settings flag
   ([VUH-1804](https://linear.app/vuhlp/issue/VUH-1804)). Until it ships, docs
   must not call a lowered local level a sandbox.
+
+Existing SSH machines with a saved enabled fleet connection and no recorded
+access choice migrate to `workers`; the next settings write persists that
+choice. Explicit levels (including `portal`) stay unchanged. New registrations
+and unknown hosts remain `portal`; SSH alone grants no shell or screen access.
+Access refusals are retained per machine and required level and appear in
+`clankie doctor` / `clankie doctor --machine FLEET --json`. The authenticated
+read is `GET /v1/machines/access-refusals`, also available as
+`clankie machines access-refusals --json`; it names the machine and owner fix.
+Resolved refusals leave the doctor view after the owner's grant covers them.

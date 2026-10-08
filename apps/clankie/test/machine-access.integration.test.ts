@@ -21,6 +21,7 @@ import { machineCodingTools } from "../src/captain/machine-coding-tools.ts";
 import { Machines } from "../src/machines.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
+import { machineDoctorCommand, formatMachineDoctorSummary } from "../../tui/src/command/doctor.ts";
 import { runMachinesCommand } from "../../tui/src/command/machines.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -228,4 +229,62 @@ it("real SDK registration and loadout changes retain guarded native tools withou
       }),
     ).rejects.toThrow("requires shell");
   await expect(stat(join(f.root, "marker.txt"))).rejects.toThrow();
+});
+
+it("legacy linked fleets migrate on real disk reads and persist without raising explicit owner choices or new registrations", async () => {
+  const f = await fixture();
+  const existing = await f.settings.load();
+  for (const machineAccess of [undefined, {}, { pc: "portal" }, { pc: "shell" }]) {
+    const legacy = {
+      ...existing,
+      machineAccess,
+      execution: {
+        ...existing.execution,
+        connections: [
+          { id: "old-fleet", machine: "pc", session: "work", kind: "herdr", enabled: true, capabilities: [] },
+        ],
+      },
+    };
+    await writeFile(f.settings.path, JSON.stringify(legacy));
+    const store = new SettingsStore(f.settings.path);
+    const expected = machineAccess?.pc ?? "workers";
+    expect(machineAccessLevel((await store.loadFenced()).settings, "pc")).toBe(expected);
+    await requireMachineAccess(store, "pc", expected === "portal" ? "portal" : "workers");
+    await store.update((current) => current);
+    expect(JSON.parse(await readFile(f.settings.path, "utf8")).machineAccess.pc).toBe(expected);
+    expect(machineAccessLevel(await new SettingsStore(f.settings.path).load(), "pc")).toBe(expected);
+  }
+  await f.machines.add({ id: "new-machine", ssh: "new-fixture.invalid", shell: "posix" });
+  expect(machineAccessLevel(await f.settings.load(), "new-machine")).toBe("portal");
+  expect(machineAccessLevel(await f.settings.load(), "unknown")).toBe("portal");
+});
+
+it("refused operations retain a durable owner doctor item over real HTTP/CLI, coalesce and resolve when granted", async () => {
+  const f = await fixture();
+  const options = { host: f.host, env: { CLANKIE_OPERATOR_TOKEN: f.token } };
+  await expect(requireMachineAccess(f.settings, "pc", "workers")).rejects.toThrow(MachineAccessRefused);
+  await expect(requireMachineAccess(f.settings, "pc", "workers")).rejects.toThrow(MachineAccessRefused);
+  const result = (await runMachinesCommand(["access-refusals"], options)) as { refusals: unknown[] };
+  expect(result.refusals).toHaveLength(1);
+  expect(result.refusals[0]).toMatchObject({
+    machine: "pc",
+    accessLevel: "portal",
+    required: "workers",
+    fix: expect.stringContaining("clankie machines access pc workers"),
+  });
+  expect(formatMachineDoctorSummary({ machine: "pc", machineAccessRefusals: result })).toContain(
+    "clankie machines access pc workers",
+  );
+  const doctor = await machineDoctorCommand("pc", options);
+  expect(doctor.machineAccessRefusals).toEqual(result);
+  expect(formatMachineDoctorSummary(doctor)).toContain("clankie machines access pc workers");
+  const restarted = new Machines({
+    settings: new SettingsStore(f.settings.path),
+    primary: () => undefined,
+    changed: () => {},
+  });
+  expect(await restarted.accessRefusals()).toEqual(result);
+  expect((await fetch(`${f.host}/v1/machines/access-refusals`)).status).toBe(401);
+  await f.set("pc", "workers");
+  expect(await runMachinesCommand(["access-refusals"], options)).toEqual({ refusals: [] });
 });
