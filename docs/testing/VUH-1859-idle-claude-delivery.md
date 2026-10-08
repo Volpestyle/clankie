@@ -35,3 +35,56 @@ boundary, including restart/deduplication and no message-body exposure. Native
 Claude wake/consumption is not claimed. The PC proof above describes the original
 lane; newly landed UI behavior has not been deployed there. The additional binding
 repair and identification of the historical typing actor remain open.
+
+## Host-side binding trace after the owner's restart
+
+Read-only production process observations of the restarted lead found the native
+Claude image loaded from `claude.exe.old.<13-digit timestamp>.<kernel pid>` beside
+the independently resolved PATH launcher. The unmodified probe admitted only an
+exact installed-image match, so its native process list was empty. The corrected
+probe recognizes that same running process and reads its cwd in both observation
+phases without changing the pane.
+
+The repair admits only that installed launcher's exact predecessor name, with
+the matching kernel PID and a rename timestamp within the process lifetime.
+The launcher anchor does not grow as predecessors are observed. Fresh process
+lifetime, pane ancestry and socket-owner checks still apply. Workspace grants
+are unchanged. The process image replacement actor has not been identified.
+
+`seat-routes.ts` requires a matching remote `projectProof`, but the observer in
+`remote-project-proof.ts` receives fleet, shell and private-seat inputs, not
+workspace grants. The parent-folder cwd is therefore not the observed cause of
+this refusal. Workspace membership remains a separate check for project work.
+An HTTP 403 `remote_pane_required` causes the installed inbound-receipt helper
+to report `binding_rejected` before claiming or posting the report receipt.
+
+The manual `windows-claude-predecessor.integration.test.ts` executes the production
+admission function through real Windows PowerShell over authenticated SSH. It
+covers the accepted predecessor and refusals for wrong PID, directory, launcher
+name, pre-birth/future timestamp, extra suffix and nested predecessor. No remote
+files or configuration are written. Run explicitly with
+`clankie heavy -- env WINDOWS_CLAUDE_PROOF_HOST=HOST pnpm exec vitest run --config vitest.config.ts apps/clankie/test/windows-claude-predecessor.integration.test.ts`.
+
+The live process observation did not include the original report request's
+socket. It proves executable recognition, not successful report admission or
+model consumption. Deploying this host change needs no PC pane restart for
+process recognition. James can leave the pane running; project-scoped work
+should still use a granted workspace. There is no reason to widen its grant.
+
+## Pasted reports: evidence and remaining gap
+
+The lead's native Claude transcript records direct `herdr agent prompt` dispatch
+to KH2 workers, including kh2-steam and kh2-review2. This establishes use of
+direct Herdr prompts in that workflow; it does not identify who inserted the
+specific rev11/rev12 reports into the lead's input. Those workers' native Codex
+session IDs were recovered from the read-only roster, but their source transcripts
+were not found in the standard or alternate account session directories checked.
+The observed launch wrappers still refer to legacy launcher routing; attributing
+these reports to that routing would be inference.
+
+Clankie's operator trace independently records the already-pasted reports at
+22:41Z and a later owner-authorized prompt to the lead. That later prompt is not
+the origin of the earlier draft. The current service, agent-host adapter and
+Herdr plugin contain no report-to-terminal fallback. The original typing actor
+and live report socket admission after deployment remain open. No PC input,
+restart, config change or report replay was performed by this assignment.

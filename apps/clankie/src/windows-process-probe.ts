@@ -333,6 +333,22 @@ export function windowsProcessCommand(input: {
   return probeCommand(`${native}
 $session = ${powershellLiteral(input.session)}
 $pane = ${powershellLiteral(input.pane)}
+# A replaced native Claude image can remain loaded under its predecessor name.
+# Keep the independently installed launcher as the anchor. Admit only its exact
+# predecessor for this kernel PID,
+# renamed during its lifetime. This never admits an arbitrary executable path.
+function Test-ClankieClaudePredecessor($running, $installed, $processId, $birth) {
+  $born = [DateTimeOffset]::Parse($birth).ToUnixTimeMilliseconds()
+  $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  foreach ($launcher in $installed) {
+    $pattern = '^' + [regex]::Escape($launcher) + '\\.old\\.([0-9]{13})\\.' + [regex]::Escape([string]$processId) + '$'
+    if ($running -match $pattern) {
+      $renamed = [long]$Matches[1]
+      if ($renamed -ge $born -and $renamed -le $now) { return $true }
+    }
+  }
+  return $false
+}
 function Observe-ClankieProcess {
 $sessions = (& herdr session list --json | ConvertFrom-Json).sessions
 $binding = @($sessions | Where-Object { $_.name -ceq $session -and $_.running })
@@ -361,6 +377,7 @@ if ($agent.agent -eq 'claude') {
   }
   $installed += @(Get-Command codex.exe -All -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { [ClankieProcess]::Canonical($_.Source) })
 }
+$launchers = @($installed)
 $nativeProcesses = @(foreach ($row in $all) {
   if ($row.name -notin @('claude.exe','codex.exe')) { continue }
   $chain = New-Object 'System.Collections.Generic.HashSet[int]'
@@ -374,7 +391,15 @@ $nativeProcesses = @(foreach ($row in $all) {
   try {
     $detail = [ClankieProcess]::Details($row.pid)
     $executable = [ClankieProcess]::Canonical($detail.executable)
-    if ($installed -contains $executable${input.codexControl ? " -or $row.name -eq 'codex.exe'" : ""}) {
+    $recognized = $launchers -contains $executable
+    if (!$recognized -and $agent.agent -eq 'claude' -and
+        (Test-ClankieClaudePredecessor $executable $launchers $row.pid $detail.startTime)) {
+      # Preserve the independently resolved PATH launcher and the current image.
+      # The receiver still verifies fresh native ancestry and socket ownership.
+      $installed += $executable
+      $recognized = $true
+    }
+    if ($recognized${input.codexControl ? " -or $row.name -eq 'codex.exe'" : ""}) {
       $cwd = $null
       try { $cwd = [ClankieProcess]::Cwd($row.pid) } catch { }
       $native = [ordered]@{pid=$row.pid; cwd=$cwd; executable=$executable}

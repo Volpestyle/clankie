@@ -99,6 +99,14 @@ Do not infer the historic sender from today's connected processes. Retain actual
 PID/pane/socket details privately and publish sanitized counts and stages. See
 `docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.
 
+For remote Windows `remote_pane_required`, compare the kernel's loaded image
+with the independently installed launcher before blaming workspace grants.
+A replaced Claude image may still run as `claude.exe.old.<timestamp>.<pid>`;
+the observer admits only that launcher's exact, lifetime-bound predecessor.
+Remote process/pane admission and project workspace membership are separate
+checks. A read-only process observation without the original request socket
+does not prove successful native report binding.
+
 For a model credential rejection, inspect doctor's `credentialRejections` and
 the original conversation receipt. Owner-typed Pi turns force one OAuth refresh
 and continue only on success, within the same run. Pi's context edit hides the
