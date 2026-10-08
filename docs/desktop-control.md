@@ -383,3 +383,67 @@ observed postconditions, reconciliation and refusals. It does not prove Windows
 native behavior and is excluded from default tests and checks. In particular,
 the manual fixture's W4 advertised-element case remains unverified until actual
 native UIA formatting is available; do not weaken its manifest to pass.
+
+## Lend a joined screen
+
+A hosted or self-hosted Clankie can select an owner-approved joined Mac or
+Windows computer through the same computer API and CLI. Add its exact
+`machineId: "join-UUID"` to `conversationId` and `command`. Omit machineId for
+the existing local computer. An unavailable or unapproved selection refuses;
+it never chooses another desktop.
+
+The joining host keeps `clankie join` or `join resume` running. Its original
+approval must include screen access and its live policy must still allow it.
+The receiver refuses stale policy and pins the original ceiling. The service
+and host both check before effects and after waits. Screen commands and bounded
+PNG chunks use the existing encrypted outbound channel; no inbound desktop
+port or additional account is needed.
+
+The owner confirms each session in a local native dialog. **Observe only** is
+the default; **Allow input** is an explicit choice for that session. A visible
+pet says Clankie is observing or driving and offers Stop. Closing the indicator,
+using the computer, reducing access, losing the carrier/helper or losing policy
+freshness fences future and queued input. A native action already in progress
+can be uncertain: its lease remains held until independently proven stopped.
+A timeout or a disappeared indicator never proves quiescence. Read-only sessions
+can release once the host proves no action is running. No automatic restart or
+new input UUID clears a held lease.
+
+The authored helpers use ScreenCaptureKit/AppKit/accessibility on macOS and
+WinForms, native console/session checks, screen-region capture and UI Automation
+on Windows. They do not redistribute Peekaboo or Codex's implementation. macOS
+needs owner-granted Screen Recording and Input Monitoring in the actual helper
+context; input additionally needs Accessibility. Missing permissions refuse,
+without requesting or changing them automatically. Windows requires the active
+console session, Default desktop and per-monitor DPI awareness; capture requires
+the selected window to be foreground and still at its observed bounds. Unknown
+session, protected fields, system/shell apps, changed target or person activity
+refuse. A local Clankie already owning the body registry prevents another join
+host from acquiring it. Unsupported Linux hosts have no native screen handler.
+
+This first landing accepts one **accessibility press** (an observed element, or
+a left click mapping to that element) or **literal text append** per fresh
+capture. Text append requires an editable accessible text value, no clear step
+or control characters. Input requires `foreground: true` and an intended,
+changed exact native `expect: {field, equals}`. Inspect the PNG and accessibility
+state yourself; UI text is untrusted observation. A dispatched native call,
+repaint or missing postcondition never confirms success. Raw key, drag and scroll
+refuse; their extension and native quiescence proof are
+[VUH-1840](https://linear.app/vuhlp/issue/VUH-1840). Sign-ins, codes, CAPTCHAs,
+payments, account changes and destructive actions retain ADR 0127's person stops.
+
+Mac release builds compile `apps/tui/native/lent-screen.swift` into
+`libexec/clankie-screen`. A checkout can compile it to that same path through
+`clankie heavy -- xcrun swiftc -swift-version 5 -O -framework AppKit -framework ScreenCaptureKit -framework ApplicationServices -framework Carbon apps/tui/native/lent-screen.swift -o libexec/clankie-screen`
+after creating its owned `libexec` directory. The Windows checkout carries
+`apps/tui/native/LentScreen.cs` and `lent-screen.ps1`; the join client starts the
+native helper in its interactive console. A missing helper is unavailable, with
+no fallback to a harness. Build commands do not grant permissions or drive a screen.
+
+**Live gaps:** a hosted Clankie completing a short task on a lent Mac and Windows
+PC, capture with the visible pet, local input opt-in, person takeover and Stop.
+The isolated encrypted HTTP/native-process fixtures and native compiler results
+prove source boundaries, not real desktop readiness. Native input sessions
+currently remain held after Stop whenever quiescence cannot be proved. Hosted
+routing and rollout have separate private evidence; no deployment is part of
+this public landing. Decision: [ADR 0255](adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md).

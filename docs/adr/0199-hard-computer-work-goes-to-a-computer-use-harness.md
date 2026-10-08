@@ -3,7 +3,9 @@
 Status: proposed (2026-09-27), from James's direction the same day. Its "a
 hosted body has no desktop at all" is amended by
 [ADR 0244](0244-machines-join-clankie-at-an-access-level.md): an owner can lend
-a joined machine's screen. Relates to
+a joined machine's screen. [ADR 0255](0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md)
+implements bounded accessibility press/text through that host's own capture,
+per-session local consent and visible Stop; real Mac/PC driving proof remains open. Relates to
 [ADR 0082](0082-clankie-holds-the-browser.md) (his own browser), which it
 narrows rather than replaces, and to
 [ADR 0127](0127-his-accounts-are-his.md) (human checks stop for the person),

@@ -10,6 +10,7 @@ export function registerComputerRoutes(
   app: Hono,
   options: {
     body?: ComputerBody;
+    joined?: import("./joined-computer.ts").JoinedComputer;
     identity(request: Request, conversationId: string): Promise<BodyConversationIdentity | undefined>;
   },
 ): void {
@@ -45,9 +46,12 @@ export function registerComputerRoutes(
     if (!parsed.success) return context.json({ error: "invalid_computer_request" }, 400);
     const identity = await options.identity(context.req.raw, parsed.data.conversationId);
     if (identity === undefined) return context.json({ error: "computer_authorization_required" }, 401);
-    if (options.body === undefined) return context.json({ error: "computer_body_unavailable" }, 503);
+    if (parsed.data.machineId ? options.joined === undefined : options.body === undefined)
+      return context.json({ error: "computer_body_unavailable" }, 503);
     try {
-      const result = await options.body.dispatch(identity, parsed.data.command);
+      const result = parsed.data.machineId
+        ? await options.joined!.dispatch(identity, parsed.data.machineId, parsed.data.command)
+        : await options.body!.dispatch(identity, parsed.data.command);
       return context.json(result as Record<string, unknown>, 200, { "cache-control": "no-store" });
     } catch (error) {
       if (error instanceof MachineAccessRefused)

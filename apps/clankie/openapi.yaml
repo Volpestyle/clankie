@@ -138,7 +138,10 @@ paths:
         AES-256-GCM request key derives from the broker-owned scoped capability;
         AAD binds request direction, machineId, requestId and the one-use challenge.
         Encrypted payload is {op: poll, results: [...], responseSecret} with at
-        most 16 results and 8,192 characters per output, with a truncated flag.
+        most 16 results. Worker/shell output remains 8,192 characters with a
+        truncated flag. Structured screenOutput is separately bounded to 65,536
+        characters and never truncated. Screen frames use 49,152-character chunks;
+        the sender measures result batches within a 750,000-byte JSON budget.
         Response sealedResponse encrypts current policy and at most 16 requests
         under the fresh independent responseSecret and response-direction AAD.
         Challenge is consumed before dispatch; neither ciphertext nor lost work
@@ -146,7 +149,7 @@ paths:
         checks current policy intersected with the original approved ceiling and
         canonical directory intersection. Raising beyond original consent needs
         a new owner-approved join.
-        Native worker/screen adapters remain unavailable. Gateway routing reveals
+        Native worker adapters remain unavailable; a screen host requires local session consent. Gateway routing reveals
         only metadata; the gateway cannot read or forge capabilities or work.
       requestBody:
         required: true
@@ -5447,7 +5450,7 @@ paths:
       operationId: requestComputerBody
       summary: Drive the conversation-leased computer body
       description: >-
-        Strict ComputerRequestSchema (conversationId and command) from
+        Strict ComputerRequestSchema (conversationId, optional joined machineId and command) from
         @clankie/interactive-environment. Operator authority bound to an existing
         runnable conversation, rechecked at each input. Actions: status, acquire,
         renew, release, revoke, recover, inventory, capture, frame, input. Capture returns
@@ -5466,7 +5469,13 @@ paths:
         shell/system targets and system-switching shortcuts refuse. Every native
         error retires the host. Input release requires James's W8 live stop proof.
         Observation-only clients remain read-only. No additional
-        model loop starts; hosted display routes are not implemented.
+        model loop starts. A registered joined machineId selects a lent screen without
+        fallback, including from a hosted service. The host requires fresh screen policy
+        within the original join ceiling and local per-session consent; input is off
+        until locally allowed. Its visible pet Stop fences queued input. Authored Mac
+        and Windows hosts support accessibility press/text with exact changed-field
+        receipts; raw key/drag/scroll refuse. Frame chunks share the authenticated join
+        carrier within existing caps. Real Mac/PC driving and native stop proof are live gaps.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true

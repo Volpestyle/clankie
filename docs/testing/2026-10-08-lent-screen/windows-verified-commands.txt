@@ -1,0 +1,57 @@
+Source SHA256: dae79e1ed664276fa22eaa0543fe36dc6d1d1a9e4b49a02ce51e0f9d196c32cc
+
+COMMAND (SSH PowerShell -NoProfile -NonInteractive -EncodedCommand; UTF-16LE body):
+$ErrorActionPreference='Stop'; $taskDirectory=Join-Path ([IO.Path]::GetTempPath()) 'vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770'; if(Test-Path -LiteralPath $taskDirectory){throw 'existing_temp_refused'}; New-Item -ItemType Directory -Path $taskDirectory | Out-Null; Write-Output $taskDirectory
+OUTPUT:
+C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770
+
+COMMAND:
+scp -o BatchMode=yes -o StrictHostKeyChecking=yes /Users/james/dev/clankie-wt/vuh-1803/apps/tui/native/LentScreen.cs volpe@supedupsilly:C:/Users/volpe/AppData/Local/Temp/vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770/LentScreen.cs
+OUTPUT:
+
+COMMAND (SSH PowerShell -NoProfile -NonInteractive -EncodedCommand; UTF-16LE body):
+$ErrorActionPreference='Stop'; $taskDirectory='C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770'; try { $framework=[Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory(); $references=@('System.Windows.Forms.dll','System.Drawing.dll','System.Web.Extensions.dll','System.Core.dll'); $references += @('UIAutomationClient.dll','UIAutomationTypes.dll','WindowsBase.dll') | ForEach-Object { Join-Path $framework ('WPF\' + $_) }; Add-Type -Path (Join-Path $taskDirectory 'LentScreen.cs') -OutputAssembly (Join-Path $taskDirectory 'LentScreen.dll') -OutputType Library -ReferencedAssemblies $references; Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $taskDirectory 'LentScreen.cs') | Select-Object Algorithm,Hash; Write-Output 'COMPILE_OK; output assembly only; type not loaded or invoked' } catch { Write-Output $_.Exception.Message; Write-Output $_.ToString(); exit 1 }
+OUTPUT:
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : Warning as Error: 'ClankieLentScreen.Handle(string)' hides inherited member 'System.Windows.Forms.Control.Handle'. Use the new keyword if hiding was intended.
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(137) :     }
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : >>>     void Handle(string line) {
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(139) :         string id="", action="";
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : Warning as Error: 'ClankieLentScreen.Handle(string)' hides inherited member 'System.Windows.Forms.Control.Handle'. Use the new keyword if hiding was intended.
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(137) :     }
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : >>>     void Handle(string line) {
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(139) :         string id="", action="";
+
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">2</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>FAILURE:
+Error: Command failed: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes volpe@supedupsilly powershell -NoProfile -NonInteractive -EncodedCommand JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnADsAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAPQAnAEMAOgBcAFUAcwBlAHIAcwBcAHYAbwBsAHAAZQBcAEEAcABwAEQAYQB0AGEAXABMAG8AYwBhAGwAXABUAGUAbQBwAFwAdgB1AGgALQAxADgAMAAzAC0AbgBhAHQAaQB2AGUALQA4ADcAZQA4ADEAZABkADYALQA0AGEAOQAxAC0ANAAxADQANwAtAGIANwAzAGIALQA0ADgAZgA3ADQAZQAwAGMAYQA3ADcAMAAnADsAIAB0AHIAeQAgAHsAIAAkAGYAcgBhAG0AZQB3AG8AcgBrAD0AWwBSAHUAbgB0AGkAbQBlAC4ASQBuAHQAZQByAG8AcABTAGUAcgB2AGkAYwBlAHMALgBSAHUAbgB0AGkAbQBlAEUAbgB2AGkAcgBvAG4AbQBlAG4AdABdADoAOgBHAGUAdABSAHUAbgB0AGkAbQBlAEQAaQByAGUAYwB0AG8AcgB5ACgAKQA7ACAAJAByAGUAZgBlAHIAZQBuAGMAZQBzAD0AQAAoACcAUwB5AHMAdABlAG0ALgBXAGkAbgBkAG8AdwBzAC4ARgBvAHIAbQBzAC4AZABsAGwAJwAsACcAUwB5AHMAdABlAG0ALgBEAHIAYQB3AGkAbgBnAC4AZABsAGwAJwAsACcAUwB5AHMAdABlAG0ALgBXAGUAYgAuAEUAeAB0AGUAbgBzAGkAbwBuAHMALgBkAGwAbAAnACwAJwBTAHkAcwB0AGUAbQAuAEMAbwByAGUALgBkAGwAbAAnACkAOwAgACQAcgBlAGYAZQByAGUAbgBjAGUAcwAgACsAPQAgAEAAKAAnAFUASQBBAHUAdABvAG0AYQB0AGkAbwBuAEMAbABpAGUAbgB0AC4AZABsAGwAJwAsACcAVQBJAEEAdQB0AG8AbQBhAHQAaQBvAG4AVAB5AHAAZQBzAC4AZABsAGwAJwAsACcAVwBpAG4AZABvAHcAcwBCAGEAcwBlAC4AZABsAGwAJwApACAAfAAgAEYAbwByAEUAYQBjAGgALQBPAGIAagBlAGMAdAAgAHsAIABKAG8AaQBuAC0AUABhAHQAaAAgACQAZgByAGEAbQBlAHcAbwByAGsAIAAoACcAVwBQAEYAXAAnACAAKwAgACQAXwApACAAfQA7ACAAQQBkAGQALQBUAHkAcABlACAALQBQAGEAdABoACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAdABhAHMAawBEAGkAcgBlAGMAdABvAHIAeQAgACcATABlAG4AdABTAGMAcgBlAGUAbgAuAGMAcwAnACkAIAAtAE8AdQB0AHAAdQB0AEEAcwBzAGUAbQBiAGwAeQAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAIAAnAEwAZQBuAHQAUwBjAHIAZQBlAG4ALgBkAGwAbAAnACkAIAAtAE8AdQB0AHAAdQB0AFQAeQBwAGUAIABMAGkAYgByAGEAcgB5ACAALQBSAGUAZgBlAHIAZQBuAGMAZQBkAEEAcwBzAGUAbQBiAGwAaQBlAHMAIAAkAHIAZQBmAGUAcgBlAG4AYwBlAHMAOwAgAEcAZQB0AC0ARgBpAGwAZQBIAGEAcwBoACAALQBBAGwAZwBvAHIAaQB0AGgAbQAgAFMASABBADIANQA2ACAALQBMAGkAdABlAHIAYQBsAFAAYQB0AGgAIAAoAEoAbwBpAG4ALQBQAGEAdABoACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5ACAAJwBMAGUAbgB0AFMAYwByAGUAZQBuAC4AYwBzACcAKQAgAHwAIABTAGUAbABlAGMAdAAtAE8AYgBqAGUAYwB0ACAAQQBsAGcAbwByAGkAdABoAG0ALABIAGEAcwBoADsAIABXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACcAQwBPAE0AUABJAEwARQBfAE8ASwA7ACAAbwB1AHQAcAB1AHQAIABhAHMAcwBlAG0AYgBsAHkAIABvAG4AbAB5ADsAIAB0AHkAcABlACAAbgBvAHQAIABsAG8AYQBkAGUAZAAgAG8AcgAgAGkAbgB2AG8AawBlAGQAJwAgAH0AIABjAGEAdABjAGgAIAB7ACAAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAkAF8ALgBFAHgAYwBlAHAAdABpAG8AbgAuAE0AZQBzAHMAYQBnAGUAOwAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJABfAC4AVABvAFMAdAByAGkAbgBnACgAKQA7ACAAZQB4AGkAdAAgADEAIAB9AA==
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">2</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : Warning as Error: 'ClankieLentScreen.Handle(string)' hides inherited member 'System.Windows.Forms.Control.Handle'. Use the new keyword if hiding was intended.
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(137) :     }
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : >>>     void Handle(string line) {
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(139) :         string id="", action="";
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : Warning as Error: 'ClankieLentScreen.Handle(string)' hides inherited member 'System.Windows.Forms.Control.Handle'. Use the new keyword if hiding was intended.
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(137) :     }
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(138) : >>>     void Handle(string line) {
+
+c:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770\LentScreen.cs(139) :         string id="", action="";
+
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">2</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>
+COMMAND (SSH PowerShell -NoProfile -NonInteractive -EncodedCommand; UTF-16LE body):
+$ErrorActionPreference='Stop'; $taskDirectory='C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-87e81dd6-4a91-4147-b73b-48f74e0ca770'; Remove-Item -LiteralPath $taskDirectory -Recurse -Force; Write-Output ('TEMP_REMOVED=' + (-not (Test-Path -LiteralPath $taskDirectory)))
+OUTPUT:
+TEMP_REMOVED=True

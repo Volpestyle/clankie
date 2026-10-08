@@ -233,7 +233,11 @@ export class MachineJoins {
     const input = JoinedMachinePollSchema.parse(raw);
     for (const result of input.results) {
       const work = this.work.get(result.id);
-      if (work?.machineId === record.id && work.claimed) work.settle(result);
+      if (work?.machineId === record.id && work.claimed) {
+        if (result.screenOutput !== undefined && work.request.operation.kind !== "screen")
+          throw Error("join_result_refused");
+        work.settle(result);
+      }
     }
     const settings = await this.options.settings.load();
     if (!this.has(record.id)) throw Error("revoked");

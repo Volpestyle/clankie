@@ -3,6 +3,7 @@ import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { requireMachineAccess } from "./machine-access.ts";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
+import { JoinedComputer } from "./joined-computer.ts";
 import { ComputerBody } from "./computer-body.ts";
 import { randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
@@ -1803,6 +1804,7 @@ const clankie = await createClankieApp({
   startPlayHost: () => playHost.start(playAbort.signal),
   rivals,
   machineJoins,
+  joinedComputer: new JoinedComputer(machineJoins, settingsStore),
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
   autoUpdateManaged: hostedBody !== undefined,

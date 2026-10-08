@@ -1,0 +1,6 @@
+Compiler invocation (exit 0, inside clankie heavy -- sh -c after formatting):
+xcrun swiftc -swift-version 5 -O -framework AppKit -framework ScreenCaptureKit -framework ApplicationServices -framework Carbon apps/tui/native/lent-screen.swift -o /tmp/vuh-1803-screen-final
+
+Compiler stdout/stderr: empty
+Source SHA256: e15956b90ff650f5cd6b2f4a4947d5cd13e5dfa7cd3afbd9a6bc11744553360e
+The output executable was never executed. Compilation ran sequentially after formatting inside one clankie heavy permit.

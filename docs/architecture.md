@@ -533,6 +533,17 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   shell. [Proposed ADR 0253](adr/0253-owner-confirmation-needs-an-isolated-authority.md)
   separates protected confirmation from these actor and machine preferences;
   its authority, native signing and protected effects are not implemented.
+  A joined screen is selected explicitly through `/v1/computer`'s `machineId`;
+  hosted Clankie can borrow it without a local desktop. Encrypted join traffic
+  carries strict commands and bounded frame chunks. The host intersects its
+  original screen ceiling with fresh policy, asks locally for session consent,
+  defaults to observation, and shows a pet with Stop. Authored macOS/Windows
+  helpers accept accessibility press/text with exact effect receipts; raw key,
+  drag and scroll refuse. Reduction, carrier loss, person takeover or lost
+  consent fences queued input. Uncertain native stop keeps the lease held.
+  Real Mac/PC task and Stop proof remain live gaps (VUH-1803); raw primitives
+  and native quiescence proof are VUH-1840. See
+  [lent screens](desktop-control.md#lend-a-joined-screen).
 - **Machine tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
   attach to the operator console and to Discord turns authorized by the
   machine-control grants

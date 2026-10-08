@@ -6,3 +6,4 @@ export * from "./activity-share.ts";
 export * from "./activity-observation.ts";
 export * from "./play-sight.ts";
 export * from "./computer.ts";
+export * from "./joined-screen.ts";

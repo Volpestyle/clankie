@@ -71,6 +71,7 @@
         "test/fixtures/runtime-canary-cpu-preload.mjs",
         "test/fixtures/runtime-canary-service.ts",
         "test/fixtures/mcp-stdio-bridge.ts",
+        "test/fixtures/lent-screen-provider.mjs",
         "src/captain/pi-worker-fleet.d.mts",
         "test/fixtures/pi-fleet-mcp/server.mjs",
         "test/fixtures/seat-pump-stdio.ts",

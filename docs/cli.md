@@ -2609,14 +2609,16 @@ Inventory reports `transport: join` and `accessEnforcement: joined-host` for
 these approved identities. The receiver checks the current access level and
 intersects the service-approved directories with its own canonical directories
 before execution; a symlink escape is refused. The channel supports a guarded
-shell at shell/screen level. Native worker and screen adapters remain follow-ups;
+shell at shell/screen level. Native worker adapters remain a follow-up;
+screen level can host a consent-bound computer through the same encrypted channel.
 workers-level shell and screen requests are refused. Directory checks bind the
 requested working directory; an authorized shell command still runs as the
 owner and can address other paths. OS confinement remains VUH-1804.
 
 The public service and client contract is implemented. Production gateway
 bootstrap/channel routing and admission/rate limits belong to `clankie-ops` and
-still need delivery; the hosted/self-hosted Mac and Windows capture is pending.
+has separate source and rollout evidence; real Mac/Windows driving remains an
+owner-run live gap.
 Do not treat a loopback relay fixture as a live gateway deployment. The gateway
 cannot read or forge joined-host capabilities, commands or results
 ([ADR 0173](adr/0173-the-gateway-cannot-read-device-traffic.md)). Bootstrap sends
@@ -2626,7 +2628,10 @@ original holder. Channel and leave use authenticated AES-256-GCM envelopes
 with fresh one-use challenges and independently keyed responses. TLS still
 protects the carrier; an untrusted gateway can deny delivery but cannot forge
 work. Broker keys stay at both endpoints; the registration ledger stores only
-token hashes. Outputs are bounded to 8,192 characters and report truncation.
+token hashes. Worker/shell outputs are bounded to 8,192 characters and report
+truncation. Structured screen results use a separate 65,536-character bound and
+never truncate; PNGs travel in 49,152-character chunks within the existing
+envelope/body caps. Oversized or stale screen data refuses.
 
 ### `machines [list|discover] [--json]`
 
@@ -5782,3 +5787,48 @@ Close and tidy also hold merge commits outside the destination's ancestry:
 landed. Land the merge or record an explicit reconciliation decision after
 inspecting it. A decided prune keeps the commits under
 `refs/clankie/dropped-worktrees/`.
+
+### Lent computer selection
+
+Pass `machineId: "join-UUID"` in the existing computer request to select that
+registered computer explicitly. Omit it for the local body. Selection failure
+never falls back to another screen:
+
+```bash
+clankie computer request '{"conversationId":"global-default","machineId":"join-UUID","command":{"action":"acquire"}}'
+```
+
+On the joining host, `join` / `join resume` must stay running with the authored
+native helper available. A screen-level join approval permits asking; the local
+owner confirms observation for each session and separately allows input. The
+visible pet offers Stop. Only one accessibility press or text append runs per
+fresh capture, with `foreground: true` and a changed exact `expect` field. Raw
+key, drag and scroll refuse. Never retry unknown input under a new UUID. Stop
+and recovery remain usable after reducing access; uncertain quiescence keeps
+the host lease held. Mac/Windows live driving proof remains open. Setup and
+limits: [lend a joined screen](desktop-control.md#lend-a-joined-screen).
+
+Desktop parents can supervise `clankie join … --json` or `join resume --json`.
+Stdout is newline-delimited `MachineJoinEventSchema`: `approval` contains the
+secret approval `code` and `expiresAt`; `joined` contains `machineId`; `screen`
+contains a matching command `id` and status `result`; `finished` contains the
+channel state `left` or `revoked`. Keep the approval code out of logs and evidence.
+`left` means the process stopped, not that registration was revoked.
+
+Keep stdin open. It accepts only `MachineJoinLocalScreenCommandSchema`:
+`{"id":"UUID","action":"screen_status"}` or `screen_stop`. Status and Stop
+cannot grant consent or enable input. Invalid controls fence the screen; stdin
+closure also permanently withholds screen policy for that supervised process.
+The status result contains `available`, `busy`, `allowInput`,
+`inputReady`, `outcome` (`status`, `released`, `held`, `unavailable`) and a nullable
+lease with only `conversationId`, `expiresAt` and `state`. It contains no lease
+token, screenshot or native observation. `available` means the owned helper is
+running, not that permissions or consent have been granted. `held` and
+`unavailable` are not successful release receipts.
+
+`join status --json` is finite and reads local registration only: `{configured:
+false}` or `{configured: true, machineId, origin}`. It does not prove screen
+readiness. `join leave --json` is finite: it revokes the encrypted transport,
+then deletes the local broker credential and reports `{ok: true, left: true}`.
+A failure has a nonzero exit status; uncertain removal is never reported as
+success. Revoke alone is not proof that an outstanding screen effect stopped.

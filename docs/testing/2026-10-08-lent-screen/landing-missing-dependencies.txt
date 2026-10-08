@@ -1,0 +1,283 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 3 queued)
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && node scripts/check-doc-links.mjs && node scripts/check-retired-claims.mjs && pnpm typecheck && vitest run --config vitest.config.ts --changed ${CLANKIE_LANDING_BASE:-origin/main} --bail 1 --passWithNoTests
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.3 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 990ms on 2963 files using 18 threads.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.44
+   Compiling libc v0.2.182
+    Checking cfg-if v1.0.4
+   Compiling typenum v1.19.0
+   Compiling version_check v0.9.5
+    Checking subtle v2.6.1
+    Checking const-oid v0.9.6
+   Compiling shlex v1.3.0
+   Compiling find-msvc-tools v0.1.9
+    Checking base64ct v1.8.3
+   Compiling serde_core v1.0.228
+   Compiling zerocopy v0.8.40
+    Checking base16ct v0.2.0
+    Checking pin-project-lite v0.2.17
+   Compiling semver v1.0.27
+   Compiling serde v1.0.228
+    Checking memchr v2.8.0
+    Checking once_cell v1.21.3
+   Compiling log v0.4.29
+   Compiling crossbeam-utils v0.8.21
+   Compiling hax-lib v0.3.6
+   Compiling pkg-config v0.3.32
+    Checking pem-rfc7468 v0.7.0
+   Compiling rustc_version v0.4.1
+    Checking futures-core v0.3.32
+    Checking smallvec v1.15.1
+    Checking futures-sink v0.3.32
+   Compiling generic-array v0.14.7
+    Checking rand_core v0.9.5
+    Checking opaque-debug v0.3.1
+    Checking futures-channel v0.3.32
+    Checking itoa v1.0.17
+    Checking futures-io v0.3.32
+   Compiling anyhow v1.0.102
+    Checking futures-task v0.3.32
+    Checking slab v0.4.12
+   Compiling zmij v1.0.21
+    Checking scopeguard v1.2.0
+   Compiling libcrux-intrinsics v0.0.6
+    Checking untrusted v0.9.0
+   Compiling parking_lot_core v0.8.6
+   Compiling thiserror v2.0.18
+    Checking lock_api v0.4.14
+   Compiling curve25519-dalek v4.1.3
+    Checking rand v0.9.2
+    Checking instant v0.1.13
+   Compiling libcrux-sha3 v0.0.8
+   Compiling serde_json v1.0.149
+   Compiling rustls v0.23.37
+   Compiling rayon-core v1.13.0
+    Checking bytes v1.11.1
+   Compiling thiserror v1.0.69
+   Compiling same-file v1.0.6
+    Checking crossbeam-epoch v0.9.18
+    Checking tracing-core v0.1.36
+    Checking getrandom v0.2.17
+    Checking cpufeatures v0.2.17
+   Compiling jobserver v0.1.34
+    Checking libcrux-platform v0.0.3
+   Compiling walkdir v2.5.0
+   Compiling nasm-rs v0.3.2
+    Checking rand_core v0.6.4
+   Compiling getrandom v0.3.4
+   Compiling autocfg v1.5.0
+   Compiling httparse v1.10.1
+    Checking crossbeam-deque v0.8.6
+    Checking mio v1.1.1
+   Compiling syn v2.0.117
+   Compiling cc v1.2.56
+    Checking parking_lot v0.11.2
+    Checking ff v0.13.1
+    Checking socket2 v0.6.2
+    Checking regex-syntax v0.8.10
+    Checking bytemuck v1.25.0
+    Checking pin-utils v0.1.0
+    Checking group v0.13.0
+    Checking rand_core v0.10.1
+   Compiling parking_lot_core v0.9.12
+    Checking either v1.15.0
+    Checking http v1.4.0
+    Checking utf-8 v0.7.6
+    Checking safe_arch v0.7.4
+    Checking byteorder v1.5.0
+    Checking data-encoding v2.10.0
+    Checking lazy_static v1.5.0
+    Checking tracing-log v0.2.0
+    Checking wide v0.7.33
+    Checking thread_local v1.1.9
+    Checking sharded-slab v0.1.7
+   Compiling hex-literal v0.3.4
+   Compiling num-traits v0.2.19
+    Checking gcd v2.3.0
+    Checking nu-ansi-term v0.50.3
+    Checking crossbeam-channel v0.5.15
+    Checking rayon v1.11.0
+    Checking base64 v0.22.1
+    Checking parking_lot v0.12.5
+   Compiling cmake v0.1.57
+    Checking regex-automata v0.4.14
+   Compiling ring v0.17.14
+   Compiling openh264-sys2 v0.9.6
+   Compiling audiopus_sys v0.2.2
+   Compiling turbojpeg-sys v1.1.1
+    Checking serde_bytes v0.11.19
+    Checking matchers v0.2.0
+    Checking ppv-lite86 v0.2.21
+    Checking rand_chacha v0.3.1
+    Checking rand v0.8.5
+   Compiling zeroize_derive v1.4.3
+   Compiling serde_derive v1.0.228
+   Compiling hax-lib-macros v0.3.6
+   Compiling tls_codec_derive v0.4.2
+   Compiling futures-macro v0.3.32
+   Compiling thiserror-impl v2.0.18
+   Compiling thiserror-impl v1.0.69
+   Compiling tokio-macros v2.6.1
+   Compiling tracing-attributes v0.1.31
+   Compiling num-derive v0.4.2
+    Checking zeroize v1.8.2
+    Checking tokio v1.49.0
+    Checking futures-util v0.3.32
+    Checking libcrux-secrets v0.0.5
+    Checking der v0.7.10
+    Checking rustls-pki-types v1.14.0
+    Checking hpke-rs-crypto v0.6.1
+    Checking libcrux-traits v0.0.6
+    Checking tracing v0.1.44
+    Checking rustls-webpki v0.103.9
+    Checking webpki-roots v1.0.6
+    Checking webpki-roots v0.26.11
+    Checking crypto-common v0.1.7
+    Checking block-buffer v0.10.4
+    Checking inout v0.1.4
+    Checking crypto-bigint v0.5.5
+    Checking tracing-subscriber v0.3.22
+    Checking universal-hash v0.5.1
+    Checking aead v0.5.2
+    Checking cipher v0.4.4
+    Checking digest v0.10.7
+    Checking polyval v0.6.2
+    Checking poly1305 v0.8.0
+    Checking spki v0.7.3
+    Checking ctr v0.9.2
+    Checking hmac v0.12.1
+    Checking signature v2.2.0
+    Checking sha2 v0.10.9
+    Checking hkdf v0.12.4
+    Checking pkcs8 v0.10.2
+    Checking rfc6979 v0.4.0
+    Checking ed25519 v2.2.3
+    Checking ghash v0.5.1
+    Checking aes v0.8.4
+    Checking chacha20 v0.9.1
+    Checking pbkdf2 v0.12.2
+    Checking sec1 v0.7.3
+    Checking sha1 v0.10.6
+    Checking salsa20 v0.10.2
+    Checking chacha20poly1305 v0.10.1
+    Checking aes-gcm v0.10.3
+    Checking scrypt v0.11.0
+    Checking x25519-dalek v2.0.1
+    Checking ed25519-dalek v2.2.0
+    Checking elliptic-curve v0.13.8
+    Checking primeorder v0.13.6
+    Checking ecdsa v0.16.9
+    Checking k256 v0.13.4
+    Checking p384 v0.13.1
+    Checking p256 v0.13.2
+    Checking tls_codec v0.4.2
+    Checking futures-executor v0.3.32
+    Checking futures v0.3.32
+    Checking hpke-rs-rust-crypto v0.6.1
+    Checking fluvio-wasm-timer v0.2.5
+    Checking tungstenite v0.24.0
+    Checking tokio-rustls v0.26.4
+    Checking openmls_traits v0.5.0
+    Checking hpke-rs v0.6.1
+    Checking tokio-tungstenite v0.24.0
+    Checking openmls_memory_storage v0.5.0
+    Checking openmls_basic_credential v0.5.0
+    Checking openmls v0.8.1
+    Checking openmls_rust_crypto v0.5.1
+    Checking openh264 v0.9.3
+    Checking audiopus v0.3.0-rc.0
+    Checking turbojpeg v1.4.0
+    Checking davey v0.1.4
+    Checking clankvox v0.3.0 (/Users/james/dev/clankie-wt/vuh-1803/apps/vox)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.61s
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+Configuration hints (1)
+integrations/codex-plugin/skills/**    knip.json  Remove from ignore
+Checked 545 markdown files; local links resolve; ADR numbers have no new collisions.
+$ turbo run typecheck
+• turbo 2.10.4
+
+   • Packages in scope: @clankie/agent-hosts, @clankie/agent-transcript, @clankie/api-client, @clankie/clankie, @clankie/credential-broker, @clankie/discord-activity, @clankie/discord-bridge, @clankie/discord-presence-core, @clankie/discord-user-session, @clankie/docs, @clankie/fleet-resources, @clankie/game-extension, @clankie/interactive-environment, @clankie/media-connector, @clankie/minecraft, @clankie/minecraft-mcp, @clankie/model-provider, @clankie/model-registry, @clankie/observability, @clankie/persona-images, @clankie/play, @clankie/play-voice, @clankie/pokemon, @clankie/protocol, @clankie/relay, @clankie/rendered-surface-client, @clankie/settings, @clankie/tui, @clankie/vec3, @clankie/vox, @clankie/vox-client, @clankie/work-items
+   • Running typecheck in 32 packages
+   • Remote caching disabled, using shared worktree cache
+
+@clankie/protocol:typecheck: cache miss, executing db7e5479630bce30
+@clankie/persona-images:typecheck: cache hit, replaying logs fddd7a121810ee34
+@clankie/persona-images:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/fleet-resources:typecheck: cache hit, replaying logs cc05c78f035d6869
+@clankie/vox-client:typecheck: cache hit, replaying logs 90fc8d792ab0f4d5
+@clankie/model-registry:typecheck: cache hit, replaying logs 12947e1ffd9e0f50
+@clankie/model-registry:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/observability:typecheck: cache hit, replaying logs bc740f900684bad1
+@clankie/fleet-resources:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/media-connector:typecheck: cache hit, replaying logs 7d3abc8a0b8446a8
+@clankie/vox-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/media-connector:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/observability:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/game-extension:typecheck: cache hit, replaying logs 29a385c08dde7253
+@clankie/game-extension:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/vox:typecheck: cache hit, replaying logs d352db51883219da
+@clankie/vox:typecheck: $ cargo check --locked --all-targets --all-features
+@clankie/vox:typecheck:     Checking clankvox v0.3.0 (/Users/james/dev/clankie-wt/lead-landing/apps/vox)
+@clankie/vox:typecheck:     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.12s
+@clankie/protocol:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/credential-broker:typecheck: cache miss, executing 2c5ce5fe0e0566f1
+@clankie/settings:typecheck: cache miss, executing ec79842754ce12d6
+@clankie/work-items:typecheck: cache miss, executing d6bd0f0dc4557a4c
+@clankie/interactive-environment:typecheck: cache miss, executing 817417fb5d062b08
+@clankie/interactive-environment:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/credential-broker:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/settings:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/work-items:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play:typecheck: cache miss, executing f4e8a3a22ef15e03
+@clankie/api-client:typecheck: cache miss, executing 8b6c136d4e8f4afe
+@clankie/play:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/api-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/minecraft-mcp:typecheck: cache miss, executing 55e70ed82ff53db5
+@clankie/discord-activity:typecheck: cache miss, executing df3c129815ce55b6
+@clankie/play-voice:typecheck: cache miss, executing c44bde2a22ae5d07
+@clankie/relay:typecheck: cache miss, executing e629a7d4336c451b
+@clankie/model-provider:typecheck: cache miss, executing ed1ddff321f54009
+@clankie/rendered-surface-client:typecheck: cache miss, executing e6807ff051d616f9
+@clankie/discord-activity:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/relay:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/minecraft-mcp:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/model-provider:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/play-voice:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/rendered-surface-client:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-hosts:typecheck: cache miss, executing 98c91ed68258fb8d
+@clankie/agent-transcript:typecheck: cache miss, executing b158d1b68f484f19
+@clankie/agent-transcript:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-hosts:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/minecraft:typecheck: cache miss, executing efef2dbff9a0fb96
+@clankie/pokemon:typecheck: cache miss, executing 7514f0266addbf12
+@clankie/minecraft:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/pokemon:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/minecraft:typecheck: error TS2688: Cannot find type definition file for 'node'.
+@clankie/minecraft:typecheck:   The file is in the program because:
+@clankie/minecraft:typecheck:     Entry point of type library 'node' specified in compilerOptions
+@clankie/minecraft:typecheck: [ELIFECYCLE] Command failed with exit code 2.
+@clankie/minecraft:typecheck: [WARN]  Local package.json exists, but node_modules missing, did you mean to install?
+@clankie/pokemon:typecheck: [ELIFECYCLE] Command failed.
+@clankie/model-provider:typecheck: [ELIFECYCLE] Command failed.
+@clankie/relay:typecheck: [ELIFECYCLE] Command failed.
+@clankie/minecraft#typecheck:  ERROR  command (/Users/james/dev/clankie-wt/vuh-1803/integrations/minecraft) /Users/james/Library/pnpm/store/v11/links/@/pnpm/11.11.0/b37077d69c428ae350728ebf090bc791c5256d01fa044503eff061bc15bf5908/bin/pnpm run typecheck exited (2)
+
+ Tasks:    21 successful, 25 total
+Cached:    8 cached, 25 total
+  Time:    6.968s
+Failed:    @clankie/minecraft#typecheck
+
+ ERROR  run failed: command  exited (2)
+[ELIFECYCLE] Command failed with exit code 2.
+[ELIFECYCLE] Command failed with exit code 2.

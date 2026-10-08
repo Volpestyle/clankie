@@ -4,6 +4,7 @@ import { machineJoinHash, machineJoinKey } from "../../../clankie/src/machine-jo
 import { hostname } from "node:os";
 import { realpath } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { createInterface, type Interface } from "node:readline";
 import {
   createDefaultCredentialStore,
   resolveOperatorCredential,
@@ -21,8 +22,11 @@ import {
   MachineJoinStatusSchema,
   MachineJoinApprovalSchema,
   MachineJoinApprovalResultSchema,
+  MachineJoinEventSchema,
+  MachineJoinLocalScreenCommandSchema,
 } from "@clankie/protocol/machine-join";
 import {
+  joinedMachineShell,
   machineJoinOrigin,
   readJoinedMachineCredential,
   saveJoinedMachineCredential,
@@ -30,10 +34,11 @@ import {
   leaveJoinedMachine,
   type JoinedMachinePorts,
 } from "../../bin/joined-machine-client.ts";
+import { defaultJoinedScreenPorts } from "../../bin/joined-screen-host.ts";
 import { commandHost, type Writable } from "./io.ts";
 
 const USAGE =
-  "Usage: clankie join --gateway URL --host HOST_ID [--name NAME] [--directory PATH]…\n       clankie join resume|status|leave\n       clankie join approve CODE --access portal|workers|shell|screen [--directory PATH]…";
+  "Usage: clankie join --gateway URL --host HOST_ID [--name NAME] [--directory PATH]… [--json]\n       clankie join resume | status | leave [--json]\n       clankie join approve CODE --access portal|workers|shell|screen [--directory PATH]…";
 export async function runJoinCommand(
   args: readonly string[],
   options: {
@@ -47,6 +52,7 @@ export async function runJoinCommand(
     readonly stderr?: Writable;
     readonly ports?: JoinedMachinePorts;
     readonly intervalMs?: number;
+    readonly stdin?: NodeJS.ReadableStream;
   } = {},
 ): Promise<number> {
   const stdout = options.stdout ?? process.stdout,
@@ -60,6 +66,8 @@ export async function runJoinCommand(
     process.once("SIGINT", interrupt);
     process.once("SIGTERM", interrupt);
   }
+  let controls: Interface | undefined;
+  let controlsOpen = false;
   try {
     // A base64url approval secret may start with '-'; it is always positional data.
     const approvalCode =
@@ -76,6 +84,7 @@ export async function runJoinCommand(
         directory: { type: "string", multiple: true },
         access: { type: "string" },
         help: { type: "boolean" },
+        json: { type: "boolean" },
       },
     });
     if (values.help) {
@@ -84,6 +93,8 @@ export async function runJoinCommand(
     }
     const [action = "start", parsedTarget] = positionals;
     const target = approvalCode ?? parsedTarget;
+    const event = (value: unknown) =>
+      stdout.write(JSON.stringify(MachineJoinEventSchema.parse(value)) + "\n");
     const post = async (origin: string, path: string, body: unknown, token?: string) => {
       const response = await fetcher(origin + path, {
         method: "POST",
@@ -120,7 +131,7 @@ export async function runJoinCommand(
     }
     if (positionals.length > 1 || values.access || !["start", "resume", "status", "leave"].includes(action))
       throw Error(USAGE);
-    if (action !== "start" && Object.keys(values).length > 0) throw Error(USAGE);
+    if (action !== "start" && Object.keys(values).some((key) => key !== "json")) throw Error(USAGE);
     const store = options.joinCredentialStore ?? createDefaultCredentialStore({ env });
     let credential = await readJoinedMachineCredential(store);
     if (action === "status") {
@@ -156,7 +167,11 @@ export async function runJoinCommand(
         approvalHash: machineJoinHash(approvalCode),
       });
       const ticket = MachineJoinTicketSchema.parse(await post(origin, MACHINE_JOIN_START_PATH, input));
-      stdout.write(`Approve ${approvalCode} from an existing owner device (expires ${ticket.expiresAt}).\n`);
+      if (values.json) event({ event: "approval", code: approvalCode, expiresAt: ticket.expiresAt });
+      else
+        stdout.write(
+          `Approve ${approvalCode} from an existing owner device (expires ${ticket.expiresAt}).\n`,
+        );
       while (!signal.aborted && Date.now() < Date.parse(ticket.expiresAt)) {
         const status = MachineJoinStatusSchema.parse(
           await post(origin, MACHINE_JOIN_STATUS_PATH, { joinId: ticket.joinId }, claimSecret),
@@ -191,15 +206,63 @@ export async function runJoinCommand(
       if (signal.aborted) return 0;
       throw Error("join_approval_required");
     }
+    const hostPorts: JoinedMachinePorts = options.ports ?? {
+      shell: joinedMachineShell,
+      ...(credential.lease.accessLevel === "screen"
+        ? defaultJoinedScreenPorts(credential.lease.machineId, env)
+        : {}),
+    };
+    const ports: JoinedMachinePorts = values.json
+      ? { ...hostPorts, screenPolicy: (allowed) => hostPorts.screenPolicy?.(allowed && controlsOpen) }
+      : hostPorts;
+    if (values.json) {
+      controls = createInterface({ input: options.stdin ?? process.stdin });
+      controlsOpen = true;
+      const stopLocal = () => {
+        void ports.localScreen?.("screen_stop").catch(() => {});
+      };
+      controls.on("close", () => {
+        controlsOpen = false;
+        ports.screenPolicy?.(false);
+        stopLocal();
+      });
+      controls.on("line", (line) => {
+        let command;
+        try {
+          command = MachineJoinLocalScreenCommandSchema.parse(JSON.parse(line.length <= 4096 ? line : ""));
+        } catch {
+          stopLocal();
+          return;
+        }
+        const unavailable = {
+          available: false,
+          busy: false,
+          allowInput: false,
+          inputReady: false,
+          lease: null,
+          outcome: "unavailable",
+        };
+        void (ports.localScreen ? ports.localScreen(command.action) : Promise.resolve(unavailable))
+          .catch(() => unavailable)
+          .then((result) => {
+            if (controlsOpen) event({ event: "screen", id: command.id, result });
+          })
+          .catch(stopLocal);
+      });
+    }
     const state = await runJoinedMachineChannel(credential, {
       store,
       signal,
       fetchImpl: fetcher,
-      ...(options.ports ? { ports: options.ports } : {}),
+      ports,
       ...(options.intervalMs === undefined ? {} : { intervalMs: options.intervalMs }),
-      onConnected: () => stdout.write(`Joined ${credential!.lease.machineId}; keep this command running.\n`),
+      onConnected: () =>
+        values.json
+          ? event({ event: "joined", machineId: credential!.lease.machineId })
+          : stdout.write(`Joined ${credential!.lease.machineId}; keep this command running.\n`),
     });
-    stdout.write(JSON.stringify({ ok: true, state }) + "\n");
+    if (values.json) event({ event: "finished", state });
+    else stdout.write(JSON.stringify({ ok: true, state }) + "\n");
     return 0;
   } catch {
     if (signal.aborted) return 0;
@@ -209,6 +272,9 @@ export async function runJoinCommand(
     );
     return 1;
   } finally {
+    controlsOpen = false;
+    controls?.removeAllListeners();
+    controls?.close();
     if (!options.signal) {
       process.removeListener("SIGINT", interrupt);
       process.removeListener("SIGTERM", interrupt);

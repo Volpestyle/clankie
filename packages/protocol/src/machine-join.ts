@@ -3,6 +3,9 @@ import { MachineAccessLevelSchema } from "./machine-access.ts";
 
 /** Public body/client contract; hosted gateway routing is implemented in clankie-ops. */
 export const MACHINE_JOIN_OUTPUT_CHAR_MAX = 8192;
+export const MACHINE_JOIN_SCREEN_OUTPUT_CHAR_MAX = 65536;
+/** JSON byte budget before AES/base64; stays within the existing 1.5M wire cap. */
+export const MACHINE_JOIN_RESULT_BATCH_BYTES_MAX = 750000;
 export const MACHINE_JOIN_START_PATH = "/v1/machine-joins/start";
 export const MACHINE_JOIN_STATUS_PATH = "/v1/machine-joins/status";
 export const MACHINE_JOIN_APPROVE_PATH = "/v1/machine-joins/approve";
@@ -28,6 +31,39 @@ export const JoinedMachineIdSchema = z
   .regex(/^join-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u);
 export const MachineJoinSecretSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 export const MachineJoinTokenSchema = z.string().regex(/^clankie_join_[A-Za-z0-9_-]{43}$/u);
+/** Local owned-child controls: metadata and stop only. Never a consent or input grant. */
+export const MachineJoinLocalScreenCommandSchema = z.strictObject({
+  id: z.string().uuid(),
+  action: z.enum(["screen_status", "screen_stop"]),
+});
+export const MachineJoinLocalScreenStatusSchema = z.strictObject({
+  available: z.boolean(),
+  busy: z.boolean(),
+  allowInput: z.boolean(),
+  inputReady: z.boolean(),
+  outcome: z.enum(["status", "released", "held", "unavailable"]),
+  lease: z
+    .strictObject({
+      conversationId: z.string().min(1).max(512),
+      expiresAt: z.number().int().nonnegative(),
+      state: z.enum(["active", "recovery_required"]),
+    })
+    .nullable(),
+});
+export const MachineJoinEventSchema = z.discriminatedUnion("event", [
+  z.strictObject({
+    event: z.literal("approval"),
+    code: MachineJoinSecretSchema,
+    expiresAt: z.string().datetime(),
+  }),
+  z.strictObject({ event: z.literal("joined"), machineId: JoinedMachineIdSchema }),
+  z.strictObject({
+    event: z.literal("screen"),
+    id: z.string().uuid(),
+    result: MachineJoinLocalScreenStatusSchema,
+  }),
+  z.strictObject({ event: z.literal("finished"), state: z.enum(["left", "revoked"]) }),
+]);
 const directory = z.string().min(1).max(4096);
 export const MachineJoinStartSchema = z
   .object({
@@ -101,6 +137,7 @@ export const JoinedMachineResultSchema = z
     id: z.string().uuid(),
     ok: z.boolean(),
     output: z.string().max(MACHINE_JOIN_OUTPUT_CHAR_MAX).optional(),
+    screenOutput: z.string().max(MACHINE_JOIN_SCREEN_OUTPUT_CHAR_MAX).optional(),
     truncated: z.boolean().optional(),
     error: z
       .enum([

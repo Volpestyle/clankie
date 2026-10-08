@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { JoinedMachineIdSchema } from "@clankie/protocol/machine-join";
 import { EnvironmentLeaseV2Schema } from "./environment.ts";
 import { RenderedSurfaceFrameSchema, RENDERED_SURFACE_QUEUE_MAX } from "./rendered-surface.ts";
 
@@ -209,7 +210,11 @@ export const ComputerCommandSchema = z.discriminatedUnion("action", [
   }),
 ]);
 export type ComputerCommand = z.infer<typeof ComputerCommandSchema>;
-export const ComputerRequestSchema = z.strictObject({ conversationId: id, command: ComputerCommandSchema });
+export const ComputerRequestSchema = z.strictObject({
+  conversationId: id,
+  machineId: JoinedMachineIdSchema.optional(),
+  command: ComputerCommandSchema,
+});
 
 /** Image-local pixels, including retina/ROI captures, map through the actual capture bounds. */
 export function computerPoint(

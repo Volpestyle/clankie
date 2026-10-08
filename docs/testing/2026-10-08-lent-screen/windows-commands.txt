@@ -1,0 +1,21 @@
+Source SHA256: 0d46c8e69c4574824b5a294dabdff533464ceabda7d117736dcabf9a37ea995e
+
+COMMAND (pc.sh):
+$ErrorActionPreference='Stop'; $taskDirectory=Join-Path ([IO.Path]::GetTempPath()) 'vuh-1803-native-ff28d393-286d-4f50-98e5-e4368d9fc68e'; if(Test-Path -LiteralPath $taskDirectory){throw 'existing_temp_refused'}; New-Item -ItemType Directory -Path $taskDirectory | Out-Null; Write-Output $taskDirectory
+OUTPUT:
+C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-ff28d393-286d-4f50-98e5-e4368d9fc68e
+
+COMMAND:
+scp -o BatchMode=yes -o StrictHostKeyChecking=yes /Users/james/dev/clankie-wt/vuh-1803/apps/tui/native/LentScreen.cs volpe@supedupsilly:C:/Users/volpe/AppData/Local/Temp/vuh-1803-native-ff28d393-286d-4f50-98e5-e4368d9fc68e/LentScreen.cs
+OUTPUT:
+
+COMMAND (pc.sh):
+$ErrorActionPreference='Stop'; $taskDirectory='C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-ff28d393-286d-4f50-98e5-e4368d9fc68e'; Add-Type -Path (Join-Path $taskDirectory 'LentScreen.cs') -OutputAssembly (Join-Path $taskDirectory 'LentScreen.dll') -OutputType Library -ReferencedAssemblies System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes,WindowsBase,System.Web.Extensions,System.Core; Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $taskDirectory 'LentScreen.cs') | Select-Object Algorithm,Hash; Write-Output 'COMPILE_OK; output assembly only; type not loaded or invoked'
+OUTPUT:
+FAILURE:
+Error: Command failed: zsh /Users/james/.clankie/captain/worker-codex/seat-TPTYUp/skills/windows-pc/pc.sh $ErrorActionPreference='Stop'; $taskDirectory='C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-ff28d393-286d-4f50-98e5-e4368d9fc68e'; Add-Type -Path (Join-Path $taskDirectory 'LentScreen.cs') -OutputAssembly (Join-Path $taskDirectory 'LentScreen.dll') -OutputType Library -ReferencedAssemblies System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes,WindowsBase,System.Web.Extensions,System.Core; Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $taskDirectory 'LentScreen.cs') | Select-Object Algorithm,Hash; Write-Output 'COMPILE_OK; output assembly only; type not loaded or invoked'
+
+COMMAND (pc.sh):
+$ErrorActionPreference='Stop'; $taskDirectory='C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-ff28d393-286d-4f50-98e5-e4368d9fc68e'; Remove-Item -LiteralPath $taskDirectory -Recurse -Force; Write-Output ('TEMP_REMOVED=' + (-not (Test-Path -LiteralPath $taskDirectory)))
+OUTPUT:
+TEMP_REMOVED=True

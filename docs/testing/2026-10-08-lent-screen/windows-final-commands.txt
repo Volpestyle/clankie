@@ -1,0 +1,33 @@
+Source SHA256: dae79e1ed664276fa22eaa0543fe36dc6d1d1a9e4b49a02ce51e0f9d196c32cc
+
+COMMAND (SSH PowerShell -NoProfile -NonInteractive -EncodedCommand; UTF-16LE body):
+$ErrorActionPreference='Stop'; $taskDirectory=Join-Path ([IO.Path]::GetTempPath()) 'vuh-1803-native-82d1ea0b-1622-4df0-9955-2dc4c541f7d6'; if(Test-Path -LiteralPath $taskDirectory){throw 'existing_temp_refused'}; New-Item -ItemType Directory -Path $taskDirectory | Out-Null; Write-Output $taskDirectory
+OUTPUT:
+C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-82d1ea0b-1622-4df0-9955-2dc4c541f7d6
+
+COMMAND:
+scp -o BatchMode=yes -o StrictHostKeyChecking=yes /Users/james/dev/clankie-wt/vuh-1803/apps/tui/native/LentScreen.cs volpe@supedupsilly:C:/Users/volpe/AppData/Local/Temp/vuh-1803-native-82d1ea0b-1622-4df0-9955-2dc4c541f7d6/LentScreen.cs
+OUTPUT:
+
+COMMAND (SSH PowerShell -NoProfile -NonInteractive -EncodedCommand; UTF-16LE body):
+$ErrorActionPreference='Stop'; $taskDirectory='C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-82d1ea0b-1622-4df0-9955-2dc4c541f7d6'; try { Add-Type -Path (Join-Path $taskDirectory 'LentScreen.cs') -OutputAssembly (Join-Path $taskDirectory 'LentScreen.dll') -OutputType Library -ReferencedAssemblies System.Windows.Forms.dll,System.Drawing.dll,UIAutomationClient.dll,UIAutomationTypes.dll,WindowsBase.dll,System.Web.Extensions.dll,System.Core.dll; Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $taskDirectory 'LentScreen.cs') | Select-Object Algorithm,Hash; Write-Output 'COMPILE_OK; output assembly only; type not loaded or invoked' } catch { Write-Output $_.Exception.Message; Write-Output $_.ToString(); exit 1 }
+OUTPUT:
+(0) : Metadata file 'UIAutomationClient.dll' could not be found
+
+(0) : Metadata file 'UIAutomationClient.dll' could not be found
+
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>FAILURE:
+Error: Command failed: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes volpe@supedupsilly powershell -NoProfile -NonInteractive -EncodedCommand JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnADsAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAPQAnAEMAOgBcAFUAcwBlAHIAcwBcAHYAbwBsAHAAZQBcAEEAcABwAEQAYQB0AGEAXABMAG8AYwBhAGwAXABUAGUAbQBwAFwAdgB1AGgALQAxADgAMAAzAC0AbgBhAHQAaQB2AGUALQA4ADIAZAAxAGUAYQAwAGIALQAxADYAMgAyAC0ANABkAGYAMAAtADkAOQA1ADUALQAyAGQAYwA0AGMANQA0ADEAZgA3AGQANgAnADsAIAB0AHIAeQAgAHsAIABBAGQAZAAtAFQAeQBwAGUAIAAtAFAAYQB0AGgAIAAoAEoAbwBpAG4ALQBQAGEAdABoACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5ACAAJwBMAGUAbgB0AFMAYwByAGUAZQBuAC4AYwBzACcAKQAgAC0ATwB1AHQAcAB1AHQAQQBzAHMAZQBtAGIAbAB5ACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAdABhAHMAawBEAGkAcgBlAGMAdABvAHIAeQAgACcATABlAG4AdABTAGMAcgBlAGUAbgAuAGQAbABsACcAKQAgAC0ATwB1AHQAcAB1AHQAVAB5AHAAZQAgAEwAaQBiAHIAYQByAHkAIAAtAFIAZQBmAGUAcgBlAG4AYwBlAGQAQQBzAHMAZQBtAGIAbABpAGUAcwAgAFMAeQBzAHQAZQBtAC4AVwBpAG4AZABvAHcAcwAuAEYAbwByAG0AcwAuAGQAbABsACwAUwB5AHMAdABlAG0ALgBEAHIAYQB3AGkAbgBnAC4AZABsAGwALABVAEkAQQB1AHQAbwBtAGEAdABpAG8AbgBDAGwAaQBlAG4AdAAuAGQAbABsACwAVQBJAEEAdQB0AG8AbQBhAHQAaQBvAG4AVAB5AHAAZQBzAC4AZABsAGwALABXAGkAbgBkAG8AdwBzAEIAYQBzAGUALgBkAGwAbAAsAFMAeQBzAHQAZQBtAC4AVwBlAGIALgBFAHgAdABlAG4AcwBpAG8AbgBzAC4AZABsAGwALABTAHkAcwB0AGUAbQAuAEMAbwByAGUALgBkAGwAbAA7ACAARwBlAHQALQBGAGkAbABlAEgAYQBzAGgAIAAtAEEAbABnAG8AcgBpAHQAaABtACAAUwBIAEEAMgA1ADYAIAAtAEwAaQB0AGUAcgBhAGwAUABhAHQAaAAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAIAAnAEwAZQBuAHQAUwBjAHIAZQBlAG4ALgBjAHMAJwApACAAfAAgAFMAZQBsAGUAYwB0AC0ATwBiAGoAZQBjAHQAIABBAGwAZwBvAHIAaQB0AGgAbQAsAEgAYQBzAGgAOwAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJwBDAE8ATQBQAEkATABFAF8ATwBLADsAIABvAHUAdABwAHUAdAAgAGEAcwBzAGUAbQBiAGwAeQAgAG8AbgBsAHkAOwAgAHQAeQBwAGUAIABuAG8AdAAgAGwAbwBhAGQAZQBkACAAbwByACAAaQBuAHYAbwBrAGUAZAAnACAAfQAgAGMAYQB0AGMAaAAgAHsAIABXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACQAXwAuAEUAeABjAGUAcAB0AGkAbwBuAC4ATQBlAHMAcwBhAGcAZQA7ACAAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAkAF8ALgBUAG8AUwB0AHIAaQBuAGcAKAApADsAIABlAHgAaQB0ACAAMQAgAH0A
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>
+(0) : Metadata file 'UIAutomationClient.dll' could not be found
+
+(0) : Metadata file 'UIAutomationClient.dll' could not be found
+
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>
+COMMAND (SSH PowerShell -NoProfile -NonInteractive -EncodedCommand; UTF-16LE body):
+$ErrorActionPreference='Stop'; $taskDirectory='C:\Users\volpe\AppData\Local\Temp\vuh-1803-native-82d1ea0b-1622-4df0-9955-2dc4c541f7d6'; Remove-Item -LiteralPath $taskDirectory -Recurse -Force; Write-Output ('TEMP_REMOVED=' + (-not (Test-Path -LiteralPath $taskDirectory)))
+OUTPUT:
+TEMP_REMOVED=True

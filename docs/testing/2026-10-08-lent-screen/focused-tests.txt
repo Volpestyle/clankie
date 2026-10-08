@@ -1,0 +1,10 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 2 queued)
+Finished in 24ms on 2 files using 18 threads.
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1803
+
+
+ Test Files  2 passed (2)
+      Tests  13 passed (13)
+   Start at  07:33:29
+   Duration  12.06s (transform 1.48s, setup 27ms, import 2.49s, tests 13.77s, environment 0ms)

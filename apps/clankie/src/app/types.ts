@@ -273,6 +273,7 @@ export interface ClankieAppDependencies {
     "authorize"
   >;
   computer?: import("../computer-body.ts").ComputerBody;
+  joinedComputer?: import("../joined-computer.ts").JoinedComputer;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;

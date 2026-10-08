@@ -2187,6 +2187,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   registerComputerRoutes(app, {
     ...(dependencies.computer === undefined ? {} : { body: dependencies.computer }),
+    ...(dependencies.joinedComputer === undefined ? {} : { joined: dependencies.joinedComputer }),
     async identity(request, conversationId) {
       const operator = await authenticateOperator(request, dependencies);
       if (!operator || operator === "unavailable") return undefined;

@@ -9,8 +9,11 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { machineAccessAllows } from "@clankie/protocol";
+import { joinedScreenRecovery } from "@clankie/interactive-environment";
 import {
   MACHINE_JOIN_OUTPUT_CHAR_MAX,
+  MACHINE_JOIN_SCREEN_OUTPUT_CHAR_MAX,
+  MACHINE_JOIN_RESULT_BATCH_BYTES_MAX,
   MACHINE_JOIN_CHANNEL_PATH,
   MACHINE_JOIN_CHALLENGE_PATH,
   MachineJoinChallengeSchema,
@@ -70,7 +73,11 @@ export async function saveJoinedMachineCredential(
 export interface JoinedMachinePorts {
   workers?: (request: string, directory: string, signal: AbortSignal) => Promise<string>;
   shell?: (command: string, directory: string, signal: AbortSignal) => Promise<string>;
-  screen?: (request: string, signal: AbortSignal) => Promise<string>;
+  screen?: (request: string, signal: AbortSignal, guard: () => void) => Promise<string>;
+  screenPolicy?: (allowed: boolean) => void;
+  closeScreen?: () => Promise<void>;
+  /** Only the joining machine's owned stdin/parent can call these, never the remote screen wire. */
+  localScreen?: (action: "screen_status" | "screen_stop") => Promise<unknown>;
 }
 /** Never expose a general shell through a workers-level handler. */
 async function executeJoinedMachineRequest(
@@ -80,11 +87,16 @@ async function executeJoinedMachineRequest(
   approvedDirectories: readonly string[],
   ports: JoinedMachinePorts,
   signal: AbortSignal,
+  screenGuard: () => void,
+  originallyScreen: boolean,
 ): Promise<JoinedMachineResult> {
   const request = JoinedMachineRequestSchema.parse(raw);
   const operation = request.operation;
   if (signal.aborted) return { id: request.id, ok: false, error: "revoked" };
-  if (!machineAccessAllows(policy.accessLevel, operation.kind))
+  if (
+    !machineAccessAllows(policy.accessLevel, operation.kind) &&
+    !(originallyScreen && operation.kind === "screen" && joinedScreenRecovery(operation.request))
+  )
     return { id: request.id, ok: false, error: "machine_access_refused" };
   let directory = "";
   if (operation.kind !== "screen") {
@@ -115,10 +127,16 @@ async function executeJoinedMachineRequest(
     if (!handler) return { id: request.id, ok: false, error: "operation_unavailable" };
     const output =
       operation.kind === "screen"
-        ? await ports.screen!(operation.request, signal)
+        ? await ports.screen!(operation.request, signal, screenGuard)
         : operation.kind === "shell"
           ? await ports.shell!(operation.command, directory, signal)
           : await ports.workers!(operation.request, directory, signal);
+    if (operation.kind === "screen") {
+      if (output.length > MACHINE_JOIN_SCREEN_OUTPUT_CHAR_MAX) throw Error("screen_result_too_large");
+      return signal.aborted
+        ? { id: request.id, ok: false, error: "revoked" }
+        : { id: request.id, ok: true, screenOutput: output };
+    }
     return signal.aborted
       ? { id: request.id, ok: false, error: "revoked" }
       : {
@@ -131,7 +149,11 @@ async function executeJoinedMachineRequest(
     return { id: request.id, ok: false, error: signal.aborted ? "revoked" : "operation_failed" };
   }
 }
-const joinedMachineShell: NonNullable<JoinedMachinePorts["shell"]> = async (command, directory, signal) => {
+export const joinedMachineShell: NonNullable<JoinedMachinePorts["shell"]> = async (
+  command,
+  directory,
+  signal,
+) => {
   const windows = process.platform === "win32";
   const result = await exec(
     windows ? "powershell.exe" : "/bin/sh",
@@ -213,9 +235,22 @@ export async function runJoinedMachineChannel(
   let results: JoinedMachineResult[] = [];
   const fetcher = options.fetchImpl ?? fetch;
   let connected = false;
+  let currentScreen = false;
+  let policyAt = 0;
+  const ports = options.ports ?? { shell: joinedMachineShell };
+  const freshScreen = () => currentScreen && performance.now() - policyAt < 2000;
+  const staleTimer = setInterval(() => ports.screenPolicy?.(freshScreen()), 250);
   try {
     while (!options.signal.aborted) {
-      const outgoing = results.splice(0, 16);
+      const outgoing: JoinedMachineResult[] = [];
+      let bytes = 0;
+      while (results.length && outgoing.length < 16) {
+        const next = results[0]!;
+        const size = Buffer.byteLength(JSON.stringify(next), "utf8") + 1;
+        if (bytes + size > MACHINE_JOIN_RESULT_BATCH_BYTES_MAX) break;
+        bytes += size;
+        outgoing.push(results.shift()!);
+      }
       let batch;
       try {
         batch = JoinedMachineBatchSchema.parse(
@@ -238,8 +273,19 @@ export async function runJoinedMachineChannel(
           ? batch.policy.accessLevel
           : credential.lease.accessLevel,
       };
+      policyAt = performance.now();
+      currentScreen = policy.accessLevel === "screen";
+      ports.screenPolicy?.(freshScreen());
       for (const task of active.values())
-        if (!machineAccessAllows(policy.accessLevel, task.request.operation.kind)) task.abort.abort();
+        if (
+          !machineAccessAllows(policy.accessLevel, task.request.operation.kind) &&
+          !(
+            credential.lease.accessLevel === "screen" &&
+            task.request.operation.kind === "screen" &&
+            joinedScreenRecovery(task.request.operation.request)
+          )
+        )
+          task.abort.abort();
       if (!connected) {
         connected = true;
         options.onConnected?.();
@@ -253,8 +299,13 @@ export async function runJoinedMachineChannel(
           policy,
           credential.localDirectories,
           credential.lease.directories,
-          options.ports ?? { shell: joinedMachineShell },
+          ports,
           AbortSignal.any([options.signal, abort.signal]),
+          () => {
+            if (options.signal.aborted || abort.signal.aborted || !freshScreen())
+              throw Error("screen_policy_unavailable");
+          },
+          credential.lease.accessLevel === "screen",
         )
           .then((result) => {
             if (results.length < 16) results.push(result);
@@ -274,7 +325,11 @@ export async function runJoinedMachineChannel(
   } catch (error) {
     if (!options.signal.aborted) throw error;
   } finally {
+    clearInterval(staleTimer);
+    currentScreen = false;
+    ports.screenPolicy?.(false);
     for (const task of active.values()) task.abort.abort();
+    await ports.closeScreen?.();
   }
   return "left";
 }

@@ -231,3 +231,16 @@ management across conversations is in [launcher details](reference/launcher.md#m
   Discord, a Mac connected to a hosted body, customer support access.
 - [Browser and persona images](reference/browser-and-persona.md).
 - Mail, Google accounts and their consent: the `connected-accounts` skill.
+
+For a lent screen, use the same `clankie computer request` API with an explicit
+registered `machineId: "join-UUID"`. Screen level does not grant local session
+consent or input. The host asks its owner and shows a pet with Stop; observation
+is the default. Desktop parents can supervise `join resume --json` with local
+`screen_status` / `screen_stop` stdin controls; neither can enable input.
+`join status --json` reads registration and `join leave --json` revokes it.
+An unavailable or held Stop is not quiescence proof. See the
+[CLI contract](../../../docs/cli.md#lent-computer-selection).
+Native accessibility press/text only, exact receipts, no raw
+key/drag/scroll, no fallback or replay. Read the
+[desktop-control skill](../desktop-control/SKILL.md) before driving. Real
+Mac/Windows driving remains an owner-run live gap.

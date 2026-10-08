@@ -221,6 +221,8 @@ async function copyRuntimeAssets(targetRoot) {
   await copySkillAssets(repoRoot, targetRoot);
   const files = [
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
+    ["apps/tui/native/LentScreen.cs", "apps/tui/native/LentScreen.cs"],
+    ["apps/tui/native/lent-screen.ps1", "apps/tui/native/lent-screen.ps1"],
     ["apps/clankie/src/captain/instructions.md", "apps/clankie/src/instructions.md"],
     ["apps/discord-activity/src/client.html", "apps/discord-activity/src/client.html"],
     ["LICENSE", "LICENSE"],
@@ -247,6 +249,26 @@ async function copyRuntimeAssets(targetRoot) {
     const target = join(targetRoot, destination);
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
+  }
+  if (!hosted) {
+    await mkdir(join(targetRoot, "libexec"), { recursive: true });
+    run("xcrun", [
+      "swiftc",
+      "-swift-version",
+      "5",
+      "-O",
+      "-framework",
+      "AppKit",
+      "-framework",
+      "ScreenCaptureKit",
+      "-framework",
+      "ApplicationServices",
+      "-framework",
+      "Carbon",
+      join(repoRoot, "apps/tui/native/lent-screen.swift"),
+      "-o",
+      join(targetRoot, "libexec/clankie-screen"),
+    ]);
   }
   for (const directory of [
     "integrations/herdr-plugin",

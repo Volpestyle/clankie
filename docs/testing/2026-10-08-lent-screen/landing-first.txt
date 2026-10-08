@@ -1,0 +1,17 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 1 queued)
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && node scripts/check-doc-links.mjs && node scripts/check-retired-claims.mjs && pnpm typecheck && vitest run --config vitest.config.ts --changed ${CLANKIE_LANDING_BASE:-origin/main} --bail 1 --passWithNoTests
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.3 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 1088ms on 2963 files using 18 threads.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+apps/clankie/test/fixtures/lent-screen-provider.mjs:65:47: warning eslint(no-useless-escape): Unnecessary escape character '"' help: Replace `\"` with `"`.
+apps/clankie/test/fixtures/lent-screen-provider.mjs:65:54: warning eslint(no-useless-escape): Unnecessary escape character '"' help: Replace `\"` with `"`.
+apps/clankie/test/fixtures/lent-screen-provider.mjs:65:57: warning eslint(no-useless-escape): Unnecessary escape character '"' help: Replace `\"` with `"`.
+apps/clankie/test/fixtures/lent-screen-provider.mjs:65:66: warning eslint(no-useless-escape): Unnecessary escape character '"' help: Replace `\"` with `"`.
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.

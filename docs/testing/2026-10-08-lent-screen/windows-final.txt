@@ -1,0 +1,41 @@
+clankie heavy: waiting for machine capacity (load; 2/2 held, 5 queued)
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>node:internal/errors:999
+  const err = new Error(message);
+              ^
+
+Error: Command failed: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes volpe@supedupsilly powershell -NoProfile -NonInteractive -EncodedCommand JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnADsAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAPQAnAEMAOgBcAFUAcwBlAHIAcwBcAHYAbwBsAHAAZQBcAEEAcABwAEQAYQB0AGEAXABMAG8AYwBhAGwAXABUAGUAbQBwAFwAdgB1AGgALQAxADgAMAAzAC0AbgBhAHQAaQB2AGUALQA4ADIAZAAxAGUAYQAwAGIALQAxADYAMgAyAC0ANABkAGYAMAAtADkAOQA1ADUALQAyAGQAYwA0AGMANQA0ADEAZgA3AGQANgAnADsAIAB0AHIAeQAgAHsAIABBAGQAZAAtAFQAeQBwAGUAIAAtAFAAYQB0AGgAIAAoAEoAbwBpAG4ALQBQAGEAdABoACAAJAB0AGEAcwBrAEQAaQByAGUAYwB0AG8AcgB5ACAAJwBMAGUAbgB0AFMAYwByAGUAZQBuAC4AYwBzACcAKQAgAC0ATwB1AHQAcAB1AHQAQQBzAHMAZQBtAGIAbAB5ACAAKABKAG8AaQBuAC0AUABhAHQAaAAgACQAdABhAHMAawBEAGkAcgBlAGMAdABvAHIAeQAgACcATABlAG4AdABTAGMAcgBlAGUAbgAuAGQAbABsACcAKQAgAC0ATwB1AHQAcAB1AHQAVAB5AHAAZQAgAEwAaQBiAHIAYQByAHkAIAAtAFIAZQBmAGUAcgBlAG4AYwBlAGQAQQBzAHMAZQBtAGIAbABpAGUAcwAgAFMAeQBzAHQAZQBtAC4AVwBpAG4AZABvAHcAcwAuAEYAbwByAG0AcwAuAGQAbABsACwAUwB5AHMAdABlAG0ALgBEAHIAYQB3AGkAbgBnAC4AZABsAGwALABVAEkAQQB1AHQAbwBtAGEAdABpAG8AbgBDAGwAaQBlAG4AdAAuAGQAbABsACwAVQBJAEEAdQB0AG8AbQBhAHQAaQBvAG4AVAB5AHAAZQBzAC4AZABsAGwALABXAGkAbgBkAG8AdwBzAEIAYQBzAGUALgBkAGwAbAAsAFMAeQBzAHQAZQBtAC4AVwBlAGIALgBFAHgAdABlAG4AcwBpAG8AbgBzAC4AZABsAGwALABTAHkAcwB0AGUAbQAuAEMAbwByAGUALgBkAGwAbAA7ACAARwBlAHQALQBGAGkAbABlAEgAYQBzAGgAIAAtAEEAbABnAG8AcgBpAHQAaABtACAAUwBIAEEAMgA1ADYAIAAtAEwAaQB0AGUAcgBhAGwAUABhAHQAaAAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAHQAYQBzAGsARABpAHIAZQBjAHQAbwByAHkAIAAnAEwAZQBuAHQAUwBjAHIAZQBlAG4ALgBjAHMAJwApACAAfAAgAFMAZQBsAGUAYwB0AC0ATwBiAGoAZQBjAHQAIABBAGwAZwBvAHIAaQB0AGgAbQAsAEgAYQBzAGgAOwAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJwBDAE8ATQBQAEkATABFAF8ATwBLADsAIABvAHUAdABwAHUAdAAgAGEAcwBzAGUAbQBiAGwAeQAgAG8AbgBsAHkAOwAgAHQAeQBwAGUAIABuAG8AdAAgAGwAbwBhAGQAZQBkACAAbwByACAAaQBuAHYAbwBrAGUAZAAnACAAfQAgAGMAYQB0AGMAaAAgAHsAIABXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACQAXwAuAEUAeABjAGUAcAB0AGkAbwBuAC4ATQBlAHMAcwBhAGcAZQA7ACAAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAkAF8ALgBUAG8AUwB0AHIAaQBuAGcAKAApADsAIABlAHgAaQB0ACAAMQAgAH0A
+#< CLIXML
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>
+    at genericNodeError (node:internal/errors:999:15)
+    at wrappedFn (node:internal/errors:544:14)
+    at checkExecSyncError (node:child_process:942:11)
+    at execFileSync (node:child_process:978:15)
+    at pc (file:///private/tmp/vuh-1803-compile-windows.mjs:12:16)
+    at file:///private/tmp/vuh-1803-compile-windows.mjs:24:2
+    at ModuleJob.run (node:internal/modules/esm/module_job:569:25)
+    at async node:internal/modules/esm/loader:650:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  status: 1,
+  signal: null,
+  output: [
+    null,
+    "(0) : Metadata file 'UIAutomationClient.dll' could not be found\n" +
+      '\r\n' +
+      "(0) : Metadata file 'UIAutomationClient.dll' could not be found\n" +
+      '\r\n',
+    '#< CLIXML\r\n' +
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>'
+  ],
+  pid: 42279,
+  stdout: "(0) : Metadata file 'UIAutomationClient.dll' could not be found\n" +
+    '\r\n' +
+    "(0) : Metadata file 'UIAutomationClient.dll' could not be found\n" +
+    '\r\n',
+  stderr: '#< CLIXML\r\n' +
+    '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>'
+}
+
+Node.js v26.7.0

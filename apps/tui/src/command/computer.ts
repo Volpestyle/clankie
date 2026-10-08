@@ -13,7 +13,7 @@ export async function runComputerCommand(
     args[0] !== "request"
   )
     throw new Error(
-      "Usage: clankie computer request JSON [--image-path NEW_PNG_PATH] (conversationId and command)",
+      "Usage: clankie computer request JSON [--image-path NEW_PNG_PATH] (conversationId, command, optional joined machineId)",
     );
   const request = ComputerRequestSchema.parse(JSON.parse(args[1]!));
   if (args.length === 4 && request.command.action !== "frame")

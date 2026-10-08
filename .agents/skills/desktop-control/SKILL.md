@@ -39,6 +39,24 @@ replay an uncertain input. Its macOS adapter preserves Peekaboo's limitations;
 recovery needs host stop proof. Contract and examples:
 [desktop control](../../../docs/desktop-control.md#shared-computer-body).
 
+## Lend a joined screen
+
+For an explicitly lent computer, pass its registered `machineId: "join-UUID"`
+through `clankie computer request` alongside `conversationId` and `command`.
+Omitting machineId uses the local body; failed selection never picks another
+screen. A hosted Clankie can use this body without a local owner desktop.
+
+`screen` level only permits asking. The host owner confirms observation for
+one session locally and separately allows input. Keep the visible pet and Stop
+available. Capture, save and read the actual image before choosing one native
+accessibility press or literal text append. Use explicit `foreground: true`
+and an exact changed `expect` field. Raw key, drag and scroll refuse in this
+landing (VUH-1840). Stop on person takeover, access reduction or uncertain
+results. Preserve the original request UUID; never replay unknown input.
+Recovery remains usable after reduction, but unknown native quiescence holds
+the lease. Real Mac/PC driving proof is open; do not infer it from an HTTP
+fixture or compile. Setup: [lent screens](../../../docs/desktop-control.md#lend-a-joined-screen).
+
 ## Windows native control
 
 On a Windows machine, use the native Codex computer-use plugin's trusted

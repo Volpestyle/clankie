@@ -104,6 +104,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0251 — Discord servers have owners; rooms can grant skills](0251-discord-owners-and-room-skills.md)
 - [0252 — Household legacy authors need owner-confirmed ID bindings](0252-household-legacy-authors-need-owner-confirmed-id-bindings.md)
 - [0253 — Owner confirmation needs an isolated authority (proposed)](0253-owner-confirmation-needs-an-isolated-authority.md)
+- [0255 — A lent screen keeps consent and stops on its host](0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md)
 
 ## Archived decisions
 
