@@ -92,11 +92,14 @@ export class RuntimeCanary {
     runtime: RuntimeBootIdentity;
     holds: DeployHolds;
     sample: (runtime: RuntimeBootIdentity) => Promise<RuntimeHealthSample>;
+    /** Monotonic elapsed time; defaults to the process clock. */
+    now?: () => number;
     alert?: (text: string) => Promise<boolean>;
     onError?: (error: unknown) => void;
     /** Best-effort retention after the passed canary's hold release is durable. */
     onPassed?: () => Promise<void>;
   };
+  private readonly now: () => number;
   private session: Session | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<void> | undefined;
@@ -104,6 +107,7 @@ export class RuntimeCanary {
 
   constructor(options: RuntimeCanary["options"]) {
     this.options = options;
+    this.now = options.now ?? (() => performance.now());
   }
 
   policy(): RuntimeCanaryPolicy {
@@ -274,7 +278,7 @@ export class RuntimeCanary {
     this.session = {
       id: result.id,
       policy: armed.policy,
-      startedAt: performance.now(),
+      startedAt: this.now(),
       latencies: [],
       cpuTotal: 0,
       cpuDurationMs: 0,
@@ -360,7 +364,7 @@ export class RuntimeCanary {
     const session = this.session;
     if (!session || !result?.canary || result.canary.state !== "pending") return;
     let sample: RuntimeHealthSample;
-    const attemptStartedAt = performance.now();
+    const attemptStartedAt = this.now();
     try {
       sample = RuntimeHealthSampleSchema.parse(await this.options.sample(this.options.runtime));
       if (
@@ -378,7 +382,7 @@ export class RuntimeCanary {
     } catch (error) {
       if (this.closed) return;
       session.unavailableSince ??= session.lastSampleAt ?? attemptStartedAt;
-      const now = performance.now();
+      const now = this.now();
       const diagnostic = `runtime-canary-health-unavailable: ${sampleFailure(error)}`;
       // Keep the existing three-interval availability budget, but allow transient misses to recover.
       // A completely unavailable first observation is bounded by the full window as well.
@@ -391,7 +395,7 @@ export class RuntimeCanary {
       return;
     }
     if (this.closed) return;
-    const now = performance.now();
+    const now = this.now();
     const lastVerifiedAt = session.lastSampleAt ?? session.unavailableSince;
     if (lastVerifiedAt !== undefined && now - lastVerifiedAt >= session.policy.sampleIntervalMs * 3) {
       await this.fail(

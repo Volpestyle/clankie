@@ -1,0 +1,35 @@
+{
+  "base": "be4a4cc52f6a02902a7eb903ac009e9e3155f342",
+  "scope": "disposable fixture; original tick-only poll helper, held raw native census preparation",
+  "events": [
+    {
+      "step": "poll-helper-return",
+      "bridgeState": "disconnected"
+    },
+    {
+      "step": "gate-entered",
+      "command": ["agent", "list"]
+    },
+    {
+      "step": "poll-events",
+      "eventSources": []
+    },
+    {
+      "step": "controlled-reset-ack",
+      "op": "reset",
+      "sessionState": "unbound"
+    },
+    {
+      "step": "report-return",
+      "received": true,
+      "deliveryStage": "stored",
+      "routing": [
+        {
+          "source": "unadopted",
+          "reason": "parent_unlinked",
+          "conversationId": "global-default"
+        }
+      ]
+    }
+  ]
+}

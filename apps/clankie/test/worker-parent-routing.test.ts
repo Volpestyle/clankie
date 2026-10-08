@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import {
   FleetSeatMessageReceiptSchema,
+  LEGACY_OPERATOR_SEAT_EVENT_KINDS,
+  OPERATOR_SEAT_CAPABILITIES_HEADER,
+  type OperatorSeatCapabilities,
   OperatorConversationServiceResultSchema,
   OperatorConversationStreamEventSchema,
   OperatorSeatEventsPageSchema,
@@ -299,11 +302,24 @@ async function fixture(
         admitted.delete(request);
       }
     };
-    const operatorRequest = (path: string, body?: unknown, signal?: AbortSignal) =>
+    const operatorRequest = (
+      path: string,
+      body?: unknown,
+      signal?: AbortSignal,
+      capabilities?: OperatorSeatCapabilities,
+    ) =>
       app.app.request(path, {
         ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
         ...(signal === undefined ? {} : { signal }),
-        headers: { authorization: "Bearer operator", "content-type": "application/json" },
+        headers: {
+          authorization: "Bearer operator",
+          "content-type": "application/json",
+          ...(capabilities === undefined
+            ? {}
+            : {
+                [OPERATOR_SEAT_CAPABILITIES_HEADER]: JSON.stringify(capabilities),
+              }),
+        },
       });
     let closed = false;
     const close = async () => {
@@ -399,13 +415,31 @@ async function conversation(service: Service, scope: OperatorConversationScope =
 
 async function poll(service: Service, conversationId: string) {
   const stop = new AbortController();
+  // Distinguish this fixture bridge from presence retained across a service restart.
+  const sourceHash = createHash("sha256").update(randomUUID()).digest("hex");
   const pending = service.operatorRequest(
     `/v1/seat/events?conversationId=${conversationId}&wait=30000`,
     undefined,
     stop.signal,
+    {
+      schemaVersion: 1,
+      eventKinds: [...LEGACY_OPERATOR_SEAT_EVENT_KINDS],
+      ownerOrigin: false,
+      sourceHash,
+    },
   );
-  // Complete the HTTP authentication and real attachment reservation before ingress.
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  // Authentication reserves intent before native proof/policy preparation.
+  // A tick is not its completion: wait for this poll's capabilities at the
+  // real mailbox boundary before starting reports or count-based race gates.
+  await expect
+    .poll(async () => {
+      const status = OperatorConversationServiceResultSchema.parse(
+        await service.captain.serveOperatorConversation({ schemaVersion: 1, op: "seat_bridges" }),
+      );
+      if (status.op !== "seat_bridges") throw new Error("Seat bridge status unavailable");
+      return status.bridges.find((bridge) => bridge.conversationId === conversationId)?.sourceHash;
+    })
+    .toBe(sourceHash);
   return {
     stop,
     events: async () => {
@@ -996,6 +1030,42 @@ it("adoption during awaited route discovery refuses before acceptance and a fres
   expect(event!.content).toContain("New admitted report");
   await diagnostic(f.service, f.root, fresh.id, { source: "adoption", conversationId: target });
   await settle(f.service, event!);
+});
+
+it("operator polling waits for native preparation before report race barriers", async () => {
+  const f = await fixture();
+  const target = await conversation(f.service, { kind: "workspace", workspaceId: f.root });
+  expect(
+    (
+      await f.service.operatorRequest(`/v1/seat/transcript?conversationId=${target}`, {
+        sessionId: f.rows[1]!.agent_session.value,
+        entries: [],
+      })
+    ).status,
+  ).toBe(200);
+  const preparation = await f.pauseCensus(1);
+  let attached: Awaited<ReturnType<typeof poll>> | undefined;
+  const pending = poll(f.service, target).then((value) => {
+    attached = value;
+    return value;
+  });
+  try {
+    await preparation.ready;
+    // Give the old tick-only helper its opportunity to return while proof is held.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(attached).toBeUndefined();
+    const status = await f.service.captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "seat_bridges",
+    });
+    if (status.op !== "seat_bridges") throw new Error("Seat bridge status unavailable");
+    expect(status.bridges.find((bridge) => bridge.conversationId === target)?.state).toBe("disconnected");
+  } finally {
+    preparation.release();
+    const ready = await pending;
+    ready.stop.abort();
+    expect(await ready.events()).toEqual([]);
+  }
 });
 
 it("retiring the authenticated parent session while route discovery awaits refuses before acceptance", async () => {

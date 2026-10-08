@@ -25,11 +25,27 @@ const holds = new DeployHolds(join(root, "integration"));
 const errors: string[] = [];
 let healthRequests = 0;
 let sample: ReturnType<typeof createRuntimeHealthSampler>;
+// Advance only at canary sample boundaries. Real scheduling/fsync/CPU delays
+// must not change a fixture's intended availability timeline. The sampler
+// still measures the actual child CPU and loopback HTTP latency separately.
+let canaryNow = 0;
+let attempts = 0;
+let lastSampleWall: number | undefined;
+let maxSampleGapMs = 0;
 const canary = new RuntimeCanary({
   updatesDirectory,
   runtime,
   holds,
-  sample: (identity) => sample(identity),
+  now: () => canaryNow,
+  sample: async (identity) => {
+    const attempt = attempts++;
+    if (attempt > 0) canaryNow += sampleIntervalMs * (mode === "sampling-gap" ? 4 : 1);
+    if (mode === "scheduler-stall" && attempt === 1) await new Promise((resolve) => setTimeout(resolve, 900));
+    const wall = performance.now();
+    if (lastSampleWall !== undefined) maxSampleGapMs = Math.max(maxSampleGapMs, wall - lastSampleWall);
+    lastSampleWall = wall;
+    return sample(identity);
+  },
   alert: async (text) => {
     await appendFile(join(root, "alerts.jsonl"), `${JSON.stringify({ text })}\n`, { mode: 0o600 });
     return mode !== "alert-unavailable";
@@ -62,6 +78,10 @@ const server = createServer((request, response) => {
   else answer();
 });
 await canary.recover();
+const armPath = join(updatesDirectory, id, "canary-policy.json");
+const sampleIntervalMs = existsSync(armPath)
+  ? (readPrivateJson(armPath) as { policy: { sampleIntervalMs: number } }).policy.sampleIntervalMs
+  : canary.policy().sampleIntervalMs;
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = (server.address() as { port: number }).port;
 sample = createRuntimeHealthSampler({
@@ -91,6 +111,7 @@ process.on("message", (message: unknown) => {
           policy: canary.policy(),
           errors,
           healthRequests,
+          maxSampleGapMs,
           checkpoint: existsSync(join(updatesDirectory, "healthy-canary.json"))
             ? readPrivateJson(join(updatesDirectory, "healthy-canary.json"))
             : undefined,

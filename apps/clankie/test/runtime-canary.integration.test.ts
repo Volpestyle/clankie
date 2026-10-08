@@ -24,6 +24,7 @@ interface Snapshot {
   policy: RuntimeCanaryPolicy;
   errors: string[];
   healthRequests: number;
+  maxSampleGapMs: number;
   checkpoint?: { commit: string };
 }
 const roots: string[] = [];
@@ -463,6 +464,35 @@ it("bounds sustained unavailability by the window when it is shorter than three 
   expect(failed.holds.map((hold) => hold.id)).toContain(f.id);
   expect(failed.checkpoint?.commit).toBe("a".repeat(40));
   expect(await alerts(f.root)).toHaveLength(1);
+});
+
+it("keeps fixture sampling time independent of a real scheduling stall", async () => {
+  const f = await fixture();
+  const service = await start(f.root, "scheduler-stall");
+  const passed = await waitFor(service, "passed");
+  expect(passed.maxSampleGapMs).toBeGreaterThan(policy.sampleIntervalMs * 3);
+  expect(passed.result.canary).toMatchObject({ state: "passed", holdReleased: true });
+  expect(passed.result.canary!.policy!.sampleIntervalMs).toBe(150);
+  expect(passed.result.canary!.samples).toBe(passed.healthRequests);
+  expect(passed.holds).toEqual([]);
+  expect(await alerts(f.root)).toEqual([]);
+});
+
+it("retains the hold for a controlled gap despite healthy real HTTP samples", async () => {
+  const f = await fixture();
+  const service = await start(f.root, "sampling-gap");
+  const failed = await waitFor(service, "failed");
+  expect(failed.result.canary).toMatchObject({
+    state: "failed",
+    samples: 1,
+    error: "runtime-canary-sampling-gap: 600ms without verified health (budget 450ms)",
+  });
+  expect(failed.healthRequests).toBe(2);
+  expect(failed.holds.map((hold) => hold.id)).toContain(f.id);
+  expect(failed.checkpoint).toEqual({ commit: "a".repeat(40) });
+  const notices = await alerts(f.root);
+  expect(notices).toHaveLength(1);
+  expect(notices[0]!.text).toContain(failed.result.canary!.error);
 });
 
 it("rejects an unsafe policy and exposes a claimed notification's delivery uncertainty without replay", async () => {

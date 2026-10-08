@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const cleanup of resources.splice(0).reverse()) await cleanup();
 });
 const repoRoot = resolve(import.meta.dirname, "../../..");
-async function fixture() {
+async function fixture(beforeReply?: (path: string) => Promise<void>) {
   // The real owner can update links while this suite runs. Plant a descriptor
   // in Vitest's private parent HOME instead of snapshotting a live owner file.
   // The CLI gets its own HOME/state below, so neither descriptor may change.
@@ -135,6 +135,7 @@ async function fixture() {
       ),
       ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
     });
+    await beforeReply?.(path);
     response.writeHead(result.status, Object.fromEntries(result.headers));
     // A future host changes display copy and adds optional metadata. Real clients
     // must render its definition and tolerate the additive response fields.
@@ -214,17 +215,42 @@ async function fixture() {
     },
   };
 }
+const commandsInFlight = new WeakMap<ClankieFaceShell, Promise<void>>();
 async function prompt(shell: ClankieFaceShell, contains: string) {
-  let current!: InteractiveSelectPrompt | InteractiveTextPrompt;
-  await vi.waitFor(() => {
-    const focused = shell.tui.getFocusedComponent();
-    expect(focused instanceof InteractiveSelectPrompt || focused instanceof InteractiveTextPrompt).toBe(true);
-    expect(stripVTControlCharacters(focused!.render(180).join("\n")).toLocaleLowerCase()).toContain(
-      contains.toLocaleLowerCase(),
-    );
-    current = focused as InteractiveSelectPrompt | InteractiveTextPrompt;
+  const running = commandsInFlight.get(shell);
+  if (!running) throw new Error("Start a command before waiting for its prompt");
+  let observe!: () => void;
+  const ready = new Promise<InteractiveSelectPrompt | InteractiveTextPrompt>((resolve) => {
+    observe = () => {
+      const focused = shell.tui.getFocusedComponent();
+      if (!(focused instanceof InteractiveSelectPrompt || focused instanceof InteractiveTextPrompt)) return;
+      if (
+        !stripVTControlCharacters(focused.render(180).join("\n"))
+          .toLocaleLowerCase()
+          .includes(contains.toLocaleLowerCase())
+      )
+        return;
+      resolve(focused);
+    };
   });
-  return current;
+  // The real setup flow requests a render after focusing each overlay. Observe
+  // that event, preserving rendering, rather than timing HTTP/FS work at 1s.
+  const render = shell.tui.requestRender.bind(shell.tui);
+  const observer = vi.spyOn(shell.tui, "requestRender").mockImplementation((...args) => {
+    render(...args);
+    observe();
+  });
+  try {
+    observe();
+    return await Promise.race([
+      ready,
+      running.then(() => {
+        throw new Error(`Command ended before prompt: ${contains}`);
+      }),
+    ]);
+  } finally {
+    observer.mockRestore();
+  }
 }
 async function choose(shell: ClankieFaceShell, contains: string, filter: string) {
   const current = await prompt(shell, contains);
@@ -234,8 +260,13 @@ async function choose(shell: ClankieFaceShell, contains: string, filter: string)
   if (filter === "Advanced") current.handleInput("\x1b[B");
   current.handleInput("\r");
 }
-const submit = (shell: ClankieFaceShell, text: string) =>
-  (shell as unknown as { submitEditorText(text: string): Promise<void> }).submitEditorText(text);
+const submit = (shell: ClankieFaceShell, text: string) => {
+  const running = (shell as unknown as { submitEditorText(text: string): Promise<void> }).submitEditorText(
+    text,
+  );
+  commandsInFlight.set(shell, running);
+  return running;
+};
 
 it("the real CLI and HTTP API require explicit household author confirmation, preserve omissions and fence stale writes", async () => {
   const f = await fixture();
@@ -639,4 +670,44 @@ it("CLI owners and room skills round-trip through the revision-fenced API", asyn
   expect((await f.api.discordSettings()).revision).toBe(before);
   await f.cli("room-skill", "--server", "10002", "--channel", "20011", "--skill", "off");
   expect((await f.settings.load()).discord.roomSkills).toEqual([]);
+});
+
+it("overlay readiness waits for real HTTP preparation, beyond the old helper deadline", async () => {
+  let release!: () => void;
+  let entered!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let first = true;
+  const f = await fixture(async (path) => {
+    if (first && path === "/v1/discord/settings") {
+      first = false;
+      entered();
+      await held;
+    }
+  });
+  const shell = f.shell();
+  const running = submit(shell, "/discord");
+  try {
+    await ready;
+    let observed = false;
+    const waiting = prompt(shell, "Clankie connects").then((value) => {
+      observed = true;
+      return value;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(observed).toBe(false);
+    expect(shell.tui.getFocusedComponent() instanceof InteractiveSelectPrompt).toBe(false);
+    release();
+    expect(await waiting).toBeInstanceOf(InteractiveSelectPrompt);
+    await choose(shell, "Invite Clankie to a server", "Done");
+    await running;
+  } finally {
+    release();
+    shell.setupFlow.handleSubmit("/cancel");
+    await running;
+  }
 });

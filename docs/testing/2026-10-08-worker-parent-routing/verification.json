@@ -1,0 +1,92 @@
+{
+  "parentRouting": {
+    "workers": 4,
+    "consecutiveRuns": 20,
+    "passedPerRun": [67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67, 67],
+    "filesPerRun": [
+      {
+        "path": "apps/clankie/test/operator-conversation-reset.test.ts",
+        "passed": 4
+      },
+      {
+        "path": "apps/clankie/test/operator-conversation-seat.test.ts",
+        "passed": 7
+      },
+      {
+        "path": "apps/clankie/test/worker-call-receipts.integration.test.ts",
+        "passed": 15
+      },
+      {
+        "path": "apps/clankie/test/worker-parent-routing.test.ts",
+        "passed": 41
+      }
+    ]
+  },
+  "canary": {
+    "workers": 4,
+    "consecutiveRuns": 3,
+    "passedPerRun": [89, 89, 89],
+    "filesPerRun": [
+      {
+        "path": "apps/clankie/test/operator-conversation-reset.test.ts",
+        "passed": 4
+      },
+      {
+        "path": "apps/clankie/test/operator-conversation-seat.test.ts",
+        "passed": 7
+      },
+      {
+        "path": "apps/clankie/test/runtime-canary.integration.test.ts",
+        "passed": 22
+      },
+      {
+        "path": "apps/clankie/test/worker-call-receipts.integration.test.ts",
+        "passed": 15
+      },
+      {
+        "path": "apps/clankie/test/worker-parent-routing.test.ts",
+        "passed": 41
+      }
+    ]
+  },
+  "combined": {
+    "workers": 4,
+    "consecutiveCompletedRuns": 20,
+    "passedPerRun": [88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88],
+    "filesPerRun": [
+      {
+        "path": "apps/tui/test/discord-setup-integration.test.ts",
+        "passed": 10
+      },
+      {
+        "path": "apps/clankie/test/runtime-canary.integration.test.ts",
+        "passed": 22
+      },
+      {
+        "path": "apps/clankie/test/worker-call-receipts.integration.test.ts",
+        "passed": 15
+      },
+      {
+        "path": "apps/clankie/test/worker-parent-routing.test.ts",
+        "passed": 41
+      }
+    ],
+    "executionNote": "Initial permit stopped at owner request after12 complete rounds. Interrupted round13 excluded; remaining rounds use2-run permits with queue re-entry.",
+    "sourceSha256": {
+      "apps/clankie/src/runtime-canary.ts": "9d4bb6e629514b755608a93ec7030e490f18d2a8e2f1c12579094bc99b132495",
+      "apps/clankie/test/fixtures/runtime-canary-service.ts": "7c4431459486d6e6fffa40c7c293d0e9217a9f634b2b5c3a64de839fb7250d54",
+      "apps/clankie/test/runtime-canary.integration.test.ts": "e418e93d15a82c312245cf43ac514e2ea27ac37922dda846ec38ed3ad2b57d9e",
+      "apps/clankie/test/worker-parent-routing.test.ts": "5f1515068e43f9cb497a0026d5abb29231b56ab78123479d884ebcfea1f4aba4",
+      "apps/tui/test/discord-setup-integration.test.ts": "ae20f0d9ba99753f1c582a497ee14ec260b2c572a50fe2197f8fd32a6cc3a6e3"
+    }
+  },
+  "landing": {
+    "base": "475651a67fd0bdd25560783aeaf54439b4acf118",
+    "typecheckTasks": 30,
+    "passedTests": 1142,
+    "skippedTests": 5,
+    "passedFiles": 152,
+    "skippedFiles": 2,
+    "exclusions": []
+  }
+}

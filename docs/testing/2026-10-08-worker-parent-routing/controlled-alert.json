@@ -1,0 +1,37 @@
+{
+  "base": "be4a4cc52f6a02902a7eb903ac009e9e3155f342",
+  "scope": "disposable fixture; original helper, old lead preparation held until after abort",
+  "events": [
+    {
+      "step": "report-acceptance",
+      "received": true,
+      "deliveryStage": "stored",
+      "routeSources": ["parent"]
+    },
+    {
+      "step": "poll-events",
+      "eventSources": ["worker-report"]
+    },
+    {
+      "step": "old-lead-native-preparation-held"
+    },
+    {
+      "step": "report-acceptance",
+      "received": true,
+      "deliveryStage": "stored",
+      "routeSources": ["parent"]
+    },
+    {
+      "step": "poll-events",
+      "eventSources": []
+    },
+    {
+      "step": "poll-events",
+      "eventSources": []
+    },
+    {
+      "step": "original-route-retained",
+      "acceptanceCount": 1
+    }
+  ]
+}
