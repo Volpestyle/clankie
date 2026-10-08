@@ -1,0 +1,23 @@
+{
+  "observedAt": "2026-10-08",
+  "source": "owned live managed local Codex w47:p4, thread 01a119a3-1214-7241-a1cb-d6b60eede318; non-secret configuration arguments only",
+  "argv": [
+    "codex",
+    "-c",
+    "mcp_servers.linear.enabled=false",
+    "-c",
+    "approval_policy=\"on-request\"",
+    "-c",
+    "mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=\"[\\\"clankie_call\\\",\\\"clankie_tools\\\",\\\"list_fleet_seats\\\",\\\"message_peer\\\"]\"",
+    "-c",
+    "mcp_servers.clankie.enabled=true",
+    "-c",
+    "mcp_servers.clankie.command=\"clankie\"",
+    "-c",
+    "mcp_servers.clankie.args=[\"mcp\",\"--fleet\"]",
+    "-c",
+    "mcp_servers.clankie.env_vars=[\"HERDR_PANE_ID\",\"HERDR_SOCKET_PATH\",\"CLANKIE_STATE\"]",
+    "-c",
+    "mcp_servers.clankie.default_tools_approval_mode=\"approve\""
+  ]
+}

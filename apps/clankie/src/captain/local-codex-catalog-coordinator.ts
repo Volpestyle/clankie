@@ -79,6 +79,64 @@ export interface LocalCodexCatalogRefreshInput {
   current?: () => boolean;
 }
 
+/** Strict launch provenance; also checked against captured managed native argv. */
+export function verifyLocalCodexCatalogOverrides(argv: readonly string[]): ReadonlyMap<string, unknown> {
+  const overrides = new Map<string, unknown>();
+  for (let index = 1; index < argv.length; index++) {
+    const argument = argv[index]!;
+    requireProof(
+      !["-p", "--profile"].includes(argument) &&
+        !argument.startsWith("--profile=") &&
+        !/^-[cp].+/u.test(argument),
+      "native_codex_profile_or_override_unproven",
+    );
+    const expression =
+      argument === "-c" || argument === "--config"
+        ? argv[++index]
+        : argument.startsWith("--config=")
+          ? argument.slice(9)
+          : undefined;
+    if (expression === undefined) continue;
+    const separator = expression.indexOf("=");
+    requireProof(separator > 0, "native_codex_override_unparseable");
+    const key = expression.slice(0, separator).trim();
+    requireProof(
+      !overrides.has(key) &&
+        key !== KEY &&
+        !(
+          key.startsWith("mcp_servers.clankie") &&
+          ![
+            "mcp_servers.clankie.enabled",
+            "mcp_servers.clankie.command",
+            "mcp_servers.clankie.args",
+            "mcp_servers.clankie.env_vars",
+            "mcp_servers.clankie.default_tools_approval_mode",
+            "mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES",
+            "mcp_servers.clankie.env.CLANKIE_EXPECTED_REQUIRED_TOOL_NAMES",
+          ].includes(key)
+        ),
+      "native_codex_bridge_override_unproven",
+    );
+    overrides.set(key, JSON.parse(expression.slice(separator + 1)));
+  }
+  requireProof(
+    overrides.get("mcp_servers.clankie.enabled") === true &&
+      overrides.get("mcp_servers.clankie.command") === "clankie" &&
+      same(overrides.get("mcp_servers.clankie.args"), ["mcp", "--fleet"]) &&
+      same(overrides.get("mcp_servers.clankie.env_vars"), [
+        "HERDR_PANE_ID",
+        "HERDR_SOCKET_PATH",
+        "CLANKIE_STATE",
+      ]) &&
+      // Current managed launches approve this bridge through Clankie's own
+      // service gates. Earlier supported launches omitted the override.
+      (!overrides.has("mcp_servers.clankie.default_tools_approval_mode") ||
+        overrides.get("mcp_servers.clankie.default_tools_approval_mode") === "approve"),
+    "original_codex_tui_bridge_not_managed_fleet",
+  );
+  return overrides;
+}
+
 /** Native process proof observes the original controller, never creates/resumes a thread. */
 export async function observeLocalCodexCatalogIdentity(
   launch: LocalCodexRecord,
@@ -113,54 +171,7 @@ export async function observeLocalCodexCatalogIdentity(
   requireProof(occupants.length === 1, "original_codex_tui_ambiguous");
   const tui = occupants[0]!,
     argv = tui.argv as string[];
-  const overrides = new Map<string, unknown>();
-  for (let index = 1; index < argv.length; index++) {
-    const argument = argv[index]!;
-    requireProof(
-      !["-p", "--profile"].includes(argument) &&
-        !argument.startsWith("--profile=") &&
-        !/^-[cp].+/u.test(argument),
-      "native_codex_profile_or_override_unproven",
-    );
-    const expression =
-      argument === "-c" || argument === "--config"
-        ? argv[++index]
-        : argument.startsWith("--config=")
-          ? argument.slice(9)
-          : undefined;
-    if (expression === undefined) continue;
-    const separator = expression.indexOf("=");
-    requireProof(separator > 0, "native_codex_override_unparseable");
-    const key = expression.slice(0, separator).trim();
-    requireProof(
-      !overrides.has(key) &&
-        key !== KEY &&
-        !(
-          key.startsWith("mcp_servers.clankie") &&
-          ![
-            "mcp_servers.clankie.enabled",
-            "mcp_servers.clankie.command",
-            "mcp_servers.clankie.args",
-            "mcp_servers.clankie.env_vars",
-            "mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES",
-            "mcp_servers.clankie.env.CLANKIE_EXPECTED_REQUIRED_TOOL_NAMES",
-          ].includes(key)
-        ),
-      "native_codex_bridge_override_unproven",
-    );
-    overrides.set(key, JSON.parse(expression.slice(separator + 1)));
-  }
-  requireProof(
-    overrides.get("mcp_servers.clankie.enabled") === true &&
-      overrides.get("mcp_servers.clankie.command") === "clankie" &&
-      same(overrides.get("mcp_servers.clankie.args"), ["mcp", "--fleet"]) &&
-      same(overrides.get("mcp_servers.clankie.env_vars"), [
-        "HERDR_PANE_ID",
-        "HERDR_SOCKET_PATH",
-        "CLANKIE_STATE",
-      ]),
-    "original_codex_tui_bridge_not_managed_fleet",
-  );
+  const overrides = verifyLocalCodexCatalogOverrides(argv);
   const endpoint = argv[argv.indexOf("--remote") + 1];
   requireProof(
     argv.filter((arg) => arg === "--remote").length === 1 &&
