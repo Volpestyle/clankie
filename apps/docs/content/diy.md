@@ -222,21 +222,6 @@ You can also sit in Clankie's seat from another harness: `clankie claude`,
 `clankie codex`, `clankie opencode`, or `clankie grok` opens that tool as
 Clankie, with his memory and tools ([seat commands](/cli/#seat-commands)).
 
-### Give him ongoing work
-
-```text
-/goal Improve the project's onboarding guide and verify its examples
-/autonomy on
-```
-
-A goal gives a conversation a lasting objective; autonomy lets him continue
-across turns and wake himself. Neither adds tools or access. Goals default to a
-1,000,000-token budget (`/goal --tokens N …` to change it), and `/goal` pauses,
-resumes, or clears one. They run in Clankie's own conversations, not in a
-harness seat, and are [console-only](/cli/#console-only-not-missing).
-The service must keep running: [`clankie autostart enable`](/cli/#autostart-enable-autostart-disable-autostart-status)
-starts it at login.
-
 ### Connect your services
 
 `/connect` links GitHub, Linear, and Google. Gmail and Calendar are read-only;

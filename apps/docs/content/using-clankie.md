@@ -92,8 +92,22 @@ separate personal-lab body. Start with [Discord and play setup](/diy/#hang-out-a
 Closing a window does not stop the service. A local Mac must stay awake and
 online; hosted availability follows your plan.
 
-For DIY work that should continue across turns, set a `/goal` and turn on
-`/autonomy`. Goals have a token budget and can be paused at any time
-([ongoing work](/diy/#give-him-ongoing-work)).
+<a id="give-him-ongoing-work"></a>
+
+To keep him working across turns, give the conversation a goal:
+
+```text
+/goal Improve the project's onboarding guide and verify its examples
+```
+
+He keeps working toward it and can wake himself later, with no more tools or
+access than an ordinary turn. If he proposes a goal himself, `/goal accept`
+starts it. Goals default to a 1,000,000-token budget (`/goal --tokens N …` to
+change it), and `/goal pause`, `resume`, or `clear` controls one. From a script,
+use [`clankie conversations goal`](/cli/#conversations-list-show-id-tail-id-goal-id). Goals run in Clankie's
+own conversations, not in a harness seat. Autonomy is on by default;
+`/autonomy off` stops goal runs and self-wakes everywhere. On a local Mac,
+[`clankie autostart enable`](/cli/#autostart-enable-autostart-disable-autostart-status)
+keeps the service running after login.
 
 Next: [how he works](/how-it-works/) explains what sits underneath.

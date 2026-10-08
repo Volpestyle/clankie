@@ -4774,7 +4774,7 @@ interactive in the console. The capability exists — only the flag does not:
   and webhook signing secret), and email
 - `/discord` secret entry and lab-user ToS opt-in — Discord tokens never become flags
 - `/voice` — realtime/TTS provider and brokered credentials
-- `/btw`, `/board`, `/jump`, `/conversation`, `/goal`, `/layout` — live console state
+- `/btw`, `/board`, `/jump`, `/conversation`, `/layout` — live console state
 
 There is no `clankie up` or `clankie auth`. Local model
 servers are not supervised.
