@@ -106,3 +106,11 @@ deadcode, docs links and retired claims, all 31 workspace typechecks, and
 existing conditions). The original focused canary/release run passed all 44
 tests. The landing run includes the corrected source-status/API assertions
 and routing helper. No evals or live deployments ran.
+
+The passing gate preceded the clean rebase onto fetched `origin/main`
+`0f825f03e107a083228d209770f96d28ff032066`. `git range-diff` verified the
+rebased fix (`5794ee4e5d6a44bffb19452892f7a07eb1015de5`) has an identical patch.
+The queued repeat gate was cancelled before starting under fleet load/slot
+pressure; the valid passing evidence was reused. The fix was pushed directly
+to `main` under ADR 0240. The concise [landing output](landing-summary.log)
+retains the gate command and its actual result.
