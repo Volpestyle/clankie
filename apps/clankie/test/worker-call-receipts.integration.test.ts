@@ -26,6 +26,7 @@ import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createLinearApiProvider, DOCUMENT_ID, ISSUE_ID } from "./fixtures/linear-api-provider.ts";
 
+const SHORT_REQUEST_TIMEOUT_MS = 500;
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
@@ -56,7 +57,7 @@ async function listen(fetch: (request: Request) => Promise<Response>) {
 }
 
 /** Real worker/host/SDK HTTP path; the isolated tracker owns one controlled issue. */
-async function fixture(options: { local?: boolean; api?: boolean } = {}) {
+async function fixture(options: { local?: boolean; api?: boolean; requestTimeoutMs?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-call-receipts-"));
   const admitted = gate();
   const release = gate();
@@ -198,7 +199,9 @@ async function fixture(options: { local?: boolean; api?: boolean } = {}) {
     directory: join(root, "grants"),
     credentials,
     host,
-    requestTimeoutMs: 500,
+    // Receipt/authority tests use the production deadline, not a latency assertion.
+    // Only tests whose contract is expiry opt into a short budget.
+    ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
     fleetTools: async () => (await settings.load()).fleet.tools,
     fleetToolsSnapshot: async () => {
       const held = heldFence;
@@ -239,7 +242,9 @@ async function fixture(options: { local?: boolean; api?: boolean } = {}) {
       method: "POST",
       headers: headers(session, pane),
       body: JSON.stringify(body(method, params)),
-      signal: signal ?? AbortSignal.timeout(3_000),
+      // Vitest bounds the fixture lifetime. A second HTTP deadline would turn
+      // receipt/authority tests into latency tests; cancellation tests supply their signal.
+      ...(signal === undefined ? {} : { signal }),
     });
   const initialize = async (pane?: string) => {
     const response = await post(
@@ -329,8 +334,24 @@ it("API-owned reads and writes retain scoped worker receipts without repeating p
   const session = await f.initialize();
   const readId = randomUUID();
   const readArgs = { name: "linear_get_issue", arguments: { id: ISSUE_ID } };
-  const read = await f.call(readArgs, session, undefined, readId);
-  expect(read).toMatchObject({ outcome: "ok", receiptId: readId, isError: false, toolError: false });
+  // Hold a real HTTP provider response past both former fixture-only budgets
+  // (500 ms worker / 3 s receiver). Receipt scoping does not promise that latency.
+  const held = f.apiProvider!.blockNextGraphql();
+  const pending = f.call(readArgs, session, undefined, readId);
+  try {
+    await held.started;
+    await new Promise<void>((resolve) => setTimeout(resolve, 3_100));
+  } finally {
+    held.release();
+  }
+  const read = await pending;
+  await f.observed.promise;
+  expect(read, JSON.stringify({ reason: read.reason, detail: read.detail })).toMatchObject({
+    outcome: "ok",
+    receiptId: readId,
+    isError: false,
+    toolError: false,
+  });
   const reads = f.apiProvider!.seen.length;
   expect(await f.call({ receiptId: readId }, session)).toEqual(read);
   expect(await f.call(readArgs, session, undefined, readId)).toEqual(read);
@@ -369,7 +390,7 @@ it("API-owned reads and writes retain scoped worker receipts without repeating p
 });
 
 it("a late API-owned read settles the same receipt with the model cap and no mutation admission", async () => {
-  const f = await fixture({ api: true });
+  const f = await fixture({ api: true, requestTimeoutMs: SHORT_REQUEST_TIMEOUT_MS });
   const session = await f.initialize();
   f.apiProvider!.issue.description = "x".repeat(60_000);
   const held = f.apiProvider!.blockNextGraphql();
@@ -413,7 +434,7 @@ it("a late API-owned read settles the same receipt with the model cap and no mut
 });
 
 it("an admitted API mutation keeps an uncertain receipt until its original response settles", async () => {
-  const f = await fixture({ api: true });
+  const f = await fixture({ api: true, requestTimeoutMs: SHORT_REQUEST_TIMEOUT_MS });
   const session = await f.initialize();
   const held = f.apiProvider!.blockNextMutationResponse();
   const receiptId = randomUUID();
@@ -500,7 +521,7 @@ it("a fleet worker queries and deletes a scratch document through linear_graphql
 });
 
 it("an uncertain linear_graphql mutation reconciles by receipt and is never resent", async () => {
-  const f = await fixture({ api: true });
+  const f = await fixture({ api: true, requestTimeoutMs: SHORT_REQUEST_TIMEOUT_MS });
   const session = await f.initialize();
   const held = f.apiProvider!.blockNextMutationResponse();
   const receiptId = randomUUID();
@@ -597,7 +618,7 @@ it("local tracker reads and writes retain scoped receipts while the fleet kill s
 });
 
 it("a timed-out admitted Linear write has a durable receipt and reconciles without redispatch", async () => {
-  const f = await fixture();
+  const f = await fixture({ requestTimeoutMs: SHORT_REQUEST_TIMEOUT_MS });
   const session = await f.initialize();
   const catalogResponse = await f.post("tools/list", {}, session);
   const catalog = ListToolsResultSchema.parse((await catalogResponse.json()).result);
@@ -669,7 +690,7 @@ it("a timed-out admitted Linear write has a durable receipt and reconciles witho
 });
 
 it("late read receipt reconciliation preserves the model-facing 50k content cap", async () => {
-  const f = await fixture();
+  const f = await fixture({ requestTimeoutMs: SHORT_REQUEST_TIMEOUT_MS });
   const session = await f.initialize();
   const receiptId = randomUUID();
   const pending = f.call({ name: "linear_read_large", arguments: {} }, session, undefined, receiptId);
@@ -708,7 +729,7 @@ it("an admitted write settles durably after its receiving HTTP request is cancel
 });
 
 it("a supplied receipt ID admits one concurrent write and rejects changed inputs or authority", async () => {
-  const f = await fixture();
+  const f = await fixture({ requestTimeoutMs: SHORT_REQUEST_TIMEOUT_MS });
   const session = await f.initialize();
   const receiptId = randomUUID();
   const pending = f.call(invocation, session, undefined, receiptId);
@@ -776,7 +797,7 @@ it("a supplied receipt ID admits one concurrent write and rejects changed inputs
 });
 
 it("an expired pre-dispatch fence cannot mutate the provider after its delayed read releases", async () => {
-  const f = await fixture();
+  const f = await fixture({ requestTimeoutMs: SHORT_REQUEST_TIMEOUT_MS });
   const session = await f.initialize();
   const held = f.holdFence();
   const receiptId = randomUUID();
