@@ -29,7 +29,8 @@ it("discovers registered games over real owner-authenticated HTTP and CLI withou
   const registry = new GameExtensionRegistry<GameExtensionProjection>();
   const leases = new BodyLeaseStore(join(root, "leases"));
   let connectorCalls = 0;
-  const createMinecraft: (host: MinecraftExtensionHost) => MinecraftExtensionRuntime = minecraftExtension.create;
+  const createMinecraft: (host: MinecraftExtensionHost) => MinecraftExtensionRuntime =
+    minecraftExtension.create;
   // Exercise native fields, private getters and detached class methods through
   // the registry Proxy against the real settings/HTTP projection below.
   class NativeRuntime {

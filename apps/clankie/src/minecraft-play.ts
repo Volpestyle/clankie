@@ -2,7 +2,5 @@
 export {
   runMinecraftPlay,
   type RunMinecraftPlayInput,
-  type MinecraftPlayNotable,
-  type MinecraftPlayResult,
   type MinecraftPlayTurn,
 } from "@clankie/minecraft";

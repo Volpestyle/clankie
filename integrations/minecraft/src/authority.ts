@@ -28,7 +28,7 @@ export interface MinecraftIdentity {
   readonly authorize: (resource: BodyResource, action: "effect" | "recover") => Promise<boolean>;
 }
 
-export interface MinecraftLeaseReference {
+interface MinecraftLeaseReference {
   resource: BodyResource;
   conversationId: string;
   token: string;
