@@ -5663,6 +5663,14 @@ or invalid roots deny their own matches; unrelated registrations continue workin
 A repository with more than 256 registered worktrees still admits a valid candidate;
 sibling count does not confer or remove its project authority.
 
+The authenticated `fleet status` working-preference lookup also proves the
+repository of a linked worktree placed outside that repo's enrolled root, such
+as an app worktree nested beside a core worktree. It uses the approved repo's
+recorded Git identity, backlink and current registration to select project
+policy. That lookup does not enroll the location for native agent membership;
+the root requirement above still applies. Unknown, copied or ambiguous Git
+identity refuses policy lookup inside an enrolled namespace.
+
 Remove an enrollment with `clankie project remove-worktree-root NAME --worktree-root ROOT`
 (and the same remote machine/platform flags if needed). Remove a repo's enrolled
 roots before removing its ordinary workspace approval. Removal does not delete

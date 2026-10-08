@@ -175,6 +175,12 @@ ordinary folder-containment authority. A large sibling-worktree inventory does
 not change a valid candidate's project membership; keep the candidate's native
 Git identity checks rather than pruning others' worktrees to enable a hire.
 This changes project membership policy, not tool grants. Do not run it as a workaround for an unapproved workspace.
+For working preferences, authenticated `clankie fleet status --working-directory
+PATH` can resolve a verified linked worktree of a second approved repo even when
+it is placed outside that repo's enrolled root. It checks the recorded repo
+identity and current Git registration. Reading that policy does not enroll the
+location for native agent membership; a copied `.git` pointer or foreign repo
+still does not qualify.
 Remove only the enrollment with `clankie project remove-worktree-root NAME
 --worktree-root ROOT` and the same machine/platform flags. Remove root enrollments
 before their repo workspace. Neither command deletes filesystem content.

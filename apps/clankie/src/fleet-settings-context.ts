@@ -5,7 +5,7 @@ import {
   observeLocalProjectGitWorktree,
   observeLocalProjectWorktreeRoot,
   projectPathContains,
-  projectWorktreeMatches,
+  projectWorktreePolicyMatches,
   resolveProjectMembership,
   type ClankieSettings,
 } from "@clankie/settings";
@@ -49,7 +49,7 @@ export async function resolveFleetSettingsContext(
   if (membership.outcome === "ambiguous" || membership.outcome === "unverified_workspace")
     throw new Error("Machine setup project context is ambiguous or unverified");
   const matches = new Set(
-    await projectWorktreeMatches(
+    await projectWorktreePolicyMatches(
       settings.projects,
       { machineId: "local", platform, cwd },
       observeLocalProjectWorktreeRoot,

@@ -79,6 +79,17 @@ export function matchesProjectWorktree(
   cwd: string,
   observed: ProjectGitWorktreeObservation,
 ): boolean {
+  return (
+    projectPathContains(root.path, observed.worktreePath, root.platform, true) &&
+    matchesRepositoryWorktree(root, cwd, observed)
+  );
+}
+
+function matchesRepositoryWorktree(
+  root: ProjectWorktreeRoot,
+  cwd: string,
+  observed: ProjectGitWorktreeObservation,
+): boolean {
   const paths = root.platform === "windows" ? win32 : posix;
   const allPaths = [
     cwd,
@@ -104,7 +115,6 @@ export function matchesProjectWorktree(
     paths.dirname(observed.gitDirectory) === paths.join(root.commonDirectory, "worktrees") &&
     observed.gitFilePath === paths.join(observed.worktreePath, ".git") &&
     observed.gitDirectoryBacklink === observed.gitFilePath &&
-    projectPathContains(root.path, observed.worktreePath, root.platform, true) &&
     projectPathContains(observed.worktreePath, cwd, root.platform) &&
     observed.registeredWorktrees.includes(observed.worktreePath)
   );
@@ -186,13 +196,33 @@ export async function projectWorktreeMatches(
   observeRoot: ObserveProjectWorktreeRoot,
   observeGit: ObserveProjectGitWorktree,
 ): Promise<readonly string[]> {
+  return matchingProjectWorktrees(settings, input, observeRoot, observeGit, true);
+}
+
+/** Owner-authenticated policy lookup only; placement does not enroll a native agent. */
+export async function projectWorktreePolicyMatches(
+  settings: ProjectsSettings,
+  input: { machineId: string; platform: "posix" | "windows"; cwd: string },
+  observeRoot: ObserveProjectWorktreeRoot,
+  observeGit: ObserveProjectGitWorktree,
+): Promise<readonly string[]> {
+  return matchingProjectWorktrees(settings, input, observeRoot, observeGit, false);
+}
+
+async function matchingProjectWorktrees(
+  settings: ProjectsSettings,
+  input: { machineId: string; platform: "posix" | "windows"; cwd: string },
+  observeRoot: ObserveProjectWorktreeRoot,
+  observeGit: ObserveProjectGitWorktree,
+  requireNamespace: boolean,
+): Promise<readonly string[]> {
   const matches = new Set<string>();
   for (const project of settings.projects)
     for (const root of project.worktreeRoots) {
       if (
         root.machineId !== input.machineId ||
         root.platform !== input.platform ||
-        !projectPathContains(root.path, input.cwd, root.platform, true) ||
+        (requireNamespace && !projectPathContains(root.path, input.cwd, root.platform, true)) ||
         !project.workspaces.some(
           (workspace) =>
             workspace.machineId === root.machineId &&
@@ -210,7 +240,13 @@ export async function projectWorktreeMatches(
         )
           continue;
         const git = await observeGit(root, input.cwd);
-        if (!git || !matchesProjectWorktree(root, input.cwd, git)) continue;
+        if (
+          !git ||
+          !(requireNamespace
+            ? matchesProjectWorktree(root, input.cwd, git)
+            : matchesRepositoryWorktree(root, input.cwd, git))
+        )
+          continue;
         if (
           !isDeepStrictEqual(await observeRoot(root), enrolled) ||
           !isDeepStrictEqual(await observeGit(root, input.cwd), git)
