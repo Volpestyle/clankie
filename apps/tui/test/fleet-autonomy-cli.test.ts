@@ -311,7 +311,10 @@ it("never executes or remembers a new source command through headless lead setup
   await expect(readFile(record, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   const receipts = await runHarnessCommand(["install"], f.options);
   if (!Array.isArray(receipts)) throw new Error("Expected install receipts");
-  expect(receipts.find((entry) => entry.harness === "codex")).toMatchObject({ status: "declined" });
+  expect(receipts.find((entry) => entry.harness === "codex")).toMatchObject({
+    status: "source-manager-required",
+    detail: expect.stringContaining(`source-managed: needs setup in ${f.codex}`),
+  });
   expect(f.calls.some((call) => call.command === "python3")).toBe(false);
   await expect(readFile(record, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 });
@@ -439,7 +442,7 @@ it("keeps refresh source receipts tied to the exact approved Codex source and sk
   });
   if (Array.isArray(changed)) throw new Error("Expected refresh receipts");
   expect(changed.local).toContainEqual(
-    expect.objectContaining({ harness: "codex", profile: f.codex, status: "declined" }),
+    expect.objectContaining({ harness: "codex", profile: f.codex, status: "source-manager-required" }),
   );
   expect(f.calls.some((call) => call.command === "python3")).toBe(false);
   expect(await readFile(receiptPath, "utf8")).toBe(receipt);

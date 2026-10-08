@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Static registration evidence only. This report never proves a live native occupant.
-import { access, readFile, realpath, readdir } from "node:fs/promises";
+import { access, readFile, realpath, readdir, lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -131,6 +131,22 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
     /* Native plugin status may supply the bridge. */
   }
   const configPath = join(env.CODEX_HOME || join(home, ".codex"), "config.toml");
+  const configSource = await realpath(configPath).catch(() => configPath);
+  const configText = await readFile(configPath, "utf8").catch(() => "");
+  const sourceManaged =
+    (await lstat(configPath).catch(() => undefined))?.isSymbolicLink() === true ||
+    /(?:generated|do not edit|managed by)/iu.test(configText.split("\n").slice(0, 20).join("\n"));
+  const setup = await json(
+    join(env.CODEX_HOME || join(home, ".codex"), "plugins", "clankie-source-setup.json"),
+  ).catch(() => undefined);
+  const sourceSetupRequired =
+    sourceManaged &&
+    !(
+      setup?.source === configSource &&
+      typeof setup.command === "string" &&
+      Array.isArray(setup.args) &&
+      setup.args.every((arg) => typeof arg === "string")
+    );
   const root = plugin
     ? join(
         env.CODEX_HOME || join(home, ".codex"),
@@ -181,7 +197,14 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
       expectedVersion: expectedVersion ?? null,
       versionMatches: expectedVersion && plugin ? codexManifest.version === expectedVersion : null,
       configPath,
-      configSource: await realpath(configPath).catch(() => configPath),
+      configSource,
+      sourceSetup: sourceSetupRequired
+        ? {
+            state: "source-manager-required",
+            detail: `source-managed: needs setup in ${env.CODEX_HOME || join(home, ".codex")}`,
+            fix: `Have the owner of ${configSource} provide a source-owned script; run clankie harness install --codex-source-setup /absolute/source-owned/script --approve in this profile. Preserve the configuration link.`,
+          }
+        : { state: sourceManaged ? "source-setup-recorded" : "unmanaged" },
       skill: root ? await exists(join(root, "skills", "clankie", "SKILL.md")) : false,
       replies: "native-control",
       liveReceiver: "not-observed",

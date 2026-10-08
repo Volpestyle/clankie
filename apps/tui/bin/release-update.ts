@@ -20,6 +20,8 @@ import { promisify } from "node:util";
 import { boundedString, commitString, object, operationId } from "./update-files.ts";
 import {
   errorText,
+  parseHarnessRefresh,
+  withHarnessRefreshDiagnostics,
   parseServiceReceipt,
   parseUpdateInitiator,
   writeRuntimeUpdate,
@@ -289,7 +291,9 @@ export async function executeReleaseUpdate(
     if (ports.refreshHarnesses) {
       try {
         const result = await ports.refreshHarnesses(target);
-        harnessRefresh = { ok: result.ok === true, result };
+        harnessRefresh = parseHarnessRefresh(
+          withHarnessRefreshDiagnostics({ ok: result.ok === true, result }, plan.directory),
+        );
       } catch (error) {
         harnessRefresh = { ok: false, error: errorText(error) };
       }
@@ -298,7 +302,16 @@ export async function executeReleaseUpdate(
       healthy: true,
       canary: { state: "pending" },
       ...(harnessRefresh
-        ? { harnessRefresh, ...(harnessRefresh.ok ? {} : { reason: "harness-refresh-incomplete" }) }
+        ? {
+            harnessRefresh,
+            ...(harnessRefresh.ok
+              ? {}
+              : {
+                  reason: harnessRefresh.sourceManaged?.length
+                    ? "harness-refresh-source-managed"
+                    : "harness-refresh-incomplete",
+                }),
+          }
         : {}),
     });
   } catch (failure) {

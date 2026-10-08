@@ -91,6 +91,8 @@ const reasons: Record<string, string> = {
   "target-update-status-unsupported": "The target does not support durable update status",
   "target-runtime-canary-unsupported": "The target does not support the runtime canary",
   "harness-refresh-incomplete": "Runtime is healthy, but some harness tools could not be refreshed",
+  "harness-refresh-source-managed":
+    "Runtime is healthy; source-managed harness setup is required. The retained receipt lists every refusal.",
 };
 const errors: Record<string, string> = {
   update_refused: "The update request was not admitted",
@@ -154,6 +156,12 @@ function updateNextStep(view: View): string[] {
 export function formatUpdateOutput(input: unknown): string {
   const view = input as View;
   const lines: string[] = [];
+  for (const entry of view.latest?.harnessRefresh?.sourceManaged ?? []) {
+    lines.push(
+      `Harness refresh (${clean(entry.machine)}): source-managed: needs setup in ${clean(entry.home)}`,
+    );
+    lines.push(`Fix: ${clean(entry.fix)}`);
+  }
   if (view.runtime) lines.push(`Live: ${short(view.runtime.commit)}`);
   if (view.target) {
     const t = view.target;

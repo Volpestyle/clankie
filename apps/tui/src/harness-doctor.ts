@@ -301,6 +301,9 @@ export async function inspectHarnessBridges(
     localFleet: local,
     linkedSession,
     remediation: [
+      ...(profiles.codex.sourceSetup?.state === "source-manager-required"
+        ? [`${profiles.codex.sourceSetup.detail}. ${profiles.codex.sourceSetup.fix}`]
+        : []),
       ...(linkedSession.nativeBindings ?? [])
         .filter((binding) => binding.status === "missing")
         .map((binding) => `${binding.paneId}: ${binding.detail}`),

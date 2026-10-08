@@ -72,6 +72,8 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
   if (unresolved)
     return `Seat delivery ${unresolved.receiptId} to ${unresolved.conversationId} has been unresolved for ${formatSeatDeliveryAge(unresolved.ageMs)} — confirm the seat never received it, then run \`clankie seat-delivery settle ${unresolved.receiptId} abandoned-unknown --conversation ${unresolved.conversationId}\`.`;
   const remediation = report.remediations[0];
+  const sourceSetup = report.harnessBridges.profiles.codex.sourceSetup;
+  if (sourceSetup?.state === "source-manager-required") return `${sourceSetup.detail}. ${sourceSetup.fix}`;
   if (remediation !== undefined) {
     const line = remediation.replace(/\s+/gu, " ").trim();
     return line.includes("`") || line.includes("/discord")
@@ -111,6 +113,11 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
 
 /** Machine cards remain available verbatim via --json; observations are not tool acceptance. */
 export function formatMachineDoctorSummary(report: Record<string, unknown>): string {
+  const harnesses = report.harnesses as
+    | { codex?: { sourceSetup?: { state: string; detail?: string; fix?: string } } }
+    | undefined;
+  const sourceSetup = harnesses?.codex?.sourceSetup;
+  if (sourceSetup?.state === "source-manager-required") return `${sourceSetup.detail}. ${sourceSetup.fix}`;
   const unavailable = [report.harnesses, report.membership].some(
     (card) => typeof card === "object" && card !== null && "status" in card && card.status === "unavailable",
   );

@@ -35,6 +35,7 @@ export function inspectHarnessProfiles(options?: {
     versionMatches: boolean | null;
     configPath: string;
     configSource: string;
+    sourceSetup?: { state: string; detail?: string; fix?: string };
     skill: boolean;
     replies: string;
     liveReceiver: string;

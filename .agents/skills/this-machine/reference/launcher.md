@@ -136,6 +136,14 @@ this machine instead of judging the absolute advisory `cpuPercent`. Older
 `runtime-canary-cpu-budget-exceeded` holds are released with `clankie integrate
 release UUID --actor NAME --reason TEXT`.
 
+`source-managed: needs setup in <home>` is a refused installer refresh, not a
+failed active thread refresh. Update status names the local/remote homes in
+`harnessRefresh.sourceManaged`; doctor names the configuration source. Ask its
+owner for a source-owned script, then use `clankie harness install
+--codex-source-setup /absolute/source-owned/script --approve` in that profile.
+Preserve generated symlinks. A linked machine with other refusals still needs
+those resolved; the full `harness-refresh.json` receipt retains them.
+
 Social turns cannot update the machine. Older already-loaded MCP bridges may
 need their MCP process refreshed to understand newer protocols; repinning files
 cannot change running bridge code. A lost tool result is not permission to resend

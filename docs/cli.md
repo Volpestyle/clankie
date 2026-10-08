@@ -5150,6 +5150,16 @@ once. The CLI rechecks current project policy and target linkage before each
 profile or remote destination. Under `owner`, refresh requires the owner's
 interactive confirmation with `--approve`; under `lead`, automatic refresh requires an already-linked
 target. Unlinked profiles and existing Claude channel policy stay unchanged.
+A source-managed Codex profile without a matching recorded source hook reports
+`source-manager-required`: `source-managed: needs setup in <home>`. Doctor reports
+the configuration owner and the source setup command. `clankie update status`
+retains `harnessRefresh.ok: false`, reports `harness-refresh-source-managed` and
+lists local/remote homes in `harnessRefresh.sourceManaged`; the complete receipt
+still lists other refusals, including unlinked machines. These are installation
+observations, not proof that an active thread adopted new tools. Have the source
+owner provide a script and run `clankie harness install --codex-source-setup
+/absolute/source-owned/script --approve` in that profile; preserve its config link.
+
 An explicitly disabled Codex plugin reports `declined`: its native installer
 would enable it, so refreshing that profile requires a reviewed install.
 Checkout and release installers maintain existing links as part of the

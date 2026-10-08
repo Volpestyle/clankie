@@ -211,7 +211,12 @@ export interface RuntimeUpdateResult {
   readonly error?: string;
   readonly rollbackError?: string;
   readonly serviceReceipts?: readonly RuntimeServiceReceipt[];
-  readonly harnessRefresh?: { readonly ok: boolean; readonly result?: unknown; readonly error?: string };
+  readonly harnessRefresh?: {
+    readonly ok: boolean;
+    readonly result?: unknown;
+    readonly error?: string;
+    readonly sourceManaged?: readonly { home: string; machine: string; fix: string }[];
+  };
   readonly canary?: RuntimeCanaryResult;
   readonly ownerCheckoutSync?: CheckoutSyncResult;
   readonly resolvedRef?: string;
@@ -274,6 +279,12 @@ export interface RuntimeUpdatePorts {
 
 export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
   const value = object(readPrivateJson(join(directory, "result.json")));
+  if (value.harnessRefresh !== undefined) {
+    const refresh = object(value.harnessRefresh);
+    value.harnessRefresh = withHarnessRefreshDiagnostics(refresh, directory);
+    if (value.reason === "harness-refresh-incomplete" && object(value.harnessRefresh).sourceManaged)
+      value.reason = "harness-refresh-source-managed";
+  }
   const phases = [
     "scheduled",
     "installing",
@@ -411,14 +422,78 @@ function parseRuntimeCanary(input: unknown): RuntimeCanaryResult {
   return value as unknown as RuntimeCanaryResult;
 }
 
-function parseHarnessRefresh(input: unknown): NonNullable<RuntimeUpdateResult["harnessRefresh"]> {
+export function parseHarnessRefresh(input: unknown): NonNullable<RuntimeUpdateResult["harnessRefresh"]> {
   const value = object(input);
   if (typeof value.ok !== "boolean") throw Error("Invalid harness refresh receipt");
   return {
     ok: value.ok,
     ...(value.result === undefined ? {} : { result: value.result }),
     ...(value.error === undefined ? {} : { error: boundedString(value.error, 1024) }),
+    ...(value.sourceManaged === undefined
+      ? {}
+      : {
+          sourceManaged: (value.sourceManaged as unknown[]).slice(0, 32).map((entry) => {
+            const item = object(entry);
+            return {
+              home: boundedString(item.home, 4096),
+              machine: boundedString(item.machine, 256),
+              fix: boundedString(item.fix, 8192),
+            };
+          }),
+        }),
   };
+}
+
+/** Read the retained receipt only at this operation's fixed path; never follow a response-supplied path. */
+export function withHarnessRefreshDiagnostics(
+  refresh: Record<string, unknown>,
+  directory: string,
+): Record<string, unknown> {
+  let receipt = refresh.result;
+  try {
+    receipt = readPrivateJson(join(directory, "harness-refresh.json"));
+  } catch {
+    /* Older/direct ports retain inline results. */
+  }
+  if (!receipt || typeof receipt !== "object") return refresh;
+  const data = receipt as Record<string, unknown>;
+  const sourceManaged: { home: string; machine: string; fix: string }[] = [];
+  const collect = (entries: unknown, machine: string) => {
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") continue;
+      const value = entry as Record<string, unknown>;
+      // Old receipts called a missing source hook declined; retain that distinction only for this exact detail.
+      if (
+        value.status !== "source-manager-required" &&
+        !(
+          value.status === "declined" &&
+          typeof value.detail === "string" &&
+          value.detail.includes("configuration is managed at") &&
+          value.detail.includes("Use its source setup")
+        )
+      )
+        continue;
+      if (typeof value.profile !== "string") continue;
+      sourceManaged.push({
+        home: value.profile,
+        machine,
+        fix:
+          value.harness === "claude"
+            ? "Apply the worker plugin setup through the source that owns this profile's settings. Preserve the configuration link."
+            : "Have the configuration owner provide a source-owned script; run clankie harness install --codex-source-setup /absolute/source-owned/script --approve in this profile. Preserve the configuration link.",
+      });
+    }
+  };
+  collect(data.local, "local");
+  if (Array.isArray(data.fleets))
+    for (const entry of data.fleets) {
+      if (!entry || typeof entry !== "object") continue;
+      const fleet = entry as Record<string, unknown>;
+      if (typeof fleet.fleet === "string" && fleet.result && typeof fleet.result === "object")
+        collect((fleet.result as Record<string, unknown>).installations, fleet.fleet);
+    }
+  return sourceManaged.length ? { ...refresh, sourceManaged } : refresh;
 }
 
 export function errorText(error: unknown): string {
@@ -535,7 +610,9 @@ export async function executeRuntimeUpdate(
     if (ports.refreshHarnesses) {
       try {
         const result = await ports.refreshHarnesses(plan.runtime);
-        harnessRefresh = { ok: result.ok === true, result };
+        harnessRefresh = parseHarnessRefresh(
+          withHarnessRefreshDiagnostics({ ok: result.ok === true, result }, plan.directory),
+        );
       } catch (error) {
         harnessRefresh = { ok: false, error: errorText(error) };
       }
@@ -544,7 +621,16 @@ export async function executeRuntimeUpdate(
       healthy: true,
       canary: { state: "pending" },
       ...(harnessRefresh
-        ? { harnessRefresh, ...(harnessRefresh.ok ? {} : { reason: "harness-refresh-incomplete" }) }
+        ? {
+            harnessRefresh,
+            ...(harnessRefresh.ok
+              ? {}
+              : {
+                  reason: harnessRefresh.sourceManaged?.length
+                    ? "harness-refresh-source-managed"
+                    : "harness-refresh-incomplete",
+                }),
+          }
         : {}),
     });
   } catch (failure) {

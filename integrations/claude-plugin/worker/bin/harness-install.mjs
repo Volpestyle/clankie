@@ -288,6 +288,19 @@ async function installHarnessBridges(options) {
         : managed
           ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
           : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
+    // Missing source setup is a setup refusal, not a declined consent prompt.
+    if (managed && !sourceSetup && !aliasUpdate) {
+      results.push({
+        harness,
+        profile: harness === "codex" ? codexProfile : profile,
+        status: "source-manager-required",
+        detail:
+          harness === "codex"
+            ? `source-managed: needs setup in ${codexProfile}. Configuration source: ${source}. Have its owner provide a source-owned script, then run clankie harness install --codex-source-setup /absolute/source-owned/script --approve in this profile. Preserve the configuration link.`
+            : `source-managed: needs setup in ${profile}. Apply the worker plugin setup through the owner of ${source}; preserve the configuration link.`,
+      });
+      continue;
+    }
     if (
       !(await options.consent(harness, detail, {
         profile: harness === "claude" ? profile : codexProfile,
@@ -297,10 +310,6 @@ async function installHarnessBridges(options) {
       }))
     ) {
       results.push({ harness, profile, status: "declined", detail });
-      continue;
-    }
-    if (managed && !sourceSetup && !aliasUpdate) {
-      results.push({ harness, profile, status: "source-manager-required", detail });
       continue;
     }
     try {
