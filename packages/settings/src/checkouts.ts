@@ -114,6 +114,11 @@ export async function reconcileWorktree(
       unlandedCommits = (await checkoutGit(root, ["cherry", base, head]))
         .split("\n")
         .filter((line) => line.startsWith("+ ")).length;
+      // `git cherry` omits merges, including unique conflict-resolution work.
+      // Hold non-ancestor merges until landed or deliberately reconciled by the lead.
+      unlandedCommits += Number(
+        (await checkoutGit(root, ["rev-list", "--count", "--merges", `${base}..${head}`])).trim(),
+      );
     }
     const dirty = status
       .split("\0")
@@ -317,13 +322,24 @@ export async function verifyHireCheckout(path: string): Promise<HireCheckoutFres
   try {
     const remoteMain = await fetchCheckoutMain(root);
     const head = (await checkoutGit(root, ["rev-parse", "HEAD"])).trim();
-    if (await checkoutGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]))
+    const dirty = (
+      await checkoutGit(root, ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal"])
+    )
+      .split("\0")
+      .filter(Boolean)
+      .map((entry) => entry.slice(3));
+    if (dirty.length)
       return {
         outcome: "refused",
         path: root,
         head,
         remoteMain,
-        reason: "Start checkout is dirty; preserve it and create a clean worktree from origin/main",
+        reason: `Start checkout is dirty: ${dirty
+          .slice(0, 20)
+          .map((file) => JSON.stringify(file))
+          .join(
+            ", ",
+          )}${dirty.length > 20 ? " (more files omitted)" : ""}; preserve it and create a clean worktree from origin/main`,
       };
     try {
       await checkoutGit(root, ["merge-base", "--is-ancestor", remoteMain, head]);

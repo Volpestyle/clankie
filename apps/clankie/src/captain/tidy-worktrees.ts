@@ -222,7 +222,15 @@ export async function listTidyWorktrees(
               if ((error as { code?: unknown }).code !== 1) throw error;
               // Rebased or cherry-picked work is on main by content even though HEAD is not.
               const cherry = await git(entry.path, ["cherry", mergeSha, head]);
-              if (!cherry.split("\n").some((line) => line.startsWith("+ "))) landedBy = "content";
+              // Cherry skips merges and cannot prove their resolution content landed.
+              const merges = await git(entry.path, [
+                "rev-list",
+                "--count",
+                "--merges",
+                `${mergeSha}..${head}`,
+              ]);
+              if (!cherry.split("\n").some((line) => line.startsWith("+ ")) && Number(merges.trim()) === 0)
+                landedBy = "content";
               else if (protection.dropDecided?.(entry.path, head)) landedBy = "decision";
               else reason = "unmerged";
             }

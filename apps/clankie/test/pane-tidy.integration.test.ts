@@ -431,3 +431,34 @@ it("closes a worker whose commits reached main by content after a rebase, withou
   expect(f.tidy.history()[0]!.unlanded).toBeUndefined();
   f.watch.close();
 });
+
+it("holds a merge's unique resolution even when git cherry says every patch landed", async () => {
+  const w = await workerWorktree();
+  await writeFile(join(w.tree, "feature.txt"), "feature\n");
+  await git(w.tree, "add", "feature.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "feature");
+  const feature = await git(w.tree, "rev-parse", "HEAD");
+  await writeFile(join(w.repo, "other.txt"), "main moved\n");
+  await git(w.repo, "add", "other.txt");
+  await git(w.repo, "commit", "--quiet", "-m", "main moved");
+  await git(w.tree, "merge", "--no-commit", "main");
+  await writeFile(join(w.tree, "resolution.txt"), "only in the merge\n");
+  await git(w.tree, "add", "resolution.txt");
+  await git(w.tree, "commit", "--quiet", "-m", "merge with unique resolution");
+  await git(w.repo, "cherry-pick", feature);
+  await git(w.repo, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const cherry = await git(w.tree, "cherry", "origin/main");
+  expect(cherry).toMatch(/^-[ ]/u);
+  expect(cherry).not.toMatch(/^\+/mu);
+  const f = await fixture({ cwd: w.tree });
+  expect(
+    await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority),
+  ).toMatchObject({
+    outcome: "refused",
+    reason: "unlanded_work",
+    worktrees: [{ unlandedCommits: 1, dirtyFiles: 0 }],
+  });
+  expect(f.closes()).toBe(0);
+  expect(await readFile(join(w.tree, "resolution.txt"), "utf8")).toBe("only in the merge\n");
+  f.watch.close();
+});

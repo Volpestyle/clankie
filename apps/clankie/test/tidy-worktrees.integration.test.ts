@@ -98,6 +98,55 @@ async function fixture() {
   };
 }
 
+it("keeps merge-only work until an exact safe-to-drop decision retains its commits", async () => {
+  const { reconcileWorktree } = await import("@clankie/settings");
+  const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
+  const f = await fixture();
+  const tree = await f.worktree("merge-worker");
+  await writeFile(join(tree, "feature.txt"), "feature\n");
+  await git(tree, ["add", "feature.txt"]);
+  await git(tree, ["commit", "--quiet", "-m", "feature"]);
+  const feature = await git(tree, ["rev-parse", "HEAD"]);
+  await writeFile(join(f.repo, "other.txt"), "main moved\n");
+  await git(f.repo, ["add", "other.txt"]);
+  await git(f.repo, ["commit", "--quiet", "-m", "main moved"]);
+  await git(tree, ["merge", "--no-commit", "main"]);
+  await writeFile(join(tree, "resolution.txt"), "only in the merge\n");
+  await git(tree, ["add", "resolution.txt"]);
+  await git(tree, ["commit", "--quiet", "-m", "merge with unique resolution"]);
+  const head = await git(tree, ["rev-parse", "HEAD"]);
+  await git(f.repo, ["cherry-pick", feature]);
+  const origin = join(f.root, "origin.git");
+  await git(f.repo, ["clone", "--bare", f.repo, origin]);
+  await git(f.repo, ["remote", "add", "origin", origin]);
+  await git(f.repo, ["fetch", "origin"]);
+  const cherry = await git(tree, ["cherry", "origin/main"]);
+  expect(cherry).toMatch(/^-[ ]/u);
+  expect(cherry).not.toMatch(/^\+/mu);
+  expect(cherry).not.toContain(head);
+  expect(await reconcileWorktree(tree)).toMatchObject({ state: "unreconciled", unlandedCommits: 1 });
+  const runner = inventory(() => []).runner;
+  const service = tidy(f.root, runner);
+  expect((await service.worktrees(f.repo)).excluded).toContainEqual({ path: tree, reason: "unmerged" });
+  const prune = (protection = {}) =>
+    pruneTidyWorktree(f.repo, tree, join(f.root, "archive"), runner, async () => {}, protection);
+  expect(await prune()).toMatchObject({ outcome: "kept", reason: "unmerged" });
+  const { WorktreeDecisions } = await import("../src/captain/worktree-decisions.ts");
+  const decisions = new WorktreeDecisions(join(f.root, "decisions.json"));
+  decisions.record({
+    path: tree,
+    head,
+    decision: "safe_to_drop",
+    reason: "Fixture merge deliberately abandoned",
+    by: "fixture",
+  });
+  const removed = await prune({
+    dropDecided: (path: string, sha: string) => decisions.latest(path, sha)?.decision === "safe_to_drop",
+  });
+  expect(removed).toMatchObject({ outcome: "removed", keptRef: `refs/clankie/dropped-worktrees/${head}` });
+  expect(await git(f.repo, ["show", `${removed.keptRef}:resolution.txt`])).toBe("only in the merge");
+});
+
 it("lists only merged clean linked worktrees, including detached HEAD and paths with spaces, without mutations", async () => {
   const f = await fixture();
   const linked = await f.worktree("clean linked"),

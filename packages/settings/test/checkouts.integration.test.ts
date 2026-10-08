@@ -144,8 +144,17 @@ it("hire admission fetches actual main, refuses stale or dirty starts and accept
   await writeFile(join(topic, "untracked.txt"), "unfinished\n");
   expect(await verifyHireCheckout(topic)).toMatchObject({
     outcome: "refused",
-    reason: expect.stringContaining("dirty"),
+    reason: expect.stringContaining('"untracked.txt"'),
   });
+  await mkdir(join(topic, ".tmp"));
+  await writeFile(join(topic, ".tmp", "notes.txt"), "owner scratch\n");
+  await writeFile(join(topic, "dynamodb-local-metadata.json"), "{}\n");
+  const before = await checkoutGit(topic, ["status", "--porcelain=v1", "-z"]);
+  const refusal = await verifyHireCheckout(topic);
+  expect(refusal.reason).toContain('".tmp/"');
+  expect(refusal.reason).toContain('"dynamodb-local-metadata.json"');
+  expect(await checkoutGit(topic, ["status", "--porcelain=v1", "-z"])).toBe(before);
+  expect(await readFile(join(topic, ".tmp", "notes.txt"), "utf8")).toBe("owner scratch\n");
   await checkoutGit(f.owner, ["remote", "set-url", "origin", join(f.root, "missing.git")]);
   expect((await verifyHireCheckout(f.owner)).outcome).toBe("refused");
   const nonGit = join(f.root, "non-git");

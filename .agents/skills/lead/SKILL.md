@@ -143,7 +143,9 @@ unknown, not healthy, and a `working` pane can be working on the wrong thing.
   Harvest includes the worktree: before closing the worker, every commit is
   on main (by content, `git cherry origin/main`) or deliberately abandoned
   with a recorded reason, and nothing uncommitted is left behind. A worktree
-  holding unlanded work is never closed or forgotten silently; the close
+  with merge commits outside main needs explicit review: `git cherry` omits
+  merges and cannot prove that their conflict resolutions landed.
+  A worktree holding unlanded work is never closed or forgotten silently; the close
   refuses `unlanded_work` until it lands or you give `unlandedReason`.
   Doctor lists unreconciled worktrees by owner and age. Mail the owner
   (`mail_owner_update`) about one over a day old whose owner is gone and
@@ -199,6 +201,9 @@ registered local owner repositories (`--repository` selects one). The integratio
 queue records this automatically. Preserve and report blocked owner edits or
 local commits. New hires require a clean checkout containing fetched
 `origin/main`; roster and doctor checkout counts use cached refs.
+Dirty-start refusals name the blocking paths, including untracked files.
+Preserve owner scratch files and create a clean deliverable worktree from
+fetched `origin/main`; a refusal does not authorize deleting or ignoring them.
 
 For authorized owned cleanup, `prune_tidy_worktree` rechecks merge, clean and
 inactive state in an enrolled developer root and preserves `.local` evidence

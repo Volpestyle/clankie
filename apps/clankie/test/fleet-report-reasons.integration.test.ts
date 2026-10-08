@@ -105,7 +105,12 @@ it("counts every worker receipt failure from real TCP/filesystem failures withou
         request: async (suffix, init) => {
           const response = await fetch(`${host}${suffix || "/"}`, {
             ...init,
-            signal: AbortSignal.timeout(100),
+            // Only the deliberate timeout cases need a deadline shorter than
+            // their server delay. Successful receipts include durable filesystem
+            // writes and must tolerate scheduling pressure on the shared machine.
+            signal: AbortSignal.timeout(
+              ["binding_timeout", "receipt_timeout"].includes(reason) ? 100 : 2_000,
+            ),
           });
           if (reason === "connection_refused" && !init) {
             await response.clone().text();

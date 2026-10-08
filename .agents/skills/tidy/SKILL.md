@@ -23,7 +23,10 @@ deadline. `undo_worker_pane` reopens and resumes that session.
 The service protects unsent drafts, owner-interactive or hand-started panes you
 did not hire, results not kept, and unlanded work: `unlanded_work` names the
 worker's worktree with commits not on `origin/main` by content or uncommitted
-files. Land it or hand it to its owner first. Pass `unlandedReason` only when
+files. `git cherry` skips merge commits: a merge not reachable from main
+also holds close and prune, even if all its ordinary patches landed. Land it
+or inspect its resolution and record a deliberate decision. Land other work
+or hand it to its owner first. Pass `unlandedReason` only when
 leaving it is a deliberate decision (superseded, a spike); the reason stays
 with the close record and the worktree's decision. Unknown draft state or provenance is a
 technical failure: leave that pane alone and explain the gap. A missing Herdr
@@ -41,7 +44,7 @@ Classify each retained unmerged or dirty tree: landed by content, worth
 landing, or safe to drop, and record the last two with
 `decide_tidy_worktree` and a one-line reason. Unlanded work is never removed
 without one, and a decided drop keeps its commits under
-`refs/clankie/dropped-worktrees/`; uncommitted files are never pruned. even idle/shell panes protect their
+`refs/clankie/dropped-worktrees/`; uncommitted files are never pruned. Even idle/shell panes protect their
 working directories. An unavailable or changing census returns no candidates.
 The tool does not establish ownership or refresh the destination ref: confirm
 your ownership and current landing proof before removing a candidate. This tool
@@ -84,5 +87,6 @@ results name files and their age; preserve those files and report the blocker.
 30 seconds, and retain at most 128 cwd observations. Default fleet reads do no
 checkout Git work. Sync and hire admission require a successful fetch.
 New hires need a clean checkout containing fetched `origin/main`, on that
-machine. Create a fresh owned deliverable worktree rather than using stale
-local main. Resuming a saved session keeps its exact directory.
+machine. A dirty-start refusal names up to 20 blocking paths, including
+untracked directories. Preserve those files; create a fresh owned deliverable
+worktree from fetched `origin/main`. Resuming a saved session keeps its exact directory.

@@ -5523,3 +5523,13 @@ Dirty checkouts, missing remote main, failed fetches and a HEAD that does not
 contain fetched `origin/main` refuse admission before launch. Clean topic
 branches based on current main are valid. Non-Git workspaces remain usable for
 other tasks; saved-session resumes keep the exact saved cwd.
+
+A dirty-start refusal names up to 20 paths, including untracked directories.
+Preserve those files and use a clean deliverable worktree from fetched
+`origin/main`. Untracked scratch files still count as dirty.
+
+Close and tidy also hold merge commits outside the destination's ancestry:
+`git cherry` skips merges and cannot establish that their resolution work
+landed. Land the merge or record an explicit reconciliation decision after
+inspecting it. A decided prune keeps the commits under
+`refs/clankie/dropped-worktrees/`.

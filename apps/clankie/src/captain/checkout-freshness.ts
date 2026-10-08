@@ -19,7 +19,8 @@ try {
     git(['fetch','--no-tags','origin','+refs/heads/main:refs/remotes/origin/main']);
     const remoteMain=git(['rev-parse','--verify','origin/main^{commit}']).trim();
     const head=git(['rev-parse','HEAD']).trim();
-    if(git(['status','--porcelain=v1','-z','--untracked-files=all'])) result={outcome:'refused',path:root,head,remoteMain,reason:'Start checkout is dirty; preserve work and create a fresh worktree'};
+    const dirty=git(['status','--porcelain=v1','-z','--no-renames','--untracked-files=normal']).split('\\0').filter(Boolean).map(entry=>entry.slice(3));
+    if(dirty.length) result={outcome:'refused',path:root,head,remoteMain,reason:'Start checkout is dirty: '+dirty.slice(0,20).map(file=>JSON.stringify(file)).join(', ')+(dirty.length>20?' (more files omitted)':'')+'; preserve it and create a clean worktree from origin/main'};
     else {
       try {git(['merge-base','--is-ancestor',remoteMain,head]);result={outcome:'fresh',path:root,head,remoteMain};}
       catch {result={outcome:'refused',path:root,head,remoteMain,reason:'Start checkout does not contain fetched origin/main'};}

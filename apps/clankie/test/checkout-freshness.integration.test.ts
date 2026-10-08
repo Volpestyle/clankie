@@ -211,7 +211,11 @@ it("remote observer enforces fetched main and cleanliness in a real child proces
     });
     expect((await syncOwnerCheckout(owner)).outcome).toBe("updated");
     await writeFile(join(owner, "draft.txt"), "dirty\n");
-    expect(await observe()).toMatchObject({ outcome: "refused", reason: expect.stringContaining("dirty") });
+    expect(await observe()).toMatchObject({
+      outcome: "refused",
+      reason: expect.stringContaining('"draft.txt"'),
+    });
+    expect(await readFile(join(owner, "draft.txt"), "utf8")).toBe("dirty\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
