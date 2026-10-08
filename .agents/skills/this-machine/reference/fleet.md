@@ -215,7 +215,12 @@ owner-started workspace member through address normalization.
 
 Briefed local Claude hires use the approved `clankie-worker` channel and report
 `control.mode: "channel"`; Codex, supported OpenCode workers and prepared Pi report `adapter`.
-Prepared Pi is off by default. Only `CLANKIE_PI_NATIVE_ENABLED=1` in the service's
+Prepared Pi is off by default on owner-run bodies; managed body images enable it.
+Pi must pass native capability and model/authentication checks in the same
+`worker_accounts` report as Claude/Codex. An owner hold excludes Pi `default`
+from automatic selection. Automatic hires prefer eligible Claude/Codex accounts
+then usable Pi, within model constraints; a local report cannot qualify remote Pi.
+Only `CLANKIE_PI_NATIVE_ENABLED=1` in the service's
 environment registers its local adapter; restart the service after changing it.
 Without opt-in, unbriefed Pi launches retain hosted model/provider preparation,
 while automated briefs remain unavailable. Opt-in requires the selected 0.87.1

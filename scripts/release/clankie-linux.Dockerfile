@@ -22,8 +22,8 @@ RUN apt-get update \
 RUN npm install --global @anthropic-ai/claude-code@2.1.281 && npm cache clean --force
 # Codex workers sign in with ChatGPT device codes (`clankie harness login codex`).
 RUN npm install --global @openai/codex@0.160.1 && npm cache clean --force
-# pi is a hireable harness, so it must be on PATH like claude; keep the workspace's pin.
-RUN npm install --global @earendil-works/pi-coding-agent@0.84.2 && npm cache clean --force
+# Native Pi workers use the adapter's independently verified CLI pin (not the captain SDK).
+RUN npm install --global @earendil-works/pi-coding-agent@0.87.1 && npm cache clean --force
 COPY --from=build /clankie/dist/hosted /opt/clankie
 COPY --chmod=755 scripts/release/hosted-entrypoint.sh /usr/local/bin/clankie-hosted
 COPY --chmod=755 scripts/release/hosted-body.sh /usr/local/bin/clankie-body

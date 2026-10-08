@@ -675,7 +675,7 @@ export const ClankieSettingsSchema = z
         z
           .object({
             machine: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-            harness: z.enum(["claude", "codex"]),
+            harness: z.enum(["claude", "codex", "pi"]),
             label: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u),
             reason: z.string().trim().min(1).max(200).optional(),
           })

@@ -2321,8 +2321,8 @@ paths:
     get:
       tags: [Operator]
       operationId: getWorkerAccounts
-      summary: Read one machine's Claude and Codex worker accounts
-      description: Sign-in, identity, plan, Codex usage headroom, holds and whether Clankie would hire on each account now (MachineWorkerAccountsSchema). Omit fleet for this machine; fleet names a runtime connection, the only query accepted. Owner or Take Control device authority.
+      summary: Read one machine's worker accounts and verified Pi profile
+      description: Sign-in, identity, plan, Codex usage headroom, verified Pi model references, holds and whether Clankie would hire on each account now (MachineWorkerAccountsSchema). Omit fleet for this machine; fleet names a runtime connection, the only query accepted. Owner or Take Control device authority.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -5944,7 +5944,7 @@ components:
                 properties:
                   {
                     machine: { type: string },
-                    harness: { type: string, enum: [claude, codex] },
+                    harness: { type: string, enum: [claude, codex, pi] },
                     label: { type: string },
                     reason: { type: string, maxLength: 200 },
                   },
@@ -5957,7 +5957,7 @@ components:
       properties:
         expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
         machine: { type: string, default: local }
-        harness: { type: string, enum: [claude, codex] }
+        harness: { type: string, enum: [claude, codex, pi] }
         label: { type: string }
         held: { type: boolean }
         reason: { type: string, maxLength: 200, description: Hold only; a release carries no reason }

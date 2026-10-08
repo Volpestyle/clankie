@@ -211,6 +211,7 @@ import {
 import { projectOnboarding } from "./project-onboarding.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
 import { createWorkerAccountsReader } from "./harness-accounts.ts";
+import { createPiWorkerStatusReader, piSeatModelRefs } from "./pi-worker-account.ts";
 import {
   createRemoteCodexSeatAdapter,
   remoteCodexControl,
@@ -339,6 +340,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const readWorkerAccounts = createWorkerAccountsReader({
     settings: () => settings(),
     localFleet: (id) => namedLocal.some((entry) => entry.id === id),
+    piStatus: createPiWorkerStatusReader({
+      enabled: () => options.piNative !== undefined,
+      cwd: workingDirectory,
+      seatModel: deps.piSeatModel,
+    }),
     fleet: async (id) => (await refreshFleets()).find((entry) => entry.id === id),
     ...(deps.fleets?.shell === undefined ? {} : { shell: deps.fleets.shell }),
   });
@@ -606,8 +612,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(options.fleetHireTools ? { fleetHireTools: options.fleetHireTools } : {}),
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},
-    resolveHireModel: async (harness, model) =>
-      resolveHireModel(await hireRegistry.catalog(), harness, model),
+    resolveHireModel: async (harness, model) => {
+      if (harness === "pi" && deps.piSeatModel) {
+        const selected = await deps.piSeatModel();
+        if (piSeatModelRefs(selected).includes(model)) return model;
+        throw new Error("Requested Pi model is unavailable in the authenticated worker provider");
+      }
+      return resolveHireModel(await hireRegistry.catalog(), harness, model);
+    },
     claudeAccounts: async () => [
       { label: "default", home: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude") },
       ...(await settings()).claudeAccounts,

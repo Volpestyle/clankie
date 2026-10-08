@@ -32,7 +32,7 @@ const ACCOUNTS_USAGE =
   "Usage: clankie accounts [list] | connect github|linear|email|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
 
 const WORKER_ACCOUNTS_USAGE =
-  "Usage: clankie accounts workers [--machine ID] | hold claude|codex LABEL [--machine ID] [--reason TEXT] | release claude|codex LABEL [--machine ID]";
+  "Usage: clankie accounts workers [--machine ID] | hold claude|codex|pi LABEL [--machine ID] [--reason TEXT] | release claude|codex|pi LABEL [--machine ID]";
 
 /**
  * The owner sets a worker account aside from Clankie's automatic choice, or
@@ -52,7 +52,11 @@ async function runWorkerAccountHold(
       throw new Error(WORKER_ACCOUNTS_USAGE);
     flags.set(flag, value);
   }
-  if ((harness !== "claude" && harness !== "codex") || !label || !/^[a-z][a-z0-9_-]{0,63}$/u.test(label))
+  if (
+    (harness !== "claude" && harness !== "codex" && harness !== "pi") ||
+    !label ||
+    !/^[a-z][a-z0-9_-]{0,63}$/u.test(label)
+  )
     throw new Error(WORKER_ACCOUNTS_USAGE);
   const machine = flags.get("--machine") ?? "local";
   const api = await ownerSettingsApi(options);

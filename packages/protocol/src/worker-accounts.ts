@@ -8,7 +8,7 @@ import { z } from "zod";
 export const WORKER_ACCOUNTS_PATH = "/v1/worker-accounts";
 export const WORKER_ACCOUNT_HOLDS_PATH = "/v1/worker-accounts/holds";
 
-export const WorkerAccountHarnessSchema = z.enum(["claude", "codex"]);
+export const WorkerAccountHarnessSchema = z.enum(["claude", "codex", "pi"]);
 export type WorkerAccountHarness = z.infer<typeof WorkerAccountHarnessSchema>;
 /** `local` (the body's own machine) or a runtime connection id. */
 export const WorkerAccountMachineSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u);
@@ -40,6 +40,8 @@ export const WorkerAccountStatusSchema = z.object({
   held: z.object({ reason: z.string().optional() }).optional(),
   /** Whether Clankie would hire on it now, and why not. */
   usable: z.boolean(),
+  /** Pi: verified models in this native profile, not credentials. */
+  models: z.array(z.string()).max(2048).optional(),
   reason: z.string().optional(),
 });
 export type WorkerAccountStatus = z.infer<typeof WorkerAccountStatusSchema>;
@@ -88,7 +90,7 @@ export type WorkerAccountHolds = z.infer<typeof WorkerAccountHoldsSchema>;
 export const WORKER_ACCOUNTS_WORDING = {
   title: "Worker accounts",
   summary:
-    "The Claude and Codex sign-ins on each machine. Clankie picks one with usage left for each new worker; set one aside to keep him off it.",
+    "The Claude and Codex sign-ins and verified Pi profile on each machine. Clankie picks one that can work; set one aside to keep him off it.",
   setAside: "Set aside",
   useAgain: "Use again",
   setAsideState: "Set aside",

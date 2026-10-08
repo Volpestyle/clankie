@@ -89,7 +89,8 @@ async function executableOnPath(
 }
 
 export async function discoverPiNativeCapability(launch: SeatLaunch): Promise<PiNativeCapability> {
-  if (process.platform !== "darwin") throw new Error("Native Pi control currently requires macOS");
+  if (!["darwin", "linux"].includes(process.platform))
+    throw new Error("Native Pi control requires macOS or Linux");
   const env = { ...process.env, ...launch.env };
   const roots = piSessionRoots();
   if (JSON.stringify(piSessionRoots(env)) !== JSON.stringify(roots))
@@ -105,8 +106,10 @@ export async function discoverPiNativeCapability(launch: SeatLaunch): Promise<Pi
   try {
     const magic = Buffer.alloc(4);
     await nodeFile.read(magic, 0, 4, 0);
-    if (!["cffaedfe", "cefaedfe", "cafebabe", "bebafeca"].includes(magic.toString("hex")))
-      throw new Error("Native Node must be a direct Mach-O executable, not a launcher");
+    const nativeMagic =
+      process.platform === "linux" ? ["7f454c46"] : ["cffaedfe", "cefaedfe", "cafebabe", "bebafeca"];
+    if (!nativeMagic.includes(magic.toString("hex")))
+      throw new Error("Native Node must be a direct platform executable, not a launcher");
   } finally {
     await nodeFile.close();
   }

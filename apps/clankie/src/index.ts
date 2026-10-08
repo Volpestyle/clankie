@@ -153,6 +153,7 @@ import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { createWorkerAccountsReader } from "./captain/harness-accounts.ts";
+import { createPiWorkerStatusReader } from "./captain/pi-worker-account.ts";
 import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
 import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
@@ -1749,6 +1750,11 @@ const clankie = await createClankieApp({
     });
   },
   workerAccounts: createWorkerAccountsReader({
+    piStatus: createPiWorkerStatusReader({
+      enabled: () => process.env.CLANKIE_PI_NATIVE_ENABLED?.trim() === "1",
+      cwd: startupSettings.captain.workingDirectory ?? homedir(),
+      seatModel: runtimeProvider.model?.piSeatModel,
+    }),
     settings: () => settingsStore.load(),
     fleet: async (id) => (await runtimes.fleets()).find((entry) => entry.id === id),
     shell: (fleet) => runtimes.fleetShell(fleet),

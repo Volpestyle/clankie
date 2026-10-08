@@ -1377,7 +1377,7 @@ canonical home path and label; `authPresent` checks file existence, not whether
 the login is valid. `default` is implicit (`CODEX_HOME`, otherwise `~/.codex`).
 Removing a registration never deletes its home or credentials.
 
-### `accounts workers [--machine ID]` / `accounts hold|release claude|codex LABEL [--machine ID] [--reason TEXT]`
+### `accounts workers [--machine ID]` / `accounts hold|release claude|codex|pi LABEL [--machine ID] [--reason TEXT]`
 
 `accounts workers` asks a machine which worker accounts it can hire on now
 (`GET /v1/worker-accounts?fleet=ID`, operator credential; omit the machine for
@@ -1388,6 +1388,14 @@ them (`claude auth status`; Codex's app-server `account/read` and
 in each Claude profile, any owner hold, and `usable` or the `reason` with its
 fix. Tokens and credential files are never read or returned. Claude usage is not
 observable, so its headroom stays `null`.
+
+The local Pi `default` profile uses the same report and holds. It is usable only
+when the native adapter is enabled, its pinned files and executable verify, and
+the worker has a configured authenticated model. Managed bodies derive that
+model from their existing included/customer provider route; no owner account
+setup is needed. Unknown or unavailable capability fails closed. Pi is the
+automatic fallback after eligible Claude/Codex accounts, within the requested
+model constraints; a local Pi observation never qualifies a remote machine.
 
 `accounts hold` sets an account aside from Clankie's automatic choice, for
 example a plan that will not be renewed or usage saved for something else; an

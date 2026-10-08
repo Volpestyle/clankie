@@ -302,7 +302,7 @@ const HEADLESS_COMMAND_HELP = [
       "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts claude [list | add HOME --label LABEL | remove LABEL]   Register existing local Claude profiles",
       "  accounts workers [--machine ID]   Worker Claude/Codex accounts on this or a linked machine: sign-in, plan, usage (JSON)",
-      "  accounts hold|release claude|codex LABEL [--machine ID] [--reason TEXT]   Keep an account out of automatic choice",
+      "  accounts hold|release claude|codex|pi LABEL [--machine ID] [--reason TEXT]   Keep an account out of automatic choice",
       "  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]",
       "  accounts apps github-secret --client-id ID --secret-stdin   Body-only developer revocation secret",
     ],

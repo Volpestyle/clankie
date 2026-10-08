@@ -855,8 +855,8 @@ function hireAgentTool(
       "Hire a fleet seat: Herdr opens a pane in the working directory, starts the harness there, and the seat " +
       "lands watched and messageable as a persona — never a bare `herdr agent start`. " +
       "Explicit hire fields (the owner's words) win over the project role, then fleet.hire defaults. Omit fields to inherit. " +
-      "You choose the harness per job unless one of those names it (Claude or Codex, each with its native subagents): weigh the work and worker_accounts usage on the hire's machine. " +
-      "Omitted with no role or fleet harness, the hire falls back to the machine's usable, unheld accounts: the only harness with one, else Codex when its best account has over half its usage left, else Claude. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement targets the repo workspace. new-tab gives each worker a Name · role tab; split requires an explicit pipeline name and joins that workflow tab, creating it for its first member. Never rearrange existing panes. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
+      "You choose the harness per job unless one of those names it (Claude, Codex or verified native Pi; Claude and Codex support native subagents): weigh the work and worker_accounts usage on the hire's machine. " +
+      "Omitted with no role or fleet harness, the hire falls back to the machine's usable, unheld accounts: the only harness with one, else Codex when its best account has over half its usage left, else Claude; verified Pi is the fallback when neither has an eligible account. Owner holds, requested models and named account scope remain binding. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement targets the repo workspace. new-tab gives each worker a Name · role tab; split requires an explicit pipeline name and joins that workflow tab, creating it for its first member. Never rearrange existing panes. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
       "outcomes: unknown_directory, harness_unavailable (no wired flag for what you asked), not_ready (rejected " +
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, " +
       "at_capacity (close or reuse a hired agent). brief is its first prompt (codex needs one) and is delivered " +
@@ -1022,12 +1022,12 @@ function workerAccountsTool(report: NonNullable<HerdrWatchPort["workerAccountsRe
     name: "worker_accounts",
     label: "Worker accounts on a machine",
     description:
-      "The Claude profiles and Codex accounts a machine can hire on, read from that machine now: label, home, " +
+      "The Claude profiles, Codex accounts and verified local Pi default profile a machine can hire on, read now: label, home, " +
       "signed-in identity and plan, Codex usage headroom (Claude usage is not observable), whether Clankie's worker " +
       "plugin is in each Claude profile, owner holds, and usable or why not with the fix. Omit fleet for this " +
       "machine (its registered profiles); pass a fleet id for a linked machine (its default home plus every " +
       "~/.claude-<label> and ~/.codex-<label>). Choose harness and account per hire from this, weighing usage and " +
-      "the owner's notes; pass the label as hire_agent account. No secrets are read or returned.",
+      "the owner's notes; pass Claude/Codex labels as hire_agent account. Pi requires enabled native control and authenticated models; it has no account override, and linked Pi remains unavailable without remote proof. No secrets are returned.",
     parameters: Type.Object({
       fleet: Type.Optional(
         Type.String({

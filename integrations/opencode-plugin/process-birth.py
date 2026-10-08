@@ -1,4 +1,4 @@
-"""Read-only macOS native control fact, not a worker/tool authority token."""
+"""Read-only native process facts, not a worker/tool authority token."""
 import ctypes
 import json
 import os
@@ -38,7 +38,7 @@ class ProcVnodePathInfo(ctypes.Structure):
     _fields_ = [("cwd", VnodeInfoPath), ("root", VnodeInfoPath)]
 
 
-def observe(pid):
+def observe_macos(pid):
     # Public SDK sys/proc_info.h PROC_PIDTBSDINFO. Reject unsupported ABIs.
     if sys.platform != "darwin" or pid <= 1 or pid > 2147483647:
         raise ValueError("Unsupported process")
@@ -81,6 +81,65 @@ def observe(pid):
         "executable": path.value.decode("utf-8", errors="strict"),
         "cwd": cwd.decode("utf-8", errors="strict"),
     }
+
+
+def observe_linux(pid):
+    if sys.platform != "linux" or pid <= 1 or pid > 2147483647:
+        raise ValueError("Unsupported process")
+    directory = "/proc/" + str(pid)
+
+    def lifetime():
+        # comm may contain spaces and parentheses; the final ')' ends field 2.
+        with open(directory + "/stat", encoding="utf-8") as source:
+            stat = source.read()
+        end = stat.rfind(")")
+        if end < 0 or int(stat[:stat.index("(")].strip()) != pid:
+            raise ValueError("Invalid process stat")
+        fields = stat[end + 2:].split()
+        if len(fields) < 20 or fields[0] in ("Z", "X", "x"):
+            raise ValueError("Original process exited")
+        start = int(fields[19])
+        if start <= 0:
+            raise ValueError("Invalid process birth")
+        return start
+
+    inode = os.stat(directory).st_ino
+    before = lifetime()
+    with open(directory + "/status", encoding="utf-8") as source:
+        rows = source.read().splitlines()
+    owners = [row.split()[1:] for row in rows if row.startswith("Uid:")]
+    if len(owners) != 1 or len(owners[0]) != 4 or any(int(uid) != os.getuid() for uid in owners[0]):
+        raise ValueError("Process owner mismatch")
+    executable = os.readlink(directory + "/exe")
+    cwd = os.readlink(directory + "/cwd")
+    if (not executable.startswith("/") or not cwd.startswith("/")
+            or executable.endswith(" (deleted)") or cwd.endswith(" (deleted)")):
+        raise ValueError("Original process paths unavailable")
+    # Kernel boot time plus start ticks is stable for this original process.
+    with open("/proc/stat", encoding="utf-8") as source:
+        boot = [row.split()[1] for row in source if row.startswith("btime ")]
+    frequency = os.sysconf("SC_CLK_TCK")
+    with open("/proc/sys/kernel/random/boot_id", encoding="utf-8") as source:
+        boot_id = source.read().strip()
+    if (len(boot) != 1 or frequency <= 0 or lifetime() != before
+            or os.stat(directory).st_ino != inode):
+        raise ValueError("Process lifetime changed")
+    seconds = int(boot[0]) + before // frequency
+    microseconds = (before % frequency) * 1000000 // frequency
+    return {
+        "pid": pid,
+        "uid": os.getuid(),
+        "birth": [str(seconds), str(microseconds)],
+        "kernelIdentity": [boot_id, str(inode), str(before)],
+        "executable": executable,
+        "cwd": cwd,
+    }
+
+
+def observe(pid):
+    if sys.platform == "linux":
+        return observe_linux(pid)
+    return observe_macos(pid)
 
 
 if __name__ == "__main__":

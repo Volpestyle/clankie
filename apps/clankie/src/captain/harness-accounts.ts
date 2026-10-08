@@ -29,10 +29,10 @@ import {
  * uses to install the worker plugin into each Claude profile.
  */
 
-export type WorkerAccountHarness = "claude" | "codex";
+export type WorkerAccountHarness = "claude" | "codex" | "pi";
 const WORKER_ACCOUNT_HARNESSES: readonly WorkerAccountHarness[] = ["claude", "codex"];
 
-interface WorkerAccountStatus {
+export interface WorkerAccountStatus {
   readonly harness: WorkerAccountHarness;
   readonly label: string;
   /** The profile home on its own machine. */
@@ -50,6 +50,7 @@ interface WorkerAccountStatus {
   readonly held?: { readonly reason?: string };
   /** Whether Clankie would hire on it now, and why not. */
   readonly usable: boolean;
+  readonly models?: readonly string[];
   readonly reason?: string;
 }
 
@@ -468,12 +469,13 @@ type WorkerHarnessChoice =
 export function chooseWorkerHarness(
   machine: string,
   report: MachineWorkerAccounts,
-  allowed: readonly WorkerAccountHarness[] = WORKER_ACCOUNT_HARNESSES,
+  allowed: readonly WorkerAccountHarness[] = [...WORKER_ACCOUNT_HARNESSES, "pi"],
+  label?: string,
 ): WorkerHarnessChoice {
   const best = new Map<WorkerAccountHarness, number>();
   const skipped: string[] = [];
   for (const account of report.accounts) {
-    if (!allowed.includes(account.harness)) continue;
+    if (!allowed.includes(account.harness) || (label !== undefined && account.label !== label)) continue;
     if (!account.usable || account.held) {
       skipped.push(
         `${account.harness} ${account.label}: ${account.held ? `held by the owner${account.held.reason ? ` (${account.held.reason})` : ""}` : account.reason}`,
@@ -501,6 +503,7 @@ export function chooseWorkerHarness(
           ? `no usable, unheld Codex account on ${machine}`
           : `Codex's best account on ${machine} has ${Math.round(codex * 100)}% usage left`,
     };
+  if (best.has("pi")) return { harness: "pi", why: `a verified Pi profile on ${machine} can run the hire` };
   const unavailable = allowed
     .map((harness) => report.unavailable?.[harness])
     .filter((reason): reason is string => reason !== undefined);
@@ -523,6 +526,7 @@ export function createWorkerAccountsReader(options: {
     Pick<ClankieSettings, "claudeAccounts" | "codexAccounts" | "workerAccountHolds" | "execution">
   >;
   readonly localFleet?: (id: string) => boolean;
+  readonly piStatus?: () => Promise<WorkerAccountStatus>;
   readonly fleet: (id: string) => Promise<HerdrFleet | undefined>;
   readonly shell?: (fleet: HerdrFleet) => FleetShellRun;
 }) {
@@ -542,8 +546,8 @@ export function createWorkerAccountsReader(options: {
       fleetId === undefined ||
       options.localFleet?.(fleetId) === true ||
       (connection !== undefined && "socketPath" in connection && connection.socketPath !== undefined);
-    if (local)
-      return readMachineWorkerAccounts(
+    if (local) {
+      const report = await readMachineWorkerAccounts(
         { id: machine, ssh: { host: "localhost", shell: "posix" } },
         localWorkerAccountsShell,
         {
@@ -557,6 +561,24 @@ export function createWorkerAccountsReader(options: {
           },
         },
       );
+      if ((harnesses === undefined || harnesses.includes("pi")) && options.piStatus) {
+        const pi = await options.piStatus();
+        const hold = holds.find((entry) => entry.harness === "pi" && entry.label === pi.label);
+        return {
+          ...report,
+          accounts: [
+            ...report.accounts,
+            {
+              ...pi,
+              ...(hold === undefined
+                ? {}
+                : { held: hold.reason === undefined ? {} : { reason: hold.reason } }),
+            },
+          ],
+        };
+      }
+      return report;
+    }
     const fleet = await options.fleet(fleetId);
     if (fleet === undefined || options.shell === undefined)
       throw new Error(`${fleetId} is not a linked machine; list them with clankie machines`);

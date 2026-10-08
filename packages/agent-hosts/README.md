@@ -81,7 +81,7 @@ flowchart TD
 | ----------- | ---------------------------------------------------- | --------------------------------------------------------------------- |
 | Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent                     |
 | Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                                  |
-| Pi          | Process-bound native extension follow-up messages    | Opt-in only; Pi 0.87.1; live acceptance held                          |
+| Pi          | Process-bound native extension follow-up messages    | Opt-in on macOS/Linux; Pi 0.87.1; live acceptance held                |
 | OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18 |
 | Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46                   |
 | Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here             |
@@ -94,7 +94,12 @@ the distinction between automated checks and live evidence are recorded in the
 
 Pi uses the original process-bound extension and causal native custom-message
 receipts. The service registers this local adapter only with
-`CLANKIE_PI_NATIVE_ENABLED=1`; it is off by default until live acceptance.
+`CLANKIE_PI_NATIVE_ENABLED=1`; owner-run defaults remain off until live acceptance.
+Managed body images opt in, using the matching CLI pin. The account/usability
+view admits Pi only with verified native capability and an authenticated worker
+model; automatic choice respects holds and falls back to Pi after eligible
+Claude/Codex accounts. Linux process proof uses the original kernel PID/birth,
+executable/cwd and socket ownership, and fails closed when observation fails.
 Without opt-in, ordinary unbriefed Pi launches preserve their hosted model/provider
 preparation and automated briefs remain unavailable. Opt-in requires the pinned
 Pi 0.87.1 files; upgrades need compatibility validation before opting in.

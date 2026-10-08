@@ -16,6 +16,9 @@ const Birth = z.object({
   pid: z.number().int().min(2),
   uid: z.number().int().nonnegative(),
   birth: z.tuple([z.string().regex(/^[1-9]\d*$/u), z.string().regex(/^\d{1,6}$/u)]),
+  kernelIdentity: z
+    .tuple([z.string().uuid(), z.string().regex(/^[1-9]\d*$/u), z.string().regex(/^[1-9]\d*$/u)])
+    .optional(),
   executable: z.string().startsWith("/"),
   cwd: z.string().startsWith("/"),
 });
@@ -98,9 +101,10 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
   const request = input.request ?? nativeRequest;
   const canonical = input.canonical ?? realpath;
   const qualify = (pane: string) => (input.fleet === undefined ? pane : fleetQualified(input.fleet, pane));
+  const platform = input.platform ?? process.platform;
   const binding = async () => {
-    if ((input.platform ?? process.platform) !== "darwin")
-      throw new Error("Prepared native control is currently macOS-only");
+    if (platform !== "darwin" && !(platform === "linux" && harness === "pi"))
+      throw new Error("Prepared native control requires macOS or Linux Pi");
     const value = await input.binding();
     if (!value) throw new Error("Native Herdr binding unavailable");
     return structuredClone(value);
@@ -179,6 +183,7 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           JSON.parse(await run("/usr/bin/python3", ["-I", input.processHelper, String(pid)])),
         );
         if (
+          (platform === "linux" && before.kernelIdentity === undefined) ||
           before.pid !== pid ||
           before.uid !== ownerUid ||
           (await canonical(before.cwd)) !== canonicalCwd ||
@@ -234,7 +239,13 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           if (!alive() || !clientPort || !serverPort) return false;
           const owner = async () =>
             clientPid(
-              await run("/usr/sbin/lsof", ["-nP", "-a", `-iTCP:${serverPort}`, "-sTCP:ESTABLISHED", "-Fpn"]),
+              await run(platform === "linux" ? "/usr/bin/lsof" : "/usr/sbin/lsof", [
+                "-nP",
+                "-a",
+                `-iTCP:${serverPort}`,
+                "-sTCP:ESTABLISHED",
+                "-Fpn",
+              ]),
               clientPort,
               serverPort,
             );

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { createServer } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
 import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,9 +11,10 @@ import {
   type PreparedNativeSession,
 } from "../src/captain/prepared-native-host.ts";
 
-// Real Unix transport and libproc process boundary; Herdr response is a
+// Real Unix/TCP transport and native process boundary; Herdr response is a
 // golden from the real 0.9.3 socket, not evidence of invoking OpenCode/Pi here.
-test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as const)(
+const harnesses = process.platform === "linux" ? (["pi"] as const) : (["grok", "opencode", "pi"] as const);
+test.skipIf(!["darwin", "linux"].includes(process.platform)).each(harnesses)(
   "reported Herdr 0.9.3 %s pane without top-level agent binds; contradictions revoke",
   async (harness) => {
     const directory = await realpath(await mkdtemp("/tmp/herdr-golden-"));
@@ -23,7 +24,7 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
       executable,
       [
         "-e",
-        "process.on('message', (cwd) => { process.chdir(cwd); process.send({cwd}); }); process.send('ready');",
+        "process.on('message', (input) => { if (typeof input === 'number') { require('node:net').createConnection({host:'127.0.0.1',port:input}); } else { process.chdir(input); process.send({cwd:input}); } }); process.send('ready');",
       ],
       { cwd: directory, stdio: ["ignore", "ignore", "ignore", "ipc"] },
     );
@@ -33,6 +34,9 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
       processFixture.send(cwd);
       expect((await changed)[0]).toEqual({ cwd });
     };
+    const accepted: Socket[] = [];
+    const controlServer = createServer((socket) => accepted.push(socket));
+    let foreignSocket: Socket | undefined;
     let lastRoot: PreparedNativeRoot | undefined;
     let lastSession: PreparedNativeSession | undefined;
     const golden = JSON.parse(
@@ -92,6 +96,18 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
             : { source: "herdr:opencode", kind: "id", value: "ses_golden1234" };
       await root.report(session, "idle");
       expect(await root.proof(session)).toMatchObject({ pane: pane.pane_id, shell: { pid } });
+      await new Promise<void>((resolve) => controlServer.listen(0, "127.0.0.1", resolve));
+      const address = controlServer.address();
+      if (!address || typeof address === "string") throw new Error("TCP fixture port unavailable");
+      const nativeConnection = once(controlServer, "connection");
+      processFixture.send(address.port);
+      const [nativeSocket] = (await nativeConnection) as [Socket];
+      expect(await root.check(nativeSocket)).toBe(true);
+      // An equal bearer/loopback endpoint from another process cannot qualify.
+      const foreignConnection = once(controlServer, "connection");
+      foreignSocket = createConnection({ host: "127.0.0.1", port: address.port });
+      const [otherSocket] = (await foreignConnection) as [Socket];
+      expect(await root.check(otherSocket)).toBe(false);
       // A real cwd change revokes the same process; restoring it permits
       // another fresh proof. No cached or caller-provided cwd is admitted.
       await changeDirectory(changedDirectory);
@@ -131,6 +147,9 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
       await exited;
       await expect(lastRoot!.proof(lastSession!)).rejects.toThrow();
     } finally {
+      foreignSocket?.destroy();
+      for (const socket of accepted) socket.destroy();
+      await new Promise<void>((resolve) => controlServer.close(() => resolve()));
       if (processFixture.exitCode === null && processFixture.signalCode === null) {
         const exited = once(processFixture, "exit");
         processFixture.kill();

@@ -1891,19 +1891,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
         "No harness was named and this service cannot read worker accounts to choose one. Pass harness for this hire.",
       );
     const models = [input.model, input.subagents?.model].filter((m): m is string => m !== undefined);
-    let allowed: WorkerAccountHarness[] = ["claude", "codex"];
-    if (models.length && this.resolveModel) {
-      const fits: WorkerAccountHarness[] = [];
-      for (const harness of allowed)
-        if (
-          await Promise.all(models.map((model) => this.resolveModel!(harness, model))).then(
-            () => true,
-            () => false,
-          )
-        )
-          fits.push(harness);
-      if (fits.length) allowed = fits;
-    }
     const machine = input.fleet ?? "this machine";
     let report: MachineWorkerAccounts;
     try {
@@ -1913,7 +1900,43 @@ export class HerdrWatchStore implements HerdrWatchPort {
         `No harness was named and ${machine}'s worker accounts could not be read (${reasonDetail(error)}). Pass harness for this hire.`,
       );
     }
-    const choice = chooseWorkerHarness(machine, report, allowed);
+    // Account overrides still select Claude/Codex profiles only. Pi is the
+    // verified default native profile, never a substitute for a named account.
+    let allowed: WorkerAccountHarness[] = [
+      "claude",
+      "codex",
+      ...(input.account === undefined && report.accounts.some((account) => account.harness === "pi")
+        ? ["pi" as const]
+        : []),
+    ];
+    if (models.length) {
+      const fits: WorkerAccountHarness[] = [];
+      for (const harness of allowed) {
+        try {
+          const resolved = await Promise.all(
+            models.map((model) => (this.resolveModel ? this.resolveModel(harness, model) : model)),
+          );
+          if (
+            harness === "pi" &&
+            !report.accounts.some(
+              (account) =>
+                account.harness === "pi" &&
+                account.usable &&
+                !account.held &&
+                resolved.every((model) => account.models?.includes(model)),
+            )
+          )
+            continue;
+          fits.push(harness);
+        } catch {
+          /* A requested model must fit this exact harness; never relax it. */
+        }
+      }
+      allowed = fits;
+      if (!allowed.length)
+        return failed("No usable worker harness can run every requested model. No pane was opened.");
+    }
+    const choice = chooseWorkerHarness(machine, report, allowed, input.account);
     return "refused" in choice ? failed(choice.refused) : choice.harness;
   }
 
