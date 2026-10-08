@@ -1,0 +1,70 @@
+clankie heavy: waiting for machine capacity (load; 1/2 held, 4 queued)
+
+ RUN  v4.1.10 <worktree>
+
+ ❯ apps/clankie/test/fleet-settings-worktrees.integration.test.ts (3 tests | 2 failed | 1 skipped) 455ms
+   × fleet status reads the second registered repo's fresh linked worktree in the first repo's namespace (shared project) 286ms
+   × fleet status reads the second registered repo's fresh linked worktree in the first repo's namespace (separate project) 167ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/fleet-settings-worktrees.integration.test.ts > fleet status reads the second registered repo's fresh linked worktree in the first repo's namespace (shared project)
+AssertionError: expected { status: 409, body: { …(2) } } to match object { status: 200, body: { …(2) } }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "body": {
+-     "effective": {
+-       "commit": "owner",
+-       "push": "owner",
+-       "reportingStyle": "Second repo policy",
++     "detail": "Machine setup worktree could not be verified",
++     "error": "fleet_settings_context_unavailable",
+    },
+-     "projectId": "core",
+-   },
+-   "status": 200,
++   "status": 409,
+  }
+
+ ❯ apps/clankie/test/fleet-settings-worktrees.integration.test.ts:196:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  apps/clankie/test/fleet-settings-worktrees.integration.test.ts > fleet status reads the second registered repo's fresh linked worktree in the first repo's namespace (separate project)
+AssertionError: expected { status: 409, body: { …(2) } } to match object { status: 200, body: { …(2) } }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "body": {
+-     "effective": {
+-       "commit": "owner",
+-       "push": "owner",
+-       "reportingStyle": "Second repo policy",
++     "detail": "Machine setup worktree could not be verified",
++     "error": "fleet_settings_context_unavailable",
+    },
+-     "projectId": "clankie-app",
+-   },
+-   "status": 200,
++   "status": 409,
+  }
+
+ ❯ apps/clankie/test/fleet-settings-worktrees.integration.test.ts:196:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 skipped (3)
+   Start at  12:44:46
+   Duration  1.11s (transform 364ms, setup 15ms, import 557ms, tests 455ms, environment 0ms)
+

@@ -1,0 +1,15 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 2 queued)
+Finished in 391ms on 5 files using 18 threads.
+Scope: 3 of 34 workspace projects
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+
+ RUN  v4.1.10 <worktree>
+
+
+ Test Files  5 passed (5)
+      Tests  41 passed (41)
+   Start at  12:54:53
+   Duration  9.27s (transform 2.86s, setup 73ms, import 5.61s, tests 10.42s, environment 0ms)
+
