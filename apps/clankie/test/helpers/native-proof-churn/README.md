@@ -92,3 +92,12 @@ No existing process or proof-helper code is addressed by the debugger. If the
 tracer dies before detaching, the supervisor continues only that same original
 lifetime once it is reparented back, and after ten seconds kills its own child and
 fails instead of leaving a stopped process holding the heavy permit.
+
+`allocation-space.c` includes the unchanged production proof implementation
+with only its entry point renamed. The manual `FLEET_ALLOCATION_TEST=1` test
+compiles it as x86_64 and checks an unconstrained TCP proof before reserving
+untouched address space in an isolated child. Stock allocator zones and kernel
+APIs remain real. Reservations are bounded at 1024; retained allocator buffers
+at 32 MiB; a five-second alarm and parent timeout bound execution. Child exit
+releases all mappings. An Intel execution environment is required; no Rosetta
+installation or host memory exhaustion is performed.

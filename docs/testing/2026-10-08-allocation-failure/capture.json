@@ -1,0 +1,31 @@
+{
+  "baselineProof": true,
+  "architecture": "x86_64",
+  "refused": true,
+  "events": [
+    {
+      "schemaVersion": 1,
+      "stage": "fd_list",
+      "reason": "allocation_failed",
+      "errno": 12,
+      "attempt": 1,
+      "retry": false
+    }
+  ],
+  "totals": {
+    "allocation_failed": 1,
+    "proofAttempts": 0
+  },
+  "windows": [
+    {
+      "minutes": 5,
+      "allocation_failed": 1,
+      "proofAttempts": 0
+    },
+    {
+      "minutes": 60,
+      "allocation_failed": 1,
+      "proofAttempts": 0
+    }
+  ]
+}

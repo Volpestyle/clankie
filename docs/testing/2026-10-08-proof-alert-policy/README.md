@@ -19,8 +19,12 @@ seat's current owning lead. `onAggregateProofAlert` uses all local fleet and
 project checks, including requests without a current identifiable pane, and
 routes to the owner's default conversation. `clankie metrics --fleet` and
 doctor show the aggregate. Later reads also include subsequent checks and can
-expire old minute buckets. The original alert omitted its per-pane source;
-its counts were not required to equal the aggregate at a later timestamp.
+expire old minute buckets. The reported wording matches the old per-pane alert template; the aggregate
+template explicitly said “across all local proof checks.” This is a source
+inference from the supplied wording, not a recovered original alert envelope.
+A per-pane count is not required to equal the aggregate at a later timestamp;
+timestamp differences also prevent exact comparison. The new text makes both
+sources explicit so the next live sample can be attributed directly.
 
 The existing aggregate path is already on main from VUH-1805 (`ac8408d0`).
 Pane-less refusals are counted and can alert. It retains an owner service notice

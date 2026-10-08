@@ -93,7 +93,14 @@ inventing a socket mismatch.
 
 ## Explicit OS coverage limits
 
-One real OS producer remains unproved: `allocation_failed`.
+`fleet-allocation-native.integration.test.ts` now proves `allocation_failed`
+with the original stock Intel allocator and production proof implementation on
+a real owned TCP pair. An unconstrained baseline admits; bounded, untouched
+`PROT_NONE` address-space reservations make the FD buffer allocation return
+`ENOMEM`. Its actual diagnostic reaches the schema, collector and both windows.
+This manual-only case requires an executable x86_64 macOS slice (Rosetta on
+Apple Silicon); it does not claim an ARM reproduction. See the
+[producer evidence](../../docs/testing/2026-10-08-allocation-failure/README.md).
 The lead's revised acceptance classifies `fd_record_invalid` and
 `socket_identity_invalid` as **defensive, not producible** through supported APIs
 on the reviewed ABI. The same manual test compiles the production guard and
