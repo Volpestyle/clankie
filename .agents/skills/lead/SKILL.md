@@ -131,6 +131,11 @@ verification stays labelled and is never a pass. Landing directly on
 
 When nothing needs judgment, let workers work. Do not manufacture supervision.
 
+When Clankie itself gets in the way (a tool refuses wrongly, a message stalls,
+a lease or queue misbehaves, a default surprises), fix it on the spot if it is
+small, otherwise file an issue in the same round with the exact symptom and
+evidence. A workaround without an issue leaves the next lead to hit it again.
+
 ## Keep the fleet efficient
 
 On each watch wake and periodic round, check **every seat you own**
