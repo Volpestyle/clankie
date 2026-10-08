@@ -4296,6 +4296,15 @@ original request and question IDs, never terminal typing. Native delivery is
 attempted once; uncertainty is retained and reported to Clankie in the source
 conversation rather than retried. A changed occupant or resolved native question
 cannot receive an answer to its replacement.
+Local Codex async questions remain answerable when Clankie no longer has the
+launch controller in memory. The host reconnects only to the dedicated Unix
+socket observed on that exact native pane and verifies its original loaded
+thread. It reads the structured question and uses attributed native user input,
+steering the active turn or starting the answer when idle. A durable answer
+claim precedes that input; uncertain acceptance remains held across restart.
+Missing or replaced sockets and unloaded threads refuse rather than resuming
+stored history, choosing an account daemon or using the native queue. Native
+synchronous requests still require their original live controller.
 Escalation requires an admitted machine turn; a social room can create its own
 ask but cannot read the owner's private worker questions.
 
@@ -4311,8 +4320,8 @@ Pending asks and uncertain native claims are protected; creation refuses at
 `input_cancel` keep their existing immutable target. All four operations require
 an authenticated operator or an active device with `terminalControl`; a captain
 bearer alone cannot read the owner mailbox or answer. Hosted devices use the same
-contract without additional owner setup. The later app mailbox consumes this API;
-informational mail updates and phone/tablet presentation are a separate lane.
+contract without additional owner setup. The app mailbox consumes this API for
+owner answers and informational updates.
 
 Approval routing reads the effective global/project `autonomy.fleet` leaves.
 `lead` or `allow` means Clankie handles it and no owner ask is created; `owner`

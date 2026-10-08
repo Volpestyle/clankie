@@ -1244,7 +1244,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (!agent?.session) throw new Error("worker_question_unavailable");
     const sessionId = nativeSessionId(agent);
     if (!sessionId) throw new Error("worker_question_identity_unavailable");
-    const control = await this.seatControl.attach(agent);
+    const control = await this.seatControl.attachQuestion(agent);
     const pending = await control?.pendingQuestion?.(requestId);
     if (!pending) throw new Error("worker_question_resolved_or_unavailable");
     const current = await this.runner.resolveTerminal(seatId).catch(() => undefined);
@@ -1268,7 +1268,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const agent = await this.runner.resolveTerminal(seatId);
       if (!agent?.session) return "unknown";
       if (nativeSessionId(agent) !== sessionId) return "resolved";
-      const control = await this.seatControl.attach(agent);
+      const control = await this.seatControl.attachQuestion(agent);
       if (!control?.pendingQuestion) return "unknown";
       const online = (status: string) => status === "working" || status === "idle" || status === "blocked";
       if (!online(await control.status())) return "unknown";
@@ -1306,13 +1306,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch {
       /* A replaced occupant fails the dispatch guard below; nothing is sent. */
     }
-    const control = await this.seatControl.attach(agent);
+    const control = await this.seatControl.attachQuestion(agent).catch(() => undefined);
     if (!control?.answerQuestion)
       return {
         outcome: "undelivered",
         detail: "No pending-question control channel is available; no queue or terminal input was sent.",
       };
-    const pending = await control.pendingQuestion?.(answer.requestId);
+    let pending: SeatQuestion | undefined;
+    try {
+      pending = await control.pendingQuestion?.(answer.requestId);
+    } catch (error) {
+      return {
+        outcome: "undelivered",
+        detail: `Original native question unavailable; no answer was sent: ${String(error)}`,
+      };
+    }
     const guard = async () => {
       await assertConversationAuthority(authority);
       const current = await this.runner.resolveTerminal(seatId);

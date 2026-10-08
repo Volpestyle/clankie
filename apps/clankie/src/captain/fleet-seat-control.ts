@@ -1,5 +1,7 @@
 import { fleetDeliveryStage } from "@clankie/protocol";
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+import { externalCodexQuestions, guardedCodexQuestions } from "./external-codex-questions.ts";
+import { openCodexSocket } from "./codex-app-server.ts";
 import { channelBody } from "./claude-worker-seat.ts";
 import type { ExternalCodexControl } from "./external-codex-control.ts";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
@@ -33,6 +35,9 @@ export function createFleetSeatControl(
   uncertaintyPath?: string,
 ) {
   const fence = new DeliveryFence(uncertaintyPath);
+  const questionFence = new DeliveryFence(
+    uncertaintyPath === undefined ? undefined : `${uncertaintyPath}.questions.json`,
+  );
   const active = new Set<string>();
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
     const fleet = splitFleetQualified(agent.paneId)?.fleet;
@@ -50,6 +55,41 @@ export function createFleetSeatControl(
     return adapter
       .attach({ harness: adapter.harness, sessionId, paneId: agent.paneId })
       .catch(() => undefined);
+  };
+
+  const attachQuestion = async (agent: HerdrAgentSnapshot) => {
+    const control = await attach(agent);
+    if (control?.answerQuestion && control.pendingQuestion)
+      return control.ref.harness === "codex" ? guardedCodexQuestions(control, questionFence) : control;
+    // A service restart loses the launch adapter's heap, not the native worker.
+    // Reconnect only to its observed dedicated socket, never an account daemon.
+    if (agent.agent !== "codex" || splitFleetQualified(agent.paneId) || !runner.paneProcesses)
+      return undefined;
+    const sessionId = nativeSessionId(agent);
+    if (!sessionId) return undefined;
+    const processes = await runner.paneProcesses(agent.paneId);
+    const process = codexProcess(processes);
+    const endpoint = codexControlEndpoint(process);
+    if (!process || typeof endpoint !== "string") return undefined;
+    const assertCurrent = async () => {
+      const current = await runner.resolveTerminal(agent.terminalId);
+      const observed = codexProcess(await runner.paneProcesses!(agent.paneId));
+      if (
+        !current?.session ||
+        current.paneId !== agent.paneId ||
+        current.agent !== agent.agent ||
+        nativeSessionId(current) !== sessionId ||
+        observed?.pid !== process.pid ||
+        codexControlEndpoint(observed) !== endpoint
+      )
+        throw new Error("Original native question occupant or socket changed; no answer was sent");
+    };
+    return externalCodexQuestions(
+      { harness: "codex", sessionId, paneId: agent.paneId },
+      () => openCodexSocket(`ws+unix://${endpoint.slice(7)}:/`),
+      assertCurrent,
+      questionFence,
+    );
   };
 
   /** Existing unowned Codex sessions may take their native queue instead of PTY input. */
@@ -223,6 +263,7 @@ export function createFleetSeatControl(
   };
   return {
     attach,
+    attachQuestion,
     async deliverToSeat(
       seatId: string,
       text: string,

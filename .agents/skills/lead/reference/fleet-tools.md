@@ -107,6 +107,15 @@ function `call_id`; question IDs are the supplied JSON-encoded IDs). Sync
 answers need the winning tool output; async receipts prove only acceptance of
 that user message.
 
+For local Codex async questions, losing Clankie's launch controller does not
+require a re-hire. The question channel reconnects to the dedicated Unix socket
+observed on the same native pane and verifies that the original thread is still
+loaded. It can read and answer the exact question through this connection;
+ordinary messages, completion watches and native synchronous requests retain
+their existing controller requirements. It never resumes stored history or
+selects an account daemon. An uncertain async answer keeps its durable claim
+across restart: inspect the original worker rather than sending it again.
+
 Claude `AskUserQuestion` and permission prompts use live plugin command hooks.
 Their request IDs bind the exact pane, session, tool invocation and hook event;
 answers return as hook JSON, never terminal keystrokes. Answer all question IDs

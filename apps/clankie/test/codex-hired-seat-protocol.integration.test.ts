@@ -1,4 +1,6 @@
 import { PendingNativeMessages } from "../src/captain/pending-native-messages.ts";
+import { randomUUID } from "node:crypto";
+import { escalateWorkerQuestion } from "../src/captain/worker-question-escalation.ts";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -80,6 +82,9 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
       wait: fallback,
       runInPane: fallback,
       codexQueue: fallback,
+      paneProcesses: async () => [
+        { pid: 12345, name: "codex", argv: ["codex", "--remote", native.endpoint] },
+      ],
       closePane: async () => {},
     },
   } satisfies NonNullable<ConstructorParameters<typeof HerdrWatchStore>[1]>;
@@ -316,6 +321,227 @@ it("routes path-bound Codex 0.160 async questions to the hiring lead and waits f
   }
 });
 
+it("recovers lead and owner mailbox answers on the original Unix worker after losing the launch controller", async () => {
+  const f = await hiredFixture({ socketPath: `/tmp/cq-${randomUUID()}.sock` });
+  let restored: HerdrWatchStore | undefined;
+  const conversations = new ConversationStore(join(f.directory, "owner-questions"), async () => {});
+  const owner = {
+    principal: { kind: "device" as const, id: "paired-owner" },
+    current: () => true,
+    authorize: async () => true,
+  };
+  try {
+    await f.native.ask("call-restored");
+    await vi.waitFor(() => expect(f.wakes.some(({ text }) => text.includes("call-restored"))).toBe(true));
+    f.store.close();
+    // No adapter from the original heap survives. The pane and native server do.
+    restored = new HerdrWatchStore(f.watchPath, {
+      ...f.storeOptions,
+      seatAdapters: [],
+      remoteSeatAdapters: () => [],
+    });
+    const q = await restored.observedSeatQuestion(f.pane.terminal_id, "call-restored");
+    const questionId = q.question.questions[0]!.id;
+    expect(
+      await restored.answerSeatQuestion(
+        f.pane.terminal_id,
+        { requestId: "call-restored", answers: { [questionId]: { answers: ["Task worktree"] } } },
+        f.owner,
+      ),
+    ).toMatchObject({ outcome: "delivered", deliveryStage: "responded" });
+    expect(f.native.requests.filter(({ method }) => method === "turn/steer")).toHaveLength(1);
+    await f.native.ask("call-owner");
+    conversations.prepareWorkerQuestion = async (seatId, requestId) => {
+      const q = await restored!.observedSeatQuestion(seatId, requestId);
+      return {
+        seatId,
+        requestId,
+        sessionId: q.sessionId,
+        questions: q.question.questions.map(({ options, ...question }) => ({
+          ...question,
+          ...(options ? { options: [...options] } : {}),
+        })),
+      };
+    };
+    conversations.reconcileWorkerQuestion = async (q) => {
+      const w = q.workerQuestion!;
+      const result = await restored!.workerQuestionStatus(w.seatId, w.requestId, w.sessionId);
+      return result === "unknown" ? "uncertain" : result;
+    };
+    conversations.deliverWorkerAnswer = async (q, answer, authority) => {
+      if (answer.kind !== "worker") throw new Error("Wrong answer kind");
+      const w = q.workerQuestion!;
+      const result = await restored!.answerSeatQuestion(
+        w.seatId,
+        { requestId: w.requestId, answers: answer.answers },
+        {
+          owner: { conversationId: q.conversationId },
+          current: authority.current,
+          authorize: authority.authorize,
+        },
+        w.sessionId,
+      );
+      if (result.outcome !== "delivered") throw new Error(JSON.stringify(result));
+    };
+    const original = await restored.observedSeatQuestion(f.pane.terminal_id, "call-owner");
+    await escalateWorkerQuestion(conversations, "global-default", f.pane.terminal_id, original.question, {
+      current: () => true,
+      authorize: async () => true,
+    });
+    const list = OperatorConversationServiceResultSchema.parse(
+      await conversations.serve({ op: "input_list", schemaVersion: 1 }, owner),
+    );
+    if (list.op !== "input_list") throw new Error("No owner inbox");
+    expect(list.result.questions).toHaveLength(1);
+    const read = await conversations.serve(
+      { op: "input_get", schemaVersion: 1, conversationId: "global-default" },
+      owner,
+    );
+    if (read.op !== "input_get" || !read.result.question) throw new Error("No owner question");
+    const qOwner = read.result.question;
+    const answerRequest = {
+      op: "input_answer" as const,
+      schemaVersion: 1 as const,
+      conversationId: qOwner.conversationId,
+      requestId: qOwner.requestId,
+      incarnationId: qOwner.incarnationId,
+      expectedRevision: read.result.revision!,
+      answer: {
+        kind: "worker" as const,
+        answers: { [original.question.questions[0]!.id]: { answers: ["Main checkout"] } },
+      },
+    };
+    expect(
+      OperatorConversationServiceResultSchema.parse(await conversations.serve(answerRequest, owner)),
+    ).toMatchObject({
+      op: "input_answer",
+      result: { status: "resolved", question: { status: "submitted" } },
+    });
+    expect(await conversations.serve(answerRequest, owner)).toMatchObject({
+      op: "input_answer",
+      result: { status: "resolved" },
+    });
+    expect(f.native.requests.filter(({ method }) => method === "turn/steer")).toHaveLength(2);
+    expect(f.native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(1);
+    expect(f.native.requests.some(({ method }) => method === "turn/interrupt")).toBe(false);
+    expect(f.fallback).not.toHaveBeenCalled();
+    expect(f.native.errors).toEqual([]);
+  } finally {
+    restored?.close();
+    await conversations.close();
+    await f.close();
+  }
+});
+
+it("retains an uncertain reconnected native answer across restart and refuses an unloaded or replaced worker", async () => {
+  const f = await hiredFixture({
+    socketPath: `/tmp/cq-${randomUUID()}.sock`,
+    initialQuestion: { callId: "call-uncertain", title: "Which checkout?" },
+  });
+  let restored: HerdrWatchStore | undefined;
+  const answer = {
+    requestId: "call-uncertain",
+    answers: {
+      [JSON.stringify(["request_user_input_async", "call-uncertain", 0])]: { answers: ["Task worktree"] },
+    },
+  };
+  const restart = () =>
+    new HerdrWatchStore(f.watchPath, { ...f.storeOptions, seatAdapters: [], remoteSeatAdapters: () => [] });
+  try {
+    f.store.close();
+    restored = restart();
+    f.native.nextLoadedInventory({ data: [], nextCursor: null });
+    expect(await restored.answerSeatQuestion(f.pane.terminal_id, answer, f.owner)).toMatchObject({
+      outcome: "undelivered",
+    });
+    expect(f.native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(1);
+    f.native.omitAnswerReceipt();
+    expect(await restored.answerSeatQuestion(f.pane.terminal_id, answer, f.owner)).toMatchObject({
+      outcome: "unconfirmed",
+    });
+    expect(f.native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(2);
+    restored.close();
+    restored = restart();
+    expect(await restored.answerSeatQuestion(f.pane.terminal_id, answer, f.owner)).toMatchObject({
+      outcome: "unconfirmed",
+    });
+    expect(f.native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(2);
+    f.pane.agent_session = { ...f.pane.agent_session, value: "replacement-thread" };
+    expect(
+      await restored.answerSeatQuestion(f.pane.terminal_id, answer, f.owner, f.native.threadId),
+    ).toMatchObject({ outcome: "undelivered" });
+    expect(f.fallback).not.toHaveBeenCalled();
+  } finally {
+    restored?.close();
+    await f.close();
+  }
+});
+
+it("preserves owner gates and the final native socket fence, and admits only one concurrent answer", async () => {
+  const f = await hiredFixture({
+    socketPath: `/tmp/cq-${randomUUID()}.sock`,
+    initialQuestion: { callId: "call-fenced", title: "Which checkout?" },
+  });
+  let restored: HerdrWatchStore | undefined;
+  let endpoint = f.native.endpoint;
+  const answer = {
+    requestId: "call-fenced",
+    answers: {
+      [JSON.stringify(["request_user_input_async", "call-fenced", 0])]: { answers: ["Task worktree"] },
+    },
+  };
+  try {
+    f.store.close();
+    restored = new HerdrWatchStore(f.watchPath, {
+      ...f.storeOptions,
+      seatAdapters: [],
+      remoteSeatAdapters: () => [],
+      runner: {
+        ...f.storeOptions.runner,
+        paneProcesses: async () => [{ pid: 12345, name: "codex", argv: ["codex", "--remote", endpoint] }],
+      },
+    });
+    restored.questionGate = async () => "owner";
+    expect(await restored.answerSeatQuestion(f.pane.terminal_id, answer, f.owner)).toMatchObject({
+      outcome: "undelivered",
+      detail: expect.stringContaining("requires the owner"),
+    });
+    restored.questionGate = async () => "lead";
+    expect(
+      await restored.answerSeatQuestion(
+        f.pane.terminal_id,
+        { requestId: "call-fenced", answers: { wrong: { answers: ["Task worktree"] } } },
+        f.owner,
+      ),
+    ).toMatchObject({ outcome: "undelivered" });
+    let checks = 0;
+    expect(
+      await restored.answerSeatQuestion(f.pane.terminal_id, answer, {
+        ...f.owner,
+        authorize: async () => {
+          if (++checks === 3) endpoint = "unix:///tmp/replaced-worker.sock";
+          return true;
+        },
+      }),
+    ).toMatchObject({ outcome: "undelivered" });
+    expect(f.native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(1);
+    endpoint = f.native.endpoint;
+    const results = await Promise.all([
+      restored.answerSeatQuestion(f.pane.terminal_id, answer, f.owner),
+      restored.answerSeatQuestion(f.pane.terminal_id, answer, f.owner),
+    ]);
+    expect(results.filter(({ outcome }) => outcome === "delivered")).toHaveLength(1);
+    expect(f.native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(2);
+    expect(
+      f.native.requests.some(({ method }) => method === "turn/interrupt" || method === "thread/queue/add"),
+    ).toBe(false);
+    expect(f.fallback).not.toHaveBeenCalled();
+  } finally {
+    restored?.close();
+    await f.close();
+  }
+});
+
 it("hydrates an async question completed before subscription, then answers once through a native idle turn", async () => {
   const title = "é\n".repeat(250);
   const { native, pane, control, store, owner, wakes, fallback, census, close } = await hiredFixture({
@@ -374,7 +600,10 @@ it("hydrates an async question completed before subscription, then answers once 
 });
 
 it("keeps an async answer unconfirmed without its correlated user-message receipt and refuses duplicate dispatch", async () => {
-  const { native, pane, store, owner, wakes, fallback, close } = await hiredFixture();
+  const { native, pane, store, owner, wakes, fallback, close, watchPath, storeOptions } = await hiredFixture({
+    socketPath: `/tmp/cq-${randomUUID()}.sock`,
+  });
+  let restored: HerdrWatchStore | undefined;
   try {
     await native.ask("call-accepted-only");
     await vi.waitFor(() =>
@@ -396,7 +625,16 @@ it("keeps an async answer unconfirmed without its correlated user-message receip
     );
     expect(mutations.map(({ method }) => method)).toEqual(["turn/start", "turn/steer"]);
     expect(await store.answerSeatQuestion(pane.terminal_id, answer, owner)).toMatchObject({
-      outcome: "undelivered",
+      outcome: "unconfirmed",
+    });
+    store.close();
+    restored = new HerdrWatchStore(watchPath, {
+      ...storeOptions,
+      seatAdapters: [],
+      remoteSeatAdapters: () => [],
+    });
+    expect(await restored.answerSeatQuestion(pane.terminal_id, answer, owner)).toMatchObject({
+      outcome: "unconfirmed",
     });
     expect(
       native.requests.filter(({ method }) => method === "turn/start" || method === "turn/steer"),
@@ -405,6 +643,7 @@ it("keeps an async answer unconfirmed without its correlated user-message receip
     expect(fallback).not.toHaveBeenCalled();
     expect(native.errors).toEqual([]);
   } finally {
+    restored?.close();
     await close();
   }
 });
@@ -445,7 +684,7 @@ it("reports a concurrent owner answer at native dispatch even when the lead's re
     expect(JSON.stringify(replies)).toContain("Owner-selected worktree");
     expect(JSON.stringify(replies)).toContain("Lead-selected worktree");
     expect(await store.answerSeatQuestion(pane.terminal_id, answer, owner)).toMatchObject({
-      outcome: "undelivered",
+      outcome: "unconfirmed",
     });
     expect(
       native.requests.filter(({ method }) => method === "turn/start" || method === "turn/steer"),

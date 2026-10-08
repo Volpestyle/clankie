@@ -30,6 +30,8 @@ export async function codex0160Protocol(
     threadId?: string;
     threadName?: string;
     rejectName?: boolean;
+    /** Exercise the same dedicated Unix transport used by local native hires. */
+    socketPath?: string;
   } = {},
 ) {
   const threadId = options.threadId ?? randomUUID();
@@ -44,14 +46,13 @@ export async function codex0160Protocol(
   );
   const http = createServer();
   const server = new WebSocketServer({ server: http });
-  let peer: WebSocket | undefined;
   let loaded = false;
   let threadName = options.threadName;
   let nextLoadedInventory: unknown;
   let closed = false;
   let silentInterrupt = false;
   let omitUserReceipt = false;
-  let subscribed = false;
+  const subscribed = new Set<WebSocket>();
   let nextRead: { entered: () => void; release: Promise<void> } | undefined;
   let nextMutationReply: { entered: () => void; release: Promise<void> } | undefined;
   let ownerReply: Record<string, unknown> | undefined;
@@ -61,7 +62,7 @@ export async function codex0160Protocol(
   const notify = (method: string, params: Record<string, unknown>) => {
     // App-server notifications are delivered only after thread/resume subscribes
     // this connection. Fast initial turns must be recovered from native history.
-    if (subscribed) peer!.send(JSON.stringify({ method, params }));
+    for (const socket of subscribed) socket.send(JSON.stringify({ method, params }));
   };
   const questionItem = (callId: string, title: string) => ({
     type: "agentMessage",
@@ -108,7 +109,7 @@ export async function codex0160Protocol(
       });
   };
   server.on("connection", (socket) => {
-    peer = socket;
+    socket.on("close", () => subscribed.delete(socket));
     socket.on("message", (bytes) => {
       const request = JSON.parse(bytes.toString()) as Rpc;
       requests.push(request);
@@ -172,7 +173,7 @@ export async function codex0160Protocol(
               modelProvider: "fixture",
               sandbox: { type: "readOnly" },
             };
-            subscribed = true;
+            subscribed.add(socket);
             break;
           case "turn/start": {
             if (active()) throw new Error("A second turn started before native idle");
@@ -235,14 +236,15 @@ export async function codex0160Protocol(
       }
     });
   });
-  http.listen(0, "127.0.0.1");
+  if (options.socketPath) http.listen(options.socketPath);
+  else http.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => {
     http.once("listening", resolve);
     http.once("error", reject);
   });
   const address = http.address();
-  if (!address || typeof address === "string") throw new Error("Missing fixture socket address");
-  const endpoint = `ws://127.0.0.1:${address.port}`;
+  if (!address) throw new Error("Missing fixture socket address");
+  const endpoint = typeof address === "string" ? `unix://${address}` : `ws://127.0.0.1:${address.port}`;
   const close = async () => {
     if (closed) return;
     closed = true;
@@ -252,7 +254,7 @@ export async function codex0160Protocol(
   };
   const launch: CodexServerLauncher = async () => ({
     endpoint,
-    connect: () => openCodexSocket(endpoint),
+    connect: () => openCodexSocket(options.socketPath ? `ws+unix://${options.socketPath}:/` : endpoint),
     failure: () => undefined,
     output: () => "",
     close,
