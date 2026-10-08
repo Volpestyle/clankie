@@ -173,3 +173,27 @@ Sign-in errors use fixed codes (`unsupported_provider`, `unsupported_model`,
 `malformed`, `unavailable`), never provider text. Login URLs and device codes
 are sensitive interaction data: do not log, persist, put them in conversation
 messages or include them in diagnostics. Provider tokens never cross this API.
+
+The headless operator CLI uses these same service jobs:
+
+```sh
+clankie model subscriptions methods
+clankie model subscriptions list
+clankie model subscriptions start openai-codex --method browser --model "openai-codex/<catalog-model>"
+clankie model subscriptions status <session-uuid>
+clankie model subscriptions cancel <session-uuid>
+```
+
+The CLI requires the service's operator credential and uses the configured
+control-plane URL. It returns typed JSON and never starts a second login after
+an uncertain response. Status and cancel must use the same initiating operator;
+operator access does not expose a paired device's login interaction. Open the
+pending interaction URL yourself and poll the original session. This does not
+restart Clankie or write a separate local model configuration. A completed job
+updates readiness for the console and every paired device.
+
+Keep pending URL/code output in the owner's terminal; do not copy it into
+logs or evidence. The service returns only fixed error codes, and the CLI
+also discards raw transport/response errors. Integration checks use the existing
+synthetic provider HTTP fixture; actual provider consent and pet UI are separate
+app verification.

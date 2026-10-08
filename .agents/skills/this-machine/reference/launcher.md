@@ -302,7 +302,12 @@ repeating the handoff preserves its active device ID. This is the service
 contract; signed app distribution and installer wiring remain separate work.
 For device setup, read `/v1/captain/readiness`; never create an app-owned setup
 flag. Subscription start/status/cancel routes are documented in
-`docs/model-keys.md` under the service root. Device API-key entry on a
+`docs/model-keys.md` under the service root. Headless operator access uses
+`clankie model subscriptions methods|list`, `start PROVIDER --method browser|device
+--model PROVIDER/MODEL`, and `status|cancel SESSION_UUID`. Poll the original job;
+never retry an uncertain start or copy a pending login URL/code into evidence.
+These commands use the running service, so completion updates shared readiness
+without a restart. Device API-key entry on a
 self-hosted Mac is refused when readiness passes; the terminal keeps owner key
 management. Claude subscription sign-in remains unsupported.
 

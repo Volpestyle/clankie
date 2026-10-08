@@ -1,3 +1,6 @@
+import { once } from "node:events";
+import { serve } from "@hono/node-server";
+import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -112,6 +115,7 @@ async function fixture(
     },
     subscriptionLogin: { browserPort: 0, fetchImpl: transport, timeoutMs: options.timeoutMs ?? 3000 },
   });
+  const operatorToken = "clankie_op_" + "a".repeat(43);
   const captain = createStubCaptain();
   if (options.operatorSeat) captain.operatorSeatReady = () => true;
   const app = await createClankieApp({
@@ -121,8 +125,41 @@ async function fixture(
     eventLogPath: join(dir, "events.jsonl"),
     deviceSessionKey: randomBytes(32),
     authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+      ["Bearer owner", `Bearer ${operatorToken}`].includes(request.headers.get("authorization") ?? "")
+        ? { operatorId: "owner" }
+        : undefined,
   });
+  const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: 0 }) as Server;
+  if (!server.listening) await once(server, "listening");
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  cleanup.push(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  const cli = async (args: string[], fetchImpl: typeof fetch = fetch) => {
+    let stdout = "",
+      stderr = "";
+    const exit = await runHeadlessCaptainCommand(["model", "subscriptions", ...args], {
+      repoRoot: dir,
+      host: origin,
+      fetchImpl,
+      env: { ...env, CLANKIE_OPERATOR_TOKEN: operatorToken },
+      stdout: {
+        write: (text: string) => {
+          stdout += text;
+        },
+      },
+      stderr: {
+        write: (text: string) => {
+          stderr += text;
+        },
+      },
+    });
+    return { exit, stdout, stderr, value: stdout ? JSON.parse(stdout) : undefined };
+  };
   const principals = new Map<string, string>();
   const sessions: { sessionId: string; principal: string }[] = [];
   cleanup.push(async () => {
@@ -141,7 +178,7 @@ async function fixture(
     }
   });
   const call = (path: string, body?: unknown, token = "owner") =>
-    app.app.request(path, {
+    fetch(origin + path, {
       method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -202,6 +239,7 @@ async function fixture(
   };
   return {
     dir,
+    cli,
     env,
     store,
     models,
@@ -449,4 +487,72 @@ describe("device subscription setup", () => {
       true,
     );
   });
+});
+
+it("headless subscription jobs use the same service broker and readiness as paired devices", async () => {
+  const f = await fixture();
+  const device = await f.pair();
+  const methods = await f.cli(["methods"]);
+  expect(methods.exit).toBe(0);
+  expect(methods.value.methods.map((method: { providerId: string }) => method.providerId)).not.toContain(
+    "anthropic",
+  );
+  const login = await f.cli([
+    "start",
+    "openai-codex",
+    "--method",
+    "browser",
+    "--model",
+    f.model("openai-codex"),
+  ]);
+  expect(login.exit).toBe(0);
+  const interaction = await f.wait(login.value.sessionId, "owner", (value) => value.ok && Boolean(value.url));
+  if (!interaction.ok || !interaction.url) throw Error("missing interaction");
+  expect(await f.status(login.value.sessionId, device.deviceToken)).toEqual({
+    ok: false,
+    error: "session_not_found",
+  });
+  await f.callback(interaction.url);
+  await f.wait(login.value.sessionId, "owner", (value) => value.ok && value.state === "complete");
+  const status = await f.cli(["status", login.value.sessionId]);
+  expect(status).toMatchObject({ exit: 0, value: { ok: true, state: "complete" } });
+  expect(status.value).not.toHaveProperty("url");
+  expect(status.value).not.toHaveProperty("userCode");
+  expect((await f.cli(["list"])).value.subscriptions).toContainEqual({
+    providerId: "openai-codex",
+    name: expect.any(String),
+  });
+  for (const token of ["owner", device.deviceToken])
+    expect((await (await f.call("/v1/captain/readiness", undefined, token)).json()).ready).toBe(true);
+  for (const output of [login.stdout, status.stdout, await readFile(join(f.dir, "events.jsonl"), "utf8")]) {
+    expect(output).not.toContain("synthetic-token-marker");
+    expect(output).not.toContain("synthetic-refresh-marker");
+  }
+});
+
+it("headless cancellation and lost start replies never retry or expose provider errors", async () => {
+  const f = await fixture();
+  const args = ["start", "openai-codex", "--method", "browser", "--model", f.model("openai-codex")];
+  const login = await f.cli(args);
+  const cancelled = await f.cli(["cancel", login.value.sessionId]);
+  expect(cancelled).toMatchObject({ exit: 0, value: { state: "cancelled" } });
+  expect(cancelled.value).not.toHaveProperty("url");
+  let starts = 0;
+  const lost = await f.cli(args, async (input, init) => {
+    starts++;
+    await fetch(input, init);
+    throw Error("synthetic-token-marker lost provider reply");
+  });
+  expect(starts).toBe(1);
+  expect(lost).toMatchObject({ exit: 1, value: { ok: false, error: "unavailable" } });
+  expect(lost.stdout + lost.stderr).not.toContain("synthetic-token-marker");
+  expect((await f.cli(args)).value).toEqual({ ok: false, error: "busy" });
+  expect(await f.store.get("openai-codex")).toBeUndefined();
+  expect((await f.cli(["status", "not-a-uuid"])).exit).toBe(1);
+  const malformed = await f.cli(["methods"], async (input, init) => {
+    const response = await fetch(input, init);
+    return Response.json({ ...(await response.json()), access_token: "synthetic-token-marker" });
+  });
+  expect(malformed).toMatchObject({ exit: 1, value: { ok: false, error: "unavailable" } });
+  expect(malformed.stdout + malformed.stderr).not.toContain("synthetic-token-marker");
 });

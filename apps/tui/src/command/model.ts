@@ -12,9 +12,13 @@ import {
 import { runModelCompactionCommand, type ModelCompactionStatus } from "./model-compaction.ts";
 import { runModelRoutingCommand, type ModelRoutingStatus } from "./model-routing.ts";
 
+import { runModelSubscriptionsCommand, type ModelSubscriptionsCommandResult } from "./model-subscriptions.ts";
+import type { CredentialStore } from "@clankie/credential-broker";
+
 const MODEL_USAGE = [
   "Usage: clankie model [status]",
   "       clankie model refresh",
+  "       clankie model subscriptions [list|methods|start|status|cancel] …",
   "       clankie model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]",
   "       clankie model set providerId/modelId",
   "       clankie model routing [status|set|off|escalate|purpose|turn-limit] …",
@@ -25,6 +29,8 @@ export interface ModelCommandOptions {
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly fetchImpl?: typeof fetch;
+  readonly host?: string;
+  readonly operatorCredentialStore?: CredentialStore;
 }
 
 export interface ModelAddLocalInput {
@@ -36,6 +42,7 @@ export interface ModelAddLocalInput {
 }
 
 export type ModelCommandResult =
+  | ModelSubscriptionsCommandResult
   | ModelRoutingStatus
   | ModelCompactionStatus
   | {
@@ -102,7 +109,7 @@ export async function modelStatus(
 export async function modelDeclareLocal(
   input: Omit<ModelAddLocalInput, "models"> & { readonly models: readonly ProbedLocalModel[] },
   options: ModelCommandOptions = {},
-): Promise<Extract<ModelCommandResult, { readonly providerId: string }>> {
+): Promise<Extract<ModelCommandResult, { readonly providerId: string; readonly baseURL: string }>> {
   const config = await declareLocalProvider({
     providerId: input.providerId,
     baseURL: input.baseURL,
@@ -271,6 +278,7 @@ export async function runModelCommand(
     if (args.length !== 1) throw new Error(MODEL_USAGE);
     return await modelRefresh(options);
   }
+  if (subcommand === "subscriptions") return runModelSubscriptionsCommand(args.slice(1), options);
   if (subcommand === "routing") return await runModelRoutingCommand(args.slice(1), options);
   if (subcommand === "compaction") return await runModelCompactionCommand(args.slice(1), options);
   if (subcommand === "add-local") return await modelAddLocal(parseAddLocalArgs(args.slice(1)), options);

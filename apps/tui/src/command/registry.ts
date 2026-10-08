@@ -257,6 +257,10 @@ const HEADLESS_COMMAND_HELP = [
   { nouns: ["model"], lines: ["  model refresh            Refresh the available model catalog"] },
   {
     nouns: ["model"],
+    lines: ["  model subscriptions list|methods|start|status|cancel   Service-owned subscription sign-in"],
+  },
+  {
+    nouns: ["model"],
     lines: [
       "  model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]",
       "                           Declare an OpenAI-compatible local runtime (ds4, Ollama, LM Studio)",

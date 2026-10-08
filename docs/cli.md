@@ -1906,6 +1906,29 @@ LM Studio yourself; `clankie restart captain` only reloads Clankie's config.
 Select the captain. The ref splits on the **first** slash (model ids may
 contain slashes). JSON: `{ "ok": true, "model": "xai/grok-4.6", "restart": "clankie restart captain" }`.
 
+### `model subscriptions [list|methods|start|status|cancel]`
+
+Use the running local service's subscription sign-in jobs through the same API
+as paired devices. `list` reports existing sign-ins; `methods` reports the
+allowed providers and browser/device choices. Start requires a catalog model:
+
+```sh
+clankie model subscriptions methods
+clankie model subscriptions start openai-codex --method browser --model "openai-codex/<catalog-model>"
+clankie model subscriptions status <session-uuid>
+clankie model subscriptions cancel <session-uuid>
+```
+
+JSON includes `ok`; a job also includes its ID, expiry and state. A pending
+status can include a sensitive browser URL or device code: open it from the
+owner's terminal, never copy it into reports or logs. A completed job stores
+credentials in the service broker, selects the requested model and updates
+shared readiness without a restart. Only the initiating principal can read or
+cancel its job. Requests have a ten-second deadline and never retry an uncertain
+start. Provider/transport errors return fixed codes, without raw error text.
+Claude subscription sign-in remains unsupported. See [model keys](model-keys.md)
+for the API, hosted policy and first-run Mac key-entry guard.
+
 ### `model refresh`
 
 Refresh the available model catalog. Use this when a newly released model is
