@@ -1,5 +1,5 @@
-// Explicit native boundary check: CODEX_CATALOG_NATIVE_TEST=1. No model turns,
-// owner credentials, existing controllers, native pane input or service deploys.
+// Explicit native boundary check: CODEX_CATALOG_NATIVE_TEST=1. Real binary, offline model transport.
+// No owner credentials, existing controllers, native pane input or service deploys.
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -32,9 +32,17 @@ const names = [
 ];
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+function modelToolNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const tool = object(entry);
+    if (tool.type === "namespace") return modelToolNames(tool.tools);
+    return tool.type === "function" && typeof tool.name === "string" ? [tool.name.split("__").at(-1)!] : [];
+  });
+}
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-async function nativeFixture() {
+async function nativeFixture(options: { omitModelTools?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "native-catalog-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "worker-codex", "seat-native"),
@@ -53,11 +61,38 @@ async function nativeFixture() {
   let available = false,
     delayMs = 0,
     toolCalls = 0;
+  const modelRequests: Record<string, unknown>[] = [];
   const transports = new Set<StreamableHTTPServerTransport>();
   const sessions = new Map<string, StreamableHTTPServerTransport>();
   const servers = new Set<Server>();
   const http = createServer((request, response) => {
     void (async () => {
+      if (request.url === "/unused-model/responses") {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        modelRequests.push(JSON.parse(Buffer.concat(chunks).toString()));
+        const id = `owned-response-${modelRequests.length}`;
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        for (const event of [
+          { type: "response.created", response: { id } },
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "message",
+              role: "assistant",
+              id: `${id}-message`,
+              content: [{ type: "output_text", text: "Owned offline turn completed." }],
+            },
+          },
+          {
+            type: "response.completed",
+            response: { id, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } },
+          },
+        ])
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        response.end();
+        return;
+      }
       if (request.url !== "/v1/fleet/mcp") {
         if (request.url?.endsWith("/messages") && request.method === "POST") toolCalls++;
         response.writeHead(404).end("{}");
@@ -137,7 +172,7 @@ async function nativeFixture() {
   );
   await writeFile(
     configPath,
-    `model = "owned-model"\nmodel_provider = "owned"\n[mcp_servers.clankie]\ncommand = "clankie"\nargs = ["mcp", "--fleet"]\nenv_vars = ["CLANKIE_STATE", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"]\nenv = { CLANKIE_EXPECTED_TOOL_NAMES = '${JSON.stringify(names)}' }\nstartup_timeout_sec = 10\n[model_providers.owned]\nname = "Owned offline provider"\nbase_url = "http://127.0.0.1:${port}/unused-model"\nwire_api = "responses"\n`,
+    `model = "owned-model"\nmodel_provider = "owned"\n[mcp_servers.clankie]\ncommand = "clankie"\nargs = ["mcp", "--fleet"]\nenv_vars = ["CLANKIE_STATE", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"]\nenv = { CLANKIE_EXPECTED_TOOL_NAMES = '${JSON.stringify(names)}' }\nstartup_timeout_sec = 10\n${options.omitModelTools ? 'omit_tools_from = ["code_mode", "deferred", "direct"]\n' : ""}[model_providers.owned]\nname = "Owned offline provider"\nbase_url = "http://127.0.0.1:${port}/unused-model"\nwire_api = "responses"\n`,
     { mode: 0o600 },
   );
   const child = spawn("codex", ["app-server", "--listen", `unix://${socketPath}`], {
@@ -175,7 +210,14 @@ async function nativeFixture() {
   }
   if (!socket!) throw new Error(`Native socket unavailable: ${stderr}`);
   await chmod(socketPath, 0o600);
-  const client = new CodexAppServerClient(socket!, () => {}, 15_000);
+  const completedTurns = new Set<string>();
+  const client = new CodexAppServerClient(
+    socket!,
+    (event) => {
+      if (event.method === "turn/completed") completedTurns.add(String(object(event.params.turn).id));
+    },
+    15_000,
+  );
   cleanups.push(() => client.close());
   await client.initialize(true);
   const request = (method: string, params: Record<string, unknown>) => client.request(method, params);
@@ -218,6 +260,17 @@ async function nativeFixture() {
     root,
     threadId,
     request,
+    async turn() {
+      const started = object(
+        await request("turn/start", {
+          threadId,
+          input: [{ type: "text", text: "Owned offline catalog turn.", text_elements: [] }],
+        }),
+      );
+      const turnId = String(object(started.turn).id);
+      await expect.poll(() => completedTurns.has(turnId), { timeout: 15_000 }).toBe(true);
+      return modelRequests.at(-1)!;
+    },
     coordinator,
     toolCalls: () => toolCalls,
     available(value: boolean, delay = 0) {
@@ -241,6 +294,7 @@ nativeIt(
       requireConnected: true,
     });
     expect(before.error).toContain("disconnected or rejected");
+    expect(modelToolNames((await f.turn()).tools)).not.toContain("clankie_tools");
     expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([
       {
         outcome: "failed",
@@ -261,7 +315,11 @@ nativeIt(
     f.available(true, 2_500);
     const repaired = await next.refresh({ revision: "deploy-one" });
     expect(repaired, JSON.stringify(repaired)).toMatchObject([
-      { outcome: "refreshed", threadId: f.threadId, catalogs: [{ threadId: f.threadId, tools: names }] },
+      {
+        outcome: "catalog-refreshed",
+        threadId: f.threadId,
+        catalogs: [{ threadId: f.threadId, tools: names }],
+      },
     ]);
     const confirmed = JSON.parse(await readFile(journal, "utf8"));
     expect(confirmed.envRevision).not.toBe(failed.envRevision);
@@ -269,6 +327,33 @@ nativeIt(
     expect(
       JSON.parse(await readFile(`${journal}.${failed.envRevision}.confirmed-failure.json`, "utf8")),
     ).toEqual(failed);
+    expect(await f.request("thread/loaded/list", {})).toEqual({ data: [f.threadId], nextCursor: null });
+    const nextTurn = await f.turn();
+    expect(modelToolNames(nextTurn.tools)).toEqual(expect.arrayContaining(names));
+    expect(f.toolCalls()).toBe(0);
+  },
+  60_000,
+);
+
+nativeIt(
+  "does not certify model delivery from a connected catalog whose tools Codex omits from the next turn",
+  async () => {
+    const f = await nativeFixture({ omitModelTools: true });
+    f.available(true);
+    const refreshed = await f.coordinator().refresh({ revision: "catalog-only" });
+    const catalog = await codexToolCatalogReport({
+      sessionId: f.threadId,
+      request: f.request,
+      requireConnected: true,
+    });
+    expect(catalog.error).toBeUndefined();
+    expect(catalog.tools).toEqual(names);
+    const nextTurn = await f.turn();
+    expect(modelToolNames(nextTurn.tools)).not.toContain("clankie_tools");
+    expect(modelToolNames(nextTurn.tools)).not.toContain("message_clankie");
+    expect(refreshed).toMatchObject([
+      { outcome: "catalog-refreshed", reason: "original_codex_next_turn_tools_unverified" },
+    ]);
     expect(await f.request("thread/loaded/list", {})).toEqual({ data: [f.threadId], nextCursor: null });
     expect(f.toolCalls()).toBe(0);
   },

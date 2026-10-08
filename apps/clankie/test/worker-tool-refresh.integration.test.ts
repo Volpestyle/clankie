@@ -40,9 +40,10 @@ it("operator CLI crosses real HTTP/schema boundaries and revocation prevents dis
           {
             paneId: input.paneId ?? "w1:p1",
             revision: "fixture-service",
-            outcome: "skipped-busy",
-            reason: "original_native_session_busy",
-            detail: "Loaded native threads: original root and active child",
+            outcome: "catalog-refreshed",
+            reason: "original_codex_next_turn_tools_unverified",
+            detail:
+              "Original catalog connected; next model turn and new report require a native worker check",
           },
         ],
       };
@@ -60,9 +61,9 @@ it("operator CLI crosses real HTTP/schema boundaries and revocation prevents dis
       {
         paneId: "w1:p1",
         revision: "fixture-service",
-        outcome: "skipped-busy",
-        reason: "original_native_session_busy",
-        detail: "Loaded native threads: original root and active child",
+        outcome: "catalog-refreshed",
+        reason: "original_codex_next_turn_tools_unverified",
+        detail: "Original catalog connected; next model turn and new report require a native worker check",
       },
     ]);
     expect(await readFile(journal, "utf8")).toBe('{"paneId":"w1:p1"}\n');

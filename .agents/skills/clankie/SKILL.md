@@ -147,8 +147,11 @@ seconds. Deploys schedule local managed Codex refresh through its original
 controller, private config version and loaded root/descendant inventory, at
 idle. The operator can request one or all with `refresh_worker_tools`,
 `clankie harness refresh-tools [--pane PANE]`, or TUI `/refresh-tools`.
-Read each `refreshed`, `skipped-busy`, or `failed` result. Local Codex result
-`detail` shows the native runtime failure or loaded scope.
+Read each `refreshed`, `catalog-refreshed`, `skipped-busy`, or `failed` result.
+Local Codex `catalog-refreshed` proves the original connected MCP catalog,
+not next-turn model exposure or report delivery. Check `clankie_tools` in that
+same thread and send one new `message_clankie` report; keep its stored receipt.
+Result `detail` shows the native runtime failure, loaded scope, or verification gap.
 A confirmed reload that reached failed MCP startup can receive a fresh guarded
 transport revision on its original thread. Unknown catalog evidence and lost
 mutation acknowledgments still require read-only reconciliation; never replay

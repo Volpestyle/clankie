@@ -1,7 +1,7 @@
 # ADR 0235: Worker catalog refresh keeps the original controller
 
-Status: Proposed implementation; VUH-1739 acceptance remains incomplete
-(2026-10-06).
+Status: Accepted; local original-thread catalog and stored-report proof recorded
+2026-10-08. Model exposure must be checked separately from catalog refresh.
 
 ## Decision
 
@@ -18,6 +18,17 @@ defers it. Only native `config/read` provenance for the private copied worker
 configuration authorizes one `config/value/write` with `expectedVersion`, then
 one `config/mcpServer/reload`. Complete filtered native catalogs must contain
 the current service projection, including enabled peer tools.
+
+Codex 0.161 rebuilds its tool router from the current MCP binding at each
+sampling step; tools are not fixed for the thread's lifetime. A filtered native
+catalog still does not prove model-facing declarations: native exposure policy
+can omit tools while status remains connected and complete. Local refresh
+therefore returns `catalog-refreshed` with
+`original_codex_next_turn_tools_unverified`, including on reconciliation of a
+previously verified attempt. Its durable `verified` flag means catalog verified
+only. The command never starts a proof turn or dispatches a surrogate report.
+Same-thread `clankie_tools` and one new stored `message_clankie` receipt establish
+the live delivery proof. See the [real app-server and live evidence](../testing/2026-10-08-codex-next-turn-tools/README.md).
 
 The durable attempt records dispatch before mutation. Lost acknowledgments are
 never retried. A confirmed reload with lost verification can be observed again.

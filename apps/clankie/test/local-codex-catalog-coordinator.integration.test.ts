@@ -328,16 +328,18 @@ it("refreshes original root and descendants once, retains native config provenan
   const f = await fixture(),
     first = f.coordinator();
   expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([
-    { outcome: "refreshed", catalogs: [{ threadId: "child" }, { threadId: "root" }] },
+    { outcome: "catalog-refreshed", catalogs: [{ threadId: "child" }, { threadId: "root" }] },
   ]);
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
   expect(readLocalCodexRecords(f.recordsPath)[0]!.catalogConfig?.filePath).toBe(f.configPath);
-  expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "catalog-refreshed" }]);
   expect(f.count("config/value/write")).toBe(1);
   first.close();
   f.restartRegistry();
-  expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([
+    { outcome: "catalog-refreshed" },
+  ]);
   expect(f.count("config/value/write")).toBe(2);
   expect(f.count("config/mcpServer/reload")).toBe(2);
   expect(
@@ -360,7 +362,7 @@ it("recovers a legacy registration only from the original native endpoint and lo
   await f.makeLegacy();
   expect(readLocalCodexRecords(f.recordsPath)[0]).not.toHaveProperty("threadId");
   expect(await f.coordinator().refresh({ revision: "deploy-one" })).toMatchObject([
-    { threadId: "root", outcome: "refreshed" },
+    { threadId: "root", outcome: "catalog-refreshed" },
   ]);
   expect(readLocalCodexRecords(f.recordsPath)[0]).toMatchObject({
     threadId: "root",
@@ -407,7 +409,7 @@ it("accepts the exact trusted projection when fleet tools are intentionally disa
   f.setTools(["message_clankie"]);
   expect(
     await f.coordinator(false, () => ["message_clankie"]).refresh({ revision: "deploy-one" }),
-  ).toMatchObject([{ outcome: "refreshed" }]);
+  ).toMatchObject([{ outcome: "catalog-refreshed" }]);
 });
 
 it("rejects an extra revoked peer tool on any original descendant", async () => {
@@ -485,7 +487,7 @@ it("fences a descendant's active-to-idle activity after a confirmed write before
 it("allows read-only reconciliation under a held crash claim without deleting it or replaying native effects", async () => {
   const f = await fixture(),
     first = f.coordinator();
-  expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "catalog-refreshed" }]);
   first.close();
   const directory = join(f.root, "codex-catalog-refresh"),
     journal = join(directory, (await readdir(directory)).find((name) => name.endsWith(".json"))!),
@@ -512,7 +514,7 @@ it("isolates a malformed signal from another registered controller in the same w
   const first = await fixture(),
     second = await fixture(43, "w1:p2"),
     seed = first.coordinator();
-  expect(await seed.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await seed.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "catalog-refreshed" }]);
   seed.close();
   const firstRecord = readLocalCodexRecords(first.recordsPath)[0]!,
     secondRecord = { ...readLocalCodexRecords(second.recordsPath)[0]!, binding: first.binding };
@@ -535,7 +537,9 @@ it("isolates a malformed signal from another registered controller in the same w
       candidate.pid === 42 ? first.observeIdentity(candidate) : second.observeIdentity(candidate),
   });
   cleanups.push(() => coordinator.close());
-  await until(() => results.some((result) => result.paneId === "w1:p2" && result.outcome === "refreshed"));
+  await until(() =>
+    results.some((result) => result.paneId === "w1:p2" && result.outcome === "catalog-refreshed"),
+  );
   coordinator.close();
   expect(results).toContainEqual(
     expect.objectContaining({ paneId: "w1:p1", reason: "invalid_codex_catalog_signal" }),
@@ -551,7 +555,7 @@ it("defers busy root or descendant and automatically refreshes when the original
   await until(() => f.results.some((result) => result.outcome === "skipped-busy"));
   expect(f.count("config/value/write")).toBe(0);
   f.setChildBusy(false);
-  await until(() => f.results.some((result) => result.outcome === "refreshed"));
+  await until(() => f.results.some((result) => result.outcome === "catalog-refreshed"));
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
@@ -564,7 +568,9 @@ it("waits after a confirmed write if a turn begins, then sends the first reload 
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(0);
   f.setBusy(false);
-  expect(await coordinator.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await coordinator.refresh({ revision: "deploy-one" })).toMatchObject([
+    { outcome: "catalog-refreshed" },
+  ]);
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
@@ -602,7 +608,9 @@ it("reconciles a confirmed reload through complete filtered catalogs without ano
     { outcome: "failed", reason: "original_codex_catalog_unverified" },
   ]);
   f.setCatalogReady(true);
-  expect(await coordinator.reconcile({ revision: "deploy-one" })).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await coordinator.reconcile({ revision: "deploy-one" })).toMatchObject([
+    { outcome: "catalog-refreshed" },
+  ]);
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
@@ -698,10 +706,10 @@ it("serializes journal reconciliation and native effects across independent coor
   ]);
   second.close();
   release!();
-  expect(await pending).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await pending).toMatchObject([{ outcome: "catalog-refreshed" }]);
   first.close();
   expect(await f.coordinator().reconcile({ revision: "deploy-one" })).toMatchObject([
-    { outcome: "refreshed" },
+    { outcome: "catalog-refreshed" },
   ]);
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
@@ -735,7 +743,7 @@ it("retains a queued operator's authority while a service refresh is already in 
   ).toMatchObject([{ outcome: "skipped-busy" }]);
   current = false;
   release!();
-  expect(await pending).toMatchObject([{ outcome: "refreshed" }]);
+  expect(await pending).toMatchObject([{ outcome: "catalog-refreshed" }]);
   await until(() =>
     f.results.some(
       (result) =>
@@ -814,7 +822,7 @@ it("never resumes an operator's confirmed write through an unguarded service lan
       current: () => true,
       beforeDispatch: async () => {},
     }),
-  ).toMatchObject([{ outcome: "refreshed" }]);
+  ).toMatchObject([{ outcome: "catalog-refreshed" }]);
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });

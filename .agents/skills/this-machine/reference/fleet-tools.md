@@ -39,9 +39,12 @@ The worker bridge gives its first `tools/list` up to 20 seconds to retry with
 backoff while native pane membership settles, including any stalled HTTP lookup.
 Fleet admission and the connected-tools setting must permit discovery; otherwise
 only `message_clankie` remains. Later lists and every call still check current
-access. Codex currently keeps its initial catalog despite
-`notifications/tools/list_changed`; after an access change, an owner may need to
-reconnect MCP or restart that native pane. New calls from a displayed stale
+access. Codex 0.161's managed original-controller refresh reloads MCP and rebuilds
+tools at the next sampling step. A `catalog-refreshed` result proves only the
+connected native catalog; model exposure and report delivery remain unverified.
+Check `clankie_tools` in that same worker thread and store one distinct
+`message_clankie` report before claiming end-to-end recovery. Native catalog
+reads cannot override owner tool-exposure settings. New calls from a displayed stale
 catalog are checked live. Native identity checks for worker messages, peer delivery and project assignments
 remain separate from connected-tool admission. Connected tools require the linked
 fleet and verified account, not a project or cwd proof (ADR 0217). Inspect the

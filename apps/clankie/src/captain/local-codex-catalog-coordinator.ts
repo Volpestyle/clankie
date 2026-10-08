@@ -31,7 +31,7 @@ export interface LocalCodexCatalogResult {
   paneId: string;
   threadId?: string;
   revision: string;
-  outcome: "refreshed" | "skipped-busy" | "failed";
+  outcome: "catalog-refreshed" | "skipped-busy" | "failed";
   reason?: string;
   detail?: string;
   catalogs?: { threadId: string; tools: string[] }[];
@@ -69,6 +69,7 @@ interface Attempt {
   writeConfirmed: boolean;
   reloadDispatched: boolean;
   reloadConfirmed: boolean;
+  /** Original-thread MCP catalog only; never proof of next-step model exposure. */
   verified: boolean;
   authorityKind: "service" | "operator";
 }
@@ -734,6 +735,21 @@ export function createLocalCodexCatalogCoordinator(input: {
         requireProof(observed.verified, "original_codex_catalog_unverified");
         return observed.inventory;
       };
+      const catalogRefreshed = (
+        inventory: { threadId: string; tools: string[] }[],
+        confirmedRevision = revision,
+      ): LocalCodexCatalogResult => ({
+        ...result,
+        revision: confirmedRevision,
+        outcome: "catalog-refreshed",
+        reason: "original_codex_next_turn_tools_unverified",
+        detail:
+          `Original MCP catalog refreshed; next model turn tools and new report delivery require a native worker check. ${result.detail ?? ""}`.slice(
+            0,
+            2048,
+          ),
+        catalogs: inventory,
+      });
       if (claimHeld) {
         const observed = await catalogs();
         await guard(config.expectedVersion, config.value);
@@ -763,13 +779,7 @@ export function createLocalCodexCatalogCoordinator(input: {
           if (observed.verified) {
             prior.verified = true;
             await writeAttempt(path, prior);
-            if (prior.revision === revision)
-              return {
-                ...result,
-                revision: prior.revision,
-                outcome: "refreshed",
-                catalogs: observed.inventory,
-              };
+            if (prior.revision === revision) return catalogRefreshed(observed.inventory, prior.revision);
           } else {
             requireProof(!reconcileOnly && observed.failedStartup, "original_codex_catalog_unverified");
             requireProof(
@@ -815,7 +825,7 @@ export function createLocalCodexCatalogCoordinator(input: {
       ) {
         const observed = await observeCatalogs();
         await guard(prior.writtenVersion!, prior.envRevision);
-        if (observed.verified) return { ...result, outcome: "refreshed", catalogs: observed.inventory };
+        if (observed.verified) return catalogRefreshed(observed.inventory);
         requireProof(!reconcileOnly && observed.failedStartup, "original_codex_catalog_unverified");
         requireProof(
           prior.authorityKind !== "operator" || authorityKind === "operator",
@@ -934,7 +944,7 @@ export function createLocalCodexCatalogCoordinator(input: {
       await guard(attempt.writtenVersion!, attempt.envRevision);
       attempt.verified = true;
       await writeAttempt(path, attempt);
-      return { ...result, revision: attempt.revision, outcome: "refreshed", catalogs: inventory };
+      return catalogRefreshed(inventory, attempt.revision);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "original_codex_refresh_unconfirmed";
       return {
@@ -975,7 +985,7 @@ export function createLocalCodexCatalogCoordinator(input: {
       try {
         const result = await pending;
         results.push(result);
-        if (result.outcome === "refreshed") completed.set(hash(candidate), result.revision);
+        if (result.outcome === "catalog-refreshed") completed.set(hash(candidate), result.revision);
         const queued = manualPending.get(candidate.pid);
         if (!reconcileOnly && (queued === undefined || queued === options)) {
           if (result.outcome === "skipped-busy" && (options.beforeDispatch || options.current))

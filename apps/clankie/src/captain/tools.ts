@@ -208,7 +208,7 @@ export function captainTools(
             name: "refresh_worker_tools",
             label: "Refresh running worker tools",
             description:
-              "Refresh Clankie's MCP tools through original running native controllers, keeping the same threads and context. Omit paneId for all observed fleet workers. Returns per-seat refreshed, skipped-busy (deferred to idle), or failed with a reason. Preserves original receipts and never replays a report, starts a turn, or restarts a harness. Unsupported original controllers fail explicitly.",
+              "Refresh Clankie's MCP tools through original running native controllers, keeping the same threads and context. Omit paneId for all observed fleet workers. Returns per-seat refreshed, catalog-refreshed (local Codex catalog connected; next-turn model tools and report delivery still unverified), skipped-busy (deferred to idle), or failed with a reason. For catalog-refreshed, have the same worker call clankie_tools and send one new message_clankie report. Preserves original receipts and never replays a report, starts a turn, or restarts a harness. Unsupported original controllers fail explicitly.",
             parameters: Type.Object({ paneId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }),
             executionMode: "sequential",
             execute: async (_id, input) => {

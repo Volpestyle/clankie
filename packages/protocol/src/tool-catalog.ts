@@ -70,7 +70,7 @@ export const FleetWorkerCatalogRefreshResultSchema = z
             seatId: z.string().min(1).max(256).optional(),
             threadId: z.string().min(1).max(256).optional(),
             revision: z.string().min(1).max(256),
-            outcome: z.enum(["refreshed", "skipped-busy", "failed"]),
+            outcome: z.enum(["refreshed", "catalog-refreshed", "skipped-busy", "failed"]),
             reason: z.string().max(1024).optional(),
             detail: z.string().max(2048).optional(),
           })

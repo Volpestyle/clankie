@@ -516,8 +516,16 @@ place; the failed generation is retained. No turn or uncertain report is replaye
 `clankie harness refresh-tools [--pane PANE]`, TUI `/refresh-tools [--pane PANE]`,
 and the operator tool `refresh_worker_tools` request one or all observed seats.
 The authenticated API is `POST /v1/fleet/worker-tool-refresh` with `{}` or
-`{"paneId":"PANE"}`. Each result is `refreshed`, `skipped-busy`, or `failed`
-with a reason. Local Codex results also include bounded `detail` evidence:
+`{"paneId":"PANE"}`. Each result is `refreshed`, `catalog-refreshed`,
+`skipped-busy`, or `failed` with a reason. Local Codex returns
+`catalog-refreshed` with `original_codex_next_turn_tools_unverified`: the original
+thread's MCP catalog is connected and complete, but the next model turn's tool
+exposure and report delivery have not been tested by this command. Codex 0.161
+rebuilds tools at each sampling step; owner exposure settings can still omit
+tools from the model while the native catalog lists them. Verify in the same
+worker thread with `clankie_tools`, then one distinct `message_clankie` report;
+retain the stored receipt. Refresh never manufactures that turn or report.
+Local Codex results also include bounded `detail` evidence:
 native catalog status/errors or the loaded thread inventory behind a scope
 refusal. Busy requests remain pending under their original authority.
 Roster `workerTools` and `/doctor` show observed/expected plugin versions and

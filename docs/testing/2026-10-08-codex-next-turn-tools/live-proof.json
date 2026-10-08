@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "subject": {
+    "paneId": "w47:p4",
+    "seatId": "term_65d4c24e348a2a7",
+    "threadId": "01a119a3-1214-7241-a1cb-d6b60eede318",
+    "codexVersion": "0.161.0",
+    "deployedRevision": "a1eef8f4"
+  },
+  "nativeModelToolCount": 6,
+  "nativeModelTools": [
+    "mcp__clankie__clankie_call",
+    "mcp__clankie__clankie_tools",
+    "mcp__clankie__list_fleet_seats",
+    "mcp__clankie__message_clankie",
+    "mcp__clankie__message_clankie_status",
+    "mcp__clankie__message_peer"
+  ],
+  "clankieTools": {
+    "query": "linear get issue",
+    "isError": false,
+    "returned": true
+  },
+  "newMessage": {
+    "tag": "VUH1739_LIVE_PROOF",
+    "schemaVersion": 1,
+    "received": true,
+    "deliveryStage": "stored",
+    "deliveryId": "7e0fcc39-94e9-43ef-aac7-5512bfc7fb32",
+    "binding": "96e15a71d30d68c4a5f51623d5829ac3bf38932ae5fff45efee6cd15700c87ff",
+    "fingerprint": "ec0ecdc6e94391a2aa5b8184f8c2ed4eba200529920250e68595f97e4f660ad1"
+  },
+  "scope": "One new native report, no replay, no new thread/controller, no restart/deploy. Previous turn lacked tools; this turn's first enumeration found six. Exact exposure transition time and cause were not observed."
+}

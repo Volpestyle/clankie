@@ -22,6 +22,11 @@ the VUH-1739 acceptance. No new native exit capability is required.
    prove that no config/reload mutation or receipt GET occurs before the
    active call settles. After idle, verify the same root/descendants and new
    accepted catalog without a TUI restart, fork, resumed thread or lost turn.
+   Local Codex returns `catalog-refreshed`: this inventory is not next-turn
+   model exposure proof. In the original worker's next turn, enumerate tools
+   (including Code Mode's `ALL_TOOLS` when applicable), call `clankie_tools`,
+   then retain the distinct stored report receipt in step 5. Missing model
+   tools remain a named gap even when the native inventory is connected.
 3. Deploy through `clankie update` with the original seats still present.
    Record the service boot change, private native config version, one revision
    write, one reload and complete filtered inventories. Repeat with unchanged

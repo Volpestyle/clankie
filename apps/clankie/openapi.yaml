@@ -2830,6 +2830,54 @@ paths:
         "401": { description: Owner authentication required }
         "403": { description: Caller is not the owner }
         "409": { description: Removal conflicts with current settings or authority }
+  /v1/fleet/worker-tool-refresh:
+    post:
+      tags: [Operator]
+      operationId: refreshWorkerTools
+      summary: Refresh worker catalogs through their original native controllers
+      description: Preserves original threads, receipts and controller identity. Never starts a proof turn, restarts a harness or replays a report. Local Codex catalog-refreshed means its MCP catalog is connected and complete; next-turn model tools and new report delivery remain unverified. Have that same worker call clankie_tools and send one new message_clankie report to prove delivery. Busy requests defer under their original authority; unsupported controllers refuse explicitly.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                paneId: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200":
+          description: Per-seat catalog evidence, deferral or refusal; catalog-refreshed is not end-to-end tool delivery proof
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [schemaVersion, revision, seats]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  revision: { type: string, minLength: 1, maxLength: 256 }
+                  seats:
+                    type: array
+                    maxItems: 256
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [paneId, revision, outcome]
+                      properties:
+                        paneId: { type: string, minLength: 1, maxLength: 256 }
+                        seatId: { type: string, minLength: 1, maxLength: 256 }
+                        threadId: { type: string, minLength: 1, maxLength: 256 }
+                        revision: { type: string, minLength: 1, maxLength: 256 }
+                        outcome: { type: string, enum: [refreshed, catalog-refreshed, skipped-busy, failed] }
+                        reason: { type: string, maxLength: 1024 }
+                        detail: { type: string, maxLength: 2048 }
+        "400": { description: Malformed request }
+        "403": { description: Operator authority required or revoked }
+        "409": { description: Original catalog refresh failed; inspect its retained evidence before retrying }
+        "413": { description: Request exceeds 1 KiB }
+        "503": { description: Original-controller catalog refresh unavailable }
   /v1/fleet/worker-tool-restart:
     post:
       tags: [Operator]

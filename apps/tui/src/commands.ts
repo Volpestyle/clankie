@@ -343,7 +343,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult(
           "/refresh-tools",
           JSON.stringify(result, null, 2),
-          result.seats.some((seat) => seat.outcome === "failed") ? "error" : "success",
+          result.seats.some((seat) => seat.outcome === "failed" || seat.outcome === "catalog-refreshed")
+            ? "error"
+            : "success",
         );
       } catch (error) {
         shell.insertCommandResult("/refresh-tools", String(error), "error");
