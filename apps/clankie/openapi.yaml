@@ -4293,6 +4293,43 @@ paths:
         "403":
           description: Peer messaging off or native sender proof unavailable
 
+  /v1/fleet/seats/{paneId}/messages/{id}/status:
+    get:
+      tags: [Captain]
+      operationId: getFleetSeatMessageStatus
+      summary: Read original sending seat's current durable delivery stage
+      description: Read-only; never resends, acknowledges a report or reconciles a send fence. Requires the original pane and native binding. Unknown status does not prove nothing was sent.
+      parameters:
+        - name: paneId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current ADR 0211 delivery stage
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [schemaVersion, deliveryId, deliveryStage]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  deliveryId: { type: string, format: uuid }
+                  deliveryStage:
+                    type: string
+                    enum: [stored, delivered, consumed, responded, unavailable, uncertain, expired, rejected]
+        "400":
+          description: Invalid delivery ID
+        "403":
+          description: Native sender proof unavailable or revoked
+        "404":
+          description: No retained receipt for this original sending seat
+
   /v1/fleet/seats/{paneId}/peer-messages:
     post:
       tags: [Captain]

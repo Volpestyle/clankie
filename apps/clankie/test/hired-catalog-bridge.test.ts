@@ -165,6 +165,7 @@ it("refreshes unchanged schemas after a runtime revision and retains both peer t
     expect(after.tools).toEqual(before.tools);
     expect(after.tools.map((row) => row.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
       "list_fleet_seats",
@@ -286,6 +287,7 @@ it("waits for an in-flight report before reconciling once or notifying the nativ
     expect(notifications).toBe(0);
     expect((await f.client.listTools()).tools.map((row) => row.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
     ]);
@@ -431,7 +433,7 @@ it("reports the catalog actually published to the native client rather than back
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(reports.at(-1)).toMatchObject({
       runtimeRevision: "before",
-      tools: ["message_clankie", "clankie_tools", "clankie_call"],
+      tools: ["message_clankie", "message_clankie_status", "clankie_tools", "clankie_call"],
     });
     await f.client.listTools();
     await observed("after");
@@ -452,6 +454,7 @@ it("adopts fleet membership after startup and emits a list-change notification i
     await notified;
     expect((await f.client.listTools()).tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
     ]);
@@ -482,6 +485,7 @@ it("requires all expected paginated tools before a native Connected surrogate ca
     admitted = true;
     expect((await pending).tools.map((t) => t.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
     ]);
@@ -494,6 +498,7 @@ it("requires all expected paginated tools before a native Connected surrogate ca
     admitted = false;
     expect((await f.client.listTools()).tools.map((t) => t.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
     ]);
@@ -555,6 +560,7 @@ it("strict client contract: fleet stdio tools/list includes mailbox, peers and c
     assertMcpToolsList(listed, "fleet stdio bridge");
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
       "list_fleet_seats",

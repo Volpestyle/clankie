@@ -12,7 +12,7 @@ import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { codexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
 
 const KEY = "mcp_servers.clankie.env.CLANKIE_CATALOG_REVISION";
-const REQUIRED_TOOLS = ["message_clankie", "clankie_tools", "clankie_call"];
+const REQUIRED_TOOLS = ["message_clankie", "message_clankie_status", "clankie_tools", "clankie_call"];
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

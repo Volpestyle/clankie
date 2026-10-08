@@ -1,6 +1,9 @@
+import { runAgentsCommand } from "../../tui/src/command/agents.ts";
+import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +16,7 @@ import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
-import { ConversationStore } from "../src/captain/conversations.ts";
+import { type ConversationRunner, ConversationStore } from "../src/captain/conversations.ts";
 import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
@@ -75,6 +78,7 @@ async function fixture(
   slowBinding = false,
   pane = "w1:p1",
   mailbox?: { status: number; error: string; ack?: boolean },
+  runner?: ConversationRunner,
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-bridge-health-"));
   const settings = new HeldSettings(join(root, "settings.json"));
@@ -85,9 +89,19 @@ async function fixture(
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
   const metrics = new FleetHealthMetrics();
-  const conversations = new ConversationStore(join(root, "conversations"), async () => {});
+  const conversations = new ConversationStore(join(root, "conversations"), runner ?? (async () => {}));
   const receiver = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
   let bindingSlow = slowBinding;
+  let binding = "a".repeat(64);
+  const receiptApp = await createClankieApp({
+    captain: createStubCaptain({
+      fleetSeatMessageBinding: async () => binding,
+      receiveFleetSeatMessage: async (sender, text, delivery) =>
+        receiver.accept(sender, delivery!, text, text),
+      fleetSeatMessageStatus: async (sender, id) => receiver.status(sender, binding, id),
+    }),
+    localFleet: { identity: () => identity() },
+  });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
@@ -142,14 +156,14 @@ async function fixture(
       if (path.endsWith("/messages")) {
         if (request.method === "POST") {
           messagePosts++;
-          const { text, delivery } = await request.json();
-          return Response.json(receiver.accept(pane, delivery, text, text));
+          return receiptApp.app.fetch(request);
         } else {
           bindingGets++;
           if (bindingSlow) await new Promise((resolve) => setTimeout(resolve, 750));
         }
-        return Response.json({ binding: "a".repeat(64) });
+        return receiptApp.app.fetch(request);
       }
+      if (path.includes("/messages/")) return receiptApp.app.fetch(request);
       return worker.handleLocalFleet(request, identity());
     },
   });
@@ -159,6 +173,7 @@ async function fixture(
   const url = `http://127.0.0.1:${address.port}/v1/fleet/mcp`;
   cleanup.push(async () => {
     settings.held?.released.release();
+    receiptApp.close();
     await worker.close();
     await host.close();
     await conversations.close();
@@ -218,6 +233,11 @@ async function fixture(
     });
   return {
     worker,
+    conversations,
+    receiver,
+    replaceBinding() {
+      binding = "b".repeat(64);
+    },
     root,
     pane,
     metrics,
@@ -245,7 +265,7 @@ async function fixture(
   };
 }
 
-async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = false) {
+async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = false, harness = "test") {
   const socket = join(f.root, "herdr.sock");
   await mkdir(join(f.root, ".clankie", "links"), { recursive: true });
   await writeFile(
@@ -266,7 +286,7 @@ async function startBridge(f: Awaited<ReturnType<typeof fixture>>, polling = fal
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : "test")},requestTimeoutMs:250});`,
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : harness)},requestTimeoutMs:250});`,
     ],
     { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: f.pane } },
   );
@@ -721,4 +741,110 @@ it.each([
   const f = await fixture(false, "w1:p1", refusal);
   await startBridge(f, true);
   await expect.poll(() => f.mailboxPolls(), { timeout: 4_000 }).toBeGreaterThanOrEqual(2);
+});
+
+it.each(["claude", "codex"])(
+  "lets a %s subprocess worker read its original report's consumed stage without resending or acknowledging it",
+  async (harness) => {
+    const deliver = gate();
+    const consume = gate();
+    const consumed = gate();
+    const finish = gate();
+    const f = await fixture(false, "w1:p1", undefined, async (_id, _message, _emit, context) => {
+      context!.deliveryReceipt!("stored");
+      await deliver.promise;
+      context!.deliveryReceipt!("delivered");
+      await consume.promise;
+      context!.deliveryReceipt!("consumed");
+      consumed.release();
+      await finish.promise;
+      context!.deliveryReceipt!("responded");
+    });
+    cleanup.push(async () => {
+      deliver.release();
+      consume.release();
+      finish.release();
+    });
+    const call = await startBridge(f, false, harness);
+    const tools = await call("tools/list", {});
+    expect(JSON.stringify(tools)).toContain("message_clankie_status");
+    const sent = await call("tools/call", {
+      name: "message_clankie",
+      arguments: { text: "Original worker report" },
+    });
+    const original = JSON.parse(sent.result!.content![0]!.text);
+    expect(original).toMatchObject({ received: true, deliveryStage: "stored" });
+    const lookup = () =>
+      call("tools/call", { name: "message_clankie_status", arguments: { deliveryId: original.deliveryId } });
+    expect(JSON.parse((await lookup()).result!.content![0]!.text).deliveryStage).toBe("stored");
+    deliver.release();
+    await expect
+      .poll(() => f.receiver.status(f.pane, "a".repeat(64), original.deliveryId)?.deliveryStage)
+      .toBe("delivered");
+    consume.release();
+    await consumed.promise;
+    const before = f.conversations.inboundAcceptance(original.deliveryId);
+    const fenceBefore = await readFile(join(f.root, "inbound.json"), "utf8");
+    const result = await lookup();
+    expect(JSON.parse(result.result!.content![0]!.text)).toEqual({
+      schemaVersion: 1,
+      deliveryId: original.deliveryId,
+      deliveryStage: "consumed",
+    });
+    expect(f.conversations.inboundAcceptance(original.deliveryId)).toEqual(before);
+    expect(await readFile(join(f.root, "inbound.json"), "utf8")).toBe(fenceBefore);
+    expect(f.conversations.inboundAcceptance(original.deliveryId)?.reportDelivery?.readAt).toBeUndefined();
+    expect(
+      await runAgentsCommand(["message-status", original.deliveryId], {
+        host: new URL(f.url).origin,
+        env: { HERDR_PANE_ID: f.pane, CLANKIE_OPERATOR_TOKEN: "isolated-fixture" },
+      }),
+    ).toEqual({ schemaVersion: 1, deliveryId: original.deliveryId, deliveryStage: "consumed" });
+    f.conversations.readInboundReports("global-default");
+    expect(f.conversations.acknowledgeInboundReports("global-default", [original.deliveryId])).toBe(true);
+    finish.release();
+    await expect
+      .poll(() => f.receiver.status(f.pane, "a".repeat(64), original.deliveryId)?.deliveryStage)
+      .toBe("responded");
+    expect(JSON.parse((await lookup()).result!.content![0]!.text).deliveryStage).toBe("responded");
+    expect(f.messagePosts()).toBe(1);
+    expect(f.receiver.status("another-pane", "a".repeat(64), original.deliveryId)).toBeUndefined();
+    f.replaceBinding();
+    const refused = await lookup();
+    expect(JSON.stringify(refused)).toContain("404");
+    expect(f.messagePosts()).toBe(1);
+  },
+);
+
+it("retains an expired stop stage and refuses unknown, malformed, other-pane and revoked status reads", async () => {
+  const hold = gate();
+  const f = await fixture(false, "w1:p1", undefined, async (_id, _message, _emit, context) => {
+    context!.deliveryReceipt!("expired");
+    await hold.promise;
+  });
+  cleanup.push(async () => hold.release());
+  const call = await startBridge(f);
+  const reply = await call("tools/call", {
+    name: "message_clankie",
+    arguments: { text: "Report with expired lead delivery" },
+  });
+  const original = JSON.parse(reply.result!.content![0]!.text);
+  const url = `${new URL(f.url).origin}/v1/fleet/seats/${encodeURIComponent(f.pane)}/messages/`;
+  await expect
+    .poll(() => f.receiver.status(f.pane, "a".repeat(64), original.deliveryId)?.deliveryStage)
+    .toBe("expired");
+  const status = await call("tools/call", {
+    name: "message_clankie_status",
+    arguments: { deliveryId: original.deliveryId },
+  });
+  expect(JSON.parse(status.result!.content![0]!.text).deliveryStage).toBe("expired");
+  expect((await fetch(`${url}${randomUUID()}/status`)).status).toBe(404);
+  expect((await fetch(`${url}bad/status`)).status).toBe(400);
+  expect(
+    (await fetch(`${url.replace(encodeURIComponent(f.pane), "another-pane")}${original.deliveryId}/status`))
+      .status,
+  ).toBe(403);
+  f.revoke();
+  expect((await fetch(`${url}${original.deliveryId}/status`)).status).toBe(403);
+  expect(f.messagePosts()).toBe(1);
 });

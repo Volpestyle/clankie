@@ -1,6 +1,7 @@
 import type {
   FleetSeatMessageDelivery,
   FleetSeatMessageReceipt,
+  FleetSeatMessageStatus,
   WorkerReportRouting,
 } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
@@ -50,6 +51,23 @@ export class InboundSeatReceipts {
     } catch {
       return true;
     }
+  }
+
+  /** Progress reads never reconcile fences, acknowledge reports, or enqueue work. */
+  public status(paneId: string, binding: string, deliveryId: string): FleetSeatMessageStatus | undefined {
+    const accepted = this.conversations.inboundAcceptance(deliveryId);
+    if (!accepted || accepted.paneId !== paneId || accepted.binding !== binding) return undefined;
+    const report = accepted.reportDelivery;
+    return {
+      schemaVersion: 1,
+      deliveryId,
+      deliveryStage:
+        report?.stage === "responded"
+          ? "responded"
+          : report?.state === "read"
+            ? "consumed"
+            : (report?.stage ?? (report?.state === "uncertain" ? "uncertain" : "stored")),
+    };
   }
 
   private abandoned(attempt: InboundAttempt): boolean {

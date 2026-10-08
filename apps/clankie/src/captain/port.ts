@@ -32,6 +32,7 @@ import type {
   FleetSeatHook,
   FleetSeatMessageDelivery,
   FleetSeatMessageReceipt,
+  FleetSeatMessageStatus,
   FleetPeerMessage,
   FleetPeerReceipt,
   FleetPeerSeats,
@@ -344,6 +345,7 @@ export interface CaptainPort {
    * holds no messageable agent.
    */
   fleetSeatMessageBinding(paneId: string): Promise<string | undefined>;
+  fleetSeatMessageStatus(paneId: string, deliveryId: string): Promise<FleetSeatMessageStatus | undefined>;
   reconcileFleetSeatMessage(
     paneId: string,
     delivery: FleetSeatMessageDelivery,
@@ -476,6 +478,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     toolCatalogHealth: async () => ({ schemaVersion: 1, seats: [] }),
     recordSeatHook: async () => false,
     fleetSeatMessageBinding: async () => undefined,
+    fleetSeatMessageStatus: async () => undefined,
     reconcileFleetSeatMessage: async (_pane, delivery, fingerprint) => ({
       schemaVersion: 1,
       received: false,

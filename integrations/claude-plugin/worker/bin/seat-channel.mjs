@@ -7,6 +7,7 @@ const PLUGIN_VERSION = JSON.parse(
   readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8"),
 ).version;
 import { createInboundSender } from "./inbound-receipt.mjs";
+import { MESSAGE_CLANKIE_STATUS_TOOL, readMessageStatus } from "./message-status.mjs";
 import {
   admissionRefusal,
   checkFleetMembership,
@@ -520,7 +521,14 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     return tools;
   };
   const advertised = () =>
-    link ? [MESSAGE_TOOL, ...(verifiedTools ?? []), ...(verifiedPeers ? PEER_TOOLS : [])] : [];
+    link
+      ? [
+          MESSAGE_TOOL,
+          MESSAGE_CLANKIE_STATUS_TOOL,
+          ...(verifiedTools ?? []),
+          ...(verifiedPeers ? PEER_TOOLS : []),
+        ]
+      : [];
   let reportObservation;
   let toolObservation = { status: "missing", reason: "Catalog not observed" };
   const report = (status, reason = "", tools = publishedCatalog ?? []) => {
@@ -802,6 +810,33 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     }
   }
 
+  const inboundRequest = async (suffix, init) => {
+    if (membershipStopped) return refusedMembershipResponse();
+    try {
+      const deadline = AbortSignal.timeout(Math.min(20_000, requestTimeoutMs));
+      return await observeMembership(
+        await requestWithAdmissionRetry(
+          () =>
+            fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
+              ...init,
+              headers: { ...linkHeaders(), "content-type": "application/json" },
+              signal: deadline,
+            }),
+          deadline,
+        ),
+      );
+    } catch (error) {
+      // Preserve the refused-connection link refresh. Reads can follow the
+      // new port immediately; POST uncertainty is never retried here.
+      // Only the explicit admission refusal permits the retry above.
+      if (refused(error) && refresh() && !init)
+        return fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
+          headers: linkHeaders(),
+          signal: AbortSignal.timeout(Math.min(20_000, requestTimeoutMs)),
+        });
+      throw error;
+    }
+  };
   const sendInbound = createInboundSender({
     onObservation: (observation) => {
       reportObservation = observation;
@@ -809,33 +844,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     },
     directory: join(homedir(), ".clankie", "inbound-receipts"),
     scope: JSON.stringify([process.env.HERDR_SOCKET_PATH ?? "", paneId]),
-    request: async (suffix, init) => {
-      if (membershipStopped) return refusedMembershipResponse();
-      try {
-        const deadline = AbortSignal.timeout(Math.min(20_000, requestTimeoutMs));
-        return await observeMembership(
-          await requestWithAdmissionRetry(
-            () =>
-              fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
-                ...init,
-                headers: { ...linkHeaders(), "content-type": "application/json" },
-                signal: deadline,
-              }),
-            deadline,
-          ),
-        );
-      } catch (error) {
-        // Preserve the refused-connection link refresh. Reads can follow the
-        // new port immediately; POST uncertainty is never retried here.
-        // Only the explicit admission refusal permits the retry above.
-        if (refused(error) && refresh() && !init)
-          return fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
-            headers: linkHeaders(),
-            signal: AbortSignal.timeout(Math.min(20_000, requestTimeoutMs)),
-          });
-        throw error;
-      }
-    },
+    request: inboundRequest,
   });
   let refreshReconciliation;
   let refreshReconciliationRevision;
@@ -928,6 +937,14 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       return;
     }
     if (method === "tools/call") {
+      if (params?.name === MESSAGE_CLANKIE_STATUS_TOOL.name) {
+        try {
+          const status = await readMessageStatus(inboundRequest, params?.arguments?.deliveryId);
+          return send({ id, result: { content: [{ type: "text", text: JSON.stringify(status) }] } });
+        } catch (error) {
+          return send({ id, result: { isError: true, content: [{ type: "text", text: String(error) }] } });
+        }
+      }
       if (params?.name === MESSAGE_TOOL.name) {
         const result = await messageClankie(params?.arguments?.text);
         return send({

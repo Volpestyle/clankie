@@ -1537,7 +1537,11 @@ const workerMcp = new WorkerMcp({
 const workerCatalogCoordinator = createLocalCodexCatalogCoordinator({
   seats: localCodexSeats,
   revision: workerRuntimeRevision,
-  expectedTools: async () => ["message_clankie", ...(await workerMcp.expectedFleetToolNames())],
+  expectedTools: async () => [
+    "message_clankie",
+    "message_clankie_status",
+    ...(await workerMcp.expectedFleetToolNames()),
+  ],
 });
 const workerToolRefresh = createWorkerToolRefresh({
   captain,

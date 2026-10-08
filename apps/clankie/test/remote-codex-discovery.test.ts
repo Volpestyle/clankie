@@ -154,7 +154,9 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
                 {
                   name: "clankie",
                   runtimeStatus: catalogReceived ? "connected" : "starting",
-                  tools: catalogReceived ? { message_clankie: {}, clankie_tools: {}, clankie_call: {} } : {},
+                  tools: catalogReceived
+                    ? { message_clankie: {}, message_clankie_status: {}, clankie_tools: {}, clankie_call: {} }
+                    : {},
                 },
               ],
               nextCursor: null,
@@ -232,7 +234,14 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
     expect(await firstTurn).toMatchObject({ turnId: "first-turn" });
     expect(turns).toBe(1);
     expect(reply).toMatchObject({
-      result: { tools: [{ name: "message_clankie" }, { name: "clankie_tools" }, { name: "clankie_call" }] },
+      result: {
+        tools: [
+          { name: "message_clankie" },
+          { name: "message_clankie_status" },
+          { name: "clankie_tools" },
+          { name: "clankie_call" },
+        ],
+      },
     });
     expect(sessionStarts).toBe(1);
     expect(nativeNameSets).toBe(1);

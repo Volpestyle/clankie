@@ -128,3 +128,8 @@ is advisory: workers continue with their current lead and report specific
 missing-tool blockers there. Owner interactive panes stay silent. Catalog
 verification does not require a new hire; switching to the shared daemon can
 break pane identity. Embedded native catalog introspection remains a follow-up.
+
+Worker threads use the shared native worker bridge, including `message_clankie`
+and `message_clankie_status`. Keep the original delivery ID and check its current
+stage before retrying or doing dependent work. The status read never resends or
+acknowledges the report and refuses receipts belonging to another native seat.

@@ -420,7 +420,10 @@ describe("clankie mcp", () => {
     const client = new Client({ name: "harness", version: "1" }, { capabilities: {} });
     await client.connect(clientTransport);
     // Writing to Clankie needs no channel; only receiving his mail does.
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["message_clankie"]);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "message_clankie",
+      "message_clankie_status",
+    ]);
     await client.close();
     await expect(running).resolves.toBe(0);
     expect(polled).toBe(false);

@@ -16,6 +16,7 @@ import {
   FleetSeatHookSchema,
   FleetSeatMessageDeliverySchema,
   FleetSeatMessageReceiptSchema,
+  FleetSeatMessageStatusSchema,
   FleetSeatMessageSchema,
   WorkerReportBridgeStatusSchema,
   OPERATOR_SEAT_EVENTS_PATH,
@@ -381,6 +382,22 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     return binding
       ? context.json({ schemaVersion: 1, binding })
       : context.json({ error: "unknown_native_session", deliveryStage: "unavailable" }, 404);
+  });
+  ctx.app.get(`${FLEET_SEAT_MESSAGES_PATH}/:id/status`, async (context) => {
+    context.header("cache-control", "no-store");
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const id = z.string().uuid().safeParse(context.req.param("id"));
+    if (!id.success) return context.json({ error: "invalid_request" }, 400);
+    const identity =
+      ctx.dependencies.localFleet?.identity(context.req.raw) ??
+      ctx.dependencies.fleetLinks?.identity?.(context.req.raw);
+    const status = await ctx.dependencies.captain.fleetSeatMessageStatus(pane.paneId, id.data);
+    if (identity && !(await identity.validate()))
+      return context.json({ error: "native_session_required" }, 403);
+    return status
+      ? context.json(FleetSeatMessageStatusSchema.parse(status))
+      : context.json({ error: "unknown_message_receipt" }, 404);
   });
   ctx.app.get(`${FLEET_SEAT_MESSAGES_PATH}/:id`, async (context) => {
     const pane = await fleetSeatPane(context);

@@ -31,6 +31,7 @@
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
         "integrations/claude-plugin/worker/bin/inbound-receipt.d.mts",
+        "integrations/claude-plugin/worker/bin/message-status.d.mts",
         "integrations/claude-plugin/worker/bin/peer-receipt.d.mts",
         "integrations/claude-plugin/worker/bin/catalog-watch.d.mts",
         "integrations/claude-plugin/worker/bin/admission.d.mts",

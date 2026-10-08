@@ -77,7 +77,12 @@ async function fixture(pid = 42, paneId = "w1:p1") {
     onConfigRead: ((count: number) => Promise<void>) | undefined,
     requestedThreadId: string | undefined,
     loadedRoot = "root";
-  let tools: Record<string, unknown> = { message_clankie: {}, clankie_tools: {}, clankie_call: {} };
+  let tools: Record<string, unknown> = {
+    message_clankie: {},
+    message_clankie_status: {},
+    clankie_tools: {},
+    clankie_call: {},
+  };
   let childExtraTools: Record<string, unknown> = {};
   const version = async () =>
     createHash("sha256")
@@ -381,6 +386,7 @@ it("requires enabled fleet peer tools on the original root and every descendant"
     await f
       .coordinator(false, () => [
         "message_clankie",
+        "message_clankie_status",
         "clankie_tools",
         "clankie_call",
         "list_fleet_seats",

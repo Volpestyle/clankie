@@ -4071,7 +4071,7 @@ No project grant, native session or workspace proof is needed for these tools.
 Projects retain roles, caps, hiring and tracker binding.
 
 The connected-tool service lists `clankie_tools` and `clankie_call`; the shared
-worker bridge adds `message_clankie` and, for a proven native sender while peer
+worker bridge adds `message_clankie`, `message_clankie_status`, and, for a proven native sender while peer
 messages are on, `list_fleet_seats` and `message_peer`. Search connected tools
 with `{query}` for at most 20 names/descriptions,
 or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
@@ -4082,6 +4082,19 @@ choose the destination. Worker reports fall back to `global-default` when that
 conversation has been removed; a retained room with revoked grants is refused.
 Local and fleet-qualified remote workers follow the same persisted ownership
 proof and delivery receipts.
+Keep the original `message_clankie` receipt's `deliveryId`. The read-only
+`message_clankie_status` tool (Claude and Codex), or
+`clankie agents message-status DELIVERY_ID` in the sending native pane, returns
+`{schemaVersion: 1, deliveryId, deliveryStage}`. The service verifies the sending
+pane and its original native binding, so replacement seats cannot read old
+receipts. The API is `GET /v1/fleet/seats/{paneId}/messages/{id}/status`.
+It reads durable ADR 0211 progress (`stored`, `delivered`, `consumed`, `responded`
+and stop stages such as `expired`), without resending, acknowledging a report,
+or reconciling a send fence. Check it before retrying or starting dependent work.
+Consumption does not prove task completion. Unknown receipts return 404 and do
+not prove nothing was sent; preserve and reconcile an uncertain original with
+`message_clankie`.
+
 Worker output remains in the owning conversation independently of a worker pane.
 `clankie agents reports --conversation ID [--limit N]` (or `worker_reports`)
 returns the oldest unread reports with their original delivery IDs and exact text.

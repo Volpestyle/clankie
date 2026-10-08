@@ -165,7 +165,7 @@ it runs the native seat mailbox or fleet link, with no coordinator runtime.
   marketplace holding only the worker, installs it disabled, and approves its
   channel in that machine's managed policy.
 
-In a herdr pane the server also offers one tool, `message_clankie`: any agent
+In a herdr pane the server also offers `message_clankie`: any agent
 there, hired or not, can write to Clankie first. He receives it as that agent's
 output, never as the owner's instruction, and answers with `message_seat`;
 with a live channel the answer arrives immediately. A hand-started session with
@@ -398,3 +398,10 @@ questions use the everyday gate and network tools use the outward gate.
 Native deny and managed rules keep precedence. Owner-authored native custom
 rules continue to live in Claude's own settings; category presets do not create
 a separate rule store or bypass the harness's security policy.
+
+The Claude and Codex worker bridges also expose `message_clankie_status` for a
+returned delivery ID. This reads current delivery progress for the original
+sending seat without resending or marking the report read. Check before retrying
+or doing dependent work; an unknown status is not proof that nothing was sent.
+`clankie agents message-status DELIVERY_ID` provides the same read in your native
+pane.

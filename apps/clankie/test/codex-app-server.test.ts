@@ -434,7 +434,15 @@ describe("trusted native seat policy", () => {
       },
       undefined,
       {
-        result: { data: [{ name: "clankie", runtimeStatus: "connected", tools: { message_clankie: {} } }] },
+        result: {
+          data: [
+            {
+              name: "clankie",
+              runtimeStatus: "connected",
+              tools: { message_clankie: {}, message_clankie_status: {} },
+            },
+          ],
+        },
         read: () => {},
       },
     );
@@ -463,7 +471,7 @@ describe("trusted native seat policy", () => {
             {
               name: "clankie",
               runtimeStatus: "connected",
-              tools: { message_clankie: {}, linear_get_issue: {} },
+              tools: { message_clankie: {}, message_clankie_status: {}, linear_get_issue: {} },
             },
           ],
         },

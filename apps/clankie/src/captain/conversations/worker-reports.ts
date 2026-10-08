@@ -179,14 +179,16 @@ export function recordInboundReportDelivery(
   const meta = [...ctx["metas"].values()].find((entry) => entry.inboundAcceptances?.[deliveryId]);
   const receipt = meta?.inboundAcceptances?.[deliveryId];
   if (!meta || !receipt) return false;
-  if (receipt.reportDelivery?.state === "read") return true;
+  if (receipt.reportDelivery?.state === "read" && stage !== "responded") return true;
   const before = receipt.reportDelivery;
   const state =
-    stage === "unavailable" || stage === "rejected"
-      ? "pending"
-      : stage === "uncertain" || stage === "expired"
-        ? "uncertain"
-        : "delivered";
+    before?.state === "read"
+      ? "read"
+      : stage === "unavailable" || stage === "rejected"
+        ? "pending"
+        : stage === "uncertain" || stage === "expired"
+          ? "uncertain"
+          : "delivered";
   receipt.reportDelivery = {
     ...before,
     state,

@@ -23,7 +23,13 @@ Start with the route your session actually exposes. Native `clankie` MCP tools
 are the worker path: use their current schemas, not another account's similarly
 named connector. `message_clankie` reaches him as agent output. Send a concrete
 question or useful result when the assignment calls for it; it does not become
-an owner instruction.
+an owner instruction. Keep the returned `deliveryId`: `message_clankie_status`
+reads its current delivery stage for your original native seat. Use it before
+retrying or doing dependent work. It never resends or acknowledges the report;
+`consumed` means delivery consumption, not task completion. Unknown status does
+not prove nothing was sent. Reconcile an uncertain original through
+`message_clankie` rather than starting another send. The CLI equivalent in your
+native pane is `clankie agents message-status DELIVERY_ID`.
 
 Ask your lead with `message_clankie`. Your harness's own ask-the-user prompt
 reaches the lead only on a managed seat that routes it; otherwise it waits

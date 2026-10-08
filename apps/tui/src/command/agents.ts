@@ -1,3 +1,4 @@
+import { readMessageStatus } from "../../../../integrations/claude-plugin/worker/bin/message-status.mjs";
 import { runProjectRoleCommand } from "./project-role.ts";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
@@ -10,6 +11,7 @@ import {
   type OperatorAgentRole,
   OperatorConversationServiceRequestSchema,
   WorkerReportPageSchema,
+  fleetSeatMessagesPath,
 } from "@clankie/protocol";
 import {
   createCaptainOperatorConversationClient,
@@ -21,6 +23,7 @@ import { text } from "node:stream/consumers";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
+  "       clankie agents message-status DELIVERY_ID (current native seat)\n" +
   "       clankie agents readopt SEAT --conversation ID\n" +
   "       clankie agents reports --conversation ID [--limit N]\n" +
   "       clankie agents reports ack DELIVERY_ID... --conversation ID\n" +
@@ -87,6 +90,29 @@ export async function runAgentsCommand(
     stdin?: Parameters<typeof text>[0];
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "message-status") {
+    if (args.length !== 2) throw new Error(AGENTS_USAGE);
+    const env = options.env ?? process.env;
+    const pane = env.HERDR_PANE_ID?.trim();
+    if (!pane) throw new Error("Message status needs your native HERDR_PANE_ID.");
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+    });
+    if (!credential) throw new Error("Message status needs the operator credential. Run clankie doctor.");
+    return readMessageStatus(
+      (suffix) =>
+        (options.fetchImpl ?? fetch)(
+          new URL(`${fleetSeatMessagesPath(pane)}${suffix}`, commandHost(options)),
+          {
+            headers: { authorization: `Bearer ${credential.token}` },
+            redirect: "error",
+            signal: AbortSignal.timeout(20_000),
+          },
+        ),
+      args[1],
+    );
+  }
   if (args[0] === "efficiency" || args[0] === "tidy-worktrees") {
     const jsonInput = args.includes("--json-stdin");
     if (args.filter((arg) => arg === "--json-stdin").length > 1) throw new Error(AGENTS_USAGE);

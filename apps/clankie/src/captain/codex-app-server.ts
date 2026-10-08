@@ -1012,7 +1012,7 @@ export async function startCodexAppServerSeat(options: {
     };
     if (options.resumeThreadId) await subscribe();
     let catalogReady = !server.waitForClankieCatalog;
-    let expectedTools: readonly string[] = ["message_clankie"];
+    let expectedTools: readonly string[] = ["message_clankie", "message_clankie_status"];
     const checkTools = async () => {
       if (!options.onCatalog) return;
       const deadline = Date.now() + 20_000;
@@ -1262,7 +1262,7 @@ export async function startCodexAppServerSeat(options: {
         };
       },
       expectTools(names) {
-        expectedTools = [...new Set(["message_clankie", ...names])];
+        expectedTools = [...new Set(["message_clankie", "message_clankie_status", ...names])];
         catalogReady = !server.waitForClankieCatalog;
       },
       threadId,

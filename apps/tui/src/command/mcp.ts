@@ -8,6 +8,10 @@ import {
   requestWithAdmissionRetry,
 } from "../../../../integrations/claude-plugin/worker/bin/admission.mjs";
 import { createInboundSender } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
+import {
+  MESSAGE_CLANKIE_STATUS_TOOL,
+  readMessageStatus,
+} from "../../../../integrations/claude-plugin/worker/bin/message-status.mjs";
 /**
  * `clankie mcp --lane operator` and `clankie mcp --seat` — stdio MCP for a
  * seated harness ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
@@ -972,6 +976,7 @@ export function createFleetSeatBridge(
     boolean | { received: boolean; deliveryStage: "stored" | "unavailable" | "rejected" | "uncertain" }
   >,
   durable = false,
+  status?: (deliveryId: unknown) => Promise<unknown>,
 ): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
     { name: FLEET_SEAT_MCP_SERVER, version: "0.3.0" },
@@ -984,11 +989,22 @@ export function createFleetSeatBridge(
     },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: send === undefined ? [] : [MESSAGE_CLANKIE_TOOL],
+    tools: send === undefined ? [] : [MESSAGE_CLANKIE_TOOL, ...(status ? [MESSAGE_CLANKIE_STATUS_TOOL] : [])],
   }));
   let uncertain = false;
   if (send !== undefined)
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      if (request.params.name === MESSAGE_CLANKIE_STATUS_TOOL.name && status) {
+        try {
+          const receipt = await status(request.params.arguments?.deliveryId);
+          return { content: [{ type: "text", text: JSON.stringify(receipt) }] };
+        } catch (error) {
+          return {
+            content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+            isError: true,
+          };
+        }
+      }
       if (request.params.name !== MESSAGE_CLANKIE_TOOL.name)
         return { content: [{ type: "text", text: `Unknown tool ${request.params.name}` }], isError: true };
       const text = String((request.params.arguments as { text?: unknown } | undefined)?.text ?? "").trim();
@@ -1089,6 +1105,26 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   const env = options.env ?? process.env;
   const stderr = options.stderr ?? process.stderr;
   const paneId = env.HERDR_PANE_ID?.trim() ?? "";
+  const inboundRequest = async (
+    suffix: string,
+    init?: { method: string; body: string; redirect?: "error" },
+  ) => {
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (credential === undefined) throw new Error("No operator credential");
+    const deadline = AbortSignal.timeout(20_000);
+    return requestWithAdmissionRetry(
+      () =>
+        fetch(new URL(`${fleetSeatMessagesPath(paneId)}${suffix}`, commandHost({ ...options, env })), {
+          ...init,
+          headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+          signal: deadline,
+        }),
+      deadline,
+    );
+  };
   const sendInbound = createInboundSender({
     directory: join(env.HOME ?? homedir(), ".clankie", "inbound-receipts"),
     scope: JSON.stringify([env.HERDR_SOCKET_PATH ?? "", paneId]),
@@ -1106,25 +1142,13 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
         signal: AbortSignal.timeout(2_000),
       });
     },
-    request: async (suffix, init) => {
-      const credential = await resolveOperatorCredential({
-        env,
-        ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-      });
-      if (credential === undefined) throw new Error("No operator credential");
-      const deadline = AbortSignal.timeout(20_000);
-      return requestWithAdmissionRetry(
-        () =>
-          fetch(new URL(`${fleetSeatMessagesPath(paneId)}${suffix}`, commandHost({ ...options, env })), {
-            ...init,
-            headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-            signal: deadline,
-          }),
-        deadline,
-      );
-    },
+    request: inboundRequest,
   });
-  const server = createFleetSeatBridge(paneId.length === 0 ? undefined : sendInbound, true);
+  const server = createFleetSeatBridge(
+    paneId.length === 0 ? undefined : sendInbound,
+    true,
+    paneId.length === 0 ? undefined : (id) => readMessageStatus(inboundRequest, id),
+  );
   const transport = options.transport ?? new StdioServerTransport();
   const closing = new AbortController();
   const closed = new Promise<void>((resolve) => {

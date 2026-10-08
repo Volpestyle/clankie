@@ -383,6 +383,8 @@ export {
   type FleetSeatMessageDelivery,
   FleetSeatMessageReceiptSchema,
   type FleetSeatMessageReceipt,
+  FleetSeatMessageStatusSchema,
+  type FleetSeatMessageStatus,
   FleetSeatMessageSchema,
   type FleetSeatMessage,
   FLEET_SEAT_MESSAGES_PATH,

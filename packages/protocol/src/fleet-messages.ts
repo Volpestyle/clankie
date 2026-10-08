@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DeliveryStageSchema } from "./delivery.ts";
 import {
   OPERATOR_CONVERSATION_REF_MAX,
   OperatorConversationIdSchema,
@@ -132,6 +133,15 @@ export const FleetSeatMessageReceiptSchema = z
   })
   .strict();
 export type FleetSeatMessageReceipt = z.infer<typeof FleetSeatMessageReceiptSchema>;
+/** Read-only progress for the authenticated original sender; separate from admission reconciliation. */
+export const FleetSeatMessageStatusSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    deliveryId: z.string().uuid(),
+    deliveryStage: DeliveryStageSchema,
+  })
+  .strict();
+export type FleetSeatMessageStatus = z.infer<typeof FleetSeatMessageStatusSchema>;
 export const FleetSeatMessageSchema = z
   .object({
     schemaVersion: z.literal(1),

@@ -2501,6 +2501,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       report.bridge === "worker"
         ? [
             "message_clankie",
+            "message_clankie_status",
             ...workerTools,
             ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
           ]
@@ -2565,6 +2566,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const currentSettings = await settings();
       const worker = [
         "message_clankie",
+        "message_clankie_status",
         ...((await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? []),
         ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
       ];
@@ -4762,6 +4764,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     async fleetSeatMessageBinding(paneId) {
       const agent = await herdrRunner.get(paneId).catch(() => undefined);
       return inboundBinding(agent);
+    },
+
+    async fleetSeatMessageStatus(paneId, deliveryId) {
+      const agent = await herdrRunner.get(paneId).catch(() => undefined);
+      const binding = inboundBinding(agent);
+      if (!agent || !binding) return undefined;
+      const status = inboundReceipts.status(agent.paneId, binding, deliveryId);
+      const current = await herdrRunner.get(paneId).catch(() => undefined);
+      return inboundBinding(current) === binding ? status : undefined;
     },
 
     async reconcileFleetSeatMessage(paneId, delivery, fingerprint) {
