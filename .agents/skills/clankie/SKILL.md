@@ -145,9 +145,10 @@ authority. Known allocations use the ordinary recovery disposition instead.
 The bridge observes schemas and authenticated runtime revisions every five
 seconds. Deploys schedule local managed Codex refresh through its original
 controller, private config version and loaded root/descendant inventory, at
-idle. The operator can request one or all with `refresh_worker_tools`,
+idle. The operator can request one or its own led/hired seats with `refresh_worker_tools`,
 `clankie harness refresh-tools [--pane PANE]`, or TUI `/refresh-tools`.
-Read each `refreshed`, `catalog-refreshed`, `skipped-busy`, or `failed` result.
+No pane selects only the calling conversation's led/hired seats, including remote seats. Other panes return `skipped-not-owned` and require an explicit pane through the authenticated owner API/CLI. Ownership is rechecked before deferred effects.
+Read each `refreshed`, `catalog-refreshed`, `skipped-busy`, `skipped-not-owned`, or `failed` result.
 Local Codex `catalog-refreshed` proves the original connected MCP catalog,
 not next-turn model exposure or report delivery. Check `clankie_tools` in that
 same thread and send one new `message_clankie` report; keep its stored receipt.

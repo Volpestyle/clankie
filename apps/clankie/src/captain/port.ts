@@ -169,7 +169,14 @@ export interface CaptainPort {
     authority: import("../worker-tool-refresh.ts").WorkerCatalogRefreshAuthority,
   ): Promise<import("@clankie/protocol/tool-catalog").FleetWorkerToolRestartResult>;
   workerCatalogSeats?(): Promise<
-    readonly { paneId: string; seatId: string; harness: string; sessionId?: string; status?: string }[]
+    readonly {
+      paneId: string;
+      seatId: string;
+      harness: string;
+      sessionId?: string;
+      status?: string;
+      ownerConversationId?: string;
+    }[]
   >;
   refreshNativeWorkerCatalog?(
     paneId: string,

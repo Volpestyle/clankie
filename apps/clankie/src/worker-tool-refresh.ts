@@ -9,6 +9,11 @@ import { splitFleetQualified } from "./herdr-fleet.ts";
 export interface WorkerCatalogRefreshAuthority {
   guard(): Promise<void>;
   current(): boolean;
+  /** Host attribution; never read from the refresh request body. */
+  conversationId?: string;
+  /** Set only by the authenticated owner API. Effective only with an explicit pane. */
+  ownerAuthorized?: boolean;
+  explicitPaneId?: string;
 }
 export type RefreshWorkerCatalogs = (
   input: { paneId?: string },
@@ -17,7 +22,7 @@ export type RefreshWorkerCatalogs = (
 
 /** Coordinates only original native controllers. A missing controller fails visibly. */
 export function createWorkerToolRefresh(input: {
-  captain: CaptainPort;
+  captain: Pick<CaptainPort, "workerCatalogSeats" | "refreshNativeWorkerCatalog" | "toolCatalogHealth">;
   local: ReturnType<typeof createLocalCodexCatalogCoordinator>;
   remote: RemoteCodexSeats;
   workerMcp: WorkerMcp;
@@ -48,6 +53,19 @@ export function createWorkerToolRefresh(input: {
     if (stopped) throw new Error("worker_catalog_refresh_closed");
     if (authority?.current() === false) throw new Error("worker_catalog_refresh_authority_changed");
   };
+  const owned = (seat: Seat, authority?: WorkerCatalogRefreshAuthority) =>
+    authority === undefined ||
+    (authority.conversationId !== undefined && seat.ownerConversationId === authority.conversationId) ||
+    (authority.ownerAuthorized === true && authority.explicitPaneId === seat.paneId);
+  const notOwned = (seat: Seat, target: string): Result => ({
+    paneId: seat.paneId,
+    seatId: seat.seatId,
+    revision: target,
+    outcome: "skipped-not-owned",
+    reason: "worker_catalog_refresh_not_owned",
+    detail:
+      "This conversation does not lead or hire this seat. An authenticated owner must select its explicit paneId.",
+  });
   const run = async (
     seat: Seat,
     target: string,
@@ -56,9 +74,17 @@ export function createWorkerToolRefresh(input: {
     const base = { paneId: seat.paneId, seatId: seat.seatId, revision: target };
     try {
       await guard(authority);
-      const fresh = await input.captain.workerCatalogSeats?.();
-      if (!fresh?.some((row) => key(row, target) === key(seat, target)))
-        return { ...base, outcome: "failed", reason: "original_native_session_changed" };
+      const fresh = (await input.captain.workerCatalogSeats?.()) ?? [];
+      const original = fresh.find((row) => key(row, target) === key(seat, target));
+      if (!original) return { ...base, outcome: "failed", reason: "original_native_session_changed" };
+      if (!owned(original, authority)) return notOwned(seat, target);
+      const dispatchGuard = async () => {
+        await guard(authority);
+        const current = (await input.captain.workerCatalogSeats?.())?.find((row) => key(row) === key(seat));
+        if (!current || !owned(current, authority))
+          throw new Error("worker_catalog_refresh_ownership_changed");
+        await guard(authority);
+      };
       if (seat.harness === "codex") {
         const qualified = splitFleetQualified(seat.paneId);
         const results = qualified
@@ -66,9 +92,7 @@ export function createWorkerToolRefresh(input: {
           : await input.local.refresh({
               paneId: seat.paneId,
               revision: target,
-              ...(authority
-                ? { beforeDispatch: () => guard(authority), current: () => authority.current() }
-                : {}),
+              ...(authority ? { beforeDispatch: dispatchGuard, current: () => authority.current() } : {}),
             });
         const result = results.find((row) => row.paneId === seat.paneId);
         if (result && result.revision !== target)
@@ -95,7 +119,7 @@ export function createWorkerToolRefresh(input: {
       if (seat.harness === "opencode") {
         const result = await input.captain.refreshNativeWorkerCatalog?.(seat.paneId, {
           revision: target,
-          beforeDispatch: () => guard(authority),
+          beforeDispatch: dispatchGuard,
         });
         if (result?.outcome !== "refreshed")
           return {
@@ -135,7 +159,7 @@ export function createWorkerToolRefresh(input: {
         };
       }
       if (!held || held.revision !== target || !held.signaled) {
-        await guard(authority);
+        await dispatchGuard();
         input.workerMcp.requestCatalogRefresh(fleet, pane, target);
         pending.set(key(seat, target), {
           seat,
@@ -195,6 +219,11 @@ export function createWorkerToolRefresh(input: {
     authority?: WorkerCatalogRefreshAuthority,
   ): Promise<FleetWorkerCatalogRefreshResult> => {
     const serviceRevision = revision;
+    if (authority) {
+      authority = { ...authority };
+      if (selection.paneId === undefined) delete authority.explicitPaneId;
+      else authority.explicitPaneId = selection.paneId;
+    }
     await guard(authority);
     const roster = await input.captain.workerCatalogSeats?.();
     if (!roster) throw new Error("worker_catalog_roster_unavailable");
@@ -204,8 +233,13 @@ export function createWorkerToolRefresh(input: {
     const results: Result[] = [];
     // Avoid hundreds of simultaneous native-controller probes under fleet load.
     for (const seat of seats) {
+      if (!owned(seat, authority)) {
+        results.push(notOwned(seat, target));
+        continue;
+      }
       const result = await run(seat, target, authority);
       results.push(result);
+      if (result.outcome === "skipped-not-owned") continue;
       if (result.outcome !== "skipped-busy") {
         complete.set(key(seat, target), serviceRevision);
         if (pending.get(key(seat, target))?.revision === target) pending.delete(key(seat, target));
@@ -243,6 +277,8 @@ export function createWorkerToolRefresh(input: {
         }
       }
       for (const seat of roster) {
+        // Deployment refresh covers Clankie-led seats, never unclaimed owner panes.
+        if (seat.ownerConversationId === undefined) continue;
         if (
           complete.get(key(seat, revision)) === revision ||
           [...pending.values()].some((row) => row.seat.paneId === seat.paneId)
@@ -260,7 +296,10 @@ export function createWorkerToolRefresh(input: {
   const timer = setInterval(() => void tick(), input.intervalMs ?? 5_000);
   timer.unref();
   return {
-    refresh: ((selection, authority) => perform(selection, randomUUID(), authority)) as RefreshWorkerCatalogs,
+    refresh: (async (selection, authority) => {
+      if (!authority) throw new Error("worker_catalog_refresh_authority_required");
+      return perform(selection, randomUUID(), authority);
+    }) as RefreshWorkerCatalogs,
     expectRevision(value: string) {
       revision = value;
       input.workerMcp.expectRuntimeRevision(value);

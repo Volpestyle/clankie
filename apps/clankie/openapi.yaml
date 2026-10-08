@@ -2868,7 +2868,7 @@ paths:
       tags: [Operator]
       operationId: refreshWorkerTools
       summary: Refresh worker catalogs through their original native controllers
-      description: Preserves original threads, receipts and controller identity. Never starts a proof turn, restarts a harness or replays a report. Local Codex catalog-refreshed means its MCP catalog is connected and complete; next-turn model tools and new report delivery remain unverified. Have that same worker call clankie_tools and send one new message_clankie report to prove delivery. Busy requests defer under their original authority; unsupported controllers refuse explicitly.
+      description: Without paneId, selects only seats led or hired by the default owner conversation and lists others as skipped-not-owned. Cross-conversation refresh requires explicit paneId and owner authentication. Preserves original threads, receipts and controller identity. Never starts a proof turn, restarts a harness or replays a report. Local Codex catalog-refreshed means its MCP catalog is connected and complete; next-turn model tools and new report delivery remain unverified. Have that same worker call clankie_tools and send one new message_clankie report to prove delivery. Busy requests defer under their original authority; unsupported controllers refuse explicitly.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -2903,7 +2903,11 @@ paths:
                         seatId: { type: string, minLength: 1, maxLength: 256 }
                         threadId: { type: string, minLength: 1, maxLength: 256 }
                         revision: { type: string, minLength: 1, maxLength: 256 }
-                        outcome: { type: string, enum: [refreshed, catalog-refreshed, skipped-busy, failed] }
+                        outcome:
+                          {
+                            type: string,
+                            enum: [refreshed, catalog-refreshed, skipped-busy, skipped-not-owned, failed],
+                          }
                         reason: { type: string, maxLength: 1024 }
                         detail: { type: string, maxLength: 2048 }
         "400": { description: Malformed request }

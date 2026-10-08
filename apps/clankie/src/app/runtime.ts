@@ -899,6 +899,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       setup: { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },
       pluginVersionInstalled: dependencies.pluginVersionInstalled,
       refreshWorkerCatalogs: dependencies.refreshWorkerCatalogs,
+      refreshConversationId: () => dependencies.captain.seatContext()?.conversationId,
       restartWorkerTools: dependencies.captain.restartWorkerTools,
       holds: dependencies.deployHolds,
       authorize: async (request) => {

@@ -514,10 +514,10 @@ reports failed startup, a fresh guarded transport revision can repair it in
 place; the failed generation is retained. No turn or uncertain report is replayed.
 
 `clankie harness refresh-tools [--pane PANE]`, TUI `/refresh-tools [--pane PANE]`,
-and the operator tool `refresh_worker_tools` request one or all observed seats.
+and the operator tool `refresh_worker_tools` refresh the caller's led or hired seats when no pane is selected. Other seats return `skipped-not-owned`; they require an explicit pane and authenticated owner API/CLI authority. The owner CLI defaults to the default owner conversation.
 The authenticated API is `POST /v1/fleet/worker-tool-refresh` with `{}` or
 `{"paneId":"PANE"}`. Each result is `refreshed`, `catalog-refreshed`,
-`skipped-busy`, or `failed` with a reason. Local Codex returns
+`skipped-busy`, `skipped-not-owned`, or `failed` with a reason. Local Codex returns
 `catalog-refreshed` with `original_codex_next_turn_tools_unverified`: the original
 thread's MCP catalog is connected and complete, but the next model turn's tool
 exposure and report delivery have not been tested by this command. Codex 0.161

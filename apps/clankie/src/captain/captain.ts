@@ -5060,12 +5060,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           title: seat.title,
           ...(seat.session === undefined ? {} : { session: seat.session }),
         });
+        const owner = herdrWatches.seatClaim(observedAgent(seat))?.owner;
         return {
           paneId: seat.paneId,
           seatId: seat.seatId,
           harness: seat.harness,
           status: seat.status,
           ...(sessionId === undefined ? {} : { sessionId }),
+          ...(owner === undefined ? {} : { ownerConversationId: owner.conversationId }),
         };
       });
     },

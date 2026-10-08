@@ -46,6 +46,7 @@ export function createRuntimeUpdateRoutes(options: {
   readonly setup?: FleetSettingsContextDependencies | undefined;
   readonly pluginVersionInstalled?: ((version: string) => void) | undefined;
   readonly refreshWorkerCatalogs?: RefreshWorkerCatalogs | undefined;
+  readonly refreshConversationId?: (() => string | undefined) | undefined;
   readonly restartWorkerTools?: import("./captain/port.ts").CaptainPort["restartWorkerTools"] | undefined;
   readonly authorize: (request: Request) => Promise<UpdateAuthority | undefined>;
 }): Hono {
@@ -140,9 +141,10 @@ export function createRuntimeUpdateRoutes(options: {
     try {
       await authority.guard();
       if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+      const conversationId = options.refreshConversationId?.();
       const result = await options.refreshWorkerCatalogs(
         input.data.paneId === undefined ? {} : { paneId: input.data.paneId },
-        authority,
+        { ...authority, ownerAuthorized: true, ...(conversationId === undefined ? {} : { conversationId }) },
       );
       await authority.guard();
       if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
