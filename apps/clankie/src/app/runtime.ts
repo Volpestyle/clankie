@@ -1,3 +1,4 @@
+import { createMachineJoinRoutes } from "../machine-join-routes.ts";
 import { createPersonaVoiceSettingsRoutes } from "../persona-voice-settings-routes.ts";
 import { createMachineAccessRoutes } from "../machine-access-routes.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -1045,6 +1046,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         : { keepAwakeStatus: dependencies.keepAwakeStatus }),
     }),
   );
+  app.route("/", createMachineJoinRoutes(dependencies.machineJoins, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",

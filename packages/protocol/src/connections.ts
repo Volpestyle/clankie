@@ -18,9 +18,11 @@ export const MachineSessionSchema = z
 export const MachineSchema = z
   .object({
     id: connectionId,
-    transport: z.enum(["local", "ssh"]),
+    name: label.optional(),
+    platform: z.enum(["darwin", "win32", "linux"]).optional(),
+    transport: z.enum(["local", "ssh", "join"]),
     accessLevel: MachineAccessLevelSchema.optional(),
-    accessEnforcement: z.literal("service-preference").optional(),
+    accessEnforcement: z.enum(["service-preference", "joined-host"]).optional(),
     ssh: label.optional(),
     shell: z.enum(["posix", "powershell"]).optional(),
     configured: z.boolean(),

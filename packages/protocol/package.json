@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./machine-join": "./src/machine-join.ts",
     "./public-gateway": "./src/public-gateway.ts",
     "./gateway-encryption": "./src/gateway-encryption.ts",
     "./account-diagnostics": "./src/account-diagnostics.ts",

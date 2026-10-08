@@ -433,6 +433,7 @@ it("the worker bridge discovers peers, routes once outside MCP retries, and obse
     );
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
       "list_fleet_seats",
@@ -460,6 +461,7 @@ it("the worker bridge discovers peers, routes once outside MCP retries, and obse
     enabled = false;
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
+      "message_clankie_status",
       "clankie_tools",
       "clankie_call",
     ]);

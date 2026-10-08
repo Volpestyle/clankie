@@ -1,3 +1,4 @@
+import { MachineJoins } from "./machine-joins.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { requireMachineAccess } from "./machine-access.ts";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
@@ -808,6 +809,13 @@ const runtimes = new ExecutionConnections({
   sshControlDirectory: join(stateRoot, "ssh"),
   fleetObserver: (fleet) => proofFleetLinks?.observer(fleet),
 });
+const machineJoins = new MachineJoins({
+  settings: settingsStore,
+  secrets: operatorCredentialStore,
+  directory: join(stateRoot, "machine-joins"),
+  changed: () => runtimes.machines.invalidate(),
+});
+runtimes.machines.setJoinedProvider(machineJoins);
 const integrationDirectory = join(stateRoot, "integration");
 const deployHolds = new DeployHolds(integrationDirectory, (hold) =>
   deployHoldPresence(hold, async (fleetId) => {
@@ -1794,6 +1802,7 @@ const clankie = await createClankieApp({
   playSight,
   startPlayHost: () => playHost.start(playAbort.signal),
   rivals,
+  machineJoins,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
   autoUpdateManaged: hostedBody !== undefined,

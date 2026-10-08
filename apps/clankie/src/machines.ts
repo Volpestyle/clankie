@@ -4,7 +4,14 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { AgentHostConnectionSchema, type SettingsStore } from "@clankie/settings";
-import { MachineAccessChangeSchema, type Machine, type MachineInventory } from "@clankie/protocol";
+import {
+  MachineAccessChangeSchema,
+  machineAccessAllows,
+  type MachineAccessLevel,
+  type Machine,
+  type MachineInventory,
+} from "@clankie/protocol";
+import { JoinedMachineIdSchema } from "@clankie/protocol/machine-join";
 import { machineAccessLevel } from "./machine-access.ts";
 import { remoteProgramCommand } from "./herdr-fleet.ts";
 import { parseHerdrAgentList } from "./captain/herdr-census.ts";
@@ -65,7 +72,19 @@ type Probe = (
   args: readonly string[],
   env: NodeJS.ProcessEnv,
 ) => Promise<{ stdout: string }>;
+interface JoinedMachineProvider {
+  readonly count: number;
+  has(id: string): boolean;
+  accessCeiling(id: string): MachineAccessLevel | undefined;
+  inventory(): Promise<Machine[]>;
+  remove(id: string): Promise<void>;
+}
 export class Machines {
+  private joined: JoinedMachineProvider | undefined;
+  setJoinedProvider(provider: NonNullable<Machines["joined"]>) {
+    this.joined = provider;
+    this.invalidate();
+  }
   private active = 0;
   private readonly waiting: Array<() => void> = [];
   private cached: { expires: number; inventory: Promise<MachineInventory> } | undefined;
@@ -144,10 +163,14 @@ export class Machines {
 
   async add(raw: unknown) {
     const input = AgentHostConnectionSchema.parse(raw);
+    if (JoinedMachineIdSchema.safeParse(input.id).success)
+      throw new Error("Joined identities are reserved for approved registration");
     await this.options.settings.update((current) => {
       const existing = current.machines.find(
         (entry) => entry.id === input.id || entry.aliases.includes(input.id),
       );
+      if (!existing && this.joined && current.machines.length + this.joined.count >= 63)
+        throw new Error("Machine inventory capacity reached");
       if (existing && (existing.ssh !== input.ssh || existing.shell !== input.shell))
         throw new Error("Machine ID is pinned to another host; use a new ID");
       return {
@@ -165,6 +188,18 @@ export class Machines {
 
   async remove(id: string) {
     if (id === "local") throw new Error("The local machine cannot be removed");
+    if (this.joined?.has(id)) {
+      await this.joined.remove(id);
+      await this.options.settings.update((current) => ({
+        ...current,
+        machineAccess: Object.fromEntries(
+          Object.entries(current.machineAccess).filter(([key]) => key !== id),
+        ),
+      }));
+      this.invalidate();
+      await this.options.changed(id);
+      return;
+    }
     const removed: string[] = [];
     await this.options.settings.update((current) => {
       const reference = current.execution.connections.find((entry) => entry.id === id)?.machine;
@@ -210,13 +245,24 @@ export class Machines {
     let selected = id;
     await this.options.settings.update((current) => {
       const machine = current.machines.find((entry) => entry.id === id || entry.aliases.includes(id));
-      if (id !== "local" && !machine) throw new Error("Unknown machine");
-      selected = machine?.id ?? "local";
+      if (id !== "local" && !machine && !this.joined?.has(id)) throw new Error("Unknown machine");
+      selected = machine?.id ?? id;
+      if (
+        this.joined?.has(selected) &&
+        !machineAccessAllows(this.joined.accessCeiling(selected) ?? "portal", input.accessLevel)
+      )
+        throw Error("Rejoin with owner approval to raise this machine's access ceiling");
       return { ...current, machineAccess: { ...current.machineAccess, [selected]: input.accessLevel } };
     });
     this.cached = undefined;
     await this.options.changed(selected);
-    return { id: selected, ...input, accessEnforcement: "service-preference" as const };
+    return {
+      id: selected,
+      ...input,
+      accessEnforcement: this.joined?.has(selected)
+        ? ("joined-host" as const)
+        : ("service-preference" as const),
+    };
   }
 
   async list(refresh = false): Promise<MachineInventory> {
@@ -364,6 +410,13 @@ export class Machines {
       }),
     ]);
     clearTimeout(deadline);
-    return { observedAt: new Date().toISOString(), machines: structuredClone(configured) };
+    return {
+      observedAt: new Date().toISOString(),
+      machines: [
+        ...structuredClone(configured.filter((machine) => machine.configured)),
+        ...((await this.joined?.inventory()) ?? []),
+        ...structuredClone(configured.filter((machine) => !machine.configured)),
+      ].slice(0, 64),
+    };
   }
 }

@@ -1,3 +1,11 @@
+import {
+  MACHINE_JOIN_START_PATH,
+  MACHINE_JOIN_STATUS_PATH,
+  MACHINE_JOIN_APPROVE_PATH,
+  MACHINE_JOIN_CHALLENGE_PATH,
+  MACHINE_JOIN_CHANNEL_PATH,
+  MACHINE_JOIN_LEAVE_PATH,
+} from "./machine-join.ts";
 import { HOST_SETTINGS_PATH } from "./owner-settings.ts";
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
@@ -89,6 +97,14 @@ import {
 export { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  ...[
+    MACHINE_JOIN_START_PATH,
+    MACHINE_JOIN_STATUS_PATH,
+    MACHINE_JOIN_APPROVE_PATH,
+    MACHINE_JOIN_CHALLENGE_PATH,
+    MACHINE_JOIN_CHANNEL_PATH,
+    MACHINE_JOIN_LEAVE_PATH,
+  ].map((path) => ({ method: "POST" as const, path, target: "control" as const })),
   // Host-route traffic is behind the gateway encryption gate. The trusted
   // Activity media tunnel separately requires a fleet permit and live audience checks.
   { method: "POST", path: "/v1/activity/viewer", target: "control" },

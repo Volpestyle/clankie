@@ -1,3 +1,9 @@
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
+import { machineJoinLeaseAad, MachineJoinLeaseSchema } from "@clankie/protocol/machine-join";
+import { exchangeJoinedMachine } from "../../tui/bin/joined-machine-client.ts";
+import { getRequestListener } from "@hono/node-server";
+import { MachineJoins } from "../src/machine-joins.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -322,6 +328,107 @@ describe("public gateway Mac connector", () => {
     }
     expect(forwarded).toHaveLength(4);
   });
+  it("routes scoped outbound machine traffic to the real body while owner approval retains encryption", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-gateway-join-"));
+    roots.push(root);
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const joins = new MachineJoins({
+      settings,
+      secrets: new FileCredentialStore(join(root, "host-secrets.json")),
+      directory: join(root, "joins"),
+    });
+    const app = await createClankieApp({
+      captain: createStubCaptain(),
+      settings,
+      machineJoins: joins,
+      authenticateOperator: async () => undefined,
+    });
+    apps.push(app);
+    const control = await listen(createServer(getRequestListener(app.app.fetch)));
+    const gateway = await fakeGateway();
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      hostToken,
+      controlPlaneUrl: control,
+      relayUrl: control,
+      logger: { info: () => {}, warn: () => {} },
+    });
+    connectors.push(connector);
+    connector.start();
+    const connection = await gateway.nextConnection();
+    const exchange = async (path: string, body: unknown, token?: string) => {
+      connection.send({
+        schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+        kind: "request",
+        requestId: randomUUID(),
+        target: "control",
+        method: "POST",
+        path,
+        headers: [
+          { name: "content-type", value: "application/json" },
+          ...(token ? [{ name: "authorization", value: `Bearer ${token}` }] : []),
+        ],
+        bodyBase64: Buffer.from(JSON.stringify(body)).toString("base64"),
+      });
+      const frames = await connection.framesThrough("response_end");
+      const start = frames.find((frame) => frame.kind === "response_start");
+      const text = frames
+        .filter((frame): frame is PublicGatewayResponseChunkFrame => frame.kind === "response_chunk")
+        .map((frame) => Buffer.from(frame.bodyBase64, "base64").toString("utf8"))
+        .join("");
+      return { start, body: JSON.parse(text) };
+    };
+    const claimSecret = randomBytes(32).toString("base64url"),
+      code = randomBytes(32).toString("base64url");
+    const ticket = await exchange("/v1/machine-joins/start", {
+      name: "fixture host",
+      platform: "darwin",
+      directories: [],
+      claimSecret,
+      approvalHash: machineJoinHash(code),
+    });
+    expect(ticket.start).toMatchObject({ status: 200 });
+    expect(
+      (await exchange("/v1/machine-joins/status", { joinId: ticket.body.joinId }, claimSecret)).body,
+    ).toEqual({ state: "pending" });
+    expect(
+      (
+        await exchange(
+          "/v1/machine-joins/approve",
+          { code, accessLevel: "portal", directories: [] },
+          "fixture-operator",
+        )
+      ).start,
+    ).toMatchObject({ status: 426 });
+    await joins.approve({ code, accessLevel: "portal", directories: [] }, async () => {});
+    const approved = (await exchange("/v1/machine-joins/status", { joinId: ticket.body.joinId }, claimSecret))
+      .body;
+    const lease = MachineJoinLeaseSchema.parse(
+      JSON.parse(
+        openGatewayValue(machineJoinKey(code), approved.sealedLease, machineJoinLeaseAad(ticket.body.joinId)),
+      ),
+    );
+    expect(JSON.stringify(approved)).not.toContain(lease.token);
+    const credential = { origin: "https://fixture.invalid", lease, localDirectories: [] };
+    const carrier: typeof fetch = async (url, init) => {
+      expect(init?.headers).not.toHaveProperty("authorization");
+      const result = await exchange(new URL(String(url)).pathname, JSON.parse(String(init?.body)));
+      if (!result.start || result.start.kind !== "response_start") throw Error("Missing response metadata");
+      return Response.json(result.body, { status: result.start.status });
+    };
+    expect(await exchangeJoinedMachine(credential, { op: "poll", results: [] }, carrier)).toMatchObject({
+      policy: { machineId: lease.machineId, accessLevel: "portal" },
+      requests: [],
+    });
+    expect(await exchangeJoinedMachine(credential, { op: "leave", results: [] }, carrier)).toEqual({
+      ok: true,
+    });
+    expect(
+      (await exchange("/v1/joined-machines/challenge", { machineId: lease.machineId })).start,
+    ).toMatchObject({ status: 403 });
+  });
+
   it("registers hashed offers and refuses plaintext application forwarding", async () => {
     const relayRequests: Array<{ readonly authorization?: string; readonly body: string }> = [];
     const relay = await listen(

@@ -63,3 +63,25 @@ Read `/v1/captain/readiness` for setup state. The companion and console share
 credentials and model selection; neither keeps a separate setup flag. Device
 subscription sign-in and the first-run key-entry limit are documented in
 [model keys](model-keys.md).
+
+## Joining another computer
+
+Companion pairing makes a device portal on this Mac. `clankie join` registers a
+machine where Clankie can act, with an outbound gateway connection and no SSH
+route or inbound listener. The joining host generates a 256-bit approval code
+locally and advertises only its hash; an existing owner
+device approves its access level and a subset of its advertised directories.
+The registry mints a separate `join-UUID` and scoped capability. These are not
+device or operator credentials, and the client cannot approve itself. Approval
+travels through the existing encrypted owner surface. The lease and channel
+are independently authenticated and encrypted; the gateway cannot read or
+forge commands, results or capabilities. Keep approval codes out of evidence.
+
+Use `join --gateway URL --host HOST_ID --directory PATH`, `join approve CODE
+--access LEVEL --directory PATH`, and `join resume|status|leave`; see
+[the CLI guide](cli.md#join). Keep the joining terminal running. Leaving or
+`machines remove join-UUID` revokes the capability; reconnecting needs fresh
+approval. The receiver intersects current policy with its original approved
+ceiling and canonical directory grants; raising the ceiling needs fresh approval.
+Native worker/screen adapters and hosted gateway routing in `clankie-ops` are
+named follow-ups; real Mac/Windows gateway captures are not yet verified.

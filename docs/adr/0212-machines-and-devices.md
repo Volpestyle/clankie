@@ -1,6 +1,9 @@
 # 0212. Machines run agents; devices reach Clankie
 
-Status: proposed (2026-10-02). Its reserved `join` transport is decided by
+Status: partially implemented (2026-10-08). Local/SSH discovery and live
+connections are implemented. The public outbound `join` contract and guarded
+receiver are implemented; gateway deployment, native worker/screen adapters
+and real Mac/Windows captures remain pending (VUH-1800). `join` is decided by
 [ADR 0244](0244-machines-join-clankie-at-an-access-level.md), which also adds
 per-machine access levels. Amends the onboarding and writer sections of
 [ADR 0184](0184-clankie-leads-more-than-one-fleet.md) and the agent-host list of
@@ -100,9 +103,19 @@ the console strip, and he can mention `clankie herdr` in his own words. User
 text says "his workspace" or "your Herdr session", never bundled, external or
 runtime.
 
-**Later: `clankie join`.** A machine with no ssh route runs `clankie join`,
-shows a code, and dials out through the gateway like the Mac does — the third
-transport. Not part of this decision's first delivery.
+**Outbound: `clankie join`.** A machine with no ssh route runs `clankie join`,
+generates a 256-bit approval code locally, and dials out through the gateway like the Mac does — the third
+transport. The owner approves the code, access level and advertised directories. The public
+receiver and registry are implemented; ops-side routing and real gateway proof
+remain pending. Bootstrap advertises only the code hash; approval uses the
+existing trusted owner surface. Following [ADR 0173](0173-the-gateway-cannot-read-device-traffic.md),
+the approved lease is encrypted for the code holder. The broker-owned machine
+capability authenticates encrypted channel/leave requests; the service consumes
+a fresh identity-bound challenge before any effect and encrypts replies under
+an independent per-request key. The receiver independently intersects current
+policy with its original approved ceiling and directories; widening that
+consent requires fresh owner approval. The gateway can observe metadata and deny
+delivery, but cannot read or forge commands, results or capabilities.
 
 ```mermaid
 flowchart LR
@@ -115,7 +128,9 @@ flowchart LR
   service --> machines["Machines"]
   machines --> local["this Mac · local"]
   machines --> pc["pc · ssh"]
-  machines -.-> joined["laptop · join (later)"]
+  machines --> joined["laptop · join · guarded receiver"]
+  joined --> gateway["opaque outbound gateway · ops delivery pending"]
+  gateway --> service
   local --> ls["Herdr sessions + transcripts"]
   pc --> ps["Herdr sessions + transcripts"]
 ```

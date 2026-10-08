@@ -185,6 +185,7 @@ export interface ClankieAppDependencies {
   fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
   linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
   runtimes?: ExecutionConnections;
+  machineJoins?: import("../machine-joins.ts").MachineJoins;
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
   /** Only a currently available connection has an active binding. */

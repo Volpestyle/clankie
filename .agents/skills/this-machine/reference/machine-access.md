@@ -21,16 +21,36 @@ adapter doing its own I/O is not a grant of the caller's general shell.
 
 The API is `PATCH /v1/machines/:id/access` with `{ "accessLevel": "workers" }`.
 The paired-device command is `set_machine_access` with `id` and `accessLevel`.
-Workers and joined clients cannot raise their own level. Unknown machines,
+Workers and joined clients cannot raise their own level. Joined receivers pin
+the original approved ceiling and directories; lowering/restoring access within
+that ceiling is live, but raising it further requires a new join approval. Unknown machines,
 invalid levels and unavailable policy refuse. Native coding tools recheck
 policy on each call, owner-pane polls require shell before and after waits,
 worker launches recheck after waits, and screen input
 rechecks before each effect. Recovery remains available after revocation.
 Lowering a level does not terminate existing workers or undo completed work.
 
-Current enforcement is reported as `service-preference`: the service checks
+Local/SSH enforcement is reported as `service-preference`: the service checks
 its own tools but runs under the owner's account. Do not call this an OS
-sandbox or authenticated joined-host enforcement. Joined transport and
-receiver proof are VUH-1800; local OS isolation is VUH-1804. A joined receiver
+sandbox. Approved join registrations report `joined-host`: the public receiver
+checks access and canonical working-directory intersection, but live gateway
+proof and native worker/screen adapters remain VUH-1800 gaps. An authorized shell
+still runs as the owner; its file effects are not confined by the working-directory
+check. Local OS isolation is VUH-1804. A joined receiver
 must check its own owner-approved level and directory grants before executing
 worker, shell or screen requests, regardless of what the sender claims.
+
+Use `clankie join --gateway URL --host HOST_ID --directory PATH` on the joining
+host. From an existing authenticated owner CLI/device approve its code with
+`clankie join approve CODE --access LEVEL --directory PATH`. The code expires
+in five minutes. It is generated locally with 256 bits of entropy; bootstrap
+advertises only its hash. Copy it only to the existing trusted owner approval
+surface; never record it in evidence. Keep the join command running. `join resume` restores approval;
+`join status` is local registration status, not a live connection assertion.
+`join leave` or `machines remove join-UUID` revokes it durably. A new join needs
+new owner approval. Lease and machine exchanges are authenticated AES-256-GCM
+envelopes with one-use challenges and independently keyed responses. The
+gateway cannot read or forge work or broker capabilities. Never print or copy
+its broker capability into evidence.
+The gateway's machine routes require separate clankie-ops delivery; do not claim
+production readiness from the loopback integration fixture.

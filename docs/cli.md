@@ -2568,6 +2568,57 @@ clankie fleet set --verification review_and_seal --report-style "Short and plain
 
 <a id="runtime-setup"></a>
 
+### `join`
+
+An outbound machine connection needs no SSH alias or inbound port. On the
+joining Mac or Windows PC, run:
+
+```bash
+clankie join --gateway https://YOUR_GATEWAY --host HOST_ID --directory /approved/workspace
+```
+
+The command generates a 256-bit approval CODE locally, prints it and waits
+up to five minutes. Keep CODE out of logs and evidence. From an existing owner device
+or the service's authenticated CLI, approve that code:
+
+```bash
+clankie join approve CODE --access workers --directory /approved/workspace
+```
+
+Approval selects only directories advertised by the joining host. The receiver
+pins that original level and directory consent. Access may be lowered or
+restored within that ceiling; raising it beyond consent requires leaving and
+joining with a new owner approval. Keep `join`
+running in its terminal. `join status` reports the locally stored registration;
+`join resume` restores its outbound channel. `join leave` revokes registration
+and removes its broker credential. `machines remove join-UUID` also revokes it;
+the old capability cannot reconnect, including after service restart. A new
+join needs a new code, owner approval and machine identity. Interrupting the
+foreground command disconnects it without revoking approval.
+
+Inventory reports `transport: join` and `accessEnforcement: joined-host` for
+these approved identities. The receiver checks the current access level and
+intersects the service-approved directories with its own canonical directories
+before execution; a symlink escape is refused. The channel supports a guarded
+shell at shell/screen level. Native worker and screen adapters remain follow-ups;
+workers-level shell and screen requests are refused. Directory checks bind the
+requested working directory; an authorized shell command still runs as the
+owner and can address other paths. OS confinement remains VUH-1804.
+
+The public service and client contract is implemented. Production gateway
+bootstrap/channel routing and admission/rate limits belong to `clankie-ops` and
+still need delivery; the hosted/self-hosted Mac and Windows capture is pending.
+Do not treat a loopback relay fixture as a live gateway deployment. The gateway
+cannot read or forge joined-host capabilities, commands or results
+([ADR 0173](adr/0173-the-gateway-cannot-read-device-traffic.md)). Bootstrap sends
+only the approval hash. Owner approval carries CODE through the existing
+authenticated/encrypted device surface, and the lease is encrypted for its
+original holder. Channel and leave use authenticated AES-256-GCM envelopes
+with fresh one-use challenges and independently keyed responses. TLS still
+protects the carrier; an untrusted gateway can deny delivery but cannot forge
+work. Broker keys stay at both endpoints; the registration ledger stores only
+token hashes. Outputs are bounded to 8,192 characters and report truncation.
+
 ### `machines [list|discover] [--json]`
 
 A machine is where agents run; a device is a paired phone or desktop portal.
@@ -2594,12 +2645,13 @@ Existing local installs retain screen; new or ungranted remote machines start
 at portal. `PATCH /v1/machines/:id/access` takes `{ "accessLevel": "workers" }`
 and requires the operator bearer. Inventory includes `accessLevel` and
 `accessEnforcement`; older servers display `unreported` rather than an inferred
-grant. Current enforcement is `service-preference`, not an OS sandbox. Actor,
+grant. Local/SSH enforcement is `service-preference`; approved joined receivers report
+`joined-host`. Neither is an OS sandbox. Actor,
 room and workspace grants remain independent; bounded service-owned I/O is
 not general shell permission. Policy is checked on each native tool call,
 after worker waits and before screen effects. Revocation leaves recovery
-available and does not terminate existing workers. Joined-host proof is
-VUH-1800; OS isolation is VUH-1804.
+available and does not terminate existing workers. The public joined receiver checks are covered by VUH-1800; live gateway captures
+and native worker/screen adapters remain gaps. OS isolation is VUH-1804.
 
 Adding registers transcript access immediately and lists available sessions.
 Connecting names an existing Herdr session; it does not start one. Removal

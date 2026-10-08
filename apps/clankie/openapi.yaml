@@ -42,6 +42,140 @@ tags:
 security: []
 
 paths:
+  /v1/machine-joins/start:
+    post:
+      tags: [Workers]
+      operationId: startMachineJoin
+      summary: Advertise a pending outbound machine with a five-minute approval window
+      description: |
+        Strict body {name, platform: darwin|win32|linux, directories, claimSecret, approvalHash}.
+        claimSecret is a fresh 32-byte base64url status claim, not execution authority.
+        The client generates a separate 32-byte approval CODE locally and sends
+        only its SHA-256 approvalHash; never send CODE through the gateway bootstrap.
+        No identity or execution rights are accepted from the sender. At most
+        32 pending tickets, 64 registered machines; maximum body 16 KiB.
+        Production gateway routing/admission remains a clankie-ops dependency.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: joinId and expiresAt; no approval secret or execution capability }
+        "400": { description: Invalid advertisement or capacity exceeded }
+        "503": { description: Join registry unavailable }
+  /v1/machine-joins/status:
+    post:
+      tags: [Workers]
+      operationId: machineJoinStatus
+      summary: Claim the approved registration with the initiating host secret
+      description: |
+        Strict {joinId}; Authorization Bearer claimSecret. Only the original
+        initiating claim can retrieve sealedLease. The lease {machineId, token,
+        accessLevel, directories} is AES-256-GCM sealed under the locally generated
+        approval CODE and bound to joinId; the gateway cannot read or forge it.
+        Unknown, expired or mismatched claims return expired.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                type: object,
+                required: [joinId],
+                additionalProperties: false,
+                properties: { joinId: { type: string, format: uuid } },
+              }
+      responses:
+        "200": { description: pending, approved with sealedLease, expired or revoked }
+        "400": { description: Malformed claim }
+  /v1/machine-joins/approve:
+    post:
+      tags: [Operator]
+      operationId: approveMachineJoin
+      summary: Owner approves a pending host, ceiling and directory subset
+      description: |
+        Strict {code, accessLevel, directories}. CODE is the 43-character base64url
+        approval secret copied from the joining host. Operator bearer or a current
+        paired device with Take Control; authority rechecked before persistence.
+        This route stays behind device-envelope encryption at the gateway.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: ok, canonical machineId and accessLevel; no capability }
+        "400": { description: Code consumed/expired or directory selection refused }
+        "401": { description: Authentication required }
+        "403": { description: Current owner control required }
+  /v1/joined-machines/challenge:
+    post:
+      tags: [Workers]
+      operationId: challengeJoinedMachine
+      summary: Fresh one-use machine request challenge
+      description: |
+        Strict {machineId}. Returns a 32-byte base64url challenge bound to a
+        registered canonical join identity, expiring in 60 seconds. At most
+        512 live challenges. No capability or execution authority is returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: challenge }
+        "403": { description: Revoked or unknown registration }
+        "503": { description: Challenge unavailable }
+  /v1/joined-machines/channel:
+    post:
+      tags: [Workers]
+      operationId: joinedMachineChannel
+      summary: Authenticated encrypted policy and one-shot work exchange
+      description: |
+        Strict {machineId, challenge, requestId, sealedRequest}. No bearer.
+        AES-256-GCM request key derives from the broker-owned scoped capability;
+        AAD binds request direction, machineId, requestId and the one-use challenge.
+        Encrypted payload is {op: poll, results: [...], responseSecret} with at
+        most 16 results and 8,192 characters per output, with a truncated flag.
+        Response sealedResponse encrypts current policy and at most 16 requests
+        under the fresh independent responseSecret and response-direction AAD.
+        Challenge is consumed before dispatch; neither ciphertext nor lost work
+        delivery is replayable. Maximum body 2 MiB. The receiver independently
+        checks current policy intersected with the original approved ceiling and
+        canonical directory intersection. Raising beyond original consent needs
+        a new owner-approved join.
+        Native worker/screen adapters remain unavailable. Gateway routing reveals
+        only metadata; the gateway cannot read or forge capabilities or work.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: sealedResponse containing current policy and one-shot requests }
+        "403": { description: Revoked or invalid machine envelope; retain credential unless revoked }
+        "503": { description: Join registry unavailable }
+  /v1/joined-machines/leave:
+    post:
+      tags: [Workers]
+      operationId: leaveJoinedMachine
+      summary: Durably revoke this machine capability
+      description: |
+        Same authenticated envelope as channel, with encrypted {op: leave,
+        results: [], responseSecret}. No bearer. Fresh challenge consumed before
+        revocation; sealedResponse acknowledges removal. Revoked tokens cannot
+        resume; a new owner approval is required. Maximum body 16 KiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: sealedResponse containing ok acknowledgement }
+        "403": { description: Already revoked }
+        "503": { description: Leave unconfirmed; retain credential }
   /v1/machines/{id}/access:
     patch:
       tags: [Operator]
@@ -50,7 +184,7 @@ paths:
       description: |
         Cumulative portal, workers, shell and screen levels. Existing local installs
         retain screen; ungranted remote machines start at portal. Current enforcement
-        is a service preference, not OS isolation or joined-host proof. Actor and
+        is service-preference for local/SSH and joined-host for registered outbound receivers; neither is OS isolation. Actor and
         directory grants remain independent. Workers cannot raise their own level.
       security: [{ operatorBearer: [] }]
       parameters:
@@ -73,7 +207,7 @@ paths:
                   enum: [portal, workers, shell, screen]
       responses:
         "200":
-          description: Persisted canonical machine ID, accessLevel and accessEnforcement (service-preference)
+          description: Persisted canonical machine ID, accessLevel and accessEnforcement (service-preference or joined-host)
         "400":
           description: Unknown machine or invalid access request
         "401":

@@ -24,6 +24,12 @@ manage workspace grants and capacity; choose native harnesses per hire. The
 choice only after doctor finds installed Herdr with running sessions, explaining
 that leading the owner's session means seeing and messaging every pane.
 
+For a machine without SSH, `clankie join --gateway URL --host HOST_ID
+--directory PATH` waits for an owner-approved code and keeps an outbound channel
+running. `join resume|status|leave` manages its broker registration; removing the
+`join-UUID` revokes it. See [machine access](machine-access.md) for receiver
+limits and the remaining gateway/native-adapter gaps.
+
 ## Worker defaults
 
 `clankie fleet set --harness codex --model gpt-6.1-sol --effort xhigh` updates

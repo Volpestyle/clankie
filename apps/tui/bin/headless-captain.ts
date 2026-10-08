@@ -1,3 +1,4 @@
+import { runJoinCommand } from "../src/command/join.ts";
 import type { CaptainRouteFetcher } from "../src/session/operator-conversations.ts";
 import { runCheckoutsCommand } from "../src/command/checkouts.ts";
 import { runComputerCommand } from "../src/command/computer.ts";
@@ -153,6 +154,8 @@ export async function runHeadlessCaptainCommand(
       await connectHostedCli(["hosted", ...rest.slice(1)], env, stdout, { target: "this-mac" });
       return 0;
     }
+    // Joining/resuming is a local foreground transport even when the CLI talks to hosted Clankie.
+    if (command === "join" && rest[0] !== "approve") return runJoinCommand(rest, options);
     if (command === "whoami") {
       outputJson(stdout, await hostedWhoami(env));
       return 0;
@@ -180,7 +183,10 @@ export async function runHeadlessCaptainCommand(
       const transport = await hostedTransportFor(env);
       // These existing commands are HTTP-only. The transport replaces their local
       // bearer inside the envelope; no Mac credential is read or transmitted.
-      if (["conversations", "conversation", "send", "runtime-health"].includes(command ?? "") || discordHttp)
+      if (
+        ["conversations", "conversation", "send", "runtime-health", "join"].includes(command ?? "") ||
+        discordHttp
+      )
         return runHeadlessCaptainCommand(args, {
           ...options,
           ...transport,
@@ -355,6 +361,7 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await runRuntimeCommand(["inventory"], options));
       return 0;
     }
+    if (command === "join") return runJoinCommand(rest, options);
     if (command === "machines") {
       const result = await runMachinesCommand(rest, options);
       const inventory = MachineInventorySchema.safeParse(result);

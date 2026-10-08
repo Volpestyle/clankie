@@ -379,6 +379,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["join"],
+    lines: [
+      "  join --gateway URL --host HOST_ID [--directory PATH] | approve CODE --access LEVEL | resume|status|leave",
+      "                           Approve an outbound machine connection without SSH",
+    ],
+  },
+  {
     nouns: ["machines"],
     lines: [
       "  machines [list|discover] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | remove NAME | sessions NAME",

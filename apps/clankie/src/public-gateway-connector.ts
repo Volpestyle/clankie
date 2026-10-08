@@ -1,3 +1,4 @@
+import { isMachineJoinTransportRoute } from "@clankie/protocol/machine-join";
 import { DISCORD_INGRESS_PATH } from "@clankie/protocol/discord-ingress";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/hosted-operator";
 import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
@@ -521,6 +522,7 @@ export class PublicGatewayConnector {
         }
       }
       const response =
+        isMachineJoinTransportRoute(frame.method, frame.path) ||
         frame.path === "/v1/hooks/linear" ||
         frame.path === "/v1/hosted/pair-offer" ||
         frame.path === DISCORD_INGRESS_PATH ||
