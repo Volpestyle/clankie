@@ -129,8 +129,10 @@ billing remain unverified.
 - Complete a hire originating in Discord and confirm the existing origin path
   reports its native final output once.
 - Browse and resume the exact saved native file in the same effective profile.
-- Verify the independently owned fleet-tool projection. These control fixtures
-  do not establish the two-meta native tool catalog or live tool authority.
+- Verify live fleet-tool discovery and worker reporting. The
+  [native fleet-MCP consumer boundary](../2026-10-08-pi-worker-fleet-mcp/README.md)
+  now has installed Pi SDK / real MCP subprocess integration coverage without
+  provider turns; the original control fixtures alone do not establish it.
 
 The named operator-chat command `clankie pi` is not supplied by this worker
 adapter. Existing generic hire/message/session APIs are its entry points.

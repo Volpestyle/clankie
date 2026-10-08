@@ -104,7 +104,9 @@ Without opt-in, ordinary unbriefed Pi launches preserve their hosted model/provi
 preparation and automated briefs remain unavailable. Opt-in requires the pinned
 Pi 0.87.1 files; upgrades need compatibility validation before opting in.
 Hosted model preparation has fixture coverage; native hosted/billing
-and the independently owned fleet-tool projection remain unverified. See the
+remain unverified. The native fleet-MCP consumer has pinned Pi SDK / real MCP
+subprocess integration coverage without provider turns; live worker reporting
+is still unverified. See the
 [Pi acceptance boundary](../../docs/testing/2026-10-04-pi-workers/README.md).
 
 Work records stay in the repo's [tracker or files](../work-items/README.md).

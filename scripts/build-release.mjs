@@ -1,3 +1,4 @@
+import { bundlePiWorkerFleet } from "./release/pi-worker-fleet.mjs";
 import { copySkillAssets } from "./release/skills.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -130,6 +131,16 @@ try {
     ...(await copyMinecraftRuntime(repoRoot, releaseRoot)),
   ];
   await copyRuntimeAssets(releaseRoot);
+  // Native Pi loads this consumer outside the bundled service. Include the
+  // standard MCP client; the native CLI need not install Clankie's dependencies.
+  const piFleetBundle = await bundlePiWorkerFleet(repoRoot, releaseRoot);
+  await writeFile(
+    metafile,
+    JSON.stringify({
+      inputs: { ...bundle.metafile.inputs, ...piFleetBundle.metafile.inputs },
+      outputs: { ...bundle.metafile.outputs, ...piFleetBundle.metafile.outputs },
+    }),
+  );
   await copyDynamicRuntimePackages(releaseRoot, metafile);
   if (hosted) {
     // A self-installed release brings its own Node, so it never depends on the image's.

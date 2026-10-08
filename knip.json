@@ -54,6 +54,7 @@
         "scripts/manual/windows-computer/check.ts",
         "scripts/manual/computer-use/fixture-server.d.mts",
         "integrations/pi-plugin/worker.mjs",
+        "scripts/release/pi-worker-fleet.d.mts",
         "integrations/pi-plugin/worker-runtime.d.mts",
         "integrations/pi-plugin/worker-connection.d.mts"
       ],
@@ -70,6 +71,8 @@
         "test/fixtures/runtime-canary-cpu-preload.mjs",
         "test/fixtures/runtime-canary-service.ts",
         "test/fixtures/mcp-stdio-bridge.ts",
+        "src/captain/pi-worker-fleet.d.mts",
+        "test/fixtures/pi-fleet-mcp/server.mjs",
         "test/fixtures/seat-pump-stdio.ts",
         "test/fixtures/inbound-receipt-0.6.2.d.mts",
         "src/computer-windows-host.ts",

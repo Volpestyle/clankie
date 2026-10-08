@@ -241,7 +241,13 @@ while automated briefs remain unavailable. Opt-in requires the selected 0.87.1
 native capability and original visible process/session; validate compatibility
 after a Pi upgrade before enabling it. Its
 `{repoRoot}/docs/testing/2026-10-04-pi-workers/README.md`
-keeps native hosted/billing and fleet-tool projection acceptance open. Missing
+keeps native hosted/billing and live fleet-tool acceptance open. Prepared Pi
+workers consume `clankie mcp --fleet` through their original native extension;
+server-advertised schemas and original receipts pass through without an operator
+fallback. Controller/session loss or MCP process loss ends this consumer; it
+never reconnects, retries an uncertain tool call or hires a replacement. The
+consumer has Pi 0.87.1 SDK / MCP subprocess coverage without provider turns,
+not live Mac or hosted hire proof. Missing
 structured control reports `unavailable` with `control.reason` (and `control.fix` when owner action
 is needed). `terminal` is only an unbriefed native launch. Each hire logs its
 lane. Folder trust and channel consent remain owner decisions; a visible prompt
