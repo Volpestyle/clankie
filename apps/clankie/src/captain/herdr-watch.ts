@@ -1,3 +1,4 @@
+import type { StopNativeTaskResult } from "@clankie/protocol";
 import { nativeHerdrRead } from "../herdr-native-read.ts";
 import { createHireLayout, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
@@ -1116,6 +1117,61 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     }
     return { agent: live === undefined ? { ...agent, status: "offline" } : agent, transcript };
+  }
+
+  /** Controller observations and actions retain the exact native occupant. */
+  public async nativeTaskObservation(
+    seatId: string,
+  ): Promise<{ binding: string; status: string; queueSupported: boolean } | undefined> {
+    if (this.closed) return undefined;
+    const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    if (!agent?.session) return undefined;
+    const control = await this.seatControl.attach(agent);
+    if (!control) return undefined;
+    const status = await control.status().catch(() => "offline");
+    const current = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    if (
+      !current?.session ||
+      !isDeepStrictEqual(current.session, agent.session) ||
+      current.agent !== agent.agent ||
+      current.terminalId !== agent.terminalId ||
+      ["offline", "released"].includes(status)
+    )
+      return undefined;
+    return {
+      binding: JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]),
+      status,
+      queueSupported:
+        agent.agent === "claude" ||
+        (agent.agent === "codex" && control.deliveryModes?.includes("steer") === true),
+    };
+  }
+
+  public async stopNativeTask(
+    seatId: string,
+    binding: string,
+    authorize: () => Promise<void>,
+  ): Promise<StopNativeTaskResult> {
+    if (this.closed) return { outcome: "unavailable" };
+    await authorize();
+    const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    if (
+      !agent?.session ||
+      JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]) !== binding
+    )
+      return { outcome: "unavailable" };
+    const control = await this.seatControl.attach(agent);
+    if (!control?.stopTask)
+      return {
+        outcome: "unsupported",
+        detail: "This native harness has no exact-task stop control; no terminal input was sent.",
+      };
+    return control.stopTask(async () => {
+      await authorize();
+      const current = await this.nativeTaskObservation(seatId);
+      if (current?.binding !== binding) throw new Error("Native occupant changed");
+      await authorize();
+    });
   }
 
   public async sendToSeat(

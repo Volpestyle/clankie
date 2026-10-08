@@ -28,6 +28,8 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const USAGE = [
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
+  "       clankie conversations pending ID [list|remove|send-now|edit] [MESSAGE_ID --version N] [--text TEXT]",
+  "       clankie conversations stop-task ID",
   "       clankie conversations goal ID [status|accept|pause|resume|clear]",
   "       clankie conversations goal ID set [--tokens N] <objective>",
   "       clankie conversations project-proposal ID --request UUID --incarnation UUID",
@@ -62,6 +64,7 @@ export async function runConversationsCommand(
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (["pending", "stop-task"].includes(args[0] ?? "")) return runNativeMessageAction(args, options);
   if (["updates", "read-update", "dismiss-update"].includes(args[0] ?? ""))
     return runOwnerUpdateAction(args, options);
   if (args[0] === "goal") return runGoalAction(args.slice(1), options);
@@ -554,4 +557,57 @@ async function runOwnerUpdateAction(
       : await client.ownerUpdateDismiss!(request.id);
   outputJson(options.stdout ?? process.stdout, result);
   return result.status === "ready" || result.status === "resolved" ? 0 : 1;
+}
+
+async function runNativeMessageAction(
+  args: readonly string[],
+  options: ConversationsCommandOptions,
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: { version: { type: "string" }, text: { type: "string" } },
+  });
+  const [operation, conversationId, action = "list", messageId] = positionals;
+  if (!conversationId) throw new Error(USAGE);
+  const request =
+    operation === "stop-task"
+      ? OperatorConversationServiceRequestSchema.parse({ op: "stop_task", schemaVersion: 1, conversationId })
+      : OperatorConversationServiceRequestSchema.parse({
+          op: "pending_messages",
+          schemaVersion: 1,
+          conversationId,
+          command:
+            action === "list"
+              ? { action }
+              : {
+                  action: action === "send-now" ? "send_now" : action,
+                  messageId,
+                  expectedVersion: Number(values.version),
+                  ...(values.text === undefined ? {} : { text: values.text }),
+                },
+        });
+  if (positionals.length > (operation === "stop-task" ? 2 : action === "list" ? 3 : 4))
+    throw new Error(USAGE);
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (!credential) throw new Error("Operator credential required to control native messages or tasks");
+  const client = createCaptainOperatorConversationClient(
+    createCaptainRouteClient({
+      host: commandHost({ ...options, env }),
+      captainToken: credential.token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    }),
+  );
+  const result =
+    request.op === "stop_task"
+      ? await client.stopTask!(conversationId)
+      : request.op === "pending_messages"
+        ? await client.pendingMessages!(conversationId, request.command)
+        : undefined;
+  outputJson(options.stdout ?? process.stdout, result);
+  return 0;
 }

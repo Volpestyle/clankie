@@ -1,4 +1,4 @@
-import type { DeliveryStage } from "@clankie/protocol";
+import type { StopNativeTaskResult, DeliveryStage } from "@clankie/protocol";
 
 /**
  * The harness-adapter seam (ADR 0187 amendment, ADR 0203, VUH-1458).
@@ -251,6 +251,8 @@ export interface SeatControl {
   settled(signal?: AbortSignal, messageId?: string): Promise<SeatEvent>;
   /** Interrupt the running turn. False when there is nothing to interrupt or no control. */
   interrupt(): Promise<boolean>;
+  /** Stop one exact observed native turn; never a terminal key or a later task. */
+  stopTask?(beforeDispatch: () => Promise<void>): Promise<StopNativeTaskResult>;
   /** Request this original native TUI's own exit. The caller confirms pane
    * disappearance; a disconnected reply can follow a successful exit. */
   exit?(beforeExit?: () => Promise<void>): Promise<void>;

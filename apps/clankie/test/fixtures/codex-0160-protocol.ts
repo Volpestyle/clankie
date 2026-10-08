@@ -49,6 +49,7 @@ export async function codex0160Protocol(
   let threadName = options.threadName;
   let nextLoadedInventory: unknown;
   let closed = false;
+  let silentInterrupt = false;
   let omitUserReceipt = false;
   let subscribed = false;
   let nextRead: { entered: () => void; release: Promise<void> } | undefined;
@@ -194,6 +195,19 @@ export async function codex0160Protocol(
             result = { turn };
             break;
           }
+          case "turn/interrupt": {
+            const turn = active();
+            if (!turn || request.params.threadId !== threadId || request.params.turnId !== turn.id)
+              throw new Error("Wrong native turn was interrupted");
+            result = {};
+            if (!silentInterrupt) {
+              turn.status = "interrupted";
+              notify("turn/completed", { threadId, turn });
+              notify("thread/status/changed", { threadId, status: { type: "idle" } });
+            }
+            silentInterrupt = false;
+            break;
+          }
           case "turn/steer": {
             const turn = active();
             if (!turn || request.params.expectedTurnId !== turn.id)
@@ -320,6 +334,9 @@ export async function codex0160Protocol(
       if (targetThread === threadId) turn.items.push(item);
       notify("item/started", { threadId: targetThread, turnId: turn.id, item, startedAtMs: Date.now() });
       notify("item/completed", { threadId: targetThread, turnId: turn.id, item, completedAtMs: Date.now() });
+    },
+    silenceNextInterrupt() {
+      silentInterrupt = true;
     },
     finish(status: "completed" | "interrupted", text: string, terminalEvent = true) {
       const turn = active()!;

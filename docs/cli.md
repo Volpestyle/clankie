@@ -3180,6 +3180,57 @@ head runs on Pi with the original room authority and grant. Only the verified
 owner's work uses native Codex children. Completed delivery retries return the
 saved result. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
 
+### Native pending messages and Stop
+
+`clankie conversations pending ID` lists host-owned native messages in admission
+order, including each original `messageId`, `version`, text, timestamp and state.
+New `send --conversation ID --delivery queue` submissions to controllable native
+seat/persona chats (or an attached native head) stay on the host until the original
+seat is idle. They return the original ID as `runId` and `seatDelivery.state: queued`.
+No model turn is spent to store or control a message.
+
+```sh
+clankie conversations pending ID edit MESSAGE_ID --version 0 --text "Revised request"
+clankie conversations pending ID remove MESSAGE_ID --version 1
+clankie conversations pending ID send-now MESSAGE_ID --version 1
+clankie conversations stop-task ID
+```
+
+The authenticated conversation dispatch operations are `pending_messages` with
+`{conversationId, command: {action: list|edit|remove|send_now, ...}}`, and `stop_task`
+with `conversationId`. Mutations select the original `messageId` and
+`expectedVersion`; edit also supplies `text`. The shared protocol client exposes
+`pendingMessages` and `stopTask`. Devices require `terminalControl`; local CLI
+uses the operator credential. Authority and the exact native occupant are checked
+again before dispatch. A bare captain bearer cannot control these messages.
+
+Message states are `queued`, `dispatching`, `picked_up`, `removed`, `uncertain`
+and `unavailable`. A native acknowledgment establishes pickup, not completion of
+the agent's work. Edit and remove act only before dispatch; send-now consumes the
+same original instead of submitting a replacement. A competing pickup returns
+`conflict`. Uncertain dispatches block automatic later pickup in that conversation
+and are never resent. Host restart retains queued originals but requires a fresh
+explicit send-now; an interrupted dispatch restores as `uncertain`. Expired
+admission authority never permits a background send. Each conversation retains
+up to 100 originals/outcomes, with at most 1000 across the host; settled history
+is trimmed first. Earlier messages already admitted to a native harness's queue
+are not imported or resent by this API.
+
+Queue requires an original live adapter with an authoritative status and safe
+send channel. Controlled Claude and Codex seats supply that boundary. Pi, OpenCode, Grok
+and external sessions without that controller cannot admit this host-owned Queue.
+Service-owned Pi queues keep their existing run cancellation. Stop currently
+supports **controller-owned Codex** through its exact native `turn/interrupt`
+RPC and terminal-turn observation. It returns `stopped`, `already_finished`,
+`unsupported`, `unavailable` or `uncertain`. A natural completion race returns
+`already_finished`; a missing native terminal receipt returns `uncertain`, and
+that controller retains the original stop attempt. Claude's interactive channel,
+external Codex sessions, Pi, OpenCode and Grok currently return `unsupported`;
+there is no terminal-key, signal, pane-close or replacement-session fallback.
+
+The app's pending bubbles and Stop presentation are a follow-up in `clankie-app`;
+the service/CLI contract does not claim iPhone/iPad UI validation.
+
 ### `send --conversation ID [--delivery steer|queue] [--attach PATH]... (MESSAGE | --stdin)`
 
 Send to an existing operator conversation through the shared service API.

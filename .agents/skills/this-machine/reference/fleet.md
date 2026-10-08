@@ -339,6 +339,16 @@ that seat's qualified fleet address. `clankie conversations show ID` reads the
 same conversation API. Remote native images are not
 published through the local file service.
 
+New native Queue sends stay host-owned until pickup. Use `clankie conversations
+pending ID` for ordered original IDs/versions and outcomes; `edit`, `remove` and
+`send-now` select that exact message with `--version N`. A picked-up or uncertain
+original is never resent. After service restart, queued messages require explicit
+send-now. `clankie conversations stop-task ID` stops an exact controller-owned
+Codex turn; other native harnesses currently return unsupported. No terminal keys,
+signals or lane restart are a fallback. These are operator/device-terminalControl
+operations; worker captain credentials grant no authority. Full commands and
+receipt states: [CLI reference](../../../../docs/cli.md#native-pending-messages-and-stop).
+
 ## Hiring and hearing from another machine
 
 `hire_agent` with `fleet` and a granted `workingDirectory` briefs a remote Codex

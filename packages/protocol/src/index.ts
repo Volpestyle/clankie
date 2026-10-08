@@ -750,3 +750,14 @@ export * from "./owner-updates.ts";
 
 export * from "./owner-settings.ts";
 export * from "./linear-settings.ts";
+
+export {
+  PendingNativeMessageSchema,
+  PendingNativeMessageActionSchema,
+  PendingNativeMessagesResultSchema,
+  StopNativeTaskResultSchema,
+  type PendingNativeMessage,
+  type PendingNativeMessageAction,
+  type PendingNativeMessagesResult,
+  type StopNativeTaskResult,
+} from "./pending-native-messages.ts";

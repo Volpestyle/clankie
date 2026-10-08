@@ -40,6 +40,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "replay",
         "tail",
         "send",
+        "pending_messages",
+        "stop_task",
         "project_proposal_get",
         "project_proposal_confirm",
         "project_proposal_tweak",

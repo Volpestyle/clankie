@@ -1,8 +1,17 @@
+import { PendingNativeMessages } from "../src/captain/pending-native-messages.ts";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { mintOperatorToken } from "@clankie/credential-broker";
+import { runConversationsCommand } from "../../tui/src/command/conversations.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { OperatorFleetSeatSchema } from "@clankie/protocol";
+import {
+  OperatorConversationServiceRequestSchema,
+  OperatorConversationServiceResultSchema,
+  OperatorFleetSeatSchema,
+} from "@clankie/protocol";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
 import { HerdrWatchStore, parseHerdrAgentResult } from "../src/captain/herdr-watch.ts";
@@ -684,3 +693,334 @@ it("keeps a fleet-qualified hire's persona through raw fleet census and child-co
     await close();
   }
 });
+
+it("host-owned native originals edit/remove/send-now exactly once and survive restart without uncertain replay", async () => {
+  const f = await hiredFixture();
+  let current = true;
+  const authorize = async () => {
+    if (!current) throw new Error("owner revoked");
+  };
+  const path = join(f.directory, "pending-native.json");
+  const host = {
+    inspect: (seatId: string) => f.store.nativeTaskObservation(seatId),
+    send: (
+      seatId: string,
+      text: string,
+      messageId: string,
+      _conversationId: string,
+      guard: () => Promise<void>,
+    ) =>
+      f.store.deliverToSeat(seatId, text, undefined, {
+        guard,
+        stableReceiptKey: messageId,
+        delivery: "steer" as const,
+      }),
+    stop: (seatId: string, binding: string, guard: () => Promise<void>) =>
+      f.store.stopNativeTask(seatId, binding, guard),
+  };
+  let queue = new PendingNativeMessages(path, host);
+  const seatId = f.pane.terminal_id;
+  const conversationId = "device-native-chat";
+  try {
+    const a = (await queue.enqueue(
+      conversationId,
+      seatId,
+      "Original queued message",
+      authorize,
+      "Attached file: original.txt",
+    ))!;
+    const b = (await queue.enqueue(conversationId, seatId, "Remove this original", authorize))!;
+    expect(queue.list(conversationId).map((r) => r.messageId)).toEqual([a.messageId, b.messageId]);
+    expect(
+      f.native.requests.filter((r) => r.method === "turn/start" || r.method === "turn/steer"),
+    ).toHaveLength(1);
+    expect(
+      (
+        await queue.action(
+          conversationId,
+          { action: "edit", messageId: a.messageId, expectedVersion: 0, text: "Edited original" },
+          authorize,
+          () => seatId,
+        )
+      ).outcome,
+    ).toBe("edited");
+    expect(
+      (
+        await queue.action(
+          conversationId,
+          { action: "remove", messageId: b.messageId, expectedVersion: 0 },
+          authorize,
+          () => seatId,
+        )
+      ).outcome,
+    ).toBe("removed");
+    expect(
+      (
+        await queue.action(
+          conversationId,
+          { action: "send_now", messageId: a.messageId, expectedVersion: 0 },
+          authorize,
+          () => seatId,
+        )
+      ).outcome,
+    ).toBe("conflict");
+    const held = f.native.holdNextMutationReply();
+    const sent = queue.action(
+      conversationId,
+      { action: "send_now", messageId: a.messageId, expectedVersion: 1 },
+      authorize,
+      () => seatId,
+    );
+    await held.pending;
+    const restored = new PendingNativeMessages(path, host);
+    try {
+      expect(restored.list(conversationId).find((r) => r.messageId === a.messageId)?.state).toBe("uncertain");
+      expect(
+        (
+          await restored.action(
+            conversationId,
+            { action: "send_now", messageId: a.messageId, expectedVersion: 2 },
+            authorize,
+            () => seatId,
+          )
+        ).outcome,
+      ).toBe("conflict");
+      expect(f.native.requests.filter((r) => r.method === "turn/steer")).toHaveLength(1);
+    } finally {
+      await restored.close();
+    }
+    expect(
+      (
+        await queue.action(
+          conversationId,
+          { action: "remove", messageId: a.messageId, expectedVersion: 1 },
+          authorize,
+          () => seatId,
+        )
+      ).outcome,
+    ).toBe("conflict");
+    held.release();
+    expect((await sent).outcome).toBe("picked_up");
+    expect(
+      (
+        await queue.action(
+          conversationId,
+          { action: "send_now", messageId: a.messageId, expectedVersion: 3 },
+          authorize,
+          () => seatId,
+        )
+      ).outcome,
+    ).toBe("conflict");
+    const requests = f.native.requests.filter((r) => r.method === "turn/steer");
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(requests)).toContain("Edited original");
+    expect(JSON.stringify(requests)).toContain("Attached file: original.txt");
+    expect(JSON.stringify(requests)).not.toContain("Remove this original");
+    const c = (await queue.enqueue(conversationId, seatId, "Retained across host restart", authorize))!;
+    await queue.close();
+    queue = new PendingNativeMessages(path, host);
+    f.native.finish("completed", "Initial native task complete");
+    await vi.waitFor(async () => expect(await f.control.status()).toBe("idle"));
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(queue.list(conversationId).find((r) => r.messageId === c.messageId)?.state).toBe("queued");
+    current = false;
+    await expect(
+      queue.action(
+        conversationId,
+        { action: "send_now", messageId: c.messageId, expectedVersion: 0 },
+        authorize,
+        () => seatId,
+      ),
+    ).rejects.toThrow("owner revoked");
+    current = true;
+    expect(
+      (
+        await queue.action(
+          conversationId,
+          { action: "send_now", messageId: c.messageId, expectedVersion: 0 },
+          authorize,
+          () => seatId,
+        )
+      ).outcome,
+    ).toBe("picked_up");
+    const d = (await queue.enqueue(
+      conversationId,
+      seatId,
+      "Never give this to a replacement occupant",
+      authorize,
+    ))!;
+    f.pane.agent_session = { ...f.pane.agent_session, value: "replacement-session" };
+    expect(
+      (
+        await queue.action(
+          conversationId,
+          { action: "send_now", messageId: d.messageId, expectedVersion: 0 },
+          authorize,
+          () => seatId,
+        )
+      ).outcome,
+    ).toBe("unavailable");
+    expect(queue.list(conversationId).find((r) => r.messageId === d.messageId)?.state).toBe("queued");
+  } finally {
+    await queue.close();
+    await f.close();
+  }
+}, 20000);
+
+it("Codex exact-task stop reports native interrupted/finished races and retains an uncertain original", async () => {
+  const f = await hiredFixture();
+  try {
+    expect(await f.control.stopTask!(async () => {})).toEqual({ outcome: "stopped", taskId: "turn-1" });
+    expect(await f.control.stopTask!(async () => {})).toEqual({ outcome: "already_finished" });
+    await f.control.send("Second task");
+    expect(
+      await f.control.stopTask!(async () => {
+        f.native.finish("completed", "Completed while owner admission awaited");
+        await vi.waitFor(async () => expect(await f.control.status()).toBe("idle"));
+      }),
+    ).toEqual({ outcome: "already_finished", taskId: "turn-2" });
+    expect(f.native.requests.filter((r) => r.method === "turn/interrupt")).toHaveLength(1);
+    await f.control.send("Third task");
+    f.native.silenceNextInterrupt();
+    expect(await f.control.stopTask!(async () => {})).toMatchObject({
+      outcome: "uncertain",
+      taskId: "turn-3",
+    });
+    expect(await f.control.stopTask!(async () => {})).toMatchObject({
+      outcome: "uncertain",
+      taskId: "turn-3",
+    });
+    expect(f.native.requests.filter((r) => r.method === "turn/interrupt")).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+it("conversation dispatch retains the host Queue identity through automatic pickup and exact Stop", async () => {
+  const f = await hiredFixture();
+  const conversations = new ConversationStore(join(f.directory, "device-conversations"), async () => {});
+  conversations.nativeMessageHost = {
+    inspect: (seatId) => f.store.nativeTaskObservation(seatId),
+    send: (seatId, text, messageId, _conversationId, guard) =>
+      f.store.deliverToSeat(seatId, text, undefined, {
+        guard,
+        stableReceiptKey: messageId,
+        delivery: "steer",
+      }),
+    stop: (seatId, binding, guard) => f.store.stopNativeTask(seatId, binding, guard),
+  };
+  const authority = {
+    principal: { kind: "device" as const, id: "paired-owner" },
+    current: () => true,
+    authorize: async () => true,
+  };
+  const dispatch = async (request: unknown) =>
+    OperatorConversationServiceResultSchema.parse(
+      await conversations.serve(
+        OperatorConversationServiceRequestSchema.parse(request) as Parameters<ConversationStore["serve"]>[0],
+        authority,
+      ),
+    );
+  const token = mintOperatorToken();
+  const server = createServer((request, response) => {
+    void (async () => {
+      if (request.headers.authorization !== `Bearer ${token}`) {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const result = await dispatch(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(result));
+    })().catch(() => {
+      response.writeHead(400);
+      response.end();
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing HTTP fixture address");
+    const cli = async (args: string[]) => {
+      let output = "";
+      expect(
+        await runConversationsCommand(args, {
+          host: `http://127.0.0.1:${address.port}`,
+          env: { CLANKIE_OPERATOR_TOKEN: token },
+          stdout: { write: (text: string) => (output += text) },
+        }),
+      ).toBe(0);
+      return JSON.parse(output);
+    };
+    const created = await dispatch({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "seat", seatId: f.pane.terminal_id },
+      title: "Device native task",
+    });
+    if (created.op !== "create") throw new Error("Expected conversation");
+    const conversationId = created.conversation.conversationId;
+    const send = await dispatch({
+      op: "send",
+      schemaVersion: 1,
+      turn: {
+        schemaVersion: 1,
+        kind: "message",
+        conversationId,
+        surfaceClientId: "paired-owner",
+        expectedRevision: 0,
+        message: "Host-owned Queue",
+        delivery: "queue",
+      },
+    });
+    if (send.op !== "send" || send.result.status !== "accepted") throw new Error("Expected host admission");
+    const runId = send.result.runId;
+    expect(send.result).toMatchObject({ seatDelivery: { state: "queued" }, deliveryStage: "stored" });
+    const read = () =>
+      dispatch({ op: "pending_messages", schemaVersion: 1, conversationId, command: { action: "list" } });
+    expect(await cli(["pending", conversationId])).toMatchObject({
+      outcome: "listed",
+      messages: [{ messageId: runId, state: "queued" }],
+    });
+    await expect(
+      cli(["pending", conversationId, "edit", runId, "--text", "Missing version"]),
+    ).rejects.toThrow();
+    expect(
+      await cli([
+        "pending",
+        conversationId,
+        "edit",
+        runId,
+        "--version",
+        "0",
+        "--text",
+        "CLI edited original",
+      ]),
+    ).toMatchObject({
+      outcome: "edited",
+      messages: [{ messageId: runId, text: "CLI edited original", version: 1 }],
+    });
+    expect(f.native.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
+    f.native.finish("completed", "Initial task complete");
+    await vi.waitFor(
+      async () =>
+        expect(await read()).toMatchObject({
+          result: { messages: [{ messageId: runId, state: "picked_up" }] },
+        }),
+      { timeout: 5000 },
+    );
+    expect(f.native.requests.filter((r) => r.method === "turn/start")).toHaveLength(2);
+    expect(JSON.stringify(f.native.requests.filter((r) => r.method === "turn/start"))).toContain(
+      "CLI edited original",
+    );
+    expect(await cli(["stop-task", conversationId])).toMatchObject({ outcome: "stopped", taskId: "turn-2" });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await conversations.close();
+    await f.close();
+  }
+}, 20000);

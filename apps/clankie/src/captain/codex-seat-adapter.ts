@@ -558,6 +558,9 @@ export function createCodexSeatAdapter(
               });
             },
             interrupt: () => seat!.interrupt(),
+            ...(seat?.stopTask === undefined
+              ? {}
+              : { stopTask: (guard: () => Promise<void>) => seat!.stopTask!(guard) }),
             close,
           };
           startupSignal.throwIfAborted();

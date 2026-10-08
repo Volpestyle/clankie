@@ -1,4 +1,12 @@
 import {
+  PendingNativeMessageActionSchema,
+  PendingNativeMessagesResultSchema,
+  StopNativeTaskResultSchema,
+  type PendingNativeMessageAction,
+  type PendingNativeMessagesResult,
+  type StopNativeTaskResult,
+} from "./pending-native-messages.ts";
+import {
   OwnerUpdateListFilterSchema,
   OwnerUpdateListSchema,
   OwnerUpdateResultSchema,
@@ -311,6 +319,17 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       turn: SubmitOperatorConversationTurnSchema,
     })
     .strict(),
+  z.strictObject({
+    op: z.literal("pending_messages"),
+    schemaVersion: z.literal(1),
+    conversationId: OperatorConversationIdSchema,
+    command: PendingNativeMessageActionSchema,
+  }),
+  z.strictObject({
+    op: z.literal("stop_task"),
+    schemaVersion: z.literal(1),
+    conversationId: OperatorConversationIdSchema,
+  }),
   // `cancel` interrupts one accepted run: the captain aborts the live model
   // turn and the durable log settles that run as `cancelled`. Cancelling a run
   // that is unknown or already settled reports `cancelled: false`.
@@ -811,6 +830,16 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       result: SubmitOperatorConversationTurnResultSchema,
     })
     .strict(),
+  z.strictObject({
+    op: z.literal("pending_messages"),
+    schemaVersion: z.literal(1),
+    result: PendingNativeMessagesResultSchema,
+  }),
+  z.strictObject({
+    op: z.literal("stop_task"),
+    schemaVersion: z.literal(1),
+    result: StopNativeTaskResultSchema,
+  }),
   z
     .object({
       op: z.literal("cancel"),
@@ -1306,6 +1335,11 @@ export interface OperatorConversationServiceClient {
   send(turn: SubmitOperatorConversationTurn): Promise<SubmitOperatorConversationTurnResult>;
   /** Interrupt one accepted run; false when it is unknown or already settled. */
   cancel(conversationId: string, runId: string): Promise<boolean>;
+  pendingMessages?(
+    conversationId: string,
+    command: PendingNativeMessageAction,
+  ): Promise<PendingNativeMessagesResult>;
+  stopTask?(conversationId: string): Promise<StopNativeTaskResult>;
   autonomy(conversationId: string, command: OperatorAutonomyCommand): Promise<OperatorAutonomyStatus>;
   /** Local-only publication of one deliberate file from this conversation's working directory. */
   publishFile?(input: {
@@ -1768,6 +1802,17 @@ export function createOperatorConversationServiceClient(
     async send(turn) {
       const result = await dispatch({ op: "send", schemaVersion: 1, turn });
       if (result.op !== "send") throw new Error(`Unexpected ${result.op} result for send`);
+      return result.result;
+    },
+    async pendingMessages(conversationId, command) {
+      const result = await dispatch({ op: "pending_messages", schemaVersion: 1, conversationId, command });
+      if (result.op !== "pending_messages")
+        throw new Error(`Unexpected ${result.op} result for pending messages`);
+      return result.result;
+    },
+    async stopTask(conversationId) {
+      const result = await dispatch({ op: "stop_task", schemaVersion: 1, conversationId });
+      if (result.op !== "stop_task") throw new Error(`Unexpected ${result.op} result for stop task`);
       return result.result;
     },
     async cancel(conversationId, runId) {

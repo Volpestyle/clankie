@@ -3362,7 +3362,7 @@ paths:
       summary: Operator conversation contract
       description: |
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
-        `fork`, `close`, `send`, `cancel`, `replay`, `subagent_replay`, `tail`, `autonomy`,
+        `fork`, `close`, `send`, `cancel`, `pending_messages`, `stop_task`, `replay`, `subagent_replay`, `tail`, `autonomy`,
         `terminal_tail`, `readopt_seat`, `worker_reports`, and
         `acknowledge_worker_reports`. Worker ownership/report operations require
         current operator authority and an exact conversationId. Re-adoption
@@ -3394,6 +3394,18 @@ paths:
         `issue: {tracker, key, url}` for navigation without tracker authority.
         Each source conversation retains active updates and 32 dismissed records
         within 256 total records and 512000 bytes; capacity refuses new mail.
+        Native message controls require owner operator authority or an active
+        terminalControl device. `pending_messages` takes conversationId and a
+        command: list; edit with original messageId, expectedVersion and text;
+        remove or send_now with original messageId and expectedVersion. It returns
+        ordered messages (messageId, version, text, createdAt, state) and an explicit
+        outcome. New native Queue messages are host-owned until pickup; edits,
+        removal and send-now cannot replace a dispatched or uncertain original.
+        Restart retains queued records for explicit send-now and marks interrupted
+        dispatch uncertain. `stop_task` takes conversationId and returns stopped,
+        already_finished, unsupported, unavailable or uncertain, with taskId when
+        known. Controller-owned Codex uses exact turn/interrupt plus observed native
+        completion; other native stop controls currently return unsupported.
         The canonical schemas are in packages/protocol/src/operator-conversations.ts
         and packages/protocol/src/operator-service.ts.
         Project onboarding uses `project_proposal_get` for one defaults-first

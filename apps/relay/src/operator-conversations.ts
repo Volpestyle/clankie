@@ -541,6 +541,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeJson(response, 403, { error: "op_is_local_to_the_machine" });
       return true;
     }
+    const nativeMessageOp = serviceRequest.op === "pending_messages" || serviceRequest.op === "stop_task";
     const questionOp =
       serviceRequest.op === "project_proposal_get" ||
       serviceRequest.op === "project_proposal_confirm" ||
@@ -553,7 +554,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const grant =
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
-        : questionOp ||
+        : nativeMessageOp ||
+            questionOp ||
             workWriteOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input"
@@ -628,6 +630,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     response.once("close", disconnected);
     if (request.aborted || response.destroyed) abort.abort();
     const ownerRoute =
+      nativeMessageOp ||
       questionOp ||
       workWriteOp ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);

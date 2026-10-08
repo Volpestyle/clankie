@@ -33,6 +33,16 @@ export function fenceFleetSeatAdapter(
       (await current()) ? control.send(message, options) : { outcome: "offline", detail },
     status: async () => ((await current()) ? control.status() : "offline"),
     interrupt: async () => ((await current()) ? control.interrupt() : false),
+    ...(control.stopTask === undefined
+      ? {}
+      : {
+          stopTask: async (guard: () => Promise<void>) =>
+            control.stopTask!(async () => {
+              await admit();
+              await guard();
+              await admit();
+            }),
+        }),
     close: async () => {
       if (await current()) await control.close();
     },

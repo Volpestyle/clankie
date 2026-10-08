@@ -1676,6 +1676,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
     ownerAttachmentHost(),
   );
+  conversations.nativeMessageHost = {
+    inspect: (seatId) => herdrWatches.nativeTaskObservation(seatId),
+    send: (seatId, text, messageId, conversationId, guard) =>
+      deliverToSeat(
+        seatId,
+        text,
+        { conversationId, source: "operator", delivery: "steer" },
+        { guard, stableReceiptKey: messageId },
+      ),
+    stop: (seatId, binding, guard) => herdrWatches.stopNativeTask(seatId, binding, guard),
+  };
   conversations.onRoomHandoffChange = () => fleetChanges.touch();
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore, () => options.fleetResources?.status());

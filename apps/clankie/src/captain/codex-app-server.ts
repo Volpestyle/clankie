@@ -1,3 +1,4 @@
+import type { StopNativeTaskResult } from "@clankie/protocol";
 import type { RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -419,6 +420,7 @@ export interface CodexAppServerSeat {
     beforeDispatch?: () => Promise<void>,
   ): Promise<SeatQuestionResult>;
   interrupt(): Promise<boolean>;
+  stopTask?(beforeDispatch: () => Promise<void>): Promise<StopNativeTaskResult>;
   close(): Promise<void>;
 }
 
@@ -700,6 +702,7 @@ export async function startCodexAppServerSeat(options: {
       socket = await server.connect();
       if (!socket) await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    const stopReceipts = new Map<string, Promise<StopNativeTaskResult>>();
     let activeTurn: string | undefined;
     let turnObservation = 0;
     let threadId: string | undefined;
@@ -1267,6 +1270,51 @@ export async function startCodexAppServerSeat(options: {
       viewArgs,
       send(message, guard) {
         return sendNative(message, guard);
+      },
+      async stopTask(beforeDispatch) {
+        const taskId = activeTurn;
+        if (!taskId) return { outcome: "already_finished" };
+        try {
+          await beforeDispatch();
+        } catch {
+          return {
+            outcome: "unavailable",
+            taskId,
+            detail: "Native binding or owner authority changed; nothing was interrupted.",
+          };
+        }
+        const prior = stopReceipts.get(taskId);
+        if (prior) return prior;
+        if (activeTurn !== taskId) return { outcome: "already_finished", taskId };
+        const receipt = (async (): Promise<StopNativeTaskResult> => {
+          try {
+            await client!.request("turn/interrupt", { threadId, turnId: taskId });
+            const deadline = Date.now() + 3000;
+            while (activeTurn === taskId && Date.now() < deadline)
+              await new Promise((resolve) => setTimeout(resolve, 25));
+            const terminal = terminalTurns.get(taskId);
+            const status = terminal && record(terminal.params.turn).status;
+            return status === "interrupted"
+              ? { outcome: "stopped", taskId }
+              : status === "completed" || status === "failed"
+                ? { outcome: "already_finished", taskId }
+                : {
+                    outcome: "uncertain",
+                    taskId,
+                    detail:
+                      "Interrupt was admitted but native completion was not observed; do not repeat it.",
+                  };
+          } catch {
+            return {
+              outcome: "uncertain",
+              taskId,
+              detail: "Native interrupt may have applied; do not repeat it.",
+            };
+          }
+        })();
+        stopReceipts.set(taskId, receipt);
+        if (stopReceipts.size > 64) stopReceipts.delete(stopReceipts.keys().next().value!);
+        return receipt;
       },
       async interrupt() {
         if (!activeTurn) return false;

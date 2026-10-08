@@ -366,3 +366,25 @@ it("concurrent authenticated owner sends retain a typed revision conflict and on
   expect(await f.outbox.poll(0, undefined, BINDING)).toEqual([]);
   expect(f.journal().filter((item) => item.type === "message" && item.role === "operator")).toHaveLength(1);
 });
+
+it("native pending and stop controls require current owner authority, never a captain-only bearer", async () => {
+  const f = await fixture();
+  for (const request of [
+    {
+      op: "pending_messages" as const,
+      schemaVersion: 1 as const,
+      conversationId: ID,
+      command: { action: "list" as const },
+    },
+    { op: "stop_task" as const, schemaVersion: 1 as const, conversationId: ID },
+  ]) {
+    expect((await f.dispatch(request, "fixture-captain")).status).toBe(403);
+    const owner = await f.dispatch(request);
+    expect(owner.status).toBe(200);
+    expect(await owner.json()).toMatchObject({ op: request.op, result: { outcome: "unsupported" } });
+  }
+  f.hooks.beforeAuthorize = async () => {
+    await f.revoke();
+  };
+  expect((await f.dispatch({ op: "stop_task", schemaVersion: 1, conversationId: ID })).status).toBe(403);
+});

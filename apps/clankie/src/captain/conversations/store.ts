@@ -1,3 +1,4 @@
+import { PendingNativeMessages, type NativeMessageHost } from "../pending-native-messages.ts";
 import { OwnerUpdates } from "../owner-updates.ts";
 import type { OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
 import type { InboundReport } from "../conversations.ts";
@@ -342,6 +343,53 @@ export class ConversationStore {
       ) => Promise<void>)
     | undefined;
   public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
+  public nativeMessageHost: NativeMessageHost | undefined;
+  private nativeMessages: PendingNativeMessages | undefined;
+  private pendingNativeMessages(): PendingNativeMessages | undefined {
+    if (!this.nativeMessageHost) return undefined;
+    return (this.nativeMessages ??= new PendingNativeMessages(
+      join(this.root, "pending-native-messages.json"),
+      this.nativeMessageHost,
+      (message) => {
+        const meta = this.metas.get(message.conversationId);
+        if (!meta) return;
+        this.append(meta, {
+          type: "turn",
+          runId: message.messageId,
+          phase:
+            message.state === "removed"
+              ? "cancelled"
+              : message.state === "picked_up"
+                ? "completed"
+                : "failed",
+          deliveryStage:
+            message.state === "picked_up"
+              ? "delivered"
+              : message.state === "removed"
+                ? "expired"
+                : message.state === "uncertain"
+                  ? "uncertain"
+                  : "unavailable",
+        });
+      },
+    ));
+  }
+  private nativeMessageSeat(meta: ConversationMeta): string | undefined {
+    if (meta.scope.kind === "seat") return meta.scope.seatId;
+    if (meta.scope.kind === "persona") return this.seatForPersona?.(meta.scope.personaId);
+    return meta.nativeSource?.paneId;
+  }
+  private nativeMessageAuthority(
+    meta: ConversationMeta,
+    seatId: string,
+    authority: QuestionAuthority | undefined,
+  ): () => Promise<void> {
+    return async () => {
+      await authorizeQuestion(authority);
+      if (this.metas.get(meta.conversationId) !== meta || this.nativeMessageSeat(meta) !== seatId)
+        throw new Error("Conversation native binding changed");
+    };
+  }
   public linearFollowing: (() => Promise<boolean>) | undefined;
   public onLinearWakeReceived:
     | ((
@@ -820,6 +868,51 @@ export class ConversationStore {
           schemaVersion: 1,
           file: await this.publishFile(request),
         };
+      case "pending_messages": {
+        await authorizeQuestion(authority);
+        const meta = this.metas.get(request.conversationId);
+        const queue = this.pendingNativeMessages();
+        const seatId = meta && this.nativeMessageSeat(meta);
+        return {
+          op: "pending_messages",
+          schemaVersion: 1,
+          result:
+            meta && seatId && queue
+              ? await queue.action(
+                  request.conversationId,
+                  request.command,
+                  this.nativeMessageAuthority(meta, seatId, authority),
+                  () => this.nativeMessageSeat(meta),
+                )
+              : {
+                  outcome: "unsupported",
+                  messages: [],
+                  detail: "This conversation has no controllable native seat.",
+                },
+        };
+      }
+      case "stop_task": {
+        await authorizeQuestion(authority);
+        const meta = this.metas.get(request.conversationId);
+        const seatId = meta && this.nativeMessageSeat(meta);
+        if (!meta || !seatId || !this.nativeMessageHost)
+          return {
+            op: "stop_task",
+            schemaVersion: 1,
+            result: { outcome: "unsupported", detail: "Use run cancellation for a service-owned turn." },
+          };
+        const authorize = this.nativeMessageAuthority(meta, seatId, authority);
+        await authorize();
+        const observed = await this.nativeMessageHost.inspect(seatId);
+        await authorize();
+        return {
+          op: "stop_task",
+          schemaVersion: 1,
+          result: observed
+            ? await this.nativeMessageHost.stop(seatId, observed.binding, authorize)
+            : { outcome: "unavailable" },
+        };
+      }
       case "cancel":
         return {
           op: "cancel",
@@ -1726,6 +1819,7 @@ export class ConversationStore {
   }
 
   public async close(): Promise<void> {
+    await this.nativeMessages?.close();
     this.tailShutdown.abort(new DOMException("Conversation tails are closed", "AbortError"));
     for (const conversationId of this.tailListeners.keys()) this.wakeTails(conversationId);
     for (const id of this.linearHookTimers.keys()) this.flushLinearActivity(id);
@@ -1996,13 +2090,37 @@ export class ConversationStore {
         "This is a read-only room transcript. Send messages in Discord; work started from a Discord room reports back through that room.",
       );
     const attachments = await this.sendAttachments(meta, turn);
+    if (turn.delivery === "queue" && meta.nativeSource && this.nativeMessageHost) {
+      return this.queueSeatSend(
+        meta,
+        meta.nativeSource.paneId,
+        turn,
+        { seatId: meta.nativeSource.paneId },
+        attachments,
+        authority,
+      );
+    }
     if (meta.scope.kind === "seat") {
-      return this.queueSeatSend(meta, meta.scope.seatId, turn, { seatId: meta.scope.seatId }, attachments);
+      return this.queueSeatSend(
+        meta,
+        meta.scope.seatId,
+        turn,
+        { seatId: meta.scope.seatId },
+        attachments,
+        authority,
+      );
     }
     if (meta.scope.kind === "persona") {
       const seatId =
         this.seatForPersona === undefined ? meta.scope.personaId : this.seatForPersona(meta.scope.personaId);
-      return this.queueSeatSend(meta, seatId, turn, { personaId: meta.scope.personaId }, attachments);
+      return this.queueSeatSend(
+        meta,
+        seatId,
+        turn,
+        { personaId: meta.scope.personaId },
+        attachments,
+        authority,
+      );
     }
     if (authority !== undefined) {
       await authorizeQuestion(authority);
@@ -2216,10 +2334,11 @@ export class ConversationStore {
     turn: SubmitOperatorConversationTurn,
     offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
     attachments?: readonly StoredOwnerAttachment[],
+    authority?: QuestionAuthority,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const previous = this.seatSends.get(meta.conversationId) ?? Promise.resolve();
     const pending = previous.then(() =>
-      this.deliverSeatTurn(meta, seatId, offlineIdentity, turn, attachments),
+      this.deliverSeatTurn(meta, seatId, offlineIdentity, turn, attachments, authority),
     );
     const settled = pending.then(
       () => undefined,
@@ -2238,6 +2357,7 @@ export class ConversationStore {
     offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
     turn: SubmitOperatorConversationTurn,
     attachments?: readonly StoredOwnerAttachment[],
+    authority?: QuestionAuthority,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
@@ -2254,6 +2374,7 @@ export class ConversationStore {
     // them; a seat that cannot take them gets nothing, and the owner keeps
     // the draft (ADR 0209).
     let message = turn.message;
+    let attachmentNote: string | undefined;
     if (attachments !== undefined && seatId !== undefined) {
       const prepared = (await this.ownerAttachments?.forSeat?.(seatId, meta.conversationId, attachments)) ?? {
         undeliverable: "This Clankie cannot hand files to agents.",
@@ -2270,6 +2391,66 @@ export class ConversationStore {
           safeCursor,
         };
       message = [turn.message, prepared.note].filter((part) => part.length > 0).join("\n\n");
+      attachmentNote = prepared.note;
+    }
+    if (turn.delivery === "queue" && this.nativeMessageHost && seatId !== undefined) {
+      const authorize = this.nativeMessageAuthority(meta, seatId, authority);
+      let admitted = false;
+      const pending = await this.pendingNativeMessages()!
+        .enqueue(
+          meta.conversationId,
+          seatId,
+          turn.message,
+          async () => {
+            await authorize();
+            if (!admitted && turn.expectedRevision !== meta.revision)
+              throw new ConversationRefusedError("Conversation changed during queue admission");
+          },
+          attachmentNote,
+        )
+        .catch((error) => {
+          if (error instanceof RangeError) throw new ConversationRefusedError(error.message);
+          throw error;
+        });
+      admitted = true;
+      if (!pending)
+        return {
+          schemaVersion: 1,
+          status: "seat_undelivered",
+          conversationId: meta.conversationId,
+          ...offlineIdentity,
+          currentRevision: meta.revision,
+          safeCursor,
+          detail: "Host-owned Queue requires a controlled Claude or Codex seat.",
+        };
+      meta.revision++;
+      meta.updatedAt = new Date().toISOString();
+      this.saveMeta(meta);
+      this.append(meta, {
+        type: "message",
+        role: "operator",
+        text: turn.message,
+        streaming: false,
+        ...(attachments === undefined
+          ? {}
+          : { attachments: attachments.map((attachment) => attachment.file) }),
+      });
+      this.append(meta, {
+        type: "turn",
+        runId: pending.messageId,
+        phase: "accepted",
+        deliveryStage: "stored",
+      });
+      return {
+        schemaVersion: 1,
+        status: "accepted",
+        conversationId: meta.conversationId,
+        runId: pending.messageId,
+        revision: meta.revision,
+        safeCursor,
+        deliveryStage: "stored",
+        seatDelivery: { state: "queued" },
+      };
     }
     const delivery =
       seatId === undefined
