@@ -121,7 +121,13 @@ holds in update status. A pending canary holds further landings. A failed canary
 keeps the new pin running, retains its hold, names `previousHealthyCommit`, and
 records alert delivery state; do not claim a rollback or successful delivery
 from a claimed receipt. Rollback is the owner's decision. A full pass clears
-only its own canary hold. Historical, independent and unreadable holds still
+only its own canary hold. Source installs then inspect runtime-worktree retention:
+keep current and immediate previous, protect live/canary/recovery dependencies,
+and remove only verified obsolete worktrees without force. `update status --json`
+shows `retention`; full effect evidence stays in the private updates directory's
+`retention.log`. Operation/receipt evidence and worker worktrees stay intact.
+Unreadable state, incomplete process observations and an uncertain maintenance
+lock refuse cleanup; never remove that lock based on age. Historical, independent and unreadable holds still
 block until the owner explicitly releases them. Terminal output groups
 holds by cause; `--json` or piped output keeps structured results. Only the
 authenticated owner can use `clankie update --override-holds --reason TEXT`,

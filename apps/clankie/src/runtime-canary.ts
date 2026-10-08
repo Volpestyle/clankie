@@ -41,7 +41,8 @@ export interface RuntimeCanaryCpu {
   readonly ratioToPrevious?: number;
 }
 
-const HOLDER = "Clankie runtime canary";
+export const RUNTIME_CANARY_HOLDER = "Clankie runtime canary";
+const HOLDER = RUNTIME_CANARY_HOLDER;
 const CheckpointSchema = z.strictObject({ commit: z.string().regex(/^[a-f0-9]{40,64}$/u) });
 const ArmSchema = z.strictObject({
   policy: RuntimeCanaryPolicySchema,
@@ -67,6 +68,8 @@ export class RuntimeCanary {
     sample: (runtime: RuntimeBootIdentity) => Promise<RuntimeHealthSample>;
     alert?: (text: string) => Promise<boolean>;
     onError?: (error: unknown) => void;
+    /** Best-effort retention after the passed canary's hold release is durable. */
+    onPassed?: () => Promise<void>;
   };
   private session: Session | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -429,7 +432,10 @@ export class RuntimeCanary {
 
   private async releasePassed(result: RuntimeUpdateResult): Promise<void> {
     if (!result.canary || result.canary.state !== "passed") return;
-    if (result.canary.holdReleased === true) return;
+    if (result.canary.holdReleased === true) {
+      await this.options.onPassed?.().catch((error) => this.options.onError?.(error));
+      return;
+    }
     if (result.newCommit !== this.options.runtime.commit)
       throw Error("Passed runtime canary does not match the running commit");
     const wanted = this.hold(result, this.previousHealthy(result));
@@ -453,6 +459,7 @@ export class RuntimeCanary {
       commit: result.newCommit,
     });
     await this.save(result, { ...result.canary, holdReleased: true });
+    await this.options.onPassed?.().catch((error) => this.options.onError?.(error));
   }
 
   private async releasePrehealthyRollback(result: RuntimeUpdateResult): Promise<void> {

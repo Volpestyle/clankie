@@ -1,0 +1,61 @@
+VUH-1841 — 2026-10-08, fresh worktree from fetched e29621ee.
+All installs, compilers, tests and owned native runtime probes used clankie heavy.
+No installed runtime cleanup, PC writes/hires or deployment.
+
+Preparation:
+  clankie heavy -- pnpm install
+  PASS.
+
+Final source checks (one serialized clankie heavy -- sh -c permit, set -e):
+  pnpm exec oxfmt --write apps/tui/bin/runtime-retention.ts apps/tui/bin/runtime-updater.ts apps/tui/test/runtime-retention.integration.test.ts apps/clankie/src/index.ts apps/clankie/src/runtime-canary.ts docs/cli.md docs/architecture.md .agents/skills/tidy/SKILL.md .agents/skills/this-machine/reference/launcher.md docs/testing/2026-10-08-runtime-worktree-retention/README.md
+  pnpm exec oxlint --deny-warnings apps/tui/bin/runtime-retention.ts apps/tui/bin/runtime-updater.ts apps/tui/test/runtime-retention.integration.test.ts apps/clankie/src/index.ts apps/clankie/src/runtime-canary.ts
+  pnpm --filter @clankie/tui typecheck
+  pnpm --filter @clankie/clankie typecheck
+  pnpm deadcode
+  pnpm exec vitest run --config vitest.config.ts apps/tui/test/runtime-retention.integration.test.ts apps/tui/test/runtime-update.integration.test.ts apps/tui/test/runtime-updater.test.ts apps/tui/test/runtime-update.test.ts apps/tui/test/pinned-runtime.test.ts apps/clankie/test/runtime-canary.integration.test.ts apps/clankie/test/runtime-canary-policy.integration.test.ts apps/clankie/test/runtime-update.test.ts apps/clankie/test/runtime-update-ux.integration.test.ts
+  node scripts/check-doc-links.mjs
+  node scripts/check-retired-claims.mjs
+
+Read result, final-signed-fixture.txt, exit 0:
+  Finished in 401ms on 10 files.
+  Both tsc --noEmit commands passed.
+  Knip passed; existing non-fatal configuration hint: integrations/codex-plugin/skills/** ignore.
+  Test Files 9 passed (9)
+  Tests 91 passed (91)
+  Duration 21.98s
+  Checked 544 markdown files; local links resolve; ADR numbers have no new collisions.
+  Retired-claims check passed silently.
+  No exclusions, waived failures or load-dependent retry claims.
+
+Earlier failures were investigated and corrected before the final gate:
+  Exploratory static checks caught an unused import and a fixture-only dependency import.
+  Native observation rejected mandatory lsof fcwd fields and macOS signed UID -2; parser corrected.
+  Fixture launcher files used 0644 instead of production 0755; fixture corrected.
+  Combined related run: 87 passed, 3 failed. Absent-error assertion corrected; unlinked
+  executable observation gained bounded kernel txt fallback; maintenance-lock concurrency
+  now preserves existing accepted:false API semantics instead of throwing EEXIST.
+  Focused corrected run: 2 files, 11 tests passed, plus TUI typecheck.
+  Additional executable regression run: 89 passed, 1 failed. The relocated Apple platform
+  binary died; the test had only awaited spawn, which was not continued-liveness proof.
+  Owned native probe, clankie heavy -- python3 with tempfile copyfile/chmod/Popen,
+  proc_pidpath and codesign --force --sign - (no identities or installed binaries):
+    original copied exit -9
+    ad-hoc signed exit None
+    kernel path <owned temporary fixture>/sleep (temporary path redacted)
+  Fixture now uses its own ad-hoc-signed copy and asserts liveness around retention.
+  First probe attempted shutil.copy2; SIP refused inherited system flags before any spawn.
+  Corrected probe copied bytes and ordinary owned permissions, without system flags.
+
+Local full attempt logs: .local/vuh-1841/{static,focused,focused-fixed,native-fixed,
+  integrated,repaired,final,final-signed-fixture}.txt (ignored, owned worktree).
+The integration ports and remaining owner live proof are described in README.md.
+Post-rebase (base 80a27a86, checked source HEAD 58e9a369):
+  Same serialized commands as above, oxfmt --check instead of --write.
+  Read rebased.txt, exit 0:
+    Formatting and lint passed; both owning typechecks passed; Knip passed.
+    Test Files 9 passed (9)
+    Tests 91 passed (91)
+    Duration 23.87s
+    Checked 548 markdown files; local links resolve; ADR numbers have no new collisions.
+    Retired-claims check passed silently.
+  The final amend only records these results in checks.txt; checked code inputs are unchanged.

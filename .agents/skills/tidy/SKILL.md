@@ -76,6 +76,13 @@ removal refusal as permission to force it. Keep live workers' owned trees even
 when their pane still reports the main checkout as its cwd. The read-only list
 is a candidate inventory, not ownership proof.
 
+Source runtime-update worktrees have their own automatic retention after a
+passed, released canary. It keeps the current pin and immediate previous runtime
+plus live, canary and recovery dependencies; it never removes worker checkouts
+or operation journals. Read `clankie update status --json` for `retention` and its
+retained reasons. `managed_runtime` is not permission to force-remove a tree,
+release a canary/recovery hold or discard an uncertain maintenance lock.
+
 The running service observes registered local owner refs every five seconds
 and fetches once a minute, so direct pushes sync automatically. Startup catches
 up pushes missed while stopped. `clankie checkouts sync` (optionally selecting

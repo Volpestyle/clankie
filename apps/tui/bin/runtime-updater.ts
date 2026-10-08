@@ -1,4 +1,11 @@
 import { syncOwnerCheckout } from "@clankie/settings";
+import {
+  retainRuntimeWorktrees,
+  withRuntimeMaintenance,
+  RuntimeMaintenanceBusyError,
+  type RuntimeRetentionResult,
+  RUNTIME_RETENTION_PENDING,
+} from "./runtime-retention.ts";
 /** Local host updater: one private operation, one detached helper, no mutation retry. */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
@@ -46,6 +53,10 @@ export interface UpdateAuthority {
 export interface RuntimeUpdateStatus {
   readonly runtime: RuntimeBootIdentity;
   readonly latest?: RuntimeUpdateResult;
+  readonly retention?: RuntimeRetentionResult;
+  /** Presence itself is a hold; unreadable metadata never becomes a negative observation. */
+  readonly retentionMaintenance?: { readonly state: "held" };
+  readonly retentionPending?: { readonly state: "unconfirmed" };
   readonly pending?: string;
   readonly needsReconciliation?: boolean;
   /** A release install already runs the requested official release. */
@@ -74,6 +85,8 @@ export interface RuntimeUpdater {
    * the clean pin that result left. Returns the reconciled result, if any.
    */
   reconcile?(): RuntimeUpdateResult | undefined;
+  /** After a passed canary; no effect when lifecycle or live runtime identity is uncertain. */
+  retainRuntimes?(): Promise<RuntimeRetentionResult>;
 }
 const IN_FLIGHT_PHASES: readonly RuntimeUpdateResult["phase"][] = [
   "scheduled",
@@ -134,6 +147,7 @@ export interface RuntimeUpdaterOptions {
     options: Parameters<typeof spawn>[2],
   ) => ChildProcess;
   readonly materialize?: (directory: string) => Promise<Readonly<Record<string, string>>>;
+  readonly retentionHolds?: () => Promise<readonly string[]>;
 }
 const HELPER_FILES = [
   "runtime-update-helper.mjs",
@@ -342,10 +356,43 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
     commit: assertPinnedRuntime(checkout, runtimePath, run),
   }));
   const { updates, lock, initialize, activeId, status, reconcile } = journal;
+  const retainedStatus = (): RuntimeUpdateStatus => {
+    const value: RuntimeUpdateStatus = {
+      ...status(),
+      ...(existsSync(join(updates, "maintenance.lock"))
+        ? { retentionMaintenance: { state: "held" as const } }
+        : {}),
+      ...(existsSync(join(updates, RUNTIME_RETENTION_PENDING))
+        ? { retentionPending: { state: "unconfirmed" as const } }
+        : {}),
+    };
+    try {
+      const retention = object(readPrivateJson(join(updates, "retention.json")));
+      if (["completed", "blocked"].includes(String(retention.outcome)))
+        return { ...value, retention: retention as unknown as RuntimeRetentionResult };
+    } catch {
+      /* Missing or damaged diagnostics grant no authority and never repair state. */
+    }
+    return value;
+  };
   return {
     runtime: boot,
-    status,
+    status: retainedStatus,
     reconcile,
+    retainRuntimes: () =>
+      retainRuntimeWorktrees({
+        home,
+        runtime: runtimePath,
+        boot,
+        protectedUpdateIds:
+          options.retentionHolds ??
+          (async () => {
+            throw Error("runtime_retention_holds_unavailable");
+          }),
+        checkout: dirname(
+          realpathSync(resolve(checkout, run("git", ["rev-parse", "--git-common-dir"], checkout))),
+        ),
+      }),
     async preview(ref) {
       const target = await updateCommit(checkout, ref, boot.commit, options.run);
       const git = async (args: string[]) => {
@@ -368,105 +415,112 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       await authority.guard();
       if (!authority.current()) throw Error("Update authority expired");
       initialize();
-      if (!journal.admit()) return { ...status(), accepted: false };
-      const oldCommit = assertPinnedRuntime(checkout, runtimePath, run);
-      if (boot.root !== realpathSync(runtimePath) || boot.commit !== oldCommit)
-        throw Error("Running service is not the exact pinned runtime");
-      // Network fetch must not block the live service's event loop.
-      const target = await updateCommit(checkout, ref, oldCommit, options.run);
-      if (assertPinnedRuntime(checkout, runtimePath, run) !== oldCommit)
-        throw Error("Pinned runtime changed during fetch");
-      const { newCommit } = target;
-      await authority.guard();
-      if (!authority.current()) throw Error("Update authority expired before checkout sync");
-      const ownerCheckoutSync =
-        target.resolvedRef === "refs/remotes/origin/main" ? await syncOwnerCheckout(checkout) : undefined;
-      const initiator = parseUpdateInitiator(authority.initiator ?? { kind: "operator" });
-      // The running pin is moved during cutover; all git operations need a stable repository cwd.
-      const repository = dirname(
-        realpathSync(resolve(checkout, run("git", ["rev-parse", "--git-common-dir"], checkout))),
-      );
-      const id = randomUUID();
-      const directory = join(updates, id);
-      mkdirSync(lock, { mode: 0o700 });
-      writePrivateJson(join(lock, "operation.json"), { id });
-      mkdirSync(directory, { mode: 0o700 });
-      let accepted = false;
-      try {
-        const plan: RuntimeUpdatePlan = {
-          id,
-          ref,
-          checkout: repository,
-          runtime: runtimePath,
-          home,
-          directory,
-          oldCommit,
-          newCommit,
-          resolvedRef: target.resolvedRef,
-          ...(ownerCheckoutSync === undefined ? {} : { ownerCheckoutSync }),
-          ...(target.warning === undefined ? {} : { warning: target.warning }),
-          initiator,
-          oldInstanceId: boot.instanceId,
-        };
-        writePrivateJson(join(directory, "plan.json"), plan);
-        const helperHashes = await (options.materialize ?? materializeUpdateHelper)(directory);
-        // Commit point: no awaited preparation remains between fresh authority and physical scheduling.
+      return withRuntimeMaintenance(updates, async () => {
+        if (existsSync(join(updates, RUNTIME_RETENTION_PENDING)))
+          throw Error("Runtime retention removal requires owner reconciliation");
+        if (!journal.admit()) return { ...status(), accepted: false };
+        const oldCommit = assertPinnedRuntime(checkout, runtimePath, run);
+        if (boot.root !== realpathSync(runtimePath) || boot.commit !== oldCommit)
+          throw Error("Running service is not the exact pinned runtime");
+        // Network fetch must not block the live service's event loop.
+        const target = await updateCommit(checkout, ref, oldCommit, options.run);
+        if (assertPinnedRuntime(checkout, runtimePath, run) !== oldCommit)
+          throw Error("Pinned runtime changed during fetch");
+        const { newCommit } = target;
         await authority.guard();
-        verifyUpdateHelper(directory, helperHashes);
-        if (!authority.current()) throw Error("Update authority expired");
-        const result: RuntimeUpdateResult = {
-          id,
-          ref,
-          oldCommit,
-          newCommit,
-          resolvedRef: target.resolvedRef,
-          ...(ownerCheckoutSync === undefined ? {} : { ownerCheckoutSync }),
-          ...(target.warning === undefined ? {} : { warning: target.warning }),
-          initiator,
-          phase: "scheduled",
-          updatedAt: new Date().toISOString(),
-        };
-        writeRuntimeUpdate(directory, result);
-        writePrivateJson(join(updates, "latest.json"), { id });
-        accepted = true;
-        const log = openSync(join(directory, "helper.log"), "ax", 0o600);
+        if (!authority.current()) throw Error("Update authority expired before checkout sync");
+        const ownerCheckoutSync =
+          target.resolvedRef === "refs/remotes/origin/main" ? await syncOwnerCheckout(checkout) : undefined;
+        const initiator = parseUpdateInitiator(authority.initiator ?? { kind: "operator" });
+        // The running pin is moved during cutover; all git operations need a stable repository cwd.
+        const repository = dirname(
+          realpathSync(resolve(checkout, run("git", ["rev-parse", "--git-common-dir"], checkout))),
+        );
+        const id = randomUUID();
+        const directory = join(updates, id);
+        mkdirSync(lock, { mode: 0o700 });
+        writePrivateJson(join(lock, "operation.json"), { id });
+        mkdirSync(directory, { mode: 0o700 });
+        let accepted = false;
         try {
-          writeSync(
-            log,
-            JSON.stringify({ event: "runtime-update-accepted", id, ref, oldCommit, ...target, initiator }) +
-              "\n",
-          );
-          const helperEnv: NodeJS.ProcessEnv = { ...env, pnpm_config_verify_deps_before_run: "false" };
-          for (const name of [
-            "PI_SESSION_FILE",
-            "PI_SESSION_ID",
-            "NODE_OPTIONS",
-            "NODE_PATH",
-            "CLANKIE_LAUNCHER_PATH",
-          ])
-            delete helperEnv[name];
-          const child = (options.spawnHelper ?? spawn)(
-            process.execPath,
-            [join(directory, "runtime-update-helper.mjs")],
-            { cwd: directory, env: helperEnv, detached: true, stdio: ["ignore", log, log] },
-          );
-          child.on("error", () => {
-            /* Acceptance is durable; uncertain spawn is never resent. */
-          });
-          child.unref();
-        } finally {
-          closeSync(log);
+          const plan: RuntimeUpdatePlan = {
+            id,
+            ref,
+            checkout: repository,
+            runtime: runtimePath,
+            home,
+            directory,
+            oldCommit,
+            newCommit,
+            resolvedRef: target.resolvedRef,
+            ...(ownerCheckoutSync === undefined ? {} : { ownerCheckoutSync }),
+            ...(target.warning === undefined ? {} : { warning: target.warning }),
+            initiator,
+            oldInstanceId: boot.instanceId,
+          };
+          writePrivateJson(join(directory, "plan.json"), plan);
+          const helperHashes = await (options.materialize ?? materializeUpdateHelper)(directory);
+          // Commit point: no awaited preparation remains between fresh authority and physical scheduling.
+          await authority.guard();
+          verifyUpdateHelper(directory, helperHashes);
+          if (!authority.current()) throw Error("Update authority expired");
+          const result: RuntimeUpdateResult = {
+            id,
+            ref,
+            oldCommit,
+            newCommit,
+            resolvedRef: target.resolvedRef,
+            ...(ownerCheckoutSync === undefined ? {} : { ownerCheckoutSync }),
+            ...(target.warning === undefined ? {} : { warning: target.warning }),
+            initiator,
+            phase: "scheduled",
+            updatedAt: new Date().toISOString(),
+          };
+          writeRuntimeUpdate(directory, result);
+          writePrivateJson(join(updates, "latest.json"), { id });
+          accepted = true;
+          const log = openSync(join(directory, "helper.log"), "ax", 0o600);
+          try {
+            writeSync(
+              log,
+              JSON.stringify({ event: "runtime-update-accepted", id, ref, oldCommit, ...target, initiator }) +
+                "\n",
+            );
+            const helperEnv: NodeJS.ProcessEnv = { ...env, pnpm_config_verify_deps_before_run: "false" };
+            for (const name of [
+              "PI_SESSION_FILE",
+              "PI_SESSION_ID",
+              "NODE_OPTIONS",
+              "NODE_PATH",
+              "CLANKIE_LAUNCHER_PATH",
+            ])
+              delete helperEnv[name];
+            const child = (options.spawnHelper ?? spawn)(
+              process.execPath,
+              [join(directory, "runtime-update-helper.mjs")],
+              { cwd: directory, env: helperEnv, detached: true, stdio: ["ignore", log, log] },
+            );
+            child.on("error", () => {
+              /* Acceptance is durable; uncertain spawn is never resent. */
+            });
+            child.unref();
+          } finally {
+            closeSync(log);
+          }
+          return { ...status(), accepted: true };
+        } catch (error) {
+          if (!accepted) {
+            // Only this unaccepted preparation owns the lock. No helper has been spawned.
+            if (activeId() === id) rmSync(lock, { recursive: true });
+            rmSync(directory, { recursive: true });
+            throw error;
+          }
+          return { ...status(), accepted: true, needsReconciliation: true };
         }
-        return { ...status(), accepted: true };
-      } catch (error) {
-        if (!accepted) {
-          // Only this unaccepted preparation owns the lock. No helper has been spawned.
-          if (activeId() === id) rmSync(lock, { recursive: true });
-          rmSync(directory, { recursive: true });
-          throw error;
-        }
-        return { ...status(), accepted: true, needsReconciliation: true };
-      }
+      }).catch((error) => {
+        if (error instanceof RuntimeMaintenanceBusyError) return { ...retainedStatus(), accepted: false };
+        throw error;
+      });
     },
   };
 }

@@ -864,7 +864,12 @@ the same safe sync, including catch-up on startup. Blocking edits and ages
 produce a service notice and structured log. Tidy's exact-worktree removal preserves `.local`
 evidence in the configured state directory and rechecks complete local pane
 and Git inventories. Managed pin/runtime/update namespaces and the running
-service checkout are protected independently of developer-root enrollment.
+service checkout are protected independently of developer-root enrollment. Source runtime
+retention is separate: after a passed and released canary, `runtime-retention.ts`
+keeps current/previous and live/canary/recovery dependencies, then releases only
+verified obsolete runtime worktrees. Its private effect journal and shared
+maintenance lock prevent uncertain removals from being replayed;
+[update status](cli.md) exposes the inspection.
 Roster/fleet checkout reads require explicit opt-in and cache owner discovery
 and inspection together for 30 seconds with a 128-cwd limit; default reads do
 no checkout Git work. Doctor reports cached refs without fetching.

@@ -26,7 +26,7 @@ import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createReleaseUpdater } from "../../tui/bin/release-updater.ts";
 import { applySavedKeepAwake, savedKeepAwakeStatus } from "../../tui/src/command/awake.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
-import { RuntimeCanary } from "./runtime-canary.ts";
+import { RuntimeCanary, RUNTIME_CANARY_HOLDER } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
 import { IntegrationQueue, integrationSources } from "./integrate.ts";
 import { DeployHolds } from "./deploy-holds.ts";
@@ -1035,7 +1035,13 @@ minecraftCapture = new MinecraftCapture({
 // tree, is replaced by its deployment instead.
 const runtimeUpdater =
   hostedBody === undefined && existsSync(join(repoRoot, ".git"))
-    ? createRuntimeUpdater({ repoRoot })
+    ? createRuntimeUpdater({
+        repoRoot,
+        retentionHolds: async () =>
+          (await deployHolds.list())
+            .filter((hold) => hold.holder === RUNTIME_CANARY_HOLDER)
+            .map((hold) => hold.id),
+      })
     : existsSync(join(repoRoot, "release.json")) && basename(dirname(realpathSync(repoRoot))) === "releases"
       ? releaseUpdaterOrNone()
       : undefined;
@@ -1482,6 +1488,27 @@ const workerPluginNotices = new WorkerPluginNotices({
     return runtimes.fleetRun(fleet)(metadata);
   },
 });
+let runtimeRetentionReady = false;
+let runtimeRetentionRequested = false;
+let runtimeRetentionTask: Promise<void> | undefined;
+const inspectRuntimeRetention = async () => {
+  runtimeRetentionRequested = true;
+  // Recover canary authority first; cleanup must not delay cold-start health.
+  if (!runtimeRetentionReady) return;
+  runtimeRetentionRequested = false;
+  runtimeRetentionTask ??= (async () => {
+    const retention = await runtimeUpdater?.retainRuntimes?.();
+    if (retention)
+      logger.info({ event: "runtime.retention", ...retention }, "Runtime worktree retention inspected");
+  })()
+    .catch((error) =>
+      logger.warn({ event: "runtime.retention.failed", error }, "Runtime retention remains unverified"),
+    )
+    .finally(() => {
+      runtimeRetentionTask = undefined;
+    });
+  await runtimeRetentionTask;
+};
 const runtimeCanary =
   runtimeUpdater === undefined
     ? undefined
@@ -1490,6 +1517,7 @@ const runtimeCanary =
         runtime: runtimeUpdater.runtime,
         holds: deployHolds,
         sample: createRuntimeHealthSampler({ healthUrl: `http://127.0.0.1:${port}/health` }),
+        onPassed: inspectRuntimeRetention,
         alert: async (text) => {
           const alerts = captain as typeof captain & {
             notifyRuntimeHealthAlert?: (text: string) => Promise<boolean>;
@@ -1996,8 +2024,14 @@ const publishLocalCompanionIssuer = async () => {
   }
 };
 server.once("listening", () => {
+  runtimeRetentionReady = true;
+  if (runtimeRetentionRequested) void inspectRuntimeRetention();
   void publishLocalCompanionIssuer();
 });
+if (server.listening) {
+  runtimeRetentionReady = true;
+  if (runtimeRetentionRequested) void inspectRuntimeRetention();
+}
 if (server.listening) runtimeHealth.start();
 else server.once("listening", () => runtimeHealth.start());
 runtimeCanary?.start();
@@ -2095,6 +2129,8 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await discordTracking.close();
     await runtimeCanary?.close();
+    runtimeRetentionReady = false;
+    await runtimeRetentionTask;
     linearWakeReads.close();
     await captain.close().catch(() => undefined);
     await herdr.close();

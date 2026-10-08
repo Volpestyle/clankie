@@ -464,6 +464,23 @@ distinguishes submitted, unavailable, and an uncertain claimed attempt.
 Submitted means the native notification path accepted the attempt; it does not
 claim a confirmed recipient receipt.
 
+After a passed canary releases its hold, source-worktree installs automatically
+release obsolete update worktrees. The current pin and that cutover's immediate
+`previous` stay. Failed or pending canaries and unresolved recovery operations
+protect their worktrees and referenced commits; live processes, dirty or locked
+trees, missing completion evidence and unverified native Git identity also hold
+removal. An unreadable journal, uncertain current/previous identity or incomplete
+process inventory refuses cleanup. Update admission and retention share a lock.
+No forced removals, worker-worktree tidy or operation/receipt deletion occurs.
+`clankie update status --json` includes the last `retention` inspection, bounded
+removed/retained lists and counts. `retentionMaintenance` and `retentionPending`
+name a currently held cleanup lock or unconfirmed removal even when its record
+is unreadable. Complete effect evidence stays in private
+`~/.clankie/updates/retention.log`; operation journals remain beside it.
+Recovery of an already passed canary inspects retention again. A held
+`maintenance.lock` or `retention-pending.json` requires owner reconciliation;
+neither age nor a timeout authorizes deletion or replay of a removal.
+
 `clankie update canary` reads the policy and last canary. Configure the next
 update with `--window-seconds N`, `--sample-seconds N`, `--cpu-percent N`
 (advisory only), and `--health-ms N`; omitted fields retain their values. Policy changes do not
