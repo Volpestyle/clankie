@@ -2,7 +2,7 @@
 
 Minecraft's turn-based play adapter and model prompt over the shared
 [`@clankie/play`](../../packages/play/README.md) kernel
-([ADR 0253](../../docs/adr/0253-turn-based-games-share-a-play-kernel.md)).
+([ADR 0254](../../docs/adr/0254-turn-based-games-share-a-play-kernel.md)).
 
 `runMinecraftPlay` supplies native observations, generation and health fences,
 bounded action settlement/cancellation, verified effects, memory and idle policy.

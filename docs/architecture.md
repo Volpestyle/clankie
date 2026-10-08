@@ -645,7 +645,7 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   `integrations/pokemon` implements it; core retains play leases, authority and
   recovery, persona/model selection, Discord/Activity destinations and evidence
   projections. Pokémon's existing API/CLI/TUI enter that extension through a
-  compatibility composition point. Pokémon and Minecraft share the turn scheduler, streamed model transport and journal envelope in `packages/play` ([ADR 0253](adr/0253-turn-based-games-share-a-play-kernel.md)); `integrations/minecraft` owns the native Minecraft play adapter. Full Minecraft and Rivals lifecycle adoption, and
+  compatibility composition point. Pokémon and Minecraft share the turn scheduler, streamed model transport and journal envelope in `packages/play` ([ADR 0254](adr/0254-turn-based-games-share-a-play-kernel.md)); `integrations/minecraft` owns the native Minecraft play adapter. Full Minecraft and Rivals lifecycle adoption, and
   installed-extension discovery without core edits, remain follow-ups.
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and

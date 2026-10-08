@@ -20,6 +20,43 @@ for await (const path of glob("**/*.md", {
   markdown.push(resolve(root, path));
 }
 const failures = [];
+// Stable historical aliases documented in docs/adr/README.md. Match exact
+// filenames so another collision under an old number cannot inherit an exemption.
+const legacyAdrPairs = new Map([
+  [
+    "0207",
+    ["0207-work-records-and-native-agent-delivery.md", "0207-workers-publish-through-one-clankie-app.md"],
+  ],
+  ["0098", ["0098-the-room-can-type-to-a-playthrough.md", "0098-user-session-watches-discord-shares.md"]],
+  [
+    "0189",
+    [
+      "0189-agent-sessions-read-from-their-transcripts.md",
+      "0189-his-own-linear-activity-does-not-wake-him.md",
+    ],
+  ],
+  [
+    "0191",
+    [
+      "0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md",
+      "0191-work-is-tracked-where-the-repo-tracks-it.md",
+    ],
+  ],
+]);
+const adrNumbers = new Map();
+for (const name of (await readdir(resolve(root, "docs/adr"))).sort()) {
+  const number = /^(\d{4})-.+\.md$/u.exec(name)?.[1];
+  if (number === undefined) continue;
+  const names = adrNumbers.get(number) ?? [];
+  names.push(name);
+  adrNumbers.set(number, names);
+}
+for (const [number, names] of adrNumbers) {
+  if (names.length < 2) continue;
+  if (JSON.stringify(names) === JSON.stringify(legacyAdrPairs.get(number))) continue;
+  failures.push(`Duplicate ADR ${number}: ${names.join(", ")}`);
+}
+
 for (const path of markdown) {
   const source = await readFile(path, "utf8");
   for (const match of source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
@@ -47,9 +84,11 @@ for (const skillRoot of [".claude/skills", ".codex/skills", "integrations/claude
   }
 }
 if (failures.length) {
-  console.error("Broken local markdown links:");
+  console.error("Documentation errors:");
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exitCode = 1;
 } else {
-  console.log(`Checked ${markdown.length} markdown files; local links resolve.`);
+  console.log(
+    `Checked ${markdown.length} markdown files; local links resolve; ADR numbers have no new collisions.`,
+  );
 }

@@ -19,7 +19,9 @@ below identifies decisions whose former implementation or scope is historical.
   fails wherever live code, skills or guides still repeat it.
 - Link ADRs by stable filename, not by number alone. Accepted ADRs are never
   renumbered.
-- Numbers 0098, 0189 and 0191 each identify two records. Use these disambiguating aliases:
+- Allocate the next unused number after checking fetched main. `pnpm docs:check` and
+  `pnpm check:landing` reject duplicate numbers, except the exact historical pairs below.
+- Numbers 0098, 0189, 0191 and 0207 each identify two records. Use these disambiguating aliases:
 
 | Alias                          | Stable record                                                                                                  |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -29,6 +31,8 @@ below identifies decisions whose former implementation or scope is historical.
 | ADR 0189 (Linear echoes)       | [His own Linear activity does not wake him](0189-his-own-linear-activity-does-not-wake-him.md)                 |
 | ADR 0191 (reply routing)       | [A reply to his post goes to whoever owns the work](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) |
 | ADR 0191 (work tracking)       | [Work is tracked where the repo tracks it](0191-work-is-tracked-where-the-repo-tracks-it.md)                   |
+| ADR 0207 (native delivery)     | [Work records and native agent delivery](0207-work-records-and-native-agent-delivery.md)                       |
+| ADR 0207 (worker publishing)   | [Workers publish through one Clankie app](0207-workers-publish-through-one-clankie-app.md)                     |
 
 ## Diagrams
 

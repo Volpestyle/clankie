@@ -1,4 +1,4 @@
-# ADR 0253: Turn-based games share a play kernel
+# ADR 0254: Turn-based games share a play kernel
 
 Status: accepted (VUH-1747, 2026-10-08).
 

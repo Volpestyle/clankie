@@ -2,6 +2,7 @@ import { cp, glob, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { marked } from "marked";
 import { parse as parseYaml } from "yaml";
+import { isMachineJoinTransportRoute } from "../../../packages/protocol/src/machine-join.ts";
 import {
   PUBLIC_GATEWAY_CONFIG_PATH,
   PUBLIC_GATEWAY_HEALTH_PATH,
@@ -175,6 +176,49 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 
 function buildNetworkRows() {
   const routeDetails = new Map([
+    [
+      "POST /v1/machine-joins/start",
+      {
+        access: "Unauthenticated bootstrap metadata; grants no machine access",
+        purpose: "Create an expiring join ticket for a machine awaiting explicit owner approval.",
+      },
+    ],
+    [
+      "POST /v1/machine-joins/status",
+      {
+        access: "Join claim-secret bearer",
+        purpose: "Read approval state and retrieve the sealed machine lease after owner consent.",
+      },
+    ],
+    [
+      "POST /v1/machine-joins/approve",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Approve a join code with an explicit access level and directory scope.",
+      },
+    ],
+    [
+      "POST /v1/joined-machines/challenge",
+      {
+        access: "Joined machine identifier; grants no operation authority",
+        purpose: "Obtain a short-lived challenge for an authenticated machine exchange.",
+      },
+    ],
+    [
+      "POST /v1/joined-machines/channel",
+      {
+        access: "Authenticated machine envelope with a fresh challenge",
+        purpose: "Poll scoped operations and return machine results under the current owner policy.",
+      },
+    ],
+    [
+      "POST /v1/joined-machines/leave",
+      {
+        access: "Authenticated machine envelope with a fresh challenge",
+        purpose: "Revoke the joined machine lease and confirm departure.",
+      },
+    ],
+
     [
       "GET /v1/operator/host-settings",
       {
@@ -833,17 +877,18 @@ function buildNetworkRows() {
     routeDetails.delete(key);
     rows.push({
       method: route.method,
-      route: [
-        "/v1/gateway/challenge",
-        "/v1/gateway/encrypted",
-        "/v1/gateway/push-authorize",
-        "/v1/hooks/linear",
-        "/v1/hosted/pair-offer",
-        "/v1/discord/ingress",
-        "/v1/activity/viewer",
-      ].includes(route.path)
-        ? `/h/{hostId}${route.path}`
-        : `${route.path} (inside encrypted exchange)`,
+      route:
+        [
+          "/v1/gateway/challenge",
+          "/v1/gateway/encrypted",
+          "/v1/gateway/push-authorize",
+          "/v1/hooks/linear",
+          "/v1/hosted/pair-offer",
+          "/v1/discord/ingress",
+          "/v1/activity/viewer",
+        ].includes(route.path) || isMachineJoinTransportRoute(route.method, route.path)
+          ? `/h/{hostId}${route.path}`
+          : `${route.path} (inside encrypted exchange)`,
       ...detail,
     });
   }

@@ -8,7 +8,7 @@ everything here sits above `GbaDriverIo` — one interface in
 [`src/body-seam.ts`](src/body-seam.ts) that the seat implements. The loop never
 learns what is behind it. The [Pokémon extension](../../integrations/pokemon/README.md)
 owns its connector and execution composition through the shared game-extension
-lifecycle; the [Minecraft adapter](../../integrations/minecraft/README.md) supplies its native play policy. This package retains the Pokémon adapter alongside their shared scheduler, transport and journal readers ([ADR 0253](../../docs/adr/0253-turn-based-games-share-a-play-kernel.md)).
+lifecycle; the [Minecraft adapter](../../integrations/minecraft/README.md) supplies its native play policy. This package retains the Pokémon adapter alongside their shared scheduler, transport and journal readers ([ADR 0254](../../docs/adr/0254-turn-based-games-share-a-play-kernel.md)).
 
 ## What is in here
 
