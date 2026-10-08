@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request as httpRequest, type Server } from "node:http";
 import { serve } from "@hono/node-server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalCompanionHandoffSchema, LocalCompanionSessionSchema } from "@clankie/protocol/local-companion";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -16,6 +16,7 @@ import { writeLocalCompanionHandoff } from "../../tui/bin/local-companion.ts";
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  vi.unstubAllEnvs();
 });
 async function fixture() {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "companion-")));
@@ -31,6 +32,7 @@ async function fixture() {
       deviceSessionKey: key,
       modelDeviceSetup: { platform: "darwin", hosted: false },
       isLocalCompanionRequest: (request) => boundary.has(request),
+      isSameMacRequest: (request) => boundary.isSameMac(request),
       authenticateOperator: async (request) =>
         request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
     });
@@ -50,7 +52,7 @@ async function fixture() {
       }),
   );
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const issuer = await startLocalCompanionIssuer({
+  let issuer = await startLocalCompanionIssuer({
     stateRoot: dir,
     controlPlaneUrl: origin,
     boundary,
@@ -72,14 +74,23 @@ async function fixture() {
     mint,
     app: () => app,
     restart: async () => {
+      await issuer.close();
       app.close();
       await boot();
+      issuer = await startLocalCompanionIssuer({
+        stateRoot: dir,
+        controlPlaneUrl: origin,
+        boundary,
+        fetch: (request) => app.app.fetch(request),
+      });
     },
   };
 }
 
 describe("Mac companion local pairing boundary", () => {
   it("hands off privately, redeems once, reuses its durable device after reinstall/restart, and preserves revocation", async () => {
+    vi.stubEnv("CLANKIE_DIRECT_CONTROL_PLANE_URL", "http://other-device.example:4310");
+    vi.stubEnv("CLANKIE_RELAY_URL", "http://other-device.example:4321");
     const f = await fixture();
     const path = await writeLocalCompanionHandoff({
       env: { CLANKIE_STATE: f.dir },
@@ -93,18 +104,53 @@ describe("Mac companion local pairing boundary", () => {
     expect(response.status).toBe(200);
     const session = LocalCompanionSessionSchema.parse(await response.json());
     expect(session.directRoute?.controlPlaneUrl).toBe(f.origin);
+    expect(session.relayUrl).toMatch(/^http:\/\/127\.0\.0\.1:/u);
+    const auth = { authorization: `Bearer ${session.deviceToken}` };
+    expect(await (await f.call("/v1/devices/self", undefined, auth)).json()).toMatchObject({
+      directRoute: session.directRoute,
+    });
+    expect(await (await f.call("/v1/devices/self/session/refresh", {}, auth)).json()).toMatchObject({
+      directRoute: session.directRoute,
+      relayUrl: session.relayUrl,
+      grants: session.grants,
+    });
     expect(
       (await f.call("/v1/devices/self", undefined, { authorization: `Bearer ${session.deviceToken}` }))
         .status,
     ).toBe(200);
     expect((await f.call("/v1/pairing/local/redeem", { offerSecret: handoff.offerSecret })).status).toBe(409);
+    // The same installer/CLI handoff can be repeated without accumulating devices.
+    const repeatPath = await writeLocalCompanionHandoff({
+      env: { CLANKIE_STATE: f.dir },
+      controlPlaneUrl: f.origin,
+      operatorToken: "owner",
+    });
+    expect(repeatPath).toBe(path);
+    const repeated = LocalCompanionHandoffSchema.parse(JSON.parse(await readFile(repeatPath, "utf8")));
+    expect(repeated.offerSecret).not.toBe(handoff.offerSecret);
+    const reused = LocalCompanionSessionSchema.parse(
+      await (await f.call("/v1/pairing/local/redeem", { offerSecret: repeated.offerSecret })).json(),
+    );
+    expect(reused).toMatchObject({
+      deviceId: session.deviceId,
+      grants: session.grants,
+      directRoute: session.directRoute,
+    });
     await f.restart();
-    const replacement = await f.mint();
+    const replacementPath = await writeLocalCompanionHandoff({
+      env: { CLANKIE_STATE: f.dir },
+      controlPlaneUrl: f.origin,
+      operatorToken: "owner",
+    });
+    const replacement = LocalCompanionHandoffSchema.parse(
+      JSON.parse(await readFile(replacementPath, "utf8")),
+    );
     const restored = LocalCompanionSessionSchema.parse(
       await (await f.call("/v1/pairing/local/redeem", { offerSecret: replacement.offerSecret })).json(),
     );
     // Redeem schema accepts only the secret, so never send a returned offer verbatim.
     expect(restored.deviceId).toBe(session.deviceId);
+    expect(restored.grants).toEqual(session.grants);
     const listed = await (await f.call("/v1/devices", undefined, { authorization: "Bearer owner" })).json();
     expect(listed).toHaveLength(1);
     await f.call(`/v1/devices/${session.deviceId}/revoke`, {}, { authorization: "Bearer owner" });
@@ -122,7 +168,13 @@ describe("Mac companion local pairing boundary", () => {
         .status,
     ).toBe(401);
     const events = await readFile(join(f.dir, "events.jsonl"), "utf8");
-    for (const secret of [handoff.offerSecret, session.deviceToken, fresh.offerSecret])
+    for (const secret of [
+      handoff.offerSecret,
+      repeated.offerSecret,
+      replacement.offerSecret,
+      session.deviceToken,
+      fresh.offerSecret,
+    ])
       expect(events).not.toContain(secret);
   });
 
@@ -133,8 +185,11 @@ describe("Mac companion local pairing boundary", () => {
     for (const headers of [
       { origin: "https://evil.example" },
       { origin: "null" },
+      { referer: "https://evil.example/" },
       { "sec-fetch-site": "same-origin" },
+      { "sec-fetch-dest": "empty" },
       { "x-forwarded-for": "127.0.0.1" },
+      { "x-clankie-gateway": "1" },
     ]) {
       expect(
         (await f.call("/v1/pairing/local/redeem", { offerSecret: offer.offerSecret }, headers)).status,

@@ -1,8 +1,10 @@
 # Pair the companion on this Mac
 
-The service and CLI provide the local pairing handoff for ADR 0226. The signed
-app distribution and installer integration are separate work; this API does
-not install or launch the app.
+The service and CLI provide a private local pairing handoff for the Mac
+companion. Same-Mac route selection follows
+[ADR 0204](adr/0204-a-self-hosted-mac-pairs-the-app-directly.md).
+The signed app distribution, automatic first-launch consumer and installer
+integration are separate work; this API does not install or launch the app.
 
 Run `clankie pair --local-companion --json` as the Mac owner after the service
 starts. It starts or reuses the app relay, asks the service's owner-private Unix
@@ -37,6 +39,14 @@ loopback control/relay endpoints. First redemption activates Take Control;
 later handoffs preserve the active companion's device ID and grants, including
 after a service restart. Revocation stays effective: fresh authorized pairing
 creates a new identity and never revives the revoked token.
+
+Restoring with `GET /v1/devices/self` and refreshing with
+`POST /v1/devices/self/session/refresh` over the primary native loopback listener
+keep the service's loopback control/relay endpoints, even when the configured
+direct route advertises a LAN or tailnet address for other devices. Headers do
+not establish same-Mac provenance; forwarded gateway requests retain their
+configured route. A successful private handoff and device reuse prove the
+service boundary, not a fresh signed-app install.
 
 Local pairing exists only on a self-hosted Mac. The primary listener checks the
 actual local and remote socket addresses, numeric loopback Host, native JSON
