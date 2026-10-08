@@ -21,6 +21,14 @@ process itself, so a hosted captain running as PID 1 can perform pressure
 admission without granting PID 1 lease or signal authority. The hosted Linux
 image installs Python 3; self-hosted hosts must provide it.
 
+Registry transactions wait for the kernel file lock without a contention timeout.
+The 15-second transaction watchdog begins after acquisition, not while another
+request holds the lock. Queued heavy requests retain their original tickets
+through that wait. Cancellation terminates only the caller's waiting helper;
+queue cleanup still commits under the same lock. Native lock failures report the
+helper exit or signal and exception type/errno, without journal contents or
+paths; an acquired transaction deadline reports its own cause.
+
 On macOS, available memory is physical RAM multiplied by the kernel's
 `kern.memorystatus_level` percentage, matching `memory_pressure -Q` rather than
 summing selected VM page queues. The existing Python native boundary reads it

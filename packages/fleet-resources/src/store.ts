@@ -35,38 +35,104 @@ export class ResourceStore {
       throw error;
     }
   }
-  async transaction<T>(apply: (state: ResourceState) => T | Promise<T>): Promise<T> {
+  async transaction<T>(
+    apply: (state: ResourceState) => T | Promise<T>,
+    { signal }: { signal?: AbortSignal } = {},
+  ): Promise<T> {
+    if (signal?.aborted) throw new DOMException("Fleet resource wait cancelled", "AbortError");
     const child = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "lock", this.directory], {
-      stdio: ["pipe", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    let diagnostic = "";
+    let timedOut = false;
+    let cancelled = false;
+    let inputFailure: string | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    child.stderr.on("data", (bytes: Buffer) => {
+      diagnostic = (diagnostic + bytes.toString()).slice(0, 4_096);
+    });
+    const failure = (reason: string) => {
+      // Only the helper's bounded cause format is public. Python startup
+      // diagnostics can contain paths; never forward arbitrary stderr.
+      const detail = /^Fleet resource lock helper failed: [A-Za-z][A-Za-z0-9_]*(?: \(errno -?\d+\))?$/u.test(
+        diagnostic.trim(),
+      )
+        ? `: ${diagnostic.trim()}`
+        : "";
+      return cancelled
+        ? new DOMException("Fleet resource wait cancelled", "AbortError")
+        : new Error(
+            timedOut
+              ? "Fleet resource lock transaction exceeded 15000ms after acquisition"
+              : `${reason}${detail}`,
+          );
+    };
     const completion = new Promise<void>((resolve, reject) => {
-      child.once("error", () => reject(new Error("Fleet resource lock requires Python 3")));
-      child.once("exit", (code) =>
-        code === 0 ? resolve() : reject(new Error("Fleet resource lock unavailable")),
+      child.once("error", (error: NodeJS.ErrnoException) =>
+        reject(
+          failure(
+            `Fleet resource lock helper could not start (${error.code ?? error.name}); Python 3 is required`,
+          ),
+        ),
       );
+      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        inputFailure = `Fleet resource lock helper input failed (${error.code ?? error.name})`;
+      });
+      // close includes drained stderr; exit alone can lose the native cause.
+      child.once("close", (code, exitSignal) => {
+        if (code === 0 && !timedOut && !cancelled && !inputFailure) resolve();
+        else
+          reject(
+            failure(
+              code === 0 && inputFailure
+                ? inputFailure
+                : exitSignal
+                  ? `Fleet resource lock helper terminated by ${exitSignal}`
+                  : `Fleet resource lock helper exited with code ${code}`,
+            ),
+          );
+      });
     });
     void completion.catch(() => undefined);
+    const cancel = () => {
+      cancelled = true;
+      child.kill("SIGTERM");
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
     const lines = createInterface({ input: child.stdout });
     const iterator = lines[Symbol.asyncIterator]();
-    const timer = setTimeout(() => child.kill("SIGKILL"), 15_000);
     try {
       const first = await iterator.next();
       if (first.done) {
         await completion;
-        throw new Error("Fleet resource lock unavailable");
+        throw new Error("Fleet resource lock helper closed without returning the journal");
       }
+      signal?.removeEventListener("abort", cancel);
+      if (cancelled) await completion;
+      // Native stdout is emitted only after flock succeeds. Waiting for another
+      // transaction is not a stalled transaction and must not spend its deadline.
+      timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, 15_000);
       const state = parseState(JSON.parse(first.value));
       const before = JSON.stringify(state);
       const result = await apply(state);
+      if (timedOut || child.exitCode !== null || child.signalCode !== null) await completion;
+      if (signal?.aborted) throw new DOMException("Fleet resource wait cancelled", "AbortError");
       parseState(state);
+      // Once sent, settle the write. Cancellation must not turn a committed
+      // ticket/lease into an unacknowledged failure at the governor boundary.
       child.stdin.end(`${JSON.stringify(before === JSON.stringify(state) ? {} : { write: state })}\n`);
       await completion;
       return result;
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
       lines.close();
       child.stdin.destroy();
-      if (child.exitCode === null) child.kill("SIGTERM");
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      await completion.catch(() => undefined);
     }
   }
 }

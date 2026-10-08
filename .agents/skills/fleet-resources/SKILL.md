@@ -32,6 +32,12 @@ Python 3 and the shipped native helper
 must be available. Repair an unavailable installation through the existing setup
 route; do not select another registry to evade a wait.
 
+Brief journal-lock contention waits internally and keeps the heavy request's
+queue ticket. Its transaction deadline begins only after lock acquisition.
+An actual helper failure reports the exit/signal and native exception type or
+errno; retain that exact error for diagnosis rather than changing capacity or
+resubmitting a healthy queued request.
+
 The owner sets capacity through `clankie fleet set --heavy-slots auto|N` and
 `--simulator-slots N`, or `/fleet resources`. Automatic capacity is the smaller
 of one slot per eight cores and one per 24 GiB RAM, with a minimum of one.

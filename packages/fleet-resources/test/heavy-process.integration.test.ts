@@ -115,6 +115,51 @@ async function fixture() {
 }
 
 describe("machine shared heavy permits with actual OS children", () => {
+  it("keeps eleven queued requests and their tickets through more than fifteen seconds of OS lock contention", async () => {
+    const f = await fixture();
+    let holder: ChildProcess | undefined;
+    let held: ReturnType<typeof createInterface> | undefined;
+    let holderDone: Promise<number | null> | undefined;
+    try {
+      const active = f.start("lock-active");
+      await eventually(() => exists(active.receipt), Boolean, 30_000);
+      const queued = Array.from({ length: 11 }, (_, i) => f.start(`lock-waiter-${i}`, "exit"));
+      const before = await eventually(
+        () => new ResourceStore(f.directory).read(),
+        (state) => state.queue.length === queued.length,
+        30_000,
+      );
+      holder = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "lock", f.directory], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      holderDone = new Promise((resolve) => holder!.once("exit", resolve));
+      held = createInterface({ input: holder.stdout! });
+      expect((await held[Symbol.asyncIterator]().next()).done).toBe(false);
+      // The real native holder has acquired flock. Every wrapper now polls the
+      // same lock; the former spawn-to-exit watchdog killed those waiters at 15s.
+      await delay(17_000);
+      expect(queued.map((request) => request.child.exitCode)).toEqual(Array(11).fill(null));
+      expect((await new ResourceStore(f.directory).read()).queue).toEqual(before.queue);
+      holder.stdin!.end("{}\n");
+      expect(await holderDone).toBe(0);
+      await f.release(active.release);
+      expect(await active.done).toBe(0);
+      expect(await Promise.all(queued.map((request) => request.done))).toEqual(Array(11).fill(0));
+      for (const request of queued) {
+        expect(await exists(request.receipt)).toBe(true);
+        expect(request.output.join("")).not.toContain("Fleet resource lock unavailable");
+      }
+      const after = await f.governor.snapshot();
+      expect(after.queue).toEqual([]);
+      expect(after.capacity.used).toBe(0);
+    } finally {
+      held?.close();
+      holder?.stdin?.destroy();
+      if (holder && holder.exitCode === null && holder.signalCode === null) holder.kill("SIGTERM");
+      if (holderDone) await holderDone;
+      await f.close();
+    }
+  }, 120_000);
   it("simulator admission never queues: a full pool and a disabled policy answer at once, leaving heavy order intact", async () => {
     const f = await fixture();
     try {

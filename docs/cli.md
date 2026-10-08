@@ -2373,6 +2373,9 @@ test suites, builds and entire owned runtime lifetimes inside the wrapper, and
 serialize multi-package compilers with `--workspace-concurrency=1`. Native local
 hire briefs include this contract automatically. Nested verified commands reuse
 the same permit; surviving descendants retain it after a wrapper exits.
+Brief registry-lock contention waits internally without discarding the queue
+ticket. Actual native failures identify their cause; see the
+[resource governor reference](../packages/fleet-resources/README.md).
 
 `fleet resources` returns current capacity, pressure, holders and queue as JSON.
 The operator fleet snapshot carries the cached `resources` field; the TUI

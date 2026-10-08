@@ -185,50 +185,56 @@ export function createResourceGovernor(
       throw new Error("Invalid fleet seat identity");
     const id = randomUUID(),
       token = randomUUID();
-    await store.transaction(async (state) => {
-      await reconcile(state);
-      if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
-      state.queue.push({
-        id,
-        token,
-        kind: "heavy",
-        owner,
-        queuedAtMs: Date.now(),
-        ...(options.seatId ? { seatId: options.seatId } : {}),
-        executable: options.executable,
-      });
-    });
+    await store.transaction(
+      async (state) => {
+        await reconcile(state);
+        if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
+        state.queue.push({
+          id,
+          token,
+          kind: "heavy",
+          owner,
+          queuedAtMs: Date.now(),
+          ...(options.seatId ? { seatId: options.seatId } : {}),
+          executable: options.executable,
+        });
+      },
+      { signal },
+    );
     let admitted = false;
     try {
       for (;;) {
         if (signal.aborted) throw abort();
         let advisory: ResourceState | undefined;
-        const lease = await store.transaction(async (state) => {
-          await reconcile(state);
-          const blocked = () => {
-            if (options.onWait) advisory = structuredClone(state);
-            return undefined;
-          };
-          if (state.queue[0]?.id !== id || state.leases.length >= resourceCapacity(state.policy))
-            return blocked();
-          if (!(await pressure.sample(state.policy)).healthy) return blocked();
-          if (signal.aborted) throw abort();
-          const at = Date.now();
-          const next: HeavyLease = {
-            id,
-            token,
-            kind: "heavy",
-            state: "starting",
-            claimOwner: owner,
-            executable: options.executable,
-            ...(options.seatId ? { seatId: options.seatId } : {}),
-            createdAtMs: at,
-            lastUsedAtMs: at,
-          };
-          state.queue.shift();
-          state.leases.push(next);
-          return structuredClone(next);
-        });
+        const lease = await store.transaction(
+          async (state) => {
+            await reconcile(state);
+            const blocked = () => {
+              if (options.onWait) advisory = structuredClone(state);
+              return undefined;
+            };
+            if (state.queue[0]?.id !== id || state.leases.length >= resourceCapacity(state.policy))
+              return blocked();
+            if (!(await pressure.sample(state.policy)).healthy) return blocked();
+            if (signal.aborted) throw abort();
+            const at = Date.now();
+            const next: HeavyLease = {
+              id,
+              token,
+              kind: "heavy",
+              state: "starting",
+              claimOwner: owner,
+              executable: options.executable,
+              ...(options.seatId ? { seatId: options.seatId } : {}),
+              createdAtMs: at,
+              lastUsedAtMs: at,
+            };
+            state.queue.shift();
+            state.leases.push(next);
+            return structuredClone(next);
+          },
+          { signal },
+        );
         if (lease) {
           admitted = true;
           return lease;

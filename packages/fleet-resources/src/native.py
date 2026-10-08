@@ -365,6 +365,13 @@ if __name__ == "__main__":
             sys.exit(heavy_runner(sys.argv[2], sys.argv[3], sys.argv[4]))
         else:
             raise RuntimeError("Unknown native operation")
-    except Exception:
-        print("Fleet resource native boundary unavailable", file=sys.stderr)
+    except Exception as error:
+        if len(sys.argv) > 1 and sys.argv[1] == "lock":
+            # Report cause, never journal data, paths or command arguments.
+            detail = type(error).__name__
+            if isinstance(error, OSError) and error.errno is not None:
+                detail += " (errno %s)" % error.errno
+            print("Fleet resource lock helper failed: " + detail, file=sys.stderr)
+        else:
+            print("Fleet resource native boundary unavailable", file=sys.stderr)
         sys.exit(1)
