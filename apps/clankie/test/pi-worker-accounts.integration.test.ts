@@ -10,7 +10,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-routes.ts";
 import { chooseWorkerHarness, createWorkerAccountsReader } from "../src/captain/harness-accounts.ts";
-import { createPiWorkerStatusReader, localPiWorkerModel } from "../src/captain/pi-worker-account.ts";
+import { createPiWorkerStatusReader, localPiWorkerModelStatus } from "../src/captain/pi-worker-account.ts";
 import { runAccountsCommand } from "../../tui/src/command/accounts.ts";
 
 let root: string;
@@ -38,13 +38,15 @@ afterEach(async () => {
 it("reads native Pi's real selected model/auth without rewriting credentials and refuses unknown/expired models", async () => {
   const authPath = join(root, "pi", "auth.json");
   const before = await readFile(authPath, "utf8");
-  expect(await localPiWorkerModel(root)).toBe("openai/gpt-4o");
+  expect(await localPiWorkerModelStatus(root)).toEqual({ model: "openai/gpt-4o" });
   expect(await readFile(authPath, "utf8")).toBe(before);
   await writeFile(
     join(root, "pi", "settings.json"),
     JSON.stringify({ defaultProvider: "openai", defaultModel: "unregistered-fixture-model" }),
   );
-  expect(await localPiWorkerModel(root)).toBeUndefined();
+  expect(await localPiWorkerModelStatus(root)).toEqual({
+    reason: "The native Pi profile’s selected model is unavailable",
+  });
   await writeFile(
     join(root, "pi", "settings.json"),
     JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4o" }),
@@ -53,7 +55,9 @@ it("reads native Pi's real selected model/auth without rewriting credentials and
     openai: { type: "oauth", access: "fixture-access", refresh: "fixture-refresh", expires: 1 },
   });
   await writeFile(authPath, expired);
-  expect(await localPiWorkerModel(root)).toBeUndefined();
+  expect(await localPiWorkerModelStatus(root)).toEqual({
+    reason: "The native Pi profile’s OAuth credential has expired; refresh it in Pi before hiring",
+  });
   expect(await readFile(authPath, "utf8")).toBe(expired);
 });
 
@@ -205,5 +209,49 @@ it.skipIf(!nativePiInstalled || !["darwin", "linux"].includes(process.platform))
     expect(customer.models).not.toContain("clankie-customer/invalid model");
     expect(JSON.stringify(configured)).not.toContain("127.0.0.1");
     expect(JSON.stringify(report)).not.toContain("fixture-only-key");
+  },
+);
+
+it.skipIf(!nativePiInstalled || !["darwin", "linux"].includes(process.platform))(
+  "exposes expired native OAuth through the owner API and CLI without refresh or auto admission",
+  async () => {
+    const authPath = join(root, "pi", "auth.json");
+    const expired = JSON.stringify({
+      openai: { type: "oauth", access: "fixture-access", refresh: "fixture-refresh", expires: 1 },
+    });
+    await writeFile(authPath, expired);
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const reader = createWorkerAccountsReader({
+      settings: () => settings.load(),
+      fleet: async () => undefined,
+      piStatus: createPiWorkerStatusReader({ enabled: () => true, cwd: root }),
+    });
+    const app = await createClankieApp({
+      captain: createStubCaptain(),
+      workerAccounts: () => reader(undefined, ["pi"]),
+      authenticateOperator: async (request) =>
+        request.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "owner" } : undefined,
+    });
+    try {
+      const request = async (path: string) =>
+        (await (
+          await app.app.request(path, { headers: { authorization: "Bearer fixture-owner" } })
+        ).json()) as Record<string, unknown>;
+      const result = MachineWorkerAccountsSchema.parse(await runAccountsCommand(["workers"], { request }));
+      expect(result.accounts[0]).toMatchObject({
+        harness: "pi",
+        usable: false,
+        signedIn: false,
+        reason: "The native Pi profile’s OAuth credential has expired; refresh it in Pi before hiring",
+      });
+      const producer = await reader(undefined, ["pi"]);
+      expect(result.accounts).toEqual(producer.accounts);
+      expect(chooseWorkerHarness("local", producer, ["pi"])).toHaveProperty("refused");
+      expect(await readFile(authPath, "utf8")).toBe(expired);
+      expect(JSON.stringify(result)).not.toContain("fixture-access");
+      expect(JSON.stringify(result)).not.toContain("fixture-refresh");
+    } finally {
+      await app.close();
+    }
   },
 );

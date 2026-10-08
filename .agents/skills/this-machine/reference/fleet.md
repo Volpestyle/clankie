@@ -230,7 +230,12 @@ Pi must pass native capability and model/authentication checks in the same
 from automatic selection. Automatic hires prefer eligible Claude/Codex accounts
 then usable Pi, within model constraints; a local report cannot qualify remote Pi.
 Only `CLANKIE_PI_NATIVE_ENABLED=1` in the service's
-environment registers its local adapter; restart the service after changing it.
+environment registers its local adapter; changing it and restarting remain
+owner actions. Inspect `clankie accounts workers` before hiring: a disabled
+Pi row does not establish native authentication. A read-only enabled prerequisite
+check can still refuse an expired OAuth credential in the separate native Pi
+profile. The owner refreshes that profile in Pi; service credentials do not
+replace it. No account observation refreshes a token.
 Without opt-in, unbriefed Pi launches retain hosted model/provider preparation,
 while automated briefs remain unavailable. Opt-in requires the selected 0.87.1
 native capability and original visible process/session; validate compatibility

@@ -11,14 +11,15 @@ import type { PiSeatModel } from "./herdr-watch.ts";
 import { discoverPiNativeCapability } from "./pi-native-capability.ts";
 
 /** Inspect the same default profile native Pi opens; no login, refresh or credential mutation. */
-export async function localPiWorkerModel(cwd: string): Promise<string | undefined> {
+export async function localPiWorkerModelStatus(cwd: string): Promise<{ model: string } | { reason: string }> {
   const home = getAgentDir();
   const settings = SettingsManager.create(cwd, home);
   const provider = settings.getDefaultProvider(),
     model = settings.getDefaultModel();
-  if (!provider || !model) return undefined;
+  if (!provider || !model) return { reason: "Choose a default provider and model in the native Pi profile" };
   const stored = readStoredCredential(provider, join(home, "auth.json"));
-  if (stored?.type === "oauth" && stored.expires <= Date.now()) return undefined;
+  if (stored?.type === "oauth" && stored.expires <= Date.now())
+    return { reason: "The native Pi profile’s OAuth credential has expired; refresh it in Pi before hiring" };
   const credentials: CredentialStore = {
     read: async (id) => (id === provider ? stored : undefined),
     list: async () => (stored === undefined ? [] : [{ providerId: provider, type: stored.type }]),
@@ -35,9 +36,10 @@ export async function localPiWorkerModel(cwd: string): Promise<string | undefine
     refreshOnCreate: false,
   });
   const selected = runtime.getModel(provider, model);
-  return selected && (await runtime.getAuth(selected, { minOAuthValidityMs: 0 }))
-    ? `${provider}/${model}`
-    : undefined;
+  if (!selected) return { reason: "The native Pi profile’s selected model is unavailable" };
+  if (!(await runtime.getAuth(selected, { minOAuthValidityMs: 0 })))
+    return { reason: "The native Pi profile’s selected model has no usable authentication" };
+  return { model: `${provider}/${model}` };
 }
 
 /** Model references declared by this authenticated provider, without any provider config or secret. */
@@ -86,15 +88,19 @@ export function createPiWorkerStatusReader(options: {
     try {
       const capability = await discoverPiNativeCapability({ harness: "pi", cwd: options.cwd, brief: "" });
       await capability.verify();
-      const models = options.seatModel
-        ? piSeatModelRefs(await options.seatModel())
-        : [await localPiWorkerModel(options.cwd)].filter((ref): ref is string => ref !== undefined);
+      let models: readonly string[];
+      if (options.seatModel) models = piSeatModelRefs(await options.seatModel());
+      else {
+        const status = await localPiWorkerModelStatus(options.cwd);
+        if ("reason" in status) return { ...base, signedIn: false, usable: false, reason: status.reason };
+        models = [status.model];
+      }
       if (!models.length)
         return {
           ...base,
           signedIn: false,
           usable: false,
-          reason: "No authenticated model is available in the native Pi profile",
+          reason: "No authenticated model is available from the configured Pi worker provider",
         };
       return { ...base, signedIn: true, usable: true, models };
     } catch {

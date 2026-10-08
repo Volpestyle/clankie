@@ -1430,14 +1430,22 @@ its label, home, `signedIn`, identity (email) and plan as its own CLI states
 them (`claude auth status`; Codex's app-server `account/read` and
 `account/rateLimits/read`), Codex `headroom`, whether Clankie's worker plugin is
 in each Claude profile, any owner hold, and `usable` or the `reason` with its
-fix. Tokens and credential files are never read or returned. Claude usage is not
-observable, so its headroom stays `null`.
+fix. Tokens are never returned. Pi inspection reads its native profile without
+refreshing or changing credentials. Claude usage is not observable, so its
+headroom stays `null`.
 
 The local Pi `default` profile uses the same report and holds. It is usable only
 when the native adapter is enabled, its pinned files and executable verify, and
 the worker has a configured authenticated model. Managed bodies derive that
 model from their existing included/customer provider route; no owner account
-setup is needed. Unknown or unavailable capability fails closed. Pi is the
+setup is needed. On owner-run bodies, the opt-in is
+`CLANKIE_PI_NATIVE_ENABLED=1` in the service environment, followed by an
+owner-authorized service restart. Other values leave native Pi disabled. The
+local profile is separate from Clankie’s service credentials: its selected model
+must be available and authenticated. The report distinguishes a missing default,
+an unavailable model, missing authentication and expired OAuth. Refresh expired
+credentials in native Pi; inspection never does it for the owner. Unknown or
+unavailable capability fails closed. Pi is the
 automatic fallback after eligible Claude/Codex accounts, within the requested
 model constraints; a local Pi observation never qualifies a remote machine.
 
