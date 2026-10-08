@@ -14,7 +14,7 @@ import {
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "@clankie/protocol/projects";
 import { isWorkerAccountsRoute } from "@clankie/protocol/worker-accounts";
 
-/** Implemented with node:crypto, Expo Crypto, or CryptoKit, never JavaScript ciphers. */
+/** Implemented with node:crypto, WebCrypto, Expo Crypto, or CryptoKit, never JavaScript ciphers. */
 export interface GatewayCrypto {
   randomBytes(length: number): Uint8Array;
   /** Standard base64 key; sealed = 12-byte IV || ciphertext || 16-byte tag. Text and AAD are UTF-8. */
@@ -57,10 +57,49 @@ function base64(bytes: Uint8Array): string {
   for (const byte of bytes) text += String.fromCharCode(byte);
   return btoa(text);
 }
-function unbase64(text: string): Uint8Array {
+function unbase64(text: string): Uint8Array<ArrayBuffer> {
   const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
   if (base64(bytes) !== text) throw new Error("Noncanonical encrypted data");
   return bytes;
+}
+/** Browsers and Node 20+ through WebCrypto; no `node:` import, so a web bundle can ship it. */
+export function createWebGatewayCrypto(webCrypto: Crypto = globalThis.crypto): GatewayCrypto {
+  if (webCrypto?.subtle === undefined)
+    throw new Error("Gateway encryption requires WebCrypto (crypto.subtle)");
+  const subtle = webCrypto.subtle;
+  const importKey = async (key: string, usage: "encrypt" | "decrypt") => {
+    const raw = unbase64(key);
+    if (raw.length !== 32) throw new Error("Gateway encryption requires a 256-bit key");
+    return subtle.importKey("raw", raw, "AES-GCM", false, [usage]);
+  };
+  return {
+    randomBytes: (length) => webCrypto.getRandomValues(new Uint8Array(length)),
+    async seal(key, plaintext, aad) {
+      const iv = webCrypto.getRandomValues(new Uint8Array(12));
+      // WebCrypto returns ciphertext || 16-byte tag; prefixing the IV gives the shared wire format.
+      const sealed = new Uint8Array(
+        await subtle.encrypt(
+          { name: "AES-GCM", iv, additionalData: encoder.encode(aad), tagLength: 128 },
+          await importKey(key, "encrypt"),
+          encoder.encode(plaintext),
+        ),
+      );
+      const out = new Uint8Array(12 + sealed.length);
+      out.set(iv);
+      out.set(sealed, 12);
+      return base64(out);
+    },
+    async open(key, sealed, aad) {
+      const bytes = unbase64(sealed);
+      if (bytes.length < 28) throw new Error("Invalid encrypted record");
+      const plain = await subtle.decrypt(
+        { name: "AES-GCM", iv: bytes.subarray(0, 12), additionalData: encoder.encode(aad), tagLength: 128 },
+        await importKey(key, "decrypt"),
+        bytes.subarray(12),
+      );
+      return new TextDecoder("utf-8", { fatal: true }).decode(plain);
+    },
+  };
 }
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");

@@ -60,6 +60,80 @@ export interface HostedPairExchange {
     context: string;
   }): Promise<string>;
 }
+const PAIR_DOMAIN = "clankie-hosted-pair-v2";
+function base64url(bytes: Uint8Array): string {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text).replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "");
+}
+function unbase64url(text: string): Uint8Array<ArrayBuffer> {
+  if (!/^[A-Za-z0-9_-]*$/u.test(text)) throw new Error("Invalid base64url");
+  const bytes = Uint8Array.from(atob(text.replace(/-/gu, "+").replace(/_/gu, "/")), (c) => c.charCodeAt(0));
+  if (base64url(bytes) !== text) throw new Error("Noncanonical base64url");
+  return bytes;
+}
+/** Browser (and Node 20+) exchange: P-256 ECDH, Ed25519, HKDF-SHA-256 and AES-256-GCM through WebCrypto.
+ * The private ECDH key is generated non-extractable and never leaves `crypto.subtle`. */
+export async function createWebHostedPairExchange(
+  webCrypto: Crypto = globalThis.crypto,
+): Promise<HostedPairExchange> {
+  if (webCrypto?.subtle === undefined) throw new Error("Hosted pairing requires WebCrypto (crypto.subtle)");
+  const subtle = webCrypto.subtle;
+  const pair = (await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, [
+    "deriveBits",
+  ])) as CryptoKeyPair;
+  const publicKey = base64url(new Uint8Array(await subtle.exportKey("raw", pair.publicKey)));
+  const nonce = base64url(webCrypto.getRandomValues(new Uint8Array(16)));
+  const encoder = new TextEncoder();
+  return {
+    publicKey,
+    nonce,
+    async open({ answer, bodyPairingKey, transcript, context }) {
+      let authentic = false;
+      try {
+        const verifyKey = await subtle.importKey(
+          "raw",
+          unbase64url(bodyPairingKey),
+          { name: "Ed25519" },
+          false,
+          ["verify"],
+        );
+        authentic = await subtle.verify(
+          { name: "Ed25519" },
+          verifyKey,
+          unbase64url(answer.signature),
+          encoder.encode(transcript),
+        );
+      } catch {
+        authentic = false;
+      }
+      if (!authentic) throw new Error("Hosted pairing answer is unauthenticated");
+      const info = encoder.encode(context);
+      const bodyKey = await subtle.importKey(
+        "raw",
+        unbase64url(answer.ephemeralPublicKey),
+        { name: "ECDH", namedCurve: "P-256" },
+        false,
+        [],
+      );
+      const shared = await subtle.deriveBits({ name: "ECDH", public: bodyKey }, pair.privateKey, 256);
+      const hkdf = await subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]);
+      const key = await subtle.deriveKey(
+        { name: "HKDF", hash: "SHA-256", salt: unbase64url(nonce), info },
+        hkdf,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["decrypt"],
+      );
+      const plaintext = await subtle.decrypt(
+        { name: "AES-GCM", iv: unbase64url(answer.iv), additionalData: info, tagLength: 128 },
+        key,
+        unbase64url(answer.ciphertext),
+      );
+      return new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
+    },
+  };
+}
 export function createHostedAccountClient(input: {
   origin: string;
   accessToken: string;
@@ -89,7 +163,9 @@ export function createHostedAccountClient(input: {
     async wake(machine: HostedMachine) {
       return request("/fleet/v1/wake", { machineId: machine.id });
     },
-    async pair(machine: HostedMachine, exchange: HostedPairExchange) {
+    /** Without an injected exchange, pairs through WebCrypto (browsers, Node 20+). */
+    async pair(machine: HostedMachine, injected?: HostedPairExchange) {
+      const exchange = injected ?? (await createWebHostedPairExchange());
       const result = HostedPairResponseSchema.parse(
         await request("/fleet/v1/pairing/offer", {
           machineId: machine.id,
@@ -99,7 +175,7 @@ export function createHostedAccountClient(input: {
       );
       if (result.machine.id !== machine.id || result.machine.hostId !== machine.hostId || !machine.hostId)
         throw new Error("Hosted pairing machine mismatch");
-      const domain = "clankie-hosted-pair-v2";
+      const domain = PAIR_DOMAIN;
       const { answer } = result;
       const transcript = [
         domain,
