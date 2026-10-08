@@ -159,7 +159,9 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
   const registry = new GameExtensionRegistry();
   const runtime = registry.register(minecraftExtension, {
     automaticPlay: true,
-    onPollError: () => { stopFailures++; },
+    onPollError: () => {
+      stopFailures++;
+    },
     store,
     path: join(directory, "session.json"),
     port: new MinecraftMcpPort({

@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FileCredentialStore, ensureOperatorCredential } from "@clankie/credential-broker";
 import { GameExtensionRegistry } from "@clankie/game-extension";
-import { minecraftExtension, minecraftProjection } from "@clankie/minecraft";
+import {
+  minecraftExtension,
+  minecraftProjection,
+  type MinecraftExtensionRuntime,
+  type MinecraftExtensionHost,
+} from "@clankie/minecraft";
 import { MinecraftMcpPort } from "@clankie/minecraft/connector";
 import { pokemonExtension } from "@clankie/pokemon";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
@@ -24,8 +29,44 @@ it("discovers registered games over real owner-authenticated HTTP and CLI withou
   const registry = new GameExtensionRegistry<GameExtensionProjection>();
   const leases = new BodyLeaseStore(join(root, "leases"));
   let connectorCalls = 0;
-  registry.register(
-    minecraftExtension,
+  const createMinecraft: (host: MinecraftExtensionHost) => MinecraftExtensionRuntime = minecraftExtension.create;
+  // Exercise native fields, private getters and detached class methods through
+  // the registry Proxy against the real settings/HTTP projection below.
+  class NativeRuntime {
+    #runtime: MinecraftExtensionRuntime;
+    constructor(runtime: MinecraftExtensionRuntime) {
+      this.#runtime = runtime;
+    }
+    get service() {
+      return this.#runtime.service;
+    }
+    start(...args: Parameters<MinecraftExtensionRuntime["start"]>) {
+      return this.#runtime.start(...args);
+    }
+    stop(sessionId: string) {
+      return this.#runtime.stop(sessionId);
+    }
+    status() {
+      return this.#runtime.status();
+    }
+    health() {
+      return this.#runtime.health();
+    }
+    bindRegistrationGuard(guard: () => void) {
+      this.#runtime.bindRegistrationGuard?.(guard);
+    }
+    activate() {
+      this.#runtime.activate();
+    }
+    deactivate() {
+      return this.#runtime.deactivate();
+    }
+  }
+  const minecraft = registry.register(
+    {
+      ...minecraftExtension,
+      create: (host: MinecraftExtensionHost) => new NativeRuntime(createMinecraft(host)),
+    },
     {
       store: leases,
       path: join(root, "minecraft.json"),
@@ -42,6 +83,32 @@ it("discovers registered games over real owner-authenticated HTTP and CLI withou
     },
     (runtime) => minecraftProjection(runtime, () => undefined),
   );
+  const { status, health, stop } = minecraft;
+  expect(await status()).toEqual({ state: "idle" });
+  expect(await health()).toEqual({ state: "ready" });
+  expect(stop("absent-session")).toBe("not_active");
+  expect(minecraft.service.ownsPlay()).toBe(false);
+  const nativeRequest = {
+    sessionId: "proxy-session",
+    profileId: "absent",
+    identity: { conversationId: "fixture-owner", current: () => true, authorize: async () => true },
+  };
+  await expect(
+    minecraft.start(
+      nativeRequest,
+      {
+        guard: async () => {
+          throw new Error("fixture_guard_revoked");
+        },
+        stopRequested: () => false,
+        confirmStopped() {
+          throw new Error("revoked_start_confirmed");
+        },
+      },
+      async () => {},
+    ),
+  ).rejects.toThrow("fixture_guard_revoked");
+  expect(await status()).toEqual({ state: "idle" });
   let modelCalls = 0;
   const host = {
     logger: { info() {}, warn() {} },
@@ -104,6 +171,14 @@ it("discovers registered games over real owner-authenticated HTTP and CLI withou
     expect(saved.status).toBe(200);
     expect((await new SettingsStore(join(root, "settings.json")).load()).minecraft.play.enabled).toBe(false);
     await registry.unregister("minecraft");
+    const { start } = minecraft;
+    await expect(
+      start(
+        nativeRequest,
+        { guard: async () => {}, stopRequested: () => false, confirmStopped() {} },
+        async () => {},
+      ),
+    ).rejects.toThrow("game_extension_not_registered");
     expect(registry.projections()).toEqual([]);
     expect((await fetch(server.host + "/v1/minecraft/configuration", { headers })).status).toBe(404);
     expect(() => registry.register(pokemonExtension, host)).toThrow("game_extension_already_registered");

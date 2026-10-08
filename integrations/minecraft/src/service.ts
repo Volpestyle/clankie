@@ -165,7 +165,8 @@ export class MinecraftService {
     const state =
       this.restartReference !== undefined || record.status.termination.state === "uncertain"
         ? "uncertain"
-      : record.status.termination.state !== "not_requested" || this.registeredStop === record.status.session.sessionId
+        : record.status.termination.state !== "not_requested" ||
+            this.registeredStop === record.status.session.sessionId
           ? "stopping"
           : record.status.phase === "connecting"
             ? "starting"
@@ -181,7 +182,12 @@ export class MinecraftService {
       this.joining.cancelled = true;
       return true;
     }
-    if (record === null || record.finished || record.status.session.sessionId !== sessionId || authority === undefined)
+    if (
+      record === null ||
+      record.finished ||
+      record.status.session.sessionId !== sessionId ||
+      authority === undefined
+    )
       return false;
     this.registeredStop = sessionId;
     this.requireAvailable();

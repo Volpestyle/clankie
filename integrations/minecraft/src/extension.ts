@@ -54,11 +54,12 @@ export const minecraftExtension: GameExtension<
       ...host,
       guardRegistration: () => registrationGuard(),
       onDisconnect(session) {
-      capture?.invalidate();
-      host.onDisconnect?.(session);
-      // This callback follows durable exact-session/generation proof in the same ledger.
-      void runtime.reconcileStopped?.(session.sessionId, async () => service.lifecycleStatus().state === "idle")
-        .catch(() => host.onPollError?.());
+        capture?.invalidate();
+        host.onDisconnect?.(session);
+        // This callback follows durable exact-session/generation proof in the same ledger.
+        void runtime
+          .reconcileStopped?.(session.sessionId, async () => service.lifecycleStatus().state === "idle")
+          .catch(() => host.onPollError?.());
       },
     });
     capture =
