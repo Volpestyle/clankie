@@ -4001,6 +4001,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           privateContext: ownerAudience && plan.systemTools,
           ...(skillGrant === undefined ? {} : { skillGrant }),
           actorId: request.trigger.actorId,
+          authorBindings: async () => (await readAuthoritySettings()).houseHuntingAuthorBindings,
           authorize: async () => {
             const fresh = await readAuthoritySettings();
             return fresh.roomSkills.some((entry) => JSON.stringify(entry) === JSON.stringify(skillGrant));

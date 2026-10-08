@@ -316,6 +316,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
           "teamVisible",
           "servers",
           "roomSkills",
+          "houseHuntingAuthorBindings",
         ] as const)
           if (
             !Object.hasOwn(incoming, key) &&

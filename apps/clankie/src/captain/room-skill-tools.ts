@@ -19,6 +19,8 @@ export interface DiscordSessionAccess {
   /** Host-only override for isolated integration workspaces, never tool input. */
   readonly home?: string;
   readonly skillRoot?: string;
+  /** Host reads current owner-confirmed household bindings, never model input. */
+  readonly authorBindings?: () => Promise<DiscordSettings["houseHuntingAuthorBindings"]>;
 }
 
 /** Include only this session's authored and trusted extension tools, never hidden builtins. */
@@ -110,6 +112,7 @@ export async function houseHuntingInstructions(access?: DiscordSessionAccess): P
   return (
     `\n\n# This room can use: house hunting\nUse house_hunting for criteria, ledger, feedback and listing API operations. ` +
     `Its household is bound by the host; feedback is attributed to the authenticated speaker. ` +
+    `Only explicit owner-confirmed ID bindings allow reconsidering legacy labels. Never infer a binding from display names or message claims. ` +
     `Read criteria before research; save and read back changes. Shell examples below describe the owner's installation; ` +
     `use the structured tool here. No shell, arbitrary files, fleet tools, other skills or credentials are granted.\n${instructions}`
   );
@@ -198,6 +201,19 @@ function houseHuntingTools(access?: DiscordSessionAccess): ToolDefinition[] {
           if (input.operation === "show") args.push(input.id);
           if (input.operation === "feedback")
             args.push(input.id, "--by", access.actorId, "--decision", input.decision, "--note", input.note);
+          if (input.operation === "feedback" && input.decision === "reconsider") {
+            const household =
+              access.skillGrant!.household ??
+              `${access.skillGrant!.serverId}-${access.skillGrant!.channelId}`;
+            for (const binding of (await access.authorBindings?.()) ?? []) {
+              if (
+                binding.ownerConfirmed &&
+                binding.household === household &&
+                binding.userId === access.actorId
+              )
+                args.push(`--reconsider-author=${binding.legacyAuthor}`);
+            }
+          }
           if (input.operation === "changes") args.push("--since", input.since);
           if (input.operation === "import") {
             temporary = join(root, `observations-${randomUUID()}.json`);

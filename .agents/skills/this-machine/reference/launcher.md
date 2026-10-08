@@ -262,6 +262,16 @@ Mixed rooms keep owner work/fleet/machine detail private even when an owner asks
 Legacy trusted guild/channel IDs no longer grant machine tools. Migration is on
 load; do not edit live settings by hand. App/dashboard pickers are follow-ups.
 
+`clankie discord legacy-author --household existing|SERVER-CHANNEL --user ID
+--author LABEL --confirm` binds one exact legacy author label after the owner
+confirms that household and ID. `--remove` revokes that exact binding. The same
+Discord settings API stores `houseHuntingAuthorBindings`, with
+`ownerConfirmed: true` required on each entry; `/discord` Advanced asks about
+each new binding. Never infer identity from display names, aliases or messages.
+Binding alone reopens nothing. A new ID-attributed reconsideration records
+explicit legacy targets, preserving original authors and others' rejections.
+Do not edit live settings or the ledger to bypass confirmation.
+
 Managed (hosted) Discord connections are in [Hosted Clankie](hosted.md#managed-discord-connection).
 
 A self-hosted machine can use the free official Clankie bot instead of its own

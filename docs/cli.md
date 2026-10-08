@@ -4622,6 +4622,27 @@ Legacy guild/channel machine IDs are retired. `discord set --servers JSON
 --room-skills JSON` remains the Advanced repair path. See
 [Discord authority](discord-rooms.md) and [ADR 0251](adr/0251-discord-owners-and-room-skills.md).
 
+`discord legacy-author --household existing|SERVER-CHANNEL --user ID --author
+LABEL --confirm` records one owner-confirmed, exact legacy author label for an
+authenticated Discord ID. Get the owner's confirmation for each binding first;
+never infer it from a display name or message. `--remove` replaces `--confirm`
+to revoke that exact household/label/ID binding. No live ledger is rewritten.
+
+The same revision-fenced `POST /v1/discord/settings` accepts
+`houseHuntingAuthorBindings: [{"household":"existing","userId":"100000",
+"legacyAuthor":"Legacy author","ownerConfirmed":true}]`. Household keys are
+`existing` for the migrated household or the numeric `SERVER-CHANNEL` room key.
+The TUI exposes this JSON under `/discord` → Advanced and confirms each new
+entry individually. Older clients that omit the field preserve existing bindings.
+Use `[]` (or CLI `none`) to clear it explicitly. Numeric legacy authors are
+refused; they already identify Discord speakers.
+
+Binding alone changes no decisions. Only a new `house_hunting` reconsideration
+by that authenticated ID appends its authorized legacy targets. Original author
+labels remain readable; other people and later rejections keep excluding homes.
+Removing a binding affects future reconsiderations, not recorded history. See
+[ADR 0252](adr/0252-household-legacy-authors-need-owner-confirmed-id-bindings.md).
+
 ```json
 {
   "ok": true,

@@ -34,6 +34,7 @@ const DISCORD_USAGE = [
   "       clankie discord setup [check | choices connect|fleet|tracking]",
   "       clankie discord owners --server ID --owners me|everyone|role [--owner-role ID] [--role participant|admin]",
   "       clankie discord room-skill --server ID --channel ID --skill house-hunting|off",
+  "       clankie discord legacy-author --household existing|SERVER-CHANNEL --user ID --author LABEL --confirm|--remove",
   "       clankie discord setup connect [--server NAME] [--role participant|admin]",
   "       clankie discord setup invite [--role participant|admin]",
   "       clankie discord setup fleet --enabled on|off",
@@ -113,6 +114,9 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
         `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}`,
     ),
     ...settings.roomSkills.map((entry) => `room ${entry.serverId}/${entry.channelId}: ${entry.skill}`),
+    ...settings.houseHuntingAuthorBindings.map(
+      (entry) => `household ${entry.household}: ${entry.legacyAuthor} → ${entry.userId} (owner-confirmed)`,
+    ),
     "",
     `text ingress: ${settings.textIngressEnabled ? "enabled" : "disabled"}`,
     showList("  ingress guilds", settings.ingressGuildIds),
@@ -203,7 +207,8 @@ export function parseDiscordSettingValue(
   raw: string,
   current: DiscordSettings,
 ): unknown {
-  if (field === "servers" || field === "roomSkills") return raw === "none" ? [] : JSON.parse(raw);
+  if (field === "servers" || field === "roomSkills" || field === "houseHuntingAuthorBindings")
+    return raw === "none" ? [] : JSON.parse(raw);
   if (field === "systemActorGuildIds" || field === "systemActorChannelIds")
     throw new Error("Use server owners and room skills; trusted guild/channel machine grants are retired.");
   const example = current[field] ?? emptySettings().discord[field];
@@ -284,6 +289,55 @@ export async function runDiscordCommand(
   | DiscordOfficialResult
 > {
   const verb = args[0];
+  if (verb === "legacy-author") {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      allowPositionals: true,
+      options: {
+        household: { type: "string" },
+        user: { type: "string" },
+        author: { type: "string" },
+        confirm: { type: "boolean" },
+        remove: { type: "boolean" },
+      },
+    });
+    if (
+      positionals.length ||
+      !values.household ||
+      !values.user ||
+      !values.author ||
+      Boolean(values.confirm) === Boolean(values.remove)
+    )
+      throw new Error(
+        "Confirm the owner-reviewed household, exact legacy label and Discord ID with --confirm; use --remove to revoke that exact binding.",
+      );
+    return discordTransform(
+      (current) => ({
+        ...current,
+        houseHuntingAuthorBindings: [
+          ...current.houseHuntingAuthorBindings.filter(
+            (binding) =>
+              !(
+                binding.household === values.household &&
+                binding.legacyAuthor === values.author &&
+                (values.confirm || binding.userId === values.user)
+              ),
+          ),
+          ...(values.remove
+            ? []
+            : [
+                {
+                  household: values.household!,
+                  userId: values.user!,
+                  legacyAuthor: values.author!,
+                  ownerConfirmed: true as const,
+                },
+              ]),
+        ],
+      }),
+      options,
+    );
+  }
   if (verb === "owners" || verb === "room-skill") {
     const { values, positionals } = parseArgs({
       args: args.slice(1),

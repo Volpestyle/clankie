@@ -241,3 +241,115 @@ it.skipIf(!existsSync(join(installedSkill, "homes.py")))(
     await expect(call({ operation: "criteria" })).rejects.toThrow("room_skill_grant_revoked");
   },
 );
+
+it.skipIf(!existsSync(join(installedSkill, "homes.py")))(
+  "owner-confirmed household bindings authorize only new exact legacy reconsiderations and preserve history",
+  async () => {
+    const home = await root();
+    const settings = new SettingsStore(join(await root(), "settings.json"));
+    const grant = {
+      serverId: SERVER,
+      channelId: ROOM,
+      skill: "house-hunting" as const,
+      household: "existing" as const,
+    };
+    let granted = true;
+    const callFor = (actorId: string, skillGrant = grant) => {
+      const tool = discordSessionTools([], false, {
+        privateContext: false,
+        actorId,
+        skillGrant,
+        home,
+        skillRoot: installedSkill,
+        authorize: async () => granted,
+        authorBindings: async () => (await settings.load()).discord.houseHuntingAuthorBindings,
+      })[0]!;
+      return async (input: unknown) => {
+        const result = await tool.execute(
+          "binding-proof",
+          input as never,
+          undefined,
+          undefined,
+          undefined as never,
+        );
+        return JSON.parse(result.content.find((part) => part.type === "text")!.text);
+      };
+    };
+    const speaker = callFor(OWNER),
+      other = callFor(OTHER);
+    const imported = await speaker({
+      operation: "import",
+      observations: [
+        {
+          address: "456 Fixture St, Wheaton, IL 60187",
+          source_url: "https://example.com/legacy",
+          observed_at: "2026-10-08T00:00:00Z",
+          facts: { price: 500000 },
+        },
+      ],
+    });
+    const id = imported.ids[0];
+    const legacy = async (author: string) =>
+      promisify(execFile)("python3", [
+        join(installedSkill, "homes.py"),
+        "--home",
+        home,
+        "feedback",
+        id,
+        "--by",
+        author,
+        "--decision",
+        "reject",
+        "--note",
+        "Original fixture rejection",
+      ]);
+    await legacy("James");
+    await legacy("Partner");
+    const original = (await speaker({ operation: "show", id })).feedback;
+    const reconsider = { operation: "feedback", id, decision: "reconsider", note: "Review my decisions" };
+    await speaker(reconsider); // Binding must not retroactively merge this row.
+    const bind = async (household: string, userId: string, legacyAuthor: string) =>
+      settings.update((current) => ({
+        ...current,
+        discord: {
+          ...current.discord,
+          houseHuntingAuthorBindings: [
+            ...current.discord.houseHuntingAuthorBindings.filter(
+              (b) => b.household !== household || b.legacyAuthor !== legacyAuthor,
+            ),
+            { household, userId, legacyAuthor, ownerConfirmed: true },
+          ],
+        },
+      }));
+    await bind("existing", OWNER, "James");
+    expect(await speaker({ operation: "list" })).toEqual([]);
+    expect((await speaker({ operation: "show", id })).feedback).toEqual(expect.arrayContaining(original));
+    await other(reconsider); // A claimed name or another ID does not inherit this binding.
+    expect(await other({ operation: "list" })).toEqual([]);
+    const result = await speaker(reconsider);
+    expect(result.feedback.at(-1)).toMatchObject({ author: OWNER, reconsidered_authors: ["James"] });
+    expect(result.rejected).toBe(true); // Partner's independent rejection survives.
+    await bind(`${SERVER}-${ROOM}`, OTHER, "Partner");
+    await other(reconsider); // Same label/ID in a different household is inert here.
+    expect(await speaker({ operation: "list" })).toEqual([]);
+    await bind("existing", OTHER, "Partner");
+    await other(reconsider);
+    expect(await speaker({ operation: "list" })).toHaveLength(1);
+    expect((await speaker({ operation: "show", id })).feedback.slice(0, original.length)).toEqual(original);
+    await settings.update((current) => ({
+      ...current,
+      discord: { ...current.discord, houseHuntingAuthorBindings: [] },
+    }));
+    expect(await speaker({ operation: "list" })).toHaveLength(1); // Revocation does not undo history.
+    await legacy("James");
+    await speaker(reconsider); // Warm adapter reads the removal at execution.
+    expect(await speaker({ operation: "list" })).toEqual([]);
+    await bind("existing", OWNER, "james");
+    await speaker(reconsider);
+    expect(await speaker({ operation: "list" })).toEqual([]); // Exact case, never inferred.
+    await expect(speaker({ ...reconsider, by: "James" })).rejects.toThrow();
+    await expect(speaker({ ...reconsider, reconsiderAuthor: "Partner" })).rejects.toThrow();
+    granted = false;
+    await expect(speaker(reconsider)).rejects.toThrow("room_skill_grant_revoked");
+  },
+);

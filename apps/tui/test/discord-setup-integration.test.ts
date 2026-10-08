@@ -237,6 +237,105 @@ async function choose(shell: ClankieFaceShell, contains: string, filter: string)
 const submit = (shell: ClankieFaceShell, text: string) =>
   (shell as unknown as { submitEditorText(text: string): Promise<void> }).submitEditorText(text);
 
+it("the real CLI and HTTP API require explicit household author confirmation, preserve omissions and fence stale writes", async () => {
+  const f = await fixture();
+  const initial = await f.api.discordSettings();
+  const flags = ["legacy-author", "--household", "existing", "--user", "30002", "--author", "Legacy author"];
+  await expect(f.cli(...flags)).rejects.toThrow();
+  expect((await f.settings.load()).discord.houseHuntingAuthorBindings).toEqual([]);
+  const added = await f.cli(...flags, "--confirm");
+  const binding = {
+    household: "existing",
+    userId: "30002",
+    legacyAuthor: "Legacy author",
+    ownerConfirmed: true,
+  };
+  expect(added.discord.houseHuntingAuthorBindings).toEqual([binding]);
+  const snapshot = await f.api.discordSettings();
+  const post = (settings: unknown, expectedRevision = snapshot.revision, authenticated = true) =>
+    fetch(`${f.url}/v1/discord/settings`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(authenticated ? { authorization: "Bearer fixture-operator" } : {}),
+      },
+      body: JSON.stringify({ settings, expectedRevision }),
+    });
+  expect((await post(snapshot.settings, initial.revision)).status).toBe(409);
+  expect((await post(snapshot.settings, snapshot.revision, false)).status).toBe(403);
+  for (const invalid of [
+    { household: "existing", userId: "30002", legacyAuthor: "Legacy author" },
+    { ...binding, ownerConfirmed: false },
+    { ...binding, legacyAuthor: "30003" },
+    { ...binding, household: "../../another" },
+    { ...binding, legacyAuthor: " Legacy author" },
+  ])
+    expect((await post({ ...snapshot.settings, houseHuntingAuthorBindings: [invalid] })).status).toBe(400);
+  expect(
+    (
+      await post({
+        ...snapshot.settings,
+        houseHuntingAuthorBindings: [binding, { ...binding, userId: "30003" }],
+      })
+    ).status,
+  ).toBe(400);
+  const old: Record<string, unknown> = { ...snapshot.settings, ambientUserIds: ["30006"] };
+  delete old.houseHuntingAuthorBindings;
+  expect((await post(old)).status).toBe(200);
+  expect((await f.settings.load()).discord.houseHuntingAuthorBindings).toEqual([binding]);
+  await f.cli(
+    "legacy-author",
+    "--household",
+    "existing",
+    "--user",
+    "30003",
+    "--author",
+    "Legacy author",
+    "--remove",
+  );
+  expect((await f.settings.load()).discord.houseHuntingAuthorBindings).toEqual([binding]);
+  await f.cli(...flags, "--remove");
+  expect((await f.settings.load()).discord.houseHuntingAuthorBindings).toEqual([]);
+});
+
+it.each(["confirm", "cancel"])(
+  "the real TUI asks for every new author binding before saving (%s)",
+  async (decision) => {
+    const f = await fixture(),
+      shell = f.shell();
+    const bindings = ["First legacy author", "Second legacy author"].map((legacyAuthor, i) => ({
+      household: "existing",
+      userId: String(30002 + i),
+      legacyAuthor,
+      ownerConfirmed: true,
+    }));
+    let settled = false;
+    const running = submit(shell, "/discord").finally(() => {
+      settled = true;
+    });
+    try {
+      await choose(shell, "Invite Clankie to a server", "Advanced");
+      await choose(shell, "Discord setting", "Household author bindings");
+      const editor = await prompt(shell, "houseHuntingAuthorBindings");
+      editor.handleInput(JSON.stringify(bindings));
+      editor.handleInput("\r");
+      await choose(shell, "First legacy author", "I confirm");
+      expect((await f.settings.load()).discord.houseHuntingAuthorBindings).toEqual([]);
+      await choose(shell, "Second legacy author", decision === "confirm" ? "I confirm" : "Cancel");
+      await choose(shell, "Invite Clankie to a server", "Done");
+      await running;
+      expect((await f.settings.load()).discord.houseHuntingAuthorBindings).toEqual(
+        decision === "confirm" ? bindings : [],
+      );
+    } finally {
+      if (!settled) {
+        shell.setupFlow.handleSubmit("/cancel");
+        await running;
+      }
+    }
+  },
+);
+
 it("the real CLI connects a server and role, toggles fleet and selects tracking without room lists or machine grants", async () => {
   const f = await fixture();
   const initial = await f.cli("setup");

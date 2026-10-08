@@ -64,6 +64,9 @@ job to its command. JSON is on stdout and progress on stderr. The most common:
 Discord server owners and room skills use `clankie discord owners` and
 `clankie discord room-skill` (see [Discord setup](reference/launcher.md)). A room
 skill never grants the machine; trusted guild/channel shell grants are retired.
+Legacy house-hunting author labels require the owner's explicit household/ID
+confirmation through `discord legacy-author ... --confirm`; display names and
+message claims never establish identity. Binding alone does not reopen a home.
 
 Fleet, persona, voice, Discord fields, worker holds, Linear follow/wake, `awake`
 and `update auto` use the owner settings API. Read the current snapshot, then

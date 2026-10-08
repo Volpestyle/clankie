@@ -1,5 +1,14 @@
 # Discord rooms behind the curtain
 
+House-hunting feedback uses authenticated Discord IDs. An owner may explicitly
+bind an exact legacy author label within one household through
+`discord.houseHuntingAuthorBindings` in the shared settings API. Every entry
+requires `ownerConfirmed: true`; names never prove identity. A binding alone
+changes nothing. A later reconsideration by that ID appends explicit legacy
+targets while preserving original authors and other people's rejections.
+See [the CLI contract](cli.md#discord-status) and
+[ADR 0252](adr/0252-household-legacy-authors-need-owner-confirmed-id-bindings.md).
+
 One Clankie has parallel room threads. `/conversation` reads the room's native
 heard/said/tool history; it does not turn inspection into authority to send or
 run tools there (ADRs [0124](adr/0124-one-self-has-many-local-threads.md),

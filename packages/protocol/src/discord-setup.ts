@@ -57,6 +57,12 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
       },
       { key: "servers", label: "Server ownership policies (JSON; Advanced)", kind: "text" },
       { key: "roomSkills", label: "Room skills (JSON; Advanced)", kind: "text" },
+      {
+        key: "houseHuntingAuthorBindings",
+        label: "Household author bindings (JSON; owner-confirmed)",
+        kind: "text",
+        help: "Confirm each exact legacy author label and Discord ID in its household. Names never establish identity.",
+      },
     ],
   },
   {

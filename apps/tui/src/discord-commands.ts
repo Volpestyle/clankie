@@ -1422,7 +1422,7 @@ async function editAllDiscordSettings(
     options: fields.map((entry) => ({
       value: entry.key,
       label: entry.label,
-      hint: ["servers", "roomSkills"].includes(entry.key)
+      hint: ["servers", "roomSkills", "houseHuntingAuthorBindings"].includes(entry.key)
         ? JSON.stringify(current[entry.key])
         : String(current[entry.key] ?? "unset"),
     })),
@@ -1430,11 +1430,10 @@ async function editAllDiscordSettings(
   if (field === undefined) return;
   const key = field as keyof DiscordSettings;
   const raw = await shell.setupFlow.readText({
-    message: `${key} — ${key === "servers" || key === "roomSkills" ? "JSON array" : "lists use commas"}; 'none' clears; blank keeps`,
-    placeholder:
-      key === "servers" || key === "roomSkills"
-        ? JSON.stringify(current[key])
-        : String(current[key] ?? "unset"),
+    message: `${key} — ${["servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key) ? "JSON array" : "lists use commas"}; 'none' clears; blank keeps`,
+    placeholder: ["servers", "roomSkills", "houseHuntingAuthorBindings"].includes(key)
+      ? JSON.stringify(current[key])
+      : String(current[key] ?? "unset"),
     validate: (value) => {
       if (!value.trim()) return undefined;
       try {
@@ -1456,5 +1455,25 @@ async function editAllDiscordSettings(
       }),
       value,
     );
+  if (key === "houseHuntingAuthorBindings") {
+    const next = transform(current);
+    for (const binding of next.houseHuntingAuthorBindings) {
+      if (
+        current.houseHuntingAuthorBindings.some(
+          (previous) => JSON.stringify(previous) === JSON.stringify(binding),
+        )
+      )
+        continue;
+      const confirmation = await shell.setupFlow.readSelect({
+        message: `Confirm ${binding.household}: legacy author “${binding.legacyAuthor}” belongs to Discord ID ${binding.userId}?`,
+        options: [
+          { value: "confirm", label: "I confirm this exact binding" },
+          { value: "cancel", label: "Cancel" },
+        ],
+        allowBack: true,
+      });
+      if (confirmation !== "confirm") return;
+    }
+  }
   await apply(services, snapshot, transform);
 }

@@ -37,6 +37,28 @@ export const DiscordRoomSkillGrantSchema = z
   })
   .strict();
 
+export const HouseHuntingAuthorBindingSchema = z
+  .object({
+    household: z.union([z.literal("existing"), z.string().regex(/^\d{5,32}-\d{5,32}$/u)]),
+    userId: SnowflakeSchema,
+    legacyAuthor: z
+      .string()
+      .min(1)
+      .max(256)
+      .refine(
+        (label) =>
+          label.trim() === label &&
+          !/^\p{Decimal_Number}+$/u.test(label) &&
+          Array.from(label).every((char) => {
+            const code = char.charCodeAt(0);
+            return code >= 32 && (code < 127 || code > 159);
+          }),
+        "Use an exact legacy author label, not a Discord ID or display-name claim",
+      ),
+    ownerConfirmed: z.literal(true),
+  })
+  .strict();
+
 export const DiscordSettingsSchema = z
   .object({
     /** One connected server. Discord permissions decide the rooms Clankie can inhabit. */
@@ -57,6 +79,16 @@ export const DiscordSettingsSchema = z
       .refine(
         (values) => new Set(values.map((v) => `${v.serverId}:${v.channelId}`)).size === values.length,
         "Duplicate room grant",
+      ),
+    houseHuntingAuthorBindings: z
+      .array(HouseHuntingAuthorBindingSchema)
+      .max(64)
+      .default([])
+      .refine(
+        (bindings) =>
+          new Set(bindings.map((b) => JSON.stringify([b.household, b.legacyAuthor]))).size ===
+          bindings.length,
+        "Each legacy author can be bound to only one Discord ID per household",
       ),
     fleetEnabled: z.boolean().default(false),
     /** Participant fleet messages use this existing room; raw IDs stay in Advanced. */

@@ -570,7 +570,7 @@ paths:
       operationId: discordSettingsUpdate
       summary: Save revision-fenced non-secret Discord settings
       description: >-
-        Requires settings and expectedRevision. servers records role and owners (me, everyone or role with ownerRoleId); roomSkills records a serverId, channelId and known skill. Omitted ownership fields from older clients are preserved. Legacy guild/channel machine grants are retired. Connecting a server projects its
+        Requires settings and expectedRevision. servers records role and owners (me, everyone or role with ownerRoleId); roomSkills records a serverId, channelId and known skill. houseHuntingAuthorBindings records explicit household, userId, legacyAuthor and ownerConfirmed=true entries; display names never establish identity. Each household/legacy label binds to one ID. Binding alone changes no feedback; only new ID-attributed reconsiderations record legacy targets. Omitted ownership/binding fields from older clients are preserved. Legacy guild/channel machine grants are retired. Connecting a server projects its
         ingress, presence and voice scope while preserving machine grants and
         lab opt-in. Stale writes are refused. Saving never posts to Discord.
         Admin actions refuse server deletion and ownership transfer at the body.
