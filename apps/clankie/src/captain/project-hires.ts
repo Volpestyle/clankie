@@ -56,6 +56,10 @@ const AllocationSchema = z
     proof: ProofSchema.optional(),
     confirmed: z.boolean().default(false),
     gone: z.boolean().default(false),
+    operatorRelease: z
+      .object({ at: z.string().datetime(), censusSha256: z.string().regex(/^[a-f0-9]{64}$/u) })
+      .strict()
+      .optional(),
   })
   .strict();
 type Allocation = z.infer<typeof AllocationSchema>;
@@ -271,7 +275,7 @@ export class ProjectHires {
         `${project.name}'s ${selected.role} role allows ${selected.concurrencyCap} running agents. ${selected.concurrencyCap === 0 ? "Raise this role’s limit in project settings before hiring." : "Close one of this role’s Herdr panes before hiring another."}`,
       );
   }
-  public launch(id: string, settings: ProjectsSettings): void {
+  public launch(id: string, settings: ProjectsSettings, dispatched = true): void {
     this.change((state) => {
       const entry = state.allocations.find((a) => a.id === id && !a.gone);
       if (!entry) throw new Error("This hire is no longer available. Try again.");
@@ -280,7 +284,8 @@ export class ProjectHires {
         throw new Error("This role's launch settings changed. Start a new hire with the current settings.");
       this.checkCaps(state.allocations, settings, entry.projectId, entry.role, id);
       this.checkDeliverable(state.allocations, entry.projectId, entry.request, id);
-      entry.started = true;
+      // Policy probes are reversible. Latch only at the native effect boundary.
+      if (dispatched) entry.started = true;
     });
   }
   public requiredModel(id: string): string | undefined {
@@ -296,6 +301,7 @@ export class ProjectHires {
     this.change((state) => {
       const a = state.allocations.find((a) => a.id === id)!;
       a.pane = pane;
+      a.started = true;
     });
   }
   public observe(id: string, seat: string, occupantId: string, proof?: ProjectHireProcessProof): void {
@@ -330,6 +336,22 @@ export class ProjectHires {
     this.change((state) => {
       const a = state.allocations.find((a) => a.id === id);
       if (a && !a.started) a.gone = true;
+    });
+  }
+  /** Operator recovery snapshots retain the original allocation; they confer no launch authority. */
+  public recoveryCandidate(id: string): Allocation | undefined {
+    return this.read().allocations.find((a) => a.id === id && !a.confirmed && (!a.gone || a.operatorRelease));
+  }
+  public release(candidate: Allocation, inventory: unknown): void {
+    this.change((state) => {
+      const entry = state.allocations.find((a) => a.id === candidate.id);
+      if (!entry || !isDeepStrictEqual(entry, candidate))
+        throw new Error("Original project hire allocation changed; nothing released.");
+      entry.gone = true;
+      entry.operatorRelease = {
+        at: new Date().toISOString(),
+        censusSha256: createHash("sha256").update(JSON.stringify(inventory)).digest("hex"),
+      };
     });
   }
   /** Capture before starting inventory so a stale census cannot release a newer allocation. */

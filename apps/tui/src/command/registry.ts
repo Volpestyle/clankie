@@ -408,7 +408,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["hire-receipt"],
     lines: [
-      "  hire-receipt settle ORIGINAL_ID [not-launched|delivered|abandoned|abandoned-unknown]",
+      "  hire-receipt settle ORIGINAL_ID [not-launched|delivered|abandoned|abandoned-unknown|release-allocation]",
       "                           Recover an authenticated original; retain its identity and evidence.",
       "  hire-receipt fresh --json-stdin",
       "                           Explicit new remote work after settlement; retain freshIntent UUIDs.",

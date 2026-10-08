@@ -560,7 +560,9 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("settle_hire_receipt"),
       schemaVersion: z.literal(1),
       receiptId: HireReceiptIdSchema,
-      disposition: z.enum(["not-launched", "delivered", "abandoned", "abandoned-unknown"]).optional(),
+      disposition: z
+        .enum(["not-launched", "delivered", "abandoned", "abandoned-unknown", "release-allocation"])
+        .optional(),
     })
     .strict(),
   /** Head seat-mailbox receipts that never resolved (VUH-1779). Read-only. */

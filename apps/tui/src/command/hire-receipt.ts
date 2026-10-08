@@ -40,17 +40,26 @@ export async function runHireReceiptCommand(
       (args.length !== 2 && args.length !== 3) ||
       args[0] !== "settle" ||
       !HireReceiptIdSchema.safeParse(args[1]).success ||
-      !["not-launched", "delivered", "abandoned", "abandoned-unknown"].includes(disposition)
+      !["not-launched", "delivered", "abandoned", "abandoned-unknown", "release-allocation"].includes(
+        disposition,
+      )
     )
       throw new Error(
-        "Usage: clankie hire-receipt settle ORIGINAL_ID [not-launched|delivered|abandoned|abandoned-unknown] | fresh --json-stdin",
+        "Usage: clankie hire-receipt settle ORIGINAL_ID [not-launched|delivered|abandoned|abandoned-unknown|release-allocation] | fresh --json-stdin",
       );
     request = {
       op: "settle_hire_receipt",
       schemaVersion: 1,
       receiptId: args[1]!,
       ...(args[2]
-        ? { disposition: disposition as "not-launched" | "delivered" | "abandoned" | "abandoned-unknown" }
+        ? {
+            disposition: disposition as
+              | "not-launched"
+              | "delivered"
+              | "abandoned"
+              | "abandoned-unknown"
+              | "release-allocation",
+          }
         : {}),
     };
   }

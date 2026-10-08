@@ -149,6 +149,15 @@ list uncertain ownership/activity/drafts for the lead. A new acceptance requires
 its own authorized intent, never an automatic retry. See `docs/cli.md` under
 `repoRoot` for the operator boundary.
 
+For an inactive, unconfirmed project allocation left held after a refusal, use
+`clankie hire-receipt settle PROJECT_ALLOCATION_UUID release-allocation` through
+the operator boundary. This UUID is the project allocation, not its native
+receipt. A complete inventory must show neither its original pane nor a worker
+in that directory; unresolved native hire receipts must be settled first.
+Retain handoff evidence and explicitly retire a present worker before releasing.
+The command preserves launch history, records a release disposition and starts
+nothing. Never rewrite project-hire state files to bypass these checks.
+
 After authenticated settlement, separately authorized new remote work can use
 `hire_agent` with `freshIntent: {id, afterReceiptId}` or
 `clankie hire-receipt fresh --json-stdin` with the public `spawn_seat` body.

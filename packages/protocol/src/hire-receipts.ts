@@ -94,6 +94,15 @@ export type RetainedHireEvidence = z.infer<typeof RetainedHireEvidenceSchema>;
 export const HireReceiptSettlementSchema = z.discriminatedUnion("state", [
   z
     .object({
+      state: z.literal("allocation-released"),
+      receiptId: HireReceiptIdSchema,
+      fleet: z.string(),
+      workingDirectory: z.string(),
+      detail: z.string(),
+    })
+    .strict(),
+  z
+    .object({
       state: z.literal("settled-not-launched"),
       receiptId: HireReceiptIdSchema,
       evidence: HireNoLaunchEvidenceSchema,

@@ -611,6 +611,20 @@ launches, incomplete census, changed connection or revoked authority are refused
 Current absence cannot reconstruct history. Receipts and evidence are retained;
 the original key stays blocked permanently and no request is resent.
 
+`clankie hire-receipt settle PROJECT_ALLOCATION_UUID release-allocation` releases
+an inactive, unconfirmed project hire claim after a complete native inventory.
+Use the allocation UUID from the retained project-hire evidence, rather than a
+native receipt UUID. It refuses a present original pane, any worker in that
+working directory, an unresolved native hire receipt in the same fleet/directory,
+changed allocation evidence or unavailable inventory. Settle the original native
+receipt first; retain a present worker's handoff and retire it explicitly.
+The command preserves launch history and records the release time and inventory
+digest. It closes no pane, replays no receipt and starts no replacement. Repeating
+it reads the retained disposition. Definite failures before native dispatch now
+release their project allocation automatically; uncertain launches stay held.
+See [the refusal and recovery evidence](testing/2026-10-07-project-hire-refusal/README.md)
+for the local VUH-1702 and PC Ada/Pell recovery commands.
+
 `clankie hire-receipt settle seat-ORIGINAL_UUID delivered` records historical
 native insertion through the same authenticated host census. The service resolves
 that exact event in its canonical mailbox journal and uniquely links its fingerprint

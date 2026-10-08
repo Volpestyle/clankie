@@ -1996,7 +1996,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return "refused" in choice ? failed(choice.refused) : choice.harness;
   }
 
-  private async admitProjectLaunch(input: SpawnOperatorSeat): Promise<void> {
+  private async admitProjectLaunch(input: SpawnOperatorSeat, dispatched = false): Promise<void> {
     const defaultPolicy = this.hireDefaultPolicies.get(input);
     if (defaultPolicy !== undefined && defaultPolicy !== JSON.stringify((await this.hireDefaults?.()) ?? {}))
       throw new Error(
@@ -2014,7 +2014,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         throw new Error(
           "The project's settings or workspace changed. Check the project before hiring again.",
         );
-      this.projectHires.launch(id, latest);
+      this.projectHires.launch(id, latest, dispatched);
     });
   }
 
@@ -2484,7 +2484,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /** Irreversible local guard plus the remote host's exclusive launch CAS, before every effect. */
-  private async commitRemoteLaunch(key?: string): Promise<void> {
+  private async commitRemoteLaunch(key?: string, input?: SpawnOperatorSeat): Promise<void> {
     if (!key || this.remoteLaunches.has(key)) return;
     const receipt = this.hireReceipts.pending(key);
     if (!receipt) throw new Error("Original hire receipt is unavailable");
@@ -2492,6 +2492,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (!claim) return;
     if (!this.remoteHireReceipts || receipt.remoteLaunchCommitted)
       throw new Error("Original remote launch cannot dispatch again");
+    if (input) await this.admitProjectLaunch(input, true);
     this.hireReceipts.update(key, receipt.messageId, { remoteLaunchCommitted: true });
     await this.remoteHireReceipts.launch(claim);
     this.remoteLaunches.add(key);
@@ -2524,7 +2525,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public async settleHireReceipt(
     receiptId: string,
     guard?: () => Promise<void>,
-    disposition: "not-launched" | "delivered" | "abandoned" | "abandoned-unknown" = "not-launched",
+    disposition:
+      | "not-launched"
+      | "delivered"
+      | "abandoned"
+      | "abandoned-unknown"
+      | "release-allocation" = "not-launched",
   ): Promise<HireReceiptSettlement> {
     const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
     if (!guard) return refused("Operator settlement authority is required; nothing settled.");
@@ -2532,6 +2538,61 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await guard();
     } catch {
       return refused("Operator settlement authority is unavailable; nothing settled.");
+    }
+    if (disposition === "release-allocation") {
+      const candidate = this.projectHires.recoveryCandidate(receiptId);
+      const released = (): HireReceiptSettlement => ({
+        state: "allocation-released",
+        receiptId,
+        fleet: candidate!.request.fleet ?? "local",
+        workingDirectory: candidate!.request.workingDirectory,
+        detail:
+          "Operator released only the project allocation after a complete native inventory. Launch history remains unchanged; no pane was closed and no native receipt was replayed.",
+      });
+      if (candidate?.gone && candidate.operatorRelease) return released();
+      if (!candidate || this.activeProjectHires.has(receiptId) || !this.runner.list)
+        return refused(
+          "No inactive unresolved project allocation, or complete native inventory is unavailable.",
+        );
+      const unresolved = () =>
+        this.hireReceipts.entries().some(([key]) => {
+          const scope = JSON.parse(key) as unknown[];
+          return (
+            scope[0] === (candidate.request.fleet ?? "local") &&
+            scope[2] === candidate.request.workingDirectory
+          );
+        });
+      try {
+        const fleet = candidate.request.fleet ?? "default";
+        const originalPane =
+          candidate.pane === undefined ? undefined : projectHirePane(fleet, candidate.pane);
+        if (candidate.pane !== undefined && originalPane === undefined)
+          return refused("Original allocation has an invalid pane address; nothing released.");
+        if (unresolved())
+          return refused(
+            "Settle the original native hire receipt before releasing this allocation; no receipt was replayed.",
+          );
+        const inventory = await this.runner.list(candidate.request.fleet);
+        await guard();
+        if (this.closed || this.activeProjectHires.has(receiptId) || unresolved())
+          return refused(
+            "Original allocation became active or acquired an unresolved native receipt; nothing released.",
+          );
+        if (
+          inventory.some(
+            (agent) =>
+              (originalPane !== undefined && originalPane === projectHirePane(fleet, agent.paneId)) ||
+              agent.workingDirectory === candidate.request.workingDirectory,
+          )
+        )
+          return refused(
+            "The original pane or a worker in its directory is still present. Retain its handoff and retire it explicitly before releasing the allocation.",
+          );
+        this.projectHires.release(candidate, inventory);
+        return released();
+      } catch (error) {
+        return refused(`Allocation recovery unavailable: ${reasonDetail(error)}. Nothing released.`);
+      }
     }
     if (disposition !== "not-launched") return this.recoverHireReceipt(receiptId, guard, disposition);
     const settled = this.hireReceipts.settlement(receiptId);
@@ -2685,7 +2746,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrSeatSpawnResult> {
     try {
       if (this.closed) throw new Error("Native hire service is closed");
-      await this.commitRemoteLaunch(receiptKey);
+      await this.commitRemoteLaunch(receiptKey, input);
       await this.assertRemoteHireAuthority(input, receiptKey, authority);
       if (authority !== undefined) {
         const held = this.hireOwners.sessionOwner(
@@ -2989,7 +3050,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     }
     if (this.nativeLaunchPolicy?.prepare) {
-      await this.commitRemoteLaunch(receiptKey);
+      await this.admitProjectLaunch(input, true);
+      await this.commitRemoteLaunch(receiptKey, input);
       await this.assertRemoteHireAuthority(input, receiptKey, authority);
     }
     const prepared = await this.nativeLaunchPolicy?.prepare?.({
@@ -3130,7 +3192,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       });
       if (authority !== undefined) await assertConversationAuthority(authority);
       await this.admitProjectLaunch(input);
-      await this.commitRemoteLaunch(receiptKey);
+      await this.commitRemoteLaunch(receiptKey, input);
       await this.assertRemoteHireAuthority(input, receiptKey, authority);
       if (adapter?.prepare) {
         if (input.chrome) throw new Error(`${input.harness} has no supported Chrome launch option`);
@@ -3171,6 +3233,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // Pressure is re-read after those awaits, immediately before the pane
       // command can create its native process.
       if (this.fleetResources) await this.admitResourceMutation(input, authority);
+      await this.admitProjectLaunch(input, true);
       paneId = await createTab({
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),
