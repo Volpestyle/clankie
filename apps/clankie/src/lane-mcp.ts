@@ -14,6 +14,8 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   RECONCILE_SEAT_CALL,
+  OWNER_UPDATE_PUBLICATION_META,
+  OwnerUpdatePublicationSchema,
   SEAT_CALL_META,
   SeatCallIdSchema,
   SeatCallRequestSchema,
@@ -160,11 +162,28 @@ export function createLaneMcpEndpoint({
       const requestPriority = request.params._meta?.clankieRequestPriority;
       if (requestPriority !== undefined && requestPriority !== "background")
         return failure("Invalid request priority. Nothing dispatched.");
+      const publication =
+        tool.name === "mail_owner_update"
+          ? OwnerUpdatePublicationSchema.safeParse(
+              request.params._meta?.[OWNER_UPDATE_PUBLICATION_META] ?? { publicationId: randomUUID() },
+            )
+          : undefined;
+      if (publication && !publication.success)
+        return failure("Invalid owner-update publication identity. Nothing dispatched.");
+      const publicationId = publication?.success ? publication.data.publicationId : undefined;
+      const context = publicationId === undefined ? undefined : { callId: publicationId };
       const invoke = async () => {
+        const call = () => (context === undefined ? tool.call(args) : tool.call(args, context));
         const result = await (requestPriority === "background"
-          ? withLinearRequestPriority("background", () => tool.call(args))
-          : tool.call(args));
-        return { content: [...result.content], ...(result.isError === true ? { isError: true } : {}) };
+          ? withLinearRequestPriority("background", call)
+          : call());
+        return {
+          content: [...result.content],
+          ...(result.isError === true ? { isError: true } : {}),
+          ...(publicationId === undefined
+            ? {}
+            : { _meta: { [OWNER_UPDATE_PUBLICATION_META]: { publicationId } } }),
+        };
       };
       const protectedTool = SeatCallToolSchema.safeParse(tool.name);
       if (!protectedTool.success) return invoke();

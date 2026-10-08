@@ -4456,6 +4456,16 @@ Per conversation, retain active news and 32 recent dismissed updates within
 active updates. Same publication identity/draft reconciles across restart;
 a changed draft under that identity refuses. There is no automatic event feed.
 
+The operator-seat MCP bridge assigns a fresh UUID to each deliberate mail call,
+including calls with identical content. It keeps that UUID through an explicit
+pre-admission reconnect/replay. The MCP result carries it in
+`_meta["clankie/owner-update"].publicationId`; an exact retry must send that same
+metadata and draft, including after a bridge or service restart. MCP request
+counters and tool names are never publication identities. Older MCP clients
+without this metadata receive a fresh host identity for each call. An unknown
+transport failure does not automatically repeat mail: inspect the original
+mailbox state before making another publication.
+
 ### `project create PROJECT --settings FILE.json --revision REVISION`
 
 Requires a service build containing the local project-creation route; a source

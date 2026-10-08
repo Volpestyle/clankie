@@ -163,7 +163,10 @@ with a title, short body and optional issue `{tracker, key, url}`, worker `seatI
 links or already published media URLs. It mails news, never an answer or a gate:
 nothing waits, and owner read/dismiss does not wake you. No event is automatically
 mailed. The host binds your source; navigation hints grant no authority. Keep the
-returned publication ID after uncertainty; never resend under a new tool call.
+returned update ID after uncertainty; never resend under a new tool call.
+MCP carries a unique publication UUID per call in
+`_meta["clankie/owner-update"].publicationId`. Exact transport retries retain
+that identity; a reconnect or identical draft does not identify a prior call.
 Owner API/CLI/TUI list, read and dismiss by update ID. Active updates survive
 retention; capacity refuses instead of evicting them. Asks also accept the optional
 `issue` reference so the mailbox can walk to the work item.

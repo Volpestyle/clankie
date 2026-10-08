@@ -5,6 +5,9 @@ import { MailIssueReferenceSchema, MailUrlSchema } from "./mail-reference.ts";
 export const OWNER_UPDATE_LIST_MAX = 1000;
 export const OWNER_UPDATE_CONVERSATION_MAX = 256;
 export const OWNER_UPDATE_STATE_BYTES_MAX = 512_000;
+/** Logical seat call identity, independent of MCP sessions and request counters. */
+export const OWNER_UPDATE_PUBLICATION_META = "clankie/owner-update";
+export const OwnerUpdatePublicationSchema = z.object({ publicationId: z.string().uuid() }).strict();
 export const OwnerUpdateStateSchema = z.enum(["unread", "read", "dismissed"]);
 export const OwnerUpdateListFilterSchema = z
   .object({

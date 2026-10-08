@@ -78,7 +78,7 @@ export interface LaneTool {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
-  call(args: Record<string, unknown>): Promise<LaneToolResult>;
+  call(args: Record<string, unknown>, context?: { readonly callId: string }): Promise<LaneToolResult>;
 }
 
 /**

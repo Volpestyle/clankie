@@ -1,4 +1,5 @@
 import { workerReportTools, type WorkerReportActions } from "./worker-report-tools.ts";
+import { randomUUID } from "node:crypto";
 import { questionTools } from "./question-tools.ts";
 /**
  * A lane's tool bank, assembled once for every harness that runs it (VUH-1085).
@@ -262,7 +263,7 @@ function authoredLaneTool(tool: ToolDefinition, turn: TurnContext): LaneTool {
     name: tool.name,
     description: tool.description,
     inputSchema: tool.parameters as Record<string, unknown>,
-    async call(args) {
+    async call(args, context) {
       const invalid = schemaViolation(tool.parameters, args);
       if (invalid !== undefined) return { content: [{ type: "text", text: invalid }], isError: true };
       const before = turn.media;
@@ -277,7 +278,7 @@ function authoredLaneTool(tool: ToolDefinition, turn: TurnContext): LaneTool {
           ) => Promise<{
             content: readonly unknown[];
           }>
-        )(`lane-${tool.name}`, args);
+        )(context?.callId ?? randomUUID(), args);
         return withMedia(toolContent(result.content), turn.media === before ? undefined : turn.media);
       } catch (error) {
         return { content: [{ type: "text", text: errorText(error) }], isError: true };

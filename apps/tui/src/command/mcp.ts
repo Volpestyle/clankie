@@ -65,6 +65,8 @@ import {
   OperatorSeatEventSchema,
   OPERATOR_SEAT_CAPABILITIES_HEADER,
   RECONCILE_SEAT_CALL,
+  OWNER_UPDATE_PUBLICATION_META,
+  OwnerUpdatePublicationSchema,
   SEAT_CALL_META,
   fleetSeatEventsPath,
   fleetSeatMessagesPath,
@@ -142,7 +144,7 @@ export interface LaneToolUpstream {
   callTool(
     name: string,
     args: Record<string, unknown>,
-    options?: { readonly background?: boolean },
+    options?: { readonly background?: boolean; readonly publicationId?: string },
   ): Promise<CallToolResult>;
   /** Long-poll the seat's outbox; empty when nothing arrived inside `waitMs`, or once `signal` aborts. */
   pollEvents(waitMs: number, signal?: AbortSignal): Promise<readonly OperatorSeatEvent[]>;
@@ -355,10 +357,26 @@ export function createSeatBridge(
       const purpose = request.params._meta?.clankieRequestPriority;
       if (purpose !== undefined && purpose !== "background")
         return { isError: true, content: [{ type: "text", text: "Invalid request priority" }] };
+      const publication =
+        request.params.name === "mail_owner_update" &&
+        request.params._meta?.[OWNER_UPDATE_PUBLICATION_META] !== undefined
+          ? OwnerUpdatePublicationSchema.safeParse(request.params._meta[OWNER_UPDATE_PUBLICATION_META])
+          : undefined;
+      if (publication && !publication.success)
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Invalid owner-update publication identity" }],
+        };
+      const publicationId = publication?.success ? publication.data.publicationId : undefined;
       return upstream.callTool(
         request.params.name,
         request.params.arguments ?? {},
-        purpose === "background" ? { background: true } : undefined,
+        purpose === "background" || publicationId !== undefined
+          ? {
+              ...(purpose === "background" ? { background: true } : {}),
+              ...(publicationId === undefined ? {} : { publicationId }),
+            }
+          : undefined,
       );
     }
     const args = request.params.arguments ?? {};
@@ -831,6 +849,13 @@ export async function connectLaneUpstream(input: {
       // One identity belongs to this intent, including the explicit pre-admission
       // replay above. Receipt recovery never dispatches the intent again.
       const id = tool === undefined ? undefined : randomUUID();
+      // Mail's durable idempotency belongs to the mailbox, not the dispatch
+      // receipt store. Allocate once before an authorized pre-admission replay.
+      const publicationId =
+        name === "mail_owner_update"
+          ? OwnerUpdatePublicationSchema.parse({ publicationId: options?.publicationId ?? randomUUID() })
+              .publicationId
+          : undefined;
       const preserveResult = (result: Awaited<ReturnType<Client["callTool"]>>): CallToolResult => ({
         ...result,
         content: Array.isArray(result.content) ? (result.content as CallToolResult["content"]) : [],
@@ -842,11 +867,14 @@ export async function connectLaneUpstream(input: {
               {
                 name,
                 arguments: args,
-                ...(id === undefined && options?.background !== true
+                ...(id === undefined && publicationId === undefined && options?.background !== true
                   ? {}
                   : {
                       _meta: {
                         ...(id === undefined ? {} : { [SEAT_CALL_META]: { id } }),
+                        ...(publicationId === undefined
+                          ? {}
+                          : { [OWNER_UPDATE_PUBLICATION_META]: { publicationId } }),
                         ...(options?.background === true ? { clankieRequestPriority: "background" } : {}),
                       },
                     }),
