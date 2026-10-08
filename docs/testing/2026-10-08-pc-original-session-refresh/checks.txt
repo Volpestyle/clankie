@@ -1,0 +1,107 @@
+VUH-1742 | read-only PC scope | 2026-10-08
+
+BASELINE REGRESSION against original worker-tool-refresh.ts on bf159323 (own fixed file backed up and restored; no PC effects):
+$ clankie heavy -- sh -c <restore original coordinator, run named regression, restore own fixed source on EXIT>
+$ pnpm exec vitest run --config vitest.config.ts apps/clankie/test/worker-tool-refresh.integration.test.ts -t "remote Claude root health cannot certify replacement of its imported bridge"
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 5 queued)
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1742-wren
+
+ ❯ apps/clankie/test/worker-tool-refresh.integration.test.ts (2 tests | 1 failed | 1 skipped) 25ms
+   × remote Claude root health cannot certify replacement of its imported bridge 22ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/clankie/test/worker-tool-refresh.integration.test.ts > remote Claude root health cannot certify replacement of its imported bridge
+AssertionError: expected { paneId: 'pc/w1:p1', …(4) } to match object { paneId: 'pc/w1:p1', …(3) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "outcome": "failed",
++   "outcome": "refreshed",
+    "paneId": "pc/w1:p1",
+-   "reason": "original_remote_claude_imported_bridge_refresh_unsupported",
++   "reason": "original_claude_catalog_and_runtime_observed",
+    "seatId": "original-pc-seat",
+  }
+
+ ❯ apps/clankie/test/worker-tool-refresh.integration.test.ts:156:27
+    154|     status = "idle";
+    155|     const idle = await runWorkerToolRefreshCommand(["refresh-tools", "…
+    156|     expect(idle.seats[0]).toMatchObject({
+       |                           ^
+    157|       paneId: "pc/w1:p1",
+    158|       seatId: "original-pc-seat",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  06:03:58
+   Duration  647ms (transform 358ms, setup 13ms, import 539ms, tests 25ms, environment 0ms)
+
+BASELINE_TEST_EXIT=1
+
+FIXED FOCUSED GATE (one heavy permit, serial commands)
+$ pnpm exec oxfmt --write apps/clankie/test/worker-tool-refresh.integration.test.ts
+$ pnpm --filter @clankie/clankie typecheck
+$ pnpm exec vitest run --config vitest.config.ts apps/clankie/test/worker-tool-refresh.integration.test.ts apps/clankie/test/remote-codex-seats.test.ts apps/clankie/test/worker-call-receipts.integration.test.ts apps/clankie/test/claude-tool-catalog-mod.integration.test.ts
+$ node scripts/check-doc-links.mjs
+$ node scripts/check-retired-claims.mjs
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 1 queued)
+Finished in 14ms on 1 files using 18 threads.
+$ tsc --noEmit -p tsconfig.json
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1742-wren
+
+
+ Test Files  4 passed (4)
+      Tests  50 passed (50)
+   Start at  05:58:09
+   Duration  21.75s (transform 911ms, setup 56ms, import 1.64s, tests 29.30s, environment 0ms)
+
+Checked 538 markdown files; local links resolve.
+
+Initial gate found two integration fixture TypeScript errors (CaptainPort narrowing and conditional server connection closure). Corrected fixture typing; fixed gate above passed. Read-only PC metadata retained ignored in .local/vuh-1742, summarized in README. No hires, turns, config writes, reconnects, receipts or live migration. Native original-session adoption remains unproven.
+
+FINAL REBASE onto 0a4d20f9165d20c8461030f07872edaf12fce792. Frozen install, formatting check (6 files), lint and service typecheck passed. Same three coordinator/remote/receipt files passed 38 tests. The initial final command used a nonexistent Claude-mod filename; corrected explicitly with the real integration file below, which passed its remaining 12 tests. Total 50 tests / 4 files, no exclusions or retries of failures.
+Scope: all 33 workspace projects
+✓ Lockfile passes supply-chain policies (verified 33s ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 617ms using pnpm v11.11.0
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 356ms on 6 files using 18 threads.
+$ tsc --noEmit -p tsconfig.json
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1742-wren
+
+
+ Test Files  3 passed (3)
+      Tests  38 passed (38)
+   Start at  06:36:47
+   Duration  8.41s (transform 815ms, setup 48ms, import 1.53s, tests 7.67s, environment 0ms)
+
+Checked 543 markdown files; local links resolve.
+
+$ clankie heavy -- pnpm exec vitest run --config vitest.config.ts apps/clankie/test/claude-tool-catalog-mod.integration.test.ts
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 1 queued)
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1742-wren
+
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  06:37:22
+   Duration  21.67s (transform 18ms, setup 14ms, import 18ms, tests 21.57s, environment 0ms)
+
+
+First push lost a race to docs-only 75fc7e69. Rebased; code/type/test inputs unchanged. Updated doc checker rerun in heavy passed:
+Checked 543 markdown files; local links resolve; ADR numbers have no new collisions.

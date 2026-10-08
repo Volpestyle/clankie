@@ -504,7 +504,12 @@ Known native busy state also holds deployment metadata publication until idle.
 The current implementation cannot safely refresh remote Codex configurations
 or recover their original controllers after a service restart. Claude supports
 native list-change adoption for an already current bridge, but replacing old
-imported bridge code remains unverified. OpenCode verifies the original native
+imported bridge code remains unverified. Remote Claude waits while busy, then
+returns `original_remote_claude_imported_bridge_refresh_unsupported` without
+signalling a refresh: root-only health cannot prove imported-code replacement
+or adoption by all loaded descendants. On-disk cache versions are not loaded
+versions. No remote session is restarted or migrated by this command.
+OpenCode verifies the original native
 MCP connection; its public SDK does not expose exact model-visible MCP names.
 These cases remain visible per-seat failures or verification gaps, never
 successful refresh claims. See [ADR 0235](adr/0235-worker-catalog-refresh-keeps-the-original-controller.md).

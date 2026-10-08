@@ -44,6 +44,10 @@ requires an authenticated bridge observation of the requested runtime. The
 declared mods API does not offer an original-server reconnect that replaces
 already imported bridge code; plugin-version changes cannot be claimed loaded.
 All-tool/descendant adoption and a live report after refresh remain unverified.
+Remote Claude refresh now defers while the observed original is busy and refuses
+at idle with `original_remote_claude_imported_bridge_refresh_unsupported` before
+signalling the bridge. A matched root catalog and runtime do not certify this
+legacy migration. See [VUH-1742 source evidence](../testing/2026-10-08-pc-original-session-refresh/README.md).
 
 Original OpenCode controllers observe their injected native SDK connection,
 fencing root/child activity and native permission/question requests. Native
@@ -58,7 +62,7 @@ Remote Codex currently lacks a private native configuration target and durable
 original-controller registration recovery. Refresh fails explicitly rather
 than editing shared owner configuration or reconstructing launch authority from
 saved IDs. Managed remote preparation and recovery require a further supported
-native path before VUH-1739 can close.
+native path in VUH-1742; these remote gaps do not expand VUH-1739's local scope.
 
 ## Verification
 

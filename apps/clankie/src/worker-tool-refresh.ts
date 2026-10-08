@@ -119,6 +119,18 @@ export function createWorkerToolRefresh(input: {
           });
         return { ...base, outcome: "skipped-busy", reason: "original_native_session_busy" };
       }
+      if (seat.harness === "claude" && qualified) {
+        // A root catalog report and a new bridge runtime do not prove that
+        // an existing PC process replaced its imported mod, or that every
+        // loaded descendant adopted the tools. The pinned native mod API
+        // supplies no original-controller replacement operation. Do not
+        // signal a refresh whose required native adoption cannot be verified.
+        return {
+          ...base,
+          outcome: "failed",
+          reason: "original_remote_claude_imported_bridge_refresh_unsupported",
+        };
+      }
       if (!held || held.revision !== target || !held.signaled) {
         await guard(authority);
         input.workerMcp.requestCatalogRefresh(fleet, pane, target);

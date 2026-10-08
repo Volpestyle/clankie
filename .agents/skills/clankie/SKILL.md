@@ -167,7 +167,12 @@ evidence stays on disk. A refreshed supported bridge reads the retained original
 once after active calls settle; it sends no replacement.
 An unresolved original stays held. A separate deliberate call after settlement
 sends the later report. Remote Codex controller/config recovery and replacing
-old imported Claude bridge code remain explicit verification gaps. Never
+old imported Claude bridge code remain explicit verification gaps. Remote Claude
+refresh defers while busy, then reports
+`original_remote_claude_imported_bridge_refresh_unsupported` without a refresh
+signal. A healthy root report or newer installed cache is not proof of imported
+code or every descendant's adoption. Preserve the original session and receipts;
+Portal access permits no worker hire or configuration write. Never
 delete the claim or report a sealed negative as a positive stored delivery.
 
 Before an authorized write, load `linear-issues` for read-before-write, labels,
