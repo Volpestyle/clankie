@@ -10,6 +10,12 @@ import {
   OperatorConversationServiceResultSchema,
 } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
+import { createLogger } from "@clankie/observability";
+import {
+  ModelCredentialHealthLog,
+  modelCredentialEventLogger,
+  readModelCredentialHealth,
+} from "../src/captain/model-credential-health.ts";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -65,6 +71,18 @@ async function fixture(
     | "control-handoff",
 ) {
   const root = await mkdtemp(join(tmpdir(), "owner-credential-retry-"));
+  const credentialEvents: Record<string, unknown>[] = [];
+  const logger = createLogger(
+    { service: "credential-boundary-fixture" },
+    {},
+    {
+      write: (line: string) => {
+        credentialEvents.push(JSON.parse(line));
+      },
+    },
+  );
+  const healthPath = join(root, "model-credential-health.json");
+  const health = new ModelCredentialHealthLog(healthPath, modelCredentialEventLogger(logger));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   let onToken = async (): Promise<void> => {};
   const tokenRequests: string[] = [];
@@ -298,11 +316,13 @@ async function fixture(
     refuseNativeGoal: () => false,
     credentialRejected: async (provider, _detail, allowRefresh = true) => {
       recoveryCalls.push(provider);
-      if (!allowRefresh) return "reconnect_required";
-      const pending = refresh(provider);
-      refreshes.push(pending);
-      return (await pending) === "refreshed" ? "refreshed" : "reconnect_required";
+      const pending = allowRefresh ? refresh(provider) : Promise.resolve("failed");
+      if (allowRefresh) refreshes.push(pending);
+      const outcome = (await pending) === "refreshed" ? "refreshed" : "reconnect_required";
+      health.rejected(provider, outcome, _detail);
+      return outcome;
     },
+    credentialAccepted: (provider) => health.succeeded(provider),
   });
   const files = new DeliveredFileStore(join(root, "attachments"));
   const conversations = new ConversationStore(
@@ -423,6 +443,8 @@ async function fixture(
     tokenRequests,
     modelRequests,
     recoveryCalls,
+    credentialEvents,
+    credentialHealth: readModelCredentialHealth(healthPath),
     completed,
     toolCalls,
     events: new ConversationJournal(join(root, "conversations")).read(id),
@@ -434,6 +456,24 @@ it("refreshes once and completes the same owner turn with its image and real too
   expect(f.completed).toBe(true);
   expect(f.tokenRequests).toEqual(["r0"]);
   expect(f.recoveryCalls).toEqual([PROVIDER]);
+  expect(
+    f.credentialEvents.map(({ event, providerId, outcome }) => ({
+      event,
+      providerId,
+      ...(outcome ? { outcome } : {}),
+    })),
+  ).toEqual([
+    { event: "model.credential_rejected", providerId: PROVIDER, outcome: "refreshed" },
+    { event: "model.credential_accepted", providerId: PROVIDER },
+  ]);
+  expect(f.credentialHealth?.providers).toEqual({});
+  for (const event of f.credentialEvents)
+    expect(Object.keys(event).sort()).toEqual(
+      (event.outcome
+        ? ["event", "level", "msg", "outcome", "providerId", "service", "time"]
+        : ["event", "level", "msg", "providerId", "service", "time"]
+      ).sort(),
+    );
   expect(f.modelRequests.map((request) => request.authorization)).toEqual([
     "Bearer rejected",
     "Bearer refreshed",
@@ -483,6 +523,11 @@ it.each(["refresh-failed", "second-rejection"] as const)(
   async (mode) => {
     const f = await fixture(mode);
     expect(f.completed).toBe(false);
+    expect(f.credentialEvents.filter((event) => event.event === "model.credential_accepted")).toEqual([]);
+    expect(f.credentialEvents.map((event) => event.outcome)).toEqual(
+      mode === "second-rejection" ? ["refreshed", "reconnect_required"] : ["reconnect_required"],
+    );
+    expect(f.credentialHealth?.providers[PROVIDER]?.state).toBe("reconnect_required");
     expect(f.tokenRequests).toEqual(["r0"]);
     expect(f.recoveryCalls).toEqual(mode === "second-rejection" ? [PROVIDER, PROVIDER] : [PROVIDER]);
     expect(f.modelRequests.map((request) => request.authorization)).toEqual(

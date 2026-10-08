@@ -1560,7 +1560,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   const credentialHealthPath = modelCredentialHealthPath(options.stateDir);
-  const credentialHealth = new ModelCredentialHealthLog(credentialHealthPath);
+  const credentialHealth = new ModelCredentialHealthLog(credentialHealthPath, deps.onModelCredentialEvent);
   const rejectedProviders = new Set(
     Object.keys(readModelCredentialHealth(credentialHealthPath)?.providers ?? {}),
   );

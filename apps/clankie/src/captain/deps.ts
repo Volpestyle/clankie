@@ -67,6 +67,10 @@ export interface CaptainDeps {
   readonly bodyLeases?: BodyLeaseRouter;
   /** Trusted hosted body: provider credentials are repaired by the service operator. */
   readonly modelCredentialsOperatorManaged?: boolean;
+  /** Durable service-log metadata for local and hosted real-turn credential recovery. */
+  readonly onModelCredentialEvent?: (
+    event: import("./model-credential-health.ts").ModelCredentialEvent,
+  ) => void;
   readonly onModelCredentialRejection?: (event: {
     providerId: string;
     outcome: "refreshed" | "reconnect_required" | "operator_required";

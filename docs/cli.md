@@ -360,7 +360,12 @@ customer `/auth` step. `credentialRejections` (present only when there is one)
 records `{ "state": "refreshed" | "reconnect_required" | "operator_required",
 "at", "detail" }` per provider from a real failure, never a new paid probe.
 Doctor distinguishes local reconnect from service operator repair; the next
-successful turn on that provider clears the entry. `commands` currently probes
+successful turn on that provider clears the entry. The service log retains
+`model.credential_rejected` with `providerId` and the recovery `outcome`, followed
+by `model.credential_accepted` when a recorded rejection clears. These local and
+hosted diagnostics contain fixed metadata, without upstream errors or credentials.
+A later successful turn alone does not prove a forced refresh occurred.
+`commands` currently probes
 `herdr`, `ffmpeg`, `yt-dlp` (version strings) and `herdr-lead`, `codex`, `claude`
 (PATH only — never execute `herdr-lead --version`).
 `laneTools` names the streamable-HTTP MCP route that serves a lane's tool bank

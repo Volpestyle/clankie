@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import type { createLogger } from "@clankie/observability";
 
 /**
  * What the model provider last said about Clankie's stored credentials, from
@@ -26,6 +27,29 @@ const ModelCredentialHealthSchema = z
 
 type ModelCredentialHealth = z.infer<typeof ModelCredentialHealthSchema>;
 export type ModelCredentialRejection = ModelCredentialHealth["providers"][string];
+export type ModelCredentialEvent =
+  | { event: "model.credential_rejected"; providerId: string; outcome: ModelCredentialRejection["state"] }
+  | { event: "model.credential_accepted"; providerId: string };
+
+/** Fixed metadata only: upstream errors and credentials never enter these diagnostics. */
+export function modelCredentialEventLogger(logger: Pick<ReturnType<typeof createLogger>, "info" | "warn">) {
+  return (event: ModelCredentialEvent): void => {
+    const fields = {
+      event: event.event,
+      providerId: event.providerId,
+      ...(event.event === "model.credential_rejected" ? { outcome: event.outcome } : {}),
+    };
+    if (event.event === "model.credential_rejected" && event.outcome === "operator_required")
+      logger.warn(fields, "Model credential rejection requires service operator review");
+    else
+      logger.info(
+        fields,
+        event.event === "model.credential_accepted"
+          ? "Model credential accepted after recorded rejection"
+          : "Model credential recovery result",
+      );
+  };
+}
 
 export function modelCredentialHealthPath(captainStateDir: string): string {
   return join(captainStateDir, "model-credential-health.json");
@@ -41,9 +65,11 @@ export function readModelCredentialHealth(path: string): ModelCredentialHealth |
 
 export class ModelCredentialHealthLog {
   private readonly path: string;
+  private readonly onEvent: ((event: ModelCredentialEvent) => void) | undefined;
 
-  public constructor(path: string) {
+  public constructor(path: string, onEvent?: (event: ModelCredentialEvent) => void) {
     this.path = path;
+    this.onEvent = onEvent;
   }
 
   /** The provider rejected its credential in a real turn; record what recovery did. */
@@ -51,6 +77,7 @@ export class ModelCredentialHealthLog {
     const current = readModelCredentialHealth(this.path) ?? { schemaVersion: 1 as const, providers: {} };
     current.providers[providerId] = { state, at: new Date().toISOString(), detail: detail.slice(0, 512) };
     this.write(current);
+    this.report({ event: "model.credential_rejected", providerId, outcome: state });
   }
 
   /** A later turn on this provider succeeded, so a recorded rejection is over. */
@@ -59,6 +86,15 @@ export class ModelCredentialHealthLog {
     if (current?.providers[providerId] === undefined) return;
     delete current.providers[providerId];
     this.write(current);
+    this.report({ event: "model.credential_accepted", providerId });
+  }
+
+  private report(event: ModelCredentialEvent): void {
+    try {
+      this.onEvent?.(event);
+    } catch {
+      /* Diagnostics never fail recovery. */
+    }
   }
 
   private write(health: ModelCredentialHealth): void {

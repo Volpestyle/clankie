@@ -105,8 +105,13 @@ and continue only on success, within the same run. Pi's context edit hides the
 rejected assistant from active context without deleting its audit record; it
 does not append the owner's input again or replay completed tools. A second
 rejection or cancellation stops continuation. Hosted `operator_required` means
-service-owned credential repair: inspect `model.credential_rejected` operator
-logs and the existing failed-turn telemetry. Never tell a hosted customer to run
+service-owned credential repair. For local and hosted turns, join service-log
+`model.credential_rejected` (`providerId`, recovery `outcome`) with later
+`model.credential_accepted` and the original receipt. These fixed diagnostics
+exclude upstream errors and credentials. Doctor is current health, not a history:
+a cleared entry or later provider success alone does not prove forced refresh.
+Retained Pi assistant records prove provider acceptance or rejection; distinguish
+that from evidence of a refresh grant. Inspect existing failed-turn telemetry too. Never tell a hosted customer to run
 `/auth`; no dedicated credential-escalation acknowledgment is implied. Local
 `reconnect_required` retains the console reconnect path. See `docs/cli.md` under
 doctor for the states. Do not run a paid model probe just to refresh diagnostics.
