@@ -169,7 +169,12 @@ export class ModelSubscriptionSignIns {
       job.controller.signal.throwIfAborted();
       this.end(job, "complete");
     } catch {
-      if (job.view.state === "pending" || job.view.state === "committing") this.end(job, "failed");
+      // Provider and session timeout callbacks can race; the pending deadline owns expiry.
+      if (job.view.state === "pending" || job.view.state === "committing")
+        this.end(
+          job,
+          job.view.state === "pending" && Date.parse(job.view.expiresAt) <= Date.now() ? "expired" : "failed",
+        );
     } finally {
       clearTimeout(timer);
     }
