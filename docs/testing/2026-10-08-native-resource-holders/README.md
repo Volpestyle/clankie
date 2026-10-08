@@ -70,11 +70,25 @@ Observed acceptance evidence:
 - High load refuses simulator admission and keeps a concurrent heavy request
   queued; both proceed after the isolated fixture's load drops.
 
-Landing verification: pending on the rebased revision. An earlier gate passed
-formatting, lint, docs and all typechecks, then stopped at the older shared-pool
-assertion (3,639 tests passed before that stop). The assertion was revised to
-verify independent simulator admission and preserved heavy FIFO order; the final
-focused run above includes it.
+Landing verification: `clankie heavy -- pnpm check:landing` passed at
+`c4f0728e6` (implementation `ec711131`), based on fetched `origin/main` at
+`4bf09369`. It passed formatting, lint, dead-code checks, docs, all typechecks,
+and 6,305 tests in 665 files; 55 tests in 20 files were skipped. The test phase
+finished in 565.87 seconds. See the [gate summary](evidence/landing-summary.log).
+
+The final rebase onto `5aaa9342d` preserved every resource implementation and
+covering-test file byte for byte. The landed implementation is `30c9147c5`, with
+the harness-version assertion in `e20c89b3c`. The intervening main changes concern
+worker refresh ownership and waiting-message visibility; only separate sections
+of `docs/cli.md` overlapped. No source conflict or resource change was introduced
+by that rebase.
+
+Earlier gate attempts exposed the old shared-pool assertion and a harness-version
+assertion pinned to `0.6.9`. Both were updated to match the delivered behavior,
+and are covered by the final passing gate. The first shared-pool stop followed
+3,639 passing tests; the version stop followed 5,059 passing tests. The final
+focused 64-test run also covers preserved heavy FIFO order and independent
+simulator admission.
 
 ## Scope
 
