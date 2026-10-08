@@ -261,7 +261,9 @@ export function captainTools(
             },
           },
         ]),
-    ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
+    ...(deps.gameExtensions !== undefined || deps.rivals === undefined
+      ? []
+      : rivalsTools(deps.rivals, turn.bodyIdentity)),
     ...(deps.gameExtensions === undefined
       ? [
           ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),

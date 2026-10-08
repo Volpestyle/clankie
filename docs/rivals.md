@@ -64,6 +64,23 @@ publisher and its channel allowlist. An official bot body cannot publish Go Live
 Stopping the sitting invalidates the watch feed. Sharing currently carries video,
 not game audio.
 
+Rivals is registered through the common game-extension contract. Starts capture
+the authenticated conversation and reserve the same durable `play` lease used by
+Pokémon and Minecraft. A repeated start from the same owner/request reads the
+original sitting; it never dispatches another controller. Other conversations
+cannot steer or stop it. Existing `gameplay.rivalsUrl` settings and API/CLI/TUI
+commands remain the configuration path; credentials stay in the broker.
+
+A stop requests native cleanup. Only the original native session ID, request ID,
+start time and execution mode with `phase: stopped`, no error and post-cleanup
+`endedAt` release ownership. Failed/denied cleanup, a lost HTTP reply, a missing
+record or a replacement sitting keep the lease and registration uncertain.
+Restart recovery uses the persisted original origin and receipt through the
+existing owner-authorized `clankie body request` recovery path; changing the URL
+cannot redirect cleanup to another controller. Status and extension discovery
+are read-only and never start a controller. An uncertain claim can require an
+operator to restore access to the original server; a new server is not proof.
+
 `starting` and `stopping` are pending states. Inspect `status` for `running`,
 `stopped`, or `failed`. A supplied note is recorded, but the current policy only
 acts on the three modes: `autonomous`, `combat`, and `disengage`. It reports

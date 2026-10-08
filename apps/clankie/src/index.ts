@@ -128,7 +128,7 @@ import { createCaptain } from "./captain/captain.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
 import { parseHerdrPaneList } from "./captain/herdr-watch.ts";
 import { linearFollowStatus } from "@clankie/settings";
-import { createRivalsClient } from "./rivals.ts";
+import { RivalsService } from "./rivals-service.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import {
@@ -806,7 +806,6 @@ const email = createEmailPort({
 // A managed body learns its address at boot so the captain can say it.
 if (hostedBody !== undefined) void email.status().catch(() => undefined);
 
-const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
 let proofFleetLinks: FleetLinks | undefined;
 const runtimes = new ExecutionConnections({
   settings: settingsStore,
@@ -998,6 +997,13 @@ const computer =
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 const gameExtensions = new GameExtensionRegistry<GameExtensionProjection>();
+const rivals = new RivalsService({
+  settings: settingsStore,
+  credentials: operatorCredentialStore,
+  store: bodyLeaseStore,
+  path: join(stateRoot, "body", "rivals-session.json"),
+  registry: gameExtensions,
+});
 const minecraftRuntime: MinecraftExtensionRuntime = gameExtensions.register(
   minecraftExtension,
   {
@@ -1743,6 +1749,7 @@ const clankie = await createClankieApp({
         return bodyVoiceStays.reconcile(reconcileDiscordVoice, guard);
       }
       if (resource === "play") {
+        if (rivals.ownsPlay()) return rivals.recover(guard);
         if (minecraft.ownsPlay()) {
           if (!(await minecraft.recover(guard))) return false;
           return gameExtensions.reconcileStopped("minecraft", async () => {
@@ -2137,6 +2144,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
     await bodyRequestsStopped;
+    await rivals.close();
     if (minecraft.ownsPlay()) {
       await minecraft.close().catch(() => false);
     }

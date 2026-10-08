@@ -62,7 +62,7 @@ it("returns image content to the captain and refuses malformed or oversized fram
   const { settings, credentials, client } = await setup(fetchImpl);
   await settings.update((s) => ({ ...s, gameplay: { ...s.gameplay, rivalsUrl: "http://127.0.0.1:4330" } }));
   await credentials.set("rivals-agent", { type: "api", key: "private-control" });
-  const result = await rivalsTools(client)[0]!.execute(
+  const result = await rivalsTools({ call: (input) => client.call(input) })[0]!.execute(
     "call",
     { action: "observe", sessionId: ID },
     undefined,
@@ -122,7 +122,10 @@ it("the HTTP route requires operator authority and validates before dispatch", a
     expect((await post({ action: "stop", sessionId: "wrong" }, true)).status).toBe(400);
     expect(call).not.toHaveBeenCalled();
     expect((await post({ action: "status" }, true)).status).toBe(200);
-    expect(call).toHaveBeenCalledWith({ action: "status" });
+    expect(call).toHaveBeenCalledWith(
+      { action: "status" },
+      expect.objectContaining({ conversationId: "global-default" }),
+    );
   } finally {
     service.close();
   }

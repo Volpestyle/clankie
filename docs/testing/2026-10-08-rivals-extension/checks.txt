@@ -1,0 +1,22 @@
+VUH-1849 — Rivals shared play ownership
+Initial base: 475651a67fd0bdd25560783aeaf54439b4acf118 (fetched origin/main)
+Fresh worktree: /Users/james/dev/clankie-wt/vuh-1849-rowan
+Branch: vuh-1849-rowan
+
+Commands are run through clankie heavy --.
+Install: pnpm install — PASS, new local @clankie/rivals workspace only; no dependency-version changes.
+Covering types: pnpm --workspace-concurrency=1 --filter @clankie/rivals --filter @clankie/clankie typecheck
+Covering tests: pnpm exec vitest run --config vitest.config.ts apps/clankie/test/rivals-extension.integration.test.ts apps/clankie/test/rivals.test.ts apps/tui/test/rivals-command.test.ts apps/clankie/test/game-extensions.integration.test.ts
+Covering types: PASS (2 affected workspaces), .local/types-passed.log.
+Covering tests: PASS (4 files / 16 tests), including all 10 new isolated HTTP cases.
+Start 2026-10-08 11:47:50 America/Chicago, duration 12.06s.
+Lint: PASS — pnpm exec oxlint --deny-warnings .
+Dead code: PASS — pnpm deadcode (one pre-existing ignore configuration hint).
+Initial type attempts failed only on fixture argument order/type-name collision, corrected.
+First covering attempt: 15 passed / 1 failed; existing route assertion expected no identity.
+Corrected assertion verifies the authenticated conversation binding; all 16 now pass.
+The landing gate result will be appended after completion.
+
+Scope: controlled real authenticated loopback session-server HTTP and real broker/settings/lease persistence.
+No live PC, controller/game body, deployment, restart, paid model or eval.
+Native policy unchanged; VUH-1325 bridge disablement remains.

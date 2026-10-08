@@ -38,6 +38,7 @@
     "@clankie/pokemon": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/rendered-surface-client": "workspace:*",
+    "@clankie/rivals": "workspace:*",
     "@clankie/settings": "workspace:*",
     "@clankie/work-items": "workspace:*",
     "@earendil-works/pi-ai": "1.0.0",

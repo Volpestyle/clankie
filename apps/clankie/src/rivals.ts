@@ -33,20 +33,25 @@ export function createRivalsClient(options: {
 }) {
   const fetchImpl = options.fetchImpl ?? fetch;
   return {
-    async call(input: RivalsCommand): Promise<Record<string, unknown>> {
+    async call(
+      input: RivalsCommand,
+      guard?: () => Promise<void>,
+      origin?: string,
+    ): Promise<Record<string, unknown>> {
       const parsed = RivalsCommandSchema.safeParse(input);
       if (!parsed.success) return { outcome: "refused", reason: "invalid_request" };
       const command = parsed.data;
       if (command.action === "share" && Boolean(command.guildId) !== Boolean(command.channelId)) {
         return { outcome: "refused", reason: "guild_and_channel_required_together" };
       }
-      const base = (await options.settings.load()).gameplay.rivalsUrl;
+      const base = origin ?? (await options.settings.load()).gameplay.rivalsUrl;
       if (!base) return { outcome: "refused", reason: "rivals_not_configured" };
       const credential = await options.credentials.get("rivals-agent");
       if (credential?.type !== "api") return { outcome: "refused", reason: "rivals_credential_missing" };
       try {
         const { action, ...body } = command;
         const path = action === "observe" ? `/v1/frame?sessionId=${command.sessionId}` : `/v1/${action}`;
+        await guard?.();
         const response = await fetchImpl(new URL(path, base), {
           method: action === "status" || action === "observe" ? "GET" : "POST",
           headers: { authorization: `Bearer ${credential.key}`, "content-type": "application/json" },
@@ -59,6 +64,7 @@ export function createRivalsClient(options: {
           signal: AbortSignal.timeout(5_000),
         });
         const data = await bytes(response);
+        if (action !== "observe" && data.length > 64 * 1024) throw new Error("status_too_large");
         if (!response.ok) {
           let reason = "rivals_rejected";
           try {
@@ -97,6 +103,7 @@ export function createRivalsClient(options: {
         }
         const watchUrl = new URL(shared.watchPath, base).href;
         if (!command.guildId || !command.channelId) return { outcome: "watch", watchUrl };
+        await guard?.();
         const publish = await postToDiscordActiveBody(
           "/go-live/start",
           {
@@ -115,4 +122,9 @@ export function createRivalsClient(options: {
   };
 }
 
-export type RivalsClient = ReturnType<typeof createRivalsClient>;
+export interface RivalsClient {
+  call(
+    input: RivalsCommand,
+    identity?: import("./body-lease-router.ts").BodyConversationIdentity,
+  ): Promise<Record<string, unknown>>;
+}

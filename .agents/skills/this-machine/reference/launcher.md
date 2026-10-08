@@ -462,7 +462,12 @@ a fake pad. Notes are retained context (`noteApplied: false`); the scripted poli
 acts on `autonomous`, `combat`, or `disengage`. Observe for real game pixels before
 describing play. Keep a start's requestId across retries and use the returned
 session ID for later commands. The watch link grants viewing only; a Go Live
-request is not proof of delivered video. Setup: `{repoRoot}/docs/rivals.md`.
+request is not proof of delivered video. Rivals shares the durable `play` lease
+with Pokémon/Minecraft; only the original owner can steer or request stop. A stop
+reply or HTTP deadline does not free that lease. Exact native `stopped` and
+post-cleanup `endedAt` for the saved original session/request/start time are
+required. Missing/replacement sessions remain held for the existing body recovery
+path. Status/discovery never starts a controller. Setup: `{repoRoot}/docs/rivals.md`.
 
 ## Conflicts
 

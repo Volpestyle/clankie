@@ -1623,16 +1623,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   }
 
-  app.post("/v1/rivals", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    const parsed = RivalsCommandSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!parsed.success) return context.json({ error: "invalid_rivals_command" }, 400);
-    if (!dependencies.rivals) return context.json({ outcome: "refused", reason: "rivals_unavailable" }, 503);
-    return context.json(await dependencies.rivals.call(parsed.data));
-  });
+  if (dependencies.gameExtensions === undefined)
+    app.post("/v1/rivals", async (context) => {
+      const operator = await authenticateOperator(context.req.raw, dependencies);
+      if (operator === "unavailable")
+        return context.json({ error: "operator_authentication_unavailable" }, 503);
+      if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+      const parsed = RivalsCommandSchema.safeParse(await context.req.json().catch(() => undefined));
+      if (!parsed.success) return context.json({ error: "invalid_rivals_command" }, 400);
+      if (!dependencies.rivals)
+        return context.json({ outcome: "refused", reason: "rivals_unavailable" }, 503);
+      return context.json(
+        await dependencies.rivals.call(
+          parsed.data,
+          operatorBodyIdentity(
+            context.req.raw.headers.get("x-clankie-conversation-id") ??
+              dependencies.captain.seatContext()?.conversationId,
+            context.req.raw,
+          ),
+        ),
+      );
+    });
 
   // Optional execution and doorway failures do not make the captain unhealthy.
   app.get("/health", (context) => {
