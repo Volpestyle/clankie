@@ -1,0 +1,22 @@
+check:landing exit status: 0
+Runtime revision: 70efa99bb6b94dec9f47daf54af479ee3701ec10
+Base revision: 1b72a1a3f0f02d568abbedbc3d2d1d066c6cc0f9
+Compiler concurrency: 1 through local TURBO_BINARY_PATH wrapper
+
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && node scripts/check-doc-links.mjs && node scripts/check-retired-claims.mjs && pnpm typecheck && vitest run --config vitest.config.ts --changed ${CLANKIE_LANDING_BASE:-origin/main} --bail 1 --passWithNoTests
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.3 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+All matched files use the correct format.
+$ cargo fmt --all --check
+$ oxlint --deny-warnings . && pnpm --filter @clankie/vox lint
+$ cargo clippy --locked --all-targets --all-features -- -D warnings
+$ knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers
+$ turbo run typecheck
+ Tasks:    31 successful, 31 total
+Cached:    28 cached, 31 total
+  Time:    24.454s 
+ Test Files  281 passed | 9 skipped (290)
+      Tests  2698 passed | 26 skipped (2724)
+   Start at  12:30:06
+   Duration  297.56s (transform 4.02s, setup 1.67s, import 292.56s, tests 863.80s, environment 14ms)

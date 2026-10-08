@@ -1,0 +1,12 @@
+clankie heavy: waiting for machine capacity (load; 1/2 held, 4 queued)
+Finished in 33ms on 2 files using 18 threads.
+$ tsc --noEmit -p tsconfig.json
+
+ RUN  v4.1.10 <worktree>
+
+
+ Test Files  5 passed (5)
+      Tests  57 passed (57)
+   Start at  12:25:17
+   Duration  54.13s (transform 183ms, setup 72ms, import 365ms, tests 118.11s, environment 0ms)
+

@@ -1,0 +1,56 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 3 queued)
+
+ RUN  v4.1.10 <worktree>
+
+ ❯ packages/fleet-resources/test/heavy-process.integration.test.ts (10 tests | 1 failed | 9 skipped) 20330ms
+     × keeps eleven queued requests and their tickets through more than fifteen seconds of OS lock contention 20327ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/fleet-resources/test/heavy-process.integration.test.ts > machine shared heavy permits with actual OS children > keeps eleven queued requests and their tickets through more than fifteen seconds of OS lock contention
+AssertionError: expected [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ] to deeply equal [ Array(11) ]
+
+- Expected
++ Received
+
+  [
+-   0,
+-   0,
+-   0,
+-   0,
+-   0,
+-   0,
+-   0,
+-   0,
+-   0,
+-   0,
+-   0,
++   1,
++   1,
++   1,
++   1,
++   1,
++   1,
++   1,
++   1,
++   1,
++   1,
++   1,
+  ]
+
+ ❯ packages/fleet-resources/test/heavy-process.integration.test.ts:147:72
+    145|       await f.release(active.release);
+    146|       expect(await active.done).toBe(0);
+    147|       expect(await Promise.all(queued.map((request) => request.done)))…
+       |                                                                        ^
+    148|       for (const request of queued) {
+    149|         expect(await exists(request.receipt)).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  12:18:43
+   Duration  20.50s (transform 42ms, setup 16ms, import 71ms, tests 20.33s, environment 0ms)
+
