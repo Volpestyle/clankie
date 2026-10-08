@@ -14,7 +14,7 @@ import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import { readWorkingPreferences } from "./working-preferences.ts";
 import { runResourceStatusCommand, runSimulatorCommand } from "./fleet-resources.ts";
-import { formatSeatDeliveryAge, readSeatDeliveries } from "./seat-delivery.ts";
+import { formatSeatDeliveryAge, readSeatDeliveries, readSeatBridges } from "./seat-delivery.ts";
 import { summarizeRecovery } from "../../bin/service-recovery.ts";
 import {
   createCaptainOperatorConversationClient,
@@ -35,6 +35,11 @@ export type { ExecFileImpl, InstallDoctorReport };
 
 /** Readiness first; optional rooms never hide the reason a first turn fails. */
 export function formatDoctorSummary(report: InstallDoctorReport): string {
+  const staleBridge =
+    report.seatBridges && "bridges" in report.seatBridges
+      ? report.seatBridges.bridges.find((bridge) => bridge.state === "stale")
+      : undefined;
+  if (staleBridge) return `Stale seat bridge for ${staleBridge.conversationId}. ${staleBridge.detail}`;
   if (!report.captain.ready) {
     return report.captain.reason === "no_model"
       ? "Choose a model — run `clankie`, then `/setup`."
@@ -129,32 +134,44 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const [report, workerObservations, resources, simulators, checkouts, seatDeliveries] = await Promise.all([
-    inspectInstall(options),
-    inspectWorkerTools(options),
-    inspectResources(options),
-    inspectSimulators(options),
-    runCheckoutsCommand(["status"], {
-      ...options,
-      ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
-    })
-      .then((value) => CheckoutReportSchema.parse(value))
-      .catch(() => ({
-        status: "unavailable" as const,
-        detail: "Checkout status unavailable; run clankie checkouts status",
-      })),
-    readSeatDeliveries({
-      ...options,
-      ...(options.credentialStore ? { captainCredentialStore: options.credentialStore } : {}),
-      timeoutMs: 5_000,
-    }).then(
-      (unresolved) => ({ unresolved }),
-      (error: unknown) => ({
-        status: "unavailable" as const,
-        detail: error instanceof Error ? error.message : String(error),
-      }),
-    ),
-  ]);
+  const [report, workerObservations, resources, simulators, checkouts, seatBridges, seatDeliveries] =
+    await Promise.all([
+      inspectInstall(options),
+      inspectWorkerTools(options),
+      inspectResources(options),
+      inspectSimulators(options),
+      runCheckoutsCommand(["status"], {
+        ...options,
+        ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
+      })
+        .then((value) => CheckoutReportSchema.parse(value))
+        .catch(() => ({
+          status: "unavailable" as const,
+          detail: "Checkout status unavailable; run clankie checkouts status",
+        })),
+      readSeatBridges({
+        ...options,
+        ...(options.credentialStore ? { captainCredentialStore: options.credentialStore } : {}),
+        timeoutMs: 5_000,
+      }).then(
+        (bridges) => ({ bridges }),
+        (error: unknown) => ({
+          status: "unavailable" as const,
+          detail: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+      readSeatDeliveries({
+        ...options,
+        ...(options.credentialStore ? { captainCredentialStore: options.credentialStore } : {}),
+        timeoutMs: 5_000,
+      }).then(
+        (unresolved) => ({ unresolved }),
+        (error: unknown) => ({
+          status: "unavailable" as const,
+          detail: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    ]);
   const { workerTools, workerReports } = workerObservations;
   const serviceRecovery = summarizeRecovery(options.env ?? process.env);
   const workingPreferences = await readWorkingPreferences({
@@ -262,6 +279,7 @@ export async function doctorCommand(
     workerTools,
     workerReports,
     seatDeliveries,
+    seatBridges,
     workingPreferences,
     resources,
     ...(simulators === undefined ? {} : { simulators }),

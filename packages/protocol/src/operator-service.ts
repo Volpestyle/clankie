@@ -23,6 +23,7 @@ import { ClosedWorkerPaneSchema } from "./operator-conversations.ts";
 import { WorktreeReconciliationSchema } from "./checkouts.ts";
 import { HireReceiptIdSchema, HireReceiptSettlementSchema } from "./hire-receipts.ts";
 import { SeatDeliverySettlementSchema, UnresolvedSeatDeliverySchema } from "./seat-deliveries.ts";
+import { OperatorSeatBridgeStatusSchema } from "./fleet-messages.ts";
 import { z } from "zod";
 import {
   ProjectProposalLocatorSchema,
@@ -565,6 +566,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
         .optional(),
     })
     .strict(),
+  z.object({ op: z.literal("seat_bridges"), schemaVersion: z.literal(1) }).strict(),
   /** Head seat-mailbox receipts that never resolved (VUH-1779). Read-only. */
   z
     .object({
@@ -1069,6 +1071,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("settle_hire_receipt"),
       schemaVersion: z.literal(1),
       result: HireReceiptSettlementSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("seat_bridges"),
+      schemaVersion: z.literal(1),
+      bridges: z.array(OperatorSeatBridgeStatusSchema),
     })
     .strict(),
   z

@@ -31,6 +31,34 @@ export const OPERATOR_SEAT_EVENT_WAIT_MS_MAX = 30_000;
  */
 export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation", "message", "turn"]);
 export type OperatorSeatEventKind = z.infer<typeof OperatorSeatEventKindSchema>;
+/** No handshake means the strict pre-owner-turn schema, not the newest installed source. */
+export const LEGACY_OPERATOR_SEAT_EVENT_KINDS = ["wake", "watch", "escalation", "message"] as const;
+export const OPERATOR_SEAT_CAPABILITIES_HEADER = "x-clankie-seat-capabilities";
+export const OperatorSeatCapabilitiesSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    eventKinds: z.array(OperatorSeatEventKindSchema).min(1).max(5),
+    ownerOrigin: z.boolean(),
+    sourceHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+  })
+  .strict();
+export type OperatorSeatCapabilities = z.infer<typeof OperatorSeatCapabilitiesSchema>;
+export const OperatorSeatBridgeStatusSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    state: z.enum(["current", "stale", "disconnected"]),
+    eventKinds: z.array(OperatorSeatEventKindSchema),
+    ownerOrigin: z.boolean(),
+    lastSeenAt: z.string().optional(),
+    sourceHash: z.string().optional(),
+    detail: z.string(),
+  })
+  .strict();
+export type OperatorSeatBridgeStatus = z.infer<typeof OperatorSeatBridgeStatusSchema>;
+
 export const OperatorSeatEventSchema = z
   .object({
     schemaVersion: z.literal(1),

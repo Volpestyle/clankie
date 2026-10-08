@@ -666,6 +666,26 @@ attest its own history. The journal covers service-authorized effects, not arbit
 programs launched outside Clankie's controlled hire path. It adds no fleet tool,
 worker authority, account setup or TUI setting.
 
+A running native seat bridge declares its loaded capabilities on each authenticated
+`GET /v1/seat/events` poll through `x-clankie-seat-capabilities`: schema version 1,
+`eventKinds`, `ownerOrigin`, and its captured `sourceHash`. A service update cannot
+change modules already loaded in that bridge. No declaration means the legacy
+`wake`/`watch`/`escalation`/`message` wire contract. Owner turns then use `message`
+without the newer `ownerOrigin` field, with verified attribution in the content;
+the original ID, delivery receipt, and normal conversation answer remain the same.
+A bridge receives only declared kinds and fields. Unsupported events are refused
+before dispatch rather than handed to a decoder that cannot read them.
+
+`clankie status` (`seatBridges`) and `clankie doctor` name a stale receiver and
+advise `Clankie's seat needs a reconnect: /mcp`. The operator-only `seat_bridges`
+dispatch operation returns the same loaded capability observation. It is a
+read-only diagnostic, not receipt acknowledgment. A stale bridge notice appears
+in the shared owner conversation without queuing another turn. If an owner turn
+was taken but never acknowledged, a second notice names its original ID; its
+uncertainty receipt stays retained and is never automatically replayed. Reconnect
+the operator MCP bridge with `/mcp`, then check a fresh owner turn. A service
+restart alone cannot refresh an old native MCP process.
+
 `clankie seat-delivery list` reads the operator-only `seat_deliveries`
 operation: every head seat-mailbox delivery whose receipt never resolved, with
 its conversation, receipt ID and age (receipts recorded before VUH-1779 have no

@@ -4011,12 +4011,25 @@ paths:
         asks again the moment a poll returns and pushes each event into the
         session as a channel notification. Operator bearer only; a Discord
         bridge bearer is 403. `wait` is capped at 30000 ms.
-        Host-authenticated owner sends arrive as `kind: turn`, with `ownerOrigin`
+        The loaded bridge advertises capabilities through x-clankie-seat-capabilities.
+        No handshake means the strict legacy wake/watch/escalation/message schema;
+        owner turns use a message with content attribution and no ownerOrigin field.
+        The original ID and receipt remain the same. Only declared wire kinds and
+        fields are dispatched. A stale bridge or unacknowledged owner turn produces
+        a visible /mcp reconnect notice in the conversation, without replay.
+        The operator seat_bridges dispatch read exposes the same loaded capabilities
+        used by doctor and status; installed files are not proof of loaded code.
+        Host-authenticated owner sends on capable bridges arrive as `kind: turn`, with `ownerOrigin`
         recording the verified device/operator principal and self-reported surface.
         The seat answers normally in the synced conversation; these events have
         no separate reply target. Room escalations retain their reply routing.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
+        - in: header
+          name: x-clankie-seat-capabilities
+          description: JSON declaration from the loaded bridge; absence is the legacy wire contract.
+          schema: { type: string, maxLength: 2048 }
+          example: '{"schemaVersion":1,"eventKinds":["wake","watch","escalation","message","turn"],"ownerOrigin":true}'
         - in: query
           name: conversationId
           description: Existing operator global/workspace conversation; omitted selects the global head.
@@ -4039,6 +4052,8 @@ paths:
                     source: service
                     content: "This is a self-wake you scheduled…"
                     createdAt: "2026-09-01T20:00:00.000Z"
+        "400":
+          description: Invalid capability declaration; reconnect the bridge with /mcp
         "403":
           description: Not the operator lane
 

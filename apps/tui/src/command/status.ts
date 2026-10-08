@@ -10,6 +10,7 @@ import { nextStepLine } from "../next-step.ts";
 import { DeviceDirectRouteSchema } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { probeHealth, type GatewayDoorwayReport } from "./gateway.ts";
+import { readSeatBridges } from "./seat-delivery.ts";
 import { hostedWhoami } from "./hosted.ts";
 
 export interface StatusCommandOptions extends CreateServiceOptionsInput {
@@ -31,6 +32,7 @@ export interface StatusCommandResult {
   /** Live remote-access doorway for phone pairing (absent when settings cannot be read). */
   readonly doorway?: GatewayDoorwayReport;
   readonly nextStep?: string;
+  readonly seatBridges?: readonly import("@clankie/protocol").OperatorSeatBridgeStatus[];
   readonly presence?: OperatorPresenceSnapshot;
   readonly presenceState?: "unreachable";
   readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
@@ -56,6 +58,14 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
   const clankie = services.find((service) => service.id === "clankie");
   const serviceHealthy = clankie?.state === "healthy";
   const access = await phoneAccess(options, env, serviceHealthy);
+  let seatBridges: StatusCommandResult["seatBridges"];
+  if (serviceHealthy) {
+    try {
+      seatBridges = await readSeatBridges({ ...options, timeoutMs: 3000 });
+    } catch {
+      /* An unavailable observation is not a current bridge. */
+    }
+  }
   let presence: OperatorPresenceSnapshot | undefined;
   if (serviceHealthy) {
     try {
@@ -98,6 +108,10 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
     operatorCredential,
     services,
     ...access,
+    ...(seatBridges === undefined ? {} : { seatBridges }),
+    ...(seatBridges?.some((bridge) => bridge.state === "stale")
+      ? { nextStep: seatBridges.find((bridge) => bridge.state === "stale")!.detail }
+      : {}),
     ...(recovery.length === 0 ? {} : { recovery }),
   };
 }

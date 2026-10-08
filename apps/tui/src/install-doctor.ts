@@ -174,6 +174,10 @@ export interface InstallDoctorReport {
     readonly error?: string;
   };
   readonly fleetHealthMetrics?: import("@clankie/protocol").FleetHealthMetricsSnapshot;
+  /** Capabilities declared by the running operator receiver, not installed source. */
+  readonly seatBridges?:
+    | { readonly bridges: readonly import("@clankie/protocol").OperatorSeatBridgeStatus[] }
+    | { readonly status: "unavailable"; readonly detail: string };
   /** Head seat deliveries whose receipt never resolved (VUH-1779); each blocks only its own resend. */
   readonly seatDeliveries?:
     | { readonly unresolved: readonly import("@clankie/protocol").UnresolvedSeatDelivery[] }

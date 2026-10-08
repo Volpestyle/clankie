@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
+import { OperatorSeatEventKindSchema } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import { createClankieApp } from "../src/app.ts";
 import {
@@ -418,7 +419,11 @@ it("a silent in-flight tool keeps an operator turn alive beyond the inactivity d
 it("the attached project receives worker reports, watches, self wakes and escalations without Pi or global leakage", async () => {
   const { captain, id, journal, send, agent, autonomous, settleSeat } = await fixture();
   const globalAbort = new AbortController();
-  const global = captain.pollSeatEvents(10_000, globalAbort.signal);
+  const global = captain.pollSeatEvents(10_000, globalAbort.signal, undefined, {
+    schemaVersion: 1,
+    eventKinds: [...OperatorSeatEventKindSchema.options],
+    ownerOrigin: true,
+  });
   let poll = captain.pollSeatEvents(10_000, undefined, id);
   // Surfaces see who takes the turns; no head pane is listed, so the harness stays unnamed.
   expect(

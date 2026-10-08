@@ -17,6 +17,10 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   type OperatorOwnerTurnOrigin,
+  LEGACY_OPERATOR_SEAT_EVENT_KINDS,
+  OperatorSeatCapabilitiesSchema,
+  type OperatorSeatCapabilities,
+  type OperatorSeatBridgeStatus,
   OPERATOR_CONVERSATION_TEXT_MAX,
   headSeatDeliveryStage,
   type HireRecoveryEvidence,
@@ -118,6 +122,7 @@ export interface SeatDeliveryInput {
 type PollFinishSource = "wake" | "timeout" | "abort" | "supersede" | "close";
 
 interface ParkedPoller {
+  readonly capabilities?: OperatorSeatCapabilities;
   readonly recipientBinding?: string;
   finish(events: OperatorSeatEvent[], source: PollFinishSource): void;
 }
@@ -153,6 +158,10 @@ export class SeatOutbox {
   /** Receipts already announced, including the alerts' own, so an alert never alerts about an alert. */
   private readonly alerted = new Set<string>();
   private readonly onUnresolved: ((receipt: UnresolvedSeatReceipt) => void) | undefined;
+  private lastCapabilities: OperatorSeatCapabilities | undefined;
+  private lastBridgePollAt: number | undefined;
+  private readonly bridgeIssues = new Set<string>();
+  private readonly onBridgeIssue: ((detail: string) => void) | undefined;
   private lastPollAt: number | undefined;
   private lastPollBinding: string | undefined;
   private readonly presencePath: string | undefined;
@@ -194,9 +203,11 @@ export class SeatOutbox {
       readonly recentSeatMs?: number;
       /** Tell the lead about an unresolved receipt instead of failing silently. Called once per receipt. */
       readonly onUnresolved?: (receipt: UnresolvedSeatReceipt) => void;
+      readonly onBridgeIssue?: (detail: string) => void;
     } = {},
   ) {
     this.onUnresolved = options.onUnresolved;
+    this.onBridgeIssue = options.onBridgeIssue;
     this.fence = new DeliveryFence(options.uncertaintyPath);
     this.delivered = new DeliveryFence(
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
@@ -213,7 +224,43 @@ export class SeatOutbox {
         this.reconnectUntil = startedAt + (options.reconnectGraceMs ?? RESTART_RECONNECT_GRACE_MS);
         // The reconnecting seat proves the same native binding when it polls.
         this.lastPollBinding = presence!.recipientBinding;
+        this.lastCapabilities = presence!.capabilities;
+        this.lastBridgePollAt = presence!.lastPollAt;
       }
+    }
+  }
+
+  /** A read observes loaded receiver capabilities, never installed files or receipts. */
+  public bridgeStatus(conversationId: string): OperatorSeatBridgeStatus {
+    const capabilities = this.lastCapabilities;
+    const current =
+      !!capabilities?.ownerOrigin &&
+      capabilities.eventKinds.includes("turn") &&
+      LEGACY_OPERATOR_SEAT_EVENT_KINDS.every((kind) => capabilities.eventKinds.includes(kind));
+    return {
+      conversationId,
+      state: !this.bound() ? "disconnected" : current ? "current" : "stale",
+      eventKinds: [...(capabilities?.eventKinds ?? LEGACY_OPERATOR_SEAT_EVENT_KINDS)],
+      ownerOrigin: capabilities?.ownerOrigin ?? false,
+      ...(capabilities?.sourceHash ? { sourceHash: capabilities.sourceHash } : {}),
+      ...(this.lastBridgePollAt === undefined
+        ? {}
+        : { lastSeenAt: new Date(this.lastBridgePollAt).toISOString() }),
+      detail: !this.bound()
+        ? "Seat bridge is disconnected; reconnect with /mcp if this conversation uses a native head."
+        : current
+          ? "Seat bridge supports owner turns."
+          : "Clankie's seat needs a reconnect: /mcp. The bridge does not declare the current seat protocol; owner turns use a compatible wire format when supported.",
+    };
+  }
+
+  private bridgeIssue(detail: string): void {
+    if (this.bridgeIssues.has(detail)) return;
+    this.bridgeIssues.add(detail);
+    try {
+      this.onBridgeIssue?.(detail);
+    } catch {
+      /* Diagnostics remain readable if the notice cannot be stored. */
     }
   }
 
@@ -514,19 +561,37 @@ export class SeatOutbox {
   }
 
   /** The bridge's long poll: ack in-flight turns, then everything queued, or park. */
-  public poll(waitMs: number, signal?: AbortSignal, recipientBinding?: string): Promise<OperatorSeatEvent[]> {
+  public poll(
+    waitMs: number,
+    signal?: AbortSignal,
+    recipientBinding?: string,
+    capabilities?: OperatorSeatCapabilities,
+  ): Promise<OperatorSeatEvent[]> {
     if (this.closed) return Promise.resolve([]);
     // The seat is back: from here, its own polls decide whether it is bound.
     this.reconnectUntil = undefined;
+    const changed = JSON.stringify(this.lastCapabilities) !== JSON.stringify(capabilities);
+    this.lastCapabilities = capabilities;
+    this.lastBridgePollAt = this.now();
+    if (changed) this.presenceWrittenAt = undefined;
     this.recordPresence(recipientBinding);
+    if (
+      !capabilities?.ownerOrigin ||
+      !capabilities.eventKinds.includes("turn") ||
+      !LEGACY_OPERATOR_SEAT_EVENT_KINDS.every((kind) => capabilities.eventKinds.includes(kind))
+    )
+      this.bridgeIssue(
+        "Clankie's seat needs a reconnect: /mcp. The attached bridge declares an older or incomplete seat protocol; owner turns use a compatible wire format when supported.",
+      );
     // A polling seat is present: announce receipts it has not been told about yet.
     this.alertUnresolved();
     this.ackInFlight(recipientBinding);
-    const ready = this.take(recipientBinding);
+    const ready = this.take(recipientBinding, capabilities);
     if (ready.length > 0 || waitMs <= 0 || signal?.aborted === true) return Promise.resolve(ready);
     return new Promise((resolve) => {
       let finished = false;
       const poller: ParkedPoller = {
+        ...(capabilities === undefined ? {} : { capabilities }),
         ...(recipientBinding === undefined ? {} : { recipientBinding }),
         finish: (events, source) => {
           if (finished) return;
@@ -654,7 +719,7 @@ export class SeatOutbox {
       mkdirSync(dirname(this.presencePath), { recursive: true, mode: 0o700 });
       writeFileSync(
         this.presencePath,
-        `${JSON.stringify({ schemaVersion: 1, lastPollAt: now, ...(recipientBinding === undefined ? {} : { recipientBinding }) })}\n`,
+        `${JSON.stringify({ schemaVersion: 1, lastPollAt: now, ...(this.lastCapabilities === undefined ? {} : { capabilities: this.lastCapabilities }), ...(recipientBinding === undefined ? {} : { recipientBinding }) })}\n`,
         { mode: 0o600 },
       );
       this.presenceWrittenAt = now;
@@ -713,7 +778,7 @@ export class SeatOutbox {
         : pending.recipientBinding === recipientBinding;
   }
 
-  private take(recipientBinding?: string): OperatorSeatEvent[] {
+  private take(recipientBinding?: string, capabilities?: OperatorSeatCapabilities): OperatorSeatEvent[] {
     const taken = [...this.queued];
     const events: OperatorSeatEvent[] = [];
     for (const pending of taken) {
@@ -722,6 +787,35 @@ export class SeatOutbox {
         continue;
       }
       if (pending.holdUntilTurnEnd && this.turnActive) continue;
+      const kinds: readonly OperatorSeatEventKind[] =
+        capabilities?.eventKinds ?? LEGACY_OPERATOR_SEAT_EVENT_KINDS;
+      const original = pending.event;
+      const fallback = original.kind === "turn" && (!kinds.includes("turn") || !capabilities?.ownerOrigin);
+      const kind = fallback ? "message" : original.kind;
+      if (!kinds.includes(kind)) {
+        this.bridgeIssue(
+          `Clankie's seat needs a reconnect: /mcp. Its bridge cannot receive ${original.kind}; this delivery was refused before dispatch.`,
+        );
+        pending.settle({ outcome: "unbound" });
+        continue;
+      }
+      // Project only declared fields. The Oct 6 bridge has a strict schema.
+      const origin = original.ownerOrigin;
+      const wire: OperatorSeatEvent = {
+        schemaVersion: 1,
+        id: original.id,
+        kind,
+        conversationId: original.conversationId,
+        source: original.source,
+        createdAt: original.createdAt,
+        content:
+          fallback && origin
+            ? fitSeatChannel(
+                `[Owner app turn from ${origin.surfaceClientId}; ${origin.principal.kind} ${origin.principal.id}, verified by the service.]\n\n${original.content}`,
+              )
+            : original.content,
+        ...(capabilities?.ownerOrigin && !fallback && origin ? { ownerOrigin: origin } : {}),
+      };
       this.queued.splice(this.queued.indexOf(pending), 1);
       pending.admission = this.turnActive ? "steered" : "started";
       this.turnActive = true;
@@ -739,7 +833,7 @@ export class SeatOutbox {
         this.boundGraceMs,
       );
       pending.timer.unref?.();
-      events.push(pending.event);
+      events.push(wire);
     }
     if (events.length > 0) this.lastPollAt = this.now();
     return events;
@@ -748,19 +842,23 @@ export class SeatOutbox {
   private wakePoller(): void {
     const [first] = this.pollers;
     if (first === undefined) return;
-    const ready = this.take(first.recipientBinding);
+    const ready = this.take(first.recipientBinding, first.capabilities);
     if (ready.length > 0) first.finish(ready, "wake");
   }
 }
 
-function readPresence(path: string): { lastPollAt: number; recipientBinding?: string } | undefined {
+function readPresence(
+  path: string,
+): { lastPollAt: number; recipientBinding?: string; capabilities?: OperatorSeatCapabilities } | undefined {
   try {
     const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
     if (typeof raw !== "object" || raw === null) return undefined;
-    const { lastPollAt, recipientBinding } = raw as Record<string, unknown>;
+    const { lastPollAt, recipientBinding, capabilities } = raw as Record<string, unknown>;
+    const parsed = OperatorSeatCapabilitiesSchema.safeParse(capabilities);
     if (typeof lastPollAt !== "number" || !Number.isFinite(lastPollAt)) return undefined;
     return {
       lastPollAt,
+      ...(parsed.success ? { capabilities: parsed.data } : {}),
       ...(typeof recipientBinding === "string" ? { recipientBinding } : {}),
     };
   } catch {

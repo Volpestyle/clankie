@@ -607,6 +607,13 @@ export function createOperatorService(
         sessions: await ctx.terminals.catalog(),
       };
     }
+    if (request.op === "seat_bridges") {
+      return {
+        op: "seat_bridges",
+        schemaVersion: 1,
+        bridges: ctx.headSeatConversations().map((id) => ctx.seatOutbox(id).bridgeStatus(id)),
+      };
+    }
     if (request.op === "seat_deliveries") {
       const now = Date.now();
       return {

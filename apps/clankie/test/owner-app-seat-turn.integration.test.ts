@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   OperatorSeatEventSchema,
+  OperatorSeatEventKindSchema,
   TAKE_CONTROL_GRANTS,
   type OperatorConversationServiceRequest,
 } from "@clankie/protocol";
@@ -174,7 +175,14 @@ async function fixture() {
       },
       bearer,
     );
-  const poll = () => conversations.pollConversationDriver(ID, () => outbox.poll(60000, undefined, BINDING));
+  const poll = () =>
+    conversations.pollConversationDriver(ID, () =>
+      outbox.poll(60000, undefined, BINDING, {
+        schemaVersion: 1,
+        eventKinds: OperatorSeatEventKindSchema.options,
+        ownerOrigin: true,
+      }),
+    );
   const journal = () => new ConversationJournal(join(root, "conversations")).read(ID);
   const revoke = async () => {
     const response = await service.app.request(`/v1/devices/${DEVICE}/revoke`, {

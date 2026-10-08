@@ -355,6 +355,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       parsed.data.op === "settle_hire_receipt" ||
       parsed.data.op === "settle_seat_delivery" ||
       parsed.data.op === "seat_deliveries" ||
+      parsed.data.op === "seat_bridges" ||
       parsed.data.op === "readopt_seat" ||
       parsed.data.op === "worker_reports" ||
       parsed.data.op === "acknowledge_worker_reports" ||

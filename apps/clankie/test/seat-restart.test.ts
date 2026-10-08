@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
+import { OperatorSeatEventKindSchema } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
@@ -27,7 +28,11 @@ it.each([
       });
     const captain = create();
     try {
-      const poll = captain.pollSeatEvents(1000);
+      const poll = captain.pollSeatEvents(1000, undefined, undefined, {
+        schemaVersion: 1,
+        eventKinds: [...OperatorSeatEventKindSchema.options],
+        ownerOrigin: true,
+      });
       const result = await captain.serveOperatorConversation({
         schemaVersion: 1,
         op: "send",
@@ -121,7 +126,11 @@ it("shutdown rejects queued turns instead of falling through into a fresh model 
     settings: new SettingsStore(join(root, "settings.json")),
   });
   try {
-    const poll = captain.pollSeatEvents(1000);
+    const poll = captain.pollSeatEvents(1000, undefined, undefined, {
+      schemaVersion: 1,
+      eventKinds: [...OperatorSeatEventKindSchema.options],
+      ownerOrigin: true,
+    });
     const send = (expectedRevision: number) =>
       captain.serveOperatorConversation({
         schemaVersion: 1,

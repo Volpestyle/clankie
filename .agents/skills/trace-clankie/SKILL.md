@@ -46,6 +46,14 @@ lifetime. Join their `runId` to the accepted/completed/failed `events.jsonl` tur
 A service-interrupted attempt stays uncertain. Read first and acknowledge only
 fully reviewed offered IDs with `clankie agents reports ack ID... --conversation ID`.
 
+For an owner app turn missing from a native operator seat, read `clankie status`
+(`seatBridges`) or doctor and the `seat_bridges` operator dispatch observation.
+Capabilities describe the loaded bridge, not installed source. No handshake is
+a legacy receiver; new owner turns use its plain message format and omit new
+wire fields. A stale bridge or lost ACK produces a conversation reconnect notice
+(`/mcp`). Match the original ID, conversation journal, bridge pump journal and
+head delivery fence. Diagnostic reads never ACK, replay or settle the original.
+
 For a stuck `message_clankie` claim, compare the exact authenticated receipt with
 the worker's running bridge version. Worker bridge 0.6.2 recognizes only `stored`;
 it keeps returning `uncertain` even when the service returns an exact sealed

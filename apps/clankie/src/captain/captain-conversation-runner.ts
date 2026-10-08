@@ -245,8 +245,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             // Shutdown loses the reply target; cancellation must not turn an
             // unanswered accepted native dispatch into a completed turn.
             ctx.shutdown.signal.throwIfAborted();
-            if (delivery.outcome === "unconfirmed")
+            if (delivery.outcome === "unconfirmed") {
               context.deliveryOutcome?.({ state: "uncertain", detail: delivery.detail });
+              if (kind === "turn")
+                ctx.conversations.recordServiceNotice(
+                  conversationId,
+                  `Clankie's seat needs a reconnect: /mcp. Owner turn ${delivery.messageId} did not confirm receipt. It remains uncertain and will not be resent automatically.`,
+                );
+            }
             if (delivery.outcome === "aborted")
               context.deliveryOutcome?.({
                 state: "rejected",

@@ -1040,6 +1040,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         presencePath: `${uncertaintyPath}.presence`,
         startedAt: serviceStartedAt,
         // VUH-1779: tell the seat once about an unresolved receipt instead of failing silently.
+        onBridgeIssue: (detail) => {
+          if (!shutdown.signal.aborted) conversations.recordServiceNotice(conversationId, detail);
+        },
         onUnresolved: (receipt) => {
           if (shutdown.signal.aborted) return;
           void created
@@ -4751,7 +4754,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     laneToolBank: laneToolBankFor,
     roomForkGrant,
 
-    async pollSeatEvents(waitMs, signal, conversationId) {
+    async pollSeatEvents(waitMs, signal, conversationId, capabilities) {
       // A closing service must refuse the poll, not answer an empty page: the
       // bridge would keep its keep-alive socket on this process and never
       // reach the replacement (2026-10-07).
@@ -4771,7 +4774,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           .pollConversationDriver(
             binding.conversationId,
             () => {
-              const pending = seatOutbox(binding.conversationId).poll(waitMs, pollSignal, recipientBinding);
+              const pending = seatOutbox(binding.conversationId).poll(
+                waitMs,
+                pollSignal,
+                recipientBinding,
+                capabilities,
+              );
               deliverServiceHandoff(binding.conversationId);
               void recoverWorkerReports(binding.conversationId).catch(() => undefined);
               return pending;

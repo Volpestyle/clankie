@@ -61,6 +61,9 @@ import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorSeatEventsPageSchema,
+  OperatorSeatEventKindSchema,
+  OperatorSeatEventSchema,
+  OPERATOR_SEAT_CAPABILITIES_HEADER,
   RECONCILE_SEAT_CALL,
   SEAT_CALL_META,
   fleetSeatEventsPath,
@@ -896,7 +899,15 @@ export async function connectLaneUpstream(input: {
       // The harness closing the bridge must not wait out a parked poll.
       const deadline = AbortSignal.timeout(waitMs + 10_000);
       const response = await fetchImpl(urlFor(`${OPERATOR_SEAT_EVENTS_PATH}?wait=${String(waitMs)}`), {
-        headers,
+        headers: {
+          ...headers,
+          [OPERATOR_SEAT_CAPABILITIES_HEADER]: JSON.stringify({
+            schemaVersion: 1,
+            eventKinds: OperatorSeatEventKindSchema.options,
+            ownerOrigin: "ownerOrigin" in OperatorSeatEventSchema.shape,
+            ...(bridgeSourceHash ? { sourceHash: bridgeSourceHash } : {}),
+          }),
+        },
         signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]),
       });
       if (!response.ok)

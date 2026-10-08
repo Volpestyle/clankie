@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
+import { OperatorSeatEventKindSchema } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
@@ -118,7 +119,14 @@ it.each(["seat attachment", "model images", "session startup"])(
       },
     });
     try {
-      const poll = boundary === "seat attachment" ? captain.pollSeatEvents(1000) : undefined;
+      const poll =
+        boundary === "seat attachment"
+          ? captain.pollSeatEvents(1000, undefined, undefined, {
+              schemaVersion: 1,
+              eventKinds: [...OperatorSeatEventKindSchema.options],
+              ownerOrigin: true,
+            })
+          : undefined;
       const sent = await captain.serveOperatorConversation({
         schemaVersion: 1,
         op: "send",

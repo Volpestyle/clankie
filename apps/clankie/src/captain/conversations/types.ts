@@ -60,6 +60,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
+  | { op: "seat_bridges" }
   | { op: "seat_deliveries" }
   | { op: "settle_seat_delivery" }
   | { op: "spawn_seat" }
@@ -95,6 +96,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "terminal_catalog" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
+  | { op: "seat_bridges" }
   | { op: "seat_deliveries" }
   | { op: "settle_seat_delivery" }
   | { op: "spawn_seat" }

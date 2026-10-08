@@ -297,6 +297,15 @@ If `clankie pair` exits with "No pairing code was made", this Mac is signed out 
 remote access: sign it back in (`/remote-access` → "Sign this Mac back in", or
 `clankie remote-access on --email EMAIL --code-stdin`), restart the captain, and
 pair again. `clankie doctor`/`clankie gateway status` show `doorway: signed out since …`.
+`clankie status` also reports loaded operator `seatBridges`. Doctor names a stale
+bridge: reconnect its MCP server with `/mcp`. Updating the service does not reload
+an existing native bridge. The `seat_bridges` operator dispatch read reports its
+declared wire kinds/owner attribution capability, last poll, and loaded source
+hash when supplied. Legacy bridges get owner turns as compatible messages; a
+reconnect notice is visible in the shared conversation. A taken turn that loses
+ACK stays uncertain under its original ID, even after reconnect. Inspect it;
+never replay or settle it merely to clear a warning.
+
 `clankie status` also reports `connection` (what `whoami` says), the live `doorway` and
 a `nextStep` line; `doctor` carries the same `nextStep`. Console: `/login` signs in,
 `/devices` lists/revokes phones. A pair code that lacks the gateway route while remote

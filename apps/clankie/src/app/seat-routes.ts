@@ -20,6 +20,8 @@ import {
   FleetSeatMessageSchema,
   WorkerReportBridgeStatusSchema,
   OPERATOR_SEAT_EVENTS_PATH,
+  OPERATOR_SEAT_CAPABILITIES_HEADER,
+  OperatorSeatCapabilitiesSchema,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OperatorConversationServiceRequestSchema,
   OperatorSeatReplySchema,
@@ -179,10 +181,31 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
         : 0;
       const binding = seatBinding(context, auth.lane);
       if ("denial" in binding) return binding.denial;
+      const advertised = context.req.header(OPERATOR_SEAT_CAPABILITIES_HEADER);
+      const capabilities =
+        advertised === undefined
+          ? undefined
+          : OperatorSeatCapabilitiesSchema.safeParse(
+              advertised.length > 2048
+                ? undefined
+                : (() => {
+                    try {
+                      return JSON.parse(advertised);
+                    } catch {
+                      return undefined;
+                    }
+                  })(),
+            );
+      if (capabilities && !capabilities.success)
+        return context.json(
+          { error: "invalid_seat_capabilities", detail: "Clankie's seat needs a reconnect: /mcp" },
+          400,
+        );
       const events = await ctx.dependencies.captain.pollSeatEvents(
         waitMs,
         context.req.raw.signal,
         binding.conversationId,
+        capabilities?.data,
       );
       const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
       return context.json(page);

@@ -4,6 +4,7 @@ import {
   OperatorConversationServiceResultSchema,
   type OperatorConversationServiceRequest,
   type UnresolvedSeatDelivery,
+  type OperatorSeatBridgeStatus,
 } from "@clankie/protocol";
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
@@ -55,9 +56,16 @@ export async function runSeatDeliveryCommand(
 
 type SeatDeliveryRequest = Extract<
   OperatorConversationServiceRequest,
-  { op: "seat_deliveries" | "settle_seat_delivery" }
+  { op: "seat_deliveries" | "settle_seat_delivery" | "seat_bridges" }
 >;
 type SeatDeliveryOptions = Parameters<typeof runSeatDeliveryCommand>[1] & { timeoutMs?: number };
+
+/** Loaded receiver capabilities, including legacy bridges retained across a deploy. */
+export async function readSeatBridges(options: SeatDeliveryOptions): Promise<OperatorSeatBridgeStatus[]> {
+  const result = await post({ op: "seat_bridges", schemaVersion: 1 }, options);
+  if (result.op !== "seat_bridges") throw new Error("Unexpected seat bridge result");
+  return result.bridges;
+}
 
 /** Doctor's read: unresolved head deliveries with their age. */
 export async function readSeatDeliveries(options: SeatDeliveryOptions): Promise<UnresolvedSeatDelivery[]> {

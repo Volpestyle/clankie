@@ -305,6 +305,7 @@ export interface CaptainPort {
     waitMs: number,
     signal?: AbortSignal,
     conversationId?: string,
+    capabilities?: import("@clankie/protocol").OperatorSeatCapabilities,
   ): Promise<readonly OperatorSeatEvent[]>;
   /**
    * A fleet seat's mailbox (ADR 0161): a DM or room turn for the agent in that

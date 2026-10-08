@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceResultSchema,
+  OperatorSeatEventKindSchema,
   SUPERVISE_GRANTS,
   type DiscordPresenceChannelTurnRequest,
   type OperatorConversationServiceRequest,
@@ -129,7 +130,11 @@ it("the default public app has no quota routes and native captain turns still co
   const f = await fixture();
   for (const path of ["/v1/runtime-fixture/quota", "/v1/hosted/credits"])
     expect((await f.request(path, "fixture-owner")).status).toBe(404);
-  const polled = f.captain.pollSeatEvents(5_000, undefined, "global-default");
+  const polled = f.captain.pollSeatEvents(5_000, undefined, "global-default", {
+    schemaVersion: 1,
+    eventKinds: [...OperatorSeatEventKindSchema.options],
+    ownerOrigin: true,
+  });
   const current = await f.command({ schemaVersion: 1, op: "get", conversationId: "global-default" });
   if (current.op !== "get" || !current.conversation) throw new Error("Missing default conversation");
   const sending = f.command({

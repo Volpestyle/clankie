@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
-import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
+import { OperatorSeatEventKindSchema, type DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { ConversationOwner } from "../src/captain/conversation-owner.ts";
@@ -346,7 +346,11 @@ it("a social room bypasses an unproven native poller while global retains its dr
     state: "settled",
     response: "Service answer",
   });
-  const globalPoll = captain.pollSeatEvents(1000);
+  const globalPoll = captain.pollSeatEvents(1000, undefined, undefined, {
+    schemaVersion: 1,
+    eventKinds: [...OperatorSeatEventKindSchema.options],
+    ownerOrigin: true,
+  });
   await captain.serveOperatorConversation({
     schemaVersion: 1,
     op: "send",
