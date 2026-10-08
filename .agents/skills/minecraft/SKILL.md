@@ -21,6 +21,11 @@ owner-approved. The CLI equivalent is `clankie minecraft`, and `/minecraft`
 exposes it in the console. Setup and limitations live in
 [`docs/minecraft.md`](../../../docs/minecraft.md).
 
+Use `clankie games extensions` (TUI `/games extensions`) for registered game
+lifecycle/health discovery. It does not join a world or probe credentials. An
+uncertain stay blocks removal and reuse until core proves exact connector end;
+a requested stop, lost adapter or deadline is not termination evidence.
+
 ## Set up a world with its owner
 
 A request to set up a Minecraft server is a conversational front door to the

@@ -1,4 +1,5 @@
 import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
+import type { InstalledGameExtensions } from "../game-extension-projection.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
 import type { FleetHealthMetrics } from "../fleet-health-metrics.ts";
 import type { BodyTelemetry } from "@clankie/observability/body-telemetry";
@@ -266,6 +267,7 @@ export interface ClankieAppDependencies {
     text: string,
     identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
   ) => Promise<unknown>;
+  gameExtensions?: Pick<InstalledGameExtensions, "catalog" | "projections">;
   minecraft?: MinecraftService;
   minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
   minecraftPrivateDelivery?: Pick<

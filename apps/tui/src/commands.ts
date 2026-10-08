@@ -83,7 +83,7 @@ import {
   type BrowserHarnessesResult,
 } from "./command/browser.ts";
 import { runSkillsCommand } from "./command/skills.ts";
-import { gamesSet, gamesStatus, gamesBudgetSet } from "./command/games.ts";
+import { gamesSet, gamesStatus, gamesBudgetSet, runGameExtensionsCommand } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runMinecraftCommand } from "./command/minecraft.ts";
 import { runMinecraftDriverMenu } from "./minecraft-driver-menu.ts";
@@ -1448,10 +1448,36 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "games",
       aliases: ["gameplay"],
-      description: "Configure Clankie's PokeAgent play",
-      argumentHint: "[on|off]",
+      description: "Configure play defaults and discover registered games",
+      argumentHint: "[on|off|status|extensions]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
+        if (argument.trim() === "extensions") {
+          try {
+            const catalog = await runGameExtensionsCommand(
+              (await settings?.load())?.client?.mode === "hosted"
+                ? { request: (await hostedTransportFor(process.env)).request }
+                : {},
+            );
+            shell.insertCommandResult(
+              "/games",
+              catalog.extensions
+                .map(
+                  (extension) =>
+                    `${extension.id}: ${extension.status.state} · ${extension.health.state}\nSettings: ${extension.settings.key} · Skill: ${extension.skill.name}`,
+                )
+                .join("\n\n") || "No game extensions are registered.",
+              "success",
+            );
+          } catch (error) {
+            shell.insertCommandResult(
+              "/games",
+              error instanceof Error ? error.message : "Game discovery unavailable",
+              "error",
+            );
+          }
+          return;
+        }
         if (settings === undefined) {
           shell.insertCommandResult("/games", "Gameplay settings are unavailable.", "error");
           return;
@@ -1468,7 +1494,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
         const [state] = words;
         if ((state !== "on" && state !== "off") || words.length !== 1) {
-          shell.insertCommandResult("/games", "Usage: /games [on|off]", "error");
+          shell.insertCommandResult("/games", "Usage: /games [on|off|status|extensions]", "error");
           return;
         }
         const next = await gamesSet(state === "on", { settings });

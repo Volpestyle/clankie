@@ -1,4 +1,5 @@
 /** Host-owned authority. None of these callbacks are model arguments or credentials. */
+export { GameExtensionRegistry } from "./registry.ts";
 export interface GameRunControl {
   stopRequested(): boolean;
   guard(): Promise<void>;
@@ -20,6 +21,12 @@ export interface GameExtensionRuntime<Request extends { sessionId: string }, Res
   status(): GameExtensionStatus | Promise<GameExtensionStatus>;
   /** Read-only health; never joins a world or spends model tokens. */
   health(): GameExtensionHealth | Promise<GameExtensionHealth>;
+  /** Host-only restart recovery; proof must attest exact connector termination. */
+  reconcileStopped?(sessionId: string, proof: () => Promise<boolean>): Promise<boolean>;
+  /** Optional native entry points retain the registry's final admission fence. */
+  bindRegistrationGuard?(guard: () => void): void;
+  /** Quiesce idle capture/polling after starts are fenced, before removal. */
+  deactivate?(): Promise<void>;
 }
 
 /** Different transports and motors share composition, not a synthetic universal action. */
@@ -49,6 +56,7 @@ export class GameExtensionBusyError extends Error {
 export function createGameExtensionRuntime<Request extends { sessionId: string }, Result>(
   execute: (request: Request, control: GameRunControl, onRunning: () => Promise<void>) => Promise<Result>,
 ): GameExtensionRuntime<Request, Result> {
+  let registrationGuard = () => {};
   let active:
     | {
         sessionId: string;
@@ -56,12 +64,17 @@ export function createGameExtensionRuntime<Request extends { sessionId: string }
         stop: boolean;
         confirmed: boolean;
         running: boolean;
+        settled: boolean;
       }
     | undefined;
   const status = (): GameExtensionStatus =>
     active === undefined ? { state: "idle" } : { state: active.state, sessionId: active.sessionId };
   return {
+    bindRegistrationGuard(guard) {
+      registrationGuard = guard;
+    },
     async start(request, control, onRunning) {
+      registrationGuard();
       const current = status();
       if (current.state !== "idle") throw new GameExtensionBusyError(current);
       const run = {
@@ -70,16 +83,22 @@ export function createGameExtensionRuntime<Request extends { sessionId: string }
         stop: false,
         confirmed: false,
         running: false,
+        settled: false,
       };
       active = run;
       let entered = false;
-      try {
+      const guard = async () => {
+        registrationGuard();
         await control.guard();
+        registrationGuard();
+      };
+      try {
+        await guard();
         entered = true;
         return await execute(
           request,
           {
-            guard: control.guard,
+            guard,
             stopRequested: () => {
               const stop = run.stop || control.stopRequested();
               if (stop) run.state = "stopping";
@@ -93,12 +112,13 @@ export function createGameExtensionRuntime<Request extends { sessionId: string }
           async () => {
             if (run.running) throw new Error("game_extension_running_twice");
             run.running = true;
-            await control.guard();
+            await guard();
             await onRunning();
             run.state = run.stop || control.stopRequested() ? "stopping" : "running";
           },
         );
       } finally {
+        run.settled = true;
         // A failed initial guard cannot have opened a connector. Once entered,
         // only connector proof can free this runtime; a resolved promise cannot.
         if (!entered || run.confirmed) active = undefined;
@@ -117,6 +137,15 @@ export function createGameExtensionRuntime<Request extends { sessionId: string }
       active?.state === "uncertain"
         ? { state: "degraded", reason: "termination_unconfirmed" }
         : { state: "ready" },
+    async reconcileStopped(sessionId, proof) {
+      const run = active;
+      if (run === undefined) return true;
+      if (run.sessionId !== sessionId || !run.settled || run.state !== "uncertain") return false;
+      if (!(await proof())) return false;
+      if (active !== run || !run.settled || run.state !== "uncertain") return false;
+      active = undefined;
+      return true;
+    },
   };
 }
 

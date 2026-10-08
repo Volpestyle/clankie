@@ -24,6 +24,19 @@ media or models. Request and result remain extension-typed, so the host can
 preserve existing validated game APIs and refusal receipts.
 
 [Pokémon](../../integrations/pokemon/README.md) is the first implementation.
-Minecraft and Rivals adoption and installed-extension discovery remain the
-follow-ups documented in the ADR. The shipped contract alone does not register
-HTTP routes, tools or settings screens, or confer permissions.
+Minecraft also implements it. `GameExtensionRegistry` validates descriptors,
+creates trusted factories with approved host ports, returns their typed runtime,
+and projects local state through a bounded catalog. Registering metadata does
+not import code, install packages or grant authority. Factories stay inert until
+execution or explicit activation.
+
+A host can associate its typed tool/route projection with a registration.
+`projections()` returns only current registrations. `unregister(id)` fences new
+starts, verifies idle state, quiesces optional capture/polling and removes the
+entry; held or uncertain state refuses. Native entry points bind the same
+registration guard so a stale reference cannot join after removal.
+
+`reconcileStopped(id, proof)` is host-only. Use it inside the existing durable,
+incarnation-fenced recovery operation after exact connector termination. A
+failed proof or still-running executor cannot clear uncertainty. It does not
+release the host ledger. Rivals lifecycle adoption remains VUH-1849.

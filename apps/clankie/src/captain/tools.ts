@@ -262,8 +262,12 @@ export function captainTools(
           },
         ]),
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
-    ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
-    ...(deps.minecraftHost === undefined ? [] : minecraftHostTools(deps.minecraftHost, turn)),
+    ...(deps.gameExtensions === undefined
+      ? [
+          ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
+          ...(deps.minecraftHost === undefined ? [] : minecraftHostTools(deps.minecraftHost, turn)),
+        ]
+      : deps.gameExtensions.projections().flatMap((projection) => projection.tools(turn))),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     // A Discord room with a shell can start workers, so it watches and
     // harvests its own; its report belongs in the room that asked (ADR 0186).

@@ -662,11 +662,15 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   See [ADR 0175](adr/0175-rivals-agent-is-a-gameplay-skill.md) and [setup](rivals.md).
 - **Game extensions.** [ADR 0234](adr/0234-games-share-one-extension-contract.md)
   defines typed connector, skill, settings, Activity and lifecycle composition.
-  `integrations/pokemon` implements it; core retains play leases, authority and
+  `integrations/pokemon` and `integrations/minecraft` implement it; core retains play leases, authority and
   recovery, persona/model selection, Discord/Activity destinations and evidence
   projections. Pokémon's existing API/CLI/TUI enter that extension through a
-  compatibility composition point. Pokémon and Minecraft share the turn scheduler, streamed model transport and journal envelope in `packages/play` ([ADR 0254](adr/0254-turn-based-games-share-a-play-kernel.md)); `integrations/minecraft` owns the native Minecraft play adapter. Full Minecraft and Rivals lifecycle adoption, and
-  installed-extension discovery without core edits, remain follow-ups.
+  compatibility composition point. Pokémon and Minecraft share the turn scheduler, streamed model transport and journal envelope in `packages/play` ([ADR 0254](adr/0254-turn-based-games-share-a-play-kernel.md)); `integrations/minecraft` owns its native connector lifecycle, play host, capture,
+  domain tools and routes. The trusted in-process registry exposes owner-authenticated
+  discovery through `/v1/games/extensions`, CLI and TUI, and removes idle tool/route
+  projections without core edits while retaining uncertain ownership. Rivals is
+  mapped in ADR 0234; shared play ownership and exact controller recovery remain
+  [VUH-1849](https://linear.app/vuhlp/issue/VUH-1849).
 - **PokeAgents boundary.** The sibling PokeAgents repository owns the
   `WORLD_OPERATIONS` catalog, capability schemas, native client transport, and
   the MCP projection derived from that catalog. MCP carries calls; the world

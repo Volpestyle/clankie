@@ -2214,6 +2214,15 @@ Quiet hours suppress them without changing the source-derived mood. Desktop
 clients also honor macOS Focus, discard expired expressions, and show them
 without taking keyboard focus. Publishing does not confirm a client displayed it.
 
+### `games extensions`
+
+Read registered game extensions through owner-authenticated
+`GET /v1/games/extensions`. The TUI uses `/games extensions`. JSON contains each
+extension's connector kind, skill, settings key, Activity surface, local lifecycle
+state and health. The command never joins a game or calls a model. `ready` is local
+lifecycle health; it does not prove a reachable world or visible stream. An
+uncertain connector remains registered until exact host recovery proves it ended.
+
 ### `games [status]` / `games set on|off` / `games budget`
 
 Read or set whether the PokeAgent MMO body is available. JSON contains the

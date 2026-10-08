@@ -1,0 +1,26 @@
+VUH-1616 LOCAL CHECKPOINT — NOT LANDED / NOT FINAL GREEN
+Base: 4832c1640c881b3965ef92ed6c870c381c9a90c4
+
+clankie heavy -- pnpm install
+Updated integration dependencies installed successfully; .local/install.log.
+
+clankie heavy -- pnpm exec vitest run --config vitest.config.ts <14 covering files>
+.local/focused-final.log: Test Files 14 passed; Tests 79 passed.
+This preceded later registration fences and legacy-stop changes; not final HEAD proof.
+Exact file list is in .local/HANDOFF-wren.md.
+
+clankie heavy -- pnpm exec vitest run --config vitest.config.ts apps/clankie/test/minecraft-driver.integration.test.ts integrations/pokemon/test/extension.integration.test.ts apps/clankie/test/game-extensions.integration.test.ts
+.local/lifecycle-final.log: Test Files 3 passed; Tests 6 passed.
+Start 09:47:57, duration 4.03s. Registry Proxy and usage text changed afterward.
+
+Prior four-package typecheck: service failed TS7022/TS7024 circular inference.
+.local/types-final.log preserves output. Explicit MinecraftExtensionRuntime annotation
+was added afterward, but not yet rechecked. Earlier optional-property/factory type
+failures and imports before linking were corrected, not waived.
+
+Earlier clankie heavy -- pnpm exec oxfmt --write <own files> completed.
+Later edits need formatting. git diff --check passed at checkpoint.
+
+REQUIRED BEFORE PUSH: final formatting, types/static checks, final integrated
+clankie heavy -- pnpm check:landing and inspected output. No exclusions authorized.
+No live bodies, deployment, evals or paid model calls were run.

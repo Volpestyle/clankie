@@ -3,9 +3,10 @@ import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileCredentialStore, WORLD_CREDENTIAL_PROVIDER_ID } from "@clankie/credential-broker";
-import { GameExtensionBusyError, type GameRunControl } from "@clankie/game-extension";
+import { GameExtensionBusyError, GameExtensionRegistry, type GameRunControl } from "@clankie/game-extension";
 import { parseFreePlayJournal, type FreePlayMind } from "@clankie/play";
 import type { EmbodimentSession } from "@clankie/protocol";
+import { WorldPlayerClient, type WorldPlayerPersistedSession } from "@pokeagents/world-protocol/ipc";
 import { WORLD_PROTOCOL_VERSION } from "@pokeagents/world-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { pokemonExtension } from "../src/index.ts";
@@ -70,7 +71,8 @@ describe("Pokémon through the game-extension contract and native IPC", () => {
     const world = await fixtureWorld();
     let calls = 0;
     const notable: string[] = [];
-    const runtime = pokemonExtension.create({
+    const registry = new GameExtensionRegistry();
+    const runtime = registry.register(pokemonExtension, {
       env: world.env,
       logger,
       gameplay: pokemonExtension.settings.schema.parse({ pokeagentMmoEnabled: true }),
@@ -87,7 +89,12 @@ describe("Pokémon through the game-extension contract and native IPC", () => {
     const host = controls();
     expect(runtime.status()).toEqual({ state: "idle" });
     expect(runtime.health()).toEqual({ state: "ready" });
-    expect(world.requests).toHaveLength(0); // health/status never open the connector
+    expect((await registry.catalog()).extensions[0]).toMatchObject({
+      id: "pokemon",
+      status: { state: "idle" },
+      settings: { key: "gameplay" },
+    });
+    expect(world.requests).toHaveLength(0); // discovery never opens the connector
     let running = 0;
     const result = await runtime.start(request(), host.control, async () => {
       running++;
@@ -110,21 +117,34 @@ describe("Pokémon through the game-extension contract and native IPC", () => {
     const world = await fixtureWorld();
     const entered = deferred();
     const release = deferred();
-    const runtime = pokemonExtension.create({
-      env: world.env,
-      logger,
-      resolveMind: async () => ({
-        mind: meteredMind(async () => {
-          entered.resolve();
-          await release.promise;
+    const registry = new GameExtensionRegistry();
+    let originalStart!: ReturnType<typeof pokemonExtension.create>["start"];
+    const runtime = registry.register(
+      {
+        ...pokemonExtension,
+        create(host) {
+          const created = pokemonExtension.create(host);
+          originalStart = created.start;
+          return created;
+        },
+      },
+      {
+        env: world.env,
+        logger,
+        resolveMind: async () => ({
+          mind: meteredMind(async () => {
+            entered.resolve();
+            await release.promise;
+          }),
+          voiceAgent: undefined,
         }),
-        voiceAgent: undefined,
-      }),
-    });
+      },
+    );
     const host = controls();
     const done = runtime.start(request(), host.control, async () => {});
     await entered.promise;
     expect(runtime.status()).toEqual({ state: "running", sessionId: "extension-run" });
+    await expect(registry.unregister("pokemon")).rejects.toBeInstanceOf(GameExtensionBusyError);
     expect(runtime.stop("older-session")).toBe("not_active");
     await expect(
       runtime.start({ ...request(), sessionId: "second" }, host.control, async () => {}),
@@ -138,13 +158,26 @@ describe("Pokémon through the game-extension contract and native IPC", () => {
     expect(world.requests.filter((r) => r.operation === "play.act")).toHaveLength(0);
     expect(host.confirmed()).toBe(1);
     expect(runtime.stop("extension-run")).toBe("not_active");
+    await registry.unregister("pokemon");
+    expect((await registry.catalog()).extensions).toEqual([]);
+    await expect(runtime.start(request(), host.control, async () => {})).rejects.toThrow(
+      "game_extension_not_registered",
+    );
+    await expect(originalStart(request(), host.control, async () => {})).rejects.toThrow(
+      "game_extension_not_registered",
+    );
   });
 
   it("retains uncertainty and blocks reuse when the world denies departure", async () => {
     const world = await fixtureWorld(true);
-    const runtime = pokemonExtension.create({
+    let persisted: WorldPlayerPersistedSession | undefined;
+    const registry = new GameExtensionRegistry();
+    const runtime = registry.register(pokemonExtension, {
       env: world.env,
       logger,
+      rememberWorldSession: (_session, _target, state) => {
+        persisted = state;
+      },
       resolveMind: async () => ({ mind: meteredMind(), voiceAgent: undefined }),
     });
     const host = controls();
@@ -153,15 +186,36 @@ describe("Pokémon through the game-extension contract and native IPC", () => {
     expect(runtime.status()).toEqual({ state: "uncertain", sessionId: "extension-run" });
     expect(runtime.health()).toEqual({ state: "degraded", reason: "termination_unconfirmed" });
     expect(runtime.stop("extension-run")).toBe("uncertain");
+    await expect(registry.unregister("pokemon")).rejects.toBeInstanceOf(GameExtensionBusyError);
+    expect(await registry.reconcileStopped("pokemon", async () => false)).toBe(false);
+    expect((await registry.catalog()).extensions[0]?.health).toEqual({
+      state: "degraded",
+      reason: "termination_unconfirmed",
+    });
     await expect(
       runtime.start({ ...request(), sessionId: "retry" }, host.control, async () => {}),
     ).rejects.toBeInstanceOf(GameExtensionBusyError);
     expect(world.requests.filter((r) => r.operation === "world.join")).toHaveLength(1);
+    world.allowDeparture();
+    expect(
+      await registry.reconcileStopped("pokemon", async () => {
+        const client = new WorldPlayerClient({
+          target: world.env.WORLD_ADDRESS,
+          sessionPersistence: { load: () => persisted },
+        });
+        const reply = await client.call("world.leave", {});
+        return "sessionId" in reply && reply.sessionId === persisted?.session.sessionId;
+      }),
+    ).toBe(true);
+    expect(runtime.status()).toEqual({ state: "idle" });
+    await registry.unregister("pokemon");
+    expect((await registry.catalog()).extensions).toEqual([]);
   });
 
   it("checks host authority before connector access and confirms a disabled venue without joining", async () => {
     const world = await fixtureWorld();
-    const runtime = pokemonExtension.create({
+    const registry = new GameExtensionRegistry();
+    const runtime = registry.register(pokemonExtension, {
       env: world.env,
       logger,
       gameplay: pokemonExtension.settings.schema.parse({ pokeagentMmoEnabled: false }),
@@ -276,6 +330,9 @@ async function fixtureWorld(denyLeave = false) {
   return {
     root,
     requests,
+    allowDeparture() {
+      denyLeave = false;
+    },
     env: {
       WORLD_ADDRESS: socketPath,
       CLANKIE_CREDENTIALS_FILE: credentialFile,

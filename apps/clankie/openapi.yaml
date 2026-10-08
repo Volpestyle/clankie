@@ -5050,6 +5050,103 @@ paths:
         "204":
           description: Forgotten
 
+  /v1/games/extensions:
+    get:
+      tags: [Operator]
+      operationId: getGameExtensions
+      summary: Discover registered game extension lifecycles
+      description: Read-only local metadata and lifecycle health. Does not join a game, probe credentials or call a model. Ready does not prove live gameplay or media. Registration and removal are trusted in-process composition, not model-authored manifests.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Bounded catalog, without credentials, endpoints or action history
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [extensions]
+                properties:
+                  extensions:
+                    type: array
+                    maxItems: 64
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [contractVersion, id, connector, skill, settings, activity, status, health]
+                      properties:
+                        contractVersion: { type: integer, enum: [1] }
+                        id: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" }
+                        connector:
+                          oneOf:
+                            - type: object
+                              additionalProperties: false
+                              required: [kind, package]
+                              properties:
+                                kind: { type: string, enum: [native] }
+                                package: { type: string, minLength: 1, maxLength: 256 }
+                            - type: object
+                              additionalProperties: false
+                              required: [kind, connection]
+                              properties:
+                                kind: { type: string, enum: [mcp] }
+                                connection: { type: string, minLength: 1, maxLength: 256 }
+                            - type: object
+                              additionalProperties: false
+                              required: [kind, sessionServer]
+                              properties:
+                                kind: { type: string, enum: [skill] }
+                                sessionServer: { type: string, minLength: 1, maxLength: 256 }
+                        skill:
+                          type: object
+                          additionalProperties: false
+                          required: [name, path]
+                          properties:
+                            name: { type: string, minLength: 1, maxLength: 256 }
+                            path: { type: string, minLength: 1, maxLength: 256 }
+                        settings:
+                          type: object
+                          additionalProperties: false
+                          required: [key]
+                          properties:
+                            key: { type: string, minLength: 1, maxLength: 256 }
+                        activity:
+                          type: object
+                          nullable: true
+                          additionalProperties: false
+                          required: [surface]
+                          properties:
+                            surface: { type: string, minLength: 1, maxLength: 256 }
+                        status:
+                          oneOf:
+                            - type: object
+                              additionalProperties: false
+                              required: [state]
+                              properties:
+                                state: { type: string, enum: [idle] }
+                            - type: object
+                              additionalProperties: false
+                              required: [state, sessionId]
+                              properties:
+                                state: { type: string, enum: [starting, running, stopping, uncertain] }
+                                sessionId: { type: string, minLength: 1, maxLength: 256 }
+                        health:
+                          oneOf:
+                            - type: object
+                              additionalProperties: false
+                              required: [state]
+                              properties:
+                                state: { type: string, enum: [ready] }
+                            - type: object
+                              additionalProperties: false
+                              required: [state, reason]
+                              properties:
+                                state: { type: string, enum: [degraded] }
+                                reason:
+                                  { type: string, enum: [termination_unconfirmed, extension_unavailable] }
+        "401": { description: Operator authentication required }
+        "503": { description: Authentication or registered catalog unavailable }
+
   /v1/minecraft:
     get:
       tags: [Operator]

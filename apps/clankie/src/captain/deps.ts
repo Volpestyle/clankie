@@ -43,6 +43,7 @@ import type { DiscordTracking } from "../discord-tracking.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
   readonly activitySharing?: import("../activity-sharing.ts").ActivitySharing;
   /** Non-secret wake settings, shared by the CLI, API and Clankie's own tool. */

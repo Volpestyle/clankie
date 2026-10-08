@@ -92,6 +92,7 @@ import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
+import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
 import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
 import { PairingOfferStore, replayReviewOffers } from "../pairing.ts";
@@ -1562,6 +1563,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(binding);
   });
 
+  app.get(GAME_EXTENSIONS_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    context.header("Cache-Control", "no-store");
+    if (!dependencies.gameExtensions) return context.json({ error: "game_extensions_unavailable" }, 503);
+    try {
+      return context.json(await dependencies.gameExtensions.catalog());
+    } catch {
+      return context.json({ error: "game_extensions_unavailable" }, 503);
+    }
+  });
+
   app.post("/v1/internal/minecraft-login-code/authorize", async (context) => {
     const body = await authenticateCaptain(context.req.raw, dependencies);
     if (!body || body === "unavailable" || body.steerSourceLane !== "discord_text")
@@ -1577,23 +1592,36 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.body(null, allowed ? 204 : 403);
   });
 
-  app.route(
-    "/",
-    createMinecraftRoutes({
-      ...(dependencies.minecraft === undefined ? {} : { service: dependencies.minecraft }),
-      ...(dependencies.minecraftHost === undefined ? {} : { host: dependencies.minecraftHost }),
-      settings: settingsSource,
-      authorize: async (request) => {
-        const operator = await authenticateOperator(request, dependencies);
-        if (!operator || operator === "unavailable") return undefined;
-        return operatorBodyIdentity(
-          request.headers.get("x-clankie-conversation-id") ??
-            dependencies.captain.seatContext()?.conversationId,
-          request,
-        );
-      },
-    }),
-  );
+  const gameRouteOptions = {
+    settings: settingsSource,
+    authorize: async (request: Request) => {
+      const operator = await authenticateOperator(request, dependencies);
+      if (!operator || operator === "unavailable") return undefined;
+      return operatorBodyIdentity(
+        request.headers.get("x-clankie-conversation-id") ??
+          dependencies.captain.seatContext()?.conversationId,
+        request,
+      );
+    },
+  };
+  if (dependencies.gameExtensions === undefined) {
+    app.route(
+      "/",
+      createMinecraftRoutes({
+        ...gameRouteOptions,
+        ...(dependencies.minecraft === undefined ? {} : { service: dependencies.minecraft }),
+        ...(dependencies.minecraftHost === undefined ? {} : { host: dependencies.minecraftHost }),
+      }),
+    );
+  } else {
+    app.use("*", async (context, next) => {
+      for (const projection of dependencies.gameExtensions!.projections()) {
+        if (projection.paths.includes(context.req.path))
+          return projection.routes(gameRouteOptions).fetch(context.req.raw);
+      }
+      await next();
+    });
+  }
 
   app.post("/v1/rivals", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

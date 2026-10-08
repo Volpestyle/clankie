@@ -1,8 +1,16 @@
-import { EmbodimentBudgetSchema, type EmbodimentBudget } from "@clankie/protocol";
+import {
+  EmbodimentBudgetSchema,
+  GAME_EXTENSIONS_PATH,
+  GameExtensionCatalogSchema,
+  type GameExtensionCatalog,
+  type EmbodimentBudget,
+} from "@clankie/protocol";
+import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import { commandHost } from "./io.ts";
 import { SettingsStore, defaultSettingsPath, type GameplaySettings } from "@clankie/settings";
 
 const GAMES_USAGE =
-  "Usage: clankie games [status]\n       clankie games set on|off\n       clankie games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <positive number|default>";
+  "Usage: clankie games [status|extensions]\n       clankie games set on|off\n       clankie games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <positive number|default>";
 
 export interface GamesCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -18,6 +26,31 @@ export interface GamesCommandResult {
 
 function store(options: GamesCommandOptions): SettingsStore {
   return options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
+}
+
+/** Installed body capabilities, read through the same authenticated API as every UI. */
+export async function runGameExtensionsCommand(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    host?: string;
+    fetchImpl?: typeof fetch;
+    operatorCredentialStore?: CredentialStore;
+    request?: (path: string) => Promise<unknown>;
+  } = {},
+): Promise<GameExtensionCatalog> {
+  if (options.request) return GameExtensionCatalogSchema.parse(await options.request(GAME_EXTENSIONS_PATH));
+  const credential = await resolveOperatorCredential({
+    env: options.env ?? process.env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (!credential)
+    throw new Error("No operator credential is available; start the clankie service once first.");
+  const response = await (options.fetchImpl ?? fetch)(new URL(GAME_EXTENSIONS_PATH, commandHost(options)), {
+    headers: { authorization: `Bearer ${credential.token}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`clankie service returned ${response.status}`);
+  return GameExtensionCatalogSchema.parse(await response.json());
 }
 
 export async function gamesStatus(options: GamesCommandOptions = {}): Promise<GamesCommandResult> {

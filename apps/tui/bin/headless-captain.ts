@@ -12,7 +12,7 @@ import {
 import { runHarnessLoginCommand } from "../src/command/harness-login.ts";
 import { runUpdateCli } from "../src/command/update-output.ts";
 import { runBodyCommand } from "../src/command/body.ts";
-import { MachineInventorySchema } from "@clankie/protocol";
+import { MachineInventorySchema, GAME_EXTENSIONS_PATH, GameExtensionCatalogSchema } from "@clankie/protocol";
 import { runMachinesCommand, formatMachines, MACHINE_RESTART_HINT } from "../src/command/machines.ts";
 import { runWorkOnCommand } from "../src/command/work-on.ts";
 import { runHireReceiptCommand } from "../src/command/hire-receipt.ts";
@@ -50,7 +50,7 @@ import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
 import { runBrowserCommand } from "../src/command/browser.ts";
 import { runSkillsCommand } from "../src/command/skills.ts";
-import { runGamesCommand } from "../src/command/games.ts";
+import { runGamesCommand, runGameExtensionsCommand } from "../src/command/games.ts";
 import { runLinearCommand } from "../src/command/linear.ts";
 import { runAccountsCommand } from "../src/command/accounts.ts";
 import { runWorkCommand } from "../src/command/work.ts";
@@ -181,6 +181,10 @@ export async function runHeadlessCaptainCommand(
       )
         throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
       const transport = await hostedTransportFor(env);
+      if (command === "games" && rest.length === 1 && rest[0] === "extensions") {
+        outputJson(stdout, GameExtensionCatalogSchema.parse(await transport.request(GAME_EXTENSIONS_PATH)));
+        return 0;
+      }
       // These existing commands are HTTP-only. The transport replaces their local
       // bearer inside the envelope; no Mac credential is read or transmitted.
       if (
@@ -334,6 +338,10 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "games") {
+      if (rest.length === 1 && rest[0] === "extensions") {
+        outputJson(stdout, await runGameExtensionsCommand(options));
+        return 0;
+      }
       const result = await runGamesCommand(rest, options);
       outputJson(stdout, result);
       return 0;

@@ -17,6 +17,11 @@ Core retains the shared `play` lease and exact-session recovery. Extension
 `health: ready` describes local lifecycle state, not world reachability or
 visible frames; use the existing status/check/watch evidence below.
 
+Use `clankie games extensions` (TUI `/games extensions`) for registered game
+lifecycle/health discovery. It does not join a world or probe credentials. An
+uncertain stay blocks removal and reuse until core proves exact connector end;
+a requested stop, lost adapter or deadline is not termination evidence.
+
 ## Get the world running
 
 Use `command -v pokeagents` to find the installed host command. Its source

@@ -20,7 +20,8 @@ import { BodyLeaseStore } from "../src/body-leases.ts";
 import type { BodyConversationIdentity } from "../src/body-lease-router.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
-import { MinecraftService } from "../src/minecraft.ts";
+import { minecraftExtension } from "@clankie/minecraft";
+import { GameExtensionRegistry, GameExtensionBusyError } from "@clankie/game-extension";
 import { createMinecraftRoutes } from "../src/minecraft-routes.ts";
 import { minecraftTools } from "../src/captain/minecraft-tools.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
@@ -148,13 +149,17 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
     },
   });
   const store = new BodyLeaseStore(join(directory, "leases"));
+  let admitted = true;
   const owner: BodyConversationIdentity = {
     conversationId: "driver-owner",
     current: () => true,
-    authorize: async () => true,
+    authorize: async () => admitted,
   };
-  const service = new MinecraftService({
+  let stopFailures = 0;
+  const registry = new GameExtensionRegistry();
+  const runtime = registry.register(minecraftExtension, {
     automaticPlay: true,
+    onPollError: () => { stopFailures++; },
     store,
     path: join(directory, "session.json"),
     port: new MinecraftMcpPort({
@@ -163,6 +168,9 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
       resolveProfile: async () => endpoint,
     }),
   });
+  const service = runtime.service;
+  expect((await registry.catalog()).extensions[0]?.status).toEqual({ state: "idle" });
+  expect(connections).toBe(0);
   let validationCalls = 0;
   let blocked: ReturnType<typeof gate> | undefined;
   let finalAdmission: (() => void) | undefined;
@@ -259,6 +267,11 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
       session: { sessionId: string; connectionGeneration: number };
     };
     await expect.poll(async () => (await service.status(owner)).session?.phase).toBe("active");
+    expect((await registry.catalog()).extensions[0]?.status).toMatchObject({
+      state: "running",
+      sessionId: joined.session.sessionId,
+    });
+    await expect(registry.unregister("minecraft")).rejects.toBeInstanceOf(GameExtensionBusyError);
     const originalLease = store.status("play");
     const oldMind = service.mindContext()!;
     expect(oldMind).toBeDefined();
@@ -421,6 +434,68 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
     await command({ action: "leave" });
     await expect.poll(async () => (await service.status(owner)).session?.phase).toBe("disconnected");
     expect(store.status("play")).toBeUndefined();
+    let confirmed = 0;
+    const started = gate();
+    const stay = runtime.start(
+      { sessionId: "registered-stay", profileId: "isolated", identity: owner },
+      {
+        guard: async () => {
+          if (!owner.current() || !(await owner.authorize("play", "effect"))) throw new Error("revoked");
+        },
+        stopRequested: () => false,
+        confirmStopped: () => {
+          confirmed++;
+        },
+      },
+      async () => {
+        started.signal();
+      },
+    );
+    await started.reached;
+    await expect.poll(async () => (await service.status(owner)).session?.phase).toBe("active");
+    expect(runtime.stop("older-stay")).toBe("not_active");
+    await expect(registry.unregister("minecraft")).rejects.toBeInstanceOf(GameExtensionBusyError);
+    expect(runtime.stop("registered-stay")).toBe("requested");
+    expect(await stay).toMatchObject({
+      session: { sessionId: "registered-stay", connectionGeneration: 1 },
+      termination: { state: "confirmed" },
+    });
+    expect(confirmed).toBe(1);
+    expect(store.status("play")).toBeUndefined();
+    const legacy = await service.join("isolated", owner);
+    await expect.poll(async () => (await service.status(owner)).session?.phase).toBe("active");
+    expect(runtime.stop("old-legacy-id")).toBe("not_active");
+    admitted = false;
+    expect(runtime.stop(legacy.session.sessionId)).toBe("requested");
+    await expect.poll(() => stopFailures).toBe(1);
+    expect((await service.status()).session?.phase).toBe("active");
+    expect(store.status("play")).toBeDefined();
+    await expect(registry.unregister("minecraft")).rejects.toBeInstanceOf(GameExtensionBusyError);
+    admitted = true;
+    expect(runtime.stop(legacy.session.sessionId)).toBe("requested");
+    await expect.poll(async () => (await service.status(owner)).session?.phase).toBe("disconnected");
+    expect(store.status("play")).toBeUndefined();
+    const admission = gate();
+    const pendingJoin = service.join("isolated", {
+      ...owner,
+      authorize: async () => {
+        admission.signal();
+        await admission.hold;
+        return false;
+      },
+    });
+    const deniedJoin = expect(pendingJoin).rejects.toThrow("minecraft_not_authorized");
+    await admission.reached;
+    expect((await registry.catalog()).extensions[0]?.status.state).toBe("starting");
+    await expect(registry.unregister("minecraft")).rejects.toBeInstanceOf(GameExtensionBusyError);
+    expect(store.status("play")).toBeUndefined();
+    admission.release();
+    await deniedJoin;
+    expect((await registry.catalog()).extensions[0]?.status).toEqual({ state: "idle" });
+    await registry.unregister("minecraft");
+    expect((await registry.catalog()).extensions).toEqual([]);
+    await expect(service.join("isolated", owner)).rejects.toThrow("game_extension_not_registered");
+    expect(connections).toBe(3);
   } finally {
     blocked?.release();
     await Promise.allSettled(clients.map((client) => client.close()));
