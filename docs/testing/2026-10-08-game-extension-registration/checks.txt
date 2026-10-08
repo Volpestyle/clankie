@@ -1,3 +1,95 @@
+FINAL TAKEOVER VERIFICATION — VUH-1616 (2026-10-08)
+Game-extension source: 06734cb8f7468c1d51bcd31af0cae7fd42519fa0
+Fetched / clean-main source: be4a4cc52f6a02902a7eb903ac009e9e3155f342
+
+clankie heavy -- pnpm install
+Exit 0; lockfile unchanged. .local/rowan-install.log.
+
+clankie heavy -- pnpm --workspace-concurrency=1 --filter @clankie/game-extension --filter @clankie/minecraft --filter @clankie/clankie --filter @clankie/tui typecheck
+Exit 0, four packages. .local/rowan-types.log.
+
+clankie heavy -- pnpm exec vitest run --config vitest.config.ts integrations/pokemon/test/extension.integration.test.ts apps/clankie/test/game-extensions.integration.test.ts apps/clankie/test/minecraft-driver.integration.test.ts apps/clankie/test/minecraft-service.test.ts apps/clankie/test/minecraft-mcp.test.ts apps/clankie/test/minecraft-capture.test.ts apps/clankie/test/minecraft-play.integration.test.ts apps/clankie/test/minecraft-routes.test.ts apps/clankie/test/minecraft-setup.integration.test.ts apps/clankie/test/minecraft-host-tools.test.ts apps/clankie/test/minecraft-port.test.ts apps/clankie/test/body-recovery.integration.test.ts apps/tui/test/minecraft-command.test.ts apps/tui/test/minecraft-host-command.test.ts
+Exit 0. .local/rowan-covering.log.
+Test Files  14 passed (14)
+Tests  79 passed (79)
+Start at  10:36:54
+Duration  30.12s (transform 4.98s, setup 127ms, import 13.35s, tests 34.12s, environment 1ms)
+
+FINAL LEAD-REQUESTED RERUN:
+clankie heavy -- pnpm check:landing
+Exit 1; sole failure: apps/clankie/test/worker-parent-routing.test.ts:1032
+Case: retiring the authenticated parent session while route discovery awaits refuses before acceptance
+Expected received:false, deliveryStage:unavailable; actual received:true, deliveryStage:stored.
+Static/doc/lint/deadcode checks and all 30 typecheck tasks passed before tests.
+.local/rowan-lead-gate.log.
+Tasks:    30 successful, 30 total
+Cached:    30 cached, 30 total
+Time:    134ms >>> FULL TURBO
+Test Files  1 failed | 19 passed (848)
+Tests  1 failed | 434 passed | 170 skipped (616)
+Start at  11:01:52
+Duration  118.26s (transform 6.55s, setup 173ms, import 23.50s, tests 444.71s, environment 1ms)
+
+Clankie's lead decision: after one final gate rerun, an untouched-test-only failure
+may land if isolation and clean-main proof pass, exact evidence is recorded, and
+VUH-1851 receives a comment. This exception is attributed to Clankie, not James.
+No failure in a touched test is exempted. No test selection exclusions or automatic
+retries were added. The full suite did not finish and is not reported green.
+
+CLEAN MAIN: owned detached checkout .local/clean-main at be4a4cc52f6a02902a7eb903ac009e9e3155f342.
+clankie heavy -- pnpm install --frozen-lockfile
+Exit 0; clean tracked status after all baseline runs. No shared node_modules links.
+
+clankie heavy -- pnpm exec vitest run --config vitest.config.ts apps/clankie/test/runtime-canary.integration.test.ts
+Isolated source exit 0 (.local/rowan-canary-focused.log):
+Test Files  1 passed (1)
+Tests  20 passed (20)
+Start at  10:47:41
+Duration  24.90s (transform 38ms, setup 15ms, import 54ms, tests 24.77s, environment 0ms)
+Clean main exit 0 (.local/rowan-clean-main-canary.log):
+Test Files  1 passed (1)
+Tests  20 passed (20)
+Start at  11:02:45
+Duration  25.88s (transform 65ms, setup 26ms, import 94ms, tests 25.67s, environment 0ms)
+
+clankie heavy -- pnpm exec vitest run --config vitest.config.ts apps/tui/test/discord-setup-integration.test.ts
+Isolated source exit 0 (.local/rowan-discord-focused.log):
+Test Files  1 passed (1)
+Tests  9 passed (9)
+Start at  10:59:23
+Duration  44.84s (transform 1.15s, setup 17ms, import 2.28s, tests 42.46s, environment 0ms)
+Clean main exit 0 (.local/rowan-clean-main-discord.log):
+Test Files  1 passed (1)
+Tests  9 passed (9)
+Start at  11:03:12
+Duration  41.25s (transform 1.17s, setup 14ms, import 2.25s, tests 38.92s, environment 0ms)
+
+clankie heavy -- pnpm exec vitest run --config vitest.config.ts apps/clankie/test/worker-parent-routing.test.ts
+Isolated source exit 0 (.local/rowan-parent-isolated.log):
+Test Files  1 passed (1)
+Tests  40 passed (40)
+Start at  11:08:36
+Duration  9.65s (transform 2.07s, setup 16ms, import 3.54s, tests 6.02s, environment 0ms)
+Clean main exit 0 (.local/rowan-parent-clean-main.log):
+Test Files  1 passed (1)
+Tests  40 passed (40)
+Start at  11:08:47
+Duration  9.82s (transform 2.20s, setup 18ms, import 3.71s, tests 6.02s, environment 0ms)
+
+UNTOUCHED FIXTURE IDENTITIES:
+apps/clankie/test/runtime-canary.integration.test.ts SHA256 eb9917eef6495dc06ee96551e526598c719562f9a22fddf4f68a055e308f5069
+apps/tui/test/discord-setup-integration.test.ts SHA256 e5371bff5e78d978732c1eb6b4df911bfbf31087c5a55944d87c8052909c83a2
+apps/clankie/test/worker-parent-routing.test.ts SHA256 7832688266da87356f5a5a02a8f8c4ff68affe6d1acb63b8c760139848264169
+
+PRIOR ATTEMPTS (retained, not relabeled as successes):
+.local/rowan-types-first.log: new test factory narrowing; fixed explicit native signature.
+.local/rowan-landing-first.log: unused core play-host wrapper and three type exports; removed.
+.local/rowan-landing-format.log: remaining export formatting; corrected.
+.local/rowan-landing-canary.log: default four-worker gate; unchanged canary case above, 2236 tests passed before bail, gap950ms>450ms.
+.local/rowan-landing-discord.log: two-worker gate; unchanged Discord overlay case above, 125 tests passed before bail.
+No live bodies, paid providers, deployment, restart, evals or hold changes.
+
+HISTORICAL WREN CHECKPOINT — superseded by results above:
 VUH-1616 LOCAL CHECKPOINT — NOT LANDED / NOT FINAL GREEN
 Base: 4832c1640c881b3965ef92ed6c870c381c9a90c4
 
