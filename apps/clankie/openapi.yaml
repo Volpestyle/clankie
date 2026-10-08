@@ -187,8 +187,11 @@ paths:
       description: |
         Cumulative portal, workers, shell and screen levels. Existing local installs
         retain screen; ungranted remote machines start at portal. Current enforcement
-        is service-preference for local/SSH and joined-host for registered outbound receivers; neither is OS isolation. Actor and
-        directory grants remain independent. Workers cannot raise their own level.
+        is service-preference for ordinary local/SSH and joined-host for registered
+        outbound receivers. A verified native macOS envelope reports os-sandbox,
+        accessCeiling and approvedDirectories in machine inventory. Raising beyond
+        that ceiling refuses until the owner removes the envelope and launches a
+        new service. Actor and directory grants remain independent.
       security: [{ operatorBearer: [] }]
       parameters:
         - name: id
@@ -210,7 +213,7 @@ paths:
                   enum: [portal, workers, shell, screen]
       responses:
         "200":
-          description: Persisted canonical machine ID, accessLevel and accessEnforcement (service-preference or joined-host)
+          description: Persisted canonical machine ID, accessLevel and accessEnforcement (service-preference, joined-host or os-sandbox)
         "400":
           description: Unknown machine or invalid access request
         "401":

@@ -526,8 +526,16 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   machine after waits. Owner-pane event admission checks shell before and after
   its poll; desktop input checks screen before each effect. Actor
   and audience proof remain independent. Bounded service-owned I/O does not
-  confer general shell access. Inventory reports `service-preference`, not an
-  OS sandbox: joined-host proof belongs to VUH-1800, OS isolation to VUH-1804.
+  confer general shell access. Ordinary local/SSH inventory reports
+  `service-preference`; registered receivers report `joined-host`. An explicitly
+  prepared macOS service launch reports `os-sandbox` only after a kernel-refused
+  outside read. Its immutable ceiling and approved directories are in inventory.
+  [ADR 0257](adr/0257-a-lowered-local-runtime-keeps-an-os-boundary.md) bounds the
+  installed runtime and a fresh private Herdr with an inherited Seatbelt profile.
+  Its private home and explicit workspaces are writable; runtime/control files,
+  outside Unix sockets and the owner's Keychain remain outside the grant.
+  Removal and access increases require an owner relaunch. Live activation/hire
+  and restoration proof remain the owner-held VUH-1804 gap.
   Lowering a level does not terminate existing workers; recovery remains usable.
   Owner bearers and local device signing keys still do not resist a same-user
   shell. [Proposed ADR 0253](adr/0253-owner-confirmation-needs-an-isolated-authority.md)

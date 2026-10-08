@@ -2,9 +2,17 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { MachineAccessChangeSchema, MachineInventorySchema, type MachineInventory } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
+import { dirname, join } from "node:path";
+import {
+  defaultSettingsPath,
+  localSandboxControl,
+  prepareLocalSandbox,
+  readLocalSandbox,
+  removeLocalSandbox,
+} from "@clankie/settings";
 
 const MACHINES_USAGE =
-  "Usage: clankie machines [list|discover] [--json]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines access NAME portal|workers|shell|screen\n       clankie machines remove NAME\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
+  "Usage: clankie machines [list|discover] [--json]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines access NAME portal|workers|shell|screen\n       clankie machines sandbox status|remove\n       clankie machines sandbox prepare portal|workers|shell --workspace DIR [--workspace DIR] [--home DIR]\n       clankie machines remove NAME\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
 export const MACHINE_RESTART_HINT =
   "Named machine connections apply immediately. Default workspace changes require clankie restart captain.";
 export async function runMachinesCommand(
@@ -14,10 +22,61 @@ export async function runMachinesCommand(
     host?: string;
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
+    repoRoot?: string;
   } = {},
 ): Promise<unknown> {
   const values = args.filter((arg) => arg !== "--json");
   const [verb = "list", name, ...rest] = values;
+  if (verb === "sandbox") {
+    const env = options.env ?? process.env;
+    const control = localSandboxControl(env);
+    if (name === "status" && !rest.length) {
+      const envelope = await readLocalSandbox(control);
+      return {
+        control,
+        state: envelope ? "prepared" : "unrestricted",
+        envelope,
+        detail:
+          "Launch controls only; clankie machines list reports the running service's verified enforcement.",
+      };
+    }
+    if (name === "remove" && !rest.length) {
+      await removeLocalSandbox(control);
+      return {
+        state: "unrestricted-next-launch",
+        detail:
+          "No running process changed. Owner stop/start is required; private home and workspace data were kept.",
+      };
+    }
+    if (name !== "prepare" || !options.repoRoot) throw new Error(MACHINES_USAGE);
+    const accessLevel = MachineAccessChangeSchema.parse({ accessLevel: rest[0] }).accessLevel;
+    const workspaces: string[] = [];
+    let home = join(dirname(control), "local-sandbox-home");
+    let homeSet = false;
+    for (let i = 1; i < rest.length; i += 2) {
+      if (!rest[i + 1]) throw new Error(MACHINES_USAGE);
+      if (rest[i] === "--workspace") workspaces.push(rest[i + 1]!);
+      else if (rest[i] === "--home" && !homeSet) {
+        home = rest[i + 1]!;
+        homeSet = true;
+      } else throw new Error(MACHINES_USAGE);
+    }
+    const envelope = await prepareLocalSandbox({
+      control,
+      runtimeRoot: options.repoRoot,
+      home,
+      workspaces,
+      accessLevel,
+      settingsPath: defaultSettingsPath(env),
+    });
+    return {
+      state: "prepared-next-launch",
+      control,
+      envelope,
+      detail:
+        "No running process changed. Provision this private home, then owner stop/start; unrestricted existing workers remain unrestricted.",
+    };
+  }
   let path = "/v1/machines",
     method = "GET",
     body: string | undefined;
@@ -73,7 +132,7 @@ export function formatMachines(inventory: MachineInventory): string {
     "MACHINE  ACCESS  HERDR SESSION  STATE  WORKERS",
     ...inventory.machines.map(
       (machine) =>
-        `${machine.id}${machine.configured ? "" : " (candidate)"}  ${machine.accessLevel ?? "unreported"}  ${machine.sessions.map((session) => session.name).join(", ") || "—"}  ${machine.state}  ${machine.workerCount ?? "?"}`,
+        `${machine.id}${machine.configured ? "" : " (candidate)"}  ${machine.accessLevel ?? "unreported"}${machine.accessEnforcement ? ` (${machine.accessEnforcement}${machine.accessCeiling ? `, ceiling ${machine.accessCeiling}` : ""})` : ""}  ${machine.sessions.map((session) => session.name).join(", ") || "—"}  ${machine.state}  ${machine.workerCount ?? "?"}`,
     ),
     MACHINE_RESTART_HINT,
   ].join("\n");

@@ -106,6 +106,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0253 — Owner confirmation needs an isolated authority (proposed)](0253-owner-confirmation-needs-an-isolated-authority.md)
 - [0255 — A lent screen keeps consent and stops on its host](0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md)
 - [0256 — Lent input needs native drain proof](0256-lent-input-needs-native-drain-proof.md)
+- [0257 — A lowered local runtime keeps an OS boundary](0257-a-lowered-local-runtime-keeps-an-os-boundary.md)
 
 ## Archived decisions
 

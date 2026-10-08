@@ -13,6 +13,7 @@ import {
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { clankieStateHome } from "../src/state-home.ts";
+import { localSandboxControl, localSandboxLaunch } from "@clankie/settings";
 
 /**
  * Generic supervision for the long-lived local services the operator launcher
@@ -618,10 +619,20 @@ export async function startService(
       command: service.command ?? "pnpm",
       args: fallbackArgs,
     };
-    child = (options.spawnImpl ?? spawn)(resolved.command, [...resolved.args], {
+    const launch =
+      service.id === "clankie"
+        ? await localSandboxLaunch({
+            control: localSandboxControl(env),
+            ...resolved,
+            env: serviceEnv,
+            ...(options.operatorToken === undefined ? {} : { operatorToken: options.operatorToken }),
+            runtimeRoot: options.repoRoot,
+          })
+        : { ...resolved, env: serviceEnv };
+    child = (options.spawnImpl ?? spawn)(launch.command, [...launch.args], {
       cwd: options.repoRoot,
       detached: true,
-      env: serviceEnv,
+      env: launch.env,
       stdio: ["ignore", logFd, logFd],
     });
     if (child.pid === undefined) throw new Error(`${service.label} spawn returned no pid.`);

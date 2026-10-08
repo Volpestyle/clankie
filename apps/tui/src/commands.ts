@@ -375,7 +375,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     },
   });
   const connectionServices = (): ConnectionsMenuServices => ({
-    machines: (args) => runMachinesCommand(args),
+    machines: (args) => runMachinesCommand(args, context.repoRoot ? { repoRoot: context.repoRoot } : {}),
     runtime: (args) => runRuntimeCommand(args),
     agents: (args) => runAgentsCommand(args),
     accounts: (args, input) =>
@@ -634,7 +634,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         try {
-          const result = await runMachinesCommand(splitQuotedArguments(argument));
+          const result = await runMachinesCommand(
+            splitQuotedArguments(argument),
+            context.repoRoot ? { repoRoot: context.repoRoot } : {},
+          );
           shell.insertCommandResult("/machines", JSON.stringify(result, null, 2), "success");
         } catch (error) {
           shell.insertCommandResult(

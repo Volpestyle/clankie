@@ -86,6 +86,7 @@ export async function startHerdrRuntime(input: {
   repoRoot: string;
   stateRoot: string;
   env: NodeJS.ProcessEnv;
+  isolated?: boolean;
 }) {
   const root = resolve(input.stateRoot, "herdr");
   const socketPath = join(root, "herdr.sock");
@@ -98,6 +99,8 @@ export async function startHerdrRuntime(input: {
   // run that still answers is adopted rather than refused, so restarting
   // Clankie does not close the panes its agents are working in.
   const listening = await socketListening(socketPath);
+  if (input.isolated && listening)
+    throw new Error("An OS-bounded fleet must start its own daemon, never adopt one");
   const fleetEnv = {
     ...input.env,
     XDG_CONFIG_HOME: root,

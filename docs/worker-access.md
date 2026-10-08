@@ -496,11 +496,16 @@ panes. Deterministic server and bridge regressions do not establish that live re
   expire after 15 minutes; clients reconnect after a service restart.
 - Worker publishing stays behind an exact manual `personaId` restriction.
   Fleet tool access does not invent a persona or grant worker attribution.
-- Provider permissions still apply. Launch isolation is not an OS sandbox;
+- Provider permissions still apply. Ordinary launch isolation is not an OS sandbox;
   direct access to an operator bearer or the owner's broker provides other authority.
   Keep credentials out of transcripts and use the
   [tracker identity contract](worker-tracker-identity.md) and
   [Linear worker publishing](linear-worker-posts.md) for attribution.
+- An explicitly prepared installed macOS runtime can confine service and native
+  descendants with an OS profile ([ADR 0257](adr/0257-a-lowered-local-runtime-keeps-an-os-boundary.md)).
+  It does not separate worker authority from service credentials inside its
+  private home or from a provided service bearer. Live activation remains owner-held;
+  do not infer confinement from a lower access preference or launch marker.
 
 ### Retiring and approving machine-specific workspaces
 

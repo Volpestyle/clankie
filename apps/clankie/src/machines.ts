@@ -13,6 +13,7 @@ import {
 } from "@clankie/protocol";
 import { JoinedMachineIdSchema } from "@clankie/protocol/machine-join";
 import { machineAccessLevel } from "./machine-access.ts";
+import { verifiedLocalSandbox } from "@clankie/settings";
 import { remoteProgramCommand } from "./herdr-fleet.ts";
 import { parseHerdrAgentList } from "./captain/herdr-census.ts";
 
@@ -243,6 +244,11 @@ export class Machines {
   async setAccess(id: string, raw: unknown) {
     const input = MachineAccessChangeSchema.parse(raw);
     let selected = id;
+    const sandbox = verifiedLocalSandbox();
+    if (id === "local" && sandbox && !machineAccessAllows(sandbox.accessLevel, input.accessLevel))
+      throw new Error(
+        "The OS sandbox ceiling requires owner removal and a new service launch to raise access",
+      );
     await this.options.settings.update((current) => {
       const machine = current.machines.find((entry) => entry.id === id || entry.aliases.includes(id));
       if (id !== "local" && !machine && !this.joined?.has(id)) throw new Error("Unknown machine");
@@ -259,9 +265,12 @@ export class Machines {
     return {
       id: selected,
       ...input,
-      accessEnforcement: this.joined?.has(selected)
-        ? ("joined-host" as const)
-        : ("service-preference" as const),
+      accessEnforcement:
+        selected === "local" && sandbox
+          ? ("os-sandbox" as const)
+          : this.joined?.has(selected)
+            ? ("joined-host" as const)
+            : ("service-preference" as const),
     };
   }
 
@@ -301,6 +310,12 @@ export class Machines {
     for (const machine of configured) {
       machine.accessLevel = machineAccessLevel(settings, machine.id);
       machine.accessEnforcement = "service-preference";
+      const sandbox = machine.id === "local" ? verifiedLocalSandbox() : undefined;
+      if (sandbox) {
+        machine.accessEnforcement = "os-sandbox";
+        machine.accessCeiling = sandbox.accessLevel;
+        machine.approvedDirectories = [...sandbox.workspaces];
+      }
     }
     let configTimer: ReturnType<typeof setTimeout> | undefined;
     const config = await Promise.race([

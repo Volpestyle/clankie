@@ -77,8 +77,10 @@ watch and type into. Clankie hires and messages Claude Code, Codex, Pi, OpenCode
 and Grok Build through each harness's own channel, never by typing into the
 pane, and reports when delivery is uncertain. Agents on other machines join
 through a fleet link. In Machines, the owner chooses portal, workers, shell or
-screen access. Current self-hosted limits are service preferences; joined-host
-enforcement and OS isolation have separate acceptance checks. The [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
+screen access. Ordinary self-hosted limits are service preferences. On an installed
+Mac, the owner can prepare an OS-bounded launch with a private home and approved
+workspaces; the running service reports verified enforcement. A new launch is
+needed to restore full access. Live activation remains owner-held. The [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
 lists support and limits.
 
 Registered local owner checkouts follow main automatically while the service

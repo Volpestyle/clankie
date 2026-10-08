@@ -2655,7 +2655,8 @@ shell at shell/screen level. Native worker adapters remain a follow-up;
 screen level can host a consent-bound computer through the same encrypted channel.
 workers-level shell and screen requests are refused. Directory checks bind the
 requested working directory; an authorized shell command still runs as the
-owner and can address other paths. OS confinement remains VUH-1804.
+owner and can address other paths. The explicit local macOS envelope described
+below does not confine these joined receivers.
 
 The public service and client contract is implemented. Production gateway
 bootstrap/channel routing and admission/rate limits belong to `clankie-ops` and
@@ -2702,12 +2703,73 @@ at portal. `PATCH /v1/machines/:id/access` takes `{ "accessLevel": "workers" }`
 and requires the operator bearer. Inventory includes `accessLevel` and
 `accessEnforcement`; older servers display `unreported` rather than an inferred
 grant. Local/SSH enforcement is `service-preference`; approved joined receivers report
-`joined-host`. Neither is an OS sandbox. Actor,
+`joined-host`. These are authority checks. An explicitly prepared macOS launch
+reports `os-sandbox`, `accessCeiling` and `approvedDirectories` after verifying a
+kernel-refused outside read. Actor,
 room and workspace grants remain independent; bounded service-owned I/O is
 not general shell permission. Policy is checked on each native tool call,
 after worker waits and before screen effects. Revocation leaves recovery
 available and does not terminate existing workers. The public joined receiver checks are covered by VUH-1800; live gateway captures
-and native worker/screen adapters remain gaps. OS isolation is VUH-1804.
+and native worker/screen adapters remain gaps.
+
+### A lower local Mac with an OS boundary
+
+An owner of an installed macOS release can prepare a Seatbelt envelope:
+
+```sh
+clankie machines sandbox prepare shell --workspace /absolute/project --home /absolute/private-home
+clankie machines sandbox status
+```
+
+Repeat `--workspace DIR` for each approved directory. Levels are `portal`,
+`workers` or `shell`; screen requires the ordinary unrestricted launch. This
+command prepares controls and a private copy of non-secret settings. It does
+not stop, restart or confine an existing process. From an owner terminal,
+provision the private home's necessary credentials and service state, deal with any unrestricted
+existing workers, then use `clankie stop captain` and `clankie start captain`.
+The private home starts with separate stores; preparation does not copy existing
+conversations, memory, paired-device records or harness authentication. Original
+stores remain intact and the ordinary full launch uses them again. The owner
+must plan a stopped-state handoff before using this as the continuing runtime.
+Check `clankie machines --json`: `os-sandbox` describes the running service;
+`sandbox status` only describes its next-launch controls.
+
+The kernel permits file contents in approved workspaces, the private home,
+read-only installed runtime and exact native loader dependencies, and OS support paths (`/System`, `/usr`, `/bin`,
+`/sbin`, `/Library/Apple`, `/private/etc`). File metadata remains visible.
+Private temporary files live inside the new home. The service and its fresh
+private bundled Herdr/worker descendants share this boundary; local named fleets refuse and external or
+already-running fleets are not adopted. Each bounded service restart starts a
+fresh fleet; surviving workers from the previous bounded daemon are not
+reattached or terminated. Finish or manage that fleet before restarting.
+The owner Keychain, login profiles,
+outside Unix sockets and other file contents are excluded. Credentials and
+required writable resource directories must be explicitly provisioned/granted;
+unavailable broker, harness or fleet resources refuse rather than escape. Install
+needed harness executables in the private home's `bin`; the bounded PATH excludes
+ambient owner installations. Read-only runtime files cannot have writable hard-link
+aliases. macOS's narrow dyld bootstrap profile supports the native loader; broad
+system XPC rules are not imported.
+Internet TCP and loopback service HTTP remain permitted. This is not a network
+exfiltration barrier, a VM, or isolation from independently authorized remote
+services. Apple's `sandbox-exec` is deprecated; unsupported launches fail closed.
+
+To restore full access, run these from the owner terminal outside the sandbox:
+
+```sh
+clankie stop captain
+clankie machines sandbox remove
+clankie start captain
+```
+
+Removal keeps the private home and workspace data and needs no reinstall.
+Existing bounded processes remain bounded; API/settings changes cannot lift
+their kernel restriction. A changed installed runtime needs owner removal and
+re-preparation; recovery never substitutes an unrestricted launch. Source
+checkouts are not supported by this installed-runtime envelope. Live owner
+lower/hire/outside-read and restore proof is held in VUH-1804; disposable native
+process integration evidence is recorded in
+[ADR 0257](adr/0257-a-lowered-local-runtime-keeps-an-os-boundary.md).
 
 Adding registers transcript access immediately and lists available sessions.
 Connecting names an existing Herdr session; it does not start one. Removal

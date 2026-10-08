@@ -1,6 +1,7 @@
 import { MachineJoins } from "./machine-joins.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { requireMachineAccess } from "./machine-access.ts";
+import { verifyLocalSandbox } from "@clankie/settings";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
 import { JoinedComputer } from "./joined-computer.ts";
@@ -239,6 +240,8 @@ loadRepoEnvFile();
 // reload from settings on every turn, and values copied out of the same file at
 // boot are not real environment overrides.
 const captainDiscordEnvironment = { ...process.env };
+// A locator alone never establishes enforcement. Refuse an unbounded or broken launch.
+await verifyLocalSandbox();
 const settingsStore = new SettingsStore();
 const startupSettings = await settingsStore.load();
 const settingsFilledNames = [

@@ -30,13 +30,35 @@ worker launches recheck after waits, and screen input
 rechecks before each effect. Recovery remains available after revocation.
 Lowering a level does not terminate existing workers or undo completed work.
 
-Local/SSH enforcement is reported as `service-preference`: the service checks
+Ordinary local/SSH enforcement is reported as `service-preference`: the service checks
 its own tools but runs under the owner's account. Do not call this an OS
 sandbox. Approved join registrations report `joined-host`: the public receiver
 checks access and canonical working-directory intersection, but live gateway
 proof and native worker/screen adapters remain VUH-1800 gaps. An authorized shell
 still runs as the owner; its file effects are not confined by the working-directory
-check. Local OS isolation is VUH-1804. A joined receiver
+check. A prepared installed macOS launch reports `os-sandbox` only after a
+refused outside read. Inventory names its immutable `accessCeiling` and
+`approvedDirectories`. The private home and workspaces are writable; installed
+runtime/exact loader dependencies and OS support files are read-only. Metadata
+and TCP networking remain available; this is not network or remote-service isolation.
+It excludes owner Keychain/login files and outside Unix sockets. Native workers
+inherit it through a fresh private bundled Herdr, never an adopted/external daemon.
+Credentials, harnesses in the private home's `bin`, and required resource grants
+need owner provisioning; unavailable resources refuse rather than fall back.
+
+Owner setup: `clankie machines sandbox prepare portal|workers|shell --workspace DIR`
+with repeated `--workspace DIR` and optional short `--home DIR`; `sandbox status`
+reads next-launch controls only. It never changes a running service or confines
+existing workers. Owner stop/start activates it. To raise back to full, the owner
+stops the service, runs `clankie machines sandbox remove` outside the sandbox,
+then starts it again. No reinstall or workspace/home deletion is needed. A
+bounded worker cannot remove its controls or raise the OS ceiling. A changed
+installed runtime needs owner re-preparation. Do not activate/restart or provision
+live credentials without owner authority. Live lower/hire/refusal and restore
+proof remain the owner-held VUH-1804 gap. Apple's deprecated `sandbox-exec` is
+the process boundary; do not describe it as a signed App Sandbox app or VM.
+
+A joined receiver
 must check its own owner-approved level and directory grants before executing
 worker, shell or screen requests, regardless of what the sender claims.
 

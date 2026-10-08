@@ -124,7 +124,7 @@ async function machineDetail(
         {
           value: "access",
           label: "Access level…",
-          hint: `${machine.accessLevel ?? "unreported"} · ${machine.accessEnforcement === "service-preference" ? "service preference" : "enforcement unreported"}`,
+          hint: `${machine.accessLevel ?? "unreported"} · ${machine.accessEnforcement === "os-sandbox" ? `OS sandbox, ceiling ${machine.accessCeiling ?? "unreported"}` : machine.accessEnforcement === "joined-host" ? "joined host" : machine.accessEnforcement === "service-preference" ? "service preference" : "enforcement unreported"}`,
         },
         ...machine.sessions.map((session, index) => ({
           value: `session:${index}`,
@@ -159,7 +159,9 @@ async function machineDetail(
         await attempt(
           flow,
           () => services.machines(["access", id, access]),
-          `${id}: ${access} access saved. This is a service preference, not an OS sandbox.`,
+          machine.accessEnforcement === "os-sandbox"
+            ? `${id}: ${access} access saved within its OS boundary. Raising beyond ${machine.accessCeiling} requires an owner relaunch.`
+            : `${id}: ${access} access saved. This is an authority preference.`,
         );
       continue;
     }

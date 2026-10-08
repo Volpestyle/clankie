@@ -216,8 +216,12 @@ A **machine** is where agents run; a **device** is a paired phone or desktop.
 choose cumulative portal, workers, shell or screen with
 `clankie machines access pc workers` or Settings → Machines. Existing local
 installs retain screen; ungranted remote machines start at portal. These are
-service preferences; joined-host enforcement and OS isolation remain separate
-work. See the
+authority preferences. An installed Mac can additionally use
+`clankie machines sandbox prepare LEVEL --workspace DIR`: a private home and
+an owner relaunch activate an inherited OS boundary. It needs owner credential,
+harness and stopped-state provisioning; live hire/refusal/restoration proof is
+held. `clankie machines --json` distinguishes verified `os-sandbox` from a
+preference. See the
 [machine reference](/cli/#runtime-setup) and the
 [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md)
 for each harness's support and limits.

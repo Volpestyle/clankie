@@ -1,4 +1,6 @@
 import { Machines } from "./machines.ts";
+import { randomUUID } from "node:crypto";
+import { verifiedLocalSandbox } from "@clankie/settings";
 import { requireRuntimeMachineAccess } from "./machine-access.ts";
 import { z } from "zod";
 import { realpath, stat } from "node:fs/promises";
@@ -146,14 +148,24 @@ export async function startHerdrConnection(
     watch?: typeof watchHerdrSocket;
   } = {},
 ) {
-  const selected = await (dependencies.resolve ?? resolveHerdrBinding)(input.settings, input.env);
+  const sandbox = verifiedLocalSandbox();
+  const selected = sandbox
+    ? {
+        runtime: input.settings.runtime === "disabled" ? ("disabled" as const) : ("bundled" as const),
+        session: input.settings.session,
+      }
+    : await (dependencies.resolve ?? resolveHerdrBinding)(input.settings, input.env);
+  // A fresh private namespace cannot adopt an older unsandboxed daemon.
+  const runtimeInput = sandbox
+    ? { ...input, stateRoot: join(sandbox.home, "h", randomUUID().slice(0, 8)), isolated: true }
+    : input;
   let owned: Awaited<ReturnType<typeof startHerdrRuntime>> | undefined;
   let watcher: ReturnType<typeof watchHerdrSocket> | undefined;
   let state = selected.runtime === "disabled" ? "disabled" : "unavailable";
   if (selected.runtime !== "disabled") {
     try {
       if (selected.runtime !== "external") {
-        owned = await (dependencies.start ?? startHerdrRuntime)(input);
+        owned = await (dependencies.start ?? startHerdrRuntime)(runtimeInput);
       }
       if (!input.env.HERDR_SOCKET_PATH) throw new Error("Herdr supplied no socket");
       state = "healthy";
@@ -173,7 +185,9 @@ export async function startHerdrConnection(
   }
   // Even a shell command must not fall through to Herdr's ambient/default session.
   const socketPath =
-    state === "healthy" ? input.env.HERDR_SOCKET_PATH! : join(input.stateRoot, "herdr", "unavailable.sock");
+    state === "healthy"
+      ? input.env.HERDR_SOCKET_PATH!
+      : join(runtimeInput.stateRoot, "herdr", "unavailable.sock");
   if (state !== "healthy") pinHerdrEnvironment(input.env, socketPath);
   const status = () => owned?.status() ?? state;
   const binding = (): HerdrBinding | undefined =>
@@ -363,6 +377,7 @@ export class ExecutionConnections {
   }
 
   async namedLocal() {
+    if (verifiedLocalSandbox()) return [];
     return (await this.options.settings.load()).execution.connections.filter(
       (entry) => entry.enabled && entry.socketPath !== undefined,
     );
@@ -480,6 +495,8 @@ export class ExecutionConnections {
       return { id: input.id, workspaces };
     }
     if (input.ssh !== undefined) return this.connectFleet({ ...input, ssh: input.ssh });
+    if (verifiedLocalSandbox())
+      throw new Error("An OS-bounded local runtime uses only its fresh private default fleet");
     const env = pinHerdrEnvironment({ ...(this.options.env ?? process.env) });
     const socketPath =
       input.socketPath ??
@@ -681,6 +698,7 @@ export class ExecutionConnections {
   /** Current admission, without a health probe on every terminal input packet. */
   async configuredBinding(id: string): Promise<HerdrBinding | undefined> {
     if (id === "default") return this.options.primary.binding();
+    if (verifiedLocalSandbox()) return undefined;
     const connection = (await this.options.settings.load()).execution.connections.find(
       (entry) => entry.id === id,
     );
@@ -692,6 +710,7 @@ export class ExecutionConnections {
 
   async binding(id: string): Promise<HerdrBinding | undefined> {
     if (id === "default") return this.options.primary.binding();
+    if (verifiedLocalSandbox()) return undefined;
     const connection = (await this.options.settings.load()).execution.connections.find(
       (entry) => entry.id === id,
     );

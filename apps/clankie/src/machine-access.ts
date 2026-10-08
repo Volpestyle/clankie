@@ -1,5 +1,5 @@
 import { MachineAccessRefused, machineAccessAllows, type MachineAccessLevel } from "@clankie/protocol";
-import type { ClankieSettings, SettingsStore } from "@clankie/settings";
+import { localSandboxAccess, type ClankieSettings, type SettingsStore } from "@clankie/settings";
 
 interface JoinedMachineRegistry {
   has(id: string): boolean;
@@ -12,7 +12,7 @@ export function machineAccessLevel(
   id: string,
   joined?: JoinedMachineRegistry,
 ): MachineAccessLevel {
-  if (id === "local") return settings.machineAccess.local ?? "screen";
+  if (id === "local") return localSandboxAccess(settings.machineAccess.local ?? "screen");
   if (joined?.has(id)) {
     const level = settings.machineAccess[id] ?? "portal";
     const ceiling = joined.accessCeiling(id) ?? "portal";

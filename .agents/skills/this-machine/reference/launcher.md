@@ -59,6 +59,11 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
 
+Owner-only local macOS setup: `clankie machines sandbox prepare LEVEL --workspace DIR`
+(with optional short `--home DIR`), `sandbox status`, and `sandbox remove`.
+Installed releases only; activation/restoration requires an owner relaunch and
+private-home provisioning. Read [machine access](machine-access.md) before using it.
+
 ## Updating the runtime
 
 On a release install (`clankie doctor` says `kind: release`), `update_runtime` or

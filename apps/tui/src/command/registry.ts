@@ -388,7 +388,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["machines"],
     lines: [
-      "  machines [list|discover] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | remove NAME | sessions NAME",
+      "  machines [list|discover] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | sandbox prepare LEVEL --workspace DIR [--home DIR] | sandbox status|remove | remove NAME | sessions NAME",
       "                           Machines where agents run; connections apply live",
     ],
   },
