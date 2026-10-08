@@ -774,3 +774,23 @@ it("disconnect after stored answer never cancels or retries its accepted continu
     1,
   );
 });
+
+it.each([false, true])(
+  "native message controls retain original device authority (hosted=%s)",
+  async (hosted) => {
+    const f = await fixture(hosted);
+    for (const request of [
+      { op: "pending_messages", schemaVersion: 1, conversationId: f.id, command: { action: "list" } },
+      { op: "stop_task", schemaVersion: 1, conversationId: f.id },
+    ] as const) {
+      const response = await f.raw(request);
+      expect(response.status).toBe(200);
+      expect((await response.json()).result.outcome).toBe("unsupported");
+      const hop = f.seen.filter((read) => read.path !== "/v1/devices/self").at(-1)!;
+      expect(hop.token).toBe(`Bearer ${f.tokens.control}`);
+      const before = f.seen.filter((read) => read.path !== "/v1/devices/self").length;
+      expect((await f.raw(request, f.tokens.read!)).status).toBe(403);
+      expect(f.seen.filter((read) => read.path !== "/v1/devices/self")).toHaveLength(before);
+    }
+  },
+);

@@ -649,7 +649,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
       const dispatch = () =>
         ownerRoute &&
-        (serviceRequest.op === "work_item_write" ||
+        (serviceRequest.op === "pending_messages" ||
+          serviceRequest.op === "stop_task" ||
+          serviceRequest.op === "work_item_write" ||
           serviceRequest.op === "work_item_write_receipt" ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||

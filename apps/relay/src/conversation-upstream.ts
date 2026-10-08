@@ -43,6 +43,8 @@ export type DeviceConversationRequest = Extract<
   {
     op:
       | "send"
+      | "pending_messages"
+      | "stop_task"
       | "input_get"
       | "input_answer"
       | "input_cancel"
@@ -81,6 +83,8 @@ export function createDeviceConversationDispatch(options: {
     if (
       ![
         "send",
+        "pending_messages",
+        "stop_task",
         "input_get",
         "input_answer",
         "input_cancel",
