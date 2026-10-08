@@ -1,0 +1,9 @@
+Gate exit code: 0
+Command: clankie heavy -- pnpm check:landing
+
+Finished in 1658ms on 3021 files using 18 threads.
+ Tasks:    31 successful, 31 total
+ Test Files  190 passed | 2 skipped (192)
+      Tests  1527 passed | 5 skipped (1532)
+   Start at  18:27:18
+   Duration  192.91s (transform 3.20s, setup 1.28s, import 252.92s, tests 495.87s, environment 11ms)
