@@ -69,6 +69,16 @@
           }
         ],
         "matcher": "AskUserQuestion"
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/resource-hook.mjs\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Notification": [

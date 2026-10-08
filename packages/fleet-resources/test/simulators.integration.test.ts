@@ -59,9 +59,10 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
     pane: "w1:p1",
     processes: [{ pid: observedProcess.pid, startTime: observedProcess.startTime }],
   };
+  let loadRatio = 0;
   const governorOptions = {
     directory: join(directory, "governor"),
-    probe: async () => ({ loadRatio: 0, availableMemoryMb: 32768 }),
+    probe: async () => ({ loadRatio, availableMemoryMb: 32768 }),
   };
   let governor = createResourceGovernor(governorOptions);
   await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, minAvailableMemoryMb: 0 });
@@ -146,6 +147,9 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
   });
   return {
     directory,
+    setLoad: (value: number) => {
+      loadRatio = value;
+    },
     port: address.port,
     child,
     owner,
@@ -200,7 +204,7 @@ function lease(result: SimulatorResult) {
   return result.lease;
 }
 
-it("crosses real HTTP, durable admission and child-process simctl boundaries; heavy work waits for simulator shutdown", async () => {
+it("crosses real HTTP, durable admission and child-process simctl boundaries; heavy work proceeds while the simulator is held", async () => {
   const f = await fixture();
   const acquired = await f.http("/acquire", f.request);
   expect(acquired.outcome).toBe("acquired");
@@ -212,10 +216,10 @@ it("crosses real HTTP, durable admission and child-process simctl boundaries; he
     "require('node:fs').writeFileSync(process.argv[1], 'started')",
     marker,
   ]);
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  expect(await readFile(marker).catch(() => undefined)).toBeUndefined();
-  expect((await f.http("/release", { id: created.id, owner: f.owner })).outcome).toBe("released");
   expect(await heavy).toBe(0);
+  expect(await readFile(marker, "utf8")).toBe("started");
+  expect((await f.governor.snapshot()).capacity).toMatchObject({ used: 0, simulatorUsed: 1 });
+  expect((await f.http("/release", { id: created.id, owner: f.owner })).outcome).toBe("released");
   const commands = await f.commands();
   expect(commands.filter((args) => args[0] === "create")).toHaveLength(1);
   expect(commands.filter((args) => args[0] === "bootstatus")).toEqual([
@@ -766,4 +770,119 @@ it("boot history prefers a warm exact device even when a cold one sorts first", 
     ];
   });
   expect(lease(await f.http("/acquire", { ...f.request, exact: true })).deviceId).toBe(warm);
+});
+
+it("two native children in one seat have separate idempotency and release identities across restart", async () => {
+  const f = await fixture();
+  const a = { ...f.request, holderId: "claude:parent:agent:dock" };
+  const b = { ...f.request, holderId: "claude:parent:agent:cards" };
+  const results = await Promise.all([f.http("/acquire", a), f.http("/acquire", b)]);
+  expect(results.map((result) => result.outcome).sort()).toEqual(["acquired", "waiting"]);
+  const acquired = results.find((result) => result.outcome === "acquired")!;
+  const held = lease(acquired);
+  const waiting = results.find((result) => result.outcome === "waiting")!;
+  if (waiting.outcome !== "waiting") throw new Error("expected waiter");
+  expect(waiting.blockers.leases[0]).toMatchObject({ seatId: a.seatId, holderId: held.holderId });
+  expect(waiting.hint).toContain(held.holderId);
+  const winner = held.holderId === a.holderId ? a : b;
+  const loser = held.holderId === a.holderId ? b : a;
+  await f.restart();
+  expect(lease(await f.http("/acquire", winner)).id).toBe(held.id);
+  expect(
+    (await f.http("/release", { id: held.id, owner: { ...f.owner, holderId: loser.holderId } })).outcome,
+  ).toBe("rejected");
+  expect(
+    (await f.http("/touch", { id: held.id, owner: { ...f.owner, holderId: loser.holderId } })).outcome,
+  ).toBe("rejected");
+  expect((await f.governor.snapshot()).leases[0]).toMatchObject({
+    seatId: a.seatId,
+    holderId: winner.holderId,
+  });
+  expect(
+    (await f.http("/release", { id: held.id, owner: { ...f.owner, holderId: winner.holderId } })).outcome,
+  ).toBe("released");
+  expect((await f.http("/acquire", loser)).outcome).toBe("acquired");
+  await stop(f.child);
+  await f.manager.observeSeatExited(f.owner);
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+});
+
+it("two real heavy runners and a simulator use independent budgets in either admission order", async () => {
+  const f = await fixture();
+  await f.governor.configure({ ...defaultResourcePolicy(), heavySlots: 2 });
+  const release = join(f.directory, "build-release");
+  const jobs: Promise<number>[] = [];
+  const cancel = new AbortController();
+  try {
+    for (const holderId of ["dock", "cards"])
+      jobs.push(
+        f.governor.runHeavy(
+          process.execPath,
+          [
+            "-e",
+            "const fs=require('node:fs');const t=setInterval(()=>{if(fs.existsSync(process.argv[1]))clearInterval(t)},20)",
+            release,
+          ],
+          { seatId: f.owner.seatId, holderId, signal: cancel.signal },
+        ),
+      );
+    const deadline = Date.now() + 8000;
+    while (
+      (await f.governor.snapshot()).leases.filter(
+        (lease) => lease.kind === "heavy" && lease.state === "running",
+      ).length < 2
+    ) {
+      if (Date.now() > deadline) throw new Error("heavy runners did not register");
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    const held = lease(await f.http("/acquire", f.request));
+    expect((await f.governor.snapshot()).capacity).toEqual({
+      heavySlots: 2,
+      simulatorSlots: 1,
+      used: 2,
+      simulatorUsed: 1,
+    });
+    expect(
+      (await f.governor.snapshot()).leases
+        .filter((lease) => lease.kind === "heavy")
+        .map((lease) => lease.holderId)
+        .sort(),
+    ).toEqual(["cards", "dock"]);
+    expect((await f.http("/acquire", { ...f.request, holderId: "third" })).outcome).toBe("waiting");
+    await writeFile(release, "done");
+    expect(await Promise.all(jobs)).toEqual([0, 0]);
+    expect((await f.governor.snapshot()).capacity).toMatchObject({ used: 0, simulatorUsed: 1 });
+    expect((await f.http("/release", { id: held.id, owner: f.owner })).outcome).toBe("released");
+  } finally {
+    cancel.abort();
+    await Promise.allSettled(jobs);
+  }
+});
+
+it("the load guard gates both independent budgets with concurrent requests", async () => {
+  const f = await fixture();
+  f.setLoad(2);
+  const marker = join(f.directory, "pressure-build");
+  const cancel = new AbortController();
+  const heavy = f.governor.runHeavy(
+    process.execPath,
+    ["-e", "require('node:fs').writeFileSync(process.argv[1],'ok')", marker],
+    { signal: cancel.signal },
+  );
+  try {
+    const refused = await f.http("/acquire", f.request);
+    expect(refused).toMatchObject({
+      outcome: "waiting",
+      reason: "pressure",
+      blockers: { pressure: { reason: "load" } },
+    });
+    expect(await readFile(marker).catch(() => undefined)).toBeUndefined();
+    expect((await f.governor.snapshot()).capacity).toMatchObject({ used: 0, simulatorUsed: 0 });
+    f.setLoad(0);
+    expect(await heavy).toBe(0);
+    expect((await f.http("/acquire", f.request)).outcome).toBe("acquired");
+  } finally {
+    cancel.abort();
+    await heavy;
+  }
 });

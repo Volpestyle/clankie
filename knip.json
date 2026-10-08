@@ -39,6 +39,7 @@
         "integrations/codex-plugin/hooks/run.mjs",
         "integrations/opencode-plugin/plugin.mjs",
         "integrations/claude-plugin/worker/bin/seat-hook.mjs",
+        "integrations/claude-plugin/worker/bin/resource-hook.mjs",
         "integrations/claude-plugin/worker/mods/tool-catalog.mjs",
         "integrations/claude-plugin/worker/mods/report.mjs",
         "integrations/claude-plugin/worker/bin/harness-inspect.mjs",

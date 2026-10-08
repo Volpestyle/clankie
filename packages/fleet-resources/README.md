@@ -6,8 +6,11 @@ calls `configure`; command callers read that policy. `HOME`, `CLANKIE_STATE`,
 settings-path overrides and `HEAVY_SLOTS` do not select a separate registry or
 increase capacity. Directory and pressure-probe injection exist for isolated tests.
 
-Heavy commands and simulator reservations consume the same permit pool. Automatic
-capacity is the smaller of one permit per eight available cores and one per 24GiB
+Heavy commands count only against `heavySlots`; simulator reservations and
+unmanaged active devices count only against `simulatorSlots`. Status reports
+`capacity.used` for heavy leases and `capacity.simulatorUsed` for simulator
+reservations; simulator status separately counts external active devices. Automatic
+heavy capacity is the smaller of one permit per eight available cores and one per 24GiB
 of RAM, with a minimum of one. The simulator limit defaults to one. Heavy
 commands wait in a FIFO queue; tickets are removed on cancellation or a proven
 requester exit. Simulator requests never queue: they take a free slot when they
@@ -51,10 +54,20 @@ still retains capacity. Runner settlement counts all UIDs in its group,
 excluding its own bounded observer and proved
 zombies, so privileged descendants also retain the permit. Nested
 heavy commands reuse an inherited permit only when the caller belongs to the
-registered group. Signals require the exact observed process birth. Journal and
+registered group and its supplied holder matches the permit. A different native
+child takes its own permit even within that group. Signals require the exact observed process birth. Journal and
 status metadata contain the executable name and optional caller label, never
 command arguments, environment, or bearer credentials. Public PIDs identify real
 holders; caller seat labels do not confer ownership or cleanup authority.
+
+Native children share a seat and root occupant, but each has an optional stable
+`holderId`. Simulator idempotency, in-flight deduplication, touch and release
+include it; heavy lease and queue metadata retain it. Older journal claims without
+a holder stay root-owned. Claude Bash hooks carry session plus `agent_id` in
+`CLANKIE_RESOURCE_HOLDER`; Codex CLI calls use `CODEX_THREAD_ID`. Other harnesses
+can pass explicit holder labels. The host still proves the original seat, occupant,
+binding and live processes; a holder label grants no authority. Child leases
+retain the root’s process proof and idle timeout, so a parent exit cleans them up.
 
 Simulator reservations remain durable when request processes die. Only the
 simulator manager can settle native receipts and release them after confirmed

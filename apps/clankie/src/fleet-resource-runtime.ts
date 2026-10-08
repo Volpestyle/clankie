@@ -61,7 +61,7 @@ export interface FleetResourceRuntime {
   refresh(): Promise<void>;
   admitHire(input: Pick<SpawnOperatorSeat, "fleet">): Promise<void>;
   hireBrief(input: Pick<SpawnOperatorSeat, "fleet">, brief?: string): Promise<string | undefined>;
-  proveSimulatorSeat(input: { seatId: string; fleet?: string }): Promise<SimulatorOwner>;
+  proveSimulatorSeat(input: { seatId: string; fleet?: string; holderId?: string }): Promise<SimulatorOwner>;
   observeSeats(seats: readonly ObservedSeat[]): Promise<void>;
   /** Notice seats whose panes use simulators booted outside leases. */
   noticeExternalSimulators(): Promise<void>;
@@ -128,7 +128,7 @@ export async function createFleetResourceRuntime(input: {
     return resolver.isLocalFleet(fleet);
   };
   const owner = (message: string) => new SimulatorRequestError("owner_unavailable", message);
-  const observe = async (request: { seatId: string; fleet?: string }) => {
+  const observe = async (request: { seatId: string; fleet?: string; holderId?: string }) => {
     try {
       return await observeSeat(request);
     } catch (error) {
@@ -137,7 +137,7 @@ export async function createFleetResourceRuntime(input: {
       throw owner("The seat could not be looked up in Herdr or its processes observed; retry.");
     }
   };
-  const observeSeat = async (request: { seatId: string; fleet?: string }) => {
+  const observeSeat = async (request: { seatId: string; fleet?: string; holderId?: string }) => {
     // Startup binds the seat resolver after the routes exist; shutdown closes it.
     if (!resolver || closed)
       throw new SimulatorRequestError(
@@ -180,6 +180,7 @@ export async function createFleetResourceRuntime(input: {
     const identity: SimulatorOwner = {
       seatId: after.terminalId,
       occupantId,
+      ...(request.holderId === undefined ? {} : { holderId: request.holderId }),
       ...(fleet === undefined || fleet === "default" ? {} : { fleet }),
       pane: proof.pane,
       binding: { ...proof.binding },

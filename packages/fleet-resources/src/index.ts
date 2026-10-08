@@ -21,3 +21,4 @@ export type {
 } from "./simulators.ts";
 export { createSimctlAdapter } from "./simctl.ts";
 export type { SimulatorAdapter, SimulatorDevice, SimctlRun } from "./simctl.ts";
+export { resourceHolderIdentity } from "./holder.ts";

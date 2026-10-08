@@ -55,6 +55,7 @@ export function createFleetResourceRoutes(
     try {
       const owner = await resources!.proveSimulatorSeat({
         seatId: request.seatId,
+        ...(request.holderId === undefined ? {} : { holderId: request.holderId }),
         ...(request.fleet === undefined ? {} : { fleet: request.fleet }),
       });
       if (!(await allowed())) return context.json({ error: "forbidden" }, 403);
@@ -64,6 +65,7 @@ export function createFleetResourceRoutes(
           ? await resources!.simulators[request.action]({
               seatId: owner.seatId,
               occupantId: owner.occupantId,
+              ...(owner.holderId === undefined ? {} : { holderId: owner.holderId }),
               ...(owner.fleet === undefined ? {} : { fleet: owner.fleet }),
               ...(request.deviceType === undefined ? {} : { deviceType: request.deviceType }),
               ...(request.runtime === undefined ? {} : { runtime: request.runtime }),

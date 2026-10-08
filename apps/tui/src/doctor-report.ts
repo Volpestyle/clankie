@@ -195,10 +195,15 @@ function formatSimulatorLines(simulators: InstallDoctorReport["simulators"]): st
 function formatResourceLines(resources: InstallDoctorReport["resources"]): string[] {
   if (!resources) return [];
   if ("status" in resources) return [`  ○ Fleet resources · unavailable · ${clean(resources.detail)}`];
-  const holder = (entry: { seatId?: string | undefined; pid?: number | undefined }) =>
-    entry.seatId ? clean(entry.seatId) : entry.pid ? `PID ${entry.pid}` : "unattributed";
+  const holder = (entry: {
+    seatId?: string | undefined;
+    pid?: number | undefined;
+    holderId?: string | undefined;
+  }) =>
+    (entry.seatId ? clean(entry.seatId) : entry.pid ? `PID ${entry.pid}` : "unattributed") +
+    (entry.holderId ? ` / ${clean(entry.holderId)}` : "");
   return [
-    `  ${mark(resources.pressure.healthy)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} shared permits · simulator limit ${resources.capacity.simulatorSlots} · ${resources.queue.length} queued`,
+    `  ${mark(resources.pressure.healthy)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} heavy · ${resources.capacity.simulatorUsed ?? resources.leases.filter((lease) => lease.kind === "simulator").length}/${resources.capacity.simulatorSlots} simulators · ${resources.queue.length} queued`,
     ...(!resources.pressure.healthy ? [`    Pressure · ${resources.pressure.reason ?? "unavailable"}`] : []),
     ...resources.leases.map(
       (lease) =>

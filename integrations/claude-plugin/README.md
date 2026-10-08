@@ -357,7 +357,11 @@ The operator Claude plugin links it; `worker-skills` links the canonical catalog
 Codex installation needs regular files, so its build materializes the catalog.
 The worker package contains regular `skills/clankie/SKILL.md` and
 `skills/fleet-resources/SKILL.md` snapshots, shared by its Claude and Codex
-manifests. The companion teaches local heavy permits and simulator leases.
+manifests. The companion teaches local heavy permits and simulator leases. The operator and
+worker `PreToolUse` Bash hooks carry each native session/subagent’s holder identity
+in `CLANKIE_RESOURCE_HOLDER`, scoped to that command. They preserve tool fields
+and leave permission decisions to Claude. The resource CLIs use it for independent
+simulator ownership and named heavy holders; they do not write a shared env file.
 
 Before a checkout worker install or fleet copy, the existing Codex materializer
 refreshes both snapshots. Release assembly does the same.

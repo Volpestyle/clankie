@@ -477,3 +477,81 @@ it("plans through authenticated HTTP and the CLI warns before submitting a new d
   expect(progress.some((line) => line.includes("touch the lease"))).toBe(true);
   expect((await f.commands()).filter((command) => command[0] === "create")).toHaveLength(1);
 });
+
+it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal boundaries", async () => {
+  const f = await fixture();
+  const credentials = new FileCredentialStore(join(f.root, "credentials.json"));
+  const hook = async (agentId: string, worker: boolean) => {
+    const pluginRoot = fileURLToPath(
+      new URL(
+        worker ? "../../../integrations/claude-plugin/worker/" : "../../../integrations/claude-plugin/",
+        import.meta.url,
+      ),
+    );
+    const config = JSON.parse(await readFile(join(pluginRoot, "hooks/hooks.json"), "utf8"));
+    const command = config.hooks.PreToolUse.find((entry: { matcher: string }) => entry.matcher === "Bash")
+      .hooks[0].command;
+    const child = spawn("/bin/sh", ["-c", command], {
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (bytes) => (output += String(bytes)));
+    const done = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", resolve);
+    });
+    child.stdin.end(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        session_id: "parent",
+        agent_id: agentId,
+        tool_input: {
+          command: "node -e 'process.stdout.write(process.env.CLANKIE_RESOURCE_HOLDER)'",
+          timeout: 10000,
+        },
+      }),
+    );
+    expect(await done).toBe(0);
+    const result = JSON.parse(output).hookSpecificOutput;
+    expect(result.permissionDecision).toBeUndefined();
+    expect(result.updatedInput.timeout).toBe(10000);
+    const { stdout } = await execute("/bin/sh", ["-c", result.updatedInput.command]);
+    return stdout;
+  };
+  const holderIds = await Promise.all([hook("dock", false), hook("cards", true)]);
+  expect(holderIds).toEqual(["claude:parent:agent:dock", "claude:parent:agent:cards"]);
+  const options = (holderId: string) => ({
+    host: f.host,
+    operatorCredentialStore: credentials,
+    env: { CLANKIE_OPERATOR_TOKEN: bearer, CLANKIE_RESOURCE_HOLDER: holderId },
+  });
+  const results = await Promise.all(
+    holderIds.map((id) =>
+      runSimulatorCommand(["acquire", JSON.stringify(f.acquire)], options(id)).then(
+        FleetSimulatorResultSchema.parse,
+      ),
+    ),
+  );
+  expect(results.map((result) => result.outcome).sort()).toEqual(["acquired", "waiting"]);
+  const acquired = results.find((result) => result.outcome === "acquired");
+  if (!acquired || !("lease" in acquired)) throw new Error("Missing acquired child lease");
+  const winner = acquired.lease.holderId!;
+  const loser = holderIds.find((id) => id !== winner)!;
+  await f.resources.refresh();
+  const snapshot = FleetResourceSnapshotSchema.parse((await f.send("GET", FLEET_RESOURCES_PATH)).json);
+  expect(snapshot.leases[0]).toMatchObject({ seatId: "resource-seat", holderId: winner });
+  expect(snapshot.capacity).toMatchObject({ used: 0, simulatorUsed: 1 });
+  const released = await runSimulatorCommand(
+    ["release", JSON.stringify({ seatId: "resource-seat", id: acquired.lease.id })],
+    options(loser),
+  );
+  expect(released).toMatchObject({ outcome: "rejected", reason: "stale_owner" });
+  expect(
+    await runSimulatorCommand(
+      ["release", JSON.stringify({ seatId: "resource-seat", id: acquired.lease.id })],
+      options(winner),
+    ),
+  ).toMatchObject({ outcome: "released" });
+});

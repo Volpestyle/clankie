@@ -160,7 +160,7 @@ describe("machine shared heavy permits with actual OS children", () => {
       await f.close();
     }
   }, 120_000);
-  it("simulator admission never queues: a full pool and a disabled policy answer at once, leaving heavy order intact", async () => {
+  it("simulator admission uses its own pool and never queues, leaving heavy FIFO order intact", async () => {
     const f = await fixture();
     try {
       const active = f.start("active");
@@ -171,13 +171,20 @@ describe("machine shared heavy permits with actual OS children", () => {
         (value) => value.queue.some((entry) => entry.seatId === "first"),
       );
       const request = { seatId: "simulator", occupantId: "fixture-occupant", externalActive: async () => 0 };
-      // Shared slot held by a real heavy runner: the answer names it instead of waiting.
-      const blocked = await f.governor.tryAcquireSimulator(request);
-      expect(blocked).toMatchObject({ admitted: false, reason: "shared_capacity" });
+      // The real heavy runner and its FIFO waiter do not consume simulator capacity.
+      const admitted = await f.governor.tryAcquireSimulator(request);
+      if (!admitted.admitted) throw new Error("simulator budget unexpectedly blocked by heavy work");
+      const blocked = await f.governor.tryAcquireSimulator({ ...request, holderId: "other-child" });
+      expect(blocked).toMatchObject({ admitted: false, reason: "simulator_capacity" });
       if (blocked.admitted) throw new Error("unexpected admission");
-      expect(blocked.snapshot.leases).toEqual([
-        expect.objectContaining({ kind: "heavy", seatId: "active", pid: expect.any(Number) }),
-      ]);
+      expect(blocked.snapshot.leases).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "heavy", seatId: "active", pid: expect.any(Number) }),
+          expect.objectContaining({ kind: "simulator", seatId: "simulator" }),
+        ]),
+      );
+      expect(blocked.snapshot.capacity).toMatchObject({ used: 1, simulatorUsed: 1 });
+      await f.governor.releaseSimulator(admitted.lease.id, admitted.lease.token);
       await f.governor.configure({
         ...defaultResourcePolicy(),
         heavySlots: 1,
@@ -341,6 +348,20 @@ describe("machine shared heavy permits with actual OS children", () => {
       await f.close();
     }
   }, 20_000);
+
+  it("a different native holder cannot reuse the parent's inherited heavy permit", async () => {
+    const f = await fixture();
+    try {
+      const child = f.start("parent", "nested-other-holder");
+      expect(await child.done).toBe(130);
+      const waiting = JSON.parse(await readFile(`${child.receipt}.waiting`, "utf8"));
+      expect(waiting.capacity.used).toBe(1);
+      expect(waiting.queue).toEqual([expect.objectContaining({ holderId: "other-native-child" })]);
+      expect((await f.governor.snapshot()).capacity.used).toBe(0);
+    } finally {
+      await f.close();
+    }
+  });
 
   it("reuses an inherited verified permit for nested heavy and propagates the real exit status", async () => {
     const f = await fixture();

@@ -29,7 +29,10 @@ export const FleetResourceSnapshotSchema = z
       .object({
         heavySlots: z.number().int().min(1).max(64),
         simulatorSlots: z.number().int().min(0).max(64),
+        /** Heavy leases only on current servers. */
         used: z.number().int().nonnegative(),
+        /** Optional for compatibility with older servers. */
+        simulatorUsed: z.number().int().nonnegative().optional(),
       })
       .strict(),
     pressure: z
@@ -49,6 +52,7 @@ export const FleetResourceSnapshotSchema = z
             kind: z.enum(["heavy", "simulator"]),
             state: z.string().min(1).max(64),
             seatId: reference.optional(),
+            holderId: reference.optional(),
             pid: z.number().int().min(2).max(2_147_483_647).optional(),
             executable: z.string().min(1).max(256).optional(),
             createdAtMs: timestamp,
@@ -65,6 +69,7 @@ export const FleetResourceSnapshotSchema = z
             id: reference,
             kind: z.enum(["heavy", "simulator"]),
             seatId: reference.optional(),
+            holderId: reference.optional(),
             pid: z.number().int().min(2).max(2_147_483_647).optional(),
             executable: z.string().min(1).max(256).optional(),
             queuedAtMs: timestamp,
@@ -76,7 +81,9 @@ export const FleetResourceSnapshotSchema = z
   .strict();
 export type FleetResourceSnapshot = z.infer<typeof FleetResourceSnapshotSchema>;
 
-const SimulatorSeatSchema = z.object({ seatId: reference, fleet: reference.optional() }).strict();
+const SimulatorSeatSchema = z
+  .object({ seatId: reference, holderId: reference.optional(), fleet: reference.optional() })
+  .strict();
 const udid = z.string().regex(/^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/u);
 /** Native occupant and process identities are observed by the host, never supplied here. */
 const SimulatorSelectionSchema = SimulatorSeatSchema.extend({
@@ -100,6 +107,7 @@ export const FleetSimulatorLeaseSchema = z
   .object({
     id: reference,
     seatId: reference,
+    holderId: reference.optional(),
     occupantId: reference,
     fleet: reference.optional(),
     phase: z.string().min(1).max(64),
@@ -150,13 +158,15 @@ export const FleetSimulatorStatusSchema = z
 const FleetSimulatorBlockersSchema = z
   .object({
     simulatorSlots: z.number().int().min(0).max(64),
-    sharedSlots: z.number().int().min(1).max(64),
+    heavySlots: z.number().int().min(1).max(64).optional(),
+    sharedSlots: z.number().int().min(1).max(64).optional(),
     leases: z
       .array(
         z
           .object({
             id: reference,
             seatId: reference,
+            holderId: reference.optional(),
             phase: z.string().min(1).max(64),
             deviceName: z.string().min(1).max(256).optional(),
             deviceId: reference.optional(),
@@ -170,6 +180,7 @@ const FleetSimulatorBlockersSchema = z
         z
           .object({
             seatId: reference.optional(),
+            holderId: reference.optional(),
             executable: z.string().min(1).max(256).optional(),
             pid: z.number().int().min(2).max(2_147_483_647).optional(),
           })

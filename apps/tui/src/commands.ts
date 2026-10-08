@@ -1871,10 +1871,15 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                           `${roster.resources.capacity.used}/${roster.resources.capacity.heavySlots} · ${roster.resources.queue.length} waiting`,
                           roster.resources.pressure.healthy ? "normal" : "warn",
                         ),
+                        s.line(
+                          "simulator slots",
+                          `${roster.resources.capacity.simulatorUsed ?? roster.resources.leases.filter((lease) => lease.kind === "simulator").length}/${roster.resources.capacity.simulatorSlots}`,
+                          "normal",
+                        ),
                         ...roster.resources.leases.map((lease) =>
                           s.line(
                             "resource holder",
-                            `${lease.seatId ?? (lease.pid === undefined ? "unidentified" : `pid ${lease.pid}`)} · ${lease.kind} · ${lease.executable ?? lease.deviceId ?? lease.state}`,
+                            `${lease.seatId ?? (lease.pid === undefined ? "unidentified" : `pid ${lease.pid}`)}${lease.holderId ? ` / ${lease.holderId}` : ""} · ${lease.kind} · ${lease.executable ?? lease.deviceId ?? lease.state}`,
                             "normal",
                           ),
                         ),

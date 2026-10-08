@@ -2365,7 +2365,7 @@ in the TUI call the same code. A listed harness is hired with `hire_agent`;
 
 <a id="fleet-resource-governor"></a>
 
-### `heavy [--seat LABEL] -- COMMAND [ARGS...]` / `fleet resources` / `simulator`
+### `heavy [--seat LABEL] [--holder ID] -- COMMAND [ARGS...]` / `fleet resources` / `simulator`
 
 `heavy` runs a local command inside the shared OS-account resource governor.
 It preserves child arguments, exit status and signals. Keep installs, compilers,
@@ -2378,6 +2378,10 @@ ticket. Actual native failures identify their cause; see the
 [resource governor reference](../packages/fleet-resources/README.md).
 
 `fleet resources` returns current capacity, pressure, holders and queue as JSON.
+`capacity.used` counts heavy leases against `heavySlots`; `simulatorUsed` counts
+simulator reservations against `simulatorSlots`. Simulator status also reports
+external active devices against the simulator budget. The budgets are independent;
+load and available-memory guards gate both.
 The operator fleet snapshot also carries recent confirmed native peer exchanges
 in `edges`: `deliveryId` is the original native delivery UUID and `text` is up to
 1,000 verbatim characters. Attempts, uncertain receipts and next-turn storage
@@ -2392,13 +2396,13 @@ not run on `/health`. Resource metadata contains no arguments or credentials.
 
 The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 
-| Flag                                      | Default | Meaning                                                                             |
-| ----------------------------------------- | ------- | ----------------------------------------------------------------------------------- |
-| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Shared capacity, 1–64; auto is min(floor(cores/8), floor(RAM GiB/24)), at least one |
-| `--simulator-slots N`                     | `1`     | Simulator ceiling, 0–64; each consumes a shared slot                                |
-| `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                            |
-| `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                     |
-| `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                          |
+| Flag                                      | Default | Meaning                                                                            |
+| ----------------------------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy capacity, 1–64; auto is min(floor(cores/8), floor(RAM GiB/24)), at least one |
+| `--simulator-slots N`                     | `1`     | Independent simulator ceiling, 0–64                                                |
+| `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                           |
+| `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                    |
+| `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                         |
 
 Available memory on macOS uses the kernel's compressor-aware
 `kern.memorystatus_level` percentage of physical RAM, matching `memory_pressure -Q`.
@@ -2414,19 +2418,19 @@ body remains available. The canonical registry is the OS user's
 `~/.clankie/fleet-resources`; worker environment and settings-path overrides do
 not create independent capacity. See the [shipped skill](../.agents/skills/fleet-resources/SKILL.md).
 
-`simulator acquire JSON [--wait SECONDS]` accepts `seatId`, optional `fleet`,
+`simulator acquire JSON [--wait SECONDS]` accepts `seatId`, optional `fleet` and `holderId`,
 `deviceType` and `runtime`, or `deviceId` to lease an existing device such as
 one the seat booted by hand, and optional `exact`. The host proves the current
 local seat and occupant, then leases an idle existing device of that type, a
 close model, then any idle iPhone or iPad of the same family on that runtime
 unless `exact`, or creates and boots a new one,
 and records its exact UUID. It answers within about 20 seconds: `acquired`,
-`booting` (the service keeps booting; acquire again, it is idempotent per seat),
+`booting` (the service keeps booting; acquire again, it is idempotent per seat, occupant and holder),
 `waiting` with `blockers` and a `hint` naming leases by seat, devices booted
 outside leases with the seats using them, heavy holders or pressure, or
 `rejected` with its cause (`service_restarting` is HTTP 503). `--wait` polls up
 to SECONDS, printing progress on stderr. `simulator touch JSON` and
-`simulator release JSON` accept `seatId`, optional `fleet` and lease `id`.
+`simulator release JSON` accept `seatId`, optional `fleet` and `holderId`, and lease `id`.
 `simulator status` lists leases and external devices with the processes and
 seats that name them; `clankie doctor` shows the same. The operator credential
 is required; native occupant, process proof and binding fields are rejected as
@@ -2443,6 +2447,13 @@ even when the latter match the requested model exactly. Among those candidates,
 exact model then close model then family determines preference. `exact: true`
 never substitutes a different model; an explicit `deviceId` remains strict.
 Missing or malformed metadata is unknown, never proof of a previous boot.
+
+Native Claude Bash hooks supply a holder from their session and subagent ID;
+Codex uses its `CODEX_THREAD_ID`. Both CLIs also accept `CLANKIE_RESOURCE_HOLDER`.
+Heavy commands accept `--holder ID`; simulator JSON accepts `holderId`, which
+must stay the same for acquire, touch and release. A different child holder
+cannot inherit or release the lease. Status lists that holder beside the seat.
+These labels never replace native seat proof or grant cleanup authority.
 
 `simulator plan JSON` gives read-only creation/reuse advice and the current idle
 timeout. Acquire reads that plan before its native request, warns on stderr

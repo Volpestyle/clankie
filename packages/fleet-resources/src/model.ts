@@ -37,6 +37,7 @@ export interface SimulatorReservation {
   token: string;
   kind: "simulator";
   seatId: string;
+  holderId?: string;
   occupantId: string;
   fleet?: string;
   pane?: string;
@@ -59,6 +60,7 @@ export interface HeavyLease {
   kind: "heavy";
   state: "starting" | "running";
   seatId?: string;
+  holderId?: string;
   executable: string;
   createdAtMs: number;
   lastUsedAtMs: number;
@@ -71,6 +73,7 @@ export interface ResourceQueueEntry {
   token: string;
   kind: "heavy" | "simulator";
   seatId?: string;
+  holderId?: string;
   executable?: string;
   queuedAtMs: number;
   owner: ProcessIdentity;
@@ -114,6 +117,7 @@ export const ResourceStateSchema = z
               kind: z.literal("heavy"),
               state: z.enum(["starting", "running"]),
               seatId: SafeText.optional(),
+              holderId: SafeText.optional(),
               executable: SafeText,
               claimOwner: IdentitySchema,
               runner: IdentitySchema.optional(),
@@ -125,6 +129,7 @@ export const ResourceStateSchema = z
               ...Common,
               kind: z.literal("simulator"),
               seatId: SafeText,
+              holderId: SafeText.optional(),
               occupantId: SafeText,
               fleet: SafeText.optional(),
               pane: SafeText.optional(),
@@ -151,6 +156,7 @@ export const ResourceStateSchema = z
             token: z.string().uuid(),
             kind: z.enum(["heavy", "simulator"]),
             seatId: SafeText.optional(),
+            holderId: SafeText.optional(),
             executable: SafeText.optional(),
             queuedAtMs: Timestamp,
             owner: IdentitySchema,
@@ -163,13 +169,14 @@ export const ResourceStateSchema = z
 export interface ResourceSnapshot {
   schemaVersion: 1;
   policy: FleetResourcePolicy;
-  capacity: { heavySlots: number; simulatorSlots: number; used: number };
+  capacity: { heavySlots: number; simulatorSlots: number; used: number; simulatorUsed: number };
   pressure: ResourcePressure;
   leases: {
     id: string;
     kind: "heavy" | "simulator";
     state: string;
     seatId?: string;
+    holderId?: string;
     executable?: string;
     createdAtMs: number;
     lastUsedAtMs: number;
@@ -180,6 +187,7 @@ export interface ResourceSnapshot {
     id: string;
     kind: "heavy" | "simulator";
     seatId?: string;
+    holderId?: string;
     executable?: string;
     queuedAtMs: number;
     pid?: number;
@@ -191,6 +199,7 @@ export interface ResourceWaitOptions {
 }
 export interface SimulatorAcquireOptions {
   seatId: string;
+  holderId?: string;
   occupantId: string;
   fleet?: string;
   pane?: string;
@@ -217,7 +226,7 @@ export interface FleetResourceGovernor {
   runHeavy(
     command: string,
     args: readonly string[],
-    options?: ResourceWaitOptions & { seatId?: string },
+    options?: ResourceWaitOptions & { seatId?: string; holderId?: string },
   ): Promise<number>;
   /** Admit now or say what holds the slots; never waits (VUH-1816). */
   tryAcquireSimulator(options: SimulatorAcquireOptions): Promise<SimulatorAdmission>;

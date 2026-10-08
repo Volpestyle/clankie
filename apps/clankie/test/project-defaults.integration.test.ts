@@ -35,7 +35,7 @@ const resources: ResourceSnapshot = {
     maxLoadRatio: 1.5,
     minAvailableMemoryMb: 4096,
   },
-  capacity: { heavySlots: 2, simulatorSlots: 1, used: 0 },
+  capacity: { heavySlots: 2, simulatorSlots: 1, used: 0, simulatorUsed: 0 },
   pressure: {
     sampledAtMs: 1791293548249,
     loadRatio: 0.4051106770833333,

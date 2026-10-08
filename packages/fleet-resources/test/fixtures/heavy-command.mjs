@@ -9,10 +9,24 @@ if (!identity) throw new Error("Owned command identity unavailable");
 // Receipt existence is the test's readiness boundary; publish complete JSON.
 await writeFile(`${receipt}.writing`, JSON.stringify({ pid: identity.pid, startTime: identity.startTime }));
 await rename(`${receipt}.writing`, receipt);
-if (mode === "nested") {
+if (mode === "nested" || mode === "nested-other-holder") {
   const governor = createResourceGovernor({ directory });
   try {
-    const code = await governor.runHeavy(process.execPath, ["-e", "process.exit(17)"]);
+    const cancelled = new AbortController();
+    const code = await governor.runHeavy(
+      process.execPath,
+      ["-e", "process.exit(17)"],
+      mode === "nested-other-holder"
+        ? {
+            holderId: "other-native-child",
+            signal: cancelled.signal,
+            onWait: async (snapshot) => {
+              await writeFile(`${receipt}.waiting`, JSON.stringify(snapshot));
+              cancelled.abort();
+            },
+          }
+        : undefined,
+    );
     await writeFile(`${receipt}.nested`, JSON.stringify({ code, snapshot: await governor.snapshot() }));
     process.exitCode = code;
   } finally {

@@ -139,6 +139,7 @@ export async function runHeadlessCaptainCommand(
     if (command === "heavy")
       return await runHeavyCommand(rest, {
         stderr,
+        env,
         ...(options.resourceGovernor === undefined ? {} : { governor: options.resourceGovernor }),
       });
     if (command === "connect" || command === "login") {

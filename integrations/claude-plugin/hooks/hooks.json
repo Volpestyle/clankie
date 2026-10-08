@@ -115,6 +115,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/worker/bin/resource-hook.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

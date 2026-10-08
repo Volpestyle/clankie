@@ -1,3 +1,4 @@
+import { resourceHolderIdentity } from "@clankie/fleet-resources";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import {
   FLEET_RESOURCES_PATH,
@@ -75,7 +76,12 @@ export async function runSimulatorCommand(
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("Simulator request must be a JSON object");
   if ("action" in value && value.action !== rest[0]) throw new Error("Simulator command and action differ");
-  const input = FleetSimulatorRequestSchema.parse({ ...value, action: rest[0] });
+  const holderId = resourceHolderIdentity(options.env ?? process.env);
+  const input = FleetSimulatorRequestSchema.parse({
+    ...(holderId === undefined ? {} : { holderId }),
+    ...value,
+    action: rest[0],
+  });
   let creationWarned = false;
   let idleShown = false;
   const call = async () => {

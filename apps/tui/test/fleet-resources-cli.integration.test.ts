@@ -119,7 +119,7 @@ async function fixture() {
   };
   const children: ChildProcess[] = [],
     completions: Promise<number>[] = [];
-  async function headless(args: string[]) {
+  async function headless(args: string[], nativeEnv: NodeJS.ProcessEnv = {}) {
     const script = join(directory, "headless.mjs");
     await writeFile(
       script,
@@ -131,7 +131,7 @@ try {process.exitCode=await runHeadlessCaptainCommand(parseDirectConversation(pr
 `,
     );
     const child = spawn(process.execPath, [script, ...args], {
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, ...nativeEnv },
       stdio: ["ignore", "pipe", "pipe"],
     });
     children.push(child);
@@ -372,7 +372,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       const rendered = formatDoctorReport(report);
       expect(rendered).toContain(`PID ${status.leases[0]!.pid}`);
       expect(rendered).toContain(`Queued Bex · heavy ${basename(process.execPath)}`);
-      expect(rendered).toContain("1/1 shared permits");
+      expect(rendered).toContain("1/1 heavy");
       expect(JSON.stringify(report)).not.toContain(f.token);
       const wrong = { ...f.options, env: { ...f.env, CLANKIE_OPERATOR_TOKEN: mintOperatorToken() } };
       await expect(runResourceStatusCommand(wrong)).rejects.toThrow("HTTP 401");
@@ -447,4 +447,55 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       await f.close();
     }
   }, 15_000);
+});
+
+it("native child heavy CLIs under the same pane keep separate holder labels and permits", async () => {
+  const f = await fixture();
+  try {
+    await f.governor.configure({
+      ...defaultResourcePolicy(),
+      heavySlots: 1,
+      maxLoadRatio: 16,
+      minAvailableMemoryMb: 0,
+    });
+    const marker = join(f.directory, "child-heavy-ready");
+    const release = join(f.directory, "child-heavy-release");
+    const first = await f.headless(
+      [
+        "heavy",
+        "--",
+        process.execPath,
+        "-e",
+        "const fs=require('node:fs');fs.writeFileSync(process.argv[1],'ready');const t=setInterval(()=>{if(fs.existsSync(process.argv[2]))clearInterval(t)},20)",
+        marker,
+        release,
+      ],
+      { HERDR_PANE_ID: "parent-seat", CLANKIE_RESOURCE_HOLDER: "claude:parent:agent:dock" },
+    );
+    await eventually(() => exists(marker), Boolean);
+    const second = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"], {
+      HERDR_PANE_ID: "parent-seat",
+      CLANKIE_RESOURCE_HOLDER: "",
+      CODEX_THREAD_ID: "cards-thread",
+    });
+    // Empty explicit identity fails closed instead of merging with the parent.
+    expect(await second.done).toBe(1);
+    const third = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"], {
+      HERDR_PANE_ID: "parent-seat",
+      CLANKIE_RESOURCE_HOLDER: undefined,
+      CODEX_THREAD_ID: "cards-thread",
+    });
+    const snapshot = await eventually(
+      () => f.governor.snapshot(),
+      (value) => value.queue.length === 1,
+    );
+    expect(snapshot.leases[0]).toMatchObject({ seatId: "parent-seat", holderId: "claude:parent:agent:dock" });
+    expect(snapshot.queue[0]).toMatchObject({ seatId: "parent-seat", holderId: "codex:cards-thread" });
+    expect(third.child.exitCode).toBeNull();
+    await writeFile(release, "done");
+    expect(await first.done).toBe(0);
+    expect(await third.done).toBe(0);
+  } finally {
+    await f.close();
+  }
 });

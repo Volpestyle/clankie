@@ -138,7 +138,8 @@ export function createResourceGovernor(
       capacity: {
         heavySlots: resourceCapacity(state.policy),
         simulatorSlots: state.policy.simulatorSlots,
-        used: state.leases.length,
+        used: state.leases.filter((lease) => lease.kind === "heavy").length,
+        simulatorUsed: state.leases.filter((lease) => lease.kind === "simulator").length,
       },
       pressure: await pressure.sample(state.policy),
       leases: state.leases.map((lease) => ({
@@ -146,6 +147,7 @@ export function createResourceGovernor(
         kind: lease.kind,
         state: lease.kind === "heavy" ? lease.state : lease.phase,
         ...(lease.seatId ? { seatId: lease.seatId } : {}),
+        ...(lease.holderId ? { holderId: lease.holderId } : {}),
         ...(lease.kind === "heavy"
           ? { executable: lease.executable }
           : lease.deviceId
@@ -155,13 +157,14 @@ export function createResourceGovernor(
         lastUsedAtMs: lease.lastUsedAtMs,
         ...(lease.kind === "heavy" && lease.runner ? { pid: lease.runner.pid } : {}),
       })),
-      queue: state.queue.map(({ id, kind, seatId, executable, queuedAtMs, owner }) => ({
+      queue: state.queue.map(({ id, kind, seatId, executable, queuedAtMs, owner, holderId }) => ({
         id,
         kind,
         ...(seatId ? { seatId } : {}),
         ...(executable ? { executable } : {}),
         queuedAtMs,
         pid: owner.pid,
+        ...(holderId ? { holderId } : {}),
       })),
     };
   }
@@ -175,7 +178,7 @@ export function createResourceGovernor(
     return project(state);
   }
   async function acquire(
-    options: ResourceWaitOptions & { seatId?: string; executable: string },
+    options: ResourceWaitOptions & { seatId?: string; holderId?: string; executable: string },
   ): Promise<HeavyLease> {
     const owner = await processIdentity();
     if (!owner) throw new Error("Fleet resource process identity unavailable");
@@ -183,6 +186,8 @@ export function createResourceGovernor(
     if (signal.aborted) throw abort();
     if (options.seatId && (options.seatId.length > 256 || options.seatId.includes("\0")))
       throw new Error("Invalid fleet seat identity");
+    if (options.holderId && (options.holderId.length > 256 || /\p{Cc}/u.test(options.holderId)))
+      throw new Error("Invalid fleet holder identity");
     const id = randomUUID(),
       token = randomUUID();
     await store.transaction(
@@ -196,6 +201,7 @@ export function createResourceGovernor(
           owner,
           queuedAtMs: Date.now(),
           ...(options.seatId ? { seatId: options.seatId } : {}),
+          ...(options.holderId ? { holderId: options.holderId } : {}),
           executable: options.executable,
         });
       },
@@ -213,7 +219,10 @@ export function createResourceGovernor(
               if (options.onWait) advisory = structuredClone(state);
               return undefined;
             };
-            if (state.queue[0]?.id !== id || state.leases.length >= resourceCapacity(state.policy))
+            if (
+              state.queue[0]?.id !== id ||
+              state.leases.filter((lease) => lease.kind === "heavy").length >= resourceCapacity(state.policy)
+            )
               return blocked();
             if (!(await pressure.sample(state.policy)).healthy) return blocked();
             if (signal.aborted) throw abort();
@@ -226,6 +235,7 @@ export function createResourceGovernor(
               claimOwner: owner,
               executable: options.executable,
               ...(options.seatId ? { seatId: options.seatId } : {}),
+              ...(options.holderId ? { holderId: options.holderId } : {}),
               createdAtMs: at,
               lastUsedAtMs: at,
             };
@@ -251,7 +261,7 @@ export function createResourceGovernor(
         });
     }
   }
-  async function inherited(): Promise<HeavyLease | undefined> {
+  async function inherited(holderId?: string): Promise<HeavyLease | undefined> {
     let ref: { id?: string; token?: string };
     try {
       ref = JSON.parse(process.env.CLANKIE_RESOURCE_LEASE ?? "null") ?? {};
@@ -263,6 +273,9 @@ export function createResourceGovernor(
         entry.kind === "heavy" && entry.id === ref.id && entry.token === ref.token,
     );
     if (!lease?.runner || lease.state !== "running") return undefined;
+    // A native child in the same group is a distinct holder, not nested work
+    // belonging to the parent that acquired this permit.
+    if (holderId !== undefined && holderId !== lease.holderId) return undefined;
     const mine = await processIdentity();
     if (!mine || mine.pgid !== lease.runner.pgid || mine.uid !== lease.runner.uid) return undefined;
     const root = await processIdentity(lease.runner.pid);
@@ -272,7 +285,7 @@ export function createResourceGovernor(
   async function runHeavy(
     command: string,
     args: readonly string[],
-    options: ResourceWaitOptions & { seatId?: string } = {},
+    options: ResourceWaitOptions & { seatId?: string; holderId?: string } = {},
   ): Promise<number> {
     if (!command || command.includes("\0") || args.some((arg) => arg.includes("\0")))
       throw new Error("Invalid heavy command");
@@ -290,7 +303,7 @@ export function createResourceGovernor(
     let child: ReturnType<typeof spawn> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const parentLease = await inherited();
+      const parentLease = await inherited(options.holderId);
       if (signal.aborted) throw abort();
       if (parentLease) {
         child = spawn(command, [...args], { stdio: "inherit" });
@@ -427,6 +440,8 @@ export function createResourceGovernor(
       if (
         !options.seatId ||
         !options.occupantId ||
+        (options.holderId !== undefined &&
+          (!options.holderId || options.holderId.length > 256 || /\p{Cc}/u.test(options.holderId))) ||
         options.occupantId.length > 512 ||
         (options.ownerProcesses?.length ?? 0) > 32
       )
@@ -450,7 +465,6 @@ export function createResourceGovernor(
           state.policy.simulatorSlots
         )
           return blocked("simulator_capacity");
-        if (state.leases.length >= resourceCapacity(state.policy)) return blocked("shared_capacity");
         if (!(await pressure.sample(state.policy)).healthy) return blocked("pressure");
         const at = Date.now();
         const next: SimulatorReservation = {
@@ -460,6 +474,7 @@ export function createResourceGovernor(
           phase: "reserved",
           seatId: options.seatId,
           occupantId: options.occupantId,
+          ...(options.holderId ? { holderId: options.holderId } : {}),
           ...(options.fleet ? { fleet: options.fleet } : {}),
           ...(options.pane ? { pane: options.pane } : {}),
           ...(options.binding ? { binding: structuredClone(options.binding) } : {}),

@@ -15,9 +15,9 @@ clankie heavy -- node path/to/owned-runtime.js
 
 Keep the complete owned runtime and its children inside the wrapper's lifetime.
 Serialize multi-package compilers inside one permit. An optional `--seat LABEL`
-before `--` identifies a holder in status; it grants no seat authority. Arguments
+before `--` labels the seat in status; `--holder ID` identifies its native child. Neither grants seat authority. Arguments
 after `--`, including flags such as `--chat`, belong to the child. The wrapper
-preserves its exit status and forwards interruption. Nested commands in the same
+preserves its exit status and forwards interruption. Nested commands with the same holder in the same
 verified process group reuse its permit. Detached surviving children retain the
 permit until the kernel proves they have exited.
 
@@ -41,7 +41,7 @@ resubmitting a healthy queued request.
 The owner sets capacity through `clankie fleet set --heavy-slots auto|N` and
 `--simulator-slots N`, or `/fleet resources`. Automatic capacity is the smaller
 of one slot per eight cores and one per 24 GiB RAM, with a minimum of one.
-Simulator leases consume that same pool; the default simulator limit is one.
+Heavy and simulator leases have independent budgets; the default simulator limit is one. Load and available-memory guards gate both.
 The registry belongs to the OS account and is shared across worktrees. Worker
 `HOME`, state-path or `HEAVY_SLOTS` overrides cannot increase capacity.
 
@@ -62,15 +62,21 @@ clankie simulator release '{"seatId":"SEAT","id":"LEASE_ID"}'
 ```
 
 Acquire answers within about 20 seconds; `--wait SECONDS` keeps polling and
-prints progress on stderr. Acquire is idempotent per seat, so repeating it
-returns your lease. Outcomes:
+prints progress on stderr. Acquire is idempotent per seat, occupant and holder, so repeating it
+returns your lease. Native Claude Bash hooks supply a session/subagent holder;
+Codex uses its thread ID. Status names `holderId` beside the seat. A child cannot
+touch or release a sibling holder’s lease. Other harnesses must supply a stable
+`holderId` in every simulator request (including touch/release), and `--holder ID`
+for heavy commands. `CLANKIE_RESOURCE_HOLDER` supplies the same identity to both
+CLIs. These labels do not grant seat authority. Never choose your lead’s or a
+sibling’s identity. Outcomes:
 
 - `acquired`: use `lease.deviceId`, the exact UDID, for every simulator command.
 - `booting`: the service is creating or booting your device and keeps going if
   you stop waiting. Acquire again (or `--wait`) to get it.
 - `waiting`: every slot is held. `hint` and `blockers` name the seats holding
   leases, devices booted outside leases (and the seats whose processes use
-  them) and heavy commands. Wait, or ask the named seat to release.
+  them). Heavy commands use their own budget. Wait, or ask the named holder to release.
 - `rejected`: `reason` is the cause. `service_restarting`: retry shortly.
   `owner_unavailable`: your seat's live occupant could not be proven.
   `device_unavailable`: the type or runtime is not installed; pick one of

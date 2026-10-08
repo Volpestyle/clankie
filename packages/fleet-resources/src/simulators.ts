@@ -13,6 +13,8 @@ import {
 export interface SimulatorOwner {
   readonly seatId: string;
   readonly occupantId: string;
+  /** Distinguishes native children; grants no seat or process authority. */
+  readonly holderId?: string;
   readonly fleet?: string;
   readonly pane: string;
   readonly processes: readonly { readonly pid: number; readonly startTime: string }[];
@@ -21,6 +23,8 @@ export interface SimulatorOwner {
 export interface SimulatorAcquireRequest {
   readonly seatId: string;
   readonly occupantId: string;
+  /** Distinguishes native children; grants no seat or process authority. */
+  readonly holderId?: string;
   readonly fleet?: string;
   /** Required unless `deviceId` names the device to lease. */
   readonly deviceType?: string;
@@ -43,6 +47,8 @@ export interface SimulatorLeaseView {
   readonly id: string;
   readonly seatId: string;
   readonly occupantId: string;
+  /** Distinguishes native children; grants no seat or process authority. */
+  readonly holderId?: string;
   readonly fleet?: string;
   readonly phase: string;
   readonly createdAtMs: number;
@@ -70,10 +76,13 @@ export interface ExternalSimulatorView {
 }
 export interface SimulatorBlockers {
   readonly simulatorSlots: number;
-  readonly sharedSlots: number;
+  readonly heavySlots?: number;
+  /** Legacy server output. */
+  readonly sharedSlots?: number;
   readonly leases: readonly {
     id: string;
     seatId: string;
+    holderId?: string;
     phase: string;
     deviceName?: string;
     deviceId?: string;
@@ -132,9 +141,10 @@ export interface SimulatorStatusView {
   hint?: string;
 }
 
-type SeatIdentity = Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet">;
-const sameSeat = (a: SeatIdentity, b: SeatIdentity) =>
+type SeatIdentity = Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet" | "holderId">;
+const sameNativeSeat = (a: SeatIdentity, b: SeatIdentity) =>
   a.seatId === b.seatId && a.occupantId === b.occupantId && (a.fleet ?? "default") === (b.fleet ?? "default");
+const sameSeat = (a: SeatIdentity, b: SeatIdentity) => sameNativeSeat(a, b) && a.holderId === b.holderId;
 const active = (device: SimulatorDevice) => ["Booted", "Booting", "Shutting Down"].includes(device.state);
 const known = (device: SimulatorDevice) =>
   ["Shutdown", "Booted", "Booting", "Shutting Down"].includes(device.state);
@@ -168,6 +178,7 @@ const view = (lease: SimulatorReservation, requestedDeviceType?: string): Simula
     id,
     seatId,
     occupantId,
+    ...(lease.holderId === undefined ? {} : { holderId: lease.holderId }),
     ...(fleet === undefined ? {} : { fleet }),
     phase,
     createdAtMs,
@@ -319,11 +330,13 @@ export function createSimulatorManager(input: {
       return undefined;
     return observed.identity;
   };
-  const matchesOwner = (lease: SimulatorReservation, owner: SimulatorOwner) =>
-    sameSeat(lease, owner) &&
+  const matchesNativeOwner = (lease: SimulatorReservation, owner: SimulatorOwner) =>
+    sameNativeSeat(lease, owner) &&
     lease.pane === owner.pane &&
     isDeepStrictEqual(lease.ownerProcesses, owner.processes) &&
     isDeepStrictEqual(lease.binding, owner.binding);
+  const matchesOwner = (lease: SimulatorReservation, owner: SimulatorOwner) =>
+    lease.holderId === owner.holderId && matchesNativeOwner(lease, owner);
   const deviceFor = (lease: SimulatorReservation, devices: readonly SimulatorDevice[]) => {
     const found = devices.find((device) => device.udid.toUpperCase() === lease.deviceId?.toUpperCase());
     if (
@@ -477,10 +490,11 @@ export function createSimulatorManager(input: {
     const external = await describeExternal(externals(devices, leases), devices);
     const blockers: SimulatorBlockers = {
       simulatorSlots: snapshot.capacity.simulatorSlots,
-      sharedSlots: snapshot.capacity.heavySlots,
+      heavySlots: snapshot.capacity.heavySlots,
       leases: leases.map((lease) => ({
         id: lease.id,
         seatId: lease.seatId,
+        ...(lease.holderId === undefined ? {} : { holderId: lease.holderId }),
         phase: lease.phase,
         ...(lease.deviceName === undefined ? {} : { deviceName: lease.deviceName }),
         ...(lease.deviceId === undefined ? {} : { deviceId: lease.deviceId }),
@@ -761,6 +775,7 @@ export function createSimulatorManager(input: {
       admission = await input.governor.tryAcquireSimulator({
         seatId: owner.seatId,
         occupantId: owner.occupantId,
+        ...(owner.holderId === undefined ? {} : { holderId: owner.holderId }),
         ...(owner.fleet === undefined ? {} : { fleet: owner.fleet }),
         pane: owner.pane,
         ownerProcesses: [...owner.processes],
@@ -832,7 +847,12 @@ export function createSimulatorManager(input: {
       }
     },
     acquire(request: SimulatorAcquireRequest): Promise<SimulatorResult> {
-      const key = JSON.stringify([request.fleet ?? "default", request.seatId, request.occupantId]);
+      const key = JSON.stringify([
+        request.fleet ?? "default",
+        request.seatId,
+        request.occupantId,
+        request.holderId,
+      ]);
       const pending = acquisitions.get(key);
       if (pending) return pending.then(async (result) => ((await authorized(request)) ? result : revoked()));
       const result = acquire(request).finally(() => acquisitions.delete(key));
@@ -875,12 +895,12 @@ export function createSimulatorManager(input: {
     },
     async observeSeatState(identity: SimulatorOwner, _status: string): Promise<void> {
       // Harness turns do not renew simulator use. Only touch/acquire is activity.
-      if ((await reservations()).some((lease) => matchesOwner(lease, identity))) await manager.tick();
+      if ((await reservations()).some((lease) => matchesNativeOwner(lease, identity))) await manager.tick();
     },
     async observeSeatExited(identity: SimulatorOwner): Promise<void> {
       await serial(async () => {
         for (const lease of await reservations()) {
-          if (!matchesOwner(lease, identity) || identity.processes.length === 0) continue;
+          if (!matchesNativeOwner(lease, identity) || identity.processes.length === 0) continue;
           if ((await Promise.all(identity.processes.map(probe))).some((state) => state !== "exited"))
             continue;
           try {
@@ -984,7 +1004,8 @@ function hintFor(
   blockers: SimulatorBlockers,
 ): string {
   const leases = blockers.leases.map(
-    (lease) => `seat ${lease.seatId} (${lease.deviceName ?? "device pending"}, ${lease.phase})`,
+    (lease) =>
+      `seat ${lease.seatId}${lease.holderId ? ` holder ${lease.holderId}` : ""} (${lease.deviceName ?? "device pending"}, ${lease.phase})`,
   );
   if (reason === "pressure")
     return `Machine pressure is high (${blockers.pressure?.reason ?? "unknown"}; load/core ${blockers.pressure?.loadRatio.toFixed(2)}, ${Math.round(blockers.pressure?.availableMemoryMb ?? 0)} MiB available). Retry later.`;
