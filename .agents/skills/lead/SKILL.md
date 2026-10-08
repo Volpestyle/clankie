@@ -78,6 +78,19 @@ own a separable result and no budget removes a required review. There is no
 fixed model or effort rule: where the owner set no preference, choose them for
 the task or omit them and let the harness decide.
 
+## Work-project boundaries
+
+For a work repo, read its owner overrides for push, release and closure. Keep
+work forge credentials in the approved native harness context, outside Clankie's
+connected accounts; the forge must protect the default branch and require MR
+approval. Use Claude Code or Codex when native approval prompts are required;
+a Pi worker supplies no such prompts. Workers and the operator seat keep their
+harness permissions. Pi has
+lane grants and no permission prompts, so the owner must explicitly accept that
+boundary or choose native-seat operator turns. Preferences and account context
+are not same-user shell isolation. See [worker access](../../../docs/worker-access.md#work-repositories).
+Do not apply one work project's restrictions to social/play lanes or other repos.
+
 ## Brief an owned result
 
 Hire with `hire_agent`, omitting harness, model and effort to inherit the

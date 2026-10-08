@@ -43,6 +43,36 @@ the owner's go-ahead for its content and destination. If that scope is missing,
 present the exact draft and destination and ask before sending; read-only
 inspection does not grant posting authority.
 
+## Work repositories
+
+Register the work repo as its own project and set owner overrides for `push`
+and `release`, plus `closure` if wanted ([project settings](cli.md#project-list-project-settings-and-project-update)).
+These are working preferences carried in briefs, not a forge permission system.
+Work boundaries live in three places:
+
+- Workers and the operator seat use their native harness permission system
+  (Claude Code or Codex); keep the work forge credentials in that harness's
+  approved account context, outside Clankie's connected accounts. Choose those
+  harnesses when native approval prompts are required; a Pi worker supplies no
+  such prompts.
+- The forge protects the default branch and requires merge-request approval.
+  Enforce protected-branch writes there, including direct pushes and bypass
+  permissions; a brief saying “never push to main” is not enforcement.
+- Clankie's pi runtime uses lane grants and has no native permission prompts.
+  An unseated operator turn, including Linear wakes, goals and self-wakes,
+  can use its granted shell and connected accounts without a per-action prompt.
+
+Under [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md), any admitted
+fleet member can use a verified connected account; a work-project override does
+not restrict that account to its project. Harness account context is not an OS
+sandbox against another same-user shell ([VUH-1687](https://linear.app/vuhlp/issue/VUH-1687)).
+Before using a work project, the owner must choose whether to accept pi's lane
+grants or route its operator turns through the native seat; do not infer that
+choice from `push: owner`. A per-action pi envelope remains a separate
+[VUH-1523](https://linear.app/vuhlp/issue/VUH-1523) decision. Apply the work repo's
+preferences to that project, without imposing a global work preset on Discord,
+voice, play or other projects.
+
 ## Catalog changes in Codex
 
 The fleet bridge checks its catalog every five seconds and emits MCP
