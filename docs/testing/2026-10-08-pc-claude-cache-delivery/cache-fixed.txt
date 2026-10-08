@@ -1,0 +1,9 @@
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 6 queued)
+
+ RUN  v4.1.10 <worktree>
+
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  00:48:04
+   Duration  1.11s (transform 376ms, setup 40ms, import 599ms, tests 1.04s, environment 0ms)

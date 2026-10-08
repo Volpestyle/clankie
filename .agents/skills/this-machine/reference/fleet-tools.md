@@ -233,6 +233,14 @@ See [the trust contract](../../../../docs/remote-process-proof.md). A host obser
 or isolated relay smoke test does not establish that a real pane sees its native
 catalog; only an owner-run pane check does.
 
+For repeated Claude catalog-report warnings, compare the selected native plugin
+cache with the prepared marketplace, including the worker version and helper
+bytes. Changed source under the same version can leave the old native cache in
+place. Ship a new worker version and use the approved `clankie herdr prepare
+FLEET_ID` setup path; then check an owned native pane. An already-running process
+can still have its old mod imported. Coordinate save/restart/resume with that
+pane's owner rather than steering another lead's session.
+
 Service-created Windows Codex hires bind their dedicated server's original OS
 lifetime to one live native pane/thread. They require the exact worker bridge
 shipped with the service; a stale, redirected or changed installation refuses

@@ -320,8 +320,10 @@ physical appearance; the caption preserves that distinction. A restart of Clanki
 and native Codex worker plugin. `clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` explicitly installs
 and enables the worker for hand-started and hired agents across remote Claude
 profiles, including `CLAUDE_CONFIG_DIR` and named `~/.claude-*` directories.
-The worker MCP server is `clankie`. Bump both worker manifests on every shipment
-so native caches cannot retain an older protocol at the same version.
+The worker MCP server is `clankie`. Bump both worker manifests on every shipment,
+including Claude mods and report helpers, so native caches cannot retain older
+bytes at the same version. A changed marketplace file with an unchanged manifest
+version is not proof that an installed native cache received the change.
 
 Updates and checkout/release installers run `clankie harness install --refresh-linked`
 for existing local profiles and enabled SSH fleet machines, without enrolling new

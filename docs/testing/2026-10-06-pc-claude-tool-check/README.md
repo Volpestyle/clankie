@@ -1,5 +1,9 @@
 # PC Claude tool-check recovery (VUH-1745)
 
+2026-10-08 follow-up: the source repair landed in `20038e9a` and `ead3ffd3`.
+Read-only PC inspection found old native user caches still at the unchanged
+worker version. See [cache delivery evidence and remaining native acceptance](../2026-10-08-pc-claude-cache-delivery/README.md).
+
 The patch prevents an ordinary remote observation timeout from immediately
 destroying every pane's authenticated relay. Claude retries at idle through
 fresh link discovery, logs each warning cause once across intermittent

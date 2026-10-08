@@ -192,6 +192,6 @@ it.each([true, false])(
 it("ships matching Claude and Codex worker versions for doctor comparisons", async () => {
   const root = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
   for (const manifest of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
-    expect(JSON.parse(await readFile(join(root, manifest), "utf8")).version).toBe("0.6.7");
+    expect(JSON.parse(await readFile(join(root, manifest), "utf8")).version).toBe("0.6.8");
   }
 });

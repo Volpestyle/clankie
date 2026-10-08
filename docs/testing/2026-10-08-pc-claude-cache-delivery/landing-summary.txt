@@ -1,0 +1,39 @@
+Command: clankie heavy -- pnpm check:landing
+Exit: 0
+Formatting, lint, deadcode, documentation checks and 29 typechecks passed.
+The native cache fixture is manual-only and passed separately with its opt-in.
+
+@clankie/play-voice:typecheck: cache hit, replaying logs 339c322effe4bd71
+@clankie/model-provider:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-activity:typecheck: cache hit, replaying logs faa02f49a3a5f8f7
+@clankie/play-voice:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-activity:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-transcript:typecheck: cache hit, replaying logs 44c7c26e15506509
+@clankie/agent-transcript:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/agent-hosts:typecheck: cache hit, replaying logs aee6a6b6b0018633
+@clankie/agent-hosts:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-presence-core:typecheck: cache hit, replaying logs 665edeaf879b7757
+@clankie/discord-presence-core:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/tui:typecheck: cache miss, executing c018257603069fd2
+@clankie/pokemon:typecheck: cache hit, replaying logs 1e39cb92fc349a89
+@clankie/pokemon:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-user-session:typecheck: cache hit, replaying logs b38d4ac90a4f1f09
+@clankie/discord-user-session:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/discord-bridge:typecheck: cache hit, replaying logs d38c479e802a897d
+@clankie/discord-bridge:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/clankie:typecheck: cache hit, replaying logs ba8b44e6c42e9c02
+@clankie/clankie:typecheck: $ tsc --noEmit -p tsconfig.json
+@clankie/tui:typecheck: $ tsc --noEmit -p tsconfig.json
+
+ Tasks:    29 successful, 29 total
+Cached:    28 cached, 29 total
+  Time:    12.494s
+
+
+ RUN  v4.1.10 <worktree>
+
+
+ Test Files  1 passed | 1 skipped (2)
+      Tests  9 passed | 1 skipped (10)
+   Start at  00:50:51
+   Duration  324ms (transform 47ms, setup 12ms, import 209ms, tests 30ms, environment 0ms)
