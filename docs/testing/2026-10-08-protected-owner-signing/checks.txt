@@ -1,0 +1,38 @@
+clankie heavy -- pnpm exec vitest run --config vitest.config.ts apps/clankie/test/goal-activation-authority.integration.test.ts apps/clankie/test/machine-access.integration.test.ts
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 2 queued)
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-1687-wren
+
+{"level":30,"time":"2026-10-08T10:55:10.627Z","service":"clankie","version":"0.2.0","deviceId":"revoked","operatorId":"goal-fixture-owner","msg":"device revoked"}
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+   Start at  05:55:07
+   Duration  3.15s (transform 2.94s, setup 28ms, import 5.43s, tests 370ms, environment 0ms)
+
+
+clankie heavy -- sh -c 'set -e; pnpm exec oxfmt --write docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md docs/adr/README.md docs/architecture.md packages/credential-broker/README.md .agents/skills/this-machine/reference/work.md; node scripts/check-doc-links.mjs; node scripts/check-retired-claims.mjs'
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 5 queued)
+Finished in 150ms on 5 files using 18 threads.
+Checked 539 markdown files; local links resolve.
+
+EXIT=0 for both commands. These are current bearer boundary tests, not protected-signing proof.
+
+Final documentation validation:
+clankie heavy -- sh -c 'set -e; pnpm exec oxfmt --write docs/testing/2026-10-08-protected-owner-signing/README.md; pnpm exec oxfmt --check docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md docs/adr/README.md docs/architecture.md packages/credential-broker/README.md .agents/skills/this-machine/reference/work.md docs/testing/2026-10-08-protected-owner-signing/README.md; node scripts/check-doc-links.mjs; node scripts/check-retired-claims.mjs'
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 2 queued)
+Finished in 75ms on 1 files using 18 threads.
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 151ms on 6 files using 18 threads.
+Checked 539 markdown files; local links resolve.
+
+EXIT=0
+
+After rebase onto bf159323 (documentation-only upstream changes):
+clankie heavy -- sh -c 'set -e; node scripts/check-doc-links.mjs; node scripts/check-retired-claims.mjs'
+clankie heavy: waiting for machine capacity (slots; 2/2 held, 2 queued)
+Checked 539 markdown files; local links resolve.
+
+EXIT=0. Boundary suite inputs unchanged by the rebase.

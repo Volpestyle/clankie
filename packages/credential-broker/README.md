@@ -77,6 +77,13 @@ overrides.
 
 ## Local operator credential
 
+The generic-password broker does not establish human presence for each action
+or isolate an operator bearer from a shell running as the same OS user.
+[Proposed ADR 0253](../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)
+requires separate protected authority and non-exportable signing; it is not
+implemented by this package. Never represent a software/FileCredentialStore
+fixture as Secure Enclave or isolated-enforcement proof.
+
 The broker owns the `clankie_operator` bearer used by trusted local operator
 surfaces. The first service start and the fullscreen launcher mint 256
 bits of cryptographic entropy when the entry is absent. The clankie service and

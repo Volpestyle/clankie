@@ -529,6 +529,10 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   confer general shell access. Inventory reports `service-preference`, not an
   OS sandbox: joined-host proof belongs to VUH-1800, OS isolation to VUH-1804.
   Lowering a level does not terminate existing workers; recovery remains usable.
+  Owner bearers and local device signing keys still do not resist a same-user
+  shell. [Proposed ADR 0253](adr/0253-owner-confirmation-needs-an-isolated-authority.md)
+  separates protected confirmation from these actor and machine preferences;
+  its authority, native signing and protected effects are not implemented.
 - **Machine tools.** Coding tools (read/bash/edit/write) are pi built-ins. They
   attach to the operator console and to Discord turns authorized by the
   machine-control grants

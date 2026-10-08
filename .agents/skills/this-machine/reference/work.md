@@ -117,6 +117,10 @@ owner/device transport; the ambient captain bearer receives `goal_owner_required
 `clankie conversations goal ID set --tokens N <objective>`. This separates API
 authority, not local OS identities: a same-UID shell can still read the operator
 credential or device signing key. See ADR 0130 for that remaining boundary.
+[Proposed ADR 0253](../../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)
+requires an isolated authority as well as a protected signer; it is not implemented.
+Do not claim that a Keychain bearer, device token or same-user helper proves
+human confirmation, and do not enroll or move owner keys without authorization.
 
 ## Tidying worktrees
 
