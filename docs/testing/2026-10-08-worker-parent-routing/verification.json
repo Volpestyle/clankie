@@ -71,7 +71,7 @@
         "passed": 41
       }
     ],
-    "executionNote": "Initial permit stopped at owner request after12 complete rounds. Interrupted round13 excluded; remaining rounds use2-run permits with queue re-entry.",
+    "executionNote": "Initial permit stopped at Clankie’s lead request after12 complete rounds. Interrupted round13 excluded; remaining rounds use2-run permits with queue re-entry.",
     "sourceSha256": {
       "apps/clankie/src/runtime-canary.ts": "9d4bb6e629514b755608a93ec7030e490f18d2a8e2f1c12579094bc99b132495",
       "apps/clankie/test/fixtures/runtime-canary-service.ts": "7c4431459486d6e6fffa40c7c293d0e9217a9f634b2b5c3a64de839fb7250d54",

@@ -76,7 +76,7 @@ loaded runs then passed 89 cases each, and the whole Discord file passed 10/10.
 
 Expanded verification passed **20 consecutive completed four-fork rounds**, each
 running all 41 parent-routing, 22 canary, 10 Discord and 15 receipt cases:
-**1,760 passing tests**, with no exclusions or case retries. After round 12 James
+**1,760 passing tests**, with no exclusions or case retries. After round 12 Clankie
 requested shorter permits so other lanes could interleave. The in-flight round
 was terminated and excluded, then restarted as round 13. Remaining rounds ran in
 four two-run permits, releasing and rejoining the normal queue between chunks.
