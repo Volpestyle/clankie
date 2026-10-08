@@ -220,6 +220,8 @@ export {
   type WorkerReportRouting,
   WorkerBridgeStatusSchema,
   type WorkerBridgeStatus,
+  FleetSeatWaitingMessagesSchema,
+  type FleetSeatWaitingMessages,
   OperatorFleetSeatSchema,
   type OperatorFleetSeat,
   OperatorSeatDayTallySchema,

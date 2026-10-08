@@ -1125,6 +1125,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // as a channel event; an unbound one reports unavailable delivery.
   const fleetMailboxes = new Map<string, SeatOutbox>();
   const nextTurnMailboxes = new NextTurnMailbox(join(options.stateDir, "next-turn-mailboxes.json"));
+  async function publishWaitingNotice(seat: string, binding: string | undefined, pane: string) {
+    const notice = nextTurnMailboxes.waitingNotice(seat, binding, pane);
+    if (!notice) return;
+    await conversations.mailOwnerUpdate(
+      conversations.defaultGlobalConversationId(),
+      notice.draft,
+      notice.publicationId,
+      { current: () => !shutdown.signal.aborted },
+    );
+  }
+
   let headSeat: ObservedHeadSeat | undefined;
 
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
@@ -2431,7 +2442,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           deliveryStage: "rejected",
           detail: "Peer authority changed before mailbox storage; nothing was sent.",
         };
-      return nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
+      const receipt = nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
+      fleetChanges.touch();
+      if (agent)
+        await publishWaitingNotice(seatId, inboundBinding(agent), agent.paneId).catch(() => undefined);
+      return receipt;
     };
     const deliver = () =>
       deliveryOptions || context.delivery
@@ -2960,6 +2975,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const fleetId = qualified?.fleet ?? "default";
       const pane = qualified?.id ?? observed.paneId;
       if (options.workerBridgeStatus) seat.workerTools = options.workerBridgeStatus(fleetId, pane);
+      seat.waitingMessages = nextTurnMailboxes.waiting(
+        observed.seatId,
+        inboundBinding(observedAgent(observed)),
+      );
+      await publishWaitingNotice(
+        observed.seatId,
+        inboundBinding(observedAgent(observed)),
+        observed.paneId,
+      ).catch(() => undefined);
       const pluginVersion = seat.workerTools?.pluginVersion;
       if (
         !qualified &&
@@ -2985,6 +3009,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.harnessBridge,
         seat.workerTools,
         seat.workerReportBridge,
+        seat.waitingMessages,
         seat.status,
         seat.summary,
       ]),
@@ -5145,11 +5170,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         nextTurnMailboxes.observe(agent.terminalId, binding, receiver);
         if (hook.deliveredMessageIds) {
           nextTurnMailboxes.acknowledge(agent.terminalId, binding, hook.deliveredMessageIds);
+          fleetChanges.touch();
           return true;
         }
         const additionalContext =
           hook.event === "UserPromptSubmit" ? nextTurnMailboxes.take(agent.terminalId, binding) : undefined;
-        if (additionalContext) return { recorded: true, ...additionalContext };
+        if (additionalContext) {
+          fleetChanges.touch();
+          return { recorded: true, ...additionalContext };
+        }
       }
       return true;
     },

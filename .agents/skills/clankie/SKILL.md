@@ -344,7 +344,14 @@ Describe what the receipt establishes:
 
 Claude sessions with an observed, process/session-bound worker prompt hook can
 receive held replies once at the next `UserPromptSubmit` without `--channels`.
-A live channel can deliver immediately. No observed compatible receiver means
+A live channel can deliver immediately only when Claude was launched with
+`--channels plugin:clankie-worker@clankie` and the policy allows it; installing
+or reconnecting the plugin alone does not enable a channel in an original
+process. Queued originals carry `waitingMessages` on the owner roster and a
+body-free owner update naming the pane. `stored` awaits the next prompt;
+`unconfirmed` awaits hook output acknowledgment and must not be replayed.
+The TUI keeps an idle lead with either state visible. Never type a fallback draft
+into a pane to compensate for missing native delivery. No observed compatible receiver means
 unavailable; a later pane occupant cannot inherit earlier mail. Codex's worker
 plugin supplies tools and skills, not a Claude-style next-turn hook; inspect its
 actual native control receipt separately.

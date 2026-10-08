@@ -349,7 +349,13 @@ authority, as described above; attachment does not grant operator tools. Every
 fleet seat has a mailbox of its own, and a Claude Code seat launched with the
 channel runs `clankie mcp --seat`, a channel-only bridge that polls it: a DM or
 room turn then lands as a channel event instead of keystrokes typed into the
-pane's pty. Local briefed Codex hires use a dedicated app-server: the native TUI
+pane's pty. An original Claude process without channel approval can receive
+only through its observed next-prompt hook. Pending originals are durable,
+body-free `waitingMessages` metadata on the owner roster and are highlighted in
+the TUI even while idle. A durable owner update names the waiting pane; roster
+state clears when the hook acknowledges output, the mail expires or the native
+recipient changes. A hook take without acknowledgment stays unconfirmed and is
+never replayed. Local briefed Codex hires use a dedicated app-server: the native TUI
 creates the session, `turn/start` and `turn/steer` deliver messages, and
 `turn/completed` supplies completion. A native Codex TUI in Herdr connects to
 that same server and thread for viewing and owner takeover. The app-server runs

@@ -711,3 +711,21 @@ it("keeps dock rows to what needs a look and leaves healthy, unknown and report 
   expect(detail).toContain("tools catalog served");
   expect(detail).toContain("report unknown");
 });
+
+it("makes an idle remote lead with queued mail visible and keeps narrow rows bounded", () => {
+  const lead = agent("lead", true);
+  lead.seat.status = "idle";
+  lead.seat.harness = "claude";
+  lead.seat.waitingMessages = {
+    stored: 1,
+    unconfirmed: 0,
+    oldestAt: "2026-10-08T22:38:00.000Z",
+    expiresAt: "2026-10-09T22:38:00.000Z",
+    detail: "Waiting for this session's next user prompt; no replay.",
+  };
+  const strip = new LiveAgentStrip(() => [lead], theme);
+  expect(expandedRows(strip, 240)).toContain("1 message(s) waiting for next prompt");
+  for (const width of [24, 40, 100]) {
+    expect(strip.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
+  }
+});

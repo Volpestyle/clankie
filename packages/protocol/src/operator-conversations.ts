@@ -827,6 +827,18 @@ export const WorkerBridgeStatusSchema = z
   .strict();
 export type WorkerBridgeStatus = z.infer<typeof WorkerBridgeStatusSchema>;
 
+/** Host-journal delivery evidence; no message bodies or claim of model consumption. */
+export const FleetSeatWaitingMessagesSchema = z
+  .object({
+    stored: z.number().int().min(0).max(100),
+    unconfirmed: z.number().int().min(0).max(100),
+    oldestAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+    detail: z.string().max(512),
+  })
+  .strict();
+export type FleetSeatWaitingMessages = z.infer<typeof FleetSeatWaitingMessagesSchema>;
+
 export const OperatorFleetSeatSchema = z
   .object({
     /** Cached owner repository observation; not freshness admission proof. */
@@ -837,6 +849,8 @@ export const OperatorFleetSeatSchema = z
     toolCatalog: FleetSeatToolCatalogHealthSchema.optional(),
     /** Authenticated bridge/catalog observations only; not proof that the harness loaded its tools. */
     workerTools: WorkerBridgeStatusSchema.optional(),
+    /** Original next-turn mail awaiting a hook or its native output acknowledgment. */
+    waitingMessages: FleetSeatWaitingMessagesSchema.optional(),
     /** Sender receipt health is independent of the served tool catalog. */
     workerReportBridge: WorkerReportBridgeStatusSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),

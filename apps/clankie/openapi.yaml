@@ -6662,7 +6662,19 @@ components:
               harness: { type: string, minLength: 1, maxLength: 128 }
               status: { type: string, minLength: 1, maxLength: 128 }
               title: { type: string, maxLength: 256 }
+              waitingMessages: { $ref: "#/components/schemas/FleetSeatWaitingMessages" }
               efficiency: { $ref: "#/components/schemas/OperatorSeatEfficiency" }
+    FleetSeatWaitingMessages:
+      type: object
+      additionalProperties: false
+      required: [stored, unconfirmed, oldestAt, expiresAt, detail]
+      description: Original next-turn journal metadata, without message bodies or model-consumption claims
+      properties:
+        stored: { type: integer, minimum: 0, maximum: 100 }
+        unconfirmed: { type: integer, minimum: 0, maximum: 100 }
+        oldestAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        detail: { type: string, maxLength: 512 }
     OperatorSeatEfficiency:
       type: object
       additionalProperties: false

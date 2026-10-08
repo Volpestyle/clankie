@@ -200,6 +200,7 @@ export async function withFleetAgentHealth(stdout: string, options: HerdrConnect
         owner,
         ...(seat.owner === undefined ? {} : { hired: seat.owner.hired }),
         ...(env.CLANKIE_CONVERSATION_ID ? { mine: owner === env.CLANKIE_CONVERSATION_ID } : {}),
+        ...(seat.waitingMessages ? { waitingMessages: seat.waitingMessages } : {}),
         ...(seat.workerReportBridge ? { workerReportBridge: seat.workerReportBridge } : {}),
         ...(seat.efficiency?.flags.includes("finished, unreported")
           ? { reportFlags: ["finished, unreported"] }

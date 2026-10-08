@@ -109,6 +109,11 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, detail = false): str
   const paintHarness = harness === "claude" ? theme.ansi.yellow : theme.ansi.blue;
   return [
     paintHarness(harness),
+    seat.waitingMessages
+      ? theme.ansi.red(
+          `${seat.waitingMessages.stored} message(s) waiting for next prompt · ${seat.waitingMessages.unconfirmed} handoff(s) unconfirmed${detail ? ` · ${clean(seat.waitingMessages.detail)}` : ""}`,
+        )
+      : undefined,
     detail &&
     seat.workerReports?.some(
       (report) => report.state === "pending" || report.state === "uncertain" || report.state === "attempting",
@@ -143,6 +148,7 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, detail = false): str
 /** Blocked or broken first, then running, then finished; idle seats only count. */
 function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
   if (
+    agent.seat.waitingMessages ||
     agent.seat.efficiency?.flags.length ||
     agent.seat.status === "blocked" ||
     bridgeWarning(agent, theme) !== undefined ||

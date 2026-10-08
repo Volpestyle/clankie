@@ -1,3 +1,4 @@
+import type { FleetSeatWaitingMessages, OwnerUpdateDraft } from "@clankie/protocol";
 import { z } from "zod";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { randomUUID, createHash } from "node:crypto";
@@ -80,6 +81,45 @@ export class NextTurnMailbox {
           : [],
     };
     this.save();
+  }
+
+  /** Read only metadata for the original occupant, including persisted mail after restart. */
+  waiting(seat: string, binding: string | undefined): FleetSeatWaitingMessages | undefined {
+    const pending = this.pending(seat, binding);
+    if (!pending.length) return undefined;
+    return {
+      stored: pending.filter((mail) => !mail.taken).length,
+      unconfirmed: pending.filter((mail) => mail.taken).length,
+      oldestAt: new Date(Math.min(...pending.map((mail) => mail.expiresAt - TTL_MS))).toISOString(),
+      expiresAt: new Date(Math.min(...pending.map((mail) => mail.expiresAt))).toISOString(),
+      detail:
+        "Stored mail waits for this session's next UserPromptSubmit; a taken message awaits its output acknowledgment. Neither proves model consumption. Do not replay uncertain mail.",
+    };
+  }
+
+  /** Stable, body-free owner notice. The owner mailbox deduplicates across restarts. */
+  waitingNotice(
+    seat: string,
+    binding: string | undefined,
+    pane: string,
+  ): { publicationId: string; draft: OwnerUpdateDraft } | undefined {
+    const first = this.pending(seat, binding).find((mail) => !mail.taken);
+    if (!first) return undefined;
+    return {
+      publicationId: first.id,
+      draft: {
+        seatId: seat,
+        title: `Message waiting in ${pane}`.slice(0, 200),
+        body: `A message was stored for ${pane} because live native delivery was unavailable. It waits for that original session's next user prompt and expires within 24 hours. No terminal input was sent. Check the fleet roster for the current queue and handoff state. Enabling Claude's worker channel requires starting Claude with --channels plugin:clankie-worker@clankie; do not restart an existing lane without authority.`,
+      },
+    };
+  }
+
+  private pending(seat: string, binding: string | undefined): Inbox["mail"] {
+    const inbox = this.inboxes[seat];
+    return !this.unreadable && binding && inbox?.binding === binding && inbox.expiresAt > this.now()
+      ? inbox.mail.filter((mail) => !mail.delivered && mail.expiresAt > this.now())
+      : [];
   }
 
   /** Read one exact original acknowledgment without taking, storing or replaying mail. */

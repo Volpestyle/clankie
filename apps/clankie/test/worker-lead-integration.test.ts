@@ -19,6 +19,7 @@ import type { ConversationOwner } from "../src/captain/conversation-owner.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
+import { NextTurnMailbox } from "../src/captain/next-turn-mailbox.ts";
 import {
   HerdrWatchStore,
   type HerdrAgentSnapshot,
@@ -627,4 +628,24 @@ it("a room-owned report reaches its attached room and posts its answer through t
     received: true,
   });
   expect(f.execute).toHaveBeenCalledOnce();
+});
+
+it("projects persisted original waiting-mail metadata into the owner roster without draining it", async () => {
+  const f = await fixture({ remote: true });
+  const binding = await f.captain.fleetSeatMessageBinding(f.agent.paneId);
+  expect(binding).toBeTruthy();
+  await f.captain.close();
+  const journal = new NextTurnMailbox(join(f.root, "next-turn-mailboxes.json"));
+  journal.observe(f.agent.terminalId, binding!);
+  journal.store(f.agent.terminalId, binding!, "private waiting original");
+  const restarted = f.open();
+  const roster = await restarted.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+  if (roster.op !== "roster") throw new Error("wrong roster response");
+  const seat = roster.seats.find((entry) => entry.seatId === f.agent.terminalId)!;
+  expect(OperatorFleetSeatSchema.parse(seat).waitingMessages).toMatchObject({ stored: 1, unconfirmed: 0 });
+  expect(JSON.stringify(seat)).not.toContain("private waiting original");
+  expect(
+    new NextTurnMailbox(join(f.root, "next-turn-mailboxes.json")).take(f.agent.terminalId, binding!)
+      ?.additionalContext,
+  ).toContain("private waiting original");
 });

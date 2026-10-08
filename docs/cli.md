@@ -5144,6 +5144,17 @@ That receipt means bridge delivery, not model consumption. A lost handoff remain
 `uncertain` and is never automatically replayed. Sessions without an observed
 receiver remain unavailable.
 
+Queued originals are exposed as `waitingMessages` on the owner fleet roster:
+`stored` waits for the next prompt; `unconfirmed` means the hook took mail but
+has not acknowledged writing its output. The TUI highlights these seats even
+when idle, and a durable owner update names the waiting pane without copying
+message bodies. Restarting the service preserves these warnings; acknowledgment,
+expiry or replacement of the native recipient clears the current roster warning.
+A channel can wake an idle Claude session only when Claude was started with
+`--channels plugin:clankie-worker@clankie` and policy permits it. Installing the
+plugin or enabling policy alone does not enable channels in an existing process.
+The service never repairs an unavailable channel by typing a draft into a pane.
+
 ### Native seat transcript sync
 
 `clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The
