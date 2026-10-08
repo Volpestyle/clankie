@@ -123,7 +123,7 @@ export class DeployHolds {
     id: string,
     actor: string,
     reason: string,
-    expected?: Pick<DeployHold, "holder" | "reason" | "pane" | "seat">,
+    expected?: Pick<DeployHold, "holder" | "reason" | "pane" | "seat"> & { createdAt?: string },
   ): Promise<DeployHold[]> {
     return withDirectoryLock(join(this.directory, "landing.lock"), async () => {
       const registry = await this.read();
@@ -134,7 +134,8 @@ export class DeployHolds {
         (hold.holder !== expected.holder ||
           hold.reason !== expected.reason ||
           hold.pane !== expected.pane ||
-          hold.seat !== expected.seat)
+          hold.seat !== expected.seat ||
+          (expected.createdAt !== undefined && hold.createdAt !== expected.createdAt))
       )
         throw Error("Hold ownership changed before release");
       registry.events.push({
@@ -154,7 +155,7 @@ export class DeployHolds {
   async landing<T>(
     operation: string,
     overrides: HoldOverride[],
-    work: () => Promise<T>,
+    work: (overriddenHolds: DeployHold[]) => Promise<T>,
     admission?: {
       overrideAll?: { actor: string; reason: string };
       guard: () => Promise<void>;
@@ -183,7 +184,7 @@ export class DeployHolds {
           operation,
         });
       if (overrides.length) await durableJson(this.path, registry, admission?.guard);
-      return work();
+      return work(registry.holds.filter((hold) => ids.has(hold.id)));
     });
   }
 }

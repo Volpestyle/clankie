@@ -310,9 +310,9 @@ export function createRuntimeUpdateRoutes(options: {
         await authority.guard();
         if (!authority.current()) throw Error("operator_revoked");
       };
-      const deploy = async () => {
+      const deploy = async (overriddenHolds: DeployHeldError["holds"] = []) => {
         await guard();
-        return options.updater!.request(parsed.data.ref ?? "main", authority);
+        return options.updater!.request(parsed.data.ref ?? "main", { ...authority, overriddenHolds });
       };
       if (!options.holds && (parsed.data.overrideHolds || parsed.data.overrides.length))
         throw Error("Deploy holds unavailable");

@@ -108,7 +108,7 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
       await authority.guard();
       if (!authority.current()) throw Error("Update authority expired");
       initialize();
-      if (!journal.admit()) return { ...status(), accepted: false };
+      if (!journal.admit()) return { ...status(), accepted: false, blockedReason: "update-in-progress" };
       if (currentRelease(installRoot) !== releaseRoot)
         throw Error("Running service is not the current release");
       const version = await resolveRelease(ref);
@@ -147,6 +147,8 @@ export function createReleaseUpdater(options: ReleaseUpdaterOptions): RuntimeUpd
       mkdirSync(directory, { mode: 0o700 });
       let accepted = false;
       try {
+        if (authority.overriddenHolds?.length)
+          writePrivateJson(join(directory, "overridden-holds.json"), authority.overriddenHolds);
         writePrivateJson(join(directory, "plan.json"), plan);
         await authority.guard();
         if (!authority.current()) throw Error("Update authority expired");

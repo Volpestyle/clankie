@@ -679,7 +679,7 @@ paths:
         "200":
           {
             description: Runtime boot identity,
-            durable operation status,
+            durable operation status (pending excludes completed operations),
             holds with canary causes and measurements,
             and optional target preview,
           }
@@ -714,7 +714,8 @@ paths:
                   }
       responses:
         "202": { description: Accepted durable update, not completed deployment }
-        "409": { description: Named deploy hold or other refusal; detail describes the blocker }
+        "409": { description: Named deploy hold or other refusal; detail describes hold/admission failures;
+              accepted false names blockedReason update-in-progress or runtime-maintenance-busy }
         "403": { description: Operator required or revoked }
         "400": { description: Invalid update request }
         "503": { description: Runtime updater unavailable }

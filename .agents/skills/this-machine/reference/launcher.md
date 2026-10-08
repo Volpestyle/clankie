@@ -130,13 +130,14 @@ without verified health (30 seconds by default) or at the window's end.
 Recovered samples clear the temporary error; failed samples never count as
 healthy observation. Do not claim a rollback or successful delivery
 from a claimed receipt. Rollback is the owner's decision. A full pass clears
-only its own canary hold. Source installs then inspect runtime-worktree retention:
+its own canary hold and verified older canary holds admitted by that update
+override or superseded through the recorded installed-runtime chain. Source installs then inspect runtime-worktree retention:
 keep current and immediate previous, protect live/canary/recovery dependencies,
 and remove only verified obsolete worktrees without force. `update status --json`
 shows `retention`; full effect evidence stays in the private updates directory's
 `retention.log`. Operation/receipt evidence and worker worktrees stay intact.
 Unreadable state, incomplete process observations and an uncertain maintenance
-lock refuse cleanup; never remove that lock based on age. Historical, independent and unreadable holds still
+lock refuse cleanup; never remove that lock based on age. Independent, changed-owner and unreadable holds still
 block until the owner explicitly releases them. Terminal output groups
 holds by cause; `--json` or piped output keeps structured results. Only the
 authenticated owner can use `clankie update --override-holds --reason TEXT`,
@@ -154,7 +155,17 @@ explicitly released after review with `clankie integrate release UUID --actor
 NAME --reason TEXT`. Read the full UUID from update status or `clankie integrate
 holds`; release audits the actor and reason, leaving the historical failure
 intact. An owner update override leaves the hold recorded and authorizes only
-that update; a later passing canary never releases an older failed hold.
+that update. Its full canary pass releases the exact overridden canary holds;
+a superseding full pass also releases verified canary holds from its recorded
+runtime predecessors. Historical failed results stay failed. Recovery repeats
+this cleanup even if the passing canary already released its own hold.
+Completed operations are no longer reported as `pending`; the next update
+retires their terminal lock. A refusal names `blockedReason`: an in-progress
+operation or busy runtime maintenance. An override cannot bypass either.
+On an older running version, explicitly release the reviewed stale hold first,
+then run `clankie update --ref main --json` and check `accepted: true`. A confirmed
+`accepted: false` is a refusal, not an uncertain send; inspect its reason before
+retrying. Never edit update journals or remove locks to recover.
 
 `source-managed: needs setup in <home>` is a refused installer refresh, not a
 failed active thread refresh. Update status names the local/remote homes in

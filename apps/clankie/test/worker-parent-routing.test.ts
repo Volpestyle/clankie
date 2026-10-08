@@ -451,9 +451,9 @@ async function poll(service: Service, conversationId: string) {
 }
 
 function metas(root: string) {
-  return readdirSync(join(root, "conversations")).map((id) =>
-    JSON.parse(readFileSync(join(root, "conversations", id, "meta.json"), "utf8")),
-  );
+  return readdirSync(join(root, "conversations"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => JSON.parse(readFileSync(join(root, "conversations", entry.name, "meta.json"), "utf8")));
 }
 
 function accepted(root: string, id: string) {

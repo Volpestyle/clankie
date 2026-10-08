@@ -11,7 +11,7 @@ import {
 import { object, operationId, privateDirectory, readPrivateJson } from "../../tui/bin/update-files.ts";
 import { DeployHolds, durableJson, withDirectoryLock } from "./deploy-holds.ts";
 import { RuntimeHealthSampleSchema, type RuntimeHealthSample } from "./runtime-health-sample.ts";
-import type { DeployHold } from "@clankie/protocol/integrate";
+import { DeployHoldSchema, type DeployHold } from "@clankie/protocol/integrate";
 
 export const RuntimeCanaryPolicySchema = z
   .strictObject({
@@ -481,10 +481,6 @@ export class RuntimeCanary {
 
   private async releasePassed(result: RuntimeUpdateResult): Promise<void> {
     if (!result.canary || result.canary.state !== "passed") return;
-    if (result.canary.holdReleased === true) {
-      await this.options.onPassed?.().catch((error) => this.options.onError?.(error));
-      return;
-    }
     if (result.newCommit !== this.options.runtime.commit)
       throw Error("Passed runtime canary does not match the running commit");
     const wanted = this.hold(result, this.previousHealthy(result));
@@ -501,14 +497,79 @@ export class RuntimeCanary {
         wanted.id,
         HOLDER,
         "Runtime canary passed its full health and latency window",
-        wanted,
+        existing,
       );
     }
-    await durableJson(join(this.options.updatesDirectory, "healthy-canary.json"), {
-      commit: result.newCommit,
-    });
-    await this.save(result, { ...result.canary, holdReleased: true });
+    // Retry on recovery even when this canary released its own hold before the process exited.
+    await this.releaseSuperseded(result);
+    if (result.canary.holdReleased !== true) {
+      await durableJson(join(this.options.updatesDirectory, "healthy-canary.json"), {
+        commit: result.newCommit,
+      });
+      await this.save(result, { ...result.canary, holdReleased: true });
+    }
     await this.options.onPassed?.().catch((error) => this.options.onError?.(error));
+  }
+
+  private async releaseSuperseded(passed: RuntimeUpdateResult): Promise<void> {
+    const overridePath = join(this.options.updatesDirectory, passed.id, "overridden-holds.json");
+    // An unreadable admitted override snapshot is uncertainty, never authority to remove a hold.
+    const overridden = existsSync(overridePath)
+      ? z.array(DeployHoldSchema).parse(readPrivateJson(overridePath))
+      : [];
+    const records: RuntimeUpdateResult[] = [];
+    const startedAt = Date.parse(passed.canary?.startedAt ?? passed.updatedAt);
+    for (const entry of readdirSync(this.options.updatesDirectory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === passed.id) continue;
+      try {
+        const candidate = readRuntimeUpdate(join(this.options.updatesDirectory, operationId(entry.name)));
+        if (
+          candidate.id === entry.name &&
+          candidate.phase === "healthy" &&
+          Date.parse(candidate.updatedAt) <= startedAt
+        )
+          records.push(candidate);
+      } catch {
+        // Missing or unreadable provenance cannot authorize a release.
+      }
+    }
+    // Walk the actual installed-runtime chain, rather than treating every old hold as superseded.
+    const commits = new Set([passed.newCommit, passed.oldCommit]);
+    let size: number;
+    do {
+      size = commits.size;
+      for (const record of records) if (commits.has(record.newCommit)) commits.add(record.oldCommit);
+    } while (commits.size !== size);
+    for (const existing of await this.options.holds.list()) {
+      if (
+        existing.id === passed.id ||
+        existing.holder !== HOLDER ||
+        existing.pane ||
+        existing.seat ||
+        Date.parse(existing.createdAt) > startedAt
+      )
+        continue;
+      const record = records.find((candidate) => candidate.id === existing.id);
+      if (!record?.canary) continue;
+      const wanted = this.hold(record, this.previousHealthy(record));
+      if (existing.reason !== wanted.reason) continue;
+      const admitted = overridden.some(
+        (hold) =>
+          hold.id === existing.id &&
+          hold.holder === existing.holder &&
+          hold.reason === existing.reason &&
+          hold.createdAt === existing.createdAt &&
+          !hold.pane &&
+          !hold.seat,
+      );
+      if (!admitted && !commits.has(record.newCommit)) continue;
+      await this.options.holds.release(
+        existing.id,
+        HOLDER,
+        `Runtime canary ${passed.id} passed and superseded this observation`,
+        existing,
+      );
+    }
   }
 
   private async releasePrehealthyRollback(result: RuntimeUpdateResult): Promise<void> {

@@ -522,7 +522,11 @@ it("retains the last passed checkpoint when an owner advances past a failed cand
   );
   await stop(first.child);
   const holds = new DeployHolds(join(f.root, "integration"));
-  await holds.release(f.id, "Owner", "Reviewed advance to the next candidate");
+  await holds.landing(
+    "next-candidate",
+    [{ holdId: f.id, actor: "Owner", reason: "Reviewed advance to the next candidate" }],
+    async () => {},
+  );
   const nextId = randomUUID();
   await mkdir(join(f.updates, nextId), { mode: 0o700 });
   writeRuntimeUpdate(join(f.updates, nextId), {
@@ -541,7 +545,7 @@ it("retains the last passed checkpoint when an owner advances past a failed cand
   expect(failed.result.canary?.error).toBe("runtime-canary-latency-budget-exceeded");
   expect(failed.result.canary?.previousHealthyCommit).toBe("a".repeat(40));
   expect(failed.checkpoint).toEqual({ commit: "a".repeat(40) });
-  expect(failed.holds.map((hold) => hold.id)).toEqual([nextId]);
+  expect(failed.holds.map((hold) => hold.id)).toEqual([f.id, nextId]);
   expect(readRuntimeUpdate(join(f.updates, f.id)).canary?.state).toBe("failed");
   const notifications = await alerts(f.root);
   expect(notifications).toHaveLength(2);
@@ -656,4 +660,52 @@ it("preserves a changed hold owner after a confirmed pre-canary rollback", async
   ]);
   await expect(previous.call("landing")).rejects.toThrow("Replacement review hold");
   expect(recovered.checkpoint).toEqual({ commit: "a".repeat(40) });
+});
+
+it.each(["override", "lineage"] as const)(
+  "recovers an already released passing canary and audits its stale %s hold without touching independent holds",
+  async (proof) => {
+    const f = await fixture();
+    const older = await olderFailedHold(f, "runtime-canary-health-unavailable");
+    const holds = new DeployHolds(join(f.root, "integration"));
+    const snapshot = (await holds.list()).find((hold) => hold.id === older)!;
+    const foreign = { id: randomUUID(), holder: "Owner", reason: "Independent release review" };
+    const unreadable = { id: randomUUID(), holder: "Clankie runtime canary", reason: "Missing provenance" };
+    await holds.acquire(foreign);
+    await holds.acquire(unreadable);
+    const result = readRuntimeUpdate(join(f.updates, f.id));
+    writeRuntimeUpdate(join(f.updates, f.id), {
+      ...result,
+      oldCommit: proof === "lineage" ? "d".repeat(40) : result.oldCommit,
+      canary: { state: "passed", holdReleased: true, previousHealthyCommit: "a".repeat(40) },
+      updatedAt: new Date().toISOString(),
+    });
+    if (proof === "override") writePrivateJson(join(f.updates, f.id, "overridden-holds.json"), [snapshot]);
+    const service = await start(f.root);
+    expect((await service.status()).holds.map((hold) => hold.id)).toEqual([foreign.id, unreadable.id]);
+    expect(readRuntimeUpdate(join(f.updates, older)).canary?.state).toBe("failed");
+    const registry = JSON.parse(await readFile(join(f.root, "integration/holds.json"), "utf8"));
+    expect(registry.events.filter((event: { action: string }) => event.action === "release")).toEqual([
+      expect.objectContaining({
+        hold: expect.objectContaining({ id: older }),
+        reason: expect.stringContaining(f.id),
+      }),
+    ]);
+    await stop(service.child);
+    const restarted = await start(f.root);
+    expect((await restarted.status()).holds.map((hold) => hold.id)).toEqual([foreign.id, unreadable.id]);
+    await expect(restarted.call("landing")).rejects.toThrow("Independent release review");
+  },
+);
+
+it("retains an overridden canary hold whose ownership changed before the replacement passed", async () => {
+  const f = await fixture();
+  const older = await olderFailedHold(f);
+  const holds = new DeployHolds(join(f.root, "integration"));
+  writePrivateJson(join(f.updates, f.id, "overridden-holds.json"), await holds.list());
+  await holds.release(older, "Owner", "Transfer the hold for independent review");
+  await holds.acquire({ id: older, holder: "Integrator", reason: "Independent review" });
+  const service = await start(f.root);
+  const passed = await waitFor(service, "passed");
+  expect(passed.holds).toMatchObject([{ id: older, holder: "Integrator", reason: "Independent review" }]);
 });

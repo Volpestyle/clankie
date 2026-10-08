@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -18,6 +18,13 @@ import { join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createReleaseUpdater } from "../bin/release-updater.ts";
 import { readRuntimeUpdate, writeRuntimeUpdate, type RuntimeUpdateResult } from "../bin/runtime-update.ts";
+import { DeployHolds } from "../../clankie/src/deploy-holds.ts";
+import { RuntimeCanary } from "../../clankie/src/runtime-canary.ts";
+import { createRuntimeHealthSampler } from "../../clankie/src/runtime-health-sample.ts";
+import { createRuntimeUpdateRoutes } from "../../clankie/src/runtime-update-routes.ts";
+import { createBearerAuthenticator } from "../../clankie/src/app/http-auth.ts";
+import { writePrivateJson } from "../bin/update-files.ts";
+import { runUpdateCommand } from "../src/command/update.ts";
 import { startScheduledUpdates } from "../../clankie/src/scheduled-update.ts";
 
 const cleanup: Array<() => void> = [];
@@ -117,16 +124,21 @@ async function fixture(
   let digest = input.badChecksum
     ? "0".repeat(64)
     : createHash("sha256").update(readFileSync(archive)).digest("hex");
+  let publishedVersion = "v1.1.0";
+  let publishedCommit = "b".repeat(40);
   const server: Server = createServer((request, response) => {
     const send = (status: number, body: string | Buffer) => {
       response.writeHead(status);
       response.end(body);
     };
     if (request.url === "/app.tar.gz") return send(200, readFileSync(join(home, "app.tar.gz")));
-    if (request.url === "/api/releases/latest") return send(200, JSON.stringify({ tag_name: "v1.1.0" }));
-    if (request.url === "/api/commits/v1.1.0") return send(200, JSON.stringify({ sha: "b".repeat(40) }));
-    if (request.url === `/download/v1.1.0/${archiveName}`) return send(200, readFileSync(archive));
-    if (request.url === `/download/v1.1.0/${archiveName}.sha256`)
+    if (request.url === "/api/releases/latest")
+      return send(200, JSON.stringify({ tag_name: publishedVersion }));
+    if (request.url === `/api/commits/${publishedVersion}`)
+      return send(200, JSON.stringify({ sha: publishedCommit }));
+    if (request.url === `/download/${publishedVersion}/${archiveName}`)
+      return send(200, readFileSync(archive));
+    if (request.url === `/download/${publishedVersion}/${archiveName}.sha256`)
       return send(200, `${digest}  ${archiveName}\n`);
     send(404, "missing");
   });
@@ -194,7 +206,14 @@ async function fixture(
           .split("\n")
           .map((line) => JSON.parse(line))
       : [];
-  return { home, install, old, updater, settled, calls, applications };
+  const publishNext = () => {
+    publishedVersion = "v1.2.0";
+    publishedCommit = "c".repeat(40);
+    writeRelease(join(published, "clankie"), publishedVersion, publishedCommit);
+    execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
+    digest = createHash("sha256").update(readFileSync(archive)).digest("hex");
+  };
+  return { home, install, old, updater, settled, calls, applications, publishNext };
 }
 
 it("updates a release install to the latest official release and then reports it current", async () => {
@@ -432,3 +451,139 @@ it("failed runtime health leaves the staged app uninstalled", async () => {
   expect(existsSync(join(f.applications, "Clankie.app"))).toBe(false);
   expect(existsSync(join(f.applications, ".clankie-app-install.lock"))).toBe(false);
 });
+
+it("failed canary → owner override deploy → passing canary → next deploy schedules without an override", async () => {
+  const f = await fixture();
+  const updates = join(f.home, ".clankie", "updates");
+  const holds = new DeployHolds(join(f.home, "integration"));
+  const failedId = randomUUID();
+  mkdirSync(join(updates, failedId), { recursive: true, mode: 0o700 });
+  mkdirSync(join(updates, "active"), { mode: 0o700 });
+  writePrivateJson(join(updates, "active", "operation.json"), { id: failedId });
+  writePrivateJson(join(updates, "latest.json"), { id: failedId });
+  writePrivateJson(join(updates, "canary-policy.json"), {
+    windowMs: 1000,
+    sampleIntervalMs: 400,
+    cpuPercent: 10000,
+    healthLatencyMs: 1000,
+  });
+  writeRuntimeUpdate(join(updates, failedId), {
+    id: failedId,
+    ref: "main",
+    oldCommit: "9".repeat(40),
+    newCommit: "a".repeat(40),
+    phase: "healthy",
+    healthy: true,
+    canary: { state: "pending" },
+    updatedAt: new Date().toISOString(),
+  });
+  let updater = f.updater(f.old);
+  let healthy = false;
+  const authenticate = createBearerAuthenticator("fixture-owner", { operatorId: "fixture-owner" });
+  let routes = createRuntimeUpdateRoutes({
+    updater,
+    holds,
+    authorize: async (request) => {
+      const actor = await authenticate(request);
+      return actor ? { ...authority, initiator: { kind: "cli", operatorId: actor.operatorId } } : undefined;
+    },
+  });
+  const server = createServer(async (request, response) => {
+    if (request.url === "/health") {
+      response.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: healthy, service: "clankie", runtime: updater.runtime }));
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const result = await routes.request(request.url!, {
+      method: request.method ?? "GET",
+      headers: { authorization: request.headers.authorization ?? "", "content-type": "application/json" },
+      ...(chunks.length ? { body: Buffer.concat(chunks).toString("utf8") } : {}),
+    });
+    response.writeHead(result.status, Object.fromEntries(result.headers));
+    response.end(await result.text());
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const host = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  let canary: RuntimeCanary;
+  const observe = async (state: "failed" | "passed") => {
+    canary = new RuntimeCanary({
+      updatesDirectory: updates,
+      runtime: updater.runtime,
+      holds,
+      sample: createRuntimeHealthSampler({ healthUrl: `${host}/health` }),
+    });
+    await canary.recover();
+    canary.start();
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      const result = updater.status().latest!;
+      if (
+        result.canary?.state === state &&
+        (state === "failed" ? result.canary.holdEstablished : result.canary.holdReleased)
+      )
+        return result;
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    throw Error(`Canary did not finish: ${JSON.stringify(updater.status())}`);
+  };
+  const cli = { host, env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" } };
+  try {
+    const failed = await observe("failed");
+    await canary!.close();
+    expect(failed.canary!.samples).toBe(0);
+    expect(updater.status().pending).toBeUndefined();
+    expect(await holds.list()).toMatchObject([{ id: failedId }]);
+    expect(await runUpdateCommand([], cli)).toMatchObject({ error: "update_refused" });
+    const override = (await runUpdateCommand(
+      ["--override-holds", "--reason", "Reviewed failed health; try replacement"],
+      cli,
+    )) as { accepted: boolean; pending: string };
+    expect(override.accepted).toBe(true);
+    expect(await holds.list()).toMatchObject([{ id: failedId }]);
+    expect(
+      JSON.parse(readFileSync(join(updates, override.pending, "overridden-holds.json"), "utf8")),
+    ).toMatchObject([{ id: failedId }]);
+    expect(await f.settled(override.pending)).toMatchObject({
+      phase: "healthy",
+      canary: { state: "pending" },
+    });
+    updater = f.updater(join(f.install, "releases", "v1.1.0"));
+    healthy = true;
+    const passed = await observe("passed");
+    await canary!.close();
+    expect(passed.canary!.samples).toBeGreaterThanOrEqual(2);
+    expect(
+      Date.parse(passed.canary!.completedAt!) - Date.parse(passed.canary!.startedAt!),
+    ).toBeGreaterThanOrEqual(1000);
+    expect(await holds.list()).toEqual([]);
+    expect(updater.status().pending).toBeUndefined();
+    expect(readRuntimeUpdate(join(updates, failedId)).canary!.state).toBe("failed");
+    const events = JSON.parse(readFileSync(join(f.home, "integration", "holds.json"), "utf8")).events;
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "override",
+          actor: "fixture-owner",
+          hold: expect.objectContaining({ id: failedId }),
+        }),
+        expect.objectContaining({ action: "release", hold: expect.objectContaining({ id: failedId }) }),
+      ]),
+    );
+    f.publishNext();
+    routes = createRuntimeUpdateRoutes({
+      updater,
+      holds,
+      authorize: async (request) => ((await authenticate(request)) ? authority : undefined),
+    });
+    const next = (await runUpdateCommand([], cli)) as { accepted: boolean; pending: string };
+    expect(next.accepted).toBe(true);
+    expect(next.pending).not.toBe(override.pending);
+    expect(await f.settled(next.pending)).toMatchObject({ newCommit: "c".repeat(40), phase: "healthy" });
+  } finally {
+    await canary!.close();
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+  }
+}, 30000);

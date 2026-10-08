@@ -210,7 +210,11 @@ it("bulk override requires a reason, authenticates the actual owner and audits e
   ).rejects.toThrow("(403)");
   expect((await f.audit()).events).toEqual([]);
   const result = await runUpdateCommand(["--override-holds", "--reason", "Reviewed CPU cause"], f.options);
-  expect(result).toMatchObject({ accepted: false, latest: { phase: "installing" } });
+  expect(result).toMatchObject({
+    accepted: false,
+    blockedReason: "update-in-progress",
+    latest: { phase: "installing" },
+  });
   const events = (await f.audit()).events;
   expect(events.map((e) => e.hold.id)).toEqual(f.ids);
   expect(events.every((e) => e.actor === "fixture-owner" && e.reason === "Reviewed CPU cause")).toBe(true);
@@ -344,11 +348,15 @@ it("reads durable scheduled, preparing, draining and failed updates without chan
     }
     const result = (await runUpdateCommand(["status"], f.options)) as {
       latest: RuntimeUpdateResult;
-      pending: string;
+      pending?: string;
       needsReconciliation?: boolean;
     };
     expect(result.latest).toMatchObject(state);
-    expect(result.pending).toBe(f.pending);
+    const completed =
+      state.reconciled !== undefined ||
+      state.reason === "pre-cutover-failed" ||
+      state.canary?.holdReleased === true;
+    expect(result.pending).toBe(completed ? undefined : f.pending);
     expect(result.needsReconciliation === true).toBe(
       ["stop-unconfirmed", "failed"].includes(state.phase!) &&
         state.reason !== "pre-cutover-failed" &&

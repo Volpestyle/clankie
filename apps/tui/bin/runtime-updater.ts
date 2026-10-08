@@ -1,4 +1,5 @@
 import { syncOwnerCheckout } from "@clankie/settings";
+import type { DeployHold } from "@clankie/protocol/integrate";
 import {
   retainRuntimeWorktrees,
   withRuntimeMaintenance,
@@ -49,6 +50,8 @@ export interface UpdateAuthority {
   guard(): Promise<void>;
   current(): boolean;
   readonly initiator?: RuntimeUpdateInitiator;
+  /** Exact registry snapshots admitted under the deploy-hold lock, retained before scheduling. */
+  readonly overriddenHolds?: readonly DeployHold[];
 }
 export interface RuntimeUpdateStatus {
   readonly runtime: RuntimeBootIdentity;
@@ -61,6 +64,7 @@ export interface RuntimeUpdateStatus {
   readonly needsReconciliation?: boolean;
   /** A release install already runs the requested official release. */
   readonly upToDate?: boolean;
+  readonly blockedReason?: "update-in-progress" | "runtime-maintenance-busy";
   readonly error?: "update_record_unreadable";
 }
 export interface RuntimeUpdater {
@@ -238,10 +242,19 @@ export function createUpdateJournal(home: string, boot: RuntimeBootIdentity, act
     try {
       const result = latest();
       const id = activeId();
+      // A terminal journal lock is retired by admission, not by a read. It is no longer pending.
+      const activeResult =
+        id !== undefined && result?.id === id
+          ? result
+          : id !== undefined && existsSync(join(updates, id, "result.json"))
+            ? readRuntimeUpdate(join(updates, id))
+            : undefined;
+      if (activeResult && activeResult.id !== id) throw Error("Active update identity changed");
+      const pending = id !== undefined && (!activeResult || !safeTerminal(activeResult));
       return {
         runtime: boot,
         ...(result === undefined ? {} : { latest: result }),
-        ...(id === undefined ? {} : { pending: id }),
+        ...(pending ? { pending: id } : {}),
         ...(id !== undefined &&
         result?.id === id &&
         ["stop-unconfirmed", "failed"].includes(result.phase) &&
@@ -418,7 +431,8 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
       return withRuntimeMaintenance(updates, async () => {
         if (existsSync(join(updates, RUNTIME_RETENTION_PENDING)))
           throw Error("Runtime retention removal requires owner reconciliation");
-        if (!journal.admit()) return { ...status(), accepted: false };
+        if (!journal.admit())
+          return { ...status(), accepted: false, blockedReason: "update-in-progress" as const };
         const oldCommit = assertPinnedRuntime(checkout, runtimePath, run);
         if (boot.root !== realpathSync(runtimePath) || boot.commit !== oldCommit)
           throw Error("Running service is not the exact pinned runtime");
@@ -443,6 +457,8 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
         mkdirSync(directory, { mode: 0o700 });
         let accepted = false;
         try {
+          if (authority.overriddenHolds?.length)
+            writePrivateJson(join(directory, "overridden-holds.json"), authority.overriddenHolds);
           const plan: RuntimeUpdatePlan = {
             id,
             ref,
@@ -518,7 +534,8 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
           return { ...status(), accepted: true, needsReconciliation: true };
         }
       }).catch((error) => {
-        if (error instanceof RuntimeMaintenanceBusyError) return { ...retainedStatus(), accepted: false };
+        if (error instanceof RuntimeMaintenanceBusyError)
+          return { ...retainedStatus(), accepted: false, blockedReason: "runtime-maintenance-busy" as const };
         throw error;
       });
     },

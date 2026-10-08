@@ -456,7 +456,8 @@ fails the canary: an absolute CPU figure depends on the machine and its fleet.
 beside the previous runtime's recorded mean on this machine, their ratio, and
 whether it exceeds the advisory `cpuPercent` (default 10). Its deploy hold blocks
 further updates and integration landings during observation. A pass releases
-only that canary's hold. A health regression or missing health signal records a
+that canary's hold and verified older canary holds admitted by its override or
+superseded through the recorded installed-runtime chain. A health regression or missing health signal records a
 failed canary, retains the hold, names the
 previous healthy commit, and attempts the runtime-health alert path. The new
 pin keeps running; rollback requires an explicit owner decision. Alert status
@@ -495,8 +496,26 @@ Explicitly release that UUID with
 the release is audited. This does not change the historical failed canary or
 claim it passed. Alternatively, the authenticated owner can authorize one
 update with `clankie update --override-holds --reason "why proceeding is safe"`.
-That override is audited per hold and leaves the holds recorded. A later
-canary's pass releases only its own hold, never this failed candidate's hold.
+That override is audited per hold and retains the holds until the admitted
+update passes its full canary. The pass releases exact overridden canary holds
+and verified canary holds from the recorded installed-runtime predecessors.
+Independent holds, changed owners/reasons and unreadable provenance remain
+blocking. Historical failed canaries stay failed; cleanup adds audited release
+events. Restart recovery retries stale-hold cleanup even if the latest canary
+already released its own hold.
+
+A completed operation is no longer reported as `pending`. Reads leave its
+terminal lock intact; the next admitted update retires it before scheduling.
+`accepted: false` names `blockedReason` (`update-in-progress` or
+`runtime-maintenance-busy`); a hold override cannot bypass either. Let an active
+operation or maintenance finish, or reconcile an uncertain result through the
+normal operator path. Never edit journal files or remove locks by hand.
+
+To deploy this behavior from an older runtime with a reviewed stale canary hold,
+explicitly release that hold using the command above, then run
+`clankie update --ref main --json`. Verify `accepted: true`, finish the turn,
+and read update status afterward. A confirmed `accepted: false` schedules
+nothing; inspect the reason before retrying. A lost response remains uncertain.
 
 `clankie update canary` reads the policy and last canary. Configure the next
 update with `--window-seconds N`, `--sample-seconds N`, `--cpu-percent N`

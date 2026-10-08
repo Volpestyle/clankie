@@ -140,6 +140,21 @@ override authorizes one update and leaves the old hold recorded. See the
 [launcher procedure](../cli.md) for both commands. Neither changes the
 historical failed result or rolls back the runtime.
 
+## Superseded canary holds and finished operations (VUH-1863, 2026-10-08)
+
+An override admitted the replacement but left the older canary hold blocking
+subsequent updates after the replacement passed. Retain exact override snapshots
+inside the accepted operation before helper scheduling. A full passing canary
+releases matching canary holds from that snapshot or its recorded runtime
+predecessors, under the hold registry lock with exact ownership checks. Unrelated,
+changed-owner and unreadable holds stay blocking; failed observations remain
+historically failed. Repeat cleanup during passed-canary recovery, including
+records whose own hold was already released.
+
+Status derives `pending` from nonterminal operations rather than lock presence.
+Reads stay read-only; admission retires terminal locks. A refused update names
+its blocking lifecycle or maintenance reason, including when holds were overridden.
+
 ## Source update repair (VUH-1737, 2026-10-06)
 
 The source updater previously resolved bare `main` from the owner's checkout.

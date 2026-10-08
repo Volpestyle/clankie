@@ -1,4 +1,5 @@
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   mkdtempSync,
@@ -22,7 +23,8 @@ import {
   UNSTARTED_HELPER_GRACE_MS,
   updateHoldingServices,
 } from "../bin/runtime-updater.ts";
-import { writeRuntimeUpdate, runtimeUpdateServices } from "../bin/runtime-update.ts";
+import { writePrivateJson } from "../bin/update-files.ts";
+import { writeRuntimeUpdate, readRuntimeUpdate, runtimeUpdateServices } from "../bin/runtime-update.ts";
 import { createRuntimeUpdateRoutes } from "../../clankie/src/runtime-update-routes.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
 import { runDownCommand, runRestartCommand, runStartCommand } from "../src/command/restart.ts";
@@ -572,3 +574,61 @@ it("a scheduled operation its helper never claimed is retired once the start gra
   expect(service.status().latest).toMatchObject({ phase: "failed", reason: "pre-cutover-failed" });
   expect((await service.request("main", authority)).accepted).toBe(true);
 }, 60_000);
+
+it("reads a finished source update without pending or state writes and schedules the next real helper", async () => {
+  const f = fixture();
+  // Use the native helper path; this new boundary test does not inject a process launcher.
+  const updater = createRuntimeUpdater({ repoRoot: f.runtime, env: { HOME: f.home } });
+  const updates = join(f.home, ".clankie", "updates");
+  const previous = randomUUID();
+  mkdirSync(join(updates, previous), { recursive: true, mode: 0o700 });
+  mkdirSync(join(updates, "active"), { mode: 0o700 });
+  writePrivateJson(join(updates, "active", "operation.json"), { id: previous });
+  writePrivateJson(join(updates, "latest.json"), { id: previous });
+  writeRuntimeUpdate(join(updates, previous), {
+    id: previous,
+    ref: "main",
+    oldCommit: f.old,
+    newCommit: f.old,
+    phase: "healthy",
+    healthy: true,
+    canary: { state: "passed", holdReleased: true },
+    updatedAt: new Date().toISOString(),
+  });
+  const before = readFileSync(join(updates, previous, "result.json"), "utf8");
+  expect(updater.status().pending).toBeUndefined();
+  expect(readFileSync(join(updates, previous, "result.json"), "utf8")).toBe(before);
+  expect(JSON.parse(readFileSync(join(updates, "active", "operation.json"), "utf8"))).toEqual({
+    id: previous,
+  });
+  mkdirSync(join(updates, "maintenance.lock"), { mode: 0o700 });
+  expect(await updater.request("main", authority)).toMatchObject({
+    accepted: false,
+    blockedReason: "runtime-maintenance-busy",
+  });
+  rmSync(join(updates, "maintenance.lock"), { recursive: true });
+  const admittedHold = {
+    id: randomUUID(),
+    holder: "Clankie runtime canary",
+    reason: "Admitted snapshot",
+    createdAt: new Date().toISOString(),
+    presence: "person" as const,
+  };
+  const next = await updater.request("main", { ...authority, overriddenHolds: [admittedHold] });
+  expect(next).toMatchObject({ accepted: true, latest: { newCommit: f.latest, phase: "scheduled" } });
+  expect(next.pending).not.toBe(previous);
+  expect(JSON.parse(readFileSync(join(updates, next.pending!, "overridden-holds.json"), "utf8"))).toEqual([
+    admittedHold,
+  ]);
+  // This tiny Git fixture lacks a Clankie target: the actual detached helper refuses it safely.
+  const deadline = Date.now() + 8000;
+  while (
+    Date.now() < deadline &&
+    ["scheduled", "installing", "stopping", "activating", "restarting"].includes(
+      updater.status().latest?.phase ?? "",
+    )
+  )
+    await new Promise((done) => setTimeout(done, 50));
+  expect(readRuntimeUpdate(join(updates, next.pending!)).phase).toBe("refused");
+  expect(updater.status().pending).toBeUndefined();
+}, 15000);

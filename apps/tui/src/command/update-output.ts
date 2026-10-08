@@ -23,6 +23,7 @@ interface View {
   canaryCpu?: CpuComparison | null;
   cpu?: CpuComparison | null;
   accepted?: boolean;
+  blockedReason?: string;
   upToDate?: boolean;
   pending?: string;
   error?: string;
@@ -224,13 +225,19 @@ export function formatUpdateOutput(input: unknown): string {
       'Review the holds, then as owner run: clankie update --override-holds --reason "why proceeding is safe"',
     );
     lines.push(
-      "Each hold gets its own audited override and remains recorded. Historical holds require an explicit owner release.",
+      "Each hold gets its own audited override. Verified canary holds are released after the admitted canary passes; independent holds require an explicit release.",
     );
   }
   if (view.upToDate) lines.push("Already running the requested official release. No update was scheduled.");
   else if (view.accepted && !view.needsReconciliation)
     lines.push(
       "Update accepted. Finish this turn, then run clankie update status to check health and canary.",
+    );
+  if (view.accepted === false && view.blockedReason)
+    lines.push(
+      view.blockedReason === "runtime-maintenance-busy"
+        ? "No update was scheduled: runtime retention maintenance is busy. Let maintenance finish, then retry."
+        : "No update was scheduled: the original operation is still in progress or requires reconciliation. Read clankie update status.",
     );
   if (view.error && !(groups.size && view.error === "update_refused"))
     lines.push(
