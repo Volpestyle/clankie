@@ -33,6 +33,7 @@ export interface LocalCodexCatalogResult {
   revision: string;
   outcome: "refreshed" | "skipped-busy" | "failed";
   reason?: string;
+  detail?: string;
   catalogs?: { threadId: string; tools: string[] }[];
 }
 export interface LocalCodexCatalogIdentity {
@@ -376,6 +377,7 @@ async function loadedThreads(
 async function scope(
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   root: string,
+  onInventory?: (threads: ThreadScope[]) => void,
 ): Promise<ThreadScope[]> {
   const loaded = await loadedThreads(request);
   requireProof(loaded.includes(root), "original_codex_loaded_scope_incomplete");
@@ -386,16 +388,20 @@ async function scope(
       thread.id === id && typeof thread.cwd === "string" && isAbsolute(thread.cwd),
       "original_codex_thread_metadata_unavailable",
     );
-    requireProof(id === root || typeof thread.parentThreadId === "string", "independent_codex_loaded_root");
     const status = object(thread.status);
     requireProof(["idle", "active"].includes(String(status.type)), "original_codex_idle_state_unavailable");
     threads.push({
       id,
-      cwd: await realpath(String(thread.cwd)),
-      parentThreadId: id === root ? null : String(thread.parentThreadId),
+      cwd: String(thread.cwd),
+      parentThreadId: id === root || typeof thread.parentThreadId !== "string" ? null : thread.parentThreadId,
       busy: status.type !== "idle",
     });
   }
+  onInventory?.(threads);
+  requireProof(
+    threads.every((thread) => thread.id === root || thread.parentThreadId !== null),
+    "independent_codex_loaded_root",
+  );
   const parents = new Map(threads.map((row) => [row.id, row.parentThreadId]));
   for (const row of threads) {
     let id = row.id;
@@ -408,6 +414,7 @@ async function scope(
       seen.add(id);
       id = parents.get(id)!;
     }
+    row.cwd = await realpath(row.cwd);
   }
   return threads;
 }
@@ -566,7 +573,9 @@ export function createLocalCodexCatalogCoordinator(input: {
         return client!.request(
           method,
           params,
-          method.startsWith("config/") && method !== "config/read" ? 30_000 : 2_000,
+          (method.startsWith("config/") && method !== "config/read") || method === "mcpServerStatus/list"
+            ? 30_000
+            : 2_000,
         );
       };
       if (candidate.threadId === undefined) {
@@ -592,7 +601,18 @@ export function createLocalCodexCatalogCoordinator(input: {
         "original_codex_registered_thread_changed",
       );
       result.threadId = candidate.threadId!;
-      const threads = await scope(request, candidate.threadId!);
+      const readScope = async () => {
+        let detail: string | undefined;
+        try {
+          return await scope(request, candidate.threadId!, (threads) => {
+            detail = `Loaded native threads: ${JSON.stringify(threads)}`.slice(0, 2048);
+          });
+        } catch (error) {
+          if (detail) result.detail = detail;
+          throw error;
+        }
+      };
+      const threads = await readScope();
       if (threads.some((thread) => thread.busy))
         return { ...result, outcome: "skipped-busy", reason: "original_codex_thread_or_descendant_busy" };
       const configs: ConfigProvenance[] = [];
@@ -661,7 +681,7 @@ export function createLocalCodexCatalogCoordinator(input: {
           prior.originalProof === hash(identity.proof),
           "original_codex_durable_controller_proof_changed",
         );
-      const catalogs = async () => {
+      const observeCatalogs = async () => {
         const expectedTools = [...new Set((await input.expectedTools?.()) ?? REQUIRED_TOOLS)].sort();
         requireProof(
           expectedTools.length <= 128 &&
@@ -669,19 +689,50 @@ export function createLocalCodexCatalogCoordinator(input: {
           "trusted_codex_catalog_expectations_unavailable",
         );
         const inventory: { threadId: string; tools: string[] }[] = [];
+        const observations: {
+          threadId: string;
+          verified: boolean;
+          runtimeStatus?: string;
+          error?: string;
+          toolsError?: string;
+          missing: string[];
+          unexpected: string[];
+        }[] = [];
         for (const thread of threads) {
+          let native: { runtimeStatus?: string; toolsError?: string } = {};
           const report = await codexToolCatalogReport({
             sessionId: thread.id,
             request,
             requireConnected: true,
+            onServerStatus: (status) => {
+              native = status;
+            },
           });
-          requireProof(
-            !report.error && same([...new Set(report.tools)].sort(), expectedTools),
-            "original_codex_catalog_unverified",
-          );
+          observations.push({
+            threadId: thread.id,
+            verified: !report.error && same([...new Set(report.tools)].sort(), expectedTools),
+            ...native,
+            ...(report.error ? { error: report.error } : {}),
+            missing: expectedTools.filter((name) => !report.tools.includes(name)),
+            unexpected: report.tools.filter((name) => !expectedTools.includes(name)),
+          });
           inventory.push({ threadId: thread.id, tools: report.tools });
         }
-        return inventory;
+        result.detail = `Original native catalogs: ${JSON.stringify(observations)}`.slice(0, 2048);
+        return {
+          inventory,
+          verified: observations.every((row) => row.verified),
+          // Unknown/absent/timed-out status or a connected wrong catalog does
+          // not authorize another mutation. A failed native runtime does.
+          failedStartup:
+            observations.some((row) => row.runtimeStatus === "failed") &&
+            observations.every((row) => row.verified || row.runtimeStatus === "failed"),
+        };
+      };
+      const catalogs = async () => {
+        const observed = await observeCatalogs();
+        requireProof(observed.verified, "original_codex_catalog_unverified");
+        return observed.inventory;
       };
       if (claimHeld) {
         const observed = await catalogs();
@@ -693,6 +744,7 @@ export function createLocalCodexCatalogCoordinator(input: {
         };
       }
       let resumeConfirmedWrite = false;
+      let replaceConfirmedFailure = false;
       if (prior && !prior.verified && (prior.writeDispatched || prior.reloadDispatched)) {
         // Observation can settle a confirmed reload's missing verification. An
         // unconfirmed mutation is never reissued, even under a newer revision.
@@ -706,12 +758,26 @@ export function createLocalCodexCatalogCoordinator(input: {
             threads.map((row) => row.id),
           )
         ) {
-          const observed = await catalogs();
+          const observed = await observeCatalogs();
           await guard(prior.writtenVersion!, prior.envRevision);
-          prior.verified = true;
-          await writeAttempt(path, prior);
-          if (prior.revision === revision)
-            return { ...result, revision: prior.revision, outcome: "refreshed", catalogs: observed };
+          if (observed.verified) {
+            prior.verified = true;
+            await writeAttempt(path, prior);
+            if (prior.revision === revision)
+              return {
+                ...result,
+                revision: prior.revision,
+                outcome: "refreshed",
+                catalogs: observed.inventory,
+              };
+          } else {
+            requireProof(!reconcileOnly && observed.failedStartup, "original_codex_catalog_unverified");
+            requireProof(
+              prior.authorityKind !== "operator" || authorityKind === "operator",
+              "original_codex_operator_refresh_requires_current_operator",
+            );
+            replaceConfirmedFailure = true;
+          }
         } else if (
           prior.writeConfirmed &&
           !prior.reloadDispatched &&
@@ -747,9 +813,15 @@ export function createLocalCodexCatalogCoordinator(input: {
           threads.map((row) => row.id),
         )
       ) {
-        const inventory = await catalogs();
+        const observed = await observeCatalogs();
         await guard(prior.writtenVersion!, prior.envRevision);
-        return { ...result, outcome: "refreshed", catalogs: inventory };
+        if (observed.verified) return { ...result, outcome: "refreshed", catalogs: observed.inventory };
+        requireProof(!reconcileOnly && observed.failedStartup, "original_codex_catalog_unverified");
+        requireProof(
+          prior.authorityKind !== "operator" || authorityKind === "operator",
+          "original_codex_operator_refresh_requires_current_operator",
+        );
+        replaceConfirmedFailure = true;
       }
       if (reconcileOnly) {
         const observed = await catalogs();
@@ -777,7 +849,13 @@ export function createLocalCodexCatalogCoordinator(input: {
             verified: false,
             authorityKind,
           };
-      if (!resumeConfirmedWrite) await writeAttempt(path, attempt);
+      if (!resumeConfirmedWrite) {
+        // Retain the fully acknowledged failed generation before installing
+        // a fresh env revision. Never overwrite an uncertain mutation journal.
+        if (replaceConfirmedFailure)
+          await writeAttempt(`${path}.${prior!.envRevision}.confirmed-failure.json`, prior!);
+        await writeAttempt(path, attempt);
+      }
       async function guard(version: string, expectedRevision?: string) {
         try {
           await authority.beforeDispatch?.();
@@ -796,7 +874,7 @@ export function createLocalCodexCatalogCoordinator(input: {
           if (expectedRevision !== undefined)
             requireProof(current.value === expectedRevision, "original_codex_effective_revision_changed");
         }
-        const freshThreads = await scope(request, candidate.threadId!);
+        const freshThreads = await readScope();
         requireProof(
           same(freshThreads, threads),
           freshThreads.some((row) => row.busy)

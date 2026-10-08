@@ -1,5 +1,9 @@
 # VUH-1739: Original worker refresh proof
 
+The [local startup repair trace](../2026-10-08-local-codex-startup-repair/README.md)
+records the confirmed failed-generation case and its explicit real Codex
+app-server integration check. It does not replace the original-seat live proof below.
+
 Run after the core integrator lands and deploys the branch. This is a local
 service/native-seat proof; it requires no AWS operation or voice provider usage.
 VUH-1739 covers local Codex. Remote Codex and old Claude recovery are tracked

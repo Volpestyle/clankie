@@ -79,6 +79,9 @@ export function createWorkerToolRefresh(input: {
               outcome: result.outcome,
               ...(result.threadId ? { threadId: result.threadId } : {}),
               ...(result.reason ? { reason: result.reason.slice(0, 1024) } : {}),
+              ...("detail" in result && typeof result.detail === "string"
+                ? { detail: result.detail.slice(0, 2048) }
+                : {}),
             }
           : {
               ...base,

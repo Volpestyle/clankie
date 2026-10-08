@@ -475,13 +475,17 @@ The service also schedules an in-place tool refresh for running workers. Local
 managed Codex controllers keep their original thread and descendants, wait for
 idle, update only the private Clankie transport revision with a native config
 version check, and reload once. A lost mutation acknowledgment is held for
-read-only reconciliation. No turn or uncertain report is replayed.
+read-only reconciliation. If an acknowledged reload's original native runtime
+reports failed startup, a fresh guarded transport revision can repair it in
+place; the failed generation is retained. No turn or uncertain report is replayed.
 
 `clankie harness refresh-tools [--pane PANE]`, TUI `/refresh-tools [--pane PANE]`,
 and the operator tool `refresh_worker_tools` request one or all observed seats.
 The authenticated API is `POST /v1/fleet/worker-tool-refresh` with `{}` or
 `{"paneId":"PANE"}`. Each result is `refreshed`, `skipped-busy`, or `failed`
-with a reason. Busy requests remain pending under their original authority.
+with a reason. Local Codex results also include bounded `detail` evidence:
+native catalog status/errors or the loaded thread inventory behind a scope
+refusal. Busy requests remain pending under their original authority.
 Roster `workerTools` and `/doctor` show observed/expected plugin versions and
 whether the observed runtime revision is behind. Local Codex seats started on
 worker plugins before 0.6.5 show **restart needed** instead of an in-place refresh

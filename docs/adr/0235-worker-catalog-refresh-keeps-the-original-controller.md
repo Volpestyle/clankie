@@ -20,8 +20,13 @@ one `config/mcpServer/reload`. Complete filtered native catalogs must contain
 the current service projection, including enabled peer tools.
 
 The durable attempt records dispatch before mutation. Lost acknowledgments are
-never retried. A confirmed reload with lost verification can be observed again;
-a lost mutation acknowledgment remains blocked. A crash-held exclusive claim
+never retried. A confirmed reload with lost verification can be observed again.
+When its complete original-thread status proves a failed MCP startup, a new
+guarded attempt may use a fresh transport revision, retaining the confirmed
+failed generation on disk. The earlier write and reload must both be acknowledged,
+and native controller, loaded scope, config version and effective revision must
+still match. Read-only reconciliation, unknown status, catalog mismatch and a
+lost mutation acknowledgment remain blocked from issuing this repair. A crash-held exclusive claim
 permits native read-only inventories while retaining the original claim and
 journal; it still blocks mutation. The native API offers no atomic idle/config/reload
 transaction, so fresh observations fence each dispatch and concurrent owner

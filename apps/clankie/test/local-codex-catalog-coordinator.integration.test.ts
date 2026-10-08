@@ -84,6 +84,7 @@ async function fixture(pid = 42, paneId = "w1:p1") {
     clankie_call: {},
   };
   let childExtraTools: Record<string, unknown> = {};
+  let runtimeStatus = "connected";
   const version = async () =>
     createHash("sha256")
       .update(await readFile(configPath))
@@ -179,7 +180,7 @@ async function fixture(pid = 42, paneId = "w1:p1") {
             data: [
               {
                 name: "clankie",
-                runtimeStatus: "connected",
+                runtimeStatus,
                 toolsError: catalogReady ? null : "still reconnecting",
                 tools: params.threadId === "child" ? { ...tools, ...childExtraTools } : tools,
               },
@@ -248,6 +249,9 @@ async function fixture(pid = 42, paneId = "w1:p1") {
     },
     setCatalogReady: (value: boolean) => {
       catalogReady = value;
+    },
+    setRuntimeStatus: (value: string) => {
+      runtimeStatus = value;
     },
     setTools: (names: string[]) => {
       tools = Object.fromEntries(names.map((name) => [name, {}]));
@@ -602,6 +606,75 @@ it("reconciles a confirmed reload through complete filtered catalogs without ano
   expect(f.count("config/value/write")).toBe(1);
   expect(f.count("config/mcpServer/reload")).toBe(1);
 });
+
+it("repairs a definitively failed startup after confirmed reload, retaining the failed generation", async () => {
+  const f = await fixture(),
+    first = f.coordinator();
+  f.setRuntimeStatus("failed");
+  expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([
+    {
+      outcome: "failed",
+      reason: "original_codex_catalog_unverified",
+      detail: expect.stringContaining('"runtimeStatus":"failed"'),
+    },
+  ]);
+  first.close();
+  f.restartRegistry();
+  const directory = join(f.root, "codex-catalog-refresh"),
+    journal = join(directory, (await readdir(directory)).find((name) => name.endsWith(".json"))!),
+    failed = JSON.parse(await readFile(journal, "utf8"));
+  // The protocol fixture remains failed after this new reload too. The
+  // actual binary integration proves successful reconnect and six-tool adoption.
+  expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([{ outcome: "failed" }]);
+  expect(f.count("config/value/write")).toBe(2);
+  expect(f.count("config/mcpServer/reload")).toBe(2);
+  expect(JSON.parse(await readFile(journal, "utf8")).envRevision).not.toBe(failed.envRevision);
+  expect(
+    JSON.parse(await readFile(`${journal}.${failed.envRevision}.confirmed-failure.json`, "utf8")),
+  ).toEqual(failed);
+});
+
+it.each(["starting", "disconnected", "unknown", "connected"])(
+  "keeps a confirmed unverified %s catalog read-only without definitive native startup failure",
+  async (status) => {
+    const f = await fixture(),
+      coordinator = f.coordinator();
+    f.setRuntimeStatus(status);
+    f.setCatalogReady(false);
+    expect(await coordinator.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "failed" }]);
+    expect(await coordinator.refresh({ revision: "deploy-two" })).toMatchObject([
+      { outcome: "failed", reason: "original_codex_catalog_unverified" },
+    ]);
+    expect(f.count("config/value/write")).toBe(1);
+    expect(f.count("config/mcpServer/reload")).toBe(1);
+  },
+);
+
+it.each(["write", "reload"] as const)(
+  "does not retry a lost %s acknowledgment even with definitive failed startup evidence",
+  async (kind) => {
+    const f = await fixture(),
+      first = f.coordinator();
+    f.setRuntimeStatus("failed");
+    f.loseReply(kind);
+    expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "failed" }]);
+    first.close();
+    f.restartRegistry();
+    const writes = f.count("config/value/write"),
+      reloads = f.count("config/mcpServer/reload");
+    expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([
+      {
+        outcome: "failed",
+        reason: "original_codex_refresh_delivery_unconfirmed_readonly_reconciliation_required",
+      },
+    ]);
+    expect(f.count("config/value/write")).toBe(writes);
+    expect(f.count("config/mcpServer/reload")).toBe(reloads);
+    expect(
+      (await readdir(join(f.root, "codex-catalog-refresh"))).filter((name) => name.endsWith(".json")),
+    ).toHaveLength(1);
+  },
+);
 
 it("serializes journal reconciliation and native effects across independent coordinator instances", async () => {
   const f = await fixture();

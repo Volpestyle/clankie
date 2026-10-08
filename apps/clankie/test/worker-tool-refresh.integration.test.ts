@@ -42,6 +42,7 @@ it("operator CLI crosses real HTTP/schema boundaries and revocation prevents dis
             revision: "fixture-service",
             outcome: "skipped-busy",
             reason: "original_native_session_busy",
+            detail: "Loaded native threads: original root and active child",
           },
         ],
       };
@@ -61,6 +62,7 @@ it("operator CLI crosses real HTTP/schema boundaries and revocation prevents dis
         revision: "fixture-service",
         outcome: "skipped-busy",
         reason: "original_native_session_busy",
+        detail: "Loaded native threads: original root and active child",
       },
     ]);
     expect(await readFile(journal, "utf8")).toBe('{"paneId":"w1:p1"}\n');

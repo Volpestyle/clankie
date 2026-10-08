@@ -11,6 +11,7 @@ export async function codexToolCatalogReport({
   bridge = "worker",
   request,
   requireConnected = false,
+  onServerStatus,
 }) {
   const report = {
     schemaVersion: 1,
@@ -55,6 +56,13 @@ export async function codexToolCatalogReport({
     }
     if (matches.length !== 1) throw new Error("Native Codex Clankie server is ambiguous");
     const row = matches[0];
+    // Only a complete, unambiguous original-thread response can prove a
+    // terminal startup failure. Keep this native observation out of the
+    // catalog report's public wire schema.
+    onServerStatus?.({
+      ...(typeof row.runtimeStatus === "string" ? { runtimeStatus: row.runtimeStatus } : {}),
+      ...(typeof row.toolsError === "string" ? { toolsError: row.toolsError.slice(0, 1024) } : {}),
+    });
     if (
       ["failed", "disabled", "cancelled", "disconnected"].includes(row.runtimeStatus) ||
       row.toolsError != null
