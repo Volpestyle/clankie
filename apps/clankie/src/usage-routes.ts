@@ -11,10 +11,12 @@ import {
 } from "@clankie/protocol/worker-accounts";
 import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 import type { MachineWorkerAccounts } from "./captain/harness-accounts.ts";
-import { CLAUDE_USAGE_MIN_VERSION } from "./captain/harness-usage.ts";
+import { CLAUDE_USAGE_MIN_VERSION, usageHeadroom } from "./captain/harness-usage.ts";
 
 /** Meters poll; spawning every profile's CLI on each poll would load the Mac for nothing. */
 const USAGE_CACHE_MS = 60_000;
+/** A signed-in account whose latest read came back empty keeps its last reading this long, with its real age. */
+const USAGE_LAST_GOOD_MS = 30 * 60_000;
 
 function usageSettings(settings: ClankieSettings): UsageSettingsSnapshot {
   const display = { overlay: settings.usage.overlay };
@@ -62,6 +64,24 @@ export function createUsageRoutes(
 ): Hono {
   const app = new Hono();
   let cached: { at: number; report: Promise<MachineWorkerAccounts> } | undefined;
+  const lastGood = new Map<string, NonNullable<MachineWorkerAccounts["accounts"][number]["usage"]>>();
+  // One CLI can miss a read (a vendor timeout, a busy Mac); a meter should not blank for it.
+  const steady = (report: MachineWorkerAccounts, now: number): MachineWorkerAccounts => ({
+    ...report,
+    accounts: report.accounts.map((account) => {
+      const key = `${account.harness}:${account.label}:${account.identity ?? ""}`;
+      if (account.usage) {
+        lastGood.set(key, account.usage);
+        return account;
+      }
+      const previous = lastGood.get(key);
+      return account.signedIn === true &&
+        previous &&
+        now - Date.parse(previous.observedAt) < USAGE_LAST_GOOD_MS
+        ? { ...account, usage: previous, headroom: usageHeadroom(previous, now) }
+        : account;
+    }),
+  });
   const report = (refresh: boolean) => {
     const now = clock();
     if (!read) throw new Error("Usage is unavailable on this body");
@@ -95,6 +115,7 @@ export function createUsageRoutes(
       );
     }
     const now = clock();
+    machine = steady(machine, now);
     const unavailable = Object.fromEntries(
       Object.entries(machine.unavailable ?? {}).filter(
         ([harness]) => harness === "claude" || harness === "codex",
