@@ -12,6 +12,10 @@ import subprocess
 import sys
 import time
 
+# One single-threaded helper owns every descriptor. A bounded operation name
+# identifies native failures without exposing paths, journal data or argv.
+lock_stage = "startup"
+
 
 class ProcBsdInfo(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint32) for name in (
@@ -493,9 +497,14 @@ def terminate_harness():
 
 
 def lock(directory):
+    global lock_stage
+    lock_stage = "directory-create"
     os.makedirs(directory, mode=0o700, exist_ok=True)
+    lock_stage = "lock-open"
     file = open(os.path.join(directory, "state.lock"), "a+")
+    lock_stage = "lock-mode"
     os.chmod(file.name, 0o600)
+    lock_stage = "lock-acquire"
     fcntl.flock(file, fcntl.LOCK_EX)
     return file
 
@@ -512,35 +521,52 @@ def read_state(directory):
 
 
 def write_state(directory, state):
+    global lock_stage
     import tempfile
+    lock_stage = "journal-create"
     fd, temporary = tempfile.mkstemp(prefix=".state-", dir=directory)
     try:
+        lock_stage = "journal-mode"
         os.fchmod(fd, 0o600)
+        lock_stage = "journal-write"
         with os.fdopen(fd, "w") as file:
             json.dump(state, file, separators=(",", ":"))
             file.write("\n")
             file.flush()
+            lock_stage = "journal-sync"
             os.fsync(file.fileno())
+            lock_stage = "journal-close"
+        lock_stage = "journal-replace"
         os.replace(temporary, os.path.join(directory, "state.json"))
+        lock_stage = "directory-open"
         fd = os.open(directory, os.O_RDONLY)
         try:
+            lock_stage = "directory-sync"
             os.fsync(fd)
         finally:
+            previous_stage = lock_stage
+            lock_stage = "directory-close"
             os.close(fd)
+            lock_stage = previous_stage
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
 
 
 def locked_pipe(directory):
+    global lock_stage
     with lock(directory):
+        lock_stage = "journal-read"
         print(json.dumps(read_state(directory)), flush=True)
+        lock_stage = "request-read"
         line = sys.stdin.readline(1024 * 1024 + 1)
         if line:
             request = json.loads(line)
             if "write" in request:
                 write_state(directory, request["write"])
+        lock_stage = "reply-write"
         print("done", flush=True)
+        lock_stage = "lock-close"
 
 
 def heavy_runner(directory, lease_id, token):
@@ -635,7 +661,7 @@ if __name__ == "__main__":
             detail = type(error).__name__
             if isinstance(error, OSError) and error.errno is not None:
                 detail += " (errno %s)" % error.errno
-            print("Fleet resource lock helper failed: " + detail, file=sys.stderr)
+            print("Fleet resource lock helper failed: " + detail + " at " + lock_stage, file=sys.stderr)
         else:
             print("Fleet resource native boundary unavailable", file=sys.stderr)
         sys.exit(1)

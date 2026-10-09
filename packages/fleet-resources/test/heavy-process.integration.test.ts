@@ -6,11 +6,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, aroundEach, describe, expect, it } from "vitest";
 import { createResourceGovernor } from "../src/governor.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
 import { processIdentity, resourceNativeHelperPath, resourcePython } from "../src/process.ts";
 import { ResourceStore } from "../src/store.ts";
+import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
+
+aroundEach(withFixtureWork);
+const fixtureCleanup: (() => Promise<void>)[] = [];
+afterEach(async () => {
+  fixtureWork().stop();
+  await fixtureWork().drain();
+  for (const close of fixtureCleanup.splice(0)) await close();
+});
 
 const driver = join(import.meta.dirname, "fixtures/heavy-driver.mjs");
 const command = join(import.meta.dirname, "fixtures/heavy-command.mjs");
@@ -37,84 +46,156 @@ async function exists(path: string) {
   }
 }
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "clankie-heavy-integration-"));
-  const governor = createResourceGovernor({ directory });
-  await governor.configure({
-    ...defaultResourcePolicy(),
-    heavySlots: 1,
-    maxLoadRatio: 10,
-    minAvailableMemoryMb: 0,
-  });
-  const children: ChildProcess[] = [],
-    completions = new Map<ChildProcess, Promise<number>>(),
-    receipts: string[] = [];
-  function start(seat: string, mode = "hold", exit = "0") {
-    const receipt = join(directory, `${seat}.receipt`),
-      release = join(directory, `${seat}.release`);
-    const child = spawn(
-      process.execPath,
-      [
-        driver,
-        directory,
-        seat,
-        process.execPath,
-        command,
-        mode,
-        receipt,
-        mode === "exit" ? exit : release,
-        directory,
-        "Bearer-secret-must-not-enter-resource-journal",
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, HEAVY_SLOTS: "99", CLANKIE_STATE: join(directory, "worker-override") },
-      },
-    );
-    const output: string[] = [];
-    child.stdout?.on("data", (bytes) => output.push(String(bytes)));
-    child.stderr?.on("data", (bytes) => output.push(String(bytes)));
-    const done = new Promise<number>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("exit", (code, signal) => resolve(code ?? (signal === "SIGKILL" ? 137 : 143)));
+  const lifetime = fixtureWork();
+  return lifetime.run(async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clankie-heavy-integration-"));
+    const rawGovernor = createResourceGovernor({ directory });
+    const governor = lifetime.wrap(rawGovernor);
+    await governor.configure({
+      ...defaultResourcePolicy(),
+      heavySlots: 1,
+      maxLoadRatio: 10,
+      minAvailableMemoryMb: 0,
     });
-    void done.catch(() => undefined);
-    children.push(child);
-    completions.set(child, done);
-    receipts.push(receipt);
-    return { child, done, receipt, release, output };
-  }
-  async function release(path: string) {
-    await writeFile(path, "release");
-  }
-  async function close() {
-    for (const child of children)
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    const state = await new ResourceStore(directory).read();
-    for (const lease of state.leases) {
-      if (lease.kind !== "heavy" || !lease.runner) continue;
-      const current = await processIdentity(lease.runner.pid);
-      if (current?.startTime === lease.runner.startTime) process.kill(-lease.runner.pgid, "SIGKILL");
+    const children: ChildProcess[] = [],
+      births = new Map<ChildProcess, ReturnType<typeof processIdentity>>(),
+      completions = new Map<ChildProcess, Promise<number>>(),
+      drained = new Map<ChildProcess, Promise<void>>(),
+      receipts: string[] = [];
+    function own(child: ChildProcess) {
+      children.push(child);
+      const birth = child.pid ? processIdentity(child.pid) : Promise.resolve(undefined);
+      void birth.catch(() => undefined);
+      births.set(child, birth);
+      const done = new Promise<number>((resolve, reject) => {
+        child.once("error", reject);
+        // Tests distinguish wrapper exit from the surviving real command group.
+        child.once("exit", (code, signal) => resolve(code ?? (signal === "SIGKILL" ? 137 : 143)));
+      });
+      void done.catch(() => undefined);
+      completions.set(child, done);
+      drained.set(child, new Promise<void>((resolve) => child.once("close", () => resolve())));
+      return child;
     }
-    // Cleanup uses exact receipts from commands this fixture started, including
-    // survivors of a killed runner; journal census bookkeeping is not authority.
-    for (const receipt of receipts) {
-      if (!(await exists(receipt))) continue;
-      const proof = JSON.parse(await readFile(receipt, "utf8")) as { pid: number; startTime: string };
-      const survivor = await processIdentity(proof.pid);
-      if (survivor?.startTime === proof.startTime) process.kill(survivor.pid, "SIGKILL");
-      await eventually(
-        () => processIdentity(proof.pid),
-        (current) => current?.startTime !== proof.startTime,
+    function start(seat: string, mode = "hold", exit = "0") {
+      lifetime.signal.throwIfAborted();
+      const receipt = join(directory, `${seat}.receipt`),
+        release = join(directory, `${seat}.release`);
+      const child = own(
+        spawn(
+          process.execPath,
+          [
+            driver,
+            directory,
+            seat,
+            process.execPath,
+            command,
+            mode,
+            receipt,
+            mode === "exit" ? exit : release,
+            directory,
+            "Bearer-secret-must-not-enter-resource-journal",
+          ],
+          {
+            // An orphan must never share the real heavy runner's group, even though
+            // its governor journal already belongs to this private fixture.
+            detached: true,
+            stdio: ["ignore", "pipe", "pipe"],
+            env: { ...process.env, HEAVY_SLOTS: "99", CLANKIE_STATE: join(directory, "worker-override") },
+          },
+        ),
       );
+      const output: string[] = [];
+      child.stdout?.on("data", (bytes) => output.push(String(bytes)));
+      child.stderr?.on("data", (bytes) => output.push(String(bytes)));
+      const done = completions.get(child)!;
+      receipts.push(receipt);
+      return { child, done, receipt, release, output };
     }
-    await Promise.allSettled(completions.values());
-    await governor.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-  return { directory, governor, start, release, close };
+    async function release(path: string) {
+      await writeFile(path, "release");
+    }
+    function killGroup(pgid: number, signal: NodeJS.Signals) {
+      try {
+        process.kill(-pgid, signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
+    let closing: Promise<void> | undefined;
+    function close(): Promise<void> {
+      return (closing ??= shutdown());
+    }
+    async function shutdown() {
+      lifetime.signal.removeEventListener("abort", cancel);
+      for (const child of children) {
+        const birth = await births.get(child);
+        const current = birth ? await processIdentity(birth.pid) : undefined;
+        if (birth && current?.startTime === birth.startTime && current.pgid === birth.pid)
+          killGroup(birth.pgid, "SIGTERM");
+      }
+      const state = await new ResourceStore(directory).read();
+      for (const lease of state.leases) {
+        if (lease.kind !== "heavy" || !lease.runner) continue;
+        const current = await processIdentity(lease.runner.pid);
+        if (current?.startTime === lease.runner.startTime) killGroup(lease.runner.pgid, "SIGKILL");
+      }
+      // Cleanup uses exact receipts from commands this fixture started, including
+      // survivors of a killed runner; journal census bookkeeping is not authority.
+      for (const receipt of receipts) {
+        if (!(await exists(receipt))) continue;
+        const proof = JSON.parse(await readFile(receipt, "utf8")) as {
+          pid: number;
+          pgid: number;
+          startTime: string;
+        };
+        const survivor = await processIdentity(proof.pid);
+        if (survivor?.startTime === proof.startTime && survivor.pgid === proof.pgid)
+          killGroup(proof.pgid, "SIGKILL");
+        await eventually(
+          () => processIdentity(proof.pid),
+          (current) => current?.startTime !== proof.startTime,
+        );
+      }
+      await Promise.allSettled(completions.values());
+      await Promise.all(drained.values());
+      await rawGovernor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+    const cancel = () => {
+      void close().catch(() => undefined);
+    };
+    fixtureCleanup.push(close);
+    lifetime.signal.addEventListener("abort", cancel, { once: true });
+    if (lifetime.signal.aborted) cancel();
+    return { directory, governor, start, release, close, own };
+  });
 }
 
 describe("machine shared heavy permits with actual OS children", () => {
+  it("cancellation drains private fixture groups without retaining the enclosing fleet permit", async () => {
+    const f = await fixture();
+    const enclosing = await processIdentity();
+    const active = f.start("cancel-owned-active");
+    await eventually(() => exists(active.receipt), Boolean);
+    const waiting = f.start("cancel-owned-waiting", "exit");
+    await eventually(
+      () => new ResourceStore(f.directory).read(),
+      (state) => state.queue.length === 1,
+    );
+    const drivers = await Promise.all([active, waiting].map((run) => processIdentity(run.child.pid!)));
+    for (const driver of drivers) {
+      expect(driver?.pgid).toBe(driver?.pid);
+      expect(driver?.pgid).not.toBe(enclosing?.pgid);
+    }
+    fixtureWork().stop();
+    await f.close();
+    await Promise.all([active.done, waiting.done]);
+    for (const driver of drivers)
+      expect((await processIdentity(driver!.pid))?.startTime).not.toBe(driver!.startTime);
+    expect(await exists(f.directory)).toBe(false);
+    expect(() => f.start("cancelled-no-new-child")).toThrow();
+  });
   it("passes bounded tool concurrency through real commands and nested permits", async () => {
     const f = await fixture();
     try {
@@ -124,25 +205,28 @@ describe("machine shared heavy permits with actual OS children", () => {
         ["2", "1", ["2", "1"]],
       ] as const) {
         const receipt = join(f.directory, "parallelism.json");
-        const child = spawn(
-          process.execPath,
-          [
-            driver,
-            f.directory,
-            "parallelism",
+        const child = f.own(
+          spawn(
             process.execPath,
-            driver,
-            f.directory,
-            "nested-parallelism",
-            process.execPath,
-            "-e",
-            "require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.env.VITEST_MAX_WORKERS, process.env.TURBO_CONCURRENCY]))",
-            receipt,
-          ],
-          {
-            stdio: "ignore",
-            env: { ...process.env, VITEST_MAX_WORKERS: vitest, TURBO_CONCURRENCY: turbo },
-          },
+            [
+              driver,
+              f.directory,
+              "parallelism",
+              process.execPath,
+              driver,
+              f.directory,
+              "nested-parallelism",
+              process.execPath,
+              "-e",
+              "require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.env.VITEST_MAX_WORKERS, process.env.TURBO_CONCURRENCY]))",
+              receipt,
+            ],
+            {
+              detached: true,
+              stdio: "ignore",
+              env: { ...process.env, VITEST_MAX_WORKERS: vitest, TURBO_CONCURRENCY: turbo },
+            },
+          ),
         );
         expect(await new Promise((resolve) => child.once("exit", resolve))).toBe(0);
         expect(JSON.parse(await readFile(receipt, "utf8"))).toEqual(expected);
@@ -166,9 +250,12 @@ describe("machine shared heavy permits with actual OS children", () => {
         (state) => state.queue.length === queued.length,
         30_000,
       );
-      holder = spawn(resourcePython, ["-I", resourceNativeHelperPath(), "lock", f.directory], {
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      holder = f.own(
+        spawn(resourcePython, ["-I", resourceNativeHelperPath(), "lock", f.directory], {
+          detached: true,
+          stdio: ["pipe", "pipe", "pipe"],
+        }),
+      );
       holderDone = new Promise((resolve) => holder!.once("exit", resolve));
       held = createInterface({ input: holder.stdout! });
       expect((await held[Symbol.asyncIterator]().next()).done).toBe(false);
@@ -181,7 +268,14 @@ describe("machine shared heavy permits with actual OS children", () => {
       expect(await holderDone).toBe(0);
       await f.release(active.release);
       expect(await active.done).toBe(0);
-      expect(await Promise.all(queued.map((request) => request.done))).toEqual(Array(11).fill(0));
+      const exits = await Promise.all(queued.map((request) => request.done));
+      expect(
+        exits,
+        queued
+          .filter((_, i) => exits[i] !== 0)
+          .map((request) => request.output.join(""))
+          .join("\n"),
+      ).toEqual(Array(11).fill(0));
       for (const request of queued) {
         expect(await exists(request.receipt)).toBe(true);
         expect(request.output.join("")).not.toContain("Fleet resource lock unavailable");
@@ -259,10 +353,11 @@ describe("machine shared heavy permits with actual OS children", () => {
       const claim = join(f.directory, "claim.receipt"),
         ready = join(f.directory, "ready.receipt"),
         submitted = join(f.directory, "submitted.receipt");
-      const wrapper = spawn(
-        process.execPath,
-        [registrationDriver, f.directory, mode, claim, ready, submitted],
-        { stdio: "ignore" },
+      const wrapper = f.own(
+        spawn(process.execPath, [registrationDriver, f.directory, mode, claim, ready, submitted], {
+          detached: true,
+          stdio: "ignore",
+        }),
       );
       const done = new Promise<void>((resolve) => wrapper.once("exit", () => resolve()));
       try {
@@ -275,10 +370,11 @@ describe("machine shared heavy permits with actual OS children", () => {
         );
         if (mode === "unregistered") {
           const ref = JSON.parse(await readFile(claim, "utf8")) as { id: string; token: string };
-          const late = spawn(
-            resourcePython,
-            ["-I", resourceNativeHelperPath(), "run", f.directory, ref.id, ref.token],
-            { detached: true, stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
+          const late = f.own(
+            spawn(resourcePython, ["-I", resourceNativeHelperPath(), "run", f.directory, ref.id, ref.token], {
+              detached: true,
+              stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
+            }),
           );
           const failed = new Promise<number | null>((resolve) => late.once("exit", resolve));
           const replies = createInterface({ input: late.stdio[4] as Readable });

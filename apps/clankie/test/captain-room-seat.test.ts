@@ -462,9 +462,14 @@ it("an unresolved original room outbox never redispatches its original while an 
   expect(JSON.stringify(f.execute.mock.calls)).not.toContain("unresolved-original-room-turn");
 });
 
-it("a taken unacknowledged room wake retains its original watch and late acknowledgment settles retry without redispatch", async () => {
+it("a taken unacknowledged room wake retains its original watch and late acknowledgment settles retry without redispatch", async ({
+  signal,
+}) => {
   const f = await fixture(true);
-  const poll = f.captain.pollSeatEvents(1000, undefined, f.conversationId);
+  const poll = f.captain.pollSeatEvents(1000, signal, f.conversationId);
+  // A full-run bail aborts the test before its awaited watch setup completes.
+  // Observe parked work immediately; its later await still proves the result.
+  void poll.catch(() => undefined);
   const watch = await durableRoomWatch(f);
   watch.settle();
   const [originalEvent] = await poll;
@@ -478,7 +483,12 @@ it("a taken unacknowledged room wake retains its original watch and late acknowl
   expect(roomReceipts(f).pending(originalEvent!.id)).toBeUndefined();
   expect(roomReceipts(f, true).pending(originalEvent!.id)).toEqual(receipt);
   const controller = new AbortController();
-  const retryPoll = f.captain.pollSeatEvents(8000, controller.signal, f.conversationId);
+  const retryPoll = f.captain.pollSeatEvents(
+    8000,
+    AbortSignal.any([controller.signal, signal]),
+    f.conversationId,
+  );
+  void retryPoll.catch(() => undefined);
   try {
     // Exercise the store's real five-second retry, not a second synthetic wake.
     await vi.waitFor(() => expect(watch.finishedAttempts()).toBe(2), { timeout: 9000 });

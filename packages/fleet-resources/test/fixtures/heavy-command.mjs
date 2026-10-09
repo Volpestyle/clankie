@@ -7,7 +7,10 @@ const [mode, receipt, release, directory] = process.argv.slice(2);
 const identity = await processIdentity();
 if (!identity) throw new Error("Owned command identity unavailable");
 // Receipt existence is the test's readiness boundary; publish complete JSON.
-await writeFile(`${receipt}.writing`, JSON.stringify({ pid: identity.pid, startTime: identity.startTime }));
+await writeFile(
+  `${receipt}.writing`,
+  JSON.stringify({ pid: identity.pid, pgid: identity.pgid, startTime: identity.startTime }),
+);
 await rename(`${receipt}.writing`, receipt);
 if (mode === "nested" || mode === "nested-other-holder") {
   const governor = createResourceGovernor({ directory });

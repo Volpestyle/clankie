@@ -62,9 +62,15 @@ function barrier() {
 }
 async function fixture(
   unavailable = false,
-  extra: { seatScript?: string; bind?: boolean; replyLease?: Record<string, string> } = {},
+  extra: {
+    seatScript?: string;
+    seatEnv?: NodeJS.ProcessEnv;
+    bind?: boolean;
+    replyLease?: Record<string, string>;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-resource-http-"));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
   const state = join(root, "simctl.json"),
     log = join(root, "simctl.jsonl");
   await writeFile(state, JSON.stringify({ devices: {} }));
@@ -72,9 +78,13 @@ async function fixture(
   const directory = join(root, "governor");
   if (unavailable) await writeFile(directory, "The real native lock cannot create this directory.\n");
   const child = spawn(process.execPath, ["-e", extra.seatScript ?? "setInterval(() => {}, 1000)"], {
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+    env: { ...process.env, ...extra.seatEnv },
   });
+  cleanup.push(() => stop(child));
+  const ready = extra.seatScript ? once(child, "message") : undefined;
   await once(child, "spawn");
+  if (ready) expect(await ready).toEqual(["ready", undefined]);
   const native = await processIdentity(child.pid!);
   if (!native) throw new Error("Actual fixture native process unavailable");
   const session = { source: "herdr:opencode", kind: "id" as const, value: "ses_httpResourceFixture123" };
@@ -218,8 +228,6 @@ async function fixture(
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await resources.close();
-    await stop(child);
-    await rm(root, { recursive: true, force: true });
   });
   const mutate = async (change: (value: { devices: Record<string, unknown[]> }) => void) => {
     const value = JSON.parse(await readFile(state, "utf8"));
@@ -419,7 +427,8 @@ it("names a hand-booted simulator, the seat whose process uses it, and tells tha
   // The seat's own process starts a tool that names the device, as xcodebuild
   // or a test runner would. The native helper finds it by its arguments.
   const f = await fixture(false, {
-    seatScript: `require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => { if (process.ppid === 1) process.exit(); }, 200)", "--udid=${udid}"], { stdio: "ignore" }); setInterval(() => {}, 1000);`,
+    seatEnv: { RESOURCE_FIXTURE_UDID: udid },
+    seatScript: `const tool = require("node:child_process").spawn(process.execPath, ["-e", "process.send('ready'); setInterval(() => { if (process.ppid === 1) process.exit(); }, 200)", "--", '--udid=' + process.env.RESOURCE_FIXTURE_UDID], { stdio: ["ignore", "ignore", "ignore", "ipc"] }); tool.once('message', () => process.send('ready')); setInterval(() => {}, 1000);`,
   });
   await f.mutate((value) => {
     value.devices[simulatorRuntime] = [

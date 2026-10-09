@@ -52,12 +52,12 @@ it("names native filesystem and journal decoding failures without echoing their 
     await writeFile(file, "private contents");
     await expect(new ResourceStore(file).transaction(() => {})).rejects.toMatchObject({
       message:
-        "Fleet resource lock helper exited with code 1: Fleet resource lock helper failed: FileExistsError (errno 17)",
+        "Fleet resource lock helper exited with code 1: Fleet resource lock helper failed: FileExistsError (errno 17) at directory-create",
     });
     await writeFile(join(directory, "state.json"), "private contents");
     await expect(new ResourceStore(directory).transaction(() => {})).rejects.toMatchObject({
       message:
-        "Fleet resource lock helper exited with code 1: Fleet resource lock helper failed: JSONDecodeError",
+        "Fleet resource lock helper exited with code 1: Fleet resource lock helper failed: JSONDecodeError at journal-read",
     });
   } finally {
     await rm(directory, { recursive: true, force: true });

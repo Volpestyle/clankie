@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,20 +145,32 @@ async function screenFixture(choice: string, proof = "certain", json = false, ma
     abort = new AbortController();
   const credential = await f.approve("screen");
   const journal = join(f.root, "native-actions.jsonl");
+  const stopSignal = join(f.root, "native-stop-ready");
   await writeFile(journal, "");
   const ports = createJoinedScreenPorts({
     machineId: credential.lease.machineId,
     directory: join(f.root, "body"),
     executable: process.execPath,
-    args: [join(import.meta.dirname, "fixtures/lent-screen-provider.mjs"), choice, journal, proof],
+    args: [
+      join(import.meta.dirname, "fixtures/lent-screen-provider.mjs"),
+      choice,
+      journal,
+      proof,
+      stopSignal,
+    ],
   });
-  if (malformedReceipt) {
+  if (malformedReceipt || choice === "drive-stop") {
     const nativeScreen = ports.screen!;
     // Adversarial authenticated producer: retain the real host effect/journal, corrupt only its wire reply.
     ports.screen = async (raw, signal, guard) => {
-      const result = await nativeScreen(raw, signal, guard);
+      const pending = nativeScreen(raw, signal, guard);
       const request = JSON.parse(raw);
-      return request.op === "command" && request.command.action === "input"
+      if (choice === "drive-stop" && request.op === "command" && request.command.action === "input")
+        // screen() captures its revocation generation and queues synchronously.
+        // Release the native inventory/Stop handshake after that admission.
+        writeFileSync(stopSignal, "stop");
+      const result = await pending;
+      return malformedReceipt && request.op === "command" && request.command.action === "input"
         ? JSON.stringify({ outcome: "confirmed" })
         : result;
     };

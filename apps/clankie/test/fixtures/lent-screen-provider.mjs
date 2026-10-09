@@ -1,9 +1,9 @@
 /** Synthetic native-process seam only. No GUI, permissions, capture or native input. */
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { deflateSync } from "node:zlib";
-const [choice, journal, stopProof = "certain"] = process.argv.slice(2);
+const [choice, journal, stopProof = "certain", stopSignal] = process.argv.slice(2);
 let bound = "",
   consent = false,
   effects = 0,
@@ -67,8 +67,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
     consent = false;
   } else if (action === "inventory") {
     if (choice === "drive-stop") {
-      setTimeout(() => process.stdout.write(JSON.stringify({ event: "stopped" }) + "\n"), 150);
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      // The test releases Stop only after the input has entered the real host
+      // queue. Wall-clock delays do not establish that admission ordering.
+      while (!existsSync(stopSignal)) await new Promise((resolve) => setTimeout(resolve, 10));
+      process.stdout.write(JSON.stringify({ event: "stopped" }) + "\n");
     }
     result = {
       complete: true,

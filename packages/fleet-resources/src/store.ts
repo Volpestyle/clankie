@@ -54,11 +54,12 @@ export class ResourceStore {
     const failure = (reason: string) => {
       // Only the helper's bounded cause format is public. Python startup
       // diagnostics can contain paths; never forward arbitrary stderr.
-      const detail = /^Fleet resource lock helper failed: [A-Za-z][A-Za-z0-9_]*(?: \(errno -?\d+\))?$/u.test(
-        diagnostic.trim(),
-      )
-        ? `: ${diagnostic.trim()}`
-        : "";
+      const detail =
+        /^Fleet resource lock helper failed: [A-Za-z][A-Za-z0-9_]*(?: \(errno -?\d+\))?(?: at [a-z]+(?:-[a-z]+)*)?$/u.test(
+          diagnostic.trim(),
+        )
+          ? `: ${diagnostic.trim()}`
+          : "";
       return cancelled
         ? new DOMException("Fleet resource wait cancelled", "AbortError")
         : new Error(

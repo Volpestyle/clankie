@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, aroundEach, describe, expect, it } from "vitest";
 import {
   FileCredentialStore,
   KeychainCredentialStore,
@@ -20,59 +20,109 @@ import {
 import { AccountConnectionSchema, type GoogleAccountProvider } from "@clankie/protocol/accounts";
 import { createGoogleAccounts } from "../src/google-accounts.ts";
 import { createGoogleProviderFixture } from "./fixtures/google-provider.ts";
+import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
 
+aroundEach(withFixtureWork);
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+  fixtureWork().stop();
+  await fixtureWork().drain();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
-async function setup() {
-  const provider = await createGoogleProviderFixture();
-  cleanup.push(provider.close);
-  const directory = await mkdtemp(join(tmpdir(), "clankie-google-"));
-  cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const config: GoogleOAuthApp = {
-    clientId: "dev-client",
-    redirectUri: "http://localhost:4317/account/connections/google/callback",
-  };
-  provider.addClient("dev-client", "fixture-client-secret");
-  let clock = Date.now();
-  const tenant = async (name: string) => {
-    const path = join(directory, name, "credentials.json");
-    const store = new FileCredentialStore(path);
-    await store.set(GOOGLE_OAUTH_APP_PROVIDER_ID, {
-      type: "api",
-      key: "fixture-client-secret",
-      metadata: { clientId: "dev-client" },
-    });
-    const options = { store, apps: async () => config, endpoints: provider.endpoints, now: () => clock };
-    const accounts = createGoogleAccounts(options);
-    const connect = async (
-      capability: GoogleAccountProvider = "google-gmail",
-      overrides: Parameters<typeof provider.issueCode>[1] = { subject: name, email: `${name}@example.com` },
-    ) => {
-      const start = await accounts.start(capability);
-      if (!start.ok) throw new Error(`Start ${start.error}`);
-      const code = provider.issueCode(start, overrides);
-      return accounts.complete(
-        capability,
-        start.flowId,
-        code,
-        undefined,
-        capability === "google-drive" ? ["chosen-file-1"] : undefined,
-      );
+function setup() {
+  return fixtureWork().run(async () => {
+    const provider = await createGoogleProviderFixture();
+    cleanup.push(provider.close);
+    const directory = await mkdtemp(join(tmpdir(), "clankie-google-"));
+    cleanup.push(() => rm(directory, { recursive: true, force: true }));
+    const config: GoogleOAuthApp = {
+      clientId: "dev-client",
+      redirectUri: "http://localhost:4317/account/connections/google/callback",
     };
-    return { path, store, options, accounts, connect };
-  };
-  return {
-    provider,
-    config,
-    tenant,
-    advance(ms: number) {
-      clock += ms;
-    },
-  };
+    provider.addClient("dev-client", "fixture-client-secret");
+    let clock = Date.now();
+    const tenant = async (name: string) => {
+      const path = join(directory, name, "credentials.json");
+      const work = fixtureWork();
+      const store = work.wrap(new FileCredentialStore(path));
+      await store.set(GOOGLE_OAUTH_APP_PROVIDER_ID, {
+        type: "api",
+        key: "fixture-client-secret",
+        metadata: { clientId: "dev-client" },
+      });
+      const request: typeof fetch = (input, init) =>
+        work.run(() =>
+          fetch(input, {
+            ...init,
+            signal: init?.signal ? AbortSignal.any([work.signal, init.signal]) : work.signal,
+          }),
+        );
+      const options = {
+        store,
+        apps: async () => config,
+        endpoints: provider.endpoints,
+        now: () => clock,
+        fetch: request,
+        fetchImpl: request,
+      };
+      const accounts = work.wrap(createGoogleAccounts(options));
+      const connect = async (
+        capability: GoogleAccountProvider = "google-gmail",
+        overrides: Parameters<typeof provider.issueCode>[1] = { subject: name, email: `${name}@example.com` },
+      ) => {
+        const start = await accounts.start(capability);
+        if (!start.ok) throw new Error(`Start ${start.error}`);
+        const code = provider.issueCode(start, overrides);
+        return accounts.complete(
+          capability,
+          start.flowId,
+          code,
+          undefined,
+          capability === "google-drive" ? ["chosen-file-1"] : undefined,
+        );
+      };
+      return { path, store, options, accounts, connect };
+    };
+    return {
+      provider,
+      config,
+      tenant,
+      advance(ms: number) {
+        clock += ms;
+      },
+    };
+  });
 }
 describe("body-owned Google lifecycle across real HTTP and file broker boundaries", () => {
+  it("cancellation drains a real HTTP refresh and its broker lock before fixture removal", async () => {
+    const context = await setup();
+    const tenant = await context.tenant("cancelled-refresh");
+    await tenant.connect();
+    context.advance(3600_000);
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    context.provider.controls.refreshStarted = entered;
+    context.provider.controls.refreshGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const refreshing = resolveGoogleBearer({ ...tenant.options, provider: "google-gmail" });
+    const stopped = expect(refreshing).rejects.toBeInstanceOf(GoogleOAuthError);
+    try {
+      await started;
+      fixtureWork().stop();
+      await fixtureWork().drain();
+      await stopped;
+      await rm(dirname(tenant.path), { recursive: true });
+      await expect(
+        tenant.store.set("google-gmail", { type: "api", key: "late-fixture-write" }),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      await expect(readFile(tenant.path)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      release();
+    }
+  });
   it("catalog is visible without client setup and consent requests PKCE, nonce, offline access and exact minimum scopes", async () => {
     const context = await setup();
     const tenant = await context.tenant("alice");
@@ -244,7 +294,7 @@ describe("body-owned Google lifecycle across real HTTP and file broker boundarie
     const before = await tenant.store.get("google-gmail");
     context.advance(3600_000);
     context.provider.controls.omitRefreshScope = true;
-    const secondStore = new FileCredentialStore(tenant.path);
+    const secondStore = fixtureWork().wrap(new FileCredentialStore(tenant.path));
     const resolve = (store: FileCredentialStore) =>
       resolveGoogleBearer({ ...tenant.options, store, provider: "google-gmail" });
     const tokens = await Promise.all([resolve(tenant.store), resolve(secondStore)]);
@@ -262,36 +312,47 @@ describe("body-owned Google lifecycle across real HTTP and file broker boundarie
     const tenant = await context.tenant("alice");
     await tenant.connect();
     const now = Date.now() + 3600_000;
+    const work = fixtureWork();
     const run = () =>
-      new Promise<string>((resolve, reject) => {
-        const child = spawn(
-          process.execPath,
-          [
-            "--import",
-            import.meta.resolve("tsx/esm"),
-            fileURLToPath(new URL("./fixtures/google-broker-process.ts", import.meta.url)),
-            JSON.stringify({
-              path: tenant.path,
-              config: context.config,
-              endpoints: context.provider.endpoints,
-              now,
-            }),
-          ],
-          { stdio: ["ignore", "pipe", "pipe"] },
-        );
-        let output = "";
-        let errors = "";
-        child.stdout.on("data", (chunk) => {
-          output += String(chunk);
-        });
-        child.stderr.on("data", (chunk) => {
-          errors += String(chunk);
-        });
-        child.on("error", reject);
-        child.on("exit", (code) =>
-          code === 0 ? resolve(output) : reject(new Error(`Broker process failed ${code}: ${errors}`)),
-        );
-      });
+      work.run(
+        () =>
+          new Promise<string>((resolve, reject) => {
+            const child = spawn(
+              process.execPath,
+              [
+                "--import",
+                import.meta.resolve("tsx/esm"),
+                fileURLToPath(new URL("./fixtures/google-broker-process.ts", import.meta.url)),
+                JSON.stringify({
+                  path: tenant.path,
+                  config: context.config,
+                  endpoints: context.provider.endpoints,
+                  now,
+                }),
+              ],
+              { stdio: ["ignore", "pipe", "pipe"], signal: work.signal },
+            );
+            let output = "";
+            let errors = "";
+            child.stdout.on("data", (chunk) => {
+              output += String(chunk);
+            });
+            child.stderr.on("data", (chunk) => {
+              errors += String(chunk);
+            });
+            let failure: Error | undefined;
+            child.on("error", (error) => {
+              failure = error;
+            });
+            child.on("close", (code) =>
+              failure
+                ? reject(failure)
+                : code === 0
+                  ? resolve(output)
+                  : reject(new Error(`Broker process failed ${code}: ${errors}`)),
+            );
+          }),
+      );
     expect(await Promise.all([run(), run()])).toEqual(["refreshed\n", "refreshed\n"]);
     expect(
       context.provider.seen.filter(
@@ -533,7 +594,7 @@ describe("body-owned Google lifecycle across real HTTP and file broker boundarie
     await started;
     const secondAccounts = createGoogleAccounts({
       ...alice.options,
-      store: new FileCredentialStore(alice.path),
+      store: fixtureWork().wrap(new FileCredentialStore(alice.path)),
     });
     const disconnecting = secondAccounts.disconnect("google-calendar");
     release();

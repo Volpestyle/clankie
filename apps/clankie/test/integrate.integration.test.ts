@@ -1,11 +1,12 @@
 import { serve } from "@hono/node-server";
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Server } from "node:http";
 import { chmod, glob, mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, aroundEach, expect, it } from "vitest";
 import { IntegrationRunSchema } from "@clankie/protocol/integrate";
 import { DeployHolds } from "../src/deploy-holds.ts";
 import { IntegrationQueue, integrationSources } from "../src/integrate.ts";
@@ -15,12 +16,24 @@ import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { deployHoldPresence } from "../src/deploy-hold-presence.ts";
 import { createIntegrationRoutes } from "../src/integrate-routes.ts";
 import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
+import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
 
-const execute = promisify(execFile);
+aroundEach(withFixtureWork);
+const nativeExecute = promisify(execFile);
+const execute = (file: string, args: string[], options: ExecFileOptions = {}) => {
+  const work = fixtureWork();
+  return work.run(() => nativeExecute(file, args, { ...options, encoding: "utf8", signal: work.signal }));
+};
 const roots: string[] = [];
-const cleanups: (() => void)[] = [];
+const queues: IntegrationQueue[] = [];
+const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
-  for (const close of cleanups.splice(0)) close();
+  fixtureWork().stop();
+  // Release only our gate barriers; a cancelled test cannot leave a writer parked.
+  for (const root of roots) await writeFile(join(root, "release"), "go");
+  await fixtureWork().drain();
+  for (const close of cleanups.splice(0)) await close();
+  await Promise.all(queues.splice(0).map((queue) => queue.wait()));
   // Gate temps live outside the batch root (short socket paths); remove them too.
   for (const root of roots)
     for await (const link of glob("**/isolation/*/tmp", { cwd: root }))
@@ -33,31 +46,32 @@ afterEach(async () => {
 async function git(directory: string, ...args: string[]): Promise<string> {
   return (await execute("git", ["-c", "core.hooksPath=/dev/null", "-C", directory, ...args])).stdout.trim();
 }
-async function fixture(gateExtra: string | ((root: string) => string) = "", withApp = false) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-integrate-")));
-  roots.push(root);
-  async function repo(name: string) {
-    const source = join(root, name === "core" ? "clankie" : "clankie-app");
-    const origin = join(root, `${name === "core" ? "clankie" : "clankie-app"}.git`);
-    await mkdir(source);
-    await git(root, "init", "--bare", origin);
-    await git(source, "init", "-b", "main");
-    await git(source, "config", "user.name", "Fixture");
-    await git(source, "config", "user.email", "fixture@example.invalid");
-    await git(source, "remote", "add", "origin", origin);
-    await writeFile(
-      join(source, "package.json"),
-      JSON.stringify({
-        name,
-        private: true,
-        scripts: { check: "node gate.mjs" },
-        packageManager: "pnpm@11.11.0",
-      }),
-    );
-    await writeFile(join(source, ".gitignore"), "node_modules/\n");
-    await writeFile(
-      join(source, "gate.mjs"),
-      `
+function fixture(gateExtra: string | ((root: string) => string) = "", withApp = false) {
+  return fixtureWork().run(async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-integrate-")));
+    roots.push(root);
+    async function repo(name: string) {
+      const source = join(root, name === "core" ? "clankie" : "clankie-app");
+      const origin = join(root, `${name === "core" ? "clankie" : "clankie-app"}.git`);
+      await mkdir(source);
+      await git(root, "init", "--bare", origin);
+      await git(source, "init", "-b", "main");
+      await git(source, "config", "user.name", "Fixture");
+      await git(source, "config", "user.email", "fixture@example.invalid");
+      await git(source, "remote", "add", "origin", origin);
+      await writeFile(
+        join(source, "package.json"),
+        JSON.stringify({
+          name,
+          private: true,
+          scripts: { check: "node gate.mjs" },
+          packageManager: "pnpm@11.11.0",
+        }),
+      );
+      await writeFile(join(source, ".gitignore"), "node_modules/\n");
+      await writeFile(
+        join(source, "gate.mjs"),
+        `
 import assert from 'node:assert/strict';
 import { writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -83,24 +97,27 @@ writeFileSync(process.env.CLANKIE_CREDENTIALS_FILE, '{}');
 console.log('fixture-gate-isolated', process.cwd());
 ${name === "core" ? (typeof gateExtra === "function" ? gateExtra(root) : gateExtra) : ""}
 `,
-    );
-    await execute("pnpm", ["install", "--lockfile-only"], { cwd: source });
-    await git(source, "add", ".");
-    await git(source, "commit", "-m", "base");
-    await git(source, "push", "origin", "HEAD:main"); // Local bare fixture only.
-    return { source, origin, base: await git(source, "rev-parse", "HEAD") };
-  }
-  const core = await repo("core");
-  const app = withApp ? await repo("app") : undefined;
-  const directory = join(root, "integration");
-  const holds = new DeployHolds(directory);
-  const queue = new IntegrationQueue({
-    directory,
-    core: core.source,
-    ...(app ? { app: app.source } : {}),
-    holds,
+      );
+      await execute("pnpm", ["install", "--lockfile-only"], { cwd: source });
+      await git(source, "add", ".");
+      await git(source, "commit", "-m", "base");
+      await git(source, "push", "origin", "HEAD:main"); // Local bare fixture only.
+      return { source, origin, base: await git(source, "rev-parse", "HEAD") };
+    }
+    const core = await repo("core");
+    const app = withApp ? await repo("app") : undefined;
+    const directory = join(root, "integration");
+    const holds = new DeployHolds(directory);
+    const rawQueue = new IntegrationQueue({
+      directory,
+      core: core.source,
+      ...(app ? { app: app.source } : {}),
+      holds,
+    });
+    queues.push(rawQueue);
+    const queue = fixtureWork().wrap(rawQueue);
+    return { root, core, app, directory, holds, queue };
   });
-  return { root, core, app, directory, holds, queue };
 }
 async function commit(source: string, file: string, value: string) {
   await writeFile(join(source, file), value);
@@ -108,7 +125,9 @@ async function commit(source: string, file: string, value: string) {
   await git(source, "commit", "-m", file);
   return git(source, "rev-parse", "HEAD");
 }
-const guard = async () => {};
+const guard = async () => {
+  fixtureWork().signal.throwIfAborted();
+};
 
 it("composes in order on fresh origin, installs real siblings, gates privately and durably reloads exact HEAD", async () => {
   const f = await fixture("assert.ok(existsSync('../clankie-app/package.json'));", true);
@@ -235,18 +254,25 @@ it("CLI/API batch passes, a named gone hold blocks push and runtime update, and 
   const approved = await commit(f.core.source, "feature", "test");
   const emptySnapshot = JSON.stringify({ result: { snapshot: { workspaces: [], tabs: [], panes: [] } } });
   const holds = new DeployHolds(f.directory, (hold) => deployHoldPresence(hold, async () => emptySnapshot));
-  const queue = new IntegrationQueue({ ...f.queue.options, holds });
+  const rawQueue = new IntegrationQueue({ ...f.queue.options, holds });
+  queues.push(rawQueue);
+  const queue = fixtureWork().wrap(rawQueue);
   // This real updater refuses an unpinned fixture checkout before ever spawning its helper.
   const updater = createRuntimeUpdater({ repoRoot: f.core.source, env: { ...process.env, HOME: f.root } });
-  const service = await createClankieApp({
-    integration: queue,
-    deployHolds: holds,
-    runtimeUpdater: updater,
-    captain: createStubCaptain(),
-    authenticateOperator: async (r) =>
-      r.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "fixture-owner" } : undefined,
+  const service = await fixtureWork().run(async () => {
+    const service = await createClankieApp({
+      integration: queue,
+      deployHolds: holds,
+      runtimeUpdater: updater,
+      captain: createStubCaptain(),
+      authenticateOperator: async (r) =>
+        r.headers.get("authorization") === "Bearer fixture-owner"
+          ? { operatorId: "fixture-owner" }
+          : undefined,
+    });
+    cleanups.push(() => service.close());
+    return service;
   });
-  cleanups.push(() => service.close());
   const fetchImpl: typeof fetch = async (input, init) => service.app.fetch(new Request(input, init));
   const cli = { host: "http://fixture.invalid", fetchImpl, env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" } };
   const id = randomUUID();
@@ -421,25 +447,44 @@ while (!existsSync(join(root, 'release'))) await new Promise(r => setTimeout(r, 
 ${extra}
 `;
 async function queueCli(f: Awaited<ReturnType<typeof fixture>>) {
-  const api = createIntegrationRoutes({
-    queue: f.queue,
-    holds: f.holds,
-    authorize: async (request) =>
-      request.headers.get("authorization") === "Bearer fixture-owner" ? guard : undefined,
+  return fixtureWork().run(async () => {
+    const api = createIntegrationRoutes({
+      queue: f.queue,
+      holds: f.holds,
+      authorize: async (request) =>
+        request.headers.get("authorization") === "Bearer fixture-owner" ? guard : undefined,
+    });
+    const server = serve({ fetch: api.fetch, port: 0, hostname: "127.0.0.1" }) as Server;
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+          server.closeAllConnections();
+        }),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string") throw Error("Missing fixture HTTP address");
+    return { host: `http://127.0.0.1:${address.port}`, env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" } };
   });
-  const server = serve({ fetch: api.fetch, port: 0, hostname: "127.0.0.1" });
-  await new Promise<void>((resolve) => server.once("listening", resolve));
-  cleanups.push(() => {
-    server.close();
-  });
-  const address = server.address();
-  if (!address || typeof address === "string") throw Error("Missing fixture HTTP address");
-  return { host: `http://127.0.0.1:${address.port}`, env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" } };
 }
 
 it("CLI/API coalesces arrivals during a real gate, isolating a cross-repo conflict and landing healthy members once", async () => {
   const f = await fixture((root) => barrier(root), true);
   const cli = await queueCli(f);
+  const initial = await commit(f.core.source, "initial", "one");
+  const a = await commit(f.core.source, "a", "healthy");
+  const paired = await commit(f.core.source, "paired", "must not land");
+  const b = await commit(f.core.source, "b", "healthy");
+  // Install the source guard before cloning. The first core-only gate can start
+  // while we prepare the independent app conflict; its barrier keeps it parked.
+  for (const source of [f.core.source, f.app!.source]) {
+    const hook = join(source, ".git", "hooks", "pre-push");
+    await writeFile(hook, "#!/bin/sh\nexit 1\n");
+    await chmod(hook, 0o755);
+  }
+  const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  await runIntegrationCommand([initial, "--id", ids[0]!, "--push", "--no-wait"], cli);
   // The app input conflicts with freshly fetched main; its paired core input must roll back too.
   const appBase = await commit(f.app!.source, "shared", "base");
   await git(f.app!.source, "push", "origin", "HEAD:main");
@@ -448,18 +493,6 @@ it("CLI/API coalesces arrivals during a real gate, isolating a cross-repo confli
   await commit(f.app!.source, "shared", "remote");
   await git(f.app!.source, "push", "origin", "HEAD:main");
   await git(f.app!.source, "checkout", "main");
-  const initial = await commit(f.core.source, "initial", "one");
-  const a = await commit(f.core.source, "a", "healthy");
-  const paired = await commit(f.core.source, "paired", "must not land");
-  const b = await commit(f.core.source, "b", "healthy");
-  // A client hook that refuses every push; integration clones must not run it.
-  for (const source of [f.core.source, f.app!.source]) {
-    const hook = join(source, ".git", "hooks", "pre-push");
-    await writeFile(hook, "#!/bin/sh\nexit 1\n");
-    await chmod(hook, 0o755);
-  }
-  const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
-  await runIntegrationCommand([initial, "--id", ids[0]!, "--push", "--no-wait"], cli);
   await until(async () => (await runIntegrationCommand(["status", ids[0]!], cli)).batch?.state === "gating");
   await runIntegrationCommand([a, "--id", ids[1]!, "--push", "--no-wait"], cli);
   await runIntegrationCommand([paired, "--app", appBad, "--id", ids[2]!, "--push", "--no-wait"], cli);
