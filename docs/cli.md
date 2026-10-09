@@ -6608,3 +6608,24 @@ unchanged. Multi-team project mappings are refused rather than guessed.
 The report's `projects` lists each Linear project with its built-in tracker
 project UUID (`trackerProjectId`); set that on the settings project with
 `project update` to bind it.
+
+### `work mirror linear --scratch NAME --project UUID enable|disable|status`
+
+Keeps an imported scratch store current from Clankie's signed Linear webhooks
+(Mirror 2). Nothing mirrors until the owner enables a store, and only a store
+imported from that project can be enabled. Each accepted data-change event for
+the project (issue create/update/state/priority/labels/milestone, comments,
+labels, project, project updates, documents, cycles and issue attachments) goes
+through the import's own mapper, once per Linear event id, attributed to the
+original Linear actor on the item event stream and the sync journal. His own
+writes' webhook echoes are mirrored too. Wakes are unaffected.
+
+The mirror is read-only: built-in tool and sync writes to it are refused with
+`mirror_read_only` until cutover. An event that references a record the mirror
+lacks is drift: the service re-reads only that issue (or the project's milestones,
+labels or updates) through the connected account within the background request
+budget, applies it with the import mapper, and records the repair. Linear sends
+no milestone or relation events, so project events refresh milestones and relation
+changes arrive with the next re-read of an issue. `status` returns counters
+(applied, duplicate, ignored, drift, failed), the applied event count and the
+last 50 drift reports. The service keeps bindings in `tracker-imports/mirrors.json`.

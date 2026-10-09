@@ -1,5 +1,7 @@
 import { MachineJoins } from "./machine-joins.ts";
-import { importConnectedLinear } from "./linear-import.ts";
+import { connectedLinearSession, importConnectedLinear, importLinearMedia } from "./linear-import.ts";
+import { LinearMirrors } from "./linear-mirror.ts";
+import { linearGraphqlCredential } from "./linear-graphql.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { requireMachineAccess } from "./machine-access.ts";
 import { verifyLocalSandbox } from "@clankie/settings";
@@ -1737,6 +1739,42 @@ const runtimeHealth = new RuntimeHealthObserver({
     ),
 });
 const localCompanionBoundary = new LocalCompanionBoundary();
+// Mirror 2 (VUH-1965): owner-enabled only; drift repair reads through the connected app.
+const mirrorSession = () =>
+  connectedLinearSession({
+    credentials: operatorCredentialStore,
+    budget: linearRequestBudget,
+    assertCurrent: async () => {},
+  });
+const linearMirrors = new LinearMirrors({
+  root: join(stateRoot, "tracker-imports"),
+  identity: async () => {
+    const settings = await settingsStore.load();
+    return {
+      ownerIds: settings.linearWebhook.wake.ownerUserIds,
+      ownerEmails: settings.linearWebhook.wake.ownerUserEmails,
+      appUserId: (await linearGraphqlCredential(operatorCredentialStore))?.credential.account?.userId,
+    };
+  },
+  session: mirrorSession,
+  // Opens the connected account only when a change carries an uncached Linear upload.
+  media: async (snapshot, directory) => {
+    let session: Awaited<ReturnType<typeof mirrorSession>> | undefined;
+    const settings = await settingsStore.load();
+    await importLinearMedia(snapshot, {
+      credentials: operatorCredentialStore,
+      budget: linearRequestBudget,
+      evidence: evidenceStore,
+      directory,
+      ownerIds: settings.linearWebhook.wake.ownerUserIds,
+      ownerEmails: settings.linearWebhook.wake.ownerUserEmails,
+      assertCurrent: async () => {},
+      access: async () => (session ??= await mirrorSession()).access(),
+      dispatch: () => session?.dispatch(),
+    });
+  },
+  log: (level, fields, message) => logger[level](fields, message),
+});
 const clankie = await createClankieApp({
   remoteProjectLeads: new RemoteProjectLeads({
     repoRoot,
@@ -1847,6 +1885,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   evidenceStore,
   builtInTracker,
+  linearMirrors,
   importLinear: async (projectId, scratch, assertCurrent) => {
     const settings = await settingsStore.load();
     return importConnectedLinear(projectId, {
@@ -2040,6 +2079,7 @@ const clankie = await createClankieApp({
     },
     issueContext: (activity) => linearAttribution.issueContext(activity, mcpHost),
     projectContext: (activity) => linearAttribution.projectContext(activity, mcpHost),
+    mirror: (event) => linearMirrors.receive(event),
     // Verified own-account identity suppresses its activity independently of rules.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },

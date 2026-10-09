@@ -144,3 +144,15 @@ records or events. It does not run local cycle rollover or completion gates.
 Reports live in the scratch directory as `import-report.json`. External attachment
 URLs are retained and reported; failed authenticated downloads abort before the
 tracker replacement. Multi-team/project-to-team mappings are currently refused.
+
+### Linear webhook mirror
+
+`planLinearMirrorEvent` turns one signed Linear data-change event into a partial
+import snapshot; `importLinear` applies it with `mirrorEvent`, so webhooks and
+imports share one mapper. The store records each applied Linear event id (the
+last 5,000) and returns `duplicate` on replay. Changes carry the original Linear
+actor and `via: linear_mirror` on item events and enter the sync journal as
+`mirror_linear`. An event naming an unknown issue, label, state or milestone plans
+as drift; `collectLinearScoped` re-reads just those records with the import's
+field selections. A store holding a Linear mirror refuses every built-in write
+(`mirror_read_only`) until cutover.

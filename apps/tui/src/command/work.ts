@@ -30,6 +30,7 @@ const WORK_USAGE = [
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
   "  | import linear --project UUID --scratch NAME   (read-only Linear mirror into a scratch store)",
+  "  | mirror linear --scratch NAME --project UUID enable|disable|status   (Linear webhooks keep that scratch store current)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
 
@@ -278,6 +279,23 @@ function trackerRequest(
         path: "/v1/tracker/import/linear",
         body: { projectId: one(parsed, "--project"), scratch: one(parsed, "--scratch") },
       };
+    case "mirror": {
+      const action = rest[1];
+      if (
+        rest.length !== 2 ||
+        rest[0] !== "linear" ||
+        !["enable", "disable", "status"].includes(action ?? "") ||
+        !one(parsed, "--project") ||
+        !one(parsed, "--scratch")
+      )
+        throw new Error(
+          "Usage: clankie work mirror linear --scratch NAME --project UUID enable|disable|status",
+        );
+      return {
+        path: "/v1/tracker/mirror/linear",
+        body: { projectId: one(parsed, "--project"), scratch: one(parsed, "--scratch"), action },
+      };
+    }
     case "releases": {
       if (rest[0] === "sync" && rest.length === 1)
         return { path: "/v1/tracker/releases/sync", body: { repo } };

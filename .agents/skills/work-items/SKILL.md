@@ -322,3 +322,10 @@ links. A rerun on unchanged source must report zero created/updated records.
 Changes made in Linear during the run are legitimate updates, not duplicates.
 Do not infer authorship from worker names mentioned in prose; original Linear
 identity is retained when a persona cannot be proven.
+
+To keep that scratch copy current, the owner runs `clankie work mirror linear
+--scratch NAME --project UUID enable`. Signed Linear webhooks then apply through
+the import mapper, once per event id, with the original actor. The copy refuses
+built-in writes (`mirror_read_only`): change mirrored work in Linear until cutover.
+`... status` shows counters and drift reports; drift is repaired by a scoped
+re-read through the connected account. It only ever targets scratch imports.

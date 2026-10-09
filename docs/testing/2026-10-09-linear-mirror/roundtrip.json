@@ -1,0 +1,60 @@
+{
+  "outcome": "passed",
+  "method": "disposable service over HTTP, real CLI, signed webhook fixtures, captured import",
+  "cliEnable": {
+    "scratch": "work",
+    "projectId": "cbd205ab-cad4-48b8-9724-7109410fc921",
+    "workspaceId": "75f1d1f0-542b-4095-9967-fd7b27093472",
+    "enabled": true,
+    "updatedAt": "2026-10-09T18:00:00.000Z",
+    "counters": {
+      "applied": 0,
+      "duplicate": 0,
+      "ignored": 0,
+      "drift": 0,
+      "failed": 0
+    },
+    "drift": []
+  },
+  "pushedCommit": "mirror_linear",
+  "pushLatencyMs": 57,
+  "mirroredItemEvents": [
+    {
+      "type": "comment",
+      "actor": {
+        "type": "human",
+        "id": "owner",
+        "name": "James Volpe",
+        "onBehalfOf": []
+      }
+    },
+    {
+      "type": "state",
+      "actor": {
+        "type": "human",
+        "id": "owner",
+        "name": "James Volpe",
+        "onBehalfOf": []
+      }
+    }
+  ],
+  "replayByteIdentical": true,
+  "builtInWrite": "Write refused (mirror_read_only): This store mirrors Linear; make the change in Linear until cutover",
+  "cliStatus": {
+    "scratch": "work",
+    "projectId": "cbd205ab-cad4-48b8-9724-7109410fc921",
+    "workspaceId": "75f1d1f0-542b-4095-9967-fd7b27093472",
+    "enabled": true,
+    "updatedAt": "2026-10-09T18:00:00.000Z",
+    "counters": {
+      "applied": 2,
+      "duplicate": 2,
+      "ignored": 0,
+      "drift": 0,
+      "failed": 0
+    },
+    "drift": [],
+    "lastEventAt": "2026-10-09T18:00:00.000Z",
+    "appliedEvents": 2
+  }
+}

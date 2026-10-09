@@ -1914,6 +1914,37 @@ paths:
         "400": { description: Invalid project UUID or scratch name }
         "422": { description: Import failed; detail includes any request-budget retry time }
         "503": { description: Import capability unavailable }
+  /v1/tracker/mirror/linear:
+    post:
+      tags: [Operator]
+      operationId: configureLinearMirror
+      summary: Enable, disable or inspect a scratch import's Linear webhook mirror
+      description: >-
+        Owner-enabled only; nothing mirrors by default. Enabling requires a scratch
+        store imported from the named project. Accepted signed Linear webhooks for
+        that project then apply through the import mapper once per Linear event id,
+        attributed to the original actor. The mirror refuses built-in writes until
+        cutover. Drift (an event naming an unknown record) triggers a scoped re-read
+        through the connected account within the background request budget and is
+        reported. Status returns counters, the applied event count and drift reports.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, scratch, action]
+              properties:
+                projectId: { type: string, format: uuid }
+                scratch: { type: string, pattern: "^[a-zA-Z0-9_-]{1,80}$" }
+                action: { type: string, enum: [enable, disable, status] }
+      responses:
+        "200": { description: The mirror binding, counters and drift reports }
+        "401": { description: Operator authentication required }
+        "400": { description: Invalid project UUID, scratch name or action }
+        "409": { description: No matching scratch import, or it mirrors another project }
+        "503": { description: Mirror capability unavailable }
   /v1/work:
     post:
       tags: [Operator]

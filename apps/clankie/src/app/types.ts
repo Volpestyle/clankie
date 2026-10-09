@@ -178,6 +178,8 @@ export interface ClankieAppDependencies {
   /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */
   builtInTracker?: import("@clankie/work-items").LocalTrackerBackend;
   importLinear?: (projectId: string, scratch: string, assertCurrent: () => Promise<void>) => Promise<unknown>;
+  /** Owner command for a scratch store's webhook mirror (VUH-1965). */
+  linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;
   /** Optional host policy; ordinary installations do not supply a provider. */
   runtimeProvider?: RuntimeProvider;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
@@ -326,6 +328,8 @@ export interface ClankieAppDependencies {
     /** Bounded read of missing issue context through the verified connected account. */
     issueContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["issueContext"]>;
     projectContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["projectContext"]>;
+    /** Owner-enabled Linear mirrors (VUH-1965): applied after the response, never gating a wake. */
+    mirror?(event: import("@clankie/work-items").LinearMirrorEvent): void;
   };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
