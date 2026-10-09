@@ -110,6 +110,8 @@ export class RuntimeCanary {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<void> | undefined;
   private closed = false;
+  // Keep completed callbacks for this boot; recovery in a new process runs cleanup again.
+  private readonly passedMaintenance = new Map<string, Promise<void>>();
 
   constructor(options: RuntimeCanary["options"]) {
     this.options = options;
@@ -557,7 +559,19 @@ export class RuntimeCanary {
       });
       await this.save(result, { ...result.canary, holdReleased: true });
     }
-    await this.options.onPassed?.().catch((error) => this.options.onError?.(error));
+    if (this.options.onPassed) {
+      let maintenance = this.passedMaintenance.get(result.id);
+      if (!maintenance) {
+        maintenance = Promise.resolve()
+          .then(() => this.options.onPassed!())
+          .catch((error) => {
+            this.passedMaintenance.delete(result.id);
+            this.options.onError?.(error);
+          });
+        this.passedMaintenance.set(result.id, maintenance);
+      }
+      await maintenance;
+    }
   }
 
   private async releaseSuperseded(passed: RuntimeUpdateResult): Promise<void> {

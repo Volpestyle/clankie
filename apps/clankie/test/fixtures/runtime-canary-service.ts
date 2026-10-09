@@ -8,6 +8,7 @@ import { performance } from "node:perf_hooks";
 import { DeployHolds } from "../../src/deploy-holds.ts";
 import { RuntimeCanary } from "../../src/runtime-canary.ts";
 import { createRuntimeHealthSampler } from "../../src/runtime-health-sample.ts";
+import { withRuntimeMaintenance } from "../../../tui/bin/runtime-retention.ts";
 import { readPrivateJson } from "../../../tui/bin/update-files.ts";
 import { readRuntimeUpdate, writeRuntimeUpdate } from "../../../tui/bin/runtime-update.ts";
 
@@ -24,6 +25,8 @@ const runtime = {
 const holds = new DeployHolds(join(root, "integration"));
 const errors: string[] = [];
 let healthRequests = 0;
+let maintenanceRuns = 0;
+let maintenanceActive = false;
 let sample: ReturnType<typeof createRuntimeHealthSampler>;
 // Advance only at canary sample boundaries. Real scheduling/fsync/CPU delays
 // must not change a fixture's intended availability timeline. The sampler
@@ -51,6 +54,19 @@ const canary = new RuntimeCanary({
     return mode !== "alert-unavailable";
   },
   onError: () => errors.push("canary observation unavailable"),
+  onPassed: async () => {
+    if (!mode.startsWith("maintenance")) return;
+    await withRuntimeMaintenance(updatesDirectory, async () => {
+      maintenanceRuns++;
+      maintenanceActive = true;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        if (mode === "maintenance-retry" && maintenanceRuns === 1) throw Error("Fixture maintenance failed");
+      } finally {
+        maintenanceActive = false;
+      }
+    });
+  },
 });
 const server = createServer((request, response) => {
   if (request.url !== "/health") {
@@ -111,6 +127,8 @@ process.on("message", (message: unknown) => {
           policy: canary.policy(),
           errors,
           healthRequests,
+          maintenanceRuns,
+          maintenanceActive,
           maxSampleGapMs,
           checkpoint: existsSync(join(updatesDirectory, "healthy-canary.json"))
             ? readPrivateJson(join(updatesDirectory, "healthy-canary.json"))
@@ -152,6 +170,11 @@ process.on("message", (message: unknown) => {
           rollbackHealthy: phase === "rolled-back",
         });
         value = { ok: true };
+      } else if (input.action === "recover") {
+        await Promise.all([canary.recover(), canary.recover()]);
+        value = { ok: true };
+      } else if (input.action === "maintenance-admission") {
+        value = await withRuntimeMaintenance(updatesDirectory, async () => ({ accepted: true }));
       } else if (input.action === "landing") {
         value = await holds.landing("fixture-deploy", [], async () => ({ accepted: true }));
       } else throw Error("Unknown fixture action");

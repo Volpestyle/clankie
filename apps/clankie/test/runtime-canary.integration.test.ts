@@ -29,6 +29,8 @@ interface Snapshot {
   policy: RuntimeCanaryPolicy;
   errors: string[];
   healthRequests: number;
+  maintenanceRuns: number;
+  maintenanceActive: boolean;
   maxSampleGapMs: number;
   checkpoint?: { commit: string };
 }
@@ -788,4 +790,31 @@ it("retains an overridden canary hold whose ownership changed before the replace
   const service = await start(f.root);
   const passed = await waitFor(service, "passed");
   expect(passed.holds).toMatchObject([{ id: older, holder: "Integrator", reason: "Independent review" }]);
+});
+
+it("passed maintenance releases deploy admission across later polls and concurrent recovery", async () => {
+  const f = await fixture();
+  const service = await start(f.root, "maintenance");
+  await waitFor(service, "passed");
+  await expect.poll(async () => (await service.status()).maintenanceActive).toBe(true);
+  await service.call("recover");
+  expect((await service.status()).maintenanceActive).toBe(false);
+  await new Promise((resolve) => setTimeout(resolve, policy.sampleIntervalMs * 5));
+  expect((await service.status()).maintenanceRuns).toBe(1);
+  expect(await service.call("maintenance-admission")).toEqual({ accepted: true });
+  await stop(service.child);
+  const restarted = await start(f.root, "maintenance");
+  expect((await restarted.status()).maintenanceRuns).toBe(1);
+  expect(await restarted.call("maintenance-admission")).toEqual({ accepted: true });
+});
+
+it("failed passed maintenance retries then leaves deploy admission available", async () => {
+  const f = await fixture();
+  const service = await start(f.root, "maintenance-retry");
+  await waitFor(service, "passed");
+  await expect.poll(async () => (await service.status()).maintenanceRuns).toBe(2);
+  await expect.poll(async () => (await service.status()).maintenanceActive).toBe(false);
+  await service.call("recover");
+  expect((await service.status()).maintenanceRuns).toBe(2);
+  expect(await service.call("maintenance-admission")).toEqual({ accepted: true });
 });

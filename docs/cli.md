@@ -478,7 +478,9 @@ removed/retained lists and counts. `retentionMaintenance` and `retentionPending`
 name a currently held cleanup lock or unconfirmed removal even when its record
 is unreadable. Complete effect evidence stays in private
 `~/.clankie/updates/retention.log`; operation journals remain beside it.
-Recovery of an already passed canary inspects retention again. A held
+Retention runs once per passed operation per service boot, rather than on every
+canary poll. Recovery in a new service process inspects retention again; failed
+maintenance callbacks remain retryable. A held
 `maintenance.lock` or `retention-pending.json` requires owner reconciliation;
 neither age nor a timeout authorizes deletion or replay of a removal.
 

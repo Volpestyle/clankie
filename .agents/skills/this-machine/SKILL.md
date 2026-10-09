@@ -106,6 +106,11 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
+Passed-canary retention runs once per operation per service boot. It shares the
+maintenance lock with update admission; `retentionMaintenance: held` with empty
+`holds` can be an active scan. Read status and the retention journal before
+concluding that a lock leaked. Recovery in a new process inspects retention again.
+
 A pending canary belongs to the candidate commit. Old/foreign observers of the
 shared update journal leave it alone while its armed process is alive or its
 exit is unproven. A confirmed exit followed by a different-commit boot serving verified
