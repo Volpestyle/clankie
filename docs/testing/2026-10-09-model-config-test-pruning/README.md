@@ -17,7 +17,16 @@ The baseline includes changes on main since the original branch point; the PR
 will be rebased before its final gate. Wall times include different cache/load
 conditions and do not establish a speedup.
 
-After gate and archive results will be recorded after verification.
+After gate: exit 0, source stable, 64/64 cases, 105.626171125 seconds,
+HEAD `b0b135d2430bcb043393523f3000e0a6188506dc`, base
+`63d1937231fb020f6e5b784edecf4e95bd4b3d74`. Every phase passed.
+Focused after check: 76/76 cases (62 model-provider, two persona integration,
+12 unchanged configured-model consumer), zero failures or skips. Source/test
+counts are 873 → 863 and 62 → 60 lines, 63 → 62 and two → two cases.
+The root gate will be repeated on the final evidence commit before branch push.
+
+Raw baseline, after, consumer and focused results, original files and the exact
+cut are retained through the content-addressed [archive manifest](evidence.json).
 
 Landed subtotal: six batches, 688 lines and 39 cases. This PR proposes seven
 batches, 700 lines and 40 cases after merge. Fixture bulk remains separate.
