@@ -66,9 +66,17 @@ Main subsequently advanced. This batch is based on fetched current main;
 additional reviewed voice/persona/project files enlarge the cut, and the private
 helper changes native import-based selection. The baseline and landing gate
 therefore are not a matched speedup comparison. No extra timing run is performed.
-The issue's landing comment records the final committed HEAD, pinned base, root
-exit status, wall time, selected cases and source-stability receipt. Only a green
-root gate on that committed, rebased change authorizes its push.
+The committed-head root gate passed **36/36 cases in all eight edited files**
+in **38.52 seconds** (39.56 seconds including command startup), exit 0,
+`sourceStable: true`, Knip and TUI typecheck green. Checked HEAD:
+`d8304c59e13102f6023adb0a9e841144bc3cbab3`; pinned base:
+`501922c9c0d54c7d07a807afcd63264072115979`. That green gate authorized the
+push to main.
+
+Baseline and landing JSON/logs/load samples, per-file counts and export-only
+proof live in the archived capture bundle listed in `evidence.json`:
+`clankie://evidence/sha256/f904fedbf4ffae02dc2e589b4461a5ee0eab5c2317f99c7d8ce9a2350094ce60`.
+Raw bytes stay outside git.
 
 The per-file before/after counts and final root evidence are attached to
 [VUH-1925](https://linear.app/vuhlp/issue/VUH-1925). Its final cumulative tally
