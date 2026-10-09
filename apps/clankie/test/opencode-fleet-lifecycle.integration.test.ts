@@ -777,9 +777,19 @@ test("SSH native hire, API history and follow-up reuse the original controller w
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
 });
 
-test("SSH native follow-up keeps its original controller while a valid Herdr reply is pending", async () => {
+test("SSH native follow-up keeps its original controller while a valid Herdr reply is pending", async (context) => {
+  const started = performance.now();
+  const stages: { stage: string; elapsedMs: number }[] = [];
+  const stage = (name: string) => {
+    const observation = { stage: name, elapsedMs: performance.now() - started };
+    stages.push(observation);
+    if (process.env.LIFECYCLE_STAGE_TRACE) console.log(JSON.stringify(observation));
+  };
+  context.onTestFailed(() => console.error("Pending SSH follow-up stages", JSON.stringify(stages)));
   const f = await fixture({ remote: true });
-  await remoteFollowup(f);
+  stage("hired");
+  // This message is the follow-up whose pending native reply we exercise.
+  // The preceding SSH case separately proves resume and history reuse.
   const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
   const message = bank.tools.find((tool) => tool.name === "message_seat")!;
   const before = f.ssh!.transportState().filter((entry) => !entry.closed);
@@ -788,13 +798,22 @@ test("SSH native follow-up keeps its original controller while a valid Herdr rep
   const sending = message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
   void sending.catch(() => {});
   try {
-    await barrier.waiting;
+    stage("sending");
+    await Promise.race([
+      barrier.waiting,
+      sending.then((receipt) => {
+        throw new Error(`Native follow-up finished before its Herdr report: ${JSON.stringify(receipt)}`);
+      }),
+    ]);
+    stage("report-pending");
     // Herdr permits ten seconds for this native request. A valid response
     // after four seconds must not retire its otherwise unchanged controller.
     await new Promise((resolve) => setTimeout(resolve, 4_250));
+    stage("delay-finished");
     const held = f.ssh!.transportState();
     barrier.resume();
     const receipt = await sending;
+    stage("delivered");
     const delivery = JSON.parse((receipt.content[0] as { text: string }).text);
     for (const entry of before)
       expect(held.find((current) => current.id === entry.id)).toMatchObject({ closed: false });
@@ -805,7 +824,7 @@ test("SSH native follow-up keeps its original controller while a valid Herdr rep
       seatId: f.hired.seat.seatId,
       status: "working",
     });
-    expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
+    expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
   } finally {
     barrier.resume();
     await sending.catch(() => undefined);
