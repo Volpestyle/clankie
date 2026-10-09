@@ -21,6 +21,18 @@ const reference = z
   .max(256)
   .regex(/^[^\p{Cc}]+$/u);
 const timestamp = z.number().int().nonnegative();
+/** Host-observed simulator runtime charge; unavailable never means zero. */
+export const FleetSimulatorUsageSchema = z.strictObject({
+  sampledAtMs: timestamp,
+  status: z.enum(["available", "partial", "unavailable"]),
+  processCount: z.number().int().nonnegative().optional(),
+  unavailableProcesses: z.number().int().nonnegative().optional(),
+  rssBytes: z.number().int().nonnegative().optional(),
+  footprintBytes: z.number().int().nonnegative().optional(),
+  cpuTimeMs: z.number().finite().nonnegative().optional(),
+  cpuPercent: z.number().finite().nonnegative().optional(),
+  intervalMs: z.number().finite().positive().optional(),
+});
 export const FleetResourceSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -58,6 +70,7 @@ export const FleetResourceSnapshotSchema = z
             createdAtMs: timestamp,
             lastUsedAtMs: timestamp,
             deviceId: reference.optional(),
+            usage: FleetSimulatorUsageSchema.optional(),
           })
           .strict(),
       )
@@ -119,6 +132,7 @@ export const FleetSimulatorLeaseSchema = z
     deviceType: z.string().min(1).max(256).optional(),
     runtime: z.string().min(1).max(256).optional(),
     /** Informational device origin; release stops and retains every device. */
+    usage: FleetSimulatorUsageSchema.optional(),
     origin: z.enum(["created", "existing"]).optional(),
     /** Present when a close model stood in for the requested device type. */
     requestedDeviceType: z.string().min(1).max(256).optional(),
@@ -142,6 +156,7 @@ const FleetExternalSimulatorSchema = z
     runtime: z.string().min(1).max(256),
     deviceType: z.string().min(1).max(256).optional(),
     holders: z.array(FleetSimulatorHolderSchema).max(32),
+    usage: FleetSimulatorUsageSchema.optional(),
   })
   .strict();
 export const FleetSimulatorStatusSchema = z

@@ -93,7 +93,36 @@ def darwin_memory():
             raise RuntimeError("Darwin memory observation unavailable")
     if percent.value > 100 or total.value == 0:
         raise RuntimeError("Darwin memory observation invalid")
-    return {"schemaVersion": 1, "availablePercent": percent.value, "totalMemoryBytes": total.value}
+    # Stable HOST_VM_INFO64 rev1 prefix (SDK mach/vm_statistics.h). Reclaiming
+    # anonymous/compressed pages needs more compression or swap; do not advertise
+    # all of those pages as immediate headroom for another simulator boot.
+    class VmStatistics(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_uint32) for name in ("free", "active", "inactive", "wired")] + [
+            (name, ctypes.c_uint64) for name in ("zero", "reactivations", "pageins", "pageouts",
+                "faults", "cow", "lookups", "hits", "purges")
+        ] + [(name, ctypes.c_uint32) for name in ("purgeable", "speculative")] + [
+            (name, ctypes.c_uint64) for name in ("decompressions", "compressions", "swapins", "swapouts")
+        ] + [(name, ctypes.c_uint32) for name in ("compressor", "throttled", "external", "internal")] + [
+            ("uncompressed", ctypes.c_uint64)]
+    if ctypes.sizeof(VmStatistics) != 152 or VmStatistics.external.offset != 136:
+        raise RuntimeError("Unsupported memory ABI")
+    library.mach_host_self.restype = ctypes.c_uint32
+    library.host_statistics64.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p,
+                                         ctypes.POINTER(ctypes.c_uint32)]
+    info = VmStatistics()
+    count = ctypes.c_uint32(38)
+    host = library.mach_host_self()
+    try:
+        if library.host_statistics64(host, 4, ctypes.byref(info), ctypes.byref(count)) != 0 or count.value != 38:
+            raise RuntimeError("Darwin page observation unavailable")
+    finally:
+        library.mach_task_self.restype = ctypes.c_uint32
+        library.mach_port_deallocate(library.mach_task_self(), host)
+    # Speculative pages are included in free_count and can also be file-backed.
+    reclaimable_bytes = (max(0, info.free - info.speculative) + info.external) * os.sysconf("SC_PAGE_SIZE")
+    available_bytes = min(total.value * percent.value // 100, reclaimable_bytes)
+    return {"schemaVersion": 1, "availablePercent": percent.value, "totalMemoryBytes": total.value,
+            "availableMemoryBytes": available_bytes}
 
 
 def snapshot():
@@ -216,6 +245,103 @@ def simulator_referents():
                 current, depth = table[current]["ppid"], depth + 1
     return {"schemaVersion": 1, "processes": list(processes.values()),
             "matches": {needle: pids for needle, pids in matches.items() if pids}}
+
+
+
+class ProcUsage(ctypes.Structure):
+    # SDK sys/resource.h rusage_info_v0, CPU times are Mach absolute ticks.
+    _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in (
+        "user", "system", "idle_wakeups", "interrupt_wakeups", "pageins", "wired",
+        "resident", "footprint", "start", "exit",
+    )]
+
+
+def simulator_usage():
+    """Read-only per-device kernel charges. Never exports argv or grants authority."""
+    if sys.platform != "darwin":
+        raise RuntimeError("Simulator usage requires Darwin")
+    if ctypes.sizeof(ProcUsage) != 96 or ProcUsage.footprint.offset != 72:
+        raise RuntimeError("Unsupported usage ABI")
+    import re
+    raw = subprocess.run(["/bin/ps", "-axww", "-o", "pid=,ppid=,uid=,rss=,comm="],
+                         capture_output=True, timeout=2, check=True).stdout
+    if len(raw) > 4 * 1024 * 1024:
+        raise RuntimeError("Process snapshot too large")
+    table = {}
+    for line in raw.decode("utf-8", "replace").splitlines():
+        fields = line.split(None, 4)
+        if len(fields) != 5:
+            raise RuntimeError("Process snapshot unavailable")
+        pid, ppid, uid, rss = map(int, fields[:4])
+        table[pid] = {"pid": pid, "ppid": ppid, "uid": uid,
+                      "rssBytes": rss * 1024, "executable": os.path.basename(fields[4])[:128]}
+    if len(table) > 10000:
+        raise RuntimeError("Process snapshot too large")
+    roots = {pid for pid, row in table.items()
+             if row["uid"] == os.getuid() and row["executable"] == "launchd_sim"}
+    devices = {}
+    if roots:
+        args = subprocess.run(["/bin/ps", "-ww", "-p", ",".join(map(str, roots)), "-o", "pid=,args="],
+                              capture_output=True, timeout=2, check=True).stdout
+        if len(args) > 1024 * 1024:
+            raise RuntimeError("Simulator roots unavailable")
+        for line in args.decode("utf-8", "replace").splitlines():
+            fields = line.strip().split(None, 1)
+            if len(fields) != 2:
+                continue
+            match = re.search(r"/CoreSimulator/Devices/([A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12})/data/var/run/launchd_bootstrap\.plist(?:$|\s)", fields[1])
+            pid = int(fields[0])
+            if pid in roots and match:
+                device = match.group(1).upper()
+                if device in devices:
+                    raise RuntimeError("Ambiguous simulator root")
+                devices[device] = pid
+    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    library.proc_pid_rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+    library.proc_pid_rusage.restype = ctypes.c_int
+    class Timebase(ctypes.Structure):
+        _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+    timebase = Timebase()
+    system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    if system.mach_timebase_info(ctypes.byref(timebase)) != 0 or not timebase.denom:
+        raise RuntimeError("CPU timebase unavailable")
+    result = []
+    for device, root in devices.items():
+        root_identity = identity(root)
+        if root_identity is None:
+            continue
+        members = {root}
+        for _ in range(64):
+            expanded = members | {pid for pid, row in table.items() if row["ppid"] in members}
+            if expanded == members:
+                break
+            members = expanded
+        processes, unavailable = [], 0
+        for pid in sorted(members):
+            row = table[pid]
+            try:
+                before = identity(pid)
+                usage = ProcUsage()
+                if before is None:
+                    continue
+                if before["ppid"] != row["ppid"]:
+                    raise RuntimeError("Process ancestry changed during observation")
+                if library.proc_pid_rusage(pid, 0, ctypes.byref(usage)) != 0:
+                    raise RuntimeError("Process usage unavailable")
+                after = identity(pid)
+                if after is None or before["startTime"] != after["startTime"]:
+                    raise RuntimeError("Process changed during usage observation")
+                processes.append({"pid": pid, "startTime": before["startTime"],
+                                  "executable": row["executable"], "rssBytes": usage.resident,
+                                  "footprintBytes": usage.footprint,
+                                  "cpuTimeMs": (usage.user + usage.system) * timebase.numer / timebase.denom / 1000000})
+            except Exception:
+                unavailable += 1
+        if identity(root) != root_identity:
+            raise RuntimeError("Simulator root changed during observation")
+        result.append({"deviceId": device, "rootPid": root, "processes": processes,
+                       "unavailableProcesses": unavailable})
+    return {"schemaVersion": 1, "sampledAtMs": int(time.time() * 1000), "devices": result}
 
 
 def group_occupied(pgid):
@@ -493,6 +619,10 @@ if __name__ == "__main__":
             if len(sys.argv) != 2:
                 raise RuntimeError("Simulator referent request unavailable")
             print(json.dumps(simulator_referents(), separators=(",", ":")))
+        elif mode == "simulator-usage":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Simulator usage request unavailable")
+            print(json.dumps(simulator_usage(), separators=(",", ":")))
         elif mode == "lock":
             locked_pipe(sys.argv[2])
         elif mode == "run":

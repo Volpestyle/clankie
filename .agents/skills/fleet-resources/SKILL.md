@@ -138,6 +138,15 @@ preflight cannot prevent a separately issued raw command or hold an atomic lock
 through it. Those clients must perform the check before their device operation.
 Never drive a sibling's device just because its UDID is visible in status.
 
+Read `usage` beside `holderId` in `clankie fleet resources` or
+`clankie simulator status` for that device's runtime cost. Kernel footprint
+includes private compressed memory; summed RSS includes shared pages and must
+not be described as physical RAM used. Interval CPU uses 100% for one core;
+process exits between observations can undercount it. Partial or unavailable
+samples do not mean zero. Diagnostic samples never grant device authority.
+Whole-machine admission includes these costs and bounds Darwin's memory estimate
+by free and file-backed pages; do not subtract a device's charge a second time.
+
 Touch the lease while actively using it; its default idle timeout is ten
 minutes. Release when finished. Release, idle expiry or a verified seat exit
 shuts the leased device down and keeps it for later reuse, including devices

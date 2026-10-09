@@ -1,3 +1,4 @@
+import { observeSimulatorUsage, simulatorUsageFor } from "./simulator-usage.ts";
 import { randomUUID } from "node:crypto";
 import { constants, userInfo } from "node:os";
 import { basename, join } from "node:path";
@@ -133,6 +134,9 @@ export function createResourceGovernor(
     state.leases = retained;
   }
   async function project(state: ResourceState): Promise<ResourceSnapshot> {
+    const usage = state.leases.some((lease) => lease.kind === "simulator" && lease.deviceId)
+      ? await observeSimulatorUsage()
+      : new Map();
     return {
       schemaVersion: 1,
       policy: state.policy,
@@ -152,7 +156,7 @@ export function createResourceGovernor(
         ...(lease.kind === "heavy"
           ? { executable: lease.executable }
           : lease.deviceId
-            ? { deviceId: lease.deviceId }
+            ? { deviceId: lease.deviceId, usage: simulatorUsageFor(usage, lease.deviceId) }
             : {}),
         createdAtMs: lease.createdAtMs,
         lastUsedAtMs: lease.lastUsedAtMs,

@@ -2434,9 +2434,12 @@ The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 | `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                    |
 | `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                         |
 
-Available memory on macOS uses the kernel's compressor-aware
-`kern.memorystatus_level` percentage of physical RAM, matching `memory_pressure -Q`.
-The native boundary reads it directly and shares a one-second cache across
+Available memory on macOS is the smaller of the kernel's
+`kern.memorystatus_level` percentage of RAM and free plus file-backed resident
+pages, excluding speculative pages already counted as free. Anonymous and
+compressed pages are not counted as immediately reclaimable headroom. File
+cache may require disk I/O to reclaim, so this remains an estimate. The native
+boundary reads both directly and shares a one-second cache across
 pressure samplers; a failed refresh or invalid observation refuses admission. Linux
 retains `MemAvailable`, and other platforms retain free memory.
 
@@ -2500,6 +2503,17 @@ must stay the same for acquire, verify, touch and release. Missing task metadata
 refuses acquire/plan instead of falling back to a seat-level lease. A different child holder
 cannot inherit or release the lease. Status lists that holder beside the seat.
 These labels never replace native seat proof or grant cleanup authority.
+
+Simulator leases in `fleet resources` and `simulator status` carry optional
+`usage`: timestamp, availability, process count, `footprintBytes`, `rssBytes`,
+CPU time and, after two observations, interval `cpuPercent` (100% is one core).
+The charge belongs to that lease's task `holderId`. Footprint includes private
+compressed memory; RSS includes shared pages and is not an extra charge.
+Partial/failed reads are marked and never mean zero usage. Unleased devices
+also show usage in simulator status. Samples are diagnostic, cached up to five
+seconds, and cannot authorize driving or releasing a device. Machine admission
+already includes that cost in its load and memory sample; it does not subtract
+the footprint twice.
 
 `simulator plan JSON` gives read-only creation/reuse advice and the current idle
 timeout. Acquire reads that plan before its native request, warns on stderr

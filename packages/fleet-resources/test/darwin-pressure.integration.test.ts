@@ -26,8 +26,10 @@ async function driver(source: string) {
   }
 }
 
-darwinIt("matches memory_pressure -Q and reuses one native read across repeated samplers", async () => {
-  const observation = await driver(`
+darwinIt(
+  "bounds memory_pressure by free and file-backed pages and reuses one native read across repeated samplers",
+  async () => {
+    const observation = await driver(`
 import {ChildProcess,execFile} from 'node:child_process';
 import {totalmem} from 'node:os';
 import {promisify} from 'node:util';
@@ -44,7 +46,12 @@ const query=async()=>{
   const {stdout}=await execute('/usr/bin/memory_pressure',['-Q']);
   const percent=Number(/System-wide memory free percentage:\\s*(\\d+)%/.exec(stdout)?.[1]);
   if(!Number.isInteger(percent)) throw new Error('Missing real memory_pressure percentage');
-  return {at:new Date().toISOString(),percent,stdout};
+  const {stdout:vm}=await execute('/usr/bin/vm_stat',[]);
+  const pageSize=Number(/page size of (\\d+) bytes/.exec(vm)?.[1]);
+  const free=Number(/Pages free:\\s*(\\d+)/.exec(vm)?.[1]);
+  const fileBacked=Number(/File-backed pages:\\s*(\\d+)/.exec(vm)?.[1]);
+  if(![pageSize,free,fileBacked].every(Number.isFinite)) throw Error('Missing kernel page census');
+  return {at:new Date().toISOString(),percent,stdout,vm,availableMemoryMb:Math.min(totalmem()*percent/100,(free+fileBacked)*pageSize)/1024**2};
 };
 const policy={heavySlots:1,simulatorSlots:1,simulatorIdleMs:600000,maxLoadRatio:16,minAvailableMemoryMb:0};
 const before=await query();
@@ -58,18 +65,22 @@ ChildProcess.prototype.spawn=original;
 console.log(JSON.stringify({before,after,first,refreshed,totalMemoryBytes:totalmem(),
   repeated:repeated.map(row=>row.availableMemoryMb),readsBeforeExpiry,nativeMemoryReads}));
 `);
-  await mkdir(evidenceDirectory, { recursive: true });
-  await writeFile(join(evidenceDirectory, "live.json"), JSON.stringify(observation, null, 2) + "\n");
-  expect(observation.first.healthy).toBe(true);
-  expect(observation.refreshed.healthy).toBe(true);
-  const percent = (observation.first.availableMemoryMb * 1024 ** 2 * 100) / observation.totalMemoryBytes;
-  expect(
-    Math.min(Math.abs(percent - observation.before.percent), Math.abs(percent - observation.after.percent)),
-  ).toBeLessThanOrEqual(3);
-  expect(observation.repeated).toEqual(Array(12).fill(observation.first.availableMemoryMb));
-  expect(observation.readsBeforeExpiry).toBe(1);
-  expect(observation.nativeMemoryReads).toBe(2);
-});
+    await mkdir(evidenceDirectory, { recursive: true });
+    await writeFile(join(evidenceDirectory, "live.json"), JSON.stringify(observation, null, 2) + "\n");
+    expect(observation.first.healthy).toBe(true);
+    expect(observation.refreshed.healthy).toBe(true);
+    expect(
+      Math.min(
+        Math.abs(observation.first.availableMemoryMb - observation.before.availableMemoryMb),
+        Math.abs(observation.first.availableMemoryMb - observation.after.availableMemoryMb),
+      ),
+    ).toBeLessThanOrEqual((observation.totalMemoryBytes / 1024 ** 2) * 0.03);
+    expect(observation.first.availableMemoryMb).toBeLessThanOrEqual(observation.totalMemoryBytes / 1024 ** 2);
+    expect(observation.repeated).toEqual(Array(12).fill(observation.first.availableMemoryMb));
+    expect(observation.readsBeforeExpiry).toBe(1);
+    expect(observation.nativeMemoryReads).toBe(2);
+  },
+);
 
 darwinIt("admits or refuses at the configured memory minimum using the real Darwin source", async () => {
   const observation = await driver(`

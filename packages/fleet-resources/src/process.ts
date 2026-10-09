@@ -34,7 +34,7 @@ export async function nativeBoundaryAvailable(): Promise<boolean> {
 }
 let pendingMemory: Promise<number> | undefined;
 let memoryCache: { at: number; availableMemoryMb: number } | undefined;
-/** Shared one-second pressure cache, never used for process or lease authority. */
+/** Shared one-second pressure cache, bounded by free/file-backed pages, never lease authority. */
 export async function darwinAvailableMemoryMb(): Promise<number> {
   if (memoryCache && performance.now() - memoryCache.at < 1_000) return memoryCache.availableMemoryMb;
   pendingMemory ??= execute(resourcePython, ["-I", resourceNativeHelperPath(), "memory"], {
@@ -47,13 +47,14 @@ export async function darwinAvailableMemoryMb(): Promise<number> {
       const reply: unknown = JSON.parse(stdout);
       if (
         !record(reply) ||
-        !keys(reply, ["schemaVersion", "availablePercent", "totalMemoryBytes"]) ||
+        !keys(reply, ["schemaVersion", "availablePercent", "totalMemoryBytes", "availableMemoryBytes"]) ||
         reply.schemaVersion !== 1 ||
         !integer(reply.availablePercent, 0, 100) ||
-        !integer(reply.totalMemoryBytes, 1, Number.MAX_SAFE_INTEGER)
+        !integer(reply.totalMemoryBytes, 1, Number.MAX_SAFE_INTEGER) ||
+        !integer(reply.availableMemoryBytes, 0, reply.totalMemoryBytes as number)
       )
         throw new Error("Darwin memory observation unavailable");
-      const availableMemoryMb = (reply.totalMemoryBytes * reply.availablePercent) / 100 / 1024 ** 2;
+      const availableMemoryMb = reply.availableMemoryBytes / 1024 ** 2;
       memoryCache = { at: performance.now(), availableMemoryMb };
       return availableMemoryMb;
     })

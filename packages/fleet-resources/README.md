@@ -23,7 +23,7 @@ Heavy commands count only against `heavySlots`; simulator reservations and
 unmanaged active devices count only against `simulatorSlots`. Status reports
 `capacity.used` for heavy leases and `capacity.simulatorUsed` for simulator
 reservations; simulator status separately counts external active devices. Automatic
-heavy capacity is the smaller of one permit per eight available cores and one per 24GiB
+heavy capacity is the smaller of one permit per four available cores and one per 24GiB
 of RAM, with a minimum of one. The simulator limit defaults to one. Heavy
 commands wait in a FIFO queue; tickets are removed on cancellation or a proven
 requester exit. Simulator requests never queue: they take a free slot when they
@@ -45,10 +45,13 @@ queue cleanup still commits under the same lock. Native lock failures report the
 helper exit or signal and exception type/errno, without journal contents or
 paths; an acquired transaction deadline reports its own cause.
 
-On macOS, available memory is physical RAM multiplied by the kernel's
-`kern.memorystatus_level` percentage, matching `memory_pressure -Q` rather than
-summing selected VM page queues. The existing Python native boundary reads it
-with `sysctlbyname`, without launching `vm_stat` or `memory_pressure`. One shared
+On macOS, available memory is the smaller of the kernel's
+`kern.memorystatus_level` percentage of RAM and free plus file-backed resident
+pages (excluding speculative pages already counted as free). This bounds the
+percentage by headroom that does not require more compression or swap of
+anonymous pages. File-backed pages may still need disk I/O to reclaim; it is an
+estimate, not a reservation. The Python native boundary reads `sysctlbyname`
+and `HOST_VM_INFO64` directly, without launching `vm_stat` or `memory_pressure`. One shared
 one-second cache and an in-flight read coalesce repeated sampler calls in each
 process. An expired value never supplies a fallback when the native read fails;
 invalid or unavailable observations refuse new work. This pressure cache grants
@@ -128,3 +131,19 @@ simctl/Xcode/external MCP operations or lock across them; the preflight is not a
 system-wide access control boundary. Worker plugin 0.6.11 versions the resource
 hook changes; doctor and native setup verify the Bash resource hook as well as
 lifecycle hooks, including named Claude profiles such as `.claude-james`.
+
+Simulator runtime usage is exposed on each device lease in `fleet resources`
+and `simulator status`, beside its `holderId`; unleased devices also expose
+usage in simulator status. The read-only native census identifies each device's
+`launchd_sim` bootstrap path and its descendants. `usage.footprintBytes` sums
+kernel physical-footprint charges (including private compressed memory), while
+`rssBytes` includes shared resident pages and must not be treated as additional
+physical memory. CPU time uses the native Mach timebase; `cpuPercent` is an
+interval observation with 100% equal to one core, not lifetime average CPU.
+Processes that exit between samples can be missed, so interval CPU is a lower
+bound. A partial read names its unavailable process count; failed or unmapped
+observations are `unavailable`, never a zero charge. These diagnostic samples
+have a five-second cache and grant no device/process authority. Admission uses
+whole-machine load and available memory, which already include the simulator;
+subtracting its footprint again would double-count it. The device ceiling and
+explicit owner overrides still bind.

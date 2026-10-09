@@ -1,3 +1,4 @@
+import { observeSimulatorUsage, simulatorUsageFor, type SimulatorUsage } from "./simulator-usage.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SimulatorsDisabledError } from "./governor.ts";
@@ -57,6 +58,7 @@ export interface SimulatorLeaseView {
   readonly deviceName?: string;
   readonly deviceType?: string;
   readonly runtime?: string;
+  readonly usage?: SimulatorUsage;
   readonly origin?: "created" | "existing";
   readonly requestedDeviceType?: string;
 }
@@ -73,6 +75,7 @@ export interface ExternalSimulatorView {
   readonly runtime: string;
   readonly deviceType?: string;
   readonly holders: readonly SimulatorHolder[];
+  readonly usage?: SimulatorUsage;
 }
 export interface SimulatorBlockers {
   readonly simulatorSlots: number;
@@ -1006,9 +1009,17 @@ export function createSimulatorManager(input: {
           ...(simulatorSlots === undefined ? {} : { simulatorSlots }),
         };
       }
-      const external = await describeExternal(externals(devices, leases), devices);
+      const usage = devices.some((device) => device.state === "Booted" || device.state === "Booting")
+        ? await observeSimulatorUsage()
+        : new Map();
+      const external = (await describeExternal(externals(devices, leases), devices)).map((device) => ({
+        ...device,
+        usage: simulatorUsageFor(usage, device.udid),
+      }));
       return {
-        leases: views,
+        leases: views.map((lease) =>
+          lease.deviceId ? { ...lease, usage: simulatorUsageFor(usage, lease.deviceId) } : lease,
+        ),
         inventory: "available",
         externalActive: external.length,
         external,

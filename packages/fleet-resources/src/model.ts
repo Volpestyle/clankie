@@ -1,3 +1,4 @@
+import type { SimulatorUsage } from "./simulator-usage.ts";
 import { z } from "zod";
 
 export const FleetResourcePolicySchema = z
@@ -181,6 +182,7 @@ export interface ResourceSnapshot {
     createdAtMs: number;
     lastUsedAtMs: number;
     deviceId?: string;
+    usage?: SimulatorUsage;
     pid?: number;
   }[];
   queue: {
