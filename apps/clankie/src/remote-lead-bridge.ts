@@ -3,21 +3,26 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
-import {
-  OperatorSeatCapabilitiesSchema,
-  OperatorSeatReplySchema,
-} from "@clankie/protocol";
+import { OperatorSeatCapabilitiesSchema, OperatorSeatReplySchema } from "@clankie/protocol";
 import type { CaptainPort } from "./captain/port.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { RemoteLeadDelegations } from "./remote-lead-delegations.ts";
 
-// These operations already enforce conversation ownership at their effect boundary.
+// Delegates project leadership and messaging, with conversation-attributed effects.
 // Owner configuration, accounts and unrelated conversations are not delegated.
 const PROJECT_TOOLS = new Set([
-  "hire_agent", "message_seat", "worker_reports", "acknowledge_worker_reports",
-  "herdr_watch", "schedule_wake", "cancel_wake", "request_user_input", "mail_owner_update",
-  "refresh_worker_tools", "close_worker_pane", "worker_pane_history",
+  "hire_agent",
+  "message_seat",
+  "worker_reports",
+  "acknowledge_worker_reports",
+  "herdr_watch",
+  "schedule_wake",
+  "cancel_wake",
+  "request_user_input",
+  "mail_owner_update",
+  "refresh_worker_tools",
+  "close_worker_pane",
 ]);
 type Authority = NonNullable<Awaited<ReturnType<RemoteLeadDelegations["authorize"]>>>;
 
@@ -52,7 +57,11 @@ export function createRemoteLeadBridge(input: {
       const path = new URL(context.req.url).pathname;
       if (path === "/v1/fleet/lead/transcript" && context.req.method === "POST") {
         const parsed = SeatTranscriptUploadSchema.safeParse(await context.req.json());
-        if (!parsed.success || occupantIdForHerdrSession({ source: "herdr:claude", kind: "id", value: parsed.data.sessionId }) !== admitted.binding.nativeOccupantId)
+        if (
+          !parsed.success ||
+          occupantIdForHerdrSession({ source: "herdr:claude", kind: "id", value: parsed.data.sessionId }) !==
+            admitted.binding.nativeOccupantId
+        )
           return context.json({ error: "remote_lead_session_mismatch" }, 403);
         await requireCurrent(admitted);
         const synced = input.captain.syncSeatTranscript(conversationId, parsed.data);
@@ -66,7 +75,7 @@ export function createRemoteLeadBridge(input: {
             current: () => calls.getStore()?.id === admitted.id && calls.getStore()!.current(),
             authorize: async () => {
               const current = calls.getStore();
-              return current?.id === admitted.id && await current.authorize();
+              return current?.id === admitted.id && (await current.authorize());
             },
           };
           endpoint = createLaneMcpEndpoint({
@@ -76,33 +85,41 @@ export function createRemoteLeadBridge(input: {
                 const bank = await input.captain.laneToolBank("operator", conversationId, delegation);
                 return {
                   ...bank,
-                  tools: bank.tools.filter((tool) => PROJECT_TOOLS.has(tool.name)).map((tool) => ({
-                    ...tool,
-                    call: async (args, options) => {
-                      const current = calls.getStore();
-                      if (!current || current.id !== admitted.id) throw new Error("remote_lead_revoked");
-                      await requireCurrent(current);
-                      return tool.call(args, options);
-                    },
-                  })),
+                  tools: bank.tools
+                    .filter((tool) => PROJECT_TOOLS.has(tool.name))
+                    .map((tool) => ({
+                      ...tool,
+                      call: async (args, options) => {
+                        const current = calls.getStore();
+                        if (!current || current.id !== admitted.id) throw new Error("remote_lead_revoked");
+                        await requireCurrent(current);
+                        return tool.call(args, options);
+                      },
+                    })),
                 };
               },
-              reconcileSeatDelivery: (id) => input.captain.reconcileSeatDelivery?.(id, conversationId)
-                ?? Promise.resolve(undefined),
+              reconcileSeatDelivery: (id) =>
+                input.captain.reconcileSeatDelivery?.(id, conversationId) ?? Promise.resolve(undefined),
             },
           });
           endpoints.set(admitted.id, endpoint);
           const created = endpoint;
-          admitted.signal.addEventListener("abort", () => {
-            endpoints.delete(admitted.id);
-            void created.close();
-          }, { once: true });
+          admitted.signal.addEventListener(
+            "abort",
+            () => {
+              endpoints.delete(admitted.id);
+              void created.close();
+            },
+            { once: true },
+          );
         }
         return endpoint.handle(context.req.raw, "operator", conversationId);
       }
       if (path === "/v1/fleet/lead/prompt" && context.req.method === "GET") {
         const prompt = await input.captain.lanePrompt({
-          lane: "operator", conversationId, harness: "claude",
+          lane: "operator",
+          conversationId,
+          harness: "claude",
           sections: ["persona", "reach", "address", "model", "conversation"],
         });
         await requireCurrent(admitted);
@@ -110,20 +127,21 @@ export function createRemoteLeadBridge(input: {
       }
       if (path === "/v1/fleet/lead/events" && context.req.method === "GET") {
         const raw = context.req.header("x-clankie-seat-capabilities");
-        const capabilities = OperatorSeatCapabilitiesSchema.safeParse(
-          raw ? JSON.parse(raw) : undefined,
-        );
+        const capabilities = OperatorSeatCapabilitiesSchema.safeParse(raw ? JSON.parse(raw) : undefined);
         if (!capabilities.success) return context.json({ error: "invalid_seat_capabilities" }, 400);
         const events = await input.captain.pollSeatEvents(
-          25_000, AbortSignal.any([context.req.raw.signal, admitted.signal]), conversationId, capabilities.data,
+          25_000,
+          AbortSignal.any([context.req.raw.signal, admitted.signal]),
+          conversationId,
+          capabilities.data,
         );
         await requireCurrent(admitted);
         return context.json({ schemaVersion: 1, events });
       }
       const event = /^\/v1\/fleet\/lead\/events\/([^/]+)\/(ack|reply)$/u.exec(path);
       if (event && context.req.method === "POST") {
-        const reply = event[2] === "reply"
-          ? OperatorSeatReplySchema.safeParse(await context.req.json()) : undefined;
+        const reply =
+          event[2] === "reply" ? OperatorSeatReplySchema.safeParse(await context.req.json()) : undefined;
         if (reply && !reply.success) return context.json({ error: "invalid_request" }, 400);
         await requireCurrent(admitted);
         const ok = reply?.success

@@ -3708,6 +3708,41 @@ head runs on Pi with the original room authority and grant. Only the verified
 owner's work uses native Codex children. Completed delivery retries return the
 saved result. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
 
+### `conversations lead prepare FLEET | launch --json-stdin | revoke ID`
+
+Start a fresh native Claude project lead on a linked Windows machine. The machine
+needs Node 22 or newer, native Claude and Herdr; no Clankie installation is needed.
+The registered fleet must permit `workers` and approve the exact working directory.
+The owner-authenticated API is `POST /v1/remote-leads/{prepare,launch,revoke}`.
+
+`prepare FLEET` projects the standalone operator bridge into a content-addressed
+`~/.clankie/remote-leads/` directory. It changes no global harness configuration.
+Source checkouts first build the bridge with
+`clankie heavy -- node scripts/build-remote-lead.mjs`; releases include it.
+
+`launch --json-stdin` reads an object with a fresh UUID `requestId`, `fleet`,
+`workingDirectory`, `title`, and optional `conversationId`. Omit the conversation
+to create a named workspace chat; otherwise select an unoccupied workspace chat
+with that exact directory. The service prepares the plugin and allocates a fresh
+Herdr workspace. The result includes the conversation, pane and `delegationId`.
+`dispatched` means the launch handoff completed, not that Claude's tools or channel
+are ready. Inspect the chat and its native head. An `unconfirmed` result must be
+reconciled using the same request ID; repeating it reads the original journal and
+never launches again. Do not substitute a fresh ID for uncertain intent.
+
+`revoke ID` invalidates the delegation immediately. Subsequent tool calls and
+channel access fail; an already dispatched effect cannot be undone. A service
+restart also revokes all remote heads. The token is delivered in memory, never in
+plugin files, arguments or receipts; OS paging and administrator memory access
+are outside this guarantee. The bridge delegates project lead tools and messaging
+with the selected chat's attribution, not general owner HTTP or settings access.
+
+Remote Codex heads and in-place worker conversion are not implemented. Preserve
+an existing worker's written handoff and original session reference, launch a new
+project head, then deliver that handoff through the chat. Coordinate any worker
+adoption or retirement separately; launch never restarts existing panes.
+See [ADR 0259](adr/0259-remote-project-leads-use-seat-bound-delegation.md).
+
 ### Native pending messages and Stop
 
 `clankie conversations pending ID` lists host-owned native messages in admission

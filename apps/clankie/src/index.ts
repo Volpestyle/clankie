@@ -1714,7 +1714,11 @@ const runtimeHealth = new RuntimeHealthObserver({
 const localCompanionBoundary = new LocalCompanionBoundary();
 const clankie = await createClankieApp({
   remoteProjectLeads: new RemoteProjectLeads({
-    repoRoot, directory: join(stateRoot, "remote-project-leads"), settings: settingsStore, runtimes, captain,
+    repoRoot,
+    directory: join(stateRoot, "remote-project-leads"),
+    settings: settingsStore,
+    runtimes,
+    captain,
   }),
   fleetResources,
   runtimeHealth: () => runtimeHealth.snapshot(),

@@ -449,3 +449,13 @@ flowchart LR
   Fork -- "room_turn tool event" --> SeatLog["Seat's conversation log"]
   SeatLog -. "never" .-x Fork
 ```
+
+## Remote project heads (ADR 0259)
+
+A project lead is a named workspace chat with a native head, rather than a worker
+pane leading other workers informally. Its hires and reports belong to that chat.
+[ADR 0259](0259-remote-project-leads-use-seat-bound-delegation.md) extends the local
+attachment with a standalone Windows Claude bridge over the fleet link and a
+seat/chat/machine-bound delegation. Existing worker context moves by a written
+handoff when the launch path cannot resume it; adoption and retirement require
+separate coordination, never an implicit restart of active workers.

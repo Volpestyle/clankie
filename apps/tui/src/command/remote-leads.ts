@@ -2,14 +2,17 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { RemoteLeadLaunchSchema } from "@clankie/protocol/remote-leads";
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
-export async function runRemoteLeadCommand(args: readonly string[], options: {
-  env?: NodeJS.ProcessEnv;
-  host?: string;
-  fetchImpl?: typeof fetch;
-  operatorCredentialStore?: CredentialStore;
-  stdout?: Writable;
-  stdin?: AsyncIterable<unknown>;
-}) {
+export async function runRemoteLeadCommand(
+  args: readonly string[],
+  options: {
+    env?: NodeJS.ProcessEnv;
+    host?: string;
+    fetchImpl?: typeof fetch;
+    operatorCredentialStore?: CredentialStore;
+    stdout?: Writable;
+    stdin?: AsyncIterable<unknown>;
+  },
+) {
   const usage = "clankie conversations lead prepare FLEET | launch --json-stdin | revoke DELEGATION_ID";
   const [action, value] = args;
   if (args.length !== 2 || !["prepare", "launch", "revoke"].includes(action ?? "")) throw new Error(usage);
@@ -28,12 +31,20 @@ export async function runRemoteLeadCommand(args: readonly string[], options: {
     ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
   });
   if (!credential) throw new Error("Remote lead launch requires owner operator authentication");
-  const response = await (options.fetchImpl ?? fetch)(new URL(`/v1/remote-leads/${action}`, commandHost(options)), {
-    method: "POST", redirect: "error",
-    headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(180_000),
-  });
-  if (!response.ok) throw new Error(`Remote lead request refused (${response.status}); retain the launch requestId and inspect its receipt before new intent`);
+  const response = await (options.fetchImpl ?? fetch)(
+    new URL(`/v1/remote-leads/${action}`, commandHost(options)),
+    {
+      method: "POST",
+      redirect: "error",
+      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(180_000),
+    },
+  );
+  if (!response.ok)
+    throw new Error(
+      `Remote lead request refused (${response.status}); retain the launch requestId and inspect its receipt before new intent`,
+    );
   const result = await response.json();
   outputJson(options.stdout ?? process.stdout, result);
   return result.stage === "unconfirmed" ? 1 : 0;

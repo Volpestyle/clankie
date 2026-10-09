@@ -10,6 +10,8 @@
       "entry": [
         "scripts/evals/run.mjs",
         "docs/testing/evidence-viewer.js",
+        "scripts/build-remote-lead.mjs",
+        "integrations/remote-lead/bootstrap.mjs",
         "scripts/profile-clankie.mjs",
         "scripts/proof-linux-pi-process.mjs",
         ".agents/skills/shared-checkout/scripts/land.mjs",
@@ -110,7 +112,12 @@
       "ignoreExportsUsedInFile": true
     },
     "apps/tui": {
-      "entry": ["bin/runtime-update-helper.mjs", "bin/release-update-helper.ts", "bin/mac-app-install.ts"]
+      "entry": [
+        "bin/runtime-update-helper.mjs",
+        "bin/release-update-helper.ts",
+        "bin/mac-app-install.ts",
+        "bin/remote-lead-mcp.ts"
+      ]
     },
     "packages/vec3": {
       "entry": ["test/**/*.test.ts"]

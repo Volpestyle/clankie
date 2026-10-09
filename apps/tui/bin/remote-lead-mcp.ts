@@ -18,8 +18,13 @@ const request: typeof fetch = async (resource, init) => {
   const link = JSON.parse(await readFile(join(homedir(), ".clankie", "links", `${fleet}.json`), "utf8"));
   const target = new URL(original.url);
   const address = new URL(link.url);
-  if (link.schemaVersion !== 2 || link.authentication !== "local-process" || link.fleet !== fleet ||
-      address.protocol !== "http:" || address.hostname !== "127.0.0.1")
+  if (
+    link.schemaVersion !== 2 ||
+    link.authentication !== "local-process" ||
+    link.fleet !== fleet ||
+    address.protocol !== "http:" ||
+    address.hostname !== "127.0.0.1"
+  )
     throw new Error("Authenticated fleet relay unavailable");
   if (target.pathname === "/v1/mcp") target.pathname = "/v1/fleet/lead/mcp";
   else if (target.pathname.startsWith("/v1/seat/events"))
@@ -31,7 +36,9 @@ const request: typeof fetch = async (resource, init) => {
   headers.set("authorization", `Bearer ${token}`);
   headers.set("x-clankie-pane", pane);
   const response = await fetch(target, {
-    method: original.method, headers, redirect: "error",
+    method: original.method,
+    headers,
+    redirect: "error",
     ...(original.body ? { body: await original.arrayBuffer() } : {}),
     signal: AbortSignal.any([original.signal, closing.signal]),
   });
@@ -41,7 +48,8 @@ const request: typeof fetch = async (resource, init) => {
 if (process.argv.includes("--sync")) {
   await runSeatSyncCommand([], {
     env: { ...process.env, CLANKIE_OPERATOR_TOKEN: token },
-    host: "http://127.0.0.1", fetchImpl: request,
+    host: "http://127.0.0.1",
+    fetchImpl: request,
   });
 } else if (process.argv.includes("--prompt")) {
   const response = await request("http://127.0.0.1/v1/fleet/lead/prompt");
@@ -49,7 +57,10 @@ if (process.argv.includes("--sync")) {
   process.stdout.write(await response.text());
 } else {
   const upstream = await connectLaneUpstream({
-    host: "http://127.0.0.1", bearer: token, conversationId, fetchImpl: request,
+    host: "http://127.0.0.1",
+    bearer: token,
+    conversationId,
+    fetchImpl: request,
   });
   const server = createSeatBridge(upstream, "operator");
   server.onclose = () => closing.abort();

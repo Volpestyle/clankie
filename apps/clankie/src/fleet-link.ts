@@ -46,7 +46,8 @@ export function fleetLinkFetch<Rest extends unknown[]>(
 ): (request: Request, ...rest: Rest) => Response | Promise<Response> {
   return (request, ...rest) => {
     const path = new URL(request.url).pathname;
-    return LINK_ROUTE.test(path) || LEAD_ROUTE.test(path) ||
+    return LINK_ROUTE.test(path) ||
+      LEAD_ROUTE.test(path) ||
       (request.method === "GET" && (LINK_RECEIPT.test(path) || LINK_MESSAGE_STATUS.test(path))) ||
       (request.method === "POST" && LINK_EVENT_ACK.test(path))
       ? fetch(request, ...rest)

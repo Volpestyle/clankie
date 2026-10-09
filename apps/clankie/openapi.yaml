@@ -4070,6 +4070,57 @@ paths:
         "404":
           description: Unknown conversation or a scope that does not run Clankie
 
+  /v1/remote-leads/{action}:
+    post:
+      tags: [Operator]
+      operationId: manageRemoteProjectLead
+      summary: Prepare, launch or revoke a Windows Claude project head
+      description: >-
+        Owner-only management. Launch uses a stable requestId; repeated requests
+        return the original journal without redispatch. Dispatched is a transport
+        handoff, not native readiness. Unconfirmed launches need reconciliation.
+        The separate in-memory delegation never authenticates owner routes.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: action
+          required: true
+          schema: { type: string, enum: [prepare, launch, revoke] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [fleet]
+                  properties:
+                    fleet: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" }
+                - type: object
+                  additionalProperties: false
+                  required: [requestId, fleet, workingDirectory, title]
+                  properties:
+                    requestId: { type: string, format: uuid }
+                    fleet: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" }
+                    workingDirectory: { type: string, minLength: 1, maxLength: 4096 }
+                    title: { type: string, minLength: 1, maxLength: 100 }
+                    conversationId: { type: string, minLength: 1, maxLength: 256 }
+                - type: object
+                  additionalProperties: false
+                  required: [delegationId]
+                  properties:
+                    delegationId: { type: string }
+      responses:
+        "200":
+          description: Preparation receipt, original launch journal, or revocation result
+        "400":
+          description: Invalid action or input
+        "401":
+          description: Owner operator authentication required
+        "503":
+          description: Remote lead service unavailable
+
   /v1/seat/transcript:
     post:
       tags: [Captain, Operator]

@@ -21,6 +21,24 @@ division of priority, dispatch, tracking and integration, with one dispatch and
 integration authority; do not redo a planner's queue audit or a tracker's
 ticket upkeep.
 
+## Project leads are chats
+
+A project lead is Clankie in a named workspace conversation with its own native
+head, not a worker sub-lead. Its hires, reports and watches belong to that chat.
+Local heads use `clankie claude --conversation ID` or `clankie codex --conversation ID`.
+For a new Windows Claude head on an already-linked fleet, the owner CLI offers
+`clankie conversations lead prepare FLEET`, `launch --json-stdin`, and
+`revoke DELEGATION_ID`; the full input and receipt contract is in
+[the CLI reference](../../../docs/cli.md#conversations-lead-prepare-fleet--launch---json-stdin--revoke-id).
+Remote heads use a seat/chat/machine-bound, revocable delegation and require the
+machine's current `workers` ceiling and approved working directory.
+
+Keep the original request ID after uncertain launch; rereading it never launches
+again. `dispatched` is not tool readiness. Prove the native lead toolkit and child
+report routing before treating a project as converted. Existing workers need a
+written context handoff and separately coordinated adoption; never restart their
+active work as part of a new lead launch. Remote Codex heads are not yet supported.
+
 ## Choose the work
 
 The tracker's priority is the owner's order. Read it each time you pick:

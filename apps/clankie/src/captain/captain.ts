@@ -2763,13 +2763,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           route: { owner: { conversationId: targetId }, mode: "machine" },
           current: () => conversations.runsCaptainTurns(targetId) && (delegation?.current() ?? true),
           authorize: async () =>
-            conversations.runsCaptainTurns(targetId) && (await delegation?.authorize() ?? true),
+            conversations.runsCaptainTurns(targetId) && ((await delegation?.authorize()) ?? true),
         };
         capture.conversationAuthority = {
           owner: { conversationId: targetId },
           current: () => conversations.runsCaptainTurns(targetId) && (delegation?.current() ?? true),
           authorize: async () =>
-            conversations.runsCaptainTurns(targetId) && (await delegation?.authorize() ?? true),
+            conversations.runsCaptainTurns(targetId) && ((await delegation?.authorize()) ?? true),
         };
         capture.shell = true;
         capture.room = roomKey("operator", targetId);
@@ -2781,12 +2781,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       capture.requestQuestion = (draft) =>
         conversations.requestSurfaceQuestion(sourceConversationId, draft, {
           current: () =>
-            !shutdown.signal.aborted && conversations.conversation(sourceConversationId) !== undefined,
+            !shutdown.signal.aborted &&
+            conversations.conversation(sourceConversationId) !== undefined &&
+            (delegation?.current() ?? true),
+          ...(delegation ? { authorize: () => delegation.authorize() } : {}),
         });
       capture.mailOwnerUpdate = (draft, publicationId) =>
         conversations.mailOwnerUpdate(sourceConversationId, draft, publicationId, {
           current: () =>
-            !shutdown.signal.aborted && conversations.conversation(sourceConversationId) !== undefined,
+            !shutdown.signal.aborted &&
+            conversations.conversation(sourceConversationId) !== undefined &&
+            (delegation?.current() ?? true),
+          ...(delegation ? { authorize: () => delegation.authorize() } : {}),
         });
     }
     const currentSettings = await settings();

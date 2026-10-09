@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { win32 } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
@@ -9,6 +10,8 @@ export interface RemoteLeadBinding {
   readonly machine: string;
   readonly pane: string;
   readonly conversationId: string;
+  readonly workingDirectory: string;
+  readonly connectionKey: string;
   readonly nativeOccupantId: string;
   readonly shell: { readonly pid: number; readonly startTime: string };
 }
@@ -76,12 +79,13 @@ export class RemoteLeadDelegations {
       !proof.nativeSessionPending &&
       proof.fleet === binding.fleet &&
       proof.workspace?.machineId === binding.machine &&
+      win32.normalize(proof.workspace.canonicalPath).toLowerCase() ===
+        win32.normalize(binding.workingDirectory).toLowerCase() &&
       proof.pane === binding.pane &&
       isDeepStrictEqual(proof.shell, binding.shell) &&
       proof.nativeOccupantId === binding.nativeOccupantId;
     const observe = async () => {
-      if (!current() || identity.fleet !== binding.fleet || identity.pane !== binding.pane)
-        return undefined;
+      if (!current() || identity.fleet !== binding.fleet || identity.pane !== binding.pane) return undefined;
       await this.admit(binding);
       if (!(await identity.validate())) return undefined;
       const proof = await identity.projectProof?.();

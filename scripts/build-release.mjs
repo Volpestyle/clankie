@@ -53,7 +53,6 @@ const entrypoints = [
   "apps/tui/bin/clankie.ts",
   "apps/tui/bin/release-update-helper.ts",
   "apps/tui/bin/mac-app-install.ts",
-  "apps/tui/bin/remote-lead-mcp.ts",
   "apps/clankie/src/index.ts",
   "apps/clankie/src/herdr-runtime.ts",
   "apps/clankie/src/captain/remote-opencode-helper.ts",
@@ -125,6 +124,22 @@ try {
     platform: "node",
     target: "node24",
   });
+  // Linked Windows heads use their installed Node, independently of the
+  // bundled service runtime. Keep the standalone artifact compatible with 22.
+  const remoteLeadBundle = await build({
+    absWorkingDir: repoRoot,
+    banner: { js: bundleBanner },
+    bundle: true,
+    entryPoints: ["apps/tui/bin/remote-lead-mcp.ts"],
+    format: "esm",
+    metafile: true,
+    outbase: ".",
+    outdir: releaseRoot,
+    platform: "node",
+    target: "node22",
+  });
+  Object.assign(bundle.metafile.inputs, remoteLeadBundle.metafile.inputs);
+  Object.assign(bundle.metafile.outputs, remoteLeadBundle.metafile.outputs);
   await writeFile(metafile, JSON.stringify(bundle.metafile));
 
   externalPackageRoots = [
