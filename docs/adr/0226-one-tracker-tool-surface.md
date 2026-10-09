@@ -236,7 +236,10 @@ pushing a tag.
 **Delivered on ship.** A built-in item reaches `delivered` on the first release
 that contains it, on any lane. That move is a `stage` event written as Clankie
 (`agent-worker clankie` for the owner), `via: release`, with the version in its
-body. It is self-echo, so it never wakes anyone. Items already at `delivered` or
+body. It is self-echo, so it never wakes anyone. The owner still checks
+everything that ships: a stage move that passes landed without stopping there
+raises the same "check it works" `verify` ask that landing does, once per item.
+Items already at `delivered` or
 `owner-verified` stay put, and canceled or duplicate items are not delivered.
 Keys from a connected tracker are listed by key only and have no stage effects
 until the mirror (VUH-1907). The sync is deterministic: run again, it upserts

@@ -4,7 +4,9 @@ import { dirname } from "node:path";
 import type { ConversationQuestion } from "@clankie/protocol";
 import type { SettingsStore } from "@clankie/settings";
 import {
+  DELIVERY_STAGES,
   TRACKER_OWNER,
+  type DeliveryStage,
   type LocalTrackerBackend,
   type TrackerActor,
   type TrackerItemEvent,
@@ -15,7 +17,8 @@ import type { CaptainPort } from "./captain/port.ts";
  * The built-in tracker's owner loop (VUH-1917), in-process: no port, tunnel or
  * webhook. It reads the tracker's event stream from a durable cursor and
  *
- * - raises a "check it works" owner ask (ADR 0245, purpose `verify`) when an item lands;
+ * - raises a "check it works" owner ask (ADR 0245, purpose `verify`) once when an item
+ *   lands or ships past landed (a release delivering it directly);
  * - applies the owner's answer as owner-verified, or sends the item back;
  * - wakes the item's routed chat on owner activity. Clankie's and his workers'
  *   own events are self-echo and never wake him.
@@ -40,6 +43,17 @@ interface LoopState {
 
 /** Owner activity that wakes the routed chat. Created items and typed reports do not. */
 const WAKING = new Set<TrackerItemEvent["type"]>(["comment", "verified", "reopened", "priority", "state"]);
+const LANDED = DELIVERY_STAGES.indexOf("landed");
+/**
+ * Everything that ships gets the owner's check: an item reaching landed, or passing it
+ * on the way to delivered (a release can ship an item nobody reported landed).
+ */
+const needsCheck = (event: TrackerItemEvent) => {
+  if (event.type === "reopened") return event.to === "landed";
+  if (event.type !== "stage") return false;
+  const from = DELIVERY_STAGES.indexOf((event.from ?? "reported") as DeliveryStage);
+  return from < LANDED && DELIVERY_STAGES.indexOf(event.to as DeliveryStage) >= LANDED;
+};
 const VERIFY_WORKS = "It works";
 const VERIFY_SEND_BACK = "Send it back";
 
@@ -93,12 +107,12 @@ export async function startTrackerOwnerLoop(options: TrackerOwnerLoopOptions): P
 
   const handle = async (event: TrackerItemEvent) => {
     if (event.seq <= state.cursor) return;
-    if (event.to === "landed" && (event.type === "stage" || event.type === "reopened")) {
+    if (needsCheck(event) && !Object.values(state.asks).some((ask) => ask.issueId === event.issueId)) {
       const { conversationId, issue } = await route(event.issueId);
       const result = await options.captain.requestOwnerAsk(conversationId, {
         kind: "choice",
         purpose: "verify",
-        prompt: `${issue.identifier} landed: "${issue.title}". Check that it works.`,
+        prompt: `${issue.identifier} ${event.to === "landed" ? "landed" : `was ${event.to ?? "delivered"}${event.body === undefined ? "" : ` (${event.body})`}`}: "${issue.title}". Check that it works.`,
         options: [
           { label: VERIFY_WORKS, description: "Mark it owner-verified." },
           { label: VERIFY_SEND_BACK, description: "Reopen it for the worker; say what is wrong." },
