@@ -6,38 +6,112 @@
       "sourceCommit": "1b779a1157beed91bd8adf013f08c799eddf02b5",
       "baseCommit": "bbb1b551ee230b1f2cd4fe4c9c9b7167e7c68e1b",
       "graders": [
-        {"path":"apps/clankie/test/herdr-seat.test.ts","blob":"30296bb1ee230eeba38ec90be66d11387cca29a66","sha256":"d95f647d15ab075f9792da338aa5139077ca6427a2991ba8348839520e6b0932"},
-        {"path":"apps/clankie/test/persona-role.test.ts","blob":"58a50c2152385607a758157b90aa87ed0a735358","sha256":"85dfcd2ee40cc7fbfce607b49fd17cc17f08f7e3f8ba94640c35196603"},
-        {"path":"apps/clankie/test/personas.test.ts","blob":"a783e1ad287fa808ebb141c9cee0f882306935e5","sha256":"240aab10ee433e4dab8235fece6aea68d66ca15483a45e0847d76b093b834770"},
-        {"path":"apps/clankie/test/seat-subagents.test.ts","blob":"c4bc93e8e6470aad9abb71029725ef0a283a96d4","sha256":"97012a0d119054557f14316a7dcfe6cd3e0c216d8facad7f117e4ffa13a468ff"},
-        {"path":"apps/clankie/test/work-items.test.ts","blob":"cfd6e34cb376d4d50f7cb28e086e08254c451176","sha256":"7608c57228157bc16dab54347c3b3e3f5cc58af182cc5351ed6e30ab38a73333"},
-        {"path":"apps/tui/test/agents-command.test.ts","blob":"6a62eaa1efb7407e87eca0e065a758847e419a04","sha256":"d3c22d785872d0a519cbd4ea52750fd7a2e613db508b3de247ad8cfffb79aaca"},
-        {"path":"packages/protocol/test/hosted-operator.test.ts","blob":"d6bfd36a22abb3aca7ecaf2a6f0f2b62264d1806","sha256":"d6747ab320d62dd38d7ece15c7e896051307e0f258af2a72381aab1f808de72e"},
-        {"path":"packages/protocol/test/protocol.test.ts","blob":"4325a3741cb1bb959b7d5fc74881782b50f3b052","sha256":"e38ca5bcd2ec7b9f9efe48cf14fda6876850a3fa7316a9bc88ab5d0b584981d2"},
-        {"path":"packages/work-items/test/backends.test.ts","blob":"fe3c9dcaaaedcc2eec45691a4e295700e96f4137","sha256":"2cd770dabdb54fc872af03c4eb62c74b277e00b49ff2b8c62fe7eac960e646fd"}
+        {
+          "path": "apps/clankie/test/herdr-seat.test.ts",
+          "blob": "30296bb1ee230eeba38ec90be66d11387cca29a66",
+          "sha256": "d95f647d15ab075f9792da338aa5139077ca6427a2991ba8348839520e6b0932"
+        },
+        {
+          "path": "apps/clankie/test/persona-role.test.ts",
+          "blob": "58a50c2152385607a758157b90aa87ed0a735358",
+          "sha256": "85dfcd2ee40cc7fbfce607b49fd17cc17f08f7e3f8ba94640c35196603"
+        },
+        {
+          "path": "apps/clankie/test/personas.test.ts",
+          "blob": "a783e1ad287fa808ebb141c9cee0f882306935e5",
+          "sha256": "240aab10ee433e4dab8235fece6aea68d66ca15483a45e0847d76b093b834770"
+        },
+        {
+          "path": "apps/clankie/test/seat-subagents.test.ts",
+          "blob": "c4bc93e8e6470aad9abb71029725ef0a283a96d4",
+          "sha256": "97012a0d119054557f14316a7dcfe6cd3e0c216d8facad7f117e4ffa13a468ff"
+        },
+        {
+          "path": "apps/clankie/test/work-items.test.ts",
+          "blob": "cfd6e34cb376d4d50f7cb28e086e08254c451176",
+          "sha256": "7608c57228157bc16dab54347c3b3e3f5cc58af182cc5351ed6e30ab38a73333"
+        },
+        {
+          "path": "apps/tui/test/agents-command.test.ts",
+          "blob": "6a62eaa1efb7407e87eca0e065a758847e419a04",
+          "sha256": "d3c22d785872d0a519cbd4ea52750fd7a2e613db508b3de247ad8cfffb79aaca"
+        },
+        {
+          "path": "packages/protocol/test/hosted-operator.test.ts",
+          "blob": "d6bfd36a22abb3aca7ecaf2a6f0f2b62264d1806",
+          "sha256": "d6747ab320d62dd38d7ece15c7e896051307e0f258af2a72381aab1f808de72e"
+        },
+        {
+          "path": "packages/protocol/test/protocol.test.ts",
+          "blob": "4325a3741cb1bb959b7d5fc74881782b50f3b052",
+          "sha256": "e38ca5bcd2ec7b9f9efe48cf14fda6876850a3fa7316a9bc88ab5d0b584981d2"
+        },
+        {
+          "path": "packages/work-items/test/backends.test.ts",
+          "blob": "fe3c9dcaaaedcc2eec45691a4e295700e96f4137",
+          "sha256": "2cd770dabdb54fc872af03c4eb62c74b277e00b49ff2b8c62fe7eac960e646fd"
+        }
       ],
-      "checks": [{"reference":"after","outcome":"pass","summary":["Test Files  9 passed (9)","Tests  74 passed (74)"]}]
+      "checks": [
+        {
+          "reference": "after",
+          "outcome": "pass",
+          "summary": ["Test Files  9 passed (9)", "Tests  74 passed (74)"]
+        }
+      ]
     },
     {
       "task": "owner-attachments",
       "sourceCommit": "6d1f7b13c0b9387cb072c0b97983b5a670d673f6",
       "baseCommit": "2e6cf7a7f5a952bd2c82cea6e142eced6569e8d6",
       "graders": [
-        {"path":"apps/clankie/test/owner-attachments.test.ts","blob":"bdfc2f05b1b88aa5821b96de1001435dddd9ca58","sha256":"4a4eeb2014d43ffa551134690391f6d026852cea226cef42d4696fa14eaa0406"},
-        {"path":"apps/tui/test/send-attach.test.ts","blob":"fbf88f49580bbfe2a38bda63d1cc9308b9d0994e","sha256":"7c1bf4e698f1b811879262448b5897ba4c6680d66d78587bd9cdecf7dba12e34"}
+        {
+          "path": "apps/clankie/test/owner-attachments.test.ts",
+          "blob": "bdfc2f05b1b88aa5821b96de1001435dddd9ca58",
+          "sha256": "4a4eeb2014d43ffa551134690391f6d026852cea226cef42d4696fa14eaa0406"
+        },
+        {
+          "path": "apps/tui/test/send-attach.test.ts",
+          "blob": "fbf88f49580bbfe2a38bda63d1cc9308b9d0994e",
+          "sha256": "7c1bf4e698f1b811879262448b5897ba4c6680d66d78587bd9cdecf7dba12e34"
+        }
       ],
-      "checks": [{"reference":"after","outcome":"pass","summary":["Test Files  2 passed (2)","Tests  11 passed (11)"]}]
+      "checks": [
+        {
+          "reference": "after",
+          "outcome": "pass",
+          "summary": ["Test Files  2 passed (2)", "Tests  11 passed (11)"]
+        }
+      ]
     },
     {
       "task": "async-discord-text",
       "sourceCommit": "aa015e0eba4e5f1487ada359fedbaa62069b27dc",
       "baseCommit": "d10d11a7a9e7e6828bfc9eba3a42cc975be7a878",
       "graders": [
-        {"path":"apps/clankie/test/discord-channel.test.ts","blob":"0370463a0f048832d0192dc12f8741e857bd3d56","sha256":"4e86515dde3ed6cc54184d9178daa640d70215372ba5822bebe9560143e85685"},
-        {"path":"apps/discord-bridge/test/text-inbox.test.ts","blob":"68793e0538e363924c73e67e97aef47774b22831","sha256":"6eb3e07d43d9ddbde0a2882e0293026d7f8600bbe28c9be3fdb3be909b524a58"},
-        {"path":"packages/api-client/test/api-client.test.ts","blob":"71745a56442ad3cca4317d3c2324b0e54799d4db","sha256":"70e3249375b7811af5e13e4dcdeabca4d79558f7417b609b93f19e15ef86692a"}
+        {
+          "path": "apps/clankie/test/discord-channel.test.ts",
+          "blob": "0370463a0f048832d0192dc12f8741e857bd3d56",
+          "sha256": "4e86515dde3ed6cc54184d9178daa640d70215372ba5822bebe9560143e85685"
+        },
+        {
+          "path": "apps/discord-bridge/test/text-inbox.test.ts",
+          "blob": "68793e0538e363924c73e67e97aef47774b22831",
+          "sha256": "6eb3e07d43d9ddbde0a2882e0293026d7f8600bbe28c9be3fdb3be909b524a58"
+        },
+        {
+          "path": "packages/api-client/test/api-client.test.ts",
+          "blob": "71745a56442ad3cca4317d3c2324b0e54799d4db",
+          "sha256": "70e3249375b7811af5e13e4dcdeabca4d79558f7417b609b93f19e15ef86692a"
+        }
       ],
-      "checks": [{"reference":"after","outcome":"pass","summary":["Test Files  3 passed (3)","Tests  35 passed (35)"]}]
+      "checks": [
+        {
+          "reference": "after",
+          "outcome": "pass",
+          "summary": ["Test Files  3 passed (3)", "Tests  35 passed (35)"]
+        }
+      ]
     }
   ]
 }

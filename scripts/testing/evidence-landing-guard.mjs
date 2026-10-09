@@ -6,9 +6,7 @@ const root = process.cwd();
 const base = process.env.CLANKIE_LANDING_BASE ?? "origin/main";
 const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
 const added = new Set(
-  git("diff", "--name-only", "--diff-filter=A", `${base}...HEAD`)
-    .split("\n")
-    .filter(Boolean),
+  git("diff", "--name-only", "--diff-filter=A", `${base}...HEAD`).split("\n").filter(Boolean),
 );
 for (const path of git("ls-files", "--others", "--exclude-standard").split("\n").filter(Boolean))
   added.add(path);

@@ -10,10 +10,7 @@ const pluginRoot = join(import.meta.dirname, "../../../integrations/claude-plugi
 const helper = join(pluginRoot, "worker/mods/report.mjs");
 // Captured from the real native TUI, stdio MCP server and HTTP reporter.
 const nativeSmoke = JSON.parse(
-  readFileSync(
-    join(import.meta.dirname, "fixtures/claude-tool-catalog.json"),
-    "utf8",
-  ),
+  readFileSync(join(import.meta.dirname, "fixtures/claude-tool-catalog.json"), "utf8"),
 );
 const report = nativeSmoke.accepted.report;
 
