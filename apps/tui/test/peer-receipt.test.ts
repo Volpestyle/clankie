@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -440,7 +441,7 @@ it("the worker bridge discovers peers, routes once outside MCP retries, and obse
       "message_peer",
     ]);
     const parse = (result: Awaited<ReturnType<Client["callTool"]>>) =>
-      JSON.parse((result.content as { text: string }[])[0]!.text);
+      decodeMcpResult(result) as { deliveryStage?: string };
     expect(parse(await client.callTool({ name: "list_fleet_seats", arguments: {} }))).toEqual(catalog);
     expect(
       parse(await client.callTool({ name: "message_peer", arguments: { seat: "peer-seat", text: "hello" } }))
