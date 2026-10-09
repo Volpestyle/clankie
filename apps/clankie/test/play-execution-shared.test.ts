@@ -8,24 +8,7 @@ describe("play execution shared reporting", () => {
     expect(overlayText("x".repeat(300))).toHaveLength(256);
   });
 
-  it("formats a room event from the settled turn fields", () => {
-    expect(
-      roomEvent({
-        turn: 3,
-        monologue: "heading up",
-        effect: "stepped onto route 2",
-        objective: "reach pewter",
-        intent: "walk north",
-      }),
-    ).toBe(
-      [
-        "turn=3",
-        "thought=heading up",
-        "observed=stepped onto route 2",
-        "goal=reach pewter",
-        "next=walk north",
-      ].join("\n"),
-    );
+  it("omits a blank room event", () => {
     expect(roomEvent({ turn: 3, monologue: null, effect: null, objective: null, intent: null })).toBeNull();
   });
 });

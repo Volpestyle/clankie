@@ -17,13 +17,6 @@ const SELECTION = {
 } as unknown as PiModelSelection;
 
 describe("captain model card", () => {
-  it("names the model, provider, effort, and limits", () => {
-    const card = modelCard(SELECTION);
-    expect(card).toContain("GPT-5.6 Terra (`openai-codex/gpt-5.6-terra`), served by openai-codex.");
-    expect(card).toContain("Reasoning model, effort medium.");
-    expect(card).toContain("Context window 272k tokens, up to 128k out. Takes text and image.");
-  });
-
   it("refreshes the card per run and stays silent when the model cannot be resolved", async () => {
     let selection: PiModelSelection | undefined = SELECTION;
     const resolved = await beforeAgentStartHandler(() =>

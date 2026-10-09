@@ -247,3 +247,50 @@ Private app and hosted-service reviews stay in their own repositories or private
 issue evidence. They do not publish private implementation details here. No
 private tests have been deleted by this batch. Evaluation fixtures are outside
 this pruning and remain manual-only.
+
+## Service presentation helpers
+
+Two mixed files lose 24 test lines and one case. Product code, exports and
+fixtures are unchanged.
+
+| File under `apps/clankie/test/` | Cut                                                                  | Keep reason                                                                                                                                                                                                   |
+| ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `captain-model-card.test.ts`    | Exact model-card sentences, token abbreviations and input-list copy. | Per-run resolution refresh, original system prompt and honest unavailable-model behavior.                                                                                                                     |
+| `play-execution-shared.test.ts` | Exact ordered room-event text snapshot.                              | Overlay length cap and blank-event omission. The retained `play-voice.test.ts` runtime cases exercise the authored thought, observed outcome, goal and next intent across the actual play/voice/journal seam. |
+
+The room-event fields remain behavior covered by that runtime file; only the
+helper's incidental field order and line layout disappear. The model-card text
+can change without invalidating model selection or prompt refresh.
+
+Additional full-file reviews retain `captain-memory.test.ts`,
+`captain-model.test.ts`, `personas.test.ts`, `runtime-health.test.ts`,
+`captain-native-subagents.test.ts`, `codex-accounts.test.ts`,
+`captain-body-identity.test.ts`, `captain-browser-tools.test.ts`,
+`browser-authority.test.ts`, `system-authority.test.ts`, `desktop.test.ts`,
+`operator-auth.test.ts`, `runtime-terminals.test.ts` and
+`runtime-connections.test.ts`. They guard lane-scoped private memory and file
+publication, broker preservation and serialized credential rotation, durable
+owner identities and exact account homes, bounded public boot identity,
+transcript/presence consumer agreement, original turn authority and revocation,
+browser shell grants, room audience grants, owner quiet hours, HTTP credential
+revocation, pinned terminal routing and runtime/workspace approval. Exact
+request arrays and native identities in these files enforce contracts, rather
+than presentation order. The empty-memory label is explicitly documented in
+`docs/cli.md`, so its case remains. No E2E, integration or golden case is removed.
+
+The [batch measurements](../testing/2026-10-09-service-helper-test-pruning/README.md)
+record counts and the before gate. Final gate output and timings are retained
+with the batch's issue evidence; the all-repository inventory remains incomplete.
+
+On resumption, eleven additional full-file reviews keep `presence-service`,
+`memory-capacity-api`, `lead-coding-helper`, `voice-transcripts`,
+`discord-captain-actions`, `discord-tool-progress`, `discord-turn-trail`,
+`discord-sender-standing`, `herdr-head-seat`, `herdr-parent-edges` and
+`pi-native-capability` under `apps/clankie/test/`. They protect real captain/API
+projection, the historical memory quota bug, bounded no-follow filesystem and
+clean-shell operations, private retained transcript access, persisted dispatch
+guards after restart, content-free progress, one-shot native turn provenance,
+verified owner/grant separation, native head identity, corrupt-cache recovery
+and inode/hash-bound native capability lifetime. Ordinary filenames do not
+make these producer/consumer integrations removable unit coverage. No test is
+removed from these files and the helper fixtures do not run evaluations.
