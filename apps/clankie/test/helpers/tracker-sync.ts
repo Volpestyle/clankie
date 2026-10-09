@@ -129,7 +129,7 @@ export async function syncFixture() {
       instance.closeAllConnections();
       await new Promise<void>((resolve) => instance.close(() => resolve()));
     }
-    await Promise.allSettled([...active]);
+    await Promise.allSettled(active);
     host.close();
     await rm(root, { recursive: true, force: true });
   };
