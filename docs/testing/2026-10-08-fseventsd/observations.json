@@ -1,0 +1,93 @@
+{
+  "windows": [
+    {
+      "window": 1,
+      "startedAtUnixSeconds": 1791510250.309243,
+      "seconds": 20.004287242889404,
+      "deliveredEvents": 1227,
+      "flags": {},
+      "categories": {
+        "temporary": 1052,
+        "dev/clankie-app": 52,
+        ".clankie/fleet-resources": 35,
+        ".clankie/captain": 29,
+        ".clankie/updates": 19,
+        ".clankie/worker-grants": 11,
+        "Library/Caches": 10,
+        "dev/clankie-app-wt/vuh-1855": 5,
+        "dev/clankie-wt/vuh-1868": 5,
+        "dev/clankie-wt/vuh-1876": 4,
+        "dev/clankie-wt/vuh-1868/node_modules": 2,
+        ".clankie/events.jsonl": 2,
+        "dev/clankie-app-wt/vuh-1855/clankie-app/packages/command-center/node_modules": 1
+      }
+    },
+    {
+      "window": 2,
+      "startedAtUnixSeconds": 1791510304.2822132,
+      "seconds": 20.0049147605896,
+      "deliveredEvents": 75,
+      "flags": {},
+      "categories": {
+        "temporary": 46,
+        ".clankie/captain": 16,
+        ".clankie/fleet-resources": 8,
+        ".clankie/updates": 3,
+        "Library/Caches": 2
+      }
+    },
+    {
+      "window": 3,
+      "startedAtUnixSeconds": 1791510372.406867,
+      "seconds": 20.00506591796875,
+      "deliveredEvents": 2135,
+      "flags": {
+        "MustScanSubDirs": 10,
+        "UserDropped": 10
+      },
+      "categories": {
+        "dev/clankie-wt/vuh-1876": 1822,
+        "dev/clankie-wt/vuh-1866": 122,
+        ".clankie/fleet-resources": 50,
+        ".clankie/captain": 42,
+        "Library/Caches": 17,
+        "dev/clankie": 17,
+        ".clankie/updates": 17,
+        "dev/clankie-app-wt/vuh-1855": 7,
+        "dev/model-index": 5,
+        ".clankie/inbound-receipts": 4,
+        "temporary": 20,
+        "dev": 2,
+        "Library/Developer": 2,
+        ".clankie": 2,
+        ".clankie/worker-plugin-notices": 2,
+        "dev/clankie-wt/vuh-1866/node_modules": 1,
+        "dev/vuh-1588-teo": 1,
+        "dev/clankie-app": 1,
+        ".clankie/events.jsonl": 1
+      }
+    },
+    {
+      "window": 4,
+      "startedAtUnixSeconds": 1791510512.780158,
+      "seconds": 20.00366187095642,
+      "deliveredEvents": 145,
+      "flags": {},
+      "categories": {
+        "temporary": 66,
+        ".clankie/fleet-resources": 28,
+        ".clankie/updates": 16,
+        ".clankie/captain": 14,
+        ".clankie/worker-grants": 11,
+        "dev/clankie-wt/vuh-1876/.local": 4,
+        "dev/clankie-wt/vuh-1868/.local": 2,
+        ".clankie/events.jsonl": 1,
+        "Library/Caches": 1,
+        "dev/clankie": 1,
+        "dev/clankie-wt/vuh-1876/packages/settings/node_modules": 1
+      }
+    }
+  ],
+  "pairedWindow4IntervalCpuPercent": [103.6, 101.9, 105.8, 104.4],
+  "limitations": "Delivered/coalesced path notifications, not daemon client attribution; window 3 incomplete due dropped flags."
+}

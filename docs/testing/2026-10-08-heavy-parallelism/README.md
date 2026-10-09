@@ -62,17 +62,19 @@ Automatic capacity now uses `max(1, min(floor(cores/4), floor(RAM_GiB/24)))`,
 giving this Mac four permits for four-worker jobs. The RAM bound, pressure
 guards and owner overrides remain unchanged. The measured throughput supports
 the four-job default; the high load peaks require keeping those guards.
-The proposed fleet note follows governor capacity, with Vitest workers and
-Turbo task concurrency at four or lower per job, after the owner applies the
-new capacity. The live 1–2-job budget remains binding until that authorization.
+The lead accepted the reversible auto-four source formula for activation with
+his next deploy. The proposed fleet note follows governor capacity, with Vitest
+workers and Turbo task concurrency at four or lower per job, after that update.
+The current live 1–2-job budget remains binding until activation; the worker
+does not apply it.
 The worker mistakenly applied the note through `clankie fleet set --notes`,
 interpreting the original note-update assignment as permission. The lead
 restored only that segment and read it back at settings revision
 `310abae8899644359aedb349898b44001bd16d08f6c65bff03c31b2ac99bfefc`; unrelated
 notes were preserved. This was a corrected mistake, not a policy rollout.
 The worker does not change the live heavy-slot setting or deploy the new version.
-Activation and the live note-update criterion remain open pending the owner
-decision; source throughput evidence alone does not complete VUH-1876.
+The capacity decision is accepted. Runtime activation and the corresponding
+live note update belong to the lead's next deploy, not this worker's delivery.
 
 ## Final verification
 
@@ -102,6 +104,9 @@ within its unchanged 30-second budget; the full historical file had already
 passed in the initial 31-test run. The [compact result](no-regression.json)
 records this targeted acceptance. Broad-gate completion remains an explicit gap;
 no unrelated controller behavior, fixture timeout or validation was changed.
+The lead filed the unchanged OpenCode failure separately as
+[VUH-1885](https://linear.app/vuhlp/issue/VUH-1885) and authorized source landing
+with that gap stated. A green complete landing-gate run is not claimed here.
 No evals or deployment commands are part of these checks.
 
 Raw logs are retained in the assigned worktree's `.local/` directory.
