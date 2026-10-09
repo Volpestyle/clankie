@@ -403,6 +403,7 @@ else console.log('{}');
     const root = await mkdtemp(join(tmpdir(), "remote-lead-reconnect-"));
     const directory = join(root, "delegations");
     let proofAvailable = true;
+    let channelAvailable = true;
     let exited = false;
     const fixtureProof = async () => {
       const { fleet, pane, nativeOccupantId, shell, binding, processes, workspace } =
@@ -443,7 +444,18 @@ else console.log('{}');
     const makeBridge = () =>
       createRemoteLeadBridge({ delegations: grants, identity: () => nativeIdentity, captain });
     let bridge = makeBridge();
-    const host = serve({ fetch: (request) => bridge.app.fetch(request), hostname: "127.0.0.1", port: 0 });
+    const host = serve({
+      fetch: (request) => {
+        if (!channelAvailable && new URL(request.url).pathname === "/v1/fleet/lead/events")
+          return new Response(JSON.stringify({ error: "remote_lead_authority_unavailable" }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          });
+        return bridge.app.fetch(request);
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
     const client = new Client({ name: "reconnect-proof", version: "1" });
     let catalogChanges = 0;
     const channelMessages: string[] = [];
@@ -493,11 +505,21 @@ else console.log('{}');
         }),
       );
       expect((await client.listTools()).tools.some((t) => t.name === "worker_reports")).toBe(true);
+      await expect
+        .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 15000 })
+        .toBe("current");
       const beforeDrop = catalogChanges;
+      // MCP and the channel are separate HTTP connections. Force the catalog
+      // to recover first; its notification cannot prove the channel is bound.
+      channelAvailable = false;
       if (!("closeAllConnections" in host)) throw Error("Fixture TCP reset unavailable");
       host.closeAllConnections();
       await expect.poll(() => catalogChanges > beforeDrop, { timeout: 15000 }).toBe(true);
       expect(effects).toBe(0);
+      channelAvailable = true;
+      await expect
+        .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 15000 })
+        .toBe("current");
       const droppedChannel = outbox.deliver({
         kind: "wake",
         conversationId: binding.conversationId,
@@ -510,7 +532,7 @@ else console.log('{}');
           timeout: 15000,
         })
         .toBe(true);
-      await droppedChannel;
+      expect(await droppedChannel).toMatchObject({ outcome: "delivered" });
       proofAvailable = false;
       const sync = spawn(process.execPath, [join(repo, ".local/remote-lead/remote-lead-mcp.mjs"), "--sync"], {
         env: nativeEnv,
@@ -586,7 +608,7 @@ else console.log('{}');
           timeout: 15000,
         })
         .toBe(true);
-      await restartedChannel;
+      expect(await restartedChannel).toMatchObject({ outcome: "delivered" });
       expect((await client.callTool({ name: "worker_reports", arguments: {} })).content).toEqual([
         { type: "text", text: "reconnected" },
       ]);

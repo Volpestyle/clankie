@@ -28,3 +28,11 @@ The owner deploys and performs live PC proof. Legacy heads run the old artifact
 and have no saved bearer hash/original lifetime proof. One owner-controlled new
 launch must load the fixed artifact after deployment; subsequent loss/restart
 proof needs no relaunch. No PC state, credentials, panes or runtime were changed.
+
+The checkpoint TCP failure came from treating MCP's catalog notification as
+channel readiness. Those HTTP connections retry independently; the outbox
+correctly refuses a delivery while unbound. A deterministic fixture now keeps
+the channel unavailable while MCP recovers, requires channel status `current`
+before sending, and asserts the notification and delivered receipt. The
+readiness diagnostic failed with `bound=false` after the catalog notification.
+No assertion timeout or production delivery/retry setting was loosened.
