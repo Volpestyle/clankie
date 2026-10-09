@@ -73,7 +73,7 @@ it("imports a real captured Linear graph into native records and survives reopen
   const sync = await tracker.sync({
     action: "bootstrap",
     type: "full",
-    projects: [snapshot.projects[0]!.id],
+    projects: ["workspace"],
     lazy: false,
   });
   if (sync.outcome !== "bootstrap") throw new Error("Expected bootstrap");
@@ -83,6 +83,17 @@ it("imports a real captured Linear graph into native records and survives reopen
     .map((line) => JSON.parse(line) as { modelName?: string });
   expect(models.map((model) => model.modelName)).toContain("milestone");
   expect(models.map((model) => model.modelName)).toContain("document");
+  expect(models.map((model) => model.modelName)).toContain("status_update");
+  const projectId = snapshot.projects[0]!.id;
+  const scoped = await tracker.sync({
+    action: "bootstrap",
+    type: "partial",
+    projects: [projectId],
+    lazy: false,
+  });
+  if (scoped.outcome !== "bootstrap") throw new Error("Expected project snapshot");
+  expect(scoped.ndjson).toContain('"modelName":"milestone"');
+  expect(scoped.ndjson).toContain('"modelName":"document"');
   const before = await readFile(join(directory, "tracker.json"), "utf8");
   const reopened = createLocalTracker({ directory });
   const rerun = await reopened.importLinear(snapshot, actors);
@@ -139,4 +150,48 @@ it("updates by provider id once and publishes the imported milestone through the
   expect(await tracker.call("get_milestone", { id: snapshot.milestones[0]!.id })).toMatchObject({
     name: "Changed upstream milestone",
   });
+});
+
+it("keeps separate scratch imports of the same Linear team on distinct durable sync stores", async () => {
+  const a = await setup();
+  const b = await setup();
+  await a.tracker.importLinear(a.snapshot, a.actors);
+  await b.tracker.importLinear(a.snapshot, a.actors);
+  const bootstrap = async (directory: string) => {
+    const boot = await createLocalTracker({ directory }).sync({
+      action: "bootstrap",
+      type: "full",
+      projects: ["*"],
+      lazy: false,
+    });
+    if (boot.outcome !== "bootstrap") throw new Error("Expected bootstrap");
+    return JSON.parse(boot.ndjson.trim().split("\n").at(-1)!);
+  };
+  const first = await bootstrap(a.directory);
+  const second = await bootstrap(b.directory);
+  expect(first.storeId).not.toBe(second.storeId);
+  expect(first.syncGroups).toEqual([a.snapshot.projects[0]!.id, "unprojected", "workspace"]);
+  expect(await bootstrap(a.directory)).toEqual(first);
+  expect(
+    await b.tracker.sync({
+      action: "subscribe",
+      projects: ["workspace"],
+      storeId: first.storeId,
+      lastSyncId: first.lastSyncId,
+      waitMs: 0,
+      limit: 100,
+    }),
+  ).toMatchObject({ outcome: "rebootstrap", reason: "store_changed" });
+});
+
+it("updates explicit actor bindings even when all provider records are unchanged", async () => {
+  const { tracker, snapshot, actors, directory } = await setup();
+  await tracker.importLinear(snapshot, actors);
+  const ownerId = "634ad2c8-4992-48b5-b14d-af650cd30030";
+  const rebound = { ...actors, [ownerId]: { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] } };
+  await tracker.importLinear(snapshot, rebound);
+  expect(await tracker.call("get_user", { query: ownerId })).toMatchObject({ actor: rebound[ownerId] });
+  const before = await readFile(join(directory, "tracker.json"), "utf8");
+  await tracker.importLinear(snapshot, rebound);
+  expect(await readFile(join(directory, "tracker.json"), "utf8")).toBe(before);
 });

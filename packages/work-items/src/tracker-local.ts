@@ -456,7 +456,8 @@ function parseStore(content: string): Store {
     store.nextProject < 1 ||
     typeof store.team?.id !== "string" ||
     typeof store.team.key !== "string" ||
-    typeof store.user?.id !== "string"
+    typeof store.user?.id !== "string" ||
+    (store.storeId !== undefined && (typeof store.storeId !== "string" || store.storeId.length === 0))
   )
     throw new Error("Invalid or unsupported local tracker store");
   for (const key of [
@@ -2714,21 +2715,22 @@ function syncModels(store: Store): TrackerSyncModel[] {
   );
   add("project", store.projects, (data) => [data.id as string, "workspace"]);
   add("milestone", store.milestones ?? [], (data) => [data.projectId as string, "workspace"]);
-  add("document", store.documents ?? [], (data) =>
-    data.projectId ? [data.projectId as string, "workspace"] : projectOfIssue(data.issueId as string),
-  );
+  add("document", store.documents ?? [], (data) => [
+    ...(data.projectId ? [data.projectId as string] : projectOfIssue(data.issueId as string)),
+    "workspace",
+  ]);
   add("comment", store.comments, (data) =>
     data.projectId
       ? [data.projectId as string]
       : data.statusUpdateId
         ? [store.statusUpdates.find((update) => update.id === data.statusUpdateId)!.projectId]
         : data.documentId
-          ? [
-              String(
-                store.documents?.find((document) => document.id === data.documentId)?.projectId ??
-                  "unprojected",
-              ),
-            ]
+          ? (() => {
+              const document = store.documents?.find((entry) => entry.id === data.documentId);
+              return document?.projectId
+                ? [document.projectId as string]
+                : projectOfIssue(document?.issueId as string | undefined);
+            })()
           : projectOfIssue(data.issueId as string),
   );
   add("cycle", store.cycles ?? [], (data) =>
@@ -3123,7 +3125,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
                 // projected into the new group without rewriting the hash-linked journal.
                 deltas: commit.deltas
                   .map((delta) =>
-                    ["project", "milestone", "document", "status_update", "cycle", "release"].includes(delta.modelName)
+                    ["project", "milestone", "document", "status_update", "cycle", "release"].includes(
+                      delta.modelName,
+                    )
                       ? {
                           ...delta,
                           projectIds: [...new Set([...delta.projectIds, "workspace"])],
@@ -3210,7 +3214,13 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             else report.updated++;
           }
         }
-        if (report.created + report.updated === 0) return report;
+        const actorMappingsChanged = snapshot.actors.some(
+          (record) =>
+            actorMap[record.id] !== undefined &&
+            canonical(store.actors?.find((actor) => actor.id === record.id)?.actor) !==
+              canonical(actorMap[record.id]),
+        );
+        if (report.created + report.updated === 0 && !actorMappingsChanged) return report;
         const actor = callOptions?.actor ?? { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
         const sourceActor = (record: LinearRecord): TrackerActor => {
           const id = linearId(record.botActor ?? record.actor ?? record.creator ?? record.user);

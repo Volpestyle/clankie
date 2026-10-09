@@ -455,8 +455,8 @@ Pre-sync stores start at zero; existing objects enter through bootstrap.
 references, rather than expanded Linear-shaped views. Supported models are
 issues, comments, projects, cycles, releases, runs, leases and bundles, plus
 item events, status updates and shared team/user/status/label metadata.
-Milestone is reserved in the model vocabulary but has no records until the
-built-in tracker supports milestones. An issue's project is its sync group;
+Milestone uses the reserved `milestone` model name; imported documents use
+`document`. Both preserve their imported fields. An issue's project is its sync group;
 `unprojected` is the explicit group for items without a project. Associated
 comments, events, runs, leases, bundles and release membership follow the issue.
 A move includes previous and current groups and complete data, so clients can
@@ -469,7 +469,8 @@ project create, rename and archive records and project-level milestone, cycle
 and release metadata. Every client always subscribes to it; the server includes
 it in subscriptions even when omitted. Project and cycle records also keep their
 project UUID groups; release records keep their derived membership groups.
-Milestones join this group when milestone records are supported.
+Imported milestones, documents and project status updates also join this group;
+status updates retain the reserved `status_update` model name.
 A full bootstrap with `projects: ["*"]` expands to every tracker project UUID
 (including archived projects), plus `unprojected` and `workspace`. The metadata
 `syncGroups` contains the exact expanded IDs. Partial bootstrap retains exactly
