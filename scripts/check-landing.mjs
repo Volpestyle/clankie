@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -30,13 +30,23 @@ const base = git(
   `${value("--base", process.env.CLANKIE_LANDING_BASE ?? "origin/main")}^{commit}`,
 );
 const head = git("rev-parse", "HEAD");
-const fingerprint = () => {
-  const hash = createHash("sha256").update(execFileSync("git", ["diff", "--binary", "HEAD"]));
+const fingerprint = async () => {
+  const hash = createHash("sha256");
+  const diff = spawn("git", ["diff", "--binary", "HEAD"], { stdio: ["ignore", "pipe", "inherit"] });
+  await Promise.all([
+    new Promise((resolve, reject) => {
+      diff.once("error", reject);
+      diff.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`git diff exited ${code}`))));
+    }),
+    (async () => {
+      for await (const chunk of diff.stdout) hash.update(chunk);
+    })(),
+  ]);
   for (const path of git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean))
     hash.update(path).update(readFileSync(path));
   return hash.digest("hex");
 };
-const source = fingerprint();
+const source = await fingerprint();
 const reportPath = resolve(value("--report", ".local/landing-gate.json"));
 const report = { head, base, source, phases: [], exitCode: null };
 const save = () => {
@@ -115,7 +125,7 @@ run("tests", [
   "--passWithNoTests",
   ...vitestArgs,
 ]);
-report.sourceStable = git("rev-parse", "HEAD") === head && fingerprint() === source;
+report.sourceStable = git("rev-parse", "HEAD") === head && (await fingerprint()) === source;
 if (!report.sourceStable) {
   console.error("[landing] Source changed while the gate ran; this result cannot authorize a push.");
   exit = 1;
