@@ -113,21 +113,16 @@ const CLAUDE_MANAGED_SETTINGS =
  */
 const WORKER_SERVER_RULE = `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`;
 
-function claudeWorkerSettings(trackerDeny: readonly string[] = [], gates?: FleetGates): string {
-  // Shell commands may combine everyday work, accounts and destructive work.
-  // Never blanket-allow Bash from a category preference. Existing managed deny
-  // rules retain precedence; all ambiguous calls reach the permission hook.
-  const localFiles = ["Edit", "Write"];
+function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
+  // Hired workers use Claude's auto classifier for routine work (James,
+  // 2026-10-09). Blanket ask rules override auto mode and stall every command.
+  // Managed denies, tracker denies and the permission hook remain authoritative;
+  // auto mode does not blanket-allow Bash or approve gated calls.
   return JSON.stringify({
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
     permissions: {
       allow: [WORKER_SERVER_RULE],
-      ...(gates === undefined
-        ? {}
-        : {
-            defaultMode: "default",
-            ask: ["Bash", "WebFetch", "WebSearch", ...localFiles],
-          }),
+      defaultMode: "auto",
       ...(trackerDeny.length === 0 ? {} : { deny: [...trackerDeny] }),
     },
   });
@@ -812,8 +807,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       try {
         const trackerDeny = await (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
-        const gates = await deps.fleetGates?.(launch.cwd, launch.env);
-        const settings = claudeWorkerSettings(trackerDeny, gates);
+        const settings = claudeWorkerSettings(trackerDeny);
         await view.start(
           "claude",
           claudeWorkerLaunchArgs(

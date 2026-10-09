@@ -67,6 +67,17 @@ category preference cannot safely grant broad native shell permission. Remote
 questions with no verified workspace policy also stay owner-only. The new
 categories do not parse shell commands or replace native custom rules.
 
+## Hired Claude auto mode (2026-10-09)
+
+James decided that hired Claude workers launch in `auto` mode. The launch
+settings enable Claude's native auto classifier and contain no blanket `ask`
+rules for Bash, web or file tools: explicit ask rules override auto mode and
+were stopping routine work at every command. The launch allows only the
+worker MCP server, never all Bash. Inherited managed denies, session tracker
+denies and the plugin's permission hook remain in force. Calls that still
+require permission follow the existing question and owner escalation path;
+this changes neither account authority nor the fleet's decision gates.
+
 ## Consequences
 
 Transport checks exercise the real command hook over HTTP and acknowledge its

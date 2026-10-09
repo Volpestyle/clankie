@@ -99,7 +99,7 @@ it("a worker launch enables its plugin for this session only and asks for the ap
     }),
   ).toEqual([
     "--settings",
-    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"]}}',
+    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto"}}',
     "--channels",
     "plugin:clankie-worker@clankie",
     "--model",
@@ -115,7 +115,7 @@ it("a worker launch enables its plugin for this session only and asks for the ap
       "mcp__linear-server",
     ])[1],
   ).toBe(
-    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"],"deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
+    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto","deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
   );
   expect(channelBody(channel("line one\nline two"))).toBe("line one\nline two");
   expect(channelBody("plain prompt")).toBeUndefined();
@@ -126,8 +126,14 @@ it.each([true, false])(
   async (matching) => {
     const root = await scratch();
     const deliver = vi.fn(async () => true);
-    const start = vi.fn(async () => undefined);
+    const start = vi.fn(async (_command: string, _args: readonly string[]) => undefined);
     const adapter = createClaudeWorkerSeatAdapter({
+      fleetGates: async () => ({
+        everydayWork: "allow",
+        leavesMac: "lead",
+        hardToUndo: "owner",
+        moneyAndAccounts: "owner",
+      }),
       consent: async () => ({ approved: true }),
       hooks: new SeatHookLog(join(root, "hooks.json")),
       agent: async () => ({
@@ -147,6 +153,15 @@ it.each([true, false])(
       { paneId: "w1:p1", start, run: async () => undefined },
     );
     expect(start).toHaveBeenCalledWith("claude", expect.arrayContaining(["--resume", SESSION]));
+    const settings = JSON.parse(start.mock.calls[0]?.[1]?.[1] ?? "{}");
+    expect(settings.permissions).toEqual({
+      defaultMode: "auto",
+      allow: ["mcp__plugin_clankie-worker_clankie"],
+      deny: ["mcp__tracker_for_cwd"],
+    });
+    expect(settings.permissions.ask).toBeUndefined();
+    expect(settings.permissions.allow).not.toContain("Bash");
+
     // Its Linear writes go through Clankie's account: inherited connectors are denied for the session.
     expect(start).toHaveBeenCalledWith(
       "claude",
@@ -408,7 +423,7 @@ it.each(["string", "blocks"])(
       timing: { readyMs: 20, receiptMs: 20, pollMs: 1 },
       trackerDeny: () => [],
     });
-    const start = vi.fn(async () => undefined);
+    const start = vi.fn(async (_command: string, _args: readonly string[]) => undefined);
     const view: SeatView = { paneId: agent.paneId, run: vi.fn(async () => undefined), start };
     const started = await adapter.start(
       { harness: "claude", cwd: root, model: "haiku", brief: "Reply exactly PROBE OK." },

@@ -131,13 +131,13 @@ for James. Money/accounts always belong to the owner. Push and release reuse
 their existing settings. Hands-off, Balanced and Careful presets change only
 the category leaves; explicit assignment limits retain precedence.
 
-Native permissions are a partial projection: local Claude asks for edits,
-writes, shell and network calls with existing denies preserved. Unclassified
-permissions stay owner-only. Local Codex keeps its sandbox with on-request
-approvals; only its own `clankie` bridge tools run without a native prompt. Remote hires
-retain native permissions. Native custom rules remain harness-owned. Neither
-the preset name nor a native allow rule proves authority for accounts, money,
-credentials, evals, or hard-to-undo effects.
+Native permissions are a partial projection: hired Claude starts in auto mode
+without blanket ask rules. Managed denies, tracker denies and permission hooks
+still apply; Bash is never blanket-allowed. Unclassified permission prompts
+stay owner-only. Local Codex keeps its sandbox with on-request approvals; only
+its own `clankie` bridge tools run without a native prompt. Native custom rules
+remain harness-owned. Neither the preset name nor a native allow rule proves
+authority for accounts, money, credentials, evals, or hard-to-undo effects.
 
 If the effective owner's `autonomy.fleet` gate reserves the decision, escalate
 the observed question with Clankie's same `request_user_input` tool: supply
