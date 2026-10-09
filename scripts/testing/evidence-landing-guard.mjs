@@ -16,7 +16,7 @@ const violations = [];
 for (const path of added) {
   if (!path.startsWith("docs/testing/") || path.endsWith("/")) continue;
   const size = statSync(join(root, path)).size;
-  if (media.test(path) || (!path.endsWith(".md") && size >= 16 * 1024))
+  if (media.test(path) || (!path.endsWith(".md") && !path.endsWith("/evidence.json") && size >= 16 * 1024))
     violations.push(`${path} (${size} bytes)`);
 }
 if (violations.length) {
