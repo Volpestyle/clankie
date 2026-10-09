@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  genericToolRenderer,
-  previewLines,
-  summarizeToolArgs,
-  unwrapMcpResult,
-} from "../src/shell/tool-render.ts";
+import { genericToolRenderer, previewLines, unwrapMcpResult } from "../src/shell/tool-render.ts";
 
 /** The envelope shape `mcp-host.ts` returns, as captured from a real `linear_list_comments` turn. */
 const linearEnvelope = JSON.stringify(
@@ -30,11 +25,6 @@ describe("unwrapMcpResult", () => {
     expect(unwrapped).toContain("VUH-1136 b22835a transport PASS 8/8");
   });
 
-  it("pretty-prints a refusal, which carries no content string", () => {
-    const refused = JSON.stringify({ outcome: "refused", reason: "lane", detail: "operator only" });
-    expect(unwrapMcpResult(refused).split("\n")).toHaveLength(5);
-  });
-
   it("leaves a non-envelope payload alone", () => {
     const notice = "[Output truncated to 20 of 53820 bytes; request a narrower result.]";
     expect(unwrapMcpResult(notice)).toBe(notice);
@@ -47,36 +37,9 @@ describe("unwrapMcpResult", () => {
 });
 
 describe("previewLines", () => {
-  it("caps a collapsed row at ten lines and reports the remainder", () => {
-    const output = Array.from({ length: 25 }, (_, index) => `line ${index}`).join("\n");
-    expect(previewLines(output, false)).toEqual({
-      lines: Array.from({ length: 10 }, (_, index) => `line ${index}`),
-      hidden: 15,
-    });
-    expect(previewLines(output, true).hidden).toBe(0);
-  });
-
   it("actually caps an unwrapped linear result, which the raw envelope never did", () => {
     expect(previewLines(linearEnvelope, false).hidden).toBe(0);
     expect(previewLines(unwrapMcpResult(linearEnvelope), false).hidden).toBeGreaterThan(0);
-  });
-});
-
-describe("summarizeToolArgs", () => {
-  it("flattens arguments onto one line", () => {
-    expect(summarizeToolArgs({ issueId: "VUH-1136", limit: 30 })).toBe("issueId=VUH-1136 limit=30");
-  });
-
-  it("drops undefined values and truncates long ones", () => {
-    const summary = summarizeToolArgs({ query: "x".repeat(200), limit: undefined });
-    expect(summary).not.toContain("limit");
-    expect(summary.length).toBeLessThanOrEqual(96);
-    expect(summary.endsWith("…")).toBe(true);
-  });
-
-  it("has nothing to say about a non-object", () => {
-    expect(summarizeToolArgs(undefined)).toBe("");
-    expect(summarizeToolArgs([1, 2])).toBe("");
   });
 });
 

@@ -38,6 +38,9 @@ pruning is a separate reviewed effort. Scale checks to the change and reuse
 valid evidence. This creates no new CI or per-commit full-suite requirement.
 Evals remain manual-only.
 
+The [reviewed inventory and pruning reasons](test-pruning-review.md) record
+VUH-1925's batches and protected coverage. Unreviewed files stay unchanged.
+
 ## Amendment: agents don't add tests nobody asked for (James, 2026-10-09)
 
 The order above still holds, but workers add a new test only when it comes from

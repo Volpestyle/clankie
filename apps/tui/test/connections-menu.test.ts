@@ -1,9 +1,5 @@
 import { expect, it, vi } from "vitest";
 import {
-  accountsHint,
-  formatTranscript,
-  projectLabel,
-  relativeAge,
   runConnectionsMenu,
   runMachineConnectionsMenu,
   type ConnectionsMenuServices,
@@ -11,29 +7,6 @@ import {
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
 
 const NOW = Date.parse("2026-09-25T22:00:00Z");
-
-it("formats hints a person can scan", () => {
-  expect(relativeAge("2026-09-25T21:59:30Z", NOW)).toBe("just now");
-  expect(relativeAge("2026-09-25T21:57:00Z", NOW)).toBe("3m ago");
-  expect(relativeAge("2026-09-25T19:00:00Z", NOW)).toBe("3h ago");
-  expect(projectLabel("-Users-james-dev-clankie")).toBe("~/dev-clankie");
-  expect(projectLabel("--Users-james-dev--")).toBe("~/dev");
-  expect(projectLabel("C--Users-volpe-AppData-Local-Temp-x")).toBe("~/AppData-Local-Temp-x");
-  expect(projectLabel("/Users/james/dev/rivals-agent")).toBe("~/dev/rivals-agent");
-  expect(projectLabel(undefined)).toBe("unknown directory");
-  expect(projectLabel("-Users-james--clankie-captain-evaluator")).toBe("~/.clankie-captain-evaluator");
-  expect(accountsHint({ linear: { status: "connected", account: { name: "James" } } })).toBe(
-    "Linear: connected as James",
-  );
-  expect(
-    formatTranscript([
-      { type: "message", role: "operator", text: "status?" },
-      { type: "tool", name: "bash", phase: "completed", detail: "ls\n-la" },
-      { type: "message", role: "agent", text: "all green" },
-    ]),
-  ).toBe("you: status?\n  · bash completed — ls -la\nagent: all green");
-  expect(formatTranscript([])).toBe("(nothing new)");
-});
 
 function fakeShell(selections: (string | undefined)[], texts: (string | undefined)[] = []) {
   const readSelect = vi.fn(async () => selections.shift());
@@ -53,8 +26,6 @@ function fakeShell(selections: (string | undefined)[], texts: (string | undefine
   } as unknown as ClankieFaceShell;
   return { shell, readSelect, results, lines };
 }
-
-const values = (call: unknown[]) => (call[0] as { options: { value: string }[] }).options.map((o) => o.value);
 
 function services(overrides: Partial<ConnectionsMenuServices> = {}) {
   const agentsCalls: string[][] = [];
@@ -112,13 +83,6 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
     } satisfies ConnectionsMenuServices,
   };
 }
-
-it("links the hub to machines without separate session sections", async () => {
-  const { shell, readSelect } = fakeShell(["machines", undefined, "done"]);
-  await runConnectionsMenu(shell, services().services);
-  expect(values(readSelect.mock.calls[0]!)).toEqual(["machines", "accounts", "json", "done"]);
-  expect(values(readSelect.mock.calls[1]!)).toEqual(["machine:pc", "add"]);
-});
 
 it("resumes a saved session through the ordinary native hire endpoint", async () => {
   const { shell, results } = fakeShell([

@@ -38,7 +38,7 @@ function formatTokenCount(tokens: number): string {
 }
 
 /** pi's compact token formatting (999, 1.2k, 200k, 1.2M). */
-export function formatFooterTokens(count: number): string {
+function formatFooterTokens(count: number): string {
   if (count < 1_000) return String(count);
   if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
   if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
@@ -46,10 +46,10 @@ export function formatFooterTokens(count: number): string {
   return `${Math.round(count / 1_000_000)}M`;
 }
 
-export type FooterContextLevel = "ok" | "warning" | "error";
+type FooterContextLevel = "ok" | "warning" | "error";
 
 /** Context remaining, escalating color past 70% and 90% usage. */
-export function formatFooterContext(usage: OperatorConversationContextUsage | undefined): {
+function formatFooterContext(usage: OperatorConversationContextUsage | undefined): {
   readonly text: string;
   readonly level: FooterContextLevel;
 } {

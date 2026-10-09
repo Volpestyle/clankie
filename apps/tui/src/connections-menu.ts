@@ -64,7 +64,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 // ─── Formatting (pure; unit-tested) ────────────────────────────────────────
 
-export function relativeAge(iso: string, now: number): string {
+function relativeAge(iso: string, now: number): string {
   const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
   if (!Number.isFinite(seconds)) return "unknown";
   if (seconds < 60) return "just now";
@@ -74,7 +74,7 @@ export function relativeAge(iso: string, now: number): string {
 }
 
 /** Harnesses encode the launch directory lossily; show it the way a person would type it. */
-export function projectLabel(project: string | undefined): string {
+function projectLabel(project: string | undefined): string {
   if (project === undefined || project === "") return "unknown directory";
   if (project.startsWith("/") || /^[A-Za-z]:\\/u.test(project))
     return project.replace(/^\/(?:Users|home)\/[^/]+/u, "~").replace(/^[A-Za-z]:\\Users\\[^\\]+/u, "~");
@@ -87,7 +87,7 @@ export function projectLabel(project: string | undefined): string {
   return label || "~";
 }
 
-export function accountsHint(accounts: Json): string {
+function accountsHint(accounts: Json): string {
   const linear = record(accounts.linear);
   if (linear.status === undefined) return "none";
   const account = record(linear.account);
@@ -109,7 +109,7 @@ function sessionOption(session: AgentSession, now: number): MenuOption {
 }
 
 /** A transcript page as readable lines: who said what, and which tools ran. */
-export function formatTranscript(entries: readonly TranscriptEntry[]): string {
+function formatTranscript(entries: readonly TranscriptEntry[]): string {
   if (entries.length === 0) return "(nothing new)";
   return entries
     .map((entry) => {

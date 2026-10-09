@@ -1,0 +1,14 @@
+[
+  {
+    "path": "apps/tui/src/connections-menu.ts",
+    "beforeSha256": "74d61a45da5a7b3ed86921bf3c345c392a882ab18a0897908f8b3bad8fda40fd",
+    "afterSha256": "aac9d79f01dfe072612493e98fc007214984e59e6b180cb5ad2e9fb0bd16c187",
+    "onlyExportModifiersRemoved": true
+  },
+  {
+    "path": "apps/tui/src/shell/footer.ts",
+    "beforeSha256": "65f6575a1ae50d822881c4f1b917b255ad3aaea4f9c8cc98ef1d3c6ecf02230e",
+    "afterSha256": "325ad7e8da63f2376733928561d26486f2dd0b62471f39b407b2dcbcbd03f7d0",
+    "onlyExportModifiersRemoved": true
+  }
+]
