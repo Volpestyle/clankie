@@ -111,7 +111,7 @@ it("uses the selected ordinary chat and ignores old per-issue or native reply re
   expect(f.store.conversation(target)).toMatchObject({ title: "Linear", scope: { kind: "global" } });
   expect(f.store.linearWakeTargetAllowed("missing")).toBe(false);
   expect(() => f.store.receiveLinearActivity(notice("Missing target"), true, "missing")).toThrow(
-    "existing ordinary global chat",
+    "existing ordinary global or workspace chat",
   );
 });
 

@@ -682,7 +682,7 @@ it("refuses a Discord room as the configured Linear wake target", async () => {
   const { captain, conversationId, execute } = await fixture(true);
   expect(() =>
     captain.receiveLinearActivity(linearNotice("Room cannot receive Linear wakes"), true, conversationId),
-  ).toThrow("Linear wake target must be an existing ordinary global chat");
+  ).toThrow("Linear wake target must be an existing ordinary global or workspace chat");
   expect(execute).not.toHaveBeenCalled();
   expect(fake.prompts).toEqual([]);
 });

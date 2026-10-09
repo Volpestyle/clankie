@@ -416,7 +416,7 @@ export interface CaptainPort {
     principalId: string,
     nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>,
   ): Promise<WorkerWriteAuthority | undefined>;
-  /** True for an existing ordinary global chat that may receive Linear wakes. */
+  /** True for an existing ordinary global or workspace chat that may receive Linear wakes. */
   linearWakeTargetAllowed(conversationId: string): boolean;
   linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
   /** Append verified external context to the selected ordinary chat and optionally wake it. */

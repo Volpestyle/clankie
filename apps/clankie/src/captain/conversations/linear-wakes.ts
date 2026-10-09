@@ -24,7 +24,7 @@ export function receiveLinearActivity(
   conversationId = "global-default",
 ): boolean {
   if (!ctx["linearWakeTargetAllowed"](conversationId))
-    throw new Error("Linear wake target must be an existing ordinary global chat");
+    throw new Error("Linear wake target must be an existing ordinary global or workspace chat");
   const meta = ctx["metas"].get(conversationId)!;
   const eventId = input.eventId ?? createHash("sha256").update(JSON.stringify(input)).digest("hex");
   if (
@@ -308,10 +308,16 @@ export function retireLinearInbox(ctx: ConversationStore): void {
   }
 }
 
-/** A configured Linear target is an ordinary owner-openable global chat. */
+/**
+ * A configured Linear target is an ordinary owner-openable chat: global, or a
+ * workspace chat such as a project lead chat (VUH-1927). Child chats never are.
+ */
 export function linearWakeTargetAllowed(ctx: ConversationStore, conversationId: string): boolean {
   const meta = ctx["metas"].get(conversationId);
-  return meta?.scope.kind === "global" && meta.parentConversationId === undefined;
+  return (
+    (meta?.scope.kind === "global" || meta?.scope.kind === "workspace") &&
+    meta.parentConversationId === undefined
+  );
 }
 
 export function flushLinearActivity(ctx: ConversationStore, id: string): void {

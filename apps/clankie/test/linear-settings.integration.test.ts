@@ -113,7 +113,7 @@ it("shares durable wake settings between Clankie's tool, CLI and HTTP with ordin
     expect(await execute({ action: "show" })).toMatchObject({ details: { wakeConversationId: id } });
     expect((await new SettingsStore(settings.path).load()).linearWebhook.wakeConversationId).toBe(id);
     await expect(execute({ action: "set", conversationId: "missing-chat" })).rejects.toThrow(
-      "ordinary global chat",
+      "ordinary global or workspace chat",
     );
     await expect(runLinearCommand(["target", "set", "missing-chat"], options)).rejects.toThrow("failed: 409");
     for (const args of [

@@ -785,7 +785,7 @@ export function linearWakeTools(
         "Read or change your non-secret Linear wake rules and project lead chats. " +
         "Defaults select owner comments and mentions, assignments/delegations to you and reactions on your comments; configure owner identity first. Set partial rule fields; omitted fields stay unchanged. " +
         "An empty notificationTypes array selects all event kinds; exclusions win. Own writes always remain quiet. " +
-        "conversationId and projectChats targets must name existing ordinary global chats. Unconfigured projects go to global-default, named in the wake. " +
+        "conversationId and projectChats targets must name existing ordinary global or workspace chats (a project lead chat). Unconfigured projects go to global-default, named in the wake. " +
         "After receiving a Linear wake in this chat, use action received with its host-issued wakeId to mark matching notifications read. A transport ACK alone leaves them unread. " +
         "Changes apply to new signed webhook events without restarting.",
       parameters: Type.Object(
@@ -845,11 +845,11 @@ export function linearWakeTools(
             ? undefined
             : LinearWebhookSettingsSchema.shape.projectChats.parse(input.projectChats);
         if (projectChats?.some((route) => !port.targetAllowed(route.conversationId)))
-          throw new Error("Every project lead target must be an existing ordinary global chat");
+          throw new Error("Every project lead target must be an existing ordinary global or workspace chat");
         if (input.conversationId !== undefined) {
           LinearWebhookSettingsSchema.shape.wakeConversationId.parse(input.conversationId);
           if (!port.targetAllowed(input.conversationId))
-            throw new Error("Linear wake target must be an existing ordinary global chat");
+            throw new Error("Linear wake target must be an existing ordinary global or workspace chat");
         }
         const current =
           input.action === "show"

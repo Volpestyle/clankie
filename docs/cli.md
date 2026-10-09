@@ -1385,7 +1385,7 @@ clankie linear target set global-default
 ```
 
 The target is one non-secret setting, `linearWebhook.wakeConversationId`. Select
-an existing ordinary global chat the owner can open; an attached native operator
+an existing ordinary global chat, or a workspace project lead chat, the owner can open; an attached native operator
 seat can drive it. To use a new chat, create it with `/new` in the TUI, name it
 Linear, and find its stable ID with `clankie conversations list` before setting
 the target. `set` does not create a chat. The change applies live to new activity;
