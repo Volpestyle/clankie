@@ -82,3 +82,39 @@ check exact, lost, missing-ID and wrong-ID ACKs: only the exact ACK permits
 another poll. Assertions wait on the observed HTTP request or bridge stop
 signal with a bounded five-second integration deadline, without fixed sleeps.
 The four focused subprocess cases passed on current main.
+
+## Existing consumer coverage correction (2026-10-09)
+
+James reported seven stale contract expectations and two recovery fixture
+startup deadlines in Moss's no-bail broad run (`broad-trace.log`/`.json` in the
+VUH-1885 worktree). The tenth failure was the already corrected linked-channel
+ACK fixture. The captain native-chat assertions now require the exact fourth
+`conversationId` option. The five mailbox cases now require the actual polled
+event IDs in delivered receipts, including distinct IDs for two successive
+turns. Head mailbox re-poll acknowledgment remains intentional; worker
+mailboxes separately require explicit ACK. No production behavior was weakened.
+
+The complete three reported files pass with `--bail 0`: 32 tests (including all
+13 inbound recovery cases), with raw inspected logs and JSON retained as
+`.local/claude-proof/vuh-1870-no-bail.log` and `.json`. Recovery startup was left
+unchanged. Those failures occurred before the fixture's IPC `ready` deadline;
+ACK/receipt handlers had not run. Its ready path constructs the inbound report
+store and listener, not the outbound SeatOutbox or channel ACK. The shared
+DeliveryFence is accessed only when requests arrive after readiness. The
+exact scheduling/import step that exceeded ten seconds is unproven and can be
+routed as separate fixture-startup diagnostics; no timeout was enlarged to hide it.
+
+The original landing gate was my hand-selected new transport/reconciliation,
+mailbox/auth and protocol checks, not a complete existing native-delivery
+consumer run. I omitted the direct captain native-chat and SeatOutbox files,
+and initially the subprocess worker-link fixture. That was a selection gap,
+not a claim that the full suite passed. The new focused manual
+`pnpm test:seat-delivery` gate explicitly includes all those consumers, inbound
+recovery and the real Claude reconciliation cases, without bail. The relevant
+integration guidance now names it; full suites and evals were not added to CI.
+
+The new focused consumer gate passed through `clankie heavy`: five full files,
+86 tests, no bail. Raw output is retained in
+`.local/claude-proof/vuh-1870-consumer-gate.log`. The heavy service typecheck,
+scoped formatting/lint, local doc links and diff checks passed. The recovery
+fixture was not changed; both previously timed-out cases passed in both runs.

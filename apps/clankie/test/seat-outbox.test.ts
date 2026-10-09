@@ -164,12 +164,17 @@ describe("seat outbox", () => {
     const parked = outbox.poll(5_000);
     expect(outbox.bound()).toBe(true);
     const delivery = wake(outbox);
-    expect((await parked).map((event) => [event.kind, event.conversationId, event.content])).toEqual([
+    const page = await parked;
+    expect(page.map((event) => [event.kind, event.conversationId, event.content])).toEqual([
       ["wake", "global-default", "wake up"],
     ]);
     // Delivered means the bridge came back for more, not that take() ran.
     expect(await outbox.poll(0)).toEqual([]);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
+    await expect(delivery).resolves.toEqual({
+      outcome: "delivered",
+      deliveryStage: "delivered",
+      messageId: page[0]!.id,
+    });
 
     now += 101;
     expect(outbox.bound()).toBe(false);
@@ -180,9 +185,14 @@ describe("seat outbox", () => {
     const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
     const parked = outbox.poll(5_000);
     const delivery = wake(outbox);
-    expect((await parked).map((event) => event.content)).toEqual(["wake up"]);
+    const page = await parked;
+    expect(page.map((event) => event.content)).toEqual(["wake up"]);
     await outbox.poll(0);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
+    await expect(delivery).resolves.toEqual({
+      outcome: "delivered",
+      deliveryStage: "delivered",
+      messageId: page[0]!.id,
+    });
   });
 
   it("holds an escalation open for the seat's reply, and lets a stale reply fall through", async () => {
@@ -265,7 +275,8 @@ describe("seat outbox", () => {
     const acked = new SeatOutbox({ boundGraceMs: 1_000 });
     const parked = acked.poll(5_000);
     const delivery = wake(acked);
-    expect((await parked).map((event) => event.content)).toEqual(["wake up"]);
+    const page = await parked;
+    expect(page.map((event) => event.content)).toEqual(["wake up"]);
     let resolved: unknown;
     void delivery.then((outcome) => {
       resolved = outcome;
@@ -273,7 +284,11 @@ describe("seat outbox", () => {
     await new Promise((resolve) => setTimeout(resolve, 15));
     expect(resolved).toBeUndefined();
     expect(await acked.poll(0)).toEqual([]);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
+    await expect(delivery).resolves.toEqual({
+      outcome: "delivered",
+      deliveryStage: "delivered",
+      messageId: page[0]!.id,
+    });
 
     const dropped = new SeatOutbox({ boundGraceMs: 30 });
     const first = dropped.poll(5_000);
@@ -289,22 +304,38 @@ describe("seat outbox", () => {
     const newer = outbox.poll(5_000);
     expect(await older).toEqual([]);
     const delivery = wake(outbox);
-    expect((await newer).map((event) => event.content)).toEqual(["wake up"]);
+    const page = await newer;
+    expect(page.map((event) => event.content)).toEqual(["wake up"]);
     expect(await outbox.poll(0)).toEqual([]);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
+    await expect(delivery).resolves.toEqual({
+      outcome: "delivered",
+      deliveryStage: "delivered",
+      messageId: page[0]!.id,
+    });
   });
 
   it("delivers two successive turns in order to one live bridge that re-polls", async () => {
     const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
     const firstPoll = outbox.poll(5_000);
     const first = message(outbox, "dm-1");
-    expect((await firstPoll).map((event) => event.content)).toEqual(["dm-1"]);
+    const firstPage = await firstPoll;
+    expect(firstPage.map((event) => event.content)).toEqual(["dm-1"]);
     const secondPoll = outbox.poll(5_000);
     const second = message(outbox, "dm-2");
-    expect((await secondPoll).map((event) => event.content)).toEqual(["dm-2"]);
+    const secondPage = await secondPoll;
+    expect(secondPage.map((event) => event.content)).toEqual(["dm-2"]);
     expect(await outbox.poll(0)).toEqual([]);
-    await expect(first).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
-    await expect(second).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
+    await expect(first).resolves.toEqual({
+      outcome: "delivered",
+      deliveryStage: "delivered",
+      messageId: firstPage[0]!.id,
+    });
+    await expect(second).resolves.toEqual({
+      outcome: "delivered",
+      deliveryStage: "delivered",
+      messageId: secondPage[0]!.id,
+    });
+    expect(firstPage[0]!.id).not.toBe(secondPage[0]!.id);
   });
 
   it("a wait=0 empty poll does not bind", async () => {

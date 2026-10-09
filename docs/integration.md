@@ -89,6 +89,24 @@ the same checks. Select the last known good batch; the tool does not decide
 whether a production failure invalidates a previously passed tree. History
 remains intact; no force push is used.
 
+## Native delivery contract checks
+
+For changes to native seat delivery, mailbox receipts or their bridge, run the
+explicit consumer gate alongside the covering checks:
+
+```sh
+clankie heavy -- pnpm test:seat-delivery
+```
+
+It runs the whole captain native-chat, SeatOutbox, inbound-recovery, Claude
+reconciliation and linked worker-bridge files with no bail. This includes
+existing consumers of changed return shapes and bridge files launched as
+subprocesses, which a static related-test graph can miss. Select tests from
+both the changed producer and its callers; a few new transport tests do not
+prove old consumers still satisfy the contract. Keep the results and inspected
+failures in the issue evidence. This is a focused manual gate, not a full suite
+or an added per-push CI run; evals stay separate.
+
 ## Deploy holds
 
 ```bash
