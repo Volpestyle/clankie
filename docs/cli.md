@@ -1792,6 +1792,12 @@ in `ndjson`, ending with snapshot cursor and model count metadata. Subscribe
 waits on committed changes, for at most 20 seconds. A keyed transaction is
 atomic across 1–50 operations; receipt lookup uses `work owner get_write_receipt`.
 
+Full bootstrap `projects: ["*"]` returns every tracker project UUID, `unprojected`
+and `workspace` in metadata `syncGroups`. Every subscription includes `workspace`
+for project discovery and project-level metadata. On a new project delta, partially
+bootstrap that UUID and add its group, preserving other cached groups. Group
+selection uses tracker UUIDs only, never project names or polling.
+
 Devices use op `tracker_sync` on `POST /operator/v1/dispatch`. The relay emits
 bootstrap directly as NDJSON; `POST /operator/v1/tail` with a subscribe command
 streams `kind:tracker_sync` pages. Chat grants authorize reads; terminalControl

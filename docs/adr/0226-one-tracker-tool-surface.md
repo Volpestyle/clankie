@@ -464,6 +464,22 @@ remove a departing object and populate an arriving one. Ordinary updates carry
 changed fields and `removedFields`; inserts are complete. Group filtering keeps
 every commit, even with empty deltas, preserving the global cursor.
 
+**Workspace discovery (VUH-1964).** The reserved `workspace` group carries
+project create, rename and archive records and project-level milestone, cycle
+and release metadata. Every client always subscribes to it; the server includes
+it in subscriptions even when omitted. Project and cycle records also keep their
+project UUID groups; release records keep their derived membership groups.
+Milestones join this group when milestone records are supported.
+A full bootstrap with `projects: ["*"]` expands to every tracker project UUID
+(including archived projects), plus `unprojected` and `workspace`. The metadata
+`syncGroups` contains the exact expanded IDs. Partial bootstrap retains exactly
+the named groups. On a new project delta, the client partially bootstraps that
+UUID, preserves other groups, and adds the UUID to its subscription; it reconciles
+the snapshot cursor with buffered deltas before resuming. Settings-to-tracker
+bindings use explicit UUIDs only; unmatched projects stay unbound. Sync group
+lookup accepts UUIDs and reserved groups, never names. Discovery uses deltas,
+never polling.
+
 **Bootstrap and hydration.** Full bootstrap replaces the selected project's
 local pool; partial bootstrap replaces only named groups. Both snapshot under
 the journal lock and return JSON lines, one model per line, ending in metadata:

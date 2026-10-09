@@ -332,3 +332,127 @@ it("cannot combine doing the work and independently checking its bundle in one t
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("expands wildcard groups and discovers a new project through workspace before bootstrapping its UUID", async () => {
+  const f = await syncFixture();
+  try {
+    const first = (await f.tracker.call("save_project", { name: "First", addTeams: ["LOCAL"] })) as {
+      id: string;
+    };
+    const canceled = (await f.tracker.call("save_project", {
+      name: "Canceled project",
+      addTeams: ["LOCAL"],
+    })) as { id: string };
+    await f.tracker.call("save_project", { id: canceled.id, state: "Canceled" });
+    await f.tracker.call("save_issue", { title: "Unprojected", team: "LOCAL" });
+    const client = await f.pair("Discovery");
+    const parse = (ndjson: string) =>
+      ndjson
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    const full = parse(
+      (
+        await f.sync(client.deviceToken, {
+          action: "bootstrap",
+          type: "full",
+          projects: ["*"],
+          lazy: false,
+        })
+      ).ndjson,
+    );
+    const meta = full.pop();
+    expect(meta.syncGroups).toEqual([first.id, canceled.id, "unprojected", "workspace"]);
+    expect(meta.modelCount).toBe(full.length);
+    expect(full.filter((model) => model.modelName === "project").map((model) => model.modelId)).toEqual([
+      first.id,
+      canceled.id,
+    ]);
+    expect(full.some((model) => model.data.title === "Unprojected")).toBe(true);
+    const created = (await f.tracker.call("save_project", { name: "New", addTeams: ["LOCAL"] })) as {
+      id: string;
+    };
+    await f.tracker.call("save_issue", {
+      title: "New project item",
+      team: "LOCAL",
+      project: created.id,
+      cycle: "current",
+    });
+    const subscription = {
+      action: "subscribe" as const,
+      projects: ["workspace"],
+      storeId: meta.storeId,
+      lastSyncId: meta.lastSyncId,
+      waitMs: 0,
+      limit: 100,
+    };
+    const discovered = await f.sync(client.deviceToken, subscription);
+    const deltas = discovered.commits.flatMap((commit: any) => commit.deltas);
+    expect(deltas).toContainEqual(
+      expect.objectContaining({
+        modelName: "project",
+        modelId: created.id,
+        action: "insert",
+        projectIds: [created.id, "workspace"],
+        data: expect.objectContaining({ name: "New" }),
+      }),
+    );
+    expect(deltas.some((delta: any) => delta.modelName === "issue")).toBe(false);
+    expect(deltas).toContainEqual(
+      expect.objectContaining({
+        modelName: "cycle",
+        projectIds: [created.id, "workspace"],
+      }),
+    );
+    // Even a client naming only its old project remains subscribed to discovery.
+    expect((await f.sync(client.deviceToken, { ...subscription, projects: [first.id] })).commits).toEqual(
+      discovered.commits,
+    );
+    const partial = parse(
+      (
+        await f.sync(client.deviceToken, {
+          action: "bootstrap",
+          type: "partial",
+          projects: [created.id],
+          lazy: false,
+        })
+      ).ndjson,
+    );
+    const partialMeta = partial.pop();
+    expect(partialMeta.syncGroups).toEqual([created.id]);
+    expect(partial.filter((model) => model.modelName === "project").map((model) => model.modelId)).toEqual([
+      created.id,
+    ]);
+    expect(partial.filter((model) => model.modelName === "issue").map((model) => model.data.title)).toEqual([
+      "New project item",
+    ]);
+    const newIssue = partial.find((model) => model.modelName === "issue");
+    await f.tracker.call("save_issue", { id: newIssue.modelId, title: "Subscribed new project" });
+    const expanded = await f.sync(client.deviceToken, {
+      ...subscription,
+      projects: [first.id, created.id, "workspace"],
+      lastSyncId: partialMeta.lastSyncId,
+    });
+    expect(expanded.commits.flatMap((commit: any) => commit.deltas)).toContainEqual(
+      expect.objectContaining({
+        modelName: "issue",
+        modelId: newIssue.modelId,
+        data: expect.objectContaining({ title: "Subscribed new project" }),
+      }),
+    );
+    await f.tracker.call("save_project", { id: created.id, name: "Renamed", state: "Canceled" });
+    const renamed = await f.sync(client.deviceToken, { ...subscription, lastSyncId: partialMeta.lastSyncId });
+    expect(renamed.commits.flatMap((commit: any) => commit.deltas)).toContainEqual(
+      expect.objectContaining({
+        modelName: "project",
+        modelId: created.id,
+        data: expect.objectContaining({ name: "Renamed", statusId: expect.any(String) }),
+      }),
+    );
+    await expect(
+      f.tracker.sync({ action: "bootstrap", type: "partial", projects: ["Renamed"], lazy: false }),
+    ).rejects.toThrow("Sync project UUID not found");
+  } finally {
+    await f.close();
+  }
+}, 30_000);

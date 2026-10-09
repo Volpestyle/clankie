@@ -215,3 +215,14 @@ recipient from its name, or strip it after refusal. Missing Take Control, tracke
 scope, native recipient or original thread refuses before the owner write. The
 assignment and original note retain separate receipts; uncertainty is checked,
 never replayed or reversed.
+
+## Built-in tracker sync discovery
+
+`clankie work sync --json COMMAND` uses the authenticated tracker sync API.
+Full bootstrap `projects: ["*"]` expands all tracker project UUIDs plus
+`unprojected` and `workspace`; metadata `syncGroups` lists the exact IDs.
+Always subscribe to `workspace` for project create/rename/archive and project-level
+metadata. Discover a new project from its delta, partially bootstrap exactly its
+UUID, preserve other cached groups and add that UUID to the subscription.
+Use explicit settings-to-tracker UUID bindings; unmatched projects stay unbound.
+Never infer bindings from names or poll for discovery.

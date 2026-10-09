@@ -2607,7 +2607,7 @@ function syncModels(store: Store): TrackerSyncModel[] {
     })),
     (data) => [(data.projectId as string) ?? "unprojected"],
   );
-  add("project", store.projects, (data) => [data.id as string]);
+  add("project", store.projects, (data) => [data.id as string, "workspace"]);
   add("comment", store.comments, (data) =>
     data.projectId
       ? [data.projectId as string]
@@ -2615,7 +2615,7 @@ function syncModels(store: Store): TrackerSyncModel[] {
         ? [store.statusUpdates.find((update) => update.id === data.statusUpdateId)!.projectId]
         : projectOfIssue(data.issueId as string),
   );
-  add("cycle", store.cycles ?? [], (data) => [data.projectId as string]);
+  add("cycle", store.cycles ?? [], (data) => [data.projectId as string, "workspace"]);
   add("status_update", store.statusUpdates, (data) => [data.projectId as string]);
   for (const [modelName, entries] of [
     ["run", store.runs ?? []],
@@ -2632,7 +2632,7 @@ function syncModels(store: Store): TrackerSyncModel[] {
   );
   add("release", store.releases ?? [], (data) => {
     const groups = (data.items as Release["items"]).flatMap((item) => projectOfIssue(item.issueId));
-    return [...new Set(groups.length ? groups : ["unprojected"])];
+    return [...new Set([...(groups.length ? groups : ["unprojected"]), "workspace"])];
   });
   add("label", store.labels, () => []);
   add("issue_status", store.issueStatuses, () => []);
@@ -2949,9 +2949,23 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             if (initialized) await persist(path, store, assertHeld);
             const storeId = store.team.id;
             const lastSyncId = store.syncId ?? 0;
-            const groupIds = command.projects.map((id) =>
-              id === "unprojected" ? id : findProject(store, id).id,
-            );
+            const wildcard =
+              command.action === "bootstrap" && command.type === "full" && command.projects.includes("*");
+            const requested = wildcard
+              ? [...store.projects.map((project) => project.id), "unprojected", "workspace"]
+              : command.projects;
+            const groupIds = [
+              ...new Set(
+                requested.map((id) => {
+                  if (id === "unprojected" || id === "workspace") return id;
+                  if (!store.projects.some((project) => project.id === id))
+                    throw new Error(`Sync project UUID not found: ${id}`);
+                  return id;
+                }),
+              ),
+            ];
+            // Discovery remains live even when clients only name their current project groups.
+            if (command.action === "subscribe" && !groupIds.includes("workspace")) groupIds.push("workspace");
             if (command.action === "bootstrap" || command.action === "batch") {
               let models = syncModels(store).filter((model) => inSyncGroups(model.projectIds, groupIds));
               if (command.action === "batch") {
@@ -2987,11 +3001,26 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               .slice(0, command.limit)
               .map(({ prevHash: _prev, hash: _hash, ...commit }) => ({
                 ...commit,
-                deltas: commit.deltas.filter(
-                  (delta) =>
-                    inSyncGroups(delta.projectIds, groupIds) ||
-                    (delta.previousProjectIds.length > 0 && inSyncGroups(delta.previousProjectIds, groupIds)),
-                ),
+                // Older retained commits predate workspace routing; project metadata is
+                // projected into the new group without rewriting the hash-linked journal.
+                deltas: commit.deltas
+                  .map((delta) =>
+                    ["project", "milestone", "cycle", "release"].includes(delta.modelName)
+                      ? {
+                          ...delta,
+                          projectIds: [...new Set([...delta.projectIds, "workspace"])],
+                          previousProjectIds: delta.previousProjectIds.length
+                            ? [...new Set([...delta.previousProjectIds, "workspace"])]
+                            : [],
+                        }
+                      : delta,
+                  )
+                  .filter(
+                    (delta) =>
+                      inSyncGroups(delta.projectIds, groupIds) ||
+                      (delta.previousProjectIds.length > 0 &&
+                        inSyncGroups(delta.previousProjectIds, groupIds)),
+                  ),
               }));
             // Register under the same lock as the replay snapshot, closing the bootstrap/live race.
             listeners.add(listener);
