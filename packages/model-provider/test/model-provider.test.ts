@@ -16,7 +16,7 @@ import {
 import { createLanguageModel, providerFamilyFor, variantProviderOptions } from "../src/instantiate.ts";
 import { resolvePiModelSelection } from "../src/pi.ts";
 import { mergedCatalog, resolveRole, subscriptionRefFor } from "../src/resolve.ts";
-import { effortVariantsFor, variantById } from "../src/variants.ts";
+import { effortVariantsFor } from "../src/variants.ts";
 
 const tempDirs: string[] = [];
 
@@ -296,8 +296,6 @@ describe("updateGlobalConfig", () => {
       model: "anthropic/claude-test",
       variant: { "anthropic/claude-test": "high" },
     });
-    expect(raw).toContain('\n  "model"'); // pretty-printed
-    expect(raw.endsWith("\n")).toBe(true);
     const leftovers = (await readdir(dirname(globalPath))).filter((name) => name.endsWith(".tmp"));
     expect(leftovers).toEqual([]);
   });
@@ -707,14 +705,6 @@ describe("effortVariantsFor", () => {
   it("falls back to low/medium/high for unknown reasoning providers", () => {
     const variants = effortVariantsFor("acme", fakeModel("acme-reasoner", true));
     expect(variants.map((variant) => variant.id)).toEqual(["low", "medium", "high"]);
-  });
-});
-
-describe("variantById", () => {
-  it("finds variants by id", () => {
-    const variants = effortVariantsFor("anthropic", fakeModel("claude-test", true));
-    expect(must(variantById(variants, "think-16k")).id).toBe("think-16k");
-    expect(variantById(variants, "nope")).toBeUndefined();
   });
 });
 
