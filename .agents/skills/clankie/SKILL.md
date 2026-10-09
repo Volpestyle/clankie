@@ -46,6 +46,19 @@ large JSON and logs) under `docs/testing/<folder>` and run `clankie evidence pus
 <folder> --issue <KEY>` (or `evidence_push`): commit only the README and
 `evidence.json`, and cite the printed `clankie://evidence` links.
 
+For recent proof across issues, use `clankie evidence list --recent` with
+`--project`, `--repo`, `--issue`, `--actor-kind`, `--actor-name`, `--media-type`,
+`--since`/`--until`, and `--limit`/`--cursor`. Keep filters stable while paging.
+Push accepts `--project`, `--repo`, `--model`, `--outcome passed|failed|partial`;
+record only known metadata. Repo defaults to the Git remote URL. Historical
+records may lack those fields.
+`pnpm testing:view` opens the archive; `/?recent` shows the filtered day feed,
+`/?issue=KEY` shows full-screen issue evidence with arrows/J/K, swipe and Esc.
+`/` focuses feed filters. Missing archive blobs fetch into the verified local
+mirror on demand. Issue gaps come from matching local evidence README sections,
+not a tracker query; missing gaps stay labelled. Feed image previews are capped
+at 64 KiB, so large captures download only when opened.
+
 ## Find the usable route
 
 Start with the route your session actually exposes. Native `worker` MCP tools (`clankie` on older installs)

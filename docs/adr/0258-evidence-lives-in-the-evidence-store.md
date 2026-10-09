@@ -66,7 +66,12 @@ is found from git.
   and the pattern for VUH-1898.
 - **Fetch** resolves an object to a signed URL that expires within 15 minutes:
   presigned S3/R2 URLs, or service-signed routes on local disk.
-- **List** returns records by issue key or by commit.
+- **List** returns records by issue key or by commit. The recent projection
+  (VUH-1933) reads the same records newest first with a `(createdAt,id)` cursor,
+  project/repo, issue, actor, media and inclusive time filters. Optional
+  project/repo/model/outcome metadata lives in the existing record, not another
+  store. Historical records retain unknown fields. Bearer-authenticated raster
+  previews cap bytes at 64 KiB; larger images use placeholders in the feed.
 
 Callers authenticate with Clankie's own identities, the operator, worker and
 seat credentials the service already issues. The store has no separate accounts,

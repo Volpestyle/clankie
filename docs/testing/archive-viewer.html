@@ -1458,7 +1458,12 @@ Select an evidence file to inspect its exact archived text.</textarea>
       elements["source-prev"].addEventListener("click", () => moveSourceMatch(-1));
       elements["source-next"].addEventListener("click", () => moveSourceMatch(1));
 
-      initialize();
+      if (
+        !new URLSearchParams(location.search).has("recent") &&
+        !new URLSearchParams(location.search).has("issue")
+      )
+        initialize();
     </script>
+    <script type="module" src="/evidence-viewer.js"></script>
   </body>
 </html>

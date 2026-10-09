@@ -2,12 +2,14 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { createReadStream, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import path, { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const testingRoot = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(testingRoot, "../..");
+const mirrorRoot = path.join(repoRoot, ".local/evidence");
 const viewerPath = path.join(testingRoot, "archive-viewer.html");
 const imageExtensions = new Set([".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"]);
 const videoExtensions = new Set([".m4v", ".mov", ".mp4", ".webm"]);
@@ -95,6 +97,22 @@ export function buildArchiveIndex(archiveDirectory) {
       };
     })
     .sort((left, right) => left.path.localeCompare(right.path));
+  for (const manifestFile of archiveFiles(root).filter((file) => path.basename(file) === "evidence.json")) {
+    const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+    for (const object of manifest.objects ?? []) {
+      const target = resolve(dirname(manifestFile), object.path);
+      if (!within(root, target) || files.some((file) => file.path === relative(root, target))) continue;
+      const extension = extname(target).toLowerCase();
+      files.push({
+        path: relative(root, target).split(path.sep).join("/"),
+        bytes: object.size,
+        sha256: object.sha256,
+        mime: mimeTypes[extension] ?? "application/octet-stream",
+        kind: kindFor(extension),
+        stored: true,
+      });
+    }
+  }
   const readme = files.find((file) => file.path === "README.md");
   const heading = readme
     ? readFileSync(path.join(root, readme.path), "utf8").match(/^#\s+(.+)$/mu)?.[1]
@@ -122,8 +140,11 @@ function requestedArchiveFile(root, requestUrl) {
   const candidate = resolve(root, pathname.slice("/files/".length));
   if (!within(root, candidate)) return null;
   try {
-    const canonical = realpathSync(candidate);
-    return within(root, canonical) && statSync(canonical).isFile() ? canonical : null;
+    const mirrored = resolve(mirrorRoot, relative(repoRoot, candidate));
+    const canonical = realpathSync(existsSync(candidate) ? candidate : mirrored);
+    return (within(root, canonical) || within(mirrorRoot, canonical)) && statSync(canonical).isFile()
+      ? canonical
+      : null;
   } catch {
     return null;
   }
@@ -149,13 +170,120 @@ function sendFile(response, file, method, contentType, headers = {}) {
 export function createArchiveServer(archiveDirectory) {
   const { root, index } = buildArchiveIndex(archiveDirectory);
   const indexBytes = Buffer.from(`${JSON.stringify(index)}\n`);
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
+    // Loopback-only viewer: reject cross-origin requests before broker-backed reads.
+    const expectedHost = `127.0.0.1:${server.address()?.port}`;
+    if (
+      request.headers.host !== expectedHost ||
+      (request.headers.origin && request.headers.origin !== `http://${expectedHost}`)
+    ) {
+      response.writeHead(403);
+      response.end("Forbidden");
+      return;
+    }
     if (request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" });
       response.end("Method not allowed\n");
       return;
     }
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (pathname.startsWith("/__evidence/")) {
+      try {
+        const { resolveOperatorCredential } =
+          await import("../../packages/credential-broker/src/operator-credential.ts");
+        const credential = await resolveOperatorCredential({ env: process.env });
+        if (!credential) throw new Error("Evidence needs the operator credential. Run clankie doctor.");
+        const host =
+          process.env.CLANKIE_CONTROL_PLANE_URL ?? process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310";
+        const requested = new URL(request.url, "http://localhost");
+        const suffix = pathname.slice("/__evidence/".length);
+        if (suffix === "gaps") {
+          const issue = requested.searchParams.get("issue");
+          if (!issue) throw new Error("Issue required");
+          const result = await fetch(
+            new URL(`/v1/evidence/records?issue=${encodeURIComponent(issue)}`, host),
+            { headers: { authorization: `Bearer ${credential.token}` }, signal: AbortSignal.timeout(30000) },
+          );
+          if (!result.ok) throw new Error(`Gaps: HTTP ${result.status}`);
+          const { records } = await result.json();
+          const gaps = [],
+            seen = new Set();
+          for (const record of records) {
+            let folder = dirname(resolve(repoRoot, record.fileName));
+            if (!within(testingRoot, folder)) continue;
+            while (within(testingRoot, folder) && folder !== testingRoot) {
+              const readme = path.join(folder, "README.md");
+              if (existsSync(readme)) {
+                if (!seen.has(readme)) {
+                  seen.add(readme);
+                  const canonical = realpathSync(readme);
+                  if (!within(testingRoot, canonical)) break;
+                  const text = readFileSync(canonical, "utf8");
+                  const sections = text.split(/(?=^#{1,6}\s)/m);
+                  for (const section of sections)
+                    if (/^#{1,6}\s+.*(?:gaps|limitations|unproven)/i.test(section))
+                      gaps.push({ source: relative(repoRoot, readme), text: section.trim() });
+                }
+                break;
+              }
+              folder = dirname(folder);
+            }
+          }
+          response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          response.end(JSON.stringify({ gaps }));
+          return;
+        }
+        let upstream;
+        if (suffix === "recent" || suffix === "records" || /^preview\/[0-9a-f]{64}$/.test(suffix)) {
+          upstream = await fetch(new URL(`/v1/evidence/${suffix}${requested.search}`, host), {
+            headers: { authorization: `Bearer ${credential.token}` },
+            signal: AbortSignal.timeout(30000),
+          });
+        } else if (/^blob\/[0-9a-f]{64}$/.test(suffix)) {
+          const hash = suffix.slice(5);
+          const signed = await fetch(new URL("/v1/evidence/fetch", host), {
+            method: "POST",
+            headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+            body: JSON.stringify({ sha256: hash }),
+            signal: AbortSignal.timeout(30000),
+          });
+          if (!signed.ok) throw new Error(`Fetch: HTTP ${signed.status}`);
+          const link = await signed.json();
+          upstream = await fetch(new URL(link.url, host), { signal: AbortSignal.timeout(30000) });
+        } else {
+          response.writeHead(404);
+          response.end();
+          return;
+        }
+        response.writeHead(upstream.status, {
+          "Content-Type": suffix.startsWith("blob/") ? "application/octet-stream" : "application/json",
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Cross-Origin-Resource-Policy": "same-origin",
+        });
+        if (request.method === "HEAD") {
+          await upstream.body?.cancel();
+          response.end();
+        } else {
+          const { Readable } = await import("node:stream");
+          if (upstream.body) Readable.fromWeb(upstream.body).pipe(response);
+          else response.end();
+        }
+      } catch (error) {
+        response.writeHead(503, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+    if (pathname === "/evidence-viewer.js") {
+      sendFile(
+        response,
+        path.join(testingRoot, "evidence-viewer.js"),
+        request.method,
+        "text/javascript; charset=utf-8",
+      );
+      return;
+    }
     if (pathname === "/" || pathname === "/archive-viewer.html") {
       sendFile(response, viewerPath, request.method, "text/html; charset=utf-8");
       return;
@@ -173,6 +301,21 @@ export function createArchiveServer(archiveDirectory) {
     }
     const file = requestedArchiveFile(root, request.url ?? "/");
     if (file === null) {
+      const relativePath = decodeURIComponent(pathname.slice("/files/".length));
+      const stored = index.files.find((file) => file.path === relativePath && file.stored);
+      if (stored) {
+        const { runEvidenceCommand } = await import("../../apps/tui/src/command/evidence.ts");
+        const result = await runEvidenceCommand(["fetch", root], {}).catch(() => ({ ok: false }));
+        if (result.ok) {
+          const found = requestedArchiveFile(root, request.url);
+          if (found) {
+            sendFile(response, found, request.method, stored.mime, {
+              "Content-Security-Policy": "default-src 'none'; sandbox",
+            });
+            return;
+          }
+        }
+      }
       response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
       response.end("Not found\n");
       return;

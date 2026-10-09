@@ -9,6 +9,7 @@
     ".": {
       "entry": [
         "scripts/evals/run.mjs",
+        "docs/testing/evidence-viewer.js",
         "scripts/profile-clankie.mjs",
         "scripts/proof-linux-pi-process.mjs",
         ".agents/skills/shared-checkout/scripts/land.mjs",

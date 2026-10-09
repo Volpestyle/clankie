@@ -1887,6 +1887,15 @@ prints one JSON document; push and fetch also print a plain summary on stderr.
 - `clankie evidence list --issue KEY | --commit SHA` returns the records
   (file name, sha256, size, content type, issue, commit, actor, caption,
   created-at, link).
+- `clankie evidence list --recent` returns newest-first records across issues,
+  with `nextCursor` when another page exists. Filters: `--project`, `--repo`,
+  `--issue`, `--actor-kind operator|worker|seat`, `--actor-name` (name, or ID
+  when unnamed), `--media-type` (image/video/text or an exact MIME type),
+  `--since` and `--until` (inclusive ISO timestamps). Use `--limit 1..100`
+  (default 40) and `--cursor` with the same filters for another page.
+  Push accepts `--project`, `--repo`, `--model`, and
+  `--outcome passed|failed|partial`; repo defaults to the Git remote URL.
+  Older records retain unknown metadata; project filters cannot infer it.
 - `clankie evidence receipt RECEIPT_ID` reads an upload receipt: `applied`,
   `pending` (with a fresh signed upload URL) or `refused` (`sha256_mismatch` or
   `size_mismatch`). It exits 1 for an unknown receipt.
@@ -1894,7 +1903,8 @@ prints one JSON document; push and fetch also print a plain summary on stderr.
 The manifest is `{"version":1,"objects":[{path,size,sha256,url}]}`, sorted by
 `path` (relative to the manifest, `/` separators), so a change is a one-object
 diff. Uploads are idempotent. Push derives each receipt ID from the file's
-repository path, its sha256, the HEAD commit, the issue and the caption. A
+repository path, its sha256, the HEAD commit, issue and caption, plus the
+repo/project/model/outcome metadata. A
 retried push therefore asks for the same receipt, and a lost answer is
 reconciled by looking that receipt up, never by a blind resend.
 
@@ -1902,13 +1912,32 @@ The service side lives in `apps/clankie` and uses the operator bearer. Its
 routes are `POST /v1/evidence/uploads`, `GET /v1/evidence/receipts/ID`,
 `POST /v1/evidence/fetch` (`{sha256}` to a signed URL valid for at most 15
 minutes), `GET /v1/evidence/records?issue=KEY|commit=SHA` and
-`GET /v1/evidence/status`. Blob bytes move only through signed, expiring
+`GET /v1/evidence/status`. `GET /v1/evidence/recent` accepts the same filters
+as query fields (`actorKind`, `actorName`, `mediaType`, `since`, `until`,
+`cursor`, `limit`). `GET /v1/evidence/preview/SHA256` returns a base64 raster
+preview only for images at most 64 KiB; larger/non-image objects return
+`available:false` with `too_large`/`not_image`. Both keep existing bearer auth.
+Blob bytes move only through signed, expiring
 routes. The store accepts a blob only after its sha256 and size match the
 upload. Self-hosted blobs live under `~/.clankie/evidence/blobs`, keyed by
 sha256, with records in `~/.clankie/evidence/evidence.sqlite`. `clankie doctor`
 reports both as `evidenceStore`. The operator seat's `clankie mcp` exposes the
 same operations as `evidence_push`, `evidence_fetch` and `evidence_list`. Hosted
 Clankie does not offer these commands yet.
+
+`pnpm testing:view [docs/testing/FOLDER] [PORT]` serves the archive locally
+(default port 4173). Open `/?recent` for the day-grouped feed, or
+`/?issue=VUH-1903` for full-screen issue evidence. Feed rows open that issue;
+J/K and arrows move, Enter opens, Esc returns, and / focuses the filters.
+The item viewer supports swipe, images/video, text/terminal captures and a
+collapsible JSON tree. It shows provenance and copies the content link.
+Gaps come from the local README's Gaps/Limitations/Unproven sections for the
+issue's recorded paths; unavailable gaps are explicitly labelled.
+The archive reads pushed files from `.local/evidence`, fetching a missing
+manifest folder on demand with the existing verified fetch command. Store
+reads use the operator broker credential on the local server; it never reaches
+the browser. `CLANKIE_CONTROL_PLANE_URL` (or `CLANKIE_CAPTAIN_URL`) selects the
+store. Larger feed images use a placeholder until opened.
 
 ### `operator-credential rotate [--json]`
 

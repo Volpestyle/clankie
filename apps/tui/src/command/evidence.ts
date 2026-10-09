@@ -20,6 +20,8 @@ import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
+  EVIDENCE_RECENT_PATH,
+  EvidenceRecentResponseSchema,
   EVIDENCE_FETCH_PATH,
   EVIDENCE_RECEIPTS_PATH,
   EVIDENCE_RECORDS_PATH,
@@ -45,6 +47,7 @@ const EVIDENCE_USAGE = [
   "Usage: clankie evidence push [PATH] [--issue KEY] [--caption TEXT]",
   "       clankie evidence fetch [PATH]",
   "       clankie evidence list --issue KEY | --commit SHA",
+  "       clankie evidence list --recent [--project NAME] [--repo REPO] [--issue KEY] [--actor-kind KIND] [--actor-name NAME] [--media-type TYPE] [--since ISO] [--until ISO] [--cursor CURSOR] [--limit N]",
   "       clankie evidence receipt RECEIPT_ID",
 ].join("\n");
 
@@ -177,6 +180,12 @@ class EvidenceClient {
     );
   }
 
+  async recent(values: URLSearchParams) {
+    const result = await this.json(`${EVIDENCE_RECENT_PATH}?${values}`);
+    if (result.status !== 200) throw EvidenceClient.failed("Recent list", result);
+    return EvidenceRecentResponseSchema.parse(result.body);
+  }
+
   async list(filter: { issueKey: string } | { commit: string }): Promise<EvidenceRecord[]> {
     const query =
       "issueKey" in filter ? `issue=${encodeURIComponent(filter.issueKey)}` : `commit=${filter.commit}`;
@@ -286,7 +295,15 @@ interface EvidencePushResult {
 }
 
 async function evidencePush(
-  input: { path?: string; issueKey?: string; caption?: string },
+  input: {
+    path?: string;
+    issueKey?: string;
+    caption?: string;
+    project?: string;
+    repo?: string;
+    model?: string;
+    outcome?: string;
+  },
   options: EvidenceOptions = {},
 ): Promise<EvidencePushResult> {
   const cwd = options.cwd ?? process.cwd();
@@ -319,6 +336,8 @@ async function evidencePush(
   const receipts: { path: string; receiptId: string; state: string }[] = [];
   const pushed: { file: string; path: string; sha256: string }[] = [];
   let uploaded = 0;
+  const repoName =
+    input.repo ?? (await git(repo, ["remote", "get-url", "origin"]).catch(() => repo.split(sep).at(-1)));
   const client = candidates.length === 0 ? undefined : await EvidenceClient.connect(options);
   for (const candidate of candidates) {
     const path = posix(relative(folder, candidate.file));
@@ -329,13 +348,27 @@ async function evidencePush(
         // Deterministic: a retried push asks for the same receipt instead of a second record.
         idempotencyKey: createHash("sha256")
           .update(
-            JSON.stringify([repoPath, sha256, commit ?? null, input.issueKey ?? null, input.caption ?? null]),
+            JSON.stringify([
+              repoPath,
+              sha256,
+              commit ?? null,
+              input.issueKey ?? null,
+              input.caption ?? null,
+              repoName ?? null,
+              input.project ?? null,
+              input.model ?? null,
+              input.outcome ?? null,
+            ]),
           )
           .digest("hex"),
         sha256,
         size: candidate.size,
         contentType: candidate.contentType,
         fileName: repoPath,
+        repo: repoName,
+        ...(input.project === undefined ? {} : { project: input.project }),
+        ...(input.model === undefined ? {} : { model: input.model }),
+        ...(input.outcome === undefined ? {} : { outcome: input.outcome }),
         ...(input.issueKey === undefined ? {} : { issueKey: input.issueKey }),
         ...(commit === undefined ? {} : { commit }),
         ...(input.caption === undefined ? {} : { caption: input.caption }),
@@ -577,12 +610,24 @@ export async function runEvidenceCommand(
   const [verb, ...rest] = args;
   const stderr = options.stderr ?? process.stderr;
   if (verb === "push") {
-    const { positional, values } = flags(rest, ["--issue", "--caption"]);
+    const { positional, values } = flags(rest, [
+      "--issue",
+      "--caption",
+      "--project",
+      "--repo",
+      "--model",
+      "--outcome",
+    ]);
     if (positional.length > 1) throw new Error(EVIDENCE_USAGE);
     const issueKey = values.get("--issue");
     const caption = values.get("--caption");
     const result = await evidencePush(
       {
+        ...Object.fromEntries(
+          ["project", "repo", "model", "outcome"].flatMap((key) =>
+            values.has(`--${key}`) ? [[key, values.get(`--${key}`)]] : [],
+          ),
+        ),
         ...(positional[0] === undefined ? {} : { path: positional[0] }),
         ...(issueKey === undefined ? {} : { issueKey }),
         ...(caption === undefined ? {} : { caption }),
@@ -598,6 +643,32 @@ export async function runEvidenceCommand(
     const result = await evidenceFetch(positional[0] === undefined ? {} : { path: positional[0] }, options);
     stderr.write(`${result.summary}\n`);
     return { ok: result.ok, body: result };
+  }
+  if (verb === "list" && rest.includes("--recent")) {
+    const { positional, values } = flags(
+      rest.filter((flag) => flag !== "--recent"),
+      [
+        "--project",
+        "--repo",
+        "--issue",
+        "--actor-kind",
+        "--actor-name",
+        "--media-type",
+        "--since",
+        "--until",
+        "--cursor",
+        "--limit",
+      ],
+    );
+    if (positional.length || rest.filter((flag) => flag === "--recent").length !== 1)
+      throw new Error(EVIDENCE_USAGE);
+    const query = new URLSearchParams();
+    for (const [key, value] of values)
+      query.set(
+        key.slice(2).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()),
+        value,
+      );
+    return { ok: true, body: await (await EvidenceClient.connect(options)).recent(query) };
   }
   if (verb === "list") {
     const { positional, values } = flags(rest, ["--issue", "--commit"]);

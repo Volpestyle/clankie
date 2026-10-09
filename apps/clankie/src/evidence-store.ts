@@ -7,6 +7,12 @@ import { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
+  EVIDENCE_RECENT_PATH,
+  EVIDENCE_PREVIEW_PATH,
+  EVIDENCE_PREVIEW_MAX_BYTES,
+  EvidenceRecentQuerySchema,
+  type EvidenceRecentQuery,
+  type EvidenceRecentResponse,
   EVIDENCE_FETCH_PATH,
   EVIDENCE_RECEIPTS_PATH,
   EVIDENCE_RECORDS_PATH,
@@ -67,6 +73,7 @@ export interface EvidenceMetadataStore {
     outcome: { record: Omit<EvidenceRecord, "url"> } | { refusal: "sha256_mismatch" | "size_mismatch" },
   ): Promise<EvidenceUploadRow>;
   listRecords(filter: { issueKey: string } | { commit: string }): Promise<Omit<EvidenceRecord, "url">[]>;
+  recent(query: EvidenceRecentQuery): Promise<EvidenceRecentResponse>;
   hasRecordForBlob(sha256: string): Promise<boolean>;
   close(): void;
 }
@@ -170,6 +177,7 @@ interface RecordSqlRow {
   actor: string;
   caption: string | null;
   created_at: string;
+  details: string;
 }
 
 class SqliteEvidenceMetadata implements EvidenceMetadataStore {
@@ -194,6 +202,10 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
       CREATE INDEX IF NOT EXISTS records_commit ON records(commit_sha);
       CREATE INDEX IF NOT EXISTS records_sha ON records(sha256);
     `);
+    const columns = this.db.prepare("PRAGMA table_info(records)").all() as { name: string }[];
+    if (!columns.some((column) => column.name === "details"))
+      this.db.exec("ALTER TABLE records ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    this.db.exec("CREATE INDEX IF NOT EXISTS records_recent ON records(created_at DESC, id DESC)");
   }
 
   private static upload(row: UploadSqlRow): EvidenceUploadRow {
@@ -210,6 +222,7 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
 
   private static record(row: RecordSqlRow): Omit<EvidenceRecord, "url"> {
     return {
+      ...JSON.parse(row.details),
       id: row.id,
       fileName: row.file_name,
       sha256: row.sha256,
@@ -260,7 +273,7 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
           const record = outcome.record;
           this.db
             .prepare(
-              "INSERT INTO records(id, file_name, sha256, size, content_type, issue_key, commit_sha, actor, caption, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO records(id, file_name, sha256, size, content_type, issue_key, commit_sha, actor, caption, created_at, details) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             )
             .run(
               record.id,
@@ -273,6 +286,12 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
               JSON.stringify(record.actor),
               record.caption ?? null,
               record.createdAt,
+              JSON.stringify({
+                project: record.project,
+                repo: record.repo,
+                model: record.model,
+                outcome: record.outcome,
+              }),
             );
           this.db
             .prepare(
@@ -302,6 +321,64 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
           .prepare("SELECT * FROM records WHERE commit_sha=? ORDER BY created_at, id")
           .all(filter.commit)) as unknown as RecordSqlRow[];
     return Promise.resolve(rows.map((row) => SqliteEvidenceMetadata.record(row)));
+  }
+
+  recent(query: EvidenceRecentQuery): Promise<EvidenceRecentResponse> {
+    const clauses: string[] = [];
+    const args: (string | number)[] = [];
+    const fields = {
+      project: "json_extract(details,'$.project')",
+      repo: "json_extract(details,'$.repo')",
+      issue: "issue_key",
+      actorKind: "json_extract(actor,'$.kind')",
+      actorName: "COALESCE(json_extract(actor,'$.name'),json_extract(actor,'$.id'))",
+    };
+    for (const [key, column] of Object.entries(fields)) {
+      const value = query[key as keyof typeof fields];
+      if (value !== undefined) {
+        clauses.push(`${column}=?`);
+        args.push(value);
+      }
+    }
+    if (query.mediaType) {
+      clauses.push("content_type LIKE ? ESCAPE '\\'");
+      args.push(query.mediaType.replace(/[\\%_]/g, "\\$&") + (query.mediaType.includes("/") ? "" : "/%"));
+    }
+    if (query.since) {
+      clauses.push("created_at>=?");
+      args.push(new Date(query.since).toISOString());
+    }
+    if (query.until) {
+      clauses.push("created_at<=?");
+      args.push(new Date(query.until).toISOString());
+    }
+    if (query.cursor) {
+      let cursor: unknown;
+      try {
+        cursor = JSON.parse(Buffer.from(query.cursor, "base64url").toString());
+      } catch {
+        throw new EvidenceRefusal(400, "invalid_cursor");
+      }
+      if (!Array.isArray(cursor) || cursor.length !== 2 || cursor.some((v) => typeof v !== "string"))
+        throw new EvidenceRefusal(400, "invalid_cursor");
+      clauses.push("(created_at<? OR (created_at=? AND id<?))");
+      args.push(cursor[0], cursor[0], cursor[1]);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM records ${clauses.length ? "WHERE " + clauses.join(" AND ") : ""} ORDER BY created_at DESC,id DESC LIMIT ?`,
+      )
+      .all(...args, query.limit + 1) as unknown as RecordSqlRow[];
+    const records = rows
+      .slice(0, query.limit)
+      .map((row) => ({ ...SqliteEvidenceMetadata.record(row), url: evidenceLink(row.sha256) }));
+    const last = records.at(-1);
+    return Promise.resolve({
+      records,
+      ...(rows.length > query.limit && last
+        ? { nextCursor: Buffer.from(JSON.stringify([last.createdAt, last.id])).toString("base64url") }
+        : {}),
+    });
   }
 
   hasRecordForBlob(sha256: string) {
@@ -437,6 +514,10 @@ export class EvidenceStore {
         contentType: request.contentType,
         ...(request.issueKey === undefined ? {} : { issueKey: request.issueKey }),
         ...(request.commit === undefined ? {} : { commit: request.commit }),
+        ...(request.project === undefined ? {} : { project: request.project }),
+        ...(request.repo === undefined ? {} : { repo: request.repo }),
+        ...(request.model === undefined ? {} : { model: request.model }),
+        ...(request.outcome === undefined ? {} : { outcome: request.outcome }),
         actor: row.actor,
         ...(request.caption === undefined ? {} : { caption: request.caption }),
         createdAt: new Date(this.clock()).toISOString(),
@@ -624,6 +705,45 @@ export function createEvidenceRoutes(
           "cache-control": "no-store",
         },
       });
+    }),
+  );
+  app.get(
+    EVIDENCE_RECENT_PATH,
+    guarded(async (context) => {
+      await actor(context.req.raw);
+      const query = EvidenceRecentQuerySchema.safeParse(context.req.query());
+      if (!query.success) throw new EvidenceRefusal(400, "invalid_request");
+      return context.json(await store!.metadata.recent(query.data));
+    }),
+  );
+  app.get(
+    `${EVIDENCE_PREVIEW_PATH}/:sha256`,
+    guarded(async (context) => {
+      await actor(context.req.raw);
+      const hash = EvidenceSha256Schema.safeParse(context.req.param("sha256"));
+      if (!hash.success) throw new EvidenceRefusal(400, "invalid_request");
+      // Resolve only recorded bytes, under the same authentication as fetch.
+      await store!.fetch({ sha256: hash.data });
+      const blob = await store!.blobs.open(hash.data);
+      if (!blob) throw new EvidenceRefusal(404, "unknown_object");
+      if (blob.size > EVIDENCE_PREVIEW_MAX_BYTES) {
+        await blob.body.cancel();
+        return context.json({ sha256: hash.data, available: false, reason: "too_large" });
+      }
+      const bytes = Buffer.from(await new Response(blob.body).arrayBuffer());
+      // Detect safe raster types from their magic, never serve SVG/HTML from the service origin.
+      const contentType = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        ? "image/png"
+        : bytes[0] === 255 && bytes[1] === 216
+          ? "image/jpeg"
+          : bytes.subarray(0, 3).toString() === "GIF"
+            ? "image/gif"
+            : undefined;
+      return context.json(
+        contentType
+          ? { sha256: hash.data, available: true, contentType, data: bytes.toString("base64") }
+          : { sha256: hash.data, available: false, reason: "not_image" },
+      );
     }),
   );
   app.get(
