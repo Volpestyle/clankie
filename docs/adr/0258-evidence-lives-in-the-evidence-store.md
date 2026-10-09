@@ -24,7 +24,11 @@ tracker can only point at repo paths; it cannot hold the media.
 Git keeps narratives, conclusions and pointers. The evidence store keeps the
 bytes and the records that describe them.
 
-**Scope.** Evidence objects are media (png, jpg, gif, mp4, mov, webm) of any
+**Scope.** Only files under a repository's declared evidence roots move:
+`docs/testing/**` in clankie and in clankie-app, plus clankie-app's
+`artifacts/**`. Product assets stay in git wherever they live: branding, app
+icons and images, persona art, App Store screenshots, fixtures. Inside an
+evidence root, evidence objects are media (png, jpg, gif, mp4, mov, webm) of any
 size, and any other non-Markdown file of 16 KiB or more: raw eval/run JSON,
 JSONL journals and logs. Markdown and smaller text stay in git. At 16 KiB, 46
 non-media files in clankie's `docs/testing` move, carrying 89k of their 118k
@@ -69,7 +73,8 @@ from the working directory and need no per-repo configuration, so they work in
 any repo.
 
 - `clankie evidence push [path] [--issue KEY] [--caption TEXT]` hashes the
-  in-scope files under `path` (default `.`), uploads only missing blobs, and
+  in-scope files under `path` (default `.`, but only within an evidence root:
+  outside one it refuses and names the roots), uploads only missing blobs, and
   writes or updates the folder's manifest. It prints what it added and changed,
   with their links. The pushed raw files then move into the `.local/` mirror
   described below. A second run uploads nothing, leaves the manifest
@@ -117,7 +122,7 @@ therefore do not shrink. Two consumers read archive files today:
 gets a trimmed fixture it owns before its folder migrates. Then each repository
 moves its existing evidence in one commit: push the folders, untrack the moved
 files, commit the manifests. Media in evidence roots (`docs/testing/**` here,
-clankie-app's `artifacts/` and `docs/`) gets ignore rules. `.gitignore` cannot
+clankie-app's `artifacts/` and `docs/testing/`) gets ignore rules. `.gitignore` cannot
 match on size, so a cheap repository check in `check:landing` rejects any newly
 added in-scope file under those roots.
 
