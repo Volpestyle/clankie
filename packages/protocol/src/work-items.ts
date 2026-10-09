@@ -325,3 +325,46 @@ export function legacyWorkItem(item: WorkItem): WorkItem {
   const { milestone: _milestone, ...legacy } = item;
   return { ...legacy, status: item.status === "backlog" ? "todo" : item.status };
 }
+
+/** Project presentation facts, read through the active tracker without inferring progress. */
+export const WorkProjectLinkSchema = z
+  .object({
+    title: z.string().min(1).max(500),
+    url: z.string().min(1).max(2048),
+  })
+  .strict();
+export const WorkProjectDetailsSchema = z
+  .object({
+    id: TextSchema(256),
+    name: TextSchema(200),
+    identifier: TextSchema(256).optional(),
+    summary: z.string().max(20_000).optional(),
+    description: z.string().max(100_000).optional(),
+    status: TextSchema(64).optional(),
+    priority: z.number().int().min(0).max(4).optional(),
+    lead: TextSchema(200).optional(),
+    startDate: z.string().max(64).optional(),
+    targetDate: z.string().max(64).optional(),
+    teams: z.array(TextSchema(200)).max(100),
+    resources: z.array(WorkProjectLinkSchema).max(500),
+    updates: z
+      .array(
+        z
+          .object({
+            id: TextSchema(256),
+            health: TextSchema(64).optional(),
+            author: TextSchema(200).optional(),
+            body: z.string().max(100_000),
+            createdAt: z.string().max(64),
+            attachments: z.array(WorkProjectLinkSchema).max(100),
+          })
+          .strict(),
+      )
+      .max(200),
+  })
+  .strict();
+export type WorkProjectDetails = z.infer<typeof WorkProjectDetailsSchema>;
+export const WorkProjectDetailsResultSchema = WorkProjectDetailsSchema.extend({
+  repo: WorkRepoSchema,
+}).strict();
+export type WorkProjectDetailsResult = z.infer<typeof WorkProjectDetailsResultSchema>;

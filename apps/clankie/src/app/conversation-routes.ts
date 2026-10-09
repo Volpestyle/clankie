@@ -362,6 +362,33 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         receipt: await serveWorkWrite(request, authority, parsed.data.op === "work_item_write"),
       });
     }
+    if (parsed.success && parsed.data.op === "evidence_fetch") {
+      // Media stays in the device's authenticated relay. Operator/captain tokens are not device authority.
+      const ownerDevice = () =>
+        owner?.principal.kind === "device" &&
+        ctx.devices.get(owner.principal.id)?.supportGrantId === undefined;
+      if (!ownerDevice() || !owner || !(await owner.authorize()))
+        return context.json({ error: "owner_device_required" }, 403);
+      try {
+        const store = ctx.dependencies.evidenceStore;
+        if (!store) throw new Error("Evidence unavailable");
+        const { sha256, offset, length } = parsed.data;
+        const result = await store.deviceFetch({ sha256, offset, length });
+        if (!ownerDevice() || !(await owner.authorize()))
+          return context.json({ error: "owner_device_required" }, 403);
+        return context.json({
+          op: "evidence_fetch",
+          schemaVersion: 1,
+          result: { outcome: "ready", ...result },
+        });
+      } catch {
+        return context.json({
+          op: "evidence_fetch",
+          schemaVersion: 1,
+          result: { outcome: "unavailable", message: "That evidence can’t be read here." },
+        });
+      }
+    }
     if (parsed.success && parsed.data.op === "tracker_sync") {
       const tracker = ctx.dependencies.builtInTracker;
       const reply = (result: import("@clankie/protocol").TrackerSyncResult) =>
@@ -585,6 +612,30 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           op: "evidence_preview",
           schemaVersion: 1,
           result: { outcome: "unavailable", message: "That evidence can’t be shown here." },
+        });
+      }
+    }
+    if (parsed.data.op === "work_project_details") {
+      try {
+        if (!ctx.dependencies.workItems) throw new Error("Work tracking is not running on this host");
+        const result = await ctx.dependencies.workItems.handle(
+          { action: "project-details", repo: parsed.data.repoId },
+          false,
+        );
+        if (!("updates" in result)) throw new Error("Unexpected project details result");
+        return context.json({
+          op: "work_project_details",
+          schemaVersion: 1,
+          result: { outcome: "ready", ...result },
+        });
+      } catch {
+        return context.json({
+          op: "work_project_details",
+          schemaVersion: 1,
+          result: {
+            outcome: "unavailable",
+            message: "This project’s details can’t be read here. Read the work again.",
+          },
         });
       }
     }

@@ -1,3 +1,4 @@
+import { EvidenceDeviceFetchRequestSchema, type EvidenceDeviceFetch } from "@clankie/protocol/evidence";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createReadStream, createWriteStream, mkdirSync } from "node:fs";
 import { chmod, rename, rm, stat } from "node:fs/promises";
@@ -50,6 +51,11 @@ export interface EvidenceBlobStore {
     size: number,
     body: AsyncIterable<Uint8Array>,
   ): Promise<{ ok: true } | { ok: false; reason: "sha256_mismatch" | "size_mismatch" }>;
+  readRange?(
+    sha256: string,
+    offset: number,
+    length: number,
+  ): Promise<{ size: number; bytes: Uint8Array } | undefined>;
   open(sha256: string): Promise<{ size: number; body: ReadableStream<Uint8Array> } | undefined>;
 }
 
@@ -77,6 +83,7 @@ export interface EvidenceMetadataStore {
   findRecord(id: string): Promise<Omit<EvidenceRecord, "url"> | undefined>;
   listRecords(filter: { issueKey: string } | { commit: string }): Promise<Omit<EvidenceRecord, "url">[]>;
   recent(query: EvidenceRecentQuery): Promise<EvidenceRecentResponse>;
+  findRecordForBlob?(sha256: string): Promise<Omit<EvidenceRecord, "url"> | undefined>;
   hasRecordForBlob(sha256: string): Promise<boolean>;
   close(): void;
 }
@@ -139,6 +146,18 @@ class LocalDiskEvidenceBlobs implements EvidenceBlobStore {
       out.destroy();
       await rm(temporary, { force: true });
     }
+  }
+
+  async readRange(sha256: string, offset: number, length: number) {
+    const info = await stat(this.path(sha256));
+    if (!info.isFile()) return undefined;
+    if (offset > info.size) throw new EvidenceRefusal(400, "invalid_request");
+    const count = Math.min(length, info.size - offset);
+    if (count === 0) return { size: info.size, bytes: new Uint8Array() };
+    const parts: Buffer[] = [];
+    for await (const part of createReadStream(this.path(sha256), { start: offset, end: offset + count - 1 }))
+      parts.push(Buffer.from(part));
+    return { size: info.size, bytes: Buffer.concat(parts) };
   }
 
   async open(sha256: string) {
@@ -325,6 +344,13 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
       throw error;
     }
     return this.findUpload(row.actorKey, row.idempotencyKey).then((stored) => stored!);
+  }
+
+  findRecordForBlob(sha256: string) {
+    const row = this.db
+      .prepare("SELECT * FROM records WHERE sha256=? ORDER BY created_at, id LIMIT 1")
+      .get(sha256) as unknown as RecordSqlRow | undefined;
+    return Promise.resolve(row === undefined ? undefined : SqliteEvidenceMetadata.record(row));
   }
 
   findRecord(id: string) {
@@ -625,6 +651,25 @@ export class EvidenceStore {
     await blob.body.cancel();
     const link = this.signed("GET", EvidenceStore.blobPath(sha256));
     return { sha256, size: blob.size, url: link.url, expiresAt: link.expiresAt };
+  }
+
+  /** Recorded bytes in bounded ranges, returned only inside an authenticated device response. */
+  async deviceFetch(input: unknown): Promise<EvidenceDeviceFetch> {
+    const parsed = EvidenceDeviceFetchRequestSchema.safeParse(input);
+    if (!parsed.success) throw new EvidenceRefusal(400, "invalid_request");
+    const { sha256, offset, length } = parsed.data;
+    const record = await this.metadata.findRecordForBlob?.(sha256);
+    if (!record) throw new EvidenceRefusal(404, "unknown_object");
+    const range = await this.blobs.readRange?.(sha256, offset, length);
+    if (!range || range.bytes.byteLength > length || range.size !== record.size)
+      throw new EvidenceRefusal(404, "unknown_object");
+    return {
+      sha256,
+      offset,
+      size: range.size,
+      contentType: record.contentType,
+      data: Buffer.from(range.bytes).toString("base64"),
+    };
   }
 
   /**

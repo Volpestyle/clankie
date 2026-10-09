@@ -125,3 +125,5 @@ project membership before/after a move. Existing stores bootstrap at cursor zero
 See the [ADR 0226 sync amendment](../../docs/adr/0226-one-tracker-tool-surface.md#amendment-built-in-tracker-sync-journal-2026-10-09-vuh-1962)
 for model fields, groups, hydration ordering and cursor recovery. This changes
 neither connected Linear nor repository adapters.
+
+`clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.

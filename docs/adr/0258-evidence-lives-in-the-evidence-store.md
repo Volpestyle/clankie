@@ -147,6 +147,8 @@ everything in git is the cost above.
 
 ## Consequences
 
+Paired owner devices may read recorded media in bounded byte ranges through their authenticated device/relay path (`evidence_fetch`), with the record’s content type; they never receive service URLs or store-signed links (VUH-1967, also enabling large-image reads for VUH-1954).
+
 - Workers publish evidence by writing the folder's `README.md`, running
   `clankie evidence push <folder> --issue <key>` (or the MCP tool), and
   committing only the README and `evidence.json`. Tracker comments cite the

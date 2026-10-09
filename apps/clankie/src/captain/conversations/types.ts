@@ -39,9 +39,11 @@ export type ConversationServiceRequest = Exclude<
   | { op: "work_repos" }
   | { op: "work_items" }
   | { op: "work_project" }
+  | { op: "work_project_details" }
   | { op: "work_item_activity" }
   | { op: "tracker_sync" }
   | { op: "evidence_records" }
+  | { op: "evidence_fetch" }
   | { op: "evidence_preview" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
@@ -80,9 +82,11 @@ export type ConversationServiceResult = Exclude<
   | { op: "work_repos" }
   | { op: "work_items" }
   | { op: "work_project" }
+  | { op: "work_project_details" }
   | { op: "work_item_activity" }
   | { op: "tracker_sync" }
   | { op: "evidence_records" }
+  | { op: "evidence_fetch" }
   | { op: "evidence_preview" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }

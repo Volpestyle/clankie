@@ -304,3 +304,5 @@ that same keyed transaction returns its original outcome. New arguments need a
 new key, and `ifUpdatedAt` conflicts need a fresh read. Device live subscriptions
 ride the existing relay tail route. Contract and command shapes live in
 [docs/cli.md](../../../docs/cli.md#work-sync---json-command).
+
+`clankie work project-details --repo REPO` reads the saved tracker project’s summary, description, status, priority, lead, dates, teams, resources and latest 200 authored status updates. Paired devices use the additive `work_project_details` operation. Linear and the built-in tracker share the canonical project/status-update tools. Unsupported or failed reads answer unavailable; an empty feed means a successful read with no updates. The read never infers health, author or delivery from issue state.

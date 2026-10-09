@@ -345,3 +345,63 @@ it("reads an item's comments over the device contract and answers unavailable wh
     await dispatch({ op: "work_item_activity", schemaVersion: 1, repoId: "workspace", itemId: "W-none00" }),
   ).toMatchObject({ result: { outcome: "unavailable" } });
 });
+
+it("reads project details and authored updates through the device contract, with unavailable for an unsupported tracker", async () => {
+  const { service, repo } = await fixture();
+  await service.handle(
+    { action: "init", repo, backend: "linear", linearTeam: "VUH", linearProject: "Clankie" },
+    true,
+  );
+  await service.callTracker(
+    "save_project",
+    {
+      id: "Clankie",
+      summary: "Build beside Clankie",
+      description: "**The plan:** ship the Work screens.",
+      priority: 2,
+    },
+    { repo, local: true },
+  );
+  const authoredUpdate = await service.callTracker(
+    "save_status_update",
+    { type: "project", project: "Clankie", body: "**Working:** Overview and Activity.", health: "onTrack" },
+    { repo, local: true },
+  );
+  if (!authoredUpdate || typeof authoredUpdate !== "object" || !("createdAt" in authoredUpdate))
+    throw new Error("Expected an authored update");
+  const listed = await service.handle({ action: "repos" }, true);
+  if (!("repos" in listed)) throw new Error("Expected repos");
+  const repoId = listed.repos.find((entry) => entry.root === repo)!.id;
+  const { app } = await createClankieApp({
+    captain: createStubCaptain(),
+    workItems: service,
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+    authenticateCaptain: async () => ({ captainId: "operator", steerSourceLane: "api" }),
+  });
+  const read = async (id: string) => {
+    const response = await app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "work_project_details", schemaVersion: 1, repoId: id }),
+    });
+    expect(response.status).toBe(200);
+    return OperatorConversationServiceResultSchema.parse(await response.json());
+  };
+  expect(await read(repoId)).toMatchObject({
+    result: {
+      outcome: "ready",
+      summary: "Build beside Clankie",
+      description: "**The plan:** ship the Work screens.",
+      priority: 2,
+      updates: [
+        {
+          body: "**Working:** Overview and Activity.",
+          health: "onTrack",
+          author: expect.any(String),
+          createdAt: authoredUpdate.createdAt,
+        },
+      ],
+    },
+  });
+  expect(await read("workspace")).toMatchObject({ result: { outcome: "unavailable" } });
+});

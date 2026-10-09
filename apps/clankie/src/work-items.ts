@@ -11,6 +11,7 @@ import {
   WorkEvidenceSchema,
   WorkItemStatusSchema,
   WorkItemPrioritySchema,
+  type WorkProjectDetailsResult,
   type WorkProjectResult,
   type WorkConvention,
   type WorkItem,
@@ -23,6 +24,7 @@ import {
   discoverConvention,
   readConvention,
   resolveTracker,
+  readProjectDetails,
   readProjectWork,
   readReleaseHistory,
   type ReleaseHistory,
@@ -69,6 +71,7 @@ const COMMAND_TIMEOUT_MS = 30_000;
 
 export const WorkRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("repos") }).strict(),
+  z.object({ action: z.literal("project-details"), repo: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal("project"), repo: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal("discover"), repo: z.string().min(1).max(4096) }).strict(),
   WorkInitSettingsSchema.extend({ action: z.literal("init"), repo: z.string().min(1).max(4096) }).strict(),
@@ -167,6 +170,7 @@ export interface WorkItemsServiceOptions {
 }
 
 export type WorkResult =
+  | WorkProjectDetailsResult
   | WorkProjectResult
   | { readonly repos: WorkRepo[] }
   | {
@@ -934,6 +938,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         if (
           request.action !== "list" &&
           request.action !== "show" &&
+          request.action !== "project-details" &&
           request.action !== "project" &&
           request.action !== "activity"
         )
@@ -941,9 +946,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         try {
           if (!projectReader) throw new Error("Project settings unavailable");
           const read = await projectReader.prepare(request.repo);
-          if (request.action === "project") {
+          if (request.action === "project" || request.action === "project-details") {
             const binding = await accountBinding(read.convention.backend);
-            const facts = await readProjectWork(read.path, read.convention, await deps(read.path, false));
+            const facts = await (request.action === "project-details" ? readProjectDetails : readProjectWork)(
+              read.path,
+              read.convention,
+              await deps(read.path, false),
+            );
             await read.validate();
             if ((await accountBinding(read.convention.backend)) !== binding)
               throw new Error("Connected tracker account changed. Read the work again.");
@@ -986,6 +995,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
       const entry = await locate(request.repo, local);
       switch (request.action) {
+        case "project-details":
         case "project": {
           const { convention } = await tracker(entry.path, false, false, local);
           const saved = JSON.stringify(await readConvention(entry.path));
@@ -994,7 +1004,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             (convention.backend === "github" && local && !options.githubToken)
               ? undefined
               : await accountBinding(convention.backend);
-          const facts = await readProjectWork(entry.path, convention, await deps(entry.path, local));
+          const facts = await (request.action === "project-details" ? readProjectDetails : readProjectWork)(
+            entry.path,
+            convention,
+            await deps(entry.path, local),
+          );
           if (
             JSON.stringify(await readConvention(entry.path)) !== saved ||
             (binding !== undefined && (await accountBinding(convention.backend)) !== binding)

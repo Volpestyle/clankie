@@ -873,9 +873,11 @@ export function createOperatorService(
     if (
       request.op === "work_repos" ||
       request.op === "work_project" ||
+      request.op === "work_project_details" ||
       request.op === "work_item_activity" ||
       request.op === "tracker_sync" ||
       request.op === "evidence_records" ||
+      request.op === "evidence_fetch" ||
       request.op === "evidence_preview" ||
       request.op === "work_items" ||
       request.op === "work_item_write" ||

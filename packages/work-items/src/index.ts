@@ -19,5 +19,6 @@ export {
   type LinearToolCall,
 } from "./backends/linear.ts";
 
+export { readProjectDetails } from "./project-details.ts";
 export { readProjectWork } from "./project-read.ts";
 export * from "./releases.ts";

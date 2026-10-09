@@ -220,3 +220,24 @@ export function splitEvidenceIssueKeys(text: string | undefined): string[] {
         ),
       ];
 }
+
+/** Bounded bytes over the authenticated device relay, never a reusable service URL. */
+export const EVIDENCE_DEVICE_CHUNK_MAX = 256 * 1024;
+export const EvidenceDeviceFetchRequestSchema = z
+  .object({
+    sha256: EvidenceSha256Schema,
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    length: z.number().int().min(1).max(EVIDENCE_DEVICE_CHUNK_MAX),
+  })
+  .strict();
+export type EvidenceDeviceFetchRequest = z.infer<typeof EvidenceDeviceFetchRequestSchema>;
+export const EvidenceDeviceFetchSchema = z
+  .object({
+    sha256: EvidenceSha256Schema,
+    offset: z.number().int().min(0),
+    size: z.number().int().min(0),
+    contentType: z.string().min(1).max(127),
+    data: z.string().max(Math.ceil(EVIDENCE_DEVICE_CHUNK_MAX / 3) * 4),
+  })
+  .strict();
+export type EvidenceDeviceFetch = z.infer<typeof EvidenceDeviceFetchSchema>;

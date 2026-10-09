@@ -1,5 +1,9 @@
 import { TrackerSyncCommandSchema, TrackerSyncResultSchema } from "./tracker-sync.ts";
 import {
+  EvidenceDeviceFetchSchema,
+  EvidenceDeviceFetchRequestSchema,
+  type EvidenceDeviceFetch,
+  type EvidenceDeviceFetchRequest,
   EvidenceDevicePreviewSchema,
   EvidenceRecordSchema,
   EvidenceSha256Schema,
@@ -66,6 +70,8 @@ import {
   WorkReposResultSchema,
   WorkItemsResultSchema,
   WorkProjectResultSchema,
+  WorkProjectDetailsResultSchema,
+  type WorkProjectDetailsResult,
   WorkItemActivityResultSchema,
   type WorkItemActivityResult,
   type WorkProjectResult,
@@ -424,11 +430,22 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     })
     .strict(),
   z
+    .object({
+      op: z.literal("work_project_details"),
+      schemaVersion: z.literal(1),
+      repoId: WorkRepoSchema.shape.id,
+    })
+    .strict(),
+  z
     .object({ op: z.literal("work_project"), schemaVersion: z.literal(1), repoId: WorkRepoSchema.shape.id })
     .strict(),
   z
     .object({ op: z.literal("tracker_sync"), schemaVersion: z.literal(1), command: TrackerSyncCommandSchema })
     .strict(),
+  EvidenceDeviceFetchRequestSchema.extend({
+    op: z.literal("evidence_fetch"),
+    schemaVersion: z.literal(1),
+  }).strict(),
   /** An issue's recorded evidence and a small preview of one blob, read-only (VUH-1936). */
   z
     .object({
@@ -721,6 +738,14 @@ export type OperatorEvidencePreviewOutcome =
   | (EvidenceDevicePreview & { readonly outcome: "ready" })
   | { readonly outcome: "unavailable"; readonly message: string };
 
+export type OperatorEvidenceFetchOutcome =
+  | (EvidenceDeviceFetch & { readonly outcome: "ready" })
+  | { readonly outcome: "unavailable"; readonly message: string };
+
+export type OperatorWorkProjectDetailsOutcome =
+  | (WorkProjectDetailsResult & { readonly outcome: "ready" })
+  | { readonly outcome: "unavailable"; readonly message: string };
+
 export type OperatorWorkItemActivityOutcome =
   | (WorkItemActivityResult & { readonly outcome: "ready" })
   | { readonly outcome: "unavailable"; readonly message: string };
@@ -991,10 +1016,30 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("evidence_fetch"),
+      schemaVersion: z.literal(1),
+      result: z.discriminatedUnion("outcome", [
+        EvidenceDeviceFetchSchema.extend({ outcome: z.literal("ready") }).strict(),
+        z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
+      ]),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("evidence_preview"),
       schemaVersion: z.literal(1),
       result: z.discriminatedUnion("outcome", [
         EvidenceDevicePreviewSchema.extend({ outcome: z.literal("ready") }).strict(),
+        z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
+      ]),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_project_details"),
+      schemaVersion: z.literal(1),
+      result: z.discriminatedUnion("outcome", [
+        WorkProjectDetailsResultSchema.extend({ outcome: z.literal("ready") }).strict(),
         z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
       ]),
     })
@@ -1393,6 +1438,8 @@ export interface OperatorConversationServiceClient {
   /** One repo's work items, or why they cannot be read yet. */
   workProject?(repoId: string): Promise<OperatorWorkProjectOutcome>;
   /** One item's comments and state changes, or why they cannot be read. */
+  evidenceFetch?(request: EvidenceDeviceFetchRequest): Promise<OperatorEvidenceFetchOutcome>;
+  workProjectDetails?(repoId: string): Promise<OperatorWorkProjectDetailsOutcome>;
   workItemActivity?(repoId: string, itemId: string): Promise<OperatorWorkItemActivityOutcome>;
   /** The evidence store's records for one issue key, and a small preview of one blob. */
   evidenceRecords?(issueKey: string): Promise<OperatorEvidenceRecordsOutcome>;
@@ -1780,6 +1827,18 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "evidence_preview", schemaVersion: 1, sha256 });
       if (result.op !== "evidence_preview")
         throw new Error(`Unexpected ${result.op} result for evidence_preview`);
+      return result.result;
+    },
+    async evidenceFetch(request) {
+      const result = await dispatch({ op: "evidence_fetch", schemaVersion: 1, ...request });
+      if (result.op !== "evidence_fetch")
+        throw new Error(`Unexpected ${result.op} result for evidence_fetch`);
+      return result.result;
+    },
+    async workProjectDetails(repoId) {
+      const result = await dispatch({ op: "work_project_details", schemaVersion: 1, repoId });
+      if (result.op !== "work_project_details")
+        throw new Error(`Unexpected ${result.op} result for work_project_details`);
       return result.result;
     },
     async workItemActivity(repoId, itemId) {
