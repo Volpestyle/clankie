@@ -46,3 +46,11 @@ DerivedData/
 **/.workflow-data/
 __pycache__/
 *.pyc
+# Raw evidence is uploaded to Clankie's evidence store and fetched into .local.
+docs/testing/**/*.png
+docs/testing/**/*.jpg
+docs/testing/**/*.jpeg
+docs/testing/**/*.gif
+docs/testing/**/*.mp4
+docs/testing/**/*.mov
+docs/testing/**/*.webm

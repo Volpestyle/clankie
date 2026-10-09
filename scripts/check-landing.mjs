@@ -82,6 +82,7 @@ run("lint", ["pnpm", "lint"]);
 run("deadcode", ["pnpm", "deadcode"]);
 run("doc-links", ["node", "scripts/check-doc-links.mjs"]);
 run("retired-claims", ["node", "scripts/check-retired-claims.mjs"]);
+run("evidence", ["node", "scripts/testing/evidence-landing-guard.mjs"]);
 if (!exit) {
   const before = performance.now();
   try {
