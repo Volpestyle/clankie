@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createRemoteLeadBridge } from "../src/remote-lead-bridge.ts";
@@ -62,6 +63,7 @@ describe("remote lead HTTP/MCP trust boundary", () => {
           expect(conversationId).toBe(binding.conversationId);
           expect(authority?.owner.conversationId).toBe(binding.conversationId);
           return {
+            lane: _lane,
             tools: ["hire_agent", "owner_settings"].map((name) => ({
               name,
               description: name,
@@ -119,7 +121,7 @@ describe("remote lead HTTP/MCP trust boundary", () => {
         new StreamableHTTPClientTransport(new URL("http://service/v1/fleet/lead/mcp"), {
           requestInit: { headers },
           fetch: async (input, init) => bridge.app.fetch(new Request(input, init)),
-        }),
+        }) as unknown as Transport,
       );
       const catalog = await client.listTools();
       expect(catalog.tools.map((tool) => tool.name)).toContain("hire_agent");
