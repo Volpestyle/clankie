@@ -109,7 +109,7 @@ if (process.argv[2] === "--head") {
   );
   let profile;
   try {
-    profile = await prepareClaude(executable, spec.plugin);
+    profile = await prepareClaude(executable, spec.plugin, { account: spec.account });
   } catch (error) {
     // No delegation exists yet; only the setup helper's bounded diagnostics cross stdout.
     process.stdout.write(JSON.stringify({ stage: "refused", error: error.message }) + "\n");

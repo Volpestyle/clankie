@@ -3909,11 +3909,21 @@ The owner-authenticated API is `POST /v1/remote-leads/{prepare,launch,revoke}`.
 before service cutover, and releases include it. A missing bridge returns a
 503 with that build command rather than an opaque 500.
 
-Launch uses the PC's existing signed-in Claude.ai profile. It honors a selected
-`CLAUDE_CONFIG_DIR`; otherwise it inspects existing `.claude`, `.claude-*` and
-numbered profiles and requires exactly one signed-in profile. It never creates
-a profile or copies credentials. An ambiguous choice requires selecting the
-profile on the PC; a logged-out selection requires James to sign in there.
+Launch uses the PC's existing signed-in Claude.ai profile. Optional `account`
+selects exactly `~/.claude-<label>` on that machine, using the same labels as
+`hire_agent` and `worker_accounts --fleet`. For example, `"account": "work"`
+selects `~/.claude-work`, taking precedence over the SSH environment's
+`CLAUDE_CONFIG_DIR`. Labels start with a lowercase letter and contain only
+lowercase letters, digits, underscores or hyphens, up to 64 characters.
+The selected profile must already exist and pass native Claude.ai sign-in
+verification; missing, logged-out or unverifiable selections refuse without
+falling back. Sign in on the PC with `$env:CLAUDE_CONFIG_DIR = Join-Path $HOME
+'.claude-work'; claude auth login` before launching with that label.
+
+Without `account`, launch honors `CLAUDE_CONFIG_DIR`; otherwise it inspects
+existing `.claude`, `.claude-*` and numbered profiles and requires exactly one
+signed-in profile. It never creates a profile or copies credentials. An
+ambiguous choice requires an explicit account or a profile selected on the PC.
 
 Before allocating a pane, launch installs the content-addressed plugin through
 the native `clankie-remote-leads` marketplace and additively approves its channel
@@ -3927,7 +3937,7 @@ It also disables inherited Clankie worker/operator plugins for this session,
 so their hooks do not bind the lead as a worker or suggest its worker channel.
 
 `launch --json-stdin` reads an object with a fresh UUID `requestId`, `fleet`,
-`workingDirectory`, `title`, and optional `conversationId`. Omit the conversation
+`workingDirectory`, `title`, and optional `account` and `conversationId`. Omit the conversation
 to create a named workspace chat; otherwise select an unoccupied workspace chat
 with that exact directory. The service prepares the plugin and allocates a fresh
 Herdr workspace. The result includes the conversation, pane and `delegationId`.

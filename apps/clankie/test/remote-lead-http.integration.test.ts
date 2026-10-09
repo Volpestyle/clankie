@@ -13,7 +13,7 @@ import { serve } from "@hono/node-server";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -48,6 +48,107 @@ const identity = {
 };
 
 describe("remote lead HTTP/MCP trust boundary", () => {
+  test("selects only the named existing Claude.ai account and refuses unsafe or unverifiable selections before setup", async () => {
+    // Real target setup consumer and filesystem with a fixture native auth CLI.
+    // Does not sign in, request a model, connect to or mutate the PC.
+    const root = await mkdtemp(join(tmpdir(), "remote-lead-accounts-"));
+    const executable = join(root, "claude");
+    const callsPath = join(root, "calls.jsonl");
+    const policyPath = join(root, "managed-settings.json");
+    const plugin = join(root, ".clankie/remote-leads/artifact");
+    const selected = join(root, ".claude-volpestyle");
+    const other = join(root, ".claude-jamescvolpe");
+    await mkdir(plugin, { recursive: true });
+    for (const name of ["volpestyle", "jamescvolpe", "logged-out", "api", "broken", "failed"]) {
+      await mkdir(join(root, `.claude-${name}`));
+      await writeFile(join(root, `.claude-${name}`, ".credentials.json"), `private fixture ${name}`);
+    }
+    await writeFile(
+      policyPath,
+      JSON.stringify({
+        channelsEnabled: true,
+        allowedChannelPlugins: [{ marketplace: "clankie-remote-leads", plugin: "clankie-remote-lead" }],
+      }),
+    );
+    await writeFile(
+      executable,
+      `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2), profile = process.env.CLAUDE_CONFIG_DIR;
+fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({args, profile})+'\\n');
+if(args[0]==='auth') {
+  if(profile.endsWith('-failed')) { console.error('private fixture failure'); process.exit(1); }
+  if(profile.endsWith('-broken')) console.log('private fixture invalid JSON');
+  else console.log(JSON.stringify({ loggedIn: !profile.endsWith('-logged-out'), authMethod: profile.endsWith('-api') ? 'api_key' : 'claude.ai' }));
+} else if(args[1]==='list') console.log(JSON.stringify([{id:${JSON.stringify(leadPlugin)},scope:'user',enabled:false}]));
+else console.log('{}');
+`,
+      { mode: 0o700 },
+    );
+    const options = { home: root, policyPath, env: { ...process.env, CLAUDE_CONFIG_DIR: other } };
+    const beforePolicy = await readFile(policyPath, "utf8");
+    const beforeOther = await readdir(other);
+    const credential = await readFile(join(selected, ".credentials.json"), "utf8");
+    try {
+      expect(await prepareClaude(executable, plugin, { ...options, account: "volpestyle" })).toBe(selected);
+      const calls = (await readFile(callsPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(calls.every((call) => call.profile === selected)).toBe(true);
+      expect(await readFile(join(selected, ".credentials.json"), "utf8")).toBe(credential);
+      expect(await readdir(other)).toEqual(beforeOther);
+      expect(await readFile(policyPath, "utf8")).toBe(beforePolicy);
+      // Omitted account preserves the SSH default and automatic ambiguity refusal.
+      expect(await prepareClaude(executable, plugin, options)).toBe(other);
+      await expect(
+        prepareClaude(executable, plugin, {
+          ...options,
+          env: { ...options.env, CLAUDE_CONFIG_DIR: "" },
+        }),
+      ).rejects.toThrow("Multiple signed-in Claude profiles");
+      const beforeDirectories = await readdir(root);
+      for (const account of ["missing", "logged-out", "api", "broken", "failed"]) {
+        await writeFile(callsPath, "");
+        await expect(prepareClaude(executable, plugin, { ...options, account })).rejects.toThrow(
+          `Claude account '${account}' at ~/.claude-${account}`,
+        );
+        await expect(prepareClaude(executable, plugin, { ...options, account })).rejects.toThrow(
+          "claude auth login",
+        );
+        const refusedCalls = (await readFile(callsPath, "utf8"))
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        expect(
+          refusedCalls.every(
+            (call) => call.args[0] === "auth" && call.profile === join(root, `.claude-${account}`),
+          ),
+        ).toBe(true);
+      }
+      expect(await readdir(root)).toEqual(beforeDirectories);
+      expect(await readFile(policyPath, "utf8")).toBe(beforePolicy);
+      await writeFile(callsPath, "");
+      for (const account of [
+        "../outside",
+        "x/../../outside",
+        "x\\outside",
+        "",
+        "Work",
+        "a".repeat(65),
+        null,
+        1,
+      ])
+        await expect(prepareClaude(executable, plugin, { ...options, account })).rejects.toThrow(
+          "Invalid Claude account label",
+        );
+      expect(await readFile(callsPath, "utf8")).toBe("");
+      expect(await readFile(join(selected, ".credentials.json"), "utf8")).toBe(credential);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   test("launches with an existing signed-in profile and the installed lead channel; the standalone bridge answers a tool call", async () => {
     // Real filesystem, TCP handoff, Node bundle, stdio MCP and HTTP routes.
     // The native Claude executable/auth response and host identity are fixtures;

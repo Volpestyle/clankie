@@ -4,7 +4,11 @@ Connected tools for fleet panes, bridge health in doctor and the roster, worker 
 
 Remote project heads use `clankie conversations lead launch --json-stdin` on an
 approved Windows fleet/workspace. They reuse an existing signed-in Claude.ai
-profile, install the dedicated `clankie-remote-lead@clankie-remote-leads` plugin
+profile; optional `account` selects exactly `~/.claude-<label>` on that machine,
+ahead of the SSH `CLAUDE_CONFIG_DIR`. A missing, logged-out or unverifiable
+selection refuses without fallback, profile creation or credential copying.
+Omitting `account` retains environment selection or exactly one signed-in profile.
+They install the dedicated `clankie-remote-lead@clankie-remote-leads` plugin
 and approve its channel before allocating a pane. Profile ambiguity, missing
 sign-in or administrator policy access returns a setup refusal in the original
 launch journal. Never answer a development warning or substitute the worker

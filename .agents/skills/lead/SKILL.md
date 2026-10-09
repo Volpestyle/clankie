@@ -32,6 +32,12 @@ For a new Windows Claude head on an already-linked fleet, the owner CLI offers
 [the CLI reference](../../../docs/cli.md#conversations-lead-prepare-fleet--launch---json-stdin--revoke-id).
 Remote heads use a seat/chat/machine-bound, revocable delegation and require the
 machine's current `workers` ceiling and approved working directory.
+Launch may name `account` to select exactly the target machine's existing
+`~/.claude-<label>` profile (the labels from `worker_accounts --fleet`). It wins
+over the SSH `CLAUDE_CONFIG_DIR` and refuses unless native Claude.ai sign-in is
+verified; never create a profile, copy credentials or substitute another account.
+The refusal explains how the owner can sign in on the PC. Omit `account` to
+retain environment selection or the exactly-one-signed-in-profile behavior.
 
 Keep the original request ID after uncertain launch; rereading it never launches
 again. `dispatched` is not tool readiness. Prove the native lead toolkit and child

@@ -304,6 +304,7 @@ process.stdin.on('end', () => {
           cwd: input.workingDirectory,
           title: input.title,
           fleet: input.fleet,
+          account: input.account,
           nativeSession,
           plugin: prepared.directory,
         }) + "\n",

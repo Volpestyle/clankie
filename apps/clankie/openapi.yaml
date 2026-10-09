@@ -4197,6 +4197,10 @@ paths:
                     fleet: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" }
                     workingDirectory: { type: string, minLength: 1, maxLength: 4096 }
                     title: { type: string, minLength: 1, maxLength: 100 }
+                    account:
+                      type: string
+                      pattern: "^[a-z][a-z0-9_-]{0,63}$"
+                      description: Select the target machine's existing signed-in Claude.ai profile at ~/.claude-<label>, overriding CLAUDE_CONFIG_DIR. Omit to retain automatic profile selection.
                     conversationId: { type: string, minLength: 1, maxLength: 256 }
                 - type: object
                   additionalProperties: false

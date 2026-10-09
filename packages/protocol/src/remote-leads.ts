@@ -10,6 +10,10 @@ export const RemoteLeadLaunchSchema = z
       .max(4096)
       .refine((value) => !value.includes("\0")),
     title: z.string().trim().min(1).max(100),
+    account: z
+      .string()
+      .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
+      .optional(),
     conversationId: z.string().min(1).max(256).optional(),
   })
   .strict();

@@ -18,6 +18,9 @@ import type { CredentialStore } from "@clankie/credential-broker";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { remoteLeadRoutes } from "../src/app/remote-lead-routes.ts";
+import { createBearerAuthenticator } from "../src/app/http-auth.ts";
+import type { ClankieAppDependencies } from "../src/app/types.ts";
 
 // Real launch, captain/store, settings and framed child pipes. The linked
 // machine/SSH endpoint is a fixture; installed Windows native admission is live proof.
@@ -190,6 +193,7 @@ it("launches an approved Windows workspace through the real conversation store w
             const input=JSON.parse(line);
             if(frame++===0) {
               if(input.cwd!==${JSON.stringify(cwd)}) process.exit(2);
+              if(input.account!=='volpestyle') process.exit(4);
               console.log(JSON.stringify({stage:'allocated',pane:'w1:p1',shell:{pid:123,startTime:'2026-10-09T00:00:00Z'}}));
             } else {
               if(typeof input.token!=='string'||!input.conversationId) process.exit(3);
@@ -207,13 +211,37 @@ it("launches an approved Windows workspace through the real conversation store w
   });
   const issue = vi.spyOn(leads.delegations, "issue");
   const input = {
-    schemaVersion: 1 as const,
     requestId: randomUUID(),
     fleet: "pc",
     workingDirectory: cwd,
     title: "KH2",
+    account: "volpestyle",
   };
+  const routes = remoteLeadRoutes({
+    remoteProjectLeads: leads,
+    captain,
+    authenticateOperator: createBearerAuthenticator("fixture-owner", { operatorId: "owner" }),
+  } as ClankieAppDependencies);
+  const launchRequest = (body: unknown, token = "fixture-owner") =>
+    routes.app.request("/v1/remote-leads/launch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
   try {
+    expect((await launchRequest(input, "wrong-token")).status).toBe(401);
+    for (const account of [
+      "",
+      "../outside",
+      "x/../../outside",
+      "x\\outside",
+      "Work",
+      "a".repeat(65),
+      null,
+      1,
+    ])
+      expect((await launchRequest({ ...input, account })).status).toBe(400);
+    expect(transportCalls).toBe(0);
     await rm(join(root, "apps/tui/bin/remote-lead-mcp.js"));
     await expect(leads.prepare(fleet.id)).rejects.toThrow(
       "clankie heavy -- node scripts/build-remote-lead.mjs",
@@ -223,7 +251,9 @@ it("launches an approved Windows workspace through the real conversation store w
     await expect(leads.launch(input, async () => {})).rejects.toThrow("owner-approved working directory");
     expect(transportCalls).toBe(0);
     approved = true;
-    const launched = await leads.launch(input, async () => {});
+    const response = await launchRequest(input);
+    expect(response.status).toBe(200);
+    const launched = await response.json();
     if (launched.stage !== "dispatched") console.info("Launch acceptance receipt", launched);
     expect(launched).toMatchObject({ stage: "dispatched", pane: "pc/w1:p1" });
     await expect(
@@ -251,6 +281,10 @@ it("launches an approved Windows workspace through the real conversation store w
     ).toBe(true);
     expect(await leads.launch(input, async () => {})).toEqual(launched);
     expect(transportCalls).toBe(2); // Original request reconciliation never allocates again.
+    await expect(leads.launch({ ...input, account: "other" }, async () => {})).rejects.toThrow(
+      "different intent",
+    );
+    expect(transportCalls).toBe(2);
     await expect(captain.laneToolBank("operator", conversationId)).rejects.toThrow("seat-bound delegation");
     const issued = await issue.mock.results[0]!.value;
     const binding = issued.binding;
@@ -451,6 +485,7 @@ it("launches an approved Windows workspace through the real conversation store w
     release();
     await client.close();
     await bridge?.close();
+    await routes.close();
     await mcp.close();
     leads.delegations.close();
     for (const child of children) child.kill();

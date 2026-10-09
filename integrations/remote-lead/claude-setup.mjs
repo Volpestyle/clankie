@@ -19,6 +19,12 @@ const parse = (text, detail) => {
 export async function prepareClaude(executable, plugin, options = {}) {
   const env = options.env ?? process.env;
   const home = options.home ?? homedir();
+  const account = options.account;
+  // Validate again on the target before resolving a path or invoking Claude.
+  if (account !== undefined && (typeof account !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/u.test(account)))
+    throw new Error(
+      "Invalid Claude account label; use 1-64 lowercase letters, digits, underscores or hyphens, starting with a letter",
+    );
   const invoke = async (args, profile, allowAlreadyDisabled = false) => {
     try {
       return (
@@ -49,29 +55,37 @@ export async function prepareClaude(executable, plugin, options = {}) {
       throw new Error(`Native Claude ${args.slice(0, 3).join(" ")} failed; inspect that profile on the PC`);
     }
   };
-  const candidates = env.CLAUDE_CONFIG_DIR
-    ? [env.CLAUDE_CONFIG_DIR]
-    : [
-        join(home, ".claude"),
-        ...(await readdir(home, { withFileTypes: true }))
-          .filter((entry) => entry.isDirectory() && /^\.claude(?:-.*|\d+)$/u.test(entry.name))
-          .map((entry) => join(home, entry.name)),
-      ];
+  const candidates =
+    account !== undefined
+      ? [join(home, `.claude-${account}`)]
+      : env.CLAUDE_CONFIG_DIR
+        ? [env.CLAUDE_CONFIG_DIR]
+        : [
+            join(home, ".claude"),
+            ...(await readdir(home, { withFileTypes: true }))
+              .filter((entry) => entry.isDirectory() && /^\.claude(?:-.*|\d+)$/u.test(entry.name))
+              .map((entry) => join(home, entry.name)),
+          ];
   const signed = new Set();
+  let accountFailure = "does not exist or cannot be accessed";
   for (const profile of candidates) {
     try {
       const existing = await realpath(profile); // Never manufacture a profile or copy credentials.
+      accountFailure = "could not verify native Claude sign-in";
       const status = JSON.parse(await invoke(["auth", "status"], existing));
       if (status.loggedIn === true && status.authMethod === "claude.ai") signed.add(existing);
+      else accountFailure = "is not signed in to Claude.ai";
     } catch {
       /* An absent or logged-out profile is not a launch target. */
     }
   }
   if (signed.size !== 1)
     throw new Error(
-      signed.size
-        ? "Multiple signed-in Claude profiles; select the PC profile with CLAUDE_CONFIG_DIR"
-        : "No existing signed-in Claude.ai profile; James must sign in to the intended PC profile",
+      account !== undefined
+        ? `Claude account '${account}' at ~/.claude-${account} ${accountFailure}; sign in to the intended profile on the PC with $env:CLAUDE_CONFIG_DIR = Join-Path $HOME '.claude-${account}'; claude auth login, then retry. Launch never creates a profile or copies credentials`
+        : signed.size
+          ? "Multiple signed-in Claude profiles; select an account label in the launch request or the PC profile with CLAUDE_CONFIG_DIR"
+          : "No existing signed-in Claude.ai profile; James must sign in to the intended PC profile",
     );
   const [profile] = signed;
 
