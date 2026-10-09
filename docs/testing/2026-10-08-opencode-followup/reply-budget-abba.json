@@ -1,0 +1,270 @@
+[
+  {
+    "run": 1,
+    "arm": "original",
+    "exitCode": 1,
+    "before": {
+      "sampledAtMs": 1791514678881,
+      "loadRatio": 0.6905381944444444,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "after": {
+      "sampledAtMs": 1791514694000,
+      "loadRatio": 0.6397840711805556,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "logSha256": "39fac1306d984af1cff187b9a5c0bdec734ca6cfeccbf11877351ec54a7f9563",
+    "reportSha256": "f601b79dd5fc5822ab3948c6fef951e95ee247ec416846f3240122ee42afc80a",
+    "transport": {
+      "before": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": false
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": false
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "held": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": true
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": true
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "delivery": {
+        "outcome": "undelivered",
+        "deliveryStage": "unavailable",
+        "detail": "No observed worker hook for this native session; no terminal input was sent.",
+        "seatId": "fixture-mac/term_native123"
+      },
+      "counts": {
+        "messages": 2,
+        "layouts": 1
+      }
+    },
+    "assertionStatus": "failed"
+  },
+  {
+    "run": 2,
+    "arm": "default",
+    "exitCode": 0,
+    "before": {
+      "sampledAtMs": 1791514694000,
+      "loadRatio": 0.6397840711805556,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "after": {
+      "sampledAtMs": 1791514709042,
+      "loadRatio": 0.6097819010416666,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "logSha256": "f12b27b74f24f3661da4e665f30ac88e828839df2ea90bd8e65a5cc1381fca78",
+    "reportSha256": "0329408449b337ee3258667a4b925b80a6eea5e263be516684da2606ace3abec",
+    "transport": {
+      "before": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": false
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": false
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "held": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": false
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": false
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "delivery": {
+        "outcome": "delivered",
+        "messageId": "msg_cb49defe9be14e45a52e66990aa91fc9",
+        "state": "queued",
+        "deliveryStage": "consumed",
+        "seatId": "fixture-mac/term_native123",
+        "status": "working"
+      },
+      "counts": {
+        "messages": 3,
+        "layouts": 1
+      }
+    },
+    "assertionStatus": "passed"
+  },
+  {
+    "run": 3,
+    "arm": "default",
+    "exitCode": 0,
+    "before": {
+      "sampledAtMs": 1791514709042,
+      "loadRatio": 0.6097819010416666,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "after": {
+      "sampledAtMs": 1791514729106,
+      "loadRatio": 0.621337890625,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "logSha256": "bd1bab168c8717bfc6a83920d34cffafe3203e9e2da51a0e7824e013fe624cd5",
+    "reportSha256": "761eea4a76c845309d11ccfc51170a6e743780d842ce28a8582b5b0b3271ed4e",
+    "transport": {
+      "before": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": false
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": false
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "held": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": false
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": false
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "delivery": {
+        "outcome": "delivered",
+        "messageId": "msg_a4d31ceaff064adab4507cb9800c70d3",
+        "state": "queued",
+        "deliveryStage": "consumed",
+        "seatId": "fixture-mac/term_native123",
+        "status": "working"
+      },
+      "counts": {
+        "messages": 3,
+        "layouts": 1
+      }
+    },
+    "assertionStatus": "passed"
+  },
+  {
+    "run": 4,
+    "arm": "original",
+    "exitCode": 1,
+    "before": {
+      "sampledAtMs": 1791514729106,
+      "loadRatio": 0.621337890625,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "after": {
+      "sampledAtMs": 1791514744130,
+      "loadRatio": 0.7039116753472222,
+      "availableMemoryMb": 76021.76,
+      "healthy": true
+    },
+    "logSha256": "056da7b777323e90e640256a06bf68700b90a487a1243d9b056beff355d53ea6",
+    "reportSha256": "7b2e160f6982a80a39b19dcc1bb281efd506a1746441b9aff17be77007574b2c",
+    "transport": {
+      "before": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": false
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": false
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "held": [
+        {
+          "id": 0,
+          "kind": "helper",
+          "closed": true
+        },
+        {
+          "id": 1,
+          "kind": "forward",
+          "closed": true
+        },
+        {
+          "id": 2,
+          "kind": "helper",
+          "closed": false
+        }
+      ],
+      "delivery": {
+        "outcome": "undelivered",
+        "deliveryStage": "unavailable",
+        "detail": "No observed worker hook for this native session; no terminal input was sent.",
+        "seatId": "fixture-mac/term_native123"
+      },
+      "counts": {
+        "messages": 2,
+        "layouts": 1
+      }
+    },
+    "assertionStatus": "failed"
+  }
+]

@@ -1,0 +1,103 @@
+{
+  "method": "One compile of the real fixture service with esbuild; original tsx versus same compiled service, sequential ABBA under one heavy permit. Each child gets a private empty TMPDIR; all before/after pressure observations healthy. Node module hook counts and resourceUsage are sampled in its ready IPC message.",
+  "arms": [
+    {
+      "arm": "original",
+      "readyMs": 1209.3509160000003,
+      "readyMetrics": {
+        "uptimeMs": 1173.036,
+        "resolved": 3844,
+        "loaded": 1198,
+        "cpu": 1103156,
+        "memory": 634798080
+      },
+      "before": {
+        "sampledAtMs": 1791515729456,
+        "loadRatio": 0.852294921875,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      },
+      "after": {
+        "sampledAtMs": 1791515729456,
+        "loadRatio": 0.852294921875,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      }
+    },
+    {
+      "arm": "bundle",
+      "readyMs": 229.31937500000004,
+      "readyMetrics": {
+        "uptimeMs": 192.138959,
+        "resolved": 38,
+        "loaded": 37,
+        "cpu": 273742,
+        "memory": 238895104
+      },
+      "before": {
+        "sampledAtMs": 1791515734436,
+        "loadRatio": 0.8196343315972222,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      },
+      "after": {
+        "sampledAtMs": 1791515734436,
+        "loadRatio": 0.8196343315972222,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      }
+    },
+    {
+      "arm": "bundle",
+      "readyMs": 284.55262500000026,
+      "readyMetrics": {
+        "uptimeMs": 244.041541,
+        "resolved": 38,
+        "loaded": 37,
+        "cpu": 331518,
+        "memory": 238780416
+      },
+      "before": {
+        "sampledAtMs": 1791515734436,
+        "loadRatio": 0.8196343315972222,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      },
+      "after": {
+        "sampledAtMs": 1791515734436,
+        "loadRatio": 0.8196343315972222,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      }
+    },
+    {
+      "arm": "original",
+      "readyMs": 1429.3539170000004,
+      "readyMetrics": {
+        "uptimeMs": 1390.975,
+        "resolved": 3844,
+        "loaded": 1198,
+        "cpu": 1272776,
+        "memory": 639696896
+      },
+      "before": {
+        "sampledAtMs": 1791515734436,
+        "loadRatio": 0.8196343315972222,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      },
+      "after": {
+        "sampledAtMs": 1791515739476,
+        "loadRatio": 0.8652072482638888,
+        "availableMemoryMb": 74711.04,
+        "healthy": true
+      }
+    }
+  ],
+  "logSha256": "96939aab86f457fbf6339d21d7c490a48792551d188ec3eadf27e0a870967252",
+  "reportSha256": "be9d4dd66371a51a7193f29b8e4630c4432deaa62cdd90eed961de7855357f5c",
+  "bundle": {
+    "inputs": 1137,
+    "outputBytes": 1720084
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "simulator-red": {
+    "passedTests": 1,
+    "failedTests": 0,
+    "pendingTests": 29,
+    "reportSha256": "b3ec7b1368ce483e42ea2c56e93220c2ff17dfeca0a3f94bd45ca2331902844f",
+    "case": [
+      {
+        "ancestorTitles": [],
+        "fullName": "a held HTTP acquisition retains its rejection until awaited after the connection closes",
+        "status": "passed",
+        "title": "a held HTTP acquisition retains its rejection until awaited after the connection closes",
+        "duration": 1790.332709,
+        "failureMessages": [],
+        "meta": {},
+        "tags": []
+      }
+    ],
+    "unhandledErrors": 1,
+    "vitestJsonSuccess": true,
+    "exitCode": 1
+  },
+  "simulator-green": {
+    "passedTests": 30,
+    "failedTests": 0,
+    "pendingTests": 0,
+    "reportSha256": "3c94ad05d5469c2ffc11d6a572f4d6701292996b7849947d5708bf0fd0de4fda",
+    "case": [
+      {
+        "ancestorTitles": [],
+        "fullName": "a held HTTP acquisition retains its rejection until awaited after the connection closes",
+        "status": "passed",
+        "title": "a held HTTP acquisition retains its rejection until awaited after the connection closes",
+        "duration": 1547.2727500000037,
+        "failureMessages": [],
+        "meta": {},
+        "tags": []
+      }
+    ],
+    "unhandledErrors": 0,
+    "vitestJsonSuccess": true,
+    "exitCode": 0
+  }
+}

@@ -272,7 +272,8 @@ export async function remoteOpenCodeFixture(options: {
     shell: () => shell,
     stream: () => stream,
     spawn: forward as unknown as typeof spawn,
-    timeoutMs: 4000,
+    // Preserve production budgets: a four-second outer RPC deadline would
+    // retire a healthy helper while its ten-second native Herdr reply is pending.
     localRun: async (_file, args) => {
       const port = Number(args.find((arg) => arg.startsWith("-iTCP:"))!.slice(6));
       return (await sample(port)).replaceAll("p" + process.pid + "\n", "p" + sshPid + "\n");

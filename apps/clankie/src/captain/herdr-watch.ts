@@ -2144,17 +2144,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   private async admitProjectLaunch(input: SpawnOperatorSeat, dispatched = false): Promise<void> {
-    await this.requireWorkerAccess?.(input.fleet);
-    const defaultPolicy = this.hireDefaultPolicies.get(input);
-    if (defaultPolicy !== undefined && defaultPolicy !== JSON.stringify((await this.hireDefaults?.()) ?? {}))
-      throw new Error(
-        "Fleet hire defaults changed during startup. Check the current profile before hiring again.",
-      );
-    const id = this.projectAllocations.get(input);
-    const context = this.projectContexts.get(input);
-    if (!id || !context || !this.projectPolicy) return;
-    const policy = this.projectPolicy;
     await this.runProjectPolicy(async () => {
+      await this.requireWorkerAccess?.(input.fleet);
+      const defaultPolicy = this.hireDefaultPolicies.get(input);
+      if (
+        defaultPolicy !== undefined &&
+        defaultPolicy !== JSON.stringify((await this.hireDefaults?.()) ?? {})
+      )
+        throw new Error(
+          "Fleet hire defaults changed during startup. Check the current profile before hiring again.",
+        );
+      const id = this.projectAllocations.get(input);
+      const context = this.projectContexts.get(input);
+      if (!id || !context || !this.projectPolicy) return;
+      const policy = this.projectPolicy;
       const settings = await policy.settings();
       const project = await policy.project(input, settings, context.authority);
       const latest = await policy.settings();

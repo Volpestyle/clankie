@@ -1,0 +1,78 @@
+{
+  "cause": "The machine-access fenced settings read in admitProjectLaunch ran before the existing project-policy queue. The active completion watcher read raced a role adoption flush inside that queue, producing settings_changed and permanently retiring its original native controller.",
+  "oldSource": "a8faeafd1448969578651b3c3d75df64ed0792a6 plus fixture budget removal and temporary diagnostics",
+  "passedCases": 11,
+  "failedCases": 1,
+  "cases": [
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 0",
+      "status": "passed",
+      "durationMs": 12086.384209
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 1",
+      "status": "failed",
+      "durationMs": 9843.985125
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 2",
+      "status": "passed",
+      "durationMs": 13060.188625000003
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 3",
+      "status": "passed",
+      "durationMs": 8776.638334000003
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 4",
+      "status": "passed",
+      "durationMs": 8035.016791000002
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 5",
+      "status": "passed",
+      "durationMs": 7638.707875
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 6",
+      "status": "passed",
+      "durationMs": 9071.140667
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 7",
+      "status": "passed",
+      "durationMs": 6986.166083000004
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 8",
+      "status": "passed",
+      "durationMs": 6162.589499999987
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 9",
+      "status": "passed",
+      "durationMs": 5956.566541000007
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 10",
+      "status": "passed",
+      "durationMs": 5614.770583999998
+    },
+    {
+      "title": "SSH native hire, API history and follow-up reuse the original controller without local allocation 11",
+      "status": "passed",
+      "durationMs": 5303.734500000006
+    }
+  ],
+  "trace": "SettingsStore.loadFenced -> requireRuntimeMachineAccess -> HerdrWatchStore.admitProjectLaunch -> launch guard -> OpenCodeController.current -> status/settled -> controller retirement; later attach sees no control and fallback returns unavailable.",
+  "logSha256": "2cf42d299e7fb10531b677ac3dc6e70369e11432a602826705bd38c22f7956ea",
+  "reportSha256": "4731ee7b92dea88000d6411994f59faeb5b38d1a534e3e2113aba5b3ea15b184",
+  "afterRepair": {
+    "exitCode": 0,
+    "passedCases": 12,
+    "failedCases": 0,
+    "logSha256": "de646ef929eec196d99082b651ff098b65f5bcd4ed34bb11180bfca7ec751f9a",
+    "reportSha256": "81b7ef37f36196eb890210061ec04d2f32f27276f66f81e07472ad3c7c47f9e4"
+  }
+}

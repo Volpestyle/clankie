@@ -94,6 +94,7 @@ async function fixture(
   let sessionStatus: "idle" | "busy" = "idle";
   let nextPromptStartsTurn = false;
   const reportedStates: string[] = [];
+  let nextReport: (() => Promise<void>) | undefined;
   const execute = promisify(execFile);
   const socketSamples = new Map<string, Promise<string>>();
   const executable = await realpath(process.execPath);
@@ -198,6 +199,9 @@ async function fixture(
       };
     if (method === "pane.get") return { result: { pane: { ...pane } } };
     if (method === "pane.report_agent") {
+      const wait = nextReport;
+      nextReport = undefined;
+      await wait?.();
       pane.agent_status = String(params.state);
       reportedStates.push(pane.agent_status);
       pane.agent_session = {
@@ -565,6 +569,20 @@ async function fixture(
     root,
     receivedBriefs,
     reportedStates,
+    pauseNextReport: () => {
+      let entered!: () => void, resume!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      nextReport = async () => {
+        entered();
+        await gate;
+      };
+      return { waiting, resume };
+    },
     startNextPrompt: () => {
       nextPromptStartsTurn = true;
     },
@@ -757,6 +775,41 @@ test("SSH native hire, API history and follow-up reuse the original controller w
   expect(f.reportedStates).toContain("working");
   expect(f.receivedBriefs.at(-1)).toBe("Native remote message");
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
+});
+
+test("SSH native follow-up keeps its original controller while a valid Herdr reply is pending", async () => {
+  const f = await fixture({ remote: true });
+  await remoteFollowup(f);
+  const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
+  const message = bank.tools.find((tool) => tool.name === "message_seat")!;
+  const before = f.ssh!.transportState().filter((entry) => !entry.closed);
+  const barrier = f.pauseNextReport();
+  f.startNextPrompt();
+  const sending = message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
+  void sending.catch(() => {});
+  try {
+    await barrier.waiting;
+    // Herdr permits ten seconds for this native request. A valid response
+    // after four seconds must not retire its otherwise unchanged controller.
+    await new Promise((resolve) => setTimeout(resolve, 4_250));
+    const held = f.ssh!.transportState();
+    barrier.resume();
+    const receipt = await sending;
+    const delivery = JSON.parse((receipt.content[0] as { text: string }).text);
+    for (const entry of before)
+      expect(held.find((current) => current.id === entry.id)).toMatchObject({ closed: false });
+    expect(receipt.isError).not.toBe(true);
+    expect(delivery).toMatchObject({
+      outcome: "delivered",
+      deliveryStage: "consumed",
+      seatId: f.hired.seat.seatId,
+      status: "working",
+    });
+    expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
+  } finally {
+    barrier.resume();
+    await sending.catch(() => undefined);
+  }
 });
 
 test.each([
