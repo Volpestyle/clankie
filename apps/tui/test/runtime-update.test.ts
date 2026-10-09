@@ -1,12 +1,13 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, renameSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { executeRuntimeUpdate, readRuntimeUpdate, type RuntimeUpdatePlan } from "../bin/runtime-update.ts";
 import type { InstallCommand } from "../bin/pinned-runtime.ts";
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
-function fixture() {
+function fixture(buildBridge = false) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-update-")));
   roots.push(home);
   const checkout = join(home, "source");
@@ -26,6 +27,13 @@ function fixture() {
     writeFileSync(join(path, "apps/tui/src/command/update.ts"), "fixture");
     mkdirSync(join(path, "apps/clankie/src"), { recursive: true });
     writeFileSync(join(path, "apps/clankie/src/runtime-canary.ts"), "fixture");
+    if (buildBridge) {
+      mkdirSync(join(path, "scripts"), { recursive: true });
+      writeFileSync(
+        join(path, "scripts/build-remote-lead.mjs"),
+        `import {mkdirSync, writeFileSync} from 'node:fs'; mkdirSync('.local/remote-lead', {recursive:true}); writeFileSync('.local/remote-lead/remote-lead-mcp.mjs', 'built bridge');`,
+      );
+    }
     for (const n of ["clankie", "clankie-herdr"])
       writeFileSync(join(path, `apps/tui/bin/${n}.ts`), "fixture");
     commits.set(path, commit);
@@ -39,6 +47,10 @@ function fixture() {
       calls.push("install");
       install();
       return "";
+    }
+    if (command === process.execPath) {
+      calls.push("build-bridge");
+      return execFileSync(command, [...args], { cwd, encoding: "utf8" });
     }
     if (args.includes("--git-common-dir")) return common;
     if (args.includes("--verify")) return args.at(-1) === "HEAD^{commit}" ? commits.get(cwd)! : newCommit;
@@ -106,9 +118,18 @@ function fixture() {
   };
 }
 it("installs completely before old shutdown and persists exact new health", async () => {
-  const f = fixture();
+  const f = fixture(true);
   const result = await executeRuntimeUpdate(f.plan, f);
-  expect(f.calls).toEqual(["stage", "install", "down:old", "move:pin", "move:stage", "restart:new"]);
+  expect(f.calls).toEqual([
+    "stage",
+    "install",
+    "build-bridge",
+    "down:old",
+    "move:pin",
+    "move:stage",
+    "restart:new",
+  ]);
+  expect(existsSync(join(f.plan.runtime, ".local/remote-lead/remote-lead-mcp.mjs"))).toBe(true);
   expect(result).toMatchObject({
     phase: "healthy",
     oldCommit: f.plan.oldCommit,

@@ -22,6 +22,14 @@ interface RemoteProjectLeadOptions {
   captain: CaptainPort;
 }
 
+export class RemoteLeadBuildMissing extends Error {
+  constructor() {
+    super(
+      "Remote lead bridge missing; run clankie heavy -- node scripts/build-remote-lead.mjs in the runtime checkout",
+    );
+  }
+}
+
 /** Owns launch intent and ephemeral authority, never owns existing remote panes. */
 export class RemoteProjectLeads {
   readonly delegations: RemoteLeadDelegations;
@@ -57,11 +65,16 @@ export class RemoteProjectLeads {
     const fleet = await this.fleet(id);
     const root = this.options.repoRoot;
     const bridge = await readFile(join(root, "apps/tui/bin/remote-lead-mcp.js")).catch(() =>
-      readFile(join(root, ".local/remote-lead/remote-lead-mcp.mjs")),
+      readFile(join(root, ".local/remote-lead/remote-lead-mcp.mjs")).catch(() => {
+        throw new RemoteLeadBuildMissing();
+      }),
     );
     const files = {
       "bridge.mjs": bridge.toString("base64"),
       "bootstrap.mjs": (await readFile(join(root, "integrations/remote-lead/bootstrap.mjs"))).toString(
+        "base64",
+      ),
+      "claude-setup.mjs": (await readFile(join(root, "integrations/remote-lead/claude-setup.mjs"))).toString(
         "base64",
       ),
       "output-styles/clankie.md": (
@@ -70,8 +83,15 @@ export class RemoteProjectLeads {
       ".claude-plugin/plugin.json": Buffer.from(
         JSON.stringify({
           name: "clankie-remote-lead",
-          version: "0.1.0",
+          version: "0.1.0-" + createHash("sha256").update(bridge).digest("hex").slice(0, 16),
           description: "Clankie's project lead over an authenticated fleet link",
+        }),
+      ).toString("base64"),
+      ".claude-plugin/marketplace.json": Buffer.from(
+        JSON.stringify({
+          name: "clankie-remote-leads",
+          owner: { name: "Clankie" },
+          plugins: [{ name: "clankie-remote-lead", source: "./" }],
         }),
       ).toString("base64"),
       ".mcp.json": Buffer.from(
@@ -125,6 +145,11 @@ export class RemoteProjectLeads {
         }),
       ).toString("base64"),
     };
+    const manifest = JSON.parse(Buffer.from(files[".claude-plugin/plugin.json"], "base64").toString());
+    // Hook/bootstrap changes must refresh the native cache too.
+    manifest.version =
+      "0.1.0-" + createHash("sha256").update(JSON.stringify(files)).digest("hex").slice(0, 16);
+    files[".claude-plugin/plugin.json"] = Buffer.from(JSON.stringify(manifest)).toString("base64");
     const hash = createHash("sha256").update(JSON.stringify(files)).digest("hex");
     // PowerShell's Console.In can stall on large SSH frames. Node reads the
     // framed payload directly from the pipe; the command contains code only.
@@ -284,6 +309,8 @@ process.stdin.on('end', () => {
         }) + "\n",
       );
       const allocated = await nextFrame(lines);
+      if (allocated.stage === "refused" && typeof allocated.error === "string")
+        throw new Error(allocated.error.slice(0, 1024));
       if (
         allocated.stage !== "allocated" ||
         !/^w[\w]+:p[\w]+$/u.test(allocated.pane) ||

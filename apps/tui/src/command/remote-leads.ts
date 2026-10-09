@@ -41,10 +41,12 @@ export async function runRemoteLeadCommand(
       signal: AbortSignal.timeout(180_000),
     },
   );
-  if (!response.ok)
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
     throw new Error(
-      `Remote lead request refused (${response.status}); retain the launch requestId and inspect its receipt before new intent`,
+      `Remote lead request refused (${response.status})${typeof detail?.error === "string" ? ": " + detail.error : ""}; retain the launch requestId and inspect its receipt before new intent`,
     );
+  }
   const result = await response.json();
   outputJson(options.stdout ?? process.stdout, result);
   return result.stage === "unconfirmed" ? 1 : 0;

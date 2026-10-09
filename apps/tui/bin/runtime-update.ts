@@ -577,6 +577,9 @@ export async function executeRuntimeUpdate(
     if (!existsSync(join(stage, "apps/clankie/src/runtime-canary.ts")))
       return persist("refused", { reason: "target-runtime-canary-unsupported" });
     installPinnedDependencies(stage, run);
+    // Build source-only projected artifacts before stopping the old service.
+    if (existsSync(join(stage, "scripts/build-remote-lead.mjs")))
+      run(process.execPath, ["scripts/build-remote-lead.mjs"], stage);
     linkPinnedState(plan.checkout, stage, run);
     relocatePinnedDependencies(stage, plan.runtime, undefined, plan.checkout);
     // Installation may take minutes; do not stop a runtime edited or replaced meanwhile.

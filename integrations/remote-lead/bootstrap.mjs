@@ -5,6 +5,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { prepareClaude, leadPlugin } from "./claude-setup.mjs";
 const execute = promisify(execFile);
 const quote = (text) => "'" + text.replaceAll("'", "''") + "'";
 const line = (stream) =>
@@ -58,15 +59,13 @@ if (process.argv[2] === "--head") {
       spec.title,
       "--session-id",
       spec.nativeSession,
-      "--plugin-dir",
-      spec.plugin,
-      "--dangerously-load-development-channels",
-      "plugin:clankie-remote-lead@inline",
+      "--channels",
+      `plugin:${leadPlugin}`,
       "--settings",
       JSON.stringify({
         outputStyle: "clankie",
         autoMemoryEnabled: false,
-        enabledPlugins: { "clankie-remote-lead@inline": true },
+        enabledPlugins: { [leadPlugin]: true, "clankie-worker@clankie": false, "clankie@clankie": false },
       }),
     ],
     {
@@ -74,6 +73,7 @@ if (process.argv[2] === "--head") {
       stdio: "inherit",
       env: {
         ...process.env,
+        CLAUDE_CONFIG_DIR: spec.profile,
         CLANKIE_REMOTE_LEAD_TOKEN: spec.token,
         CLANKIE_SEAT_SESSION_ID: spec.nativeSession,
         CLANKIE_SEAT_HARNESS: "claude",
@@ -107,6 +107,14 @@ if (process.argv[2] === "--head") {
   const executable = await ps(
     "$ErrorActionPreference='Stop'; $a=@(Get-Command claude.exe -All -CommandType Application | Select-Object -ExpandProperty Source -Unique); if($a.Count -ne 1){throw 'Native Claude unavailable'}; $a[0]",
   );
+  let profile;
+  try {
+    profile = await prepareClaude(executable, spec.plugin);
+  } catch (error) {
+    // No delegation exists yet; only the setup helper's bounded diagnostics cross stdout.
+    process.stdout.write(JSON.stringify({ stage: "refused", error: error.message }) + "\n");
+    process.exit(1);
+  }
   const created = await herdr([
     "workspace",
     "create",
@@ -144,10 +152,13 @@ if (process.argv[2] === "--head") {
         }
         claimed = true;
         server.close();
-        socket.end(JSON.stringify({ ...spec, executable, pane, token, conversationId }) + "\n", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
+        socket.end(
+          JSON.stringify({ ...spec, executable, profile, pane, token, conversationId }) + "\n",
+          () => {
+            clearTimeout(timeout);
+            resolve();
+          },
+        );
       } catch {
         socket.destroy();
       }

@@ -4,6 +4,7 @@ import { RemoteLeadLaunchSchema } from "@clankie/protocol/remote-leads";
 import type { ClankieAppDependencies } from "./types.ts";
 import { authenticateOperator } from "./http-auth.ts";
 import { createRemoteLeadBridge } from "../remote-lead-bridge.ts";
+import { RemoteLeadBuildMissing } from "../remote-project-leads.ts";
 
 export function remoteLeadRoutes(dependencies: ClankieAppDependencies) {
   const app = new Hono();
@@ -45,7 +46,12 @@ export function remoteLeadRoutes(dependencies: ClankieAppDependencies) {
       /^[a-z][a-z0-9-]{0,63}$/u.test(input.fleet)
     ) {
       await guard();
-      return context.json(await leads.prepare(input.fleet, guard));
+      try {
+        return context.json(await leads.prepare(input.fleet, guard));
+      } catch (error) {
+        if (error instanceof RemoteLeadBuildMissing) return context.json({ error: error.message }, 503);
+        throw error;
+      }
     }
     if (
       action === "revoke" &&

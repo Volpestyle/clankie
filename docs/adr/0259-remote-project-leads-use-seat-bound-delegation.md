@@ -13,6 +13,17 @@ plugin and launches that head in a fresh Herdr pane through the existing fleet
 transport. The remote machine needs its harness and Node, not a Clankie install.
 Existing workers and their panes are not converted implicitly.
 
+The head uses an existing signed-in native Claude.ai profile on that machine,
+never a fresh profile or copied credentials. Launch selects an explicit PC
+`CLAUDE_CONFIG_DIR`, or the unique signed-in profile discovered there. Native
+setup installs the versioned lead plugin into that profile and approves its
+own channel additively in managed policy before allocating a pane. Disabled
+channel policy, missing sign-in, ambiguity or an unwritable administrator
+policy refuses setup with a diagnostic. The native install remains disabled
+for ordinary sessions; launch activates only its lead channel and disables
+inherited worker/operator plugins through session settings. No development
+confirmation or worker-hook fallback is part of this operator head.
+
 The service issues a separate random delegation for one launch, bound to the
 exact machine, native seat and conversation. This is operator-lane authority for
 that conversation, never the owner's general operator credential. Dedicated

@@ -237,6 +237,7 @@ async function copyRuntimeAssets(targetRoot) {
   await copySkillAssets(repoRoot, targetRoot);
   const files = [
     ["integrations/remote-lead/bootstrap.mjs", "integrations/remote-lead/bootstrap.mjs"],
+    ["integrations/remote-lead/claude-setup.mjs", "integrations/remote-lead/claude-setup.mjs"],
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
     ["apps/tui/native/LentScreen.cs", "apps/tui/native/LentScreen.cs"],
     ["apps/tui/native/lent-screen.ps1", "apps/tui/native/lent-screen.ps1"],

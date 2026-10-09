@@ -35,6 +35,7 @@ it("launches an approved Windows workspace through the real conversation store w
   for (const path of [
     "apps/tui/bin/remote-lead-mcp.js",
     "integrations/remote-lead/bootstrap.mjs",
+    "integrations/remote-lead/claude-setup.mjs",
     "integrations/claude-plugin/output-styles/clankie.md",
   ]) {
     await mkdir(dirname(join(root, path)), { recursive: true });
@@ -105,6 +106,12 @@ it("launches an approved Windows workspace through the real conversation store w
     title: "KH2",
   };
   try {
+    await rm(join(root, "apps/tui/bin/remote-lead-mcp.js"));
+    await expect(leads.prepare(fleet.id)).rejects.toThrow(
+      "clankie heavy -- node scripts/build-remote-lead.mjs",
+    );
+    expect(transportCalls).toBe(0);
+    await writeFile(join(root, "apps/tui/bin/remote-lead-mcp.js"), "fixture artifact");
     await expect(leads.launch(input, async () => {})).rejects.toThrow("owner-approved working directory");
     expect(transportCalls).toBe(0);
     approved = true;

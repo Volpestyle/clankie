@@ -3814,9 +3814,27 @@ The registered fleet must permit `workers` and approve the exact working directo
 The owner-authenticated API is `POST /v1/remote-leads/{prepare,launch,revoke}`.
 
 `prepare FLEET` projects the standalone operator bridge into a content-addressed
-`~/.clankie/remote-leads/` directory. It changes no global harness configuration.
-Source checkouts first build the bridge with
-`clankie heavy -- node scripts/build-remote-lead.mjs`; releases include it.
+`~/.clankie/remote-leads/` directory. Source checkouts first build the bridge with
+`clankie heavy -- node scripts/build-remote-lead.mjs`; runtime updates build it
+before service cutover, and releases include it. A missing bridge returns a
+503 with that build command rather than an opaque 500.
+
+Launch uses the PC's existing signed-in Claude.ai profile. It honors a selected
+`CLAUDE_CONFIG_DIR`; otherwise it inspects existing `.claude`, `.claude-*` and
+numbered profiles and requires exactly one signed-in profile. It never creates
+a profile or copies credentials. An ambiguous choice requires selecting the
+profile on the PC; a logged-out selection requires James to sign in there.
+
+Before allocating a pane, launch installs the content-addressed plugin through
+the native `clankie-remote-leads` marketplace and additively approves its channel
+in the PC's managed policy, preserving other entries and permissions. The SSH
+account must be able to write that policy as the PC administrator. An explicitly
+disabled channel policy is refused. Setup failures return a diagnostic in the
+launch journal before allocating a pane. Plugin activation is session-only:
+the installed lead plugin is disabled for ordinary sessions, and this launch
+enables it with `--settings` and `--channels`, without the development prompt.
+It also disables inherited Clankie worker/operator plugins for this session,
+so their hooks do not bind the lead as a worker or suggest its worker channel.
 
 `launch --json-stdin` reads an object with a fresh UUID `requestId`, `fleet`,
 `workingDirectory`, `title`, and optional `conversationId`. Omit the conversation

@@ -1,4 +1,7 @@
 /** Standalone remote operator plugin entry; bundled with only Node dependencies. */
+// Initialize the shared Zod entry before SDK schemas. Otherwise esbuild's
+// wrapped protocol imports can leave ZodCustom uninitialized at SDK startup.
+import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +14,16 @@ delete process.env.CLANKIE_REMOTE_LEAD_TOKEN;
 const pane = process.env.HERDR_PANE_ID;
 const fleet = process.env.CLANKIE_REMOTE_LEAD_FLEET;
 const conversationId = process.env.CLANKIE_CONVERSATION_ID;
-if (!token || !pane || !fleet || !conversationId) throw new Error("Remote lead launch binding missing");
+const binding = z
+  .object({
+    token: z.string().min(1),
+    pane: z.string().min(1),
+    fleet: z.string().min(1),
+    conversationId: z.string().min(1),
+  })
+  .safeParse({ token, pane, fleet, conversationId });
+if (!token || !pane || !fleet || !conversationId || !binding.success)
+  throw new Error("Remote lead launch binding missing");
 const closing = new AbortController();
 const request: typeof fetch = async (resource, init) => {
   const original = new Request(resource, init);

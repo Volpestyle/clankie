@@ -2,6 +2,16 @@
 
 Connected tools for fleet panes, bridge health in doctor and the roster, worker report routing, preparing linked machines, and Windows fleets.
 
+Remote project heads use `clankie conversations lead launch --json-stdin` on an
+approved Windows fleet/workspace. They reuse an existing signed-in Claude.ai
+profile, install the dedicated `clankie-remote-lead@clankie-remote-leads` plugin
+and approve its channel before allocating a pane. Profile ambiguity, missing
+sign-in or administrator policy access returns a setup refusal in the original
+launch journal. Never answer a development warning or substitute the worker
+channel. `dispatched` proves handoff only; verify a native tool call after deploy.
+Runtime updates build the standalone bridge before cutover; a source-only
+missing-bridge refusal names `clankie heavy -- node scripts/build-remote-lead.mjs`.
+
 ## Connected fleet tools
 
 Admitted panes in a Clankie-linked session reach verified accounts through exactly

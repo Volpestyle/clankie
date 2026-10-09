@@ -9,6 +9,17 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { assertConversationAuthority } from "../src/captain/conversation-owner.ts";
 import { createBearerAuthenticator } from "../src/app/http-auth.ts";
+import { serve } from "@hono/node-server";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { execFile, spawn } from "node:child_process";
+import { createServer } from "node:net";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { prepareClaude, leadPlugin } from "../../../integrations/remote-lead/claude-setup.mjs";
+
+const execute = promisify(execFile);
 
 // Host-proof fixtures delimit this HTTP/MCP contract test. Native observation
 // and real hire adoption require the separate, deployed Windows live proof.
@@ -37,6 +48,192 @@ const identity = {
 };
 
 describe("remote lead HTTP/MCP trust boundary", () => {
+  test("launches with an existing signed-in profile and the installed lead channel; the standalone bridge answers a tool call", async () => {
+    // Real filesystem, TCP handoff, Node bundle, stdio MCP and HTTP routes.
+    // The native Claude executable/auth response and host identity are fixtures;
+    // no model request, PC mutation or claim of deployed-head acceptance.
+    const root = await mkdtemp(join(tmpdir(), "remote-lead-native-"));
+    const repo = resolve(import.meta.dirname, "../../..");
+    const profile = join(root, ".claude-james");
+    const plugin = join(root, ".clankie/remote-leads/artifact");
+    const policyPath = join(root, "managed-settings.json");
+    const executable = join(root, "claude");
+    await mkdir(profile, { recursive: true });
+    await mkdir(join(root, ".claude"));
+    await mkdir(plugin, { recursive: true });
+    await writeFile(join(profile, ".credentials.json"), "private fixture credential");
+    await writeFile(
+      policyPath,
+      JSON.stringify({
+        channelsEnabled: true,
+        permissions: { deny: ["secret"] },
+        allowedChannelPlugins: [{ marketplace: "clankie", plugin: "clankie-worker" }],
+      }),
+    );
+    await writeFile(
+      executable,
+      `#!${process.execPath}
+      const fs=require('node:fs'); const args=process.argv.slice(2);
+      if(args[0]==='auth') console.log(JSON.stringify({loggedIn:process.env.CLAUDE_CONFIG_DIR.endsWith('.claude-james'),authMethod:'claude.ai'}));
+      else if(args[0]==='plugin') console.log(args[1]==='list'?'[]':'{}');
+      else fs.writeFileSync(${JSON.stringify(join(root, "head.json"))}, JSON.stringify({args,profile:process.env.CLAUDE_CONFIG_DIR,hasToken:!!process.env.CLANKIE_REMOTE_LEAD_TOKEN}));
+    `,
+      { mode: 0o700 },
+    );
+    const env = { ...process.env, HOME: root, CLAUDE_CONFIG_DIR: "" };
+    const grants = new RemoteLeadDelegations(async () => {});
+    const issued = await grants.issue(binding);
+    const bridge = createRemoteLeadBridge({
+      delegations: grants,
+      identity: () => identity,
+      captain: createStubCaptain({
+        lanePrompt: async () => "Project lead context",
+        pollSeatEvents: async () => {
+          await new Promise((r) => setTimeout(r, 25));
+          return [];
+        },
+        laneToolBank: async () => ({
+          lane: "operator",
+          tools: [
+            {
+              name: "worker_reports",
+              description: "Read reports",
+              inputSchema: { type: "object", properties: {} },
+              call: async () => ({ content: [{ type: "text", text: "reports accepted" }] }),
+            },
+          ],
+        }),
+        syncSeatTranscript: () => true,
+      }),
+    });
+    const host = serve({ fetch: bridge.app.fetch, hostname: "127.0.0.1", port: 0 });
+    const handoff = createServer();
+    const client = new Client({ name: "bundle-acceptance", version: "1" });
+    try {
+      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath })).toBe(profile);
+      expect(await readFile(join(profile, ".credentials.json"), "utf8")).toBe("private fixture credential");
+      const policy = JSON.parse(await readFile(policyPath, "utf8"));
+      expect(policy.permissions.deny).toContain("secret");
+      expect(policy.allowedChannelPlugins).toEqual(
+        expect.arrayContaining([
+          { marketplace: "clankie", plugin: "clankie-worker" },
+          { marketplace: "clankie-remote-leads", plugin: "clankie-remote-lead" },
+        ]),
+      );
+      await expect(
+        prepareClaude(executable, plugin, {
+          env: { ...env, CLAUDE_CONFIG_DIR: join(root, ".claude") },
+          home: root,
+          policyPath,
+        }),
+      ).rejects.toThrow("No existing signed-in");
+      handoff.on("connection", (socket) =>
+        socket.once("data", (chunk) => {
+          expect(JSON.parse(chunk.toString()).ticket).toBe("fixture-ticket");
+          socket.end(
+            JSON.stringify({
+              token: issued.token,
+              pane: binding.pane,
+              fleet: binding.fleet,
+              conversationId: binding.conversationId,
+              executable,
+              profile,
+              cwd: root,
+              title: "KH2",
+              nativeSession,
+            }) + "\n",
+          );
+        }),
+      );
+      await new Promise<void>((r) => handoff.listen(0, "127.0.0.1", r));
+      const address = handoff.address();
+      if (!address || typeof address === "string") throw Error("Missing handoff address");
+      await execute(
+        process.execPath,
+        [
+          join(repo, "integrations/remote-lead/bootstrap.mjs"),
+          "--head",
+          String(address.port),
+          "fixture-ticket",
+        ],
+        { env: { ...env, HERDR_PANE_ID: binding.pane } },
+      );
+      const head = JSON.parse(await readFile(join(root, "head.json"), "utf8"));
+      expect(head.profile).toBe(profile);
+      expect(head.hasToken).toBe(true);
+      expect(head.args).toContain(`plugin:${leadPlugin}`);
+      expect(head.args).not.toContain("--dangerously-load-development-channels");
+      expect(head.args).not.toContain("--plugin-dir");
+      expect(
+        JSON.parse(head.args[head.args.indexOf("--settings") + 1]).enabledPlugins["clankie-worker@clankie"],
+      ).toBe(false);
+      await execute(process.execPath, [join(repo, "scripts/build-remote-lead.mjs")], { cwd: repo });
+      const httpAddress = host.address();
+      if (!httpAddress || typeof httpAddress === "string") throw Error("Missing HTTP address");
+      await mkdir(join(root, ".clankie/links"), { recursive: true });
+      await writeFile(
+        join(root, ".clankie/links/pc.json"),
+        JSON.stringify({
+          schemaVersion: 2,
+          authentication: "local-process",
+          fleet: "pc",
+          url: `http://127.0.0.1:${httpAddress.port}`,
+        }),
+      );
+      const nativeEnv = {
+        ...env,
+        CLANKIE_REMOTE_LEAD_TOKEN: issued.token,
+        HERDR_PANE_ID: binding.pane,
+        CLANKIE_REMOTE_LEAD_FLEET: "pc",
+        CLANKIE_CONVERSATION_ID: binding.conversationId,
+        CLANKIE_SEAT_SESSION_ID: nativeSession,
+        CLANKIE_SEAT_HARNESS: "claude",
+      };
+      const bundle = join(repo, ".local/remote-lead/remote-lead-mcp.mjs");
+      expect((await execute(process.execPath, [bundle, "--prompt"], { env: nativeEnv })).stdout).toBe(
+        "Project lead context",
+      );
+      const sync = spawn(process.execPath, [bundle, "--sync"], {
+        env: nativeEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const synced = new Promise<number | null>((r, reject) => {
+        sync.once("error", reject);
+        sync.once("exit", r);
+      });
+      sync.stdin.end(
+        JSON.stringify({
+          hook_event_name: "SessionStart",
+          session_id: nativeSession,
+          transcript_path: join(root, `${nativeSession}.jsonl`),
+        }),
+      );
+      expect(await synced).toBe(0);
+      await client.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: [bundle],
+          env: Object.fromEntries(
+            Object.entries(nativeEnv).filter(
+              (entry): entry is [string, string] => typeof entry[1] === "string",
+            ),
+          ),
+          stderr: "pipe",
+        }),
+      );
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("worker_reports");
+      expect((await client.callTool({ name: "worker_reports", arguments: {} })).content).toEqual([
+        { type: "text", text: "reports accepted" },
+      ]);
+    } finally {
+      await client.close();
+      await bridge.close();
+      if ("closeAllConnections" in host) host.closeAllConnections();
+      await new Promise<void>((r) => host.close(() => r()));
+      await new Promise<void>((r) => handoff.close(() => r()));
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   test("binds chat/session, excludes owner routes and refuses revoked calls on an existing MCP session", async () => {
     const grants = new RemoteLeadDelegations(async () => {});
     const issued = await grants.issue(binding);
