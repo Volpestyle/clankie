@@ -6,7 +6,7 @@ default in [ADR 0170](0170-a-session-that-stops-is-unbound.md) and scopes
 [ADR 0184](0184-clankie-leads-more-than-one-fleet.md) to Herdr connections.
 Acceptance ratifies the design; current support and remaining acceptance live in
 the [Swarm host README](0213-clankie-retires-swarm.md).
-A proposed amendment (2026-10-09, pending James's acceptance; tracks
+An accepted amendment (2026-10-09; tracks
 [VUH-1904](https://linear.app/vuhlp/issue/VUH-1904)) makes Clankie's built-in
 tracker the default; see [the amendment](#amendment-the-built-in-tracker-is-the-default-2026-10-09-vuh-1904).
 
@@ -293,7 +293,7 @@ need a stronger host boundary. Managed provisioning remains separate work.
 
 ## Amendment: the built-in tracker is the default (2026-10-09, VUH-1904)
 
-Status: proposed, pending James's acceptance. Records James's decisions of
+Status: accepted by James (2026-10-09). Records James's decisions of
 2026-10-08/09; tracked by [VUH-1904](https://linear.app/vuhlp/issue/VUH-1904).
 
 Agents author nearly all tracker activity, and Clankie already works around
@@ -318,6 +318,8 @@ this decision.
   (managed Postgres/S3, tenancy, backups, deploy).
 - **Order.** Core before UI. The first slice is the evidence store
   ([VUH-1902](https://linear.app/vuhlp/issue/VUH-1902)).
+- **v1 scope.** Releases are in v1, because shipping versions is core to
+  Clankie. Cycles and initiatives are not.
 
 App-only operation still needs no external account. The connection contract
 above is unchanged: a connected Linear keeps its broker-owned credentials,
