@@ -23,8 +23,24 @@ The focused check passed all four retained cases in both files, with no failures
 or skips. The actual text writer output was inspected: PASS and FAIL status,
 remediation and the not-ready outcome remain visible.
 
-The committed-head landing gate and raw before/after/narrow/writer evidence
-will be archived on [VUH-1925](https://linear.app/vuhlp/issue/VUH-1925) after landing.
+The cut landed as `70727e33165cffea3aa9ffdea86b30f42bb5c11b` on main against
+fetched base `3ef50411dd49bf34e86a8eb0fb85ab169d3006dc`. Its committed-head
+root gate passed all four cases in both files and every phase, exit 0,
+sourceStable true, **62.034 seconds**. The two compiler tasks were uncached
+(33.206s phase); tests took 16.518s versus 16.791s before. These runs do not
+isolate test deletion from shared load and compiler effects. Final pull left
+HEAD/base unchanged before push.
+
+The push completed immediately before the owner changed VUH-1925 to PR-only
+landings. This cut remains landed under the owner's instruction to preserve
+already-landed batches. Its archive manifest and result update are submitted
+separately for review; subsequent cleanup batches use PRs without worker merges.
+
+Raw before/after root gates, narrow results, actual writer output, original
+test source, counts and committed diff are archived on
+[VUH-1925](https://linear.app/vuhlp/issue/VUH-1925).
+Archive: `clankie://evidence/sha256/c954fe1096e26759b96431f352428d3cc715f88ba3e6434024f06b76b422f2cb`.
+The applied upload's hash and size are recorded in the [manifest](evidence.json).
 Local receipts are `.local/vuh-1925/discord-before-gate.json`,
 `discord-before-vitest.json`, `discord-narrow-vitest.json`,
 `discord-report-smoke.log`, `discord-counts.json`, and `discord-after-gate.json`.

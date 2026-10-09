@@ -397,4 +397,39 @@ Further full-file boundary reviews on the same main retain:
 - `apps/clankie/test/channel-turns.test.ts`: Keep actual observed Discord PASS leak regression, silent versus spoken sentinel semantics, lossless bounded native transcript and truthful unavailable versus quiet outcomes. Mixed exact prose/tie ordering remains later incidental candidate; stale PTY explanation warrants provenance review.
 - `apps/clankie/test/hosted-security-wire.test.ts`: Keep real signed nonce/body digest/tenant/installation/lifetime schema state, persisted-before-register key rotation and device revoke versus account identity.
 - `apps/clankie/test/lead-native-claude-launch.test.ts`: Keep evaluation harness native containment/lifetime safety fixture cases. Evaluation-related inputs are outside pruning and were not executed.
-- `apps/clankie/test/captain-lane-prompt-assembly.test.ts`: Keep lane authority/private address/fleet preference exposure and VUH-1391/VUH-1456 documented instruction contracts, native harness project file compatibility. Mixed exact whitespace/section order remains an incidental case-level candidate.
+- `apps/clankie/test/captain-lane-prompt-assembly.test.ts`: Keep lane authority/private address/fleet preference exposure and VUH-1391/VUH-1456 documented instruction contracts, native harness project file compatibility. Keep exact default section order and blank-line separation: `docs/cli.md` publishes that launcher contract. The proposed spacing cut was withdrawn before changing the test.
+
+## Model config and persona image presentation batch (proposed PR)
+
+Reviewed the complete model-provider and persona-images test files and their real
+consumers. Remove two config indentation/trailing-newline assertions, one trivial
+`variantById` lookup case already exercised through the configured-model consumer,
+and two image-count prose assertions. Keep the helper and all product exports;
+parsed concurrent config values, atomic writes with no temporary leftovers, secret
+rejection, model/effort schema and provider contracts remain. The unchanged
+configured-model consumer proves matched effort variants and unsupported variant
+refusal across the SDK request boundary with fixed local fetch replies. No live
+provider request or eval runs. Both persona integration cases retain actual image
+counts, file loading, settings persistence, missing-folder refusal and restart
+warnings. No E2E, integration or golden file is removed.
+
+The two touched files shrink from 935 to 923 lines, with one case removed:
+12 lines and one case. Landed subtotal remains six batches, 688 lines and 39 cases.
+If this PR merges, the subtotal becomes seven batches, 700 lines and 40 cases.
+The already-landed Discord cut `70727e33` stays on main; its archive README and
+manifest accompany this PR and are not counted again.
+[Measurements and evidence](../testing/2026-10-09-model-config-test-pruning/README.md).
+The remaining inventory is incomplete.
+
+Further complete public-file reviews retain:
+
+- `apps/clankie/test/discord-room-voice.test.ts`: Keep exact one-use host nonce, owner/source post-await revocation, foreign/replayed command refusal, retained durable audio ownership on empty/foreign/restarted body snapshots.
+- `apps/clankie/test/minecraft-port.test.ts`: Keep published controllable port fixture contract: idempotent IDs, cancellation versus world-effect evidence, unsettled motor fences, generation-specific disconnect/callback authority and unknown completion. Fake-only proof, no live server.
+- `apps/clankie/test/minecraft-routes.test.ts`: Keep actual HTTP routes/settings/body lease integration, operator authority, input/secret bounds, revocation before persistence, captured conversation ownership and exact-disconnect release; fake port remains explicit.
+- `apps/clankie/test/presence.test.ts`: Keep opt-in public projection/schema, owner-item precedence, stable cursors, strict bounded long polls and cancellation, unresolved lane handling and actual protocol client request seam.
+- `apps/clankie/test/project-worktree-routes.test.ts`: Keep owner API enrollment of native-observed Git identity, no caller facts/no observation for unauthorized requests, authority/settings/native-root races at persistence and selected-root removal.
+- `apps/clankie/test/worker-skills.test.ts`: Keep real filesystem and native loader integration: isolated Codex config, shared hook-file trust identity/no duplicate tables, owner config preservation, session/auth/tool links and every shipped skill through three harness loaders.
+
+- `apps/tui/test/inbound-receipt.test.ts`: Keep durable native delivery receipt isolation: old responder cannot settle newer claim, corrupt/locked state fails closed, exact pre-dispatch refusal versus uncertain outcome and authorization refusal without POST.
+- `apps/tui/test/project-create-cli.test.ts`: Keep published CLI/TUI reviewed settings/revision command contract, broker credential and authority-field injection fences, canonical API transport/quoted paths, no retry after refused writes and honest unavailable tracker.
+- `apps/clankie/test/discord-ingress.test.ts`: Keep real Ed25519/ECDH encrypted ingress, durable admission and restart deduplication, uncertain machine turn non-replay, content redaction and unsealed/forged/wrong-tenant/oversize refusal.

@@ -56,7 +56,5 @@ it("sets and clears images through the TUI Persona images choice", async () => {
   } as unknown as ClankieFaceShell;
   await buildPersonaCommands(fixture.options)[0]!.run("", shell);
   expect((await settings.load()).persona.imagesDir).toBe("");
-  expect(rendered.join("\n")).toContain("3 images from");
-  expect(rendered.join("\n")).toContain("0 images from no folder");
   expect(rendered.join("\n")).toContain("Restart Clankie");
 });
