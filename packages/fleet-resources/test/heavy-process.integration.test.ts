@@ -126,7 +126,33 @@ async function fixture() {
       child.stderr?.on("data", (bytes) => output.push(String(bytes)));
       const done = completions.get(child)!;
       receipts.push(receipt);
-      return { child, done, closed: drained.get(child)!, receipt, release, output };
+      const ready = (timeout = 8_000) =>
+        lifetime.run(async () => {
+          try {
+            await eventually(
+              async () => {
+                lifetime.signal.throwIfAborted();
+                if (await exists(receipt)) return true;
+                if (child.exitCode !== null || child.signalCode !== null) {
+                  await drained.get(child);
+                  throw new Error(
+                    `Owned fixture command exited ${child.exitCode ?? child.signalCode} before readiness: ${output.join("")}`,
+                  );
+                }
+                return false;
+              },
+              Boolean,
+              timeout,
+            );
+          } catch (error) {
+            const state = await new ResourceStore(directory).read();
+            throw new Error(
+              `${(error as Error).message}; private queue=${state.queue.length}, heavy phases=${state.leases.filter((lease) => lease.kind === "heavy").map((lease) => lease.state).join(",")}`,
+              { cause: error },
+            );
+          }
+        });
+      return { child, done, closed: drained.get(child)!, receipt, release, output, ready };
     }
     async function release(path: string) {
       await lifetime.run(() => writeFile(path, "release"));
@@ -196,7 +222,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     const f = await fixture();
     const enclosing = await processIdentity();
     const active = f.start("cancel-owned-active");
-    await eventually(() => exists(active.receipt), Boolean);
+    await active.ready();
     const waiting = f.start("cancel-owned-waiting", "exit");
     await eventually(
       () => new ResourceStore(f.directory).read(),
@@ -262,7 +288,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     let holderDone: Promise<number | null> | undefined;
     try {
       const active = f.start("lock-active");
-      await eventually(() => exists(active.receipt), Boolean, 30_000);
+      await active.ready(30_000);
       const queued = Array.from({ length: 11 }, (_, i) => f.start(`lock-waiter-${i}`, "exit"));
       const before = await eventually(
         () => new ResourceStore(f.directory).read(),
@@ -314,7 +340,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     const f = await fixture();
     try {
       const active = f.start("active");
-      await eventually(() => exists(active.receipt), Boolean);
+      await active.ready();
       const first = f.start("first");
       await eventually(
         () => f.governor.snapshot(),
@@ -353,10 +379,10 @@ describe("machine shared heavy permits with actual OS children", () => {
       expect((await f.governor.snapshot()).queue.map((entry) => entry.seatId)).toEqual(["first", "last"]);
       await f.release(active.release);
       expect(await active.done).toBe(0);
-      await eventually(() => exists(first.receipt), Boolean);
+      await first.ready();
       await f.release(first.release);
       expect(await first.done).toBe(0);
-      await eventually(() => exists(last.receipt), Boolean);
+      await last.ready();
       await f.release(last.release);
       expect(await last.done).toBe(0);
       expect((await f.governor.snapshot()).capacity.used).toBe(0);
@@ -417,7 +443,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     const f = await fixture();
     try {
       const first = f.start("first");
-      await eventually(() => exists(first.receipt), Boolean).catch((error) => {
+      await first.ready().catch((error) => {
         throw new Error(`${String(error)}\nOwned child output:\n${first.output.join("")}`, { cause: error });
       });
       const second = f.start("second");
@@ -437,7 +463,7 @@ describe("machine shared heavy permits with actual OS children", () => {
       expect((await f.governor.snapshot()).queue.map((entry) => entry.seatId)).toEqual(["second"]);
       await f.release(first.release);
       expect(await first.done).toBe(0);
-      await eventually(() => exists(second.receipt), Boolean);
+      await second.ready();
       expect((await f.governor.snapshot()).leases.map((entry) => entry.seatId)).toEqual(["second"]);
       expect(await readFile(join(f.directory, "state.json"), "utf8")).not.toContain("Bearer-secret");
       await f.release(second.release);
@@ -452,7 +478,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     const f = await fixture();
     try {
       const first = f.start("orphan");
-      await eventually(() => exists(first.receipt), Boolean);
+      await first.ready();
       first.child.kill("SIGKILL");
       expect(await first.done).toBe(137);
       expect((await f.governor.snapshot()).capacity.used).toBe(1);
@@ -463,7 +489,7 @@ describe("machine shared heavy permits with actual OS children", () => {
       );
       expect(await exists(second.receipt)).toBe(false);
       await f.release(first.release);
-      await eventually(() => exists(second.receipt), Boolean);
+      await second.ready();
       await f.release(second.release);
       expect(await second.done).toBe(0);
       expect((await f.governor.snapshot()).capacity.used).toBe(0);
@@ -476,7 +502,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     const f = await fixture();
     try {
       const first = f.start("runner-orphan");
-      await eventually(() => exists(first.receipt), Boolean);
+      await first.ready();
       const state = await new ResourceStore(f.directory).read();
       const lease = state.leases.find((entry) => entry.kind === "heavy")!;
       if (lease.kind !== "heavy" || !lease.runner) throw new Error("Owned runner absent");
@@ -495,7 +521,7 @@ describe("machine shared heavy permits with actual OS children", () => {
       );
       expect(await exists(second.receipt)).toBe(false);
       await f.release(first.release);
-      await eventually(() => exists(second.receipt), Boolean);
+      await second.ready();
       await f.release(second.release);
       expect(await second.done).toBe(0);
     } finally {
@@ -539,7 +565,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     const f = await fixture();
     try {
       const run = f.start("terminated");
-      await eventually(() => exists(run.receipt), Boolean);
+      await run.ready();
       const { pid } = JSON.parse(await readFile(run.receipt, "utf8")) as { pid: number };
       run.child.kill("SIGTERM");
       expect(await run.done).toBe(143);
