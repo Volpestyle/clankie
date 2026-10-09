@@ -3876,14 +3876,21 @@ Read operator-only `GET /v1/fleet/metrics` for proof attempts and refusals, work
 report attempts and failures, and fixed native/transport reason counters. The
 five- and sixty-minute windows show failure fractions and failures per minute;
 counters contain no process IDs, paths, argv, report bodies or credentials.
-Doctor includes the same windows. More than 1% terminal proof refusals in five
+Doctor includes the same aggregate windows. `callers` adds five-minute windows
+for up to 512 syntactically valid `claimedPane` labels, sorted by refusals. These
+are request claims, not authenticated identities, and never affect admission.
+Invalid/missing claims and overflow still count in aggregate totals. Inactive
+caller entries expire after five minutes unless an unresolved alert holds them;
+those held entries can have empty windows. Native/transport diagnostics remain
+separate from terminal refusal counts, including within each caller window.
+More than 1% terminal proof refusals in five
 minutes produces an alert once that window has at least 100 attempts and five
 refusals and stays elevated for at least one minute. Every refusal still counts;
 startup and high machine load do not exempt callers. Sparse or transient bursts
 remain visible in metrics without paging the owner. The aggregate alert goes to the owner's default conversation,
 including refusals without an identifiable or currently owned pane. A live seat
 also alerts its current owning lead under the same sample/persistence rule.
-Alert text labels its source: a worker's window counts only that caller pane;
+A worker alert names the pane and its observed harness; its window counts only that caller pane;
 the aggregate window matches `clankie metrics --fleet` at the alert timestamp.
 Later metric reads can differ as checks arrive and minute buckets expire.
 Aggregate alerts are retained as service
@@ -3901,7 +3908,7 @@ failed proof. Only the terminal proof result increments attempts/refusals. An
 exhausted retry, timeout, identity mismatch or failed observation still refuses
 and counts. Metrics restart with the service and state their coverage start.
 
-Private service logs explain local proof refusals without expanding metric labels.
+Private service logs explain local proof refusals beyond the bounded caller labels.
 Join `fleet.local_proof.refusal_context` to project-stage
 `fleet.local_proof.diagnostic` records by server-generated `requestId`.
 The context includes `operation` (fleet or project), a fixed route and method,

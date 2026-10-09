@@ -1220,7 +1220,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     await captain
       .notifyFleetHealthAlert(
         pane,
-        `Fleet proof refusals stayed above 1% for a minute. This worker's 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). clankie metrics --fleet and doctor show the aggregate across all callers, so their counts can differ.`,
+        `Fleet proof refusals stayed above 1% for a minute. Caller 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). clankie metrics --fleet includes this caller pane and the aggregate; doctor shows the aggregate across all callers.`,
         (result) => {
           delivery = result;
         },

@@ -425,7 +425,7 @@ it("refuses a parent native health message behind its durable fleet mailbox with
   const poll = f.captain.pollFleetSeatEvents("w1:p3", 3000);
   const delivery = f.captain.notifyFleetHealthAlert("w1:p4", "Fleet proof alert: parent-owned failure.");
   const [event] = (await poll)!;
-  expect(event?.content).toBe("Fleet proof alert: parent-owned failure.");
+  expect(event?.content).toBe("Worker w1:p4 (codex). Fleet proof alert: parent-owned failure.");
   expect(event?.id).not.toBe(originalId);
   expect(await f.captain.acknowledgeFleetSeatEvent("w1:p3", event!.id)).toBe(true);
   expect(await delivery).toBe(true);
@@ -1071,7 +1071,7 @@ it("proof threshold retries an unavailable native alert, then cools down only af
     const poll = f.captain.pollSeatEvents(3000, undefined, "global-default");
     await refuse();
     const [event] = await poll;
-    expect(event?.content).toBe("Fleet proof alert: 102/102 refused.");
+    expect(event?.content).toBe("Worker w1:p1 (codex). Fleet proof alert: 102/102 refused.");
     expect(attempts).toHaveLength(2);
     expect(await f.captain.acknowledgeSeatEvent(event!.id, "global-default")).toBe(true);
     expect(await attempts[1]).toBe(true);

@@ -86,6 +86,16 @@ export const FleetHealthMetricsSnapshotSchema = z.strictObject({
   startedAt: z.string().datetime(),
   observedAt: z.string().datetime(),
   totals: z.strictObject(Counters),
+  /** Request pane claims are diagnostic labels, never proof of caller identity. */
+  callers: z
+    .array(
+      z.strictObject({
+        claimedPane: z.string().regex(/^w\w{1,64}:p\w{1,64}$/u),
+        window: FleetHealthMetricsWindowSchema,
+      }),
+    )
+    .max(512)
+    .optional(),
   windows: z.tuple([FleetHealthMetricsWindowSchema, FleetHealthMetricsWindowSchema]),
 });
 export type FleetHealthMetricsSnapshot = z.infer<typeof FleetHealthMetricsSnapshotSchema>;

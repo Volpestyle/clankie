@@ -177,7 +177,11 @@ it("counts terminal real socket refusals, keeps diagnostics separate, and serves
         const mode = path.slice("/proof/".length);
         const accepted = await (mode === "unsupported" ? unsupported : unavailable)(
           socket,
-          mode === "invalid" ? "PID_PATH_ARGV_SENTINEL_/private/sensitive" : "w1:p1",
+          mode === "invalid"
+            ? "PID_PATH_ARGV_SENTINEL_/private/sensitive"
+            : mode === "unsupported"
+              ? "w1:p2"
+              : "w1:p1",
         );
         return Response.json({ accepted }, { status: accepted ? 200 : 403 });
       }
@@ -230,13 +234,28 @@ it("counts terminal real socket refusals, keeps diagnostics separate, and serves
       proofRefusalRate: 1,
       proofRefusalsPerMinute: 4 / 60,
     });
+    expect(snapshot.callers).toMatchObject([
+      {
+        claimedPane: "w1:p1",
+        window: {
+          minutes: 5,
+          proof: { attempts: 2, refusals: 2, byReason: { missing_binding: 1, closed_socket: 1 } },
+        },
+      },
+      {
+        claimedPane: "w1:p2",
+        window: { minutes: 5, proof: { attempts: 1, refusals: 1, byReason: { unsupported_platform: 1 } } },
+      },
+    ]);
+    expect(snapshot.callers).toHaveLength(2);
     expect(alerts).toEqual([]);
     const content = JSON.stringify(snapshot);
     expect(content).not.toMatch(
-      /PID_PATH_ARGV_SENTINEL|private-sensitive|private-argv|w1:p1|\/private\/sensitive|\bpid\b/u,
+      /PID_PATH_ARGV_SENTINEL|private-sensitive|private-argv|\/private\/sensitive|\bpid\b/u,
     );
     now += 5 * 60_000;
     expect(metrics.snapshot().windows[0].proof.attempts).toBe(0);
+    expect(metrics.snapshot().callers).toEqual([]);
     expect(metrics.snapshot().windows[1].proof.attempts).toBe(4);
     now += 55 * 60_000;
     expect(metrics.snapshot().windows[1].proof.attempts).toBe(0);

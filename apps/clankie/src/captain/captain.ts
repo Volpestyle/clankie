@@ -3367,7 +3367,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (JSON.stringify(currentRoute.owner) !== JSON.stringify(route.owner))
         throw new Error("Fleet health alert lead changed");
     };
-    return deliverNativeHealthAlert(route.owner, text, guard, route.native ?? route.parent, observeDelivery);
+    const workerText = `Worker ${pane} (${original.agent}). ${text}`;
+    return deliverNativeHealthAlert(
+      route.owner,
+      workerText,
+      guard,
+      route.native ?? route.parent,
+      observeDelivery,
+    );
   }
 
   /**

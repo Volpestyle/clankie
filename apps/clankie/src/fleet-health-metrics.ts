@@ -69,7 +69,7 @@ function window(
   };
 }
 
-/** Fixed counters leave this collector; unresolved alerts retain their bounded seat slots. */
+/** Bounded caller labels and counters; unresolved alerts retain their seat slots. */
 export class FleetHealthMetrics {
   private readonly now: () => number;
   private readonly startedAt: string;
@@ -123,13 +123,17 @@ export class FleetHealthMetrics {
   }
   observeProof(_operation: "fleet" | "project", event: LocalFleetProofDiagnostic, pane?: string): void {
     if (event.source === "native") {
-      if (FleetNativeDiagnosticReasonSchema.safeParse(event.event.reason).success)
-        this.record((counts) => increment(counts.nativeDiagnostics, event.event.reason));
+      if (FleetNativeDiagnosticReasonSchema.safeParse(event.event.reason).success) {
+        const update = (counts: Counters) => increment(counts.nativeDiagnostics, event.event.reason);
+        this.recordCaller(pane, this.record(update), update);
+      }
       return;
     }
     if (event.source === "transport") {
-      if (FleetTransportDiagnosticReasonSchema.safeParse(event.reason).success)
-        this.record((counts) => increment(counts.transportDiagnostics, event.reason));
+      if (FleetTransportDiagnosticReasonSchema.safeParse(event.reason).success) {
+        const update = (counts: Counters) => increment(counts.transportDiagnostics, event.reason);
+        this.recordCaller(pane, this.record(update), update);
+      }
       return;
     }
     if (event.source !== "proof" && event.source !== "proof_success") return;
@@ -144,7 +148,16 @@ export class FleetHealthMetrics {
     const minute = this.record(update);
     if (this.options.onAggregateProofAlert)
       this.observeAlert(event, minute, this.aggregate, (rates) => this.options.onAggregateProofAlert!(rates));
-    if (!pane || !/^w[\w]+:p[\w]+$/u.test(pane)) return;
+    const seat = this.recordCaller(pane, minute, update);
+    if (seat && pane)
+      this.observeAlert(event, minute, seat, (rates) => this.options.onProofAlert?.(pane, rates), pane);
+  }
+  private recordCaller(
+    pane: string | undefined,
+    minute: number,
+    update: (counts: Counters) => void,
+  ): AlertState | undefined {
+    if (!pane || !/^w\w{1,64}:p\w{1,64}$/u.test(pane)) return;
     let seat = this.seats.get(pane);
     if (!seat) {
       // Unknown caller panes cannot grow this internal alert map without bound.
@@ -155,7 +168,7 @@ export class FleetHealthMetrics {
     let bucket = seat.buckets.get(minute);
     if (!bucket) seat.buckets.set(minute, (bucket = empty()));
     update(bucket);
-    this.observeAlert(event, minute, seat, (rates) => this.options.onProofAlert?.(pane, rates), pane);
+    return seat;
   }
   private observeAlert(
     event: Extract<LocalFleetProofDiagnostic, { source: "proof" | "proof_success" }>,
@@ -243,6 +256,16 @@ export class FleetHealthMetrics {
       startedAt: this.startedAt,
       observedAt: new Date(now).toISOString(),
       totals: structuredClone(this.totals),
+      callers: [...this.seats]
+        .map(([claimedPane, seat]) => ({
+          claimedPane,
+          window: window(5, seat.buckets, minute),
+        }))
+        .sort(
+          (left, right) =>
+            right.window.proof.refusals - left.window.proof.refusals ||
+            left.claimedPane.localeCompare(right.claimedPane),
+        ),
       windows: [window(5, this.buckets, minute), window(60, this.buckets, minute)],
     };
   }

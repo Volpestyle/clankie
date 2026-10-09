@@ -4355,8 +4355,9 @@ paths:
       description: |
         Operator-only, content-free counts since service start and five/sixty-minute
         rates. Proof terminal admissions/refusals, receipt observations, native
-        retries and transport failures are separate. No PIDs, paths, argv, pane
-        IDs or report bodies. Contract: FleetHealthMetricsSnapshotSchema in
+        retries and transport failures are separate. Bounded five-minute caller
+        windows use claimedPane request labels, not authenticated identities.
+        No PIDs, paths, argv or report bodies. Contract: FleetHealthMetricsSnapshotSchema in
         packages/protocol/src/fleet-health-metrics.ts.
       security: [{ operatorBearer: [] }]
       responses:
