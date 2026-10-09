@@ -65,6 +65,9 @@ async function listen(service: Awaited<ReturnType<typeof createClankieApp>>) {
   return {
     url: `http://127.0.0.1:${address.port}`,
     wireRequests,
+    async waitForNotificationStream() {
+      await notificationStream.promise;
+    },
     async dropNotificationStream() {
       await notificationStream.promise;
       dropped = true;
@@ -369,6 +372,10 @@ export async function createConnectedLinearFixture(
     }
   });
   const client = new Client({ name: "linear-state-write-native-surrogate", version: "1" });
+  // The native lane captures ready tools when it initializes. Its fixture must
+  // finish the real provider catalog before creating that fixed session bank.
+  await host.warm();
+  await provider.waitForNotificationStream();
   let closed = false;
   client.onclose = () => {
     closed = true;
