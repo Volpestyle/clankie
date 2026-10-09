@@ -556,7 +556,7 @@ async function evidenceFetch(
           groups.flat(),
         )
       : await manifestsFor(repo, target);
-  for (const folder of [...new Set(manifestFolders)]) {
+  for (const folder of new Set(manifestFolders)) {
     const folderRelative = posix(relative(repo, folder));
     let manifest: EvidenceManifest;
     try {
