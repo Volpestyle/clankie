@@ -102,10 +102,24 @@ journal claims (including a name with an uncertain create receipt) exclude
 reuse. Selection prefers exact type, close model, then any idle iPhone or iPad
 of the same family and runtime unless `exact` is requested. A read-only plan
 lets the CLI announce creation and its expensive first boot before acquire.
-Planning grants no slot or authority; acquire rechecks both before effects. Simulator
-admission never waits: `tryAcquireSimulator` admits or returns the snapshot of
-what holds the slots, and the manager owns create and boot after admission, so
-a caller that disconnects never strands a lease (ADR 0249). The native helper's
+Planning grants no slot or authority; acquire rechecks both before effects. Simulator admission records a FIFO ticket in the same OS-locked journal. It
+contains the proven native owner, task holder, original device/model/runtime and
+exact flag, resolved existing device, creation time and five-minute stale deadline.
+The manager blocks on that ticket; notifications wake local waits, with bounded
+journal checks for pressure and other processes. A restart preserves live tickets.
+An atomic grant consumes only the front ticket for its device and pins that device
+in the reservation before preparation. Other device queues and the heavy FIFO are
+independent. `tryAcquireSimulator` remains the nonblocking atomic admission step;
+external clients use one blocking CLI/API acquire, not repeated acquire requests.
+The API accepts `waitMs` (0 for an immediate ticket receipt) and optional `ticketId`
+for resuming. The CLI defaults to a one-hour wait and sends acquire only once.
+The holder can cancel its own ticket; changing selection requires cancellation.
+Active waiters renew expiry; dead process births and stale tickets are pruned,
+while unknown process observations stay unknown. Queue position is per target;
+the wait estimate uses remaining idle time and one idle budget per preceding
+ticket, so renewals can extend it. Pressure/unknown occupancy can make it null.
+Cancel a queued ticket on a client wait abort; an admitted boot remains owned by
+the manager, so a caller that disconnects never strands a lease (ADR 0249). The native helper's
 `simulator-referents` mode reports which of this user's processes name a device
 (PID, parent and executable only) so status can attribute external devices to
 seats. `snapshot` does asynchronous reconciliation; the runtime publishes a

@@ -79,8 +79,26 @@ instead of silently borrowing a seat-level lease. Explicit owner calls outside a
 native harness must supply their own `holderId`. Older holderless leases remain
 releasable through their original root identity.
 
-Acquire answers within about 20 seconds; `--wait SECONDS` keeps polling and
-prints progress on stderr. Acquire is idempotent per seat, occupant and holder for a matching selection.
+Acquire takes one persisted FIFO ticket and blocks on the service, by default
+for up to one hour. `--wait SECONDS` bounds that single request (0 returns the
+ticket immediately); it never repeats acquire HTTP calls. Use `fleet resources`
+to see the holder, resolved target, per-device queue position and estimated wait.
+The estimate uses the current lease's remaining idle budget and queued rounds;
+heartbeats can extend it. Pressure or insufficient information reports a null
+estimate, never a promised deadline. A matching model request resolves an existing
+device even if busy; exact UDIDs never substitute or create a replacement.
+The queue persists across service restarts. Waiting calls renew their ticket's
+five-minute stale deadline; after a bounded wait ends, use the same selection and
+`ticketId` to resume before expiry, or cancel it explicitly:
+
+```sh
+clankie simulator cancel '{"seatId":"SEAT","holderId":"TASK","id":"TICKET_ID"}'
+```
+
+Only that live seat/occupant/holder can cancel. Cancel before changing the ticket's
+selection. Dead native owners and expired tickets leave the queue; unknown native
+observations do not prove an exit. Heavy ordering and unrelated device queues
+remain independent. A queued device is not a lease and grants no driving authority. Acquire is idempotent per seat, occupant and holder for a matching selection.
 Changing the device or exact model refuses while that holder has a different lease;
 concurrent requests validate their own selection instead of sharing another grant. Native Claude Bash hooks supply a session/subagent holder;
 Codex uses its executing thread ID even when a parent holder is inherited. The
@@ -97,10 +115,10 @@ sibling’s identity. Outcomes:
 
 - `acquired`: use `lease.deviceId`, the exact UDID, for every simulator command.
 - `booting`: the service is creating or booting your device and keeps going if
-  you stop waiting. Acquire again (or `--wait`) to get it.
+  you stop waiting. The blocking acquire waits for it; a bounded request can resume its matching lease.
 - `waiting`: every slot is held. `hint` and `blockers` name the seats holding
   leases, devices booted outside leases (and the seats whose processes use
-  them). Heavy commands use their own budget. Wait, or ask the named holder to release.
+  them). Heavy commands use their own budget. Keep the blocking request open; inspect its persisted ticket, or ask the named holder to release.
 - `rejected`: `reason` is the cause. `service_restarting`: retry shortly.
   `owner_unavailable`: your seat's live occupant could not be proven.
   `device_unavailable`: the type or runtime is not installed; pick one of

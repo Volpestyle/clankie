@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
+import { FleetResourceSnapshotSchema } from "../../protocol/src/fleet-resources.ts";
+import { ResourceStore } from "../src/store.ts";
 import { createResourceGovernor } from "../src/governor.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
 import { processIdentity } from "../src/process.ts";
@@ -631,6 +633,8 @@ it("a seat leases a device it booted by hand by its UDID without booting or dele
     ];
   });
   expect((await f.manager.acquire(f.request)).outcome).toBe("waiting");
+  const original = (await f.governor.snapshot()).queue.find((entry) => entry.holderId === f.owner.holderId)!;
+  expect(await f.manager.cancel(original.id, f.owner)).toEqual({ outcome: "cancelled" });
   const adopted = lease(
     await f.manager.acquire({
       seatId: f.owner.seatId,
@@ -756,7 +760,7 @@ it("planning is read-only and a missing create receipt still excludes its named 
   expect(lease(await f.http("/acquire", f.request)).phase).toBe("create-uncertain");
   expect(
     await f.http("/plan", { ...f.request, seatId: "another", occupantId: "another-occupant" }),
-  ).toMatchObject({ outcome: "planned", choice: "create" });
+  ).toMatchObject({ outcome: "waiting", reason: "simulator_capacity" });
   expect((await f.commands()).filter((args) => args[0] === "create")).toHaveLength(1);
 });
 
@@ -1038,3 +1042,113 @@ it("a missing native task holder cannot acquire the seat's existing lease", asyn
   });
   expect(lease(await f.http("/acquire", f.request)).id).toBe(held.id);
 });
+
+async function queued(f: Awaited<ReturnType<typeof fixture>>, holder: string) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const snapshot = FleetResourceSnapshotSchema.parse(await f.governor.snapshot());
+    const ticket = snapshot.queue.find((entry) => entry.holderId === holder);
+    if (ticket) return ticket;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Ticket for ${holder} was not persisted`);
+}
+
+it("grants three holders of one device in persisted FIFO order with one blocking HTTP acquire each", async () => {
+  const f = await fixture();
+  const a = lease(await f.http("/acquire", f.request));
+  const bRequest = { ...f.request, holderId: "fifo-b", deviceId: a.deviceId, exact: true, waitMs: 30_000 };
+  const cRequest = { ...bRequest, holderId: "fifo-c" };
+  const b = f.http("/acquire", bRequest);
+  const bTicket = await queued(f, "fifo-b");
+  const c = f.http("/acquire", cRequest);
+  const cTicket = await queued(f, "fifo-c");
+  expect(bTicket).toMatchObject({ kind: "simulator", deviceId: a.deviceId, exact: true, position: 1 });
+  expect(cTicket.position).toBe(2);
+  expect(bTicket.estimatedWaitMs).toBeGreaterThan(0);
+  expect(cTicket.queuedAtMs).toBeGreaterThanOrEqual(bTicket.queuedAtMs);
+  await f.http("/release", { id: a.id, owner: f.owner });
+  const bLease = lease(await b);
+  expect(bLease).toMatchObject({ holderId: "fifo-b", deviceId: a.deviceId });
+  expect((await f.governor.snapshot()).queue.map((entry) => entry.holderId)).toContain("fifo-c");
+  await f.http("/release", { id: bLease.id, owner: { ...f.owner, holderId: "fifo-b" } });
+  const cLease = lease(await c);
+  expect(cLease).toMatchObject({ holderId: "fifo-c", deviceId: a.deviceId });
+  await f.http("/release", { id: cLease.id, owner: { ...f.owner, holderId: "fifo-c" } });
+  expect((await f.governor.snapshot()).queue).toEqual([]);
+}, 30_000);
+
+it("keeps exact-device FIFO across a restart while another device and heavy work proceed independently", async () => {
+  const f = await fixture();
+  await f.governor.configure({
+    ...defaultResourcePolicy(),
+    heavySlots: 1,
+    simulatorSlots: 2,
+    minAvailableMemoryMb: 0,
+  });
+  const a = lease(await f.manager.acquire(f.request));
+  const otherId = randomUUID().toUpperCase();
+  await f.mutate((state) => {
+    state.devices[runtime]!.push({
+      udid: otherId,
+      name: "Other Phone",
+      state: "Shutdown",
+      isAvailable: true,
+      deviceTypeIdentifier: deviceType,
+    });
+  });
+  const bRequest = { ...f.request, holderId: "restart-b", deviceId: a.deviceId!, exact: true };
+  const b = await f.manager.acquire(bRequest);
+  expect(b.outcome).toBe("waiting");
+  const original = await queued(f, "restart-b");
+  await f.restart();
+  const other = lease(
+    await f.manager.acquire({ ...f.request, holderId: "other-device", deviceId: otherId, exact: true }),
+  );
+  expect(other.deviceId).toBe(otherId);
+  expect(await f.governor.runHeavy(process.execPath, ["-e", "process.exit(0)"])).toBe(0);
+  expect((await queued(f, "restart-b")).id).toBe(original.id);
+  const lateRequest = { ...bRequest, holderId: "restart-c" };
+  expect((await f.manager.acquire(lateRequest)).outcome).toBe("waiting");
+  await f.manager.release(a.id, f.owner);
+  // A later holder cannot jump an older ticket by asking again first.
+  expect((await f.manager.acquire(lateRequest)).outcome).toBe("waiting");
+  const bLease = lease(await f.manager.acquire({ ...bRequest, ticketId: original.id }));
+  expect(bLease.deviceId).toBe(a.deviceId);
+  await f.manager.release(bLease.id, { ...f.owner, holderId: "restart-b" });
+  const cLease = lease(await f.manager.acquire(lateRequest));
+  await f.manager.release(cLease.id, { ...f.owner, holderId: "restart-c" });
+  await f.manager.release(other.id, { ...f.owner, holderId: "other-device" });
+}, 30_000);
+
+it("allows only the ticket holder to cancel, refuses changed selections, and expires stale persisted tickets", async () => {
+  const f = await fixture();
+  const a = lease(await f.manager.acquire(f.request));
+  const bRequest = { ...f.request, holderId: "cancel-b", deviceId: a.deviceId!, exact: true };
+  expect((await f.manager.acquire(bRequest)).outcome).toBe("waiting");
+  const ticket = await queued(f, "cancel-b");
+  expect(await f.manager.cancel(ticket.id, { ...f.owner, holderId: "sibling" })).toMatchObject({
+    outcome: "rejected",
+  });
+  expect(await f.manager.acquire({ ...bRequest, exact: false })).toMatchObject({
+    outcome: "rejected",
+    reason: "ticket_unavailable",
+  });
+  expect((await queued(f, "cancel-b")).id).toBe(ticket.id);
+  expect(await f.manager.cancel(ticket.id, { ...f.owner, holderId: "cancel-b" })).toEqual({
+    outcome: "cancelled",
+  });
+  expect((await f.governor.snapshot()).queue).toEqual([]);
+  expect((await f.manager.acquire(bRequest)).outcome).toBe("waiting");
+  const stale = await queued(f, "cancel-b");
+  const store = new ResourceStore(join(f.directory, "governor"));
+  await store.transaction((state) => {
+    state.queue.find((entry) => entry.id === stale.id)!.simulator!.expiresAtMs = Date.now() - 1;
+  });
+  expect((await f.governor.snapshot()).queue).toEqual([]);
+  expect(await f.manager.acquire({ ...bRequest, ticketId: stale.id })).toMatchObject({
+    outcome: "rejected",
+    reason: "ticket_unavailable",
+  });
+  await f.manager.release(a.id, f.owner);
+}, 30_000);

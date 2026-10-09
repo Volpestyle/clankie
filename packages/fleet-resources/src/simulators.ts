@@ -34,6 +34,10 @@ export interface SimulatorAcquireRequest {
   readonly deviceId?: string;
   /** Never substitute a close model. */
   readonly exact?: boolean;
+  /** One server-side wait on the persisted ticket, rather than repeated client acquire calls. */
+  readonly waitMs?: number;
+  readonly ticketId?: string;
+  readonly waitSignal?: AbortSignal;
   /**
    * Current owner authority. It is checked before every native effect; the
    * caller's connection is not authority, so a disconnect never strands work.
@@ -109,7 +113,8 @@ export type SimulatorRejection =
   | "simulators_disabled"
   | "device_unavailable"
   | "seat_not_local"
-  | "internal_error";
+  | "internal_error"
+  | "ticket_unavailable";
 export type SimulatorResult =
   | {
       readonly outcome: "planned";
@@ -121,9 +126,10 @@ export type SimulatorResult =
       readonly lease: SimulatorLeaseView;
       readonly retryAfterMs?: number;
     }
-  | { readonly outcome: "released" }
+  | { readonly outcome: "released" | "cancelled" }
   | {
       readonly outcome: "waiting";
+      readonly ticket?: ResourceSnapshot["queue"][number];
       readonly reason: "simulator_capacity" | "shared_capacity" | "pressure";
       readonly blockers: SimulatorBlockers;
       readonly retryAfterMs: number;
@@ -263,6 +269,7 @@ export function createSimulatorManager(input: {
   let closed = false;
   let operations: Promise<unknown> = Promise.resolve();
   const acquisitions = new Map<string, Promise<SimulatorResult>>();
+  const acquisitionSelections = new Map<string, string>();
   /** Server-owned preparation by lease id; it outlives any request that started it. */
   const jobs = new Map<string, Promise<SimulatorResult>>();
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -270,7 +277,25 @@ export function createSimulatorManager(input: {
     operations = result.catch(() => undefined);
     return result;
   };
+  const waiters = new Set<() => void>();
+  const wake = () => {
+    for (const resolve of [...waiters]) resolve();
+  };
+  const waitForChange = (ms: number, signal?: AbortSignal) =>
+    new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        waiters.delete(done);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      waiters.add(done);
+      signal?.addEventListener("abort", done, { once: true });
+      if (signal?.aborted) done();
+    });
   const changed = () => {
+    wake();
     try {
       input.onChange?.();
     } catch {
@@ -435,7 +460,10 @@ export function createSimulatorManager(input: {
           detail: `${device.name} (${device.udid}) is leased or unavailable.`,
         };
       if (device.state === "Shutting Down")
-        return { kind: "refuse", detail: `${device.name} is shutting down; retry when it is Shutdown.` };
+        return {
+          kind: "waiting",
+          detail: `${device.name} is shutting down; wait for that device to be Shutdown.`,
+        };
       return { kind: "existing", device };
     }
     const deviceType = request.deviceType!,
@@ -464,6 +492,18 @@ export function createSimulatorManager(input: {
       );
       if (sameKind) return { kind: "existing", device: sameKind };
     }
+    const busy = devices.find(
+      (device) =>
+        device.available &&
+        device.runtime === runtime &&
+        device.deviceType &&
+        (request.exact ? device.deviceType === deviceType : sameFamily(device.deviceType, deviceType)),
+    );
+    if (busy)
+      return {
+        kind: "waiting",
+        detail: `Matching device ${busy.name} (${busy.udid}) is busy; wait for it rather than creating a replacement.`,
+      };
     if (!catalog) return { kind: "create", deviceType, runtime };
     const typeInstalled = catalog.deviceTypes.some((row) => row.identifier === deviceType);
     const runtimeInstalled = catalog.runtimes.includes(runtime);
@@ -562,9 +602,10 @@ export function createSimulatorManager(input: {
           const devices = await inventory();
           const leases = await reservations();
           const others = leases.filter((entry) => entry.id !== lease.id);
-          let plan = await choose(request, devices, others);
+          const pinned = lease.deviceId ? { ...request, deviceId: lease.deviceId } : request;
+          let plan = await choose(pinned, devices, others);
           if (plan.kind === "create")
-            plan = await choose(request, devices, others, await adapter.catalog().catch(() => undefined));
+            plan = await choose(pinned, devices, others, await adapter.catalog().catch(() => undefined));
           if (plan.kind === "waiting") {
             await forget(lease);
             return blockersFor("simulator_capacity", await input.governor.snapshot(), plan.detail);
@@ -786,7 +827,8 @@ export function createSimulatorManager(input: {
         );
       return resume(existing, request, owner);
     }
-    const { policy } = await input.governor.snapshot();
+    const resourceSnapshot = await input.governor.snapshot();
+    const { policy } = resourceSnapshot;
     if (policy.simulatorSlots === 0)
       return rejected("simulators_disabled", "The owner's simulator limit is 0.");
     let devices: readonly SimulatorDevice[];
@@ -800,16 +842,79 @@ export function createSimulatorManager(input: {
     let preview = await choose(request, devices, leases);
     if (preview.kind === "create")
       preview = await choose(request, devices, leases, await adapter.catalog().catch(() => undefined));
-    if (preview.kind === "waiting")
-      return blockersFor("simulator_capacity", await input.governor.snapshot(), preview.detail);
     if (preview.kind === "refuse")
       return rejected("device_unavailable", preview.detail, preview.alternatives);
+    // Resolve an existing target even while another holder owns it. Waiting never
+    // changes an exact request or creates a replacement for a busy existing device.
+    const targetPlan = await choose(
+      request,
+      devices.map((device) => ({ ...device, state: "Shutdown" })),
+      [],
+    );
+    const queued = await input.governor
+      .queueSimulator({
+        seatId: owner.seatId,
+        occupantId: owner.occupantId,
+        holderId: owner.holderId!,
+        ...(owner.fleet ? { fleet: owner.fleet } : {}),
+        ownerProcesses: [...owner.processes],
+        ...(request.ticketId ? { ticketId: request.ticketId } : {}),
+        selection: {
+          ...(request.deviceId ? { deviceId: request.deviceId.toUpperCase() } : {}),
+          ...(request.deviceType ? { deviceType: request.deviceType } : {}),
+          ...(request.runtime ? { runtime: request.runtime } : {}),
+          exact: request.exact ?? false,
+          ...(targetPlan.kind === "existing" ? { targetDeviceId: targetPlan.device.udid.toUpperCase() } : {}),
+        },
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.message.startsWith("Simulator ticket")) return undefined;
+        throw error;
+      });
+    if (!queued)
+      return rejected(
+        "ticket_unavailable",
+        "Ticket expired, was cancelled, or belongs to a different selection. Cancel the original ticket before changing it.",
+      );
+    const previous = resourceSnapshot.queue.find((entry) => entry.id === queued.id);
+    if (!previous || previous.deviceId !== queued.simulator?.targetDeviceId) changed();
+    const target = queued.simulator?.targetDeviceId;
+    if (target) preview = await choose({ ...request, deviceId: target }, devices, leases);
+    const waiting = async (result: SimulatorResult): Promise<SimulatorResult> => {
+      if (result.outcome !== "waiting") return result;
+      const ticket = (await input.governor.snapshot()).queue.find((entry) => entry.id === queued.id);
+      return { ...result, ...(ticket ? { ticket } : {}) };
+    };
+    if (
+      !request.deviceId &&
+      preview.kind === "existing" &&
+      preview.device.state !== "Shutdown" &&
+      !leases.some((lease) => lease.deviceId === preview.device.udid.toUpperCase())
+    )
+      return waiting(await blockersFor("simulator_capacity", await input.governor.snapshot()));
+    if (preview.kind === "waiting")
+      return waiting(
+        await blockersFor("simulator_capacity", await input.governor.snapshot(), preview.detail),
+      );
+    if (preview.kind === "refuse") {
+      await input.governor.cancelSimulatorTicket(queued.id, owner);
+      changed();
+      return rejected("device_unavailable", preview.detail, preview.alternatives);
+    }
     const excluding = request.deviceId && preview.kind === "existing" ? preview.device.udid : undefined;
     let authorityLost = false,
       inventoryLost = false;
     let admission: Awaited<ReturnType<FleetResourceGovernor["tryAcquireSimulator"]>>;
     try {
       admission = await input.governor.tryAcquireSimulator({
+        ticketId: queued.id,
+        ...(preview.kind === "existing"
+          ? {
+              deviceId: preview.device.udid.toUpperCase(),
+              ...(preview.device.deviceType ? { deviceType: preview.device.deviceType } : {}),
+              runtime: preview.device.runtime,
+            }
+          : {}),
         seatId: owner.seatId,
         occupantId: owner.occupantId,
         ...(owner.holderId === undefined ? {} : { holderId: owner.holderId }),
@@ -825,7 +930,7 @@ export function createSimulatorManager(input: {
             inventoryLost = true;
             throw error;
           }
-          if (!(await authorized(request))) {
+          if (request.waitSignal?.aborted || !(await authorized(request))) {
             authorityLost = true;
             throw new Error("Simulator authorization changed");
           }
@@ -833,7 +938,11 @@ export function createSimulatorManager(input: {
         },
       });
     } catch (error) {
-      if (authorityLost) return revoked();
+      if (authorityLost) {
+        await input.governor.cancelSimulatorTicket(queued.id, owner);
+        changed();
+        return revoked();
+      }
       if (inventoryLost)
         return rejected("inventory_unavailable", "CoreSimulator inventory could not be read.");
       if (error instanceof SimulatorsDisabledError)
@@ -842,7 +951,7 @@ export function createSimulatorManager(input: {
         return rejected("service_restarting", "The resource governor is stopping.");
       throw error;
     }
-    if (!admission.admitted) return blockersFor(admission.reason, admission.snapshot);
+    if (!admission.admitted) return waiting(await blockersFor(admission.reason, admission.snapshot));
     changed();
     return respond(
       startJob(admission.lease, request, owner),
@@ -897,11 +1006,45 @@ export function createSimulatorManager(input: {
         request.occupantId,
         request.holderId,
       ]);
+      const selection = JSON.stringify([
+        request.deviceId?.toUpperCase(),
+        request.deviceType,
+        request.runtime,
+        request.exact ?? false,
+      ]);
       const pending = acquisitions.get(key);
+      if (pending && acquisitionSelections.get(key) !== selection)
+        return Promise.resolve(
+          rejected(
+            "lease_unavailable",
+            "This holder has a different acquire pending; cancel its ticket before changing selection.",
+          ),
+        );
       // Serialize a holder's requests, but never reuse another request's grant:
       // its exact UDID/model/runtime may differ, even while boot is in flight.
       if (pending) return pending.then(() => manager.acquire(request));
-      const result = acquire(request)
+      const result = (async () => {
+        const deadline = Date.now() + (request.waitMs ?? 0);
+        let result = await acquire(request);
+        let ticketId = result.outcome === "waiting" ? result.ticket?.id : undefined;
+        while ((result.outcome === "waiting" || result.outcome === "booting") && Date.now() < deadline) {
+          if (closed) return rejected("service_restarting");
+          if (!(await authorized(request))) {
+            if (ticketId) await input.governor.cancelSimulatorTicket(ticketId, request);
+            return revoked();
+          }
+          await waitForChange(Math.min(RETRY_MS, deadline - Date.now()), request.waitSignal);
+          if (request.waitSignal?.aborted) {
+            if (result.outcome === "booting") return result;
+            if (ticketId) await input.governor.cancelSimulatorTicket(ticketId, request);
+            changed();
+            return { outcome: "cancelled" } as const;
+          }
+          result = await acquire({ ...request, ...(ticketId ? { ticketId } : {}) });
+          if (result.outcome === "waiting") ticketId = result.ticket?.id ?? ticketId;
+        }
+        return result;
+      })()
         .then((result): SimulatorResult => {
           // A reservation can still lack a device when a poll arrives. Check
           // again after preparation rather than treating that absence as mismatch.
@@ -917,9 +1060,26 @@ export function createSimulatorManager(input: {
             );
           return result;
         })
-        .finally(() => acquisitions.delete(key));
+        .finally(() => {
+          acquisitions.delete(key);
+          acquisitionSelections.delete(key);
+        });
       acquisitions.set(key, result);
+      acquisitionSelections.set(key, selection);
       return result;
+    },
+    async cancel(
+      id: string,
+      owner: SimulatorOwner,
+      authority?: SimulatorRequestOptions,
+    ): Promise<SimulatorResult> {
+      const current = await prove(owner);
+      if (!(await authorized(authority))) return revoked();
+      if (!current || !sameSeat(current, owner)) return rejected("stale_owner");
+      const cancelled = await input.governor.cancelSimulatorTicket(id, current);
+      if (!cancelled) return rejected("ticket_unavailable");
+      changed();
+      return { outcome: "cancelled" } as const;
     },
     /** Read-only preflight for install/launch/drive clients; never adopts another holder. */
     async verify(
@@ -1066,6 +1226,7 @@ export function createSimulatorManager(input: {
     },
     close(): void {
       closed = true;
+      wake();
       if (timer) clearInterval(timer);
       timer = undefined;
     },

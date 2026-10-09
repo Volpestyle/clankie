@@ -86,6 +86,13 @@ export const FleetResourceSnapshotSchema = z
             pid: z.number().int().min(2).max(2_147_483_647).optional(),
             executable: z.string().min(1).max(256).optional(),
             queuedAtMs: timestamp,
+            deviceId: reference.optional(),
+            deviceType: reference.optional(),
+            runtime: reference.optional(),
+            exact: z.boolean().optional(),
+            expiresAtMs: timestamp.optional(),
+            position: z.number().int().positive().optional(),
+            estimatedWaitMs: timestamp.nullable().optional(),
           })
           .strict(),
       )
@@ -110,7 +117,12 @@ const SimulatorSelectionSchema = SimulatorSeatSchema.extend({
 }).strict();
 export const FleetSimulatorRequestSchema = z.discriminatedUnion("action", [
   SimulatorSelectionSchema.extend({ action: z.literal("plan") }).strict(),
-  SimulatorSelectionSchema.extend({ action: z.literal("acquire") }).strict(),
+  SimulatorSelectionSchema.extend({
+    action: z.literal("acquire"),
+    waitMs: z.number().int().min(0).max(3_600_000).optional(),
+    ticketId: reference.optional(),
+  }).strict(),
+  SimulatorSeatSchema.extend({ action: z.literal("cancel"), id: reference }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("verify"), id: reference, deviceId: udid }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("touch"), id: reference }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("release"), id: reference }).strict(),
@@ -232,6 +244,7 @@ const FLEET_SIMULATOR_REJECTIONS = [
   "seat_not_local",
   /** An unexpected service failure; the service log has the cause. */
   "internal_error",
+  "ticket_unavailable",
 ] as const;
 export const FleetSimulatorResultSchema = z.discriminatedUnion("outcome", [
   z
@@ -249,10 +262,11 @@ export const FleetSimulatorResultSchema = z.discriminatedUnion("outcome", [
       retryAfterMs: z.number().int().min(0).max(600_000).optional(),
     })
     .strict(),
-  z.object({ outcome: z.literal("released") }).strict(),
+  z.object({ outcome: z.enum(["released", "cancelled"]) }).strict(),
   z
     .object({
       outcome: z.literal("waiting"),
+      ticket: FleetResourceSnapshotSchema.shape.queue.element.optional(),
       reason: z.enum(["simulator_capacity", "shared_capacity", "pressure"]),
       blockers: FleetSimulatorBlockersSchema,
       retryAfterMs: z.number().int().min(0).max(600_000),

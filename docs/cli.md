@@ -2517,12 +2517,29 @@ one the seat booted by hand, and optional `exact`. The host proves the current
 local seat and occupant, then leases an idle existing device of that type, a
 close model, then any idle iPhone or iPad of the same family on that runtime
 unless `exact`, or creates and boots a new one,
-and records its exact UUID. It answers within about 20 seconds: `acquired`,
-`booting` (the service keeps booting; acquire again, it is idempotent per seat, occupant and holder),
-`waiting` with `blockers` and a `hint` naming leases by seat, devices booted
-outside leases with the seats using them, heavy holders or pressure, or
-`rejected` with its cause (`service_restarting` is HTTP 503). `--wait` polls up
-to SECONDS, printing progress on stderr. `simulator touch JSON` and
+and records its exact UUID. Acquire persists one FIFO ticket and blocks on it,
+by default for up to an hour. `--wait SECONDS` bounds that one service request;
+`--wait 0` returns an immediate `waiting` ticket receipt. The CLI does not poll
+acquire. The API accepts `waitMs` and optional `ticketId` to resume a bounded wait
+with the same selection. Busy exact devices wait for that device, and matching
+model requests resolve an existing target rather than creating a replacement.
+The ticket survives service restarts and records the proven seat/occupant/holder,
+selection, exact flag and creation time. `fleet resources` shows its target,
+per-device position, expiry and `estimatedWaitMs`: an idle-budget heuristic that
+heartbeats can extend, or null under pressure/unknown conditions. Other device
+queues and heavy admission remain independent.
+
+`simulator cancel JSON` accepts the same seat/fleet/holder and ticket `id`.
+Only that holder can cancel; cancel before changing its selection. Active waits
+renew a five-minute stale deadline. Expired tickets and proven dead native owners
+leave the queue; unknown observations do not establish exit. A ticket is not a
+lease and never authorizes driving a device. An ended bounded wait can resume its
+ticket before expiry; a client wait abort cancels the pending ticket. Once admitted,
+the service keeps booting and retains its lease even if the caller disconnects.
+Results include `acquired`, `booting`, `waiting` with ticket/blockers/hint,
+`cancelled`, and `rejected` with its cause (`service_restarting` is HTTP 503).
+
+`simulator touch JSON` and
 `simulator release JSON` accept `seatId`, optional `fleet` and `holderId`, and lease `id`.
 `simulator verify JSON` accepts the same seat/fleet/holder, lease `id` and
 `deviceId`. It checks the live native occupant, exact owned device and booted

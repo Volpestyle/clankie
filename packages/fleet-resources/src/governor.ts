@@ -17,12 +17,29 @@ import {
   type ResourceWaitOptions,
   type SimulatorReservation,
   type SimulatorUpdate,
+  type ResourceQueueEntry,
 } from "./model.ts";
 import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
 import { resourceCapacity, ResourcePressureSampler } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
 import { heavyJobEnvironment } from "./parallelism.ts";
 
+const sameQueue = (
+  a: NonNullable<ResourceQueueEntry["simulator"]>,
+  b: NonNullable<ResourceQueueEntry["simulator"]>,
+) =>
+  a.targetDeviceId && b.targetDeviceId
+    ? a.targetDeviceId === b.targetDeviceId
+    : a.runtime === b.runtime && a.deviceType === b.deviceType;
+const ticketOwner = (
+  entry: ResourceQueueEntry,
+  owner: { seatId: string; holderId?: string; occupantId: string; fleet?: string },
+) =>
+  entry.kind === "simulator" &&
+  entry.seatId === owner.seatId &&
+  entry.holderId === owner.holderId &&
+  entry.simulator?.occupantId === owner.occupantId &&
+  (entry.simulator?.fleet ?? "default") === (owner.fleet ?? "default");
 const abort = () => new DOMException("Fleet resource wait cancelled", "AbortError");
 type SimulatorBlock = "simulator_capacity" | "shared_capacity" | "pressure";
 /** The owner's simulator limit is zero; distinct from an unavailable registry. */
@@ -92,6 +109,7 @@ export function createResourceGovernor(
     };
     const queue = [];
     for (const entry of state.queue) {
+      if (entry.simulator && entry.simulator.expiresAtMs <= Date.now()) continue;
       try {
         if (matches(observe(entry.owner), entry.owner)) queue.push(entry);
       } catch {
@@ -137,6 +155,7 @@ export function createResourceGovernor(
     const usage = state.leases.some((lease) => lease.kind === "simulator" && lease.deviceId)
       ? await observeSimulatorUsage()
       : new Map();
+    const sampledPressure = await pressure.sample(state.policy);
     return {
       schemaVersion: 1,
       policy: state.policy,
@@ -146,7 +165,7 @@ export function createResourceGovernor(
         used: state.leases.filter((lease) => lease.kind === "heavy").length,
         simulatorUsed: state.leases.filter((lease) => lease.kind === "simulator").length,
       },
-      pressure: await pressure.sample(state.policy),
+      pressure: sampledPressure,
       leases: state.leases.map((lease) => ({
         id: lease.id,
         kind: lease.kind,
@@ -162,15 +181,49 @@ export function createResourceGovernor(
         lastUsedAtMs: lease.lastUsedAtMs,
         ...(lease.kind === "heavy" && lease.runner ? { pid: lease.runner.pid } : {}),
       })),
-      queue: state.queue.map(({ id, kind, seatId, executable, queuedAtMs, owner, holderId }) => ({
-        id,
-        kind,
-        ...(seatId ? { seatId } : {}),
-        ...(executable ? { executable } : {}),
-        queuedAtMs,
-        pid: owner.pid,
-        ...(holderId ? { holderId } : {}),
-      })),
+      queue: state.queue.map(
+        ({ id, kind, seatId, executable, queuedAtMs, owner, holderId, simulator }, index) => ({
+          id,
+          kind,
+          ...(seatId ? { seatId } : {}),
+          ...(executable ? { executable } : {}),
+          queuedAtMs,
+          pid: owner.pid,
+          ...(holderId ? { holderId } : {}),
+          ...(simulator
+            ? {
+                ...((simulator.targetDeviceId ?? simulator.deviceId)
+                  ? { deviceId: simulator.targetDeviceId ?? simulator.deviceId }
+                  : {}),
+                ...(simulator.deviceType ? { deviceType: simulator.deviceType } : {}),
+                ...(simulator.runtime ? { runtime: simulator.runtime } : {}),
+                exact: simulator.exact,
+                expiresAtMs: simulator.expiresAtMs,
+                position: state.queue
+                  .slice(0, index + 1)
+                  .filter((entry) => entry.simulator && sameQueue(entry.simulator, simulator)).length,
+                // Idle-timeout heuristic, not a promised release: heartbeats can extend it.
+                estimatedWaitMs: sampledPressure.healthy
+                  ? (() => {
+                      const leases = state.leases.filter(
+                        (lease): lease is SimulatorReservation => lease.kind === "simulator",
+                      );
+                      const held = leases.find((lease) => lease.deviceId === simulator.targetDeviceId);
+                      const ahead = state.queue
+                        .slice(0, index)
+                        .filter((entry) => entry.simulator && sameQueue(entry.simulator, simulator)).length;
+                      if (held)
+                        return (
+                          Math.max(0, held.lastUsedAtMs + state.policy.simulatorIdleMs - Date.now()) +
+                          ahead * state.policy.simulatorIdleMs
+                        );
+                      return leases.length < state.policy.simulatorSlots && !ahead ? 0 : null;
+                    })()
+                  : null,
+              }
+            : {}),
+        }),
+      ),
     };
   }
   async function snapshot() {
@@ -225,7 +278,7 @@ export function createResourceGovernor(
               return undefined;
             };
             if (
-              state.queue[0]?.id !== id ||
+              state.queue.find((entry) => entry.kind === "heavy")?.id !== id ||
               state.leases.filter((lease) => lease.kind === "heavy").length >= resourceCapacity(state.policy)
             )
               return blocked();
@@ -244,7 +297,7 @@ export function createResourceGovernor(
               createdAtMs: at,
               lastUsedAtMs: at,
             };
-            state.queue.shift();
+            state.queue = state.queue.filter((entry) => entry.id !== id);
             state.leases.push(next);
             return structuredClone(next);
           },
@@ -448,6 +501,58 @@ export function createResourceGovernor(
       void job.finally(() => active.delete(job)).catch(() => undefined);
       return job;
     },
+    async queueSimulator(options) {
+      const proof = options.ownerProcesses?.[0];
+      const owner = proof && (await processIdentity(proof.pid));
+      if (!owner || owner.startTime !== proof?.startTime || !options.holderId)
+        throw new Error("Simulator ticket owner unavailable");
+      return store.transaction(async (state) => {
+        await reconcile(state);
+        const existing = state.queue.find((entry) => ticketOwner(entry, options));
+        if (options.ticketId && existing?.id !== options.ticketId)
+          throw new Error("Simulator ticket unavailable");
+        if (existing) {
+          const selection = existing.simulator!;
+          if (
+            selection.deviceId !== options.selection.deviceId ||
+            selection.deviceType !== options.selection.deviceType ||
+            selection.runtime !== options.selection.runtime ||
+            selection.exact !== options.selection.exact
+          )
+            throw new Error("Simulator ticket selection changed; cancel it first");
+          selection.expiresAtMs = Date.now() + 300_000;
+          if (!selection.targetDeviceId && options.selection.targetDeviceId)
+            selection.targetDeviceId = options.selection.targetDeviceId;
+          return structuredClone(existing);
+        }
+        if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
+        const ticket: ResourceQueueEntry = {
+          id: randomUUID(),
+          token: randomUUID(),
+          kind: "simulator",
+          seatId: options.seatId,
+          holderId: options.holderId!,
+          owner,
+          queuedAtMs: Date.now(),
+          simulator: {
+            ...options.selection,
+            occupantId: options.occupantId,
+            ...(options.fleet ? { fleet: options.fleet } : {}),
+            expiresAtMs: Date.now() + 300_000,
+          },
+        };
+        state.queue.push(ticket);
+        return structuredClone(ticket);
+      });
+    },
+    async cancelSimulatorTicket(id, owner) {
+      return store.transaction((state) => {
+        const ticket = state.queue.find((entry) => entry.id === id && ticketOwner(entry, owner));
+        if (!ticket) return false;
+        state.queue = state.queue.filter((entry) => entry.id !== ticket.id);
+        return true;
+      });
+    },
     async tryAcquireSimulator(options) {
       if (
         !options.seatId ||
@@ -467,8 +572,35 @@ export function createResourceGovernor(
           refusal = { reason, state: structuredClone(state) };
           return undefined;
         };
-        // Simulators never queue: a caller that is told what holds the slots
-        // polls again, so no ticket outlives its request (VUH-1816).
+        if (options.ticketId) {
+          const index = state.queue.findIndex(
+            (entry) => entry.id === options.ticketId && ticketOwner(entry, options),
+          );
+          if (index < 0) throw new Error("Simulator ticket unavailable");
+          const ticket = state.queue[index]!;
+          if (
+            ticket.simulator?.targetDeviceId &&
+            options.deviceId?.toUpperCase() !== ticket.simulator.targetDeviceId
+          )
+            throw new Error("Simulator ticket target changed");
+          if (
+            state.queue
+              .slice(0, index)
+              .some((entry) => entry.simulator && sameQueue(entry.simulator, ticket.simulator!))
+          )
+            return blocked("simulator_capacity");
+          if (
+            options.deviceId &&
+            state.leases.some(
+              (entry) =>
+                entry.kind === "simulator" &&
+                entry.deviceId?.toUpperCase() === options.deviceId!.toUpperCase(),
+            )
+          )
+            return blocked("simulator_capacity");
+        }
+        if (!options.ticketId && state.queue.some((entry) => entry.kind === "simulator"))
+          return blocked("simulator_capacity");
         const external = await options.externalActive();
         if (!Number.isSafeInteger(external) || external < 0)
           throw new Error("Simulator inventory unavailable");
@@ -484,6 +616,9 @@ export function createResourceGovernor(
           token: randomUUID(),
           kind: "simulator",
           phase: "reserved",
+          ...(options.deviceId ? { deviceId: options.deviceId } : {}),
+          ...(options.deviceType ? { deviceType: options.deviceType } : {}),
+          ...(options.runtime ? { runtime: options.runtime } : {}),
           seatId: options.seatId,
           occupantId: options.occupantId,
           ...(options.holderId ? { holderId: options.holderId } : {}),
@@ -495,6 +630,7 @@ export function createResourceGovernor(
           lastUsedAtMs: at,
         };
         state.leases.push(next);
+        if (options.ticketId) state.queue = state.queue.filter((entry) => entry.id !== options.ticketId);
         return structuredClone(next);
       });
       if (lease) return { admitted: true as const, lease };

@@ -71,13 +71,22 @@ export function createFleetResourceRoutes(
               ...(request.runtime === undefined ? {} : { runtime: request.runtime }),
               ...(request.deviceId === undefined ? {} : { deviceId: request.deviceId }),
               ...(request.exact === undefined ? {} : { exact: request.exact }),
+              ...(request.action === "acquire"
+                ? {
+                    waitSignal: context.req.raw.signal,
+                    ...(request.waitMs === undefined ? {} : { waitMs: request.waitMs }),
+                    ...(request.ticketId === undefined ? {} : { ticketId: request.ticketId }),
+                  }
+                : {}),
               authorize: owned,
             })
-          : request.action === "verify"
-            ? await resources!.simulators.verify(request.id, request.deviceId, owner, options)
-            : request.action === "touch"
-              ? await resources!.simulators.touch(request.id, owner, options)
-              : await resources!.simulators.release(request.id, owner, options);
+          : request.action === "cancel"
+            ? await resources!.simulators.cancel(request.id, owner, options)
+            : request.action === "verify"
+              ? await resources!.simulators.verify(request.id, request.deviceId, owner, options)
+              : request.action === "touch"
+                ? await resources!.simulators.touch(request.id, owner, options)
+                : await resources!.simulators.release(request.id, owner, options);
       return context.json(
         FleetSimulatorResultSchema.parse(result),
         result.outcome === "rejected" ? (result.reason === "service_restarting" ? 503 : 409) : 200,

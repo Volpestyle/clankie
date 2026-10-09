@@ -452,18 +452,32 @@ it("names a hand-booted simulator, the seat whose process uses it, and tells tha
     env: { HOME: f.root, CLANKIE_OPERATOR_TOKEN: bearer },
     operatorCredentialStore: new FileCredentialStore(join(f.root, "credentials.json")),
     progress: (line: string) => progress.push(line),
-    // The owner shuts the device down while the CLI waits.
-    sleep: async () => {
-      await f.mutate((value) => {
-        (value.devices[simulatorRuntime]![0] as { state: string }).state = "Shutdown";
-      });
-    },
   };
-  const result = FleetSimulatorResultSchema.parse(
-    await runSimulatorCommand(["acquire", JSON.stringify(f.acquire), "--wait", "30"], options),
-  );
-  const waiting = progress.find((line) => line.includes("waiting (simulator_capacity)"));
-  expect(waiting).toContain("used by seat resource-seat");
+  let acquirePosts = 0;
+  const originalFetch = fetch;
+  const pending = runSimulatorCommand(["acquire", JSON.stringify(f.acquire), "--wait", "30"], {
+    ...options,
+    fetchImpl: async (url, init) => {
+      if (init?.body && JSON.parse(String(init.body)).action === "acquire") acquirePosts++;
+      return originalFetch(url, init);
+    },
+  });
+  void pending.catch(() => undefined);
+  const deadline = Date.now() + 10_000;
+  let ticket: ReturnType<typeof FleetResourceSnapshotSchema.parse>["queue"][number] | undefined;
+  while (Date.now() < deadline) {
+    await f.resources.refresh();
+    ticket = f.resources.status()?.queue.find((entry) => entry.kind === "simulator");
+    if (ticket) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  expect(ticket).toMatchObject({ holderId: f.acquire.holderId, deviceId: udid, position: 1 });
+  // The owner shuts the device down while the same CLI request remains blocked.
+  await f.mutate((value) => {
+    (value.devices[simulatorRuntime]![0] as { state: string }).state = "Shutdown";
+  });
+  const result = FleetSimulatorResultSchema.parse(await pending);
+  expect(acquirePosts).toBe(1);
   // The freed device is the exact idle type, so it is leased instead of creating one.
   expect(result).toMatchObject({ outcome: "acquired", lease: { deviceId: udid, origin: "existing" } });
   expect((await f.commands()).some((command) => command[0] === "create")).toBe(false);
@@ -567,7 +581,7 @@ it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal 
   const { holderId: _holder, ...nativeAcquire } = f.acquire;
   const results = await Promise.all(
     holderIds.map((id) =>
-      runSimulatorCommand(["acquire", JSON.stringify(nativeAcquire)], options(id)).then(
+      runSimulatorCommand(["acquire", JSON.stringify(nativeAcquire), "--wait", "0"], options(id)).then(
         FleetSimulatorResultSchema.parse,
       ),
     ),

@@ -211,7 +211,7 @@ function formatResourceLines(resources: InstallDoctorReport["resources"]): strin
     ),
     ...resources.queue.map(
       (entry) =>
-        `    Queued ${holder(entry)} · ${entry.kind}${entry.executable ? ` ${clean(entry.executable)}` : ""}`,
+        `    Queued ${holder(entry)} · ${entry.kind}${entry.executable ? ` ${clean(entry.executable)}` : ""}${entry.deviceId ? ` ${clean(entry.deviceId)}` : ""}${entry.position ? ` · position ${entry.position}` : ""}${entry.estimatedWaitMs === undefined ? "" : entry.estimatedWaitMs === null ? " · wait unknown" : ` · estimated wait ${Math.ceil(entry.estimatedWaitMs / 1000)}s`}`,
     ),
   ];
 }

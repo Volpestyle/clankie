@@ -69,6 +69,16 @@ export interface HeavyLease {
   runner?: ProcessIdentity;
   descendants?: ProcessProof[];
 }
+export interface SimulatorTicketSelection {
+  occupantId: string;
+  fleet?: string;
+  deviceId?: string;
+  deviceType?: string;
+  runtime?: string;
+  exact: boolean;
+  targetDeviceId?: string;
+  expiresAtMs: number;
+}
 export interface ResourceQueueEntry {
   id: string;
   token: string;
@@ -78,6 +88,7 @@ export interface ResourceQueueEntry {
   executable?: string;
   queuedAtMs: number;
   owner: ProcessIdentity;
+  simulator?: SimulatorTicketSelection;
 }
 export interface ResourceState {
   schemaVersion: 1;
@@ -161,12 +172,34 @@ export const ResourceStateSchema = z
             executable: SafeText.optional(),
             queuedAtMs: Timestamp,
             owner: IdentitySchema,
+            simulator: z
+              .object({
+                occupantId: SafeText,
+                fleet: SafeText.optional(),
+                deviceId: SafeText.optional(),
+                deviceType: SafeText.optional(),
+                runtime: SafeText.optional(),
+                exact: z.boolean(),
+                targetDeviceId: SafeText.optional(),
+                expiresAtMs: Timestamp,
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )
       .max(512),
   })
-  .strict();
+  .strict()
+  .refine(
+    (state) =>
+      state.queue.every((entry) =>
+        entry.kind === "heavy"
+          ? entry.simulator === undefined
+          : Boolean(entry.simulator && entry.seatId && entry.holderId),
+      ),
+    "Simulator tickets require their selection and native holder",
+  );
 export interface ResourceSnapshot {
   schemaVersion: 1;
   policy: FleetResourcePolicy;
@@ -193,6 +226,13 @@ export interface ResourceSnapshot {
     executable?: string;
     queuedAtMs: number;
     pid?: number;
+    deviceId?: string;
+    deviceType?: string;
+    runtime?: string;
+    exact?: boolean;
+    expiresAtMs?: number;
+    position?: number;
+    estimatedWaitMs?: number | null;
   }[];
 }
 export interface ResourceWaitOptions {
@@ -209,6 +249,10 @@ export interface SimulatorAcquireOptions {
   ownerProcesses?: ProcessProof[];
   /** Read inside the registry lock, so admission and the count agree. */
   externalActive: () => Promise<number>;
+  ticketId?: string;
+  deviceId?: string;
+  deviceType?: string;
+  runtime?: string;
 }
 export type SimulatorAdmission =
   | { admitted: true; lease: SimulatorReservation }
@@ -230,7 +274,16 @@ export interface FleetResourceGovernor {
     args: readonly string[],
     options?: ResourceWaitOptions & { seatId?: string; holderId?: string },
   ): Promise<number>;
-  /** Admit now or say what holds the slots; never waits (VUH-1816). */
+  queueSimulator(
+    options: Omit<SimulatorAcquireOptions, "externalActive"> & {
+      selection: Omit<SimulatorTicketSelection, "occupantId" | "fleet" | "expiresAtMs">;
+    },
+  ): Promise<ResourceQueueEntry>;
+  cancelSimulatorTicket(
+    id: string,
+    owner: Pick<SimulatorAcquireOptions, "seatId" | "holderId" | "occupantId" | "fleet">,
+  ): Promise<boolean>;
+  /** Atomically claim a ticket only at the front of its device's queue. */
   tryAcquireSimulator(options: SimulatorAcquireOptions): Promise<SimulatorAdmission>;
   simulatorReservations(): Promise<SimulatorReservation[]>;
   updateSimulator(id: string, token: string, update: SimulatorUpdate): Promise<SimulatorReservation>;

@@ -11,7 +11,12 @@ import {
 import type { BrowserCommandOptions } from "./browser.ts";
 import { commandHost } from "./io.ts";
 
-async function request(path: string, body: unknown, options: BrowserCommandOptions): Promise<unknown> {
+async function request(
+  path: string,
+  body: unknown,
+  options: BrowserCommandOptions,
+  timeoutMs?: number,
+): Promise<unknown> {
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
     env,
@@ -22,10 +27,10 @@ async function request(path: string, body: unknown, options: BrowserCommandOptio
     method: body === undefined ? "GET" : "POST",
     headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    // The service answers an acquire within about 20 seconds (`booting` if the
-    // device is still starting); simulator status includes a CoreSimulator listing.
+    // Blocking acquire spends its requested wait on the server's persisted ticket.
+    // Other calls remain bounded; status includes a CoreSimulator listing.
     signal: AbortSignal.timeout(
-      body !== undefined ? 60_000 : path === FLEET_SIMULATORS_PATH ? 10_000 : 5_000,
+      timeoutMs ?? (body !== undefined ? 60_000 : path === FLEET_SIMULATORS_PATH ? 10_000 : 5_000),
     ),
   }).catch((error: unknown) => {
     if (error instanceof Error && error.name === "TimeoutError")
@@ -54,14 +59,13 @@ export async function runSimulatorCommand(
   args: readonly string[],
   options: BrowserCommandOptions & {
     progress?: (line: string) => void;
-    sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<unknown> {
   if (args.length === 0 || (args.length === 1 && args[0] === "status"))
     return FleetSimulatorStatusSchema.parse(await request(FLEET_SIMULATORS_PATH, undefined, options));
   const usage =
-    "Usage: clankie simulator status | plan JSON | acquire JSON [--wait SECONDS] | verify JSON | touch JSON | release JSON";
-  let waitSeconds = 0;
+    "Usage: clankie simulator status | plan JSON | acquire JSON [--wait SECONDS] | verify JSON | touch JSON | release JSON | cancel JSON";
+  let waitSeconds = 3600;
   const rest = [...args];
   const flag = rest.indexOf("--wait");
   if (flag !== -1) {
@@ -70,7 +74,10 @@ export async function runSimulatorCommand(
     if (!Number.isInteger(waitSeconds) || waitSeconds < 0 || waitSeconds > 3600) throw new Error(usage);
     rest.splice(flag, 2);
   }
-  if (rest.length !== 2 || !["plan", "acquire", "verify", "touch", "release"].includes(rest[0] ?? ""))
+  if (
+    rest.length !== 2 ||
+    !["plan", "acquire", "verify", "touch", "release", "cancel"].includes(rest[0] ?? "")
+  )
     throw new Error(usage);
   const value: unknown = JSON.parse(rest[1]!);
   if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -81,15 +88,18 @@ export async function runSimulatorCommand(
     ...(holderId === undefined ? {} : { holderId }),
     ...value,
     action: rest[0],
+    ...(rest[0] === "acquire" ? { waitMs: waitSeconds * 1000 } : {}),
   });
   let creationWarned = false;
   let idleShown = false;
   const call = async () => {
     if (input.action === "acquire") {
+      const { waitMs: _waitMs, ticketId: _ticketId, ...selection } = input;
       const plan = FleetSimulatorResultSchema.parse(
-        await request(FLEET_SIMULATORS_PATH, { ...input, action: "plan" }, options),
+        await request(FLEET_SIMULATORS_PATH, { ...selection, action: "plan" }, options),
       );
       if (plan.outcome === "rejected") return plan;
+      if (plan.outcome === "waiting") options.progress?.(`waiting (${plan.reason}): ${plan.hint}`);
       if (plan.outcome === "planned") {
         if (plan.choice === "create" && !creationWarned) {
           options.progress?.(
@@ -105,7 +115,18 @@ export async function runSimulatorCommand(
         }
       }
     }
-    const result = FleetSimulatorResultSchema.parse(await request(FLEET_SIMULATORS_PATH, input, options));
+    const result = FleetSimulatorResultSchema.parse(
+      await request(
+        FLEET_SIMULATORS_PATH,
+        input,
+        options,
+        input.action === "acquire" ? waitSeconds * 1000 + 60_000 : undefined,
+      ),
+    );
+    if (input.action === "acquire" && result.outcome === "waiting" && result.ticket)
+      options.progress?.(
+        `Ticket ${result.ticket.id}, position ${result.ticket.position ?? "unknown"}; cancel it with simulator cancel JSON or resume with its ticketId.`,
+      );
     if ((input.action === "acquire" || input.action === "verify") && result.outcome === "acquired") {
       const lease = result.lease;
       if (
@@ -124,21 +145,5 @@ export async function runSimulatorCommand(
     }
     return result;
   };
-  let result = await call();
-  // Acquire is idempotent per native seat/occupant/task holder: polling reads
-  // that holder's matching lease, or admits it once a slot frees. Nothing is left behind if waiting stops.
-  const deadline = Date.now() + waitSeconds * 1000;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  let last = "";
-  while ((result.outcome === "waiting" || result.outcome === "booting") && Date.now() < deadline) {
-    const line =
-      result.outcome === "waiting"
-        ? `waiting (${result.reason}): ${result.hint}`
-        : `booting ${result.lease.deviceName ?? "simulator"} ${result.lease.deviceId ?? ""} (${result.lease.phase})`.trim();
-    if (line !== last) options.progress?.(line);
-    last = line;
-    await sleep(Math.min(result.retryAfterMs ?? 5_000, Math.max(0, deadline - Date.now())));
-    result = await call();
-  }
-  return result;
+  return call();
 }
