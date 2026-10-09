@@ -29,6 +29,8 @@ export interface LinearImportReport {
   unchanged: number;
   skipped: { type: string; id: string; reason: string }[];
   samples: string[];
+  /** Linear project → built-in tracker project UUID, for an explicit `trackerProjectId` binding. */
+  projects: { linearProjectId: string; trackerProjectId: string; name: string }[];
 }
 
 const PAGE = "pageInfo { hasNextPage endCursor }";

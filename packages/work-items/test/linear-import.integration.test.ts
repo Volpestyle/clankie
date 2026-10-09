@@ -29,6 +29,18 @@ it("imports a real captured Linear graph into native records and survives reopen
   const { directory, snapshot, actors, tracker } = await setup();
   const first = await tracker.importLinear(snapshot, actors);
   expect(first.counts.issues).toBe(5);
+  // The report names the built-in UUID a settings project binds to (VUH-1969).
+  const [mapping] = first.projects;
+  expect(first.projects).toEqual([
+    {
+      linearProjectId: snapshot.projects[0]!.id,
+      trackerProjectId: snapshot.projects[0]!.id,
+      name: snapshot.projects[0]!.name,
+    },
+  ]);
+  expect(await tracker.call("get_project", { query: mapping!.trackerProjectId })).toMatchObject({
+    id: mapping!.trackerProjectId,
+  });
   expect(await tracker.call("get_user", { query: "634ad2c8-4992-48b5-b14d-af650cd30030" })).toMatchObject({
     actor: { type: "human", id: "owner" },
   });

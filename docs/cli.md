@@ -6560,3 +6560,6 @@ cycles. Authenticated Linear uploads enter the evidence store and links become
 The shared background request budget applies; a refusal includes its retry time.
 Reruns upsert by provider UUID and do not change the tracker when the source is
 unchanged. Multi-team project mappings are refused rather than guessed.
+The report's `projects` lists each Linear project with its built-in tracker
+project UUID (`trackerProjectId`); set that on the settings project with
+`project update` to bind it.

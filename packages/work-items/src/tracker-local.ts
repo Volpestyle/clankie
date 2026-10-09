@@ -3039,10 +3039,11 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             assertHeld,
             async (target, now, context) => {
               // Checked under the journal lock, so a swap after the client's own check cannot slip a write through.
-              if (command.expectedStoreId !== undefined && command.expectedStoreId !== target.team.id)
+              const storeId = target.storeId ?? target.team.id;
+              if (command.expectedStoreId !== undefined && command.expectedStoreId !== storeId)
                 throw new TrackerWriteRefused(
                   "store_replaced",
-                  `transaction expected store ${command.expectedStoreId}; the tracker store is now ${target.team.id}`,
+                  `transaction expected store ${command.expectedStoreId}; the tracker store is now ${storeId}`,
                 );
               const results = [];
               for (const [index, operation] of command.operations.entries()) {
@@ -3208,6 +3209,12 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           unchanged: 0,
           skipped: [],
           samples: snapshot.issues.slice(0, 5).map((i) => String(i.identifier)),
+          // Imported projects keep their Linear UUID as the built-in project UUID.
+          projects: snapshot.projects.map((project) => ({
+            linearProjectId: project.id,
+            trackerProjectId: project.id,
+            name: String(project.name),
+          })),
         };
         report.counts.archivedIssues = snapshot.issues.filter((issue) => issue.archivedAt != null).length;
         report.counts.stateHistory = snapshot.issues.reduce(
