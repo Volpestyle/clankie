@@ -301,7 +301,14 @@ export function createArchiveServer(archiveDirectory) {
     }
     const file = requestedArchiveFile(root, request.url ?? "/");
     if (file === null) {
-      const relativePath = decodeURIComponent(pathname.slice("/files/".length));
+      let relativePath;
+      try {
+        relativePath = decodeURIComponent(pathname.slice("/files/".length));
+      } catch {
+        response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+        response.end("Malformed path\n");
+        return;
+      }
       const stored = index.files.find((file) => file.path === relativePath && file.stored);
       if (stored) {
         const { runEvidenceCommand } = await import("../../apps/tui/src/command/evidence.ts");
@@ -378,6 +385,10 @@ export async function checkArchiveViewer(archiveDirectory) {
     }
 
     assert.equal((await rawRequest(address.port, "/files/%2e%2e%2fpackage.json")).status, 404);
+    const malformed = await rawRequest(address.port, "/files/%ZZ");
+    assert.equal(malformed.status, 400);
+    assert.equal(malformed.body.toString("utf8"), "Malformed path\n");
+    assert.equal((await rawRequest(address.port, "/")).status, 200);
     assert.equal((await rawRequest(address.port, "/missing")).status, 404);
     assert.equal((await rawRequest(address.port, "/", "POST")).status, 405);
   } finally {
