@@ -24,7 +24,8 @@ not described as a no-op. The initial report counted GraphQL reads separately
 from the eleven downloads; the final implementation counts both wire kinds.
 
 The raw capture, reports, source reads, five issue graphs and verification scripts
-are published in [the import proof](clankie://evidence/sha256/dac9fac7a59e0389f8f89dfd04854447f58acd9a31bbfc6cf9ef89637ccc5b58).
+are published as the import proof:
+`clankie://evidence/sha256/dac9fac7a59e0389f8f89dfd04854447f58acd9a31bbfc6cf9ef89637ccc5b58`.
 All eleven original blobs and that proof were published with
 `clankie evidence push docs/testing/2026-10-09-linear-import --issue VUH-1963`:
 12 applied receipts, no failures. [The manifest](evidence.json) lists every link.
