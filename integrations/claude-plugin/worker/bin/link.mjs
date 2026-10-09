@@ -100,6 +100,50 @@ export function parentCommandLine(pid = process.ppid) {
   }
 }
 
+/** Command hooks may have a shell between them and Claude, including on Windows. */
+export function claudeParentCommandLine() {
+  let pid = process.ppid;
+  for (let hop = 0; hop < 4 && Number.isSafeInteger(pid) && pid > 1; hop++) {
+    try {
+      let parent;
+      if (process.platform === "win32") {
+        parent = JSON.parse(
+          execFileSync(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `$p=Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}"; @{pid=$p.ParentProcessId; argv=$p.CommandLine} | ConvertTo-Json -Compress`,
+            ],
+            { encoding: "utf8", timeout: 1000, windowsHide: true },
+          ),
+        );
+      } else {
+        const line = execFileSync("ps", ["-o", "ppid=,args=", "-p", String(pid)], {
+          encoding: "utf8",
+          timeout: 1000,
+        }).trim();
+        const match = /^(\d+)\s+(.+)$/u.exec(line);
+        parent = { pid: Number(match?.[1]), argv: match?.[2] };
+      }
+      if (typeof parent.argv !== "string") return "";
+      const executable = /^(?:"([^"]+)"|(\S+))/u.exec(parent.argv);
+      const command = executable?.[1] ?? executable?.[2] ?? "";
+      if (
+        /^claude(?:[2-9])?(?:\.exe)?$/iu.test(command.split(/[\\/]/u).at(-1) ?? "") ||
+        /[\\/]claude[\\/]versions[\\/][\d.]+$/iu.test(command)
+      )
+        return parent.argv;
+      if (parent.pid === pid) return "";
+      pid = parent.pid;
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
 /**
  * Whether that Claude session approved this plugin's channel. Print mode never
  * shows channel events, so polling there would consume mail nobody sees.
@@ -113,9 +157,20 @@ export function approvesWorkerChannel(argv) {
   if (tokens.includes("--print") || tokens.includes("-p")) return false;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
-    if (token.startsWith("--channels="))
-      return token.slice("--channels=".length).split(",").includes(WORKER_CHANNEL);
-    if (token !== "--channels") continue;
+    const flag = ["--channels", "--dangerously-load-development-channels"].find(
+      (name) => token === name || token.startsWith(`${name}=`),
+    );
+    if (!flag) continue;
+    if (token.startsWith(`${flag}=`)) {
+      if (
+        token
+          .slice(flag.length + 1)
+          .split(",")
+          .includes(WORKER_CHANNEL)
+      )
+        return true;
+      continue;
+    }
     for (const value of tokens.slice(index + 1)) {
       if (value.startsWith("-")) break;
       if (value.split(",").includes(WORKER_CHANNEL)) return true;

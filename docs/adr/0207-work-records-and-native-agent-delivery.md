@@ -192,3 +192,27 @@ content, recipient binding and native occupant. Legacy fences without a retained
 receipt ID for owner settlement. A matching body hash cannot establish which
 dispatch was acknowledged, so it never substitutes for the missing ID. Authenticated owner abandonment preserves unknown evidence and
 frees an ordinary recipient for new intent; it never retries the original.
+
+## Hand-started Claude startup fix (2026-10-09)
+
+Under James's VUH-1867 assignment, the implementing lead chose the explicit
+startup fix permitted by the acceptance criteria. Claude's documented channel
+contract requires session opt-in with `--channels`; installing a plugin or
+allowing it by organization policy does not select it for a session. A plugin
+SessionStart hook cannot add flags to the already launched CLI.
+
+The worker's synchronous SessionStart hook therefore returns a user-visible
+`systemMessage` with one exact-session restart command when the matching linked
+Herdr pane has no worker channel opt-in. It recognizes the native CLI through
+an intermediary shell on macOS/Linux and Windows. Normal and explicit
+interactive development-plugin opt-ins suppress the warning; unrelated
+plugins do not. Missing or ambiguous links, missing panes, Codex, print mode,
+other hooks and unsafe session IDs do not produce that restart command. If
+launch observation fails, the message says it cannot confirm the channel.
+The notice survives a service reporting failure. It does not alter shell
+configuration, choose accounts, restart a pane or grant permission authority.
+
+The [official channel controls](https://code.claude.com/docs/en/channels#enterprise-controls)
+and [hook output contract](https://code.claude.com/docs/en/hooks#json-output)
+support this decision. [VUH-1867 verification](../verification/vuh-1867-claude-channel-startup.md)
+records the native Mac startup display and focused subprocess boundaries.

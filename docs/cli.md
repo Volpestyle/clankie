@@ -5214,6 +5214,17 @@ A channel can wake an idle Claude session only when Claude was started with
 plugin or enabling policy alone does not enable channels in an existing process.
 The service never repairs an unavailable channel by typing a draft into a pane.
 
+A hand-started Claude in a linked Herdr pane now shows a startup warning with
+`claude --resume SESSION_UUID --channels plugin:clankie-worker@clankie` when
+that session lacks the worker channel flag. This is the supported one-command
+restart fix; a plugin hook cannot change the already launched session's flags.
+The notice uses the exact native UUID, stays visible if the lifecycle report
+fails, and says “cannot confirm” if launch observation is unavailable. Existing
+opted-in sessions, unrelated panes, Codex and print mode stay quiet. An explicit
+interactive development-plugin opt-in also suppresses it while retaining
+Claude's confirmation and organization policy. The hook never restarts a pane
+or changes shell configuration.
+
 The roster also exposes Claude's `messageReceiver`: `live` for an exact-session
 native event poll, `next-turn-only` for an observed prompt hook without a live
 poll, and `unverified` when neither is observed. Live polling does not prove

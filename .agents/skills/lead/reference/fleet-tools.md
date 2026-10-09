@@ -275,3 +275,12 @@ previews are sanitized and never establish routine authority: they stay owner-on
 Every permission decision has an audit actor and input hash; hook/channel pipe
 writes are separate delivery evidence. Native channel application is unconfirmed,
 so never retry a verdict or substitute an ordinary chat answer.
+
+## Hand-started Claude channels
+
+A hand-started Claude in a linked Herdr pane shows an exact-session restart
+command when the worker channel flag is missing. Claude requires session opt-in;
+plugin installation alone cannot enable a live channel. The owner can use the
+shown `claude --resume UUID --channels plugin:clankie-worker@clankie` command.
+Do not restart existing panes or substitute terminal input for messages. Explicit
+development-plugin opt-in retains Claude's own confirmation and policy checks.

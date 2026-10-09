@@ -5,7 +5,16 @@
 // A session outside a pane has nothing to report here.
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { authorization, hasLinks, readLink, seatRoute, SUMMARY_MAX, TEXT_MAX } from "./link.mjs";
+import {
+  authorization,
+  hasLinks,
+  readLink,
+  seatRoute,
+  SUMMARY_MAX,
+  TEXT_MAX,
+  claudeParentCommandLine,
+  approvesWorkerChannel,
+} from "./link.mjs";
 import { codexToolCatalogReport } from "./codex-tool-catalog.mjs";
 import { panePresence } from "./pane-presence.mjs";
 
@@ -57,6 +66,21 @@ async function reportOverLink(link, pane) {
   )
     process.exit(0);
   if (typeof hook.session_id !== "string") process.exit(0);
+  // Channels require session-start opt-in; a plugin hook cannot add CLI flags.
+  // systemMessage is user-visible, whereas plain SessionStart stdout is model context.
+  if (
+    event === "SessionStart" &&
+    !process.argv.includes("--codex") &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(hook.session_id)
+  ) {
+    const argv = claudeParentCommandLine();
+    if (!approvesWorkerChannel(argv) && !/(?:^|\s)(?:--print(?:=\S+)?|-p)(?:\s|$)/u.test(argv))
+      process.stdout.write(
+        JSON.stringify({
+          systemMessage: `${argv ? "Clankie's live messages are off in this pane." : "Clankie cannot confirm live messages in this pane."} Restart this session with: claude --resume ${hook.session_id} --channels plugin:clankie-worker@clankie`,
+        }) + "\n",
+      );
+  }
   const lastMessage =
     typeof hook.last_assistant_message === "string" ? hook.last_assistant_message.trim() : "";
   const body = {
