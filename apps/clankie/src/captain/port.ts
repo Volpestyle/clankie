@@ -115,6 +115,8 @@ type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
       readonly status: string;
       /** Set when another conversation leads this hire; messaging it did not change that (VUH-1763). */
       readonly ownerConversationId?: string;
+      /** Set when the target was another lead, reached in its own conversation (VUH-1950). */
+      readonly leadConversationId?: string;
     })
   | (Extract<FleetSeatDelivery, { outcome: "unconfirmed" | "undelivered" }> & { readonly seatId: string })
   | { readonly outcome: "seat_offline"; readonly seatId: string }

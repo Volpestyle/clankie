@@ -52,6 +52,14 @@ report routing before treating a project as converted. Existing workers need a
 written context handoff and separately coordinated adoption; never restart their
 active work as part of a new lead launch. Remote Codex heads are not yet supported.
 
+Leads talk to each other with `message_seat`, naming the other lead's
+conversation ID or its head's seat ID. The message arrives in that chat over the
+head's own channel as an attributed `source="lead"` event: context, never an owner
+turn, and it never adopts the head as a hire. `delivered` means that channel
+acknowledged it; `undelivered` means the head has no live channel, and nothing
+was queued. Answer a lead message the same way, naming the conversation it came
+from. Never type into a lead's pane.
+
 ## Choose the work
 
 The tracker's priority is the owner's order. Read it each time you pick:
