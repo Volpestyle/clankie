@@ -76,6 +76,7 @@
         "scripts/fleet-resource-burst.ts",
         "scripts/fleet-load-worker.mjs",
         "scripts/runtime-canary-live-proof.ts",
+        "scripts/tracker-sync-roundtrip.ts",
         "test/fixtures/runtime-canary-cpu-preload.mjs",
         "test/fixtures/runtime-canary-service.ts",
         "test/fixtures/mcp-stdio-bridge.ts",
