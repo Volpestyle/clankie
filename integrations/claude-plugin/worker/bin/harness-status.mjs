@@ -76,15 +76,24 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
         versionMatches: expectedVersion ? manifest.version === expectedVersion : null,
         bridge: Boolean(mcp.mcpServers?.clankie),
         legacyServerName: Boolean(mcp.mcpServers?.swarm),
-        hooks: ["SessionStart", "UserPromptSubmit", "Stop"].every(
-          (event) =>
-            Array.isArray(hooks.hooks?.[event]) &&
-            hooks.hooks[event].some((matcher) =>
-              matcher.hooks?.some(
-                (hook) => hook.type === "command" && String(hook.command).includes("/bin/seat-hook.mjs"),
+        hooks:
+          ["SessionStart", "UserPromptSubmit", "Stop"].every(
+            (event) =>
+              Array.isArray(hooks.hooks?.[event]) &&
+              hooks.hooks[event].some((matcher) =>
+                matcher.hooks?.some(
+                  (hook) => hook.type === "command" && String(hook.command).includes("/bin/seat-hook.mjs"),
+                ),
               ),
-            ),
-        ),
+          ) &&
+          Array.isArray(hooks.hooks?.PreToolUse) &&
+          hooks.hooks.PreToolUse.some(
+            (matcher) =>
+              matcher.matcher === "Bash" &&
+              matcher.hooks?.some(
+                (hook) => hook.type === "command" && String(hook.command).includes("/bin/resource-hook.mjs"),
+              ),
+          ),
         skill: root ? await exists(join(root, "skills", "clankie", "SKILL.md")) : false,
         liveReceiver: "not-observed",
       };

@@ -60,7 +60,10 @@ function barrier() {
     },
   };
 }
-async function fixture(unavailable = false, extra: { seatScript?: string; bind?: boolean } = {}) {
+async function fixture(
+  unavailable = false,
+  extra: { seatScript?: string; bind?: boolean; replyLease?: Record<string, string> } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "fleet-resource-http-"));
   const state = join(root, "simctl.json"),
     log = join(root, "simctl.jsonl");
@@ -142,7 +145,22 @@ async function fixture(unavailable = false, extra: { seatScript?: string; bind?:
     if (!header) return "authentication_required";
     return authorized && header === `Bearer ${bearer}` ? true : "forbidden";
   }, resources);
-  const server = serve({ fetch: routes.fetch, port: 0, hostname: "127.0.0.1" }) as Server;
+  const server = serve({
+    fetch: async (incoming) => {
+      const response = await routes.fetch(incoming);
+      if (extra.replyLease && incoming.method === "POST" && response.ok) {
+        const body = await response.clone().json();
+        if (body.outcome === "acquired")
+          return new Response(JSON.stringify({ ...body, lease: { ...body.lease, ...extra.replyLease } }), {
+            status: response.status,
+            headers: response.headers,
+          });
+      }
+      return response;
+    },
+    port: 0,
+    hostname: "127.0.0.1",
+  }) as Server;
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing actual HTTP listener");
@@ -218,7 +236,13 @@ async function fixture(unavailable = false, extra: { seatScript?: string; bind?:
     resources,
     send,
     commands,
-    acquire: { action: "acquire", seatId: "resource-seat", deviceType, runtime: simulatorRuntime },
+    acquire: {
+      action: "acquire",
+      seatId: "resource-seat",
+      holderId: "root-task",
+      deviceType,
+      runtime: simulatorRuntime,
+    },
     revoke: () => {
       authorized = false;
     },
@@ -300,6 +324,7 @@ it("serves validated metadata and crosses actual TCP/governor/process-based simu
     (
       await f.send("POST", FLEET_SIMULATORS_PATH, {
         action: "touch",
+        holderId: f.acquire.holderId,
         seatId: "resource-seat",
         id: result.lease.id,
       })
@@ -309,6 +334,7 @@ it("serves validated metadata and crosses actual TCP/governor/process-based simu
     (
       await f.send("POST", FLEET_SIMULATORS_PATH, {
         action: "release",
+        holderId: f.acquire.holderId,
         seatId: "resource-seat",
         id: result.lease.id,
       })
@@ -517,8 +543,19 @@ it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal 
     const result = JSON.parse(output).hookSpecificOutput;
     expect(result.permissionDecision).toBeUndefined();
     expect(result.updatedInput.timeout).toBe(10000);
-    const { stdout } = await execute("/bin/sh", ["-c", result.updatedInput.command]);
-    return stdout;
+    const { stdout } = await execute(
+      "/bin/sh",
+      [
+        "-c",
+        result.updatedInput.command +
+          '\nnode -e \'process.stdout.write("|"+process.env.CLANKIE_RESOURCE_HOLDER+"|"+process.env.CODEX_THREAD_ID)\'',
+      ],
+      {
+        env: { ...process.env, CLANKIE_RESOURCE_HOLDER: "parent-holder", CODEX_THREAD_ID: "ancestor-thread" },
+      },
+    );
+    expect(stdout.endsWith("|parent-holder|ancestor-thread")).toBe(true);
+    return stdout.split("|")[0]!;
   };
   const holderIds = await Promise.all([hook("dock", false), hook("cards", true)]);
   expect(holderIds).toEqual(["claude:parent:agent:dock", "claude:parent:agent:cards"]);
@@ -527,9 +564,10 @@ it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal 
     operatorCredentialStore: credentials,
     env: { CLANKIE_OPERATOR_TOKEN: bearer, CLANKIE_RESOURCE_HOLDER: holderId },
   });
+  const { holderId: _holder, ...nativeAcquire } = f.acquire;
   const results = await Promise.all(
     holderIds.map((id) =>
-      runSimulatorCommand(["acquire", JSON.stringify(f.acquire)], options(id)).then(
+      runSimulatorCommand(["acquire", JSON.stringify(nativeAcquire)], options(id)).then(
         FleetSimulatorResultSchema.parse,
       ),
     ),
@@ -539,6 +577,19 @@ it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal 
   if (!acquired || !("lease" in acquired)) throw new Error("Missing acquired child lease");
   const winner = acquired.lease.holderId!;
   const loser = holderIds.find((id) => id !== winner)!;
+  const verification = JSON.stringify({
+    seatId: "resource-seat",
+    id: acquired.lease.id,
+    deviceId: acquired.lease.deviceId,
+  });
+  expect(await runSimulatorCommand(["verify", verification], options(loser))).toMatchObject({
+    outcome: "rejected",
+    reason: "stale_owner",
+  });
+  expect(await runSimulatorCommand(["verify", verification], options(winner))).toMatchObject({
+    outcome: "acquired",
+    lease: { id: acquired.lease.id, holderId: winner },
+  });
   await f.resources.refresh();
   const snapshot = FleetResourceSnapshotSchema.parse((await f.send("GET", FLEET_RESOURCES_PATH)).json);
   expect(snapshot.leases[0]).toMatchObject({ seatId: "resource-seat", holderId: winner });
@@ -554,4 +605,35 @@ it("Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal 
       options(winner),
     ),
   ).toMatchObject({ outcome: "released" });
+});
+
+it.each([
+  { deviceId: "11111111-1111-4111-8111-111111111111" },
+  { holderId: "sibling-holder" },
+  { deviceType: "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4" },
+  { runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0" },
+])("CLI rejects a mismatched successful native HTTP grant: %j", async (replyLease) => {
+  const f = await fixture(false, { replyLease });
+  const deviceId = "22222222-2222-4222-8222-222222222222";
+  await f.mutate((value) => {
+    value.devices[simulatorRuntime] = [
+      {
+        udid: deviceId,
+        name: "Requested iPhone",
+        state: "Shutdown",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+      },
+    ];
+  });
+  await expect(
+    runSimulatorCommand(
+      ["acquire", JSON.stringify({ ...f.acquire, holderId: "requested-holder", deviceId, exact: true })],
+      {
+        host: f.host,
+        env: { CLANKIE_OPERATOR_TOKEN: bearer, CLANKIE_RESOURCE_HOLDER: "requested-holder" },
+      },
+    ),
+  ).rejects.toThrow("Simulator grant does not match this holder/device request");
+  expect((await f.commands()).some((command) => command[0] === "shutdown")).toBe(false);
 });

@@ -98,6 +98,7 @@ const SimulatorSelectionSchema = SimulatorSeatSchema.extend({
 export const FleetSimulatorRequestSchema = z.discriminatedUnion("action", [
   SimulatorSelectionSchema.extend({ action: z.literal("plan") }).strict(),
   SimulatorSelectionSchema.extend({ action: z.literal("acquire") }).strict(),
+  SimulatorSeatSchema.extend({ action: z.literal("verify"), id: reference, deviceId: udid }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("touch"), id: reference }).strict(),
   SimulatorSeatSchema.extend({ action: z.literal("release"), id: reference }).strict(),
 ]);

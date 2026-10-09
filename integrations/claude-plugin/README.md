@@ -371,7 +371,11 @@ The worker package contains regular `skills/clankie/SKILL.md` and
 `skills/fleet-resources/SKILL.md` snapshots, shared by its Claude and Codex
 manifests. The companion teaches local heavy permits and simulator leases. The operator and
 worker `PreToolUse` Bash hooks carry each native session/subagent’s holder identity
-in `CLANKIE_RESOURCE_HOLDER`, scoped to that command. They preserve tool fields
+in `CLANKIE_RESOURCE_HOLDER`, scoped to a subshell for that command, clearing an
+ancestor Codex thread ID. A persistent Bash session cannot retain one child’s
+export for a sibling. Worker 0.6.11 gives the hook changes a new cache version;
+doctor/native setup also require its Bash resource hook, not just lifecycle hooks.
+Existing sessions must use their native hook reload before new definitions apply. They preserve tool fields
 and leave permission decisions to Claude. The resource CLIs use it for independent
 simulator ownership and named heavy holders; they do not write a shared env file.
 

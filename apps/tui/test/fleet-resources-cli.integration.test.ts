@@ -470,7 +470,11 @@ it("native child heavy CLIs under the same pane keep separate holder labels and 
         marker,
         release,
       ],
-      { HERDR_PANE_ID: "parent-seat", CLANKIE_RESOURCE_HOLDER: "claude:parent:agent:dock" },
+      {
+        HERDR_PANE_ID: "parent-seat",
+        CLANKIE_RESOURCE_HOLDER: "claude:parent:agent:dock",
+        CODEX_THREAD_ID: undefined,
+      },
     );
     await eventually(() => exists(marker), Boolean);
     const second = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"], {
@@ -482,7 +486,7 @@ it("native child heavy CLIs under the same pane keep separate holder labels and 
     expect(await second.done).toBe(1);
     const third = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"], {
       HERDR_PANE_ID: "parent-seat",
-      CLANKIE_RESOURCE_HOLDER: undefined,
+      CLANKIE_RESOURCE_HOLDER: "codex:parent-thread",
       CODEX_THREAD_ID: "cards-thread",
     });
     const snapshot = await eventually(

@@ -326,7 +326,10 @@ export async function inspectHarnessBridges(
         : []),
       // An installed but outdated plugin still loads, so it is drift doctor must name.
       ...profiles.claude
-        .filter((profile) => profile.installed && (profile.versionMatches === false || !profile.bridge))
+        .filter(
+          (profile) =>
+            profile.installed && (profile.versionMatches === false || !profile.bridge || !profile.hooks),
+        )
         .map(
           (profile) =>
             `Update clankie-worker ${profile.version ?? "unknown"} in ${profile.profile} to ${profile.expectedVersion ?? "the bundled version"}: clankie harness install`,

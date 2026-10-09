@@ -74,10 +74,18 @@ command arguments, environment, or bearer credentials. Public PIDs identify real
 holders; caller seat labels do not confer ownership or cleanup authority.
 
 Native children share a seat and root occupant, but each has an optional stable
-`holderId`. Simulator idempotency, in-flight deduplication, touch and release
-include it; heavy lease and queue metadata retain it. Older journal claims without
+`holderId`. New acquires/plans require that task holder; missing native hook
+metadata refuses rather than returning a seat-level sibling lease. Legacy
+holderless reservations retain their original touch/release identity. Simulator idempotency, in-flight deduplication, touch and release
+include it; concurrent acquires serialize and validate each request’s selection
+instead of sharing the first result. Existing leases refuse a different UDID,
+exact model or runtime. Busy explicit UDIDs wait without selecting an idle
+alternative. The CLI validates successful grants against holder and selection.
+Heavy lease and queue metadata retain it. Older journal claims without
 a holder stay root-owned. Claude Bash hooks carry session plus `agent_id` in
-`CLANKIE_RESOURCE_HOLDER`; Codex CLI calls use `CODEX_THREAD_ID`. Other harnesses
+`CLANKIE_RESOURCE_HOLDER`; Codex CLI calls prefer the executing `CODEX_THREAD_ID` over inherited holder
+labels. Claude scopes its holder to a command subshell and clears ancestor
+Codex metadata, so a persistent shell cannot retain a sibling identity. Other harnesses
 can pass explicit holder labels. The host still proves the original seat, occupant,
 binding and live processes; a holder label grants no authority. Child leases
 retain the root’s process proof and idle timeout, so a parent exit cleans them up.
@@ -111,3 +119,12 @@ The subprocess integration suite exercises actual OS locks, processes, filesyste
 receipts, cancellation and native runner registration. It never hires agents or
 boots simulators. Run manually through the fleet heavy limiter; production native
 device behavior requires a separately authorized simulator check.
+
+`simulator verify` is an authenticated read-only preflight for device users: it
+checks the proven seat occupant, task holder, lease ID, exact UDID and booted
+state. It neither adopts nor renews a lease. Install, launch and drive clients
+should call it before acting. Clankie cannot intercept separately issued raw
+simctl/Xcode/external MCP operations or lock across them; the preflight is not a
+system-wide access control boundary. Worker plugin 0.6.11 versions the resource
+hook changes; doctor and native setup verify the Bash resource hook as well as
+lifecycle hooks, including named Claude profiles such as `.claude-james`.

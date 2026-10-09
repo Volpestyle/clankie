@@ -1,0 +1,9 @@
+{
+  "profile": ".claude-james",
+  "version": "0.6.10",
+  "bashResourceHook": true,
+  "resourceHookFile": true,
+  "operatorReportedHolderUnset": true,
+  "sourceWorkerVersion": "0.6.11",
+  "scope": "Read-only cache inspection; no profile/seat mutation or restart."
+}

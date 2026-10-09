@@ -2448,7 +2448,8 @@ body remains available. The canonical registry is the OS user's
 `~/.clankie/fleet-resources`; worker environment and settings-path overrides do
 not create independent capacity. See the [shipped skill](../.agents/skills/fleet-resources/SKILL.md).
 
-`simulator acquire JSON [--wait SECONDS]` accepts `seatId`, optional `fleet` and `holderId`,
+`simulator acquire JSON [--wait SECONDS]` accepts `seatId`, optional `fleet`, and
+a stable task `holderId` (automatically supplied by supported native harnesses),
 `deviceType` and `runtime`, or `deviceId` to lease an existing device such as
 one the seat booted by hand, and optional `exact`. The host proves the current
 local seat and occupant, then leases an idle existing device of that type, a
@@ -2461,6 +2462,19 @@ outside leases with the seats using them, heavy holders or pressure, or
 `rejected` with its cause (`service_restarting` is HTTP 503). `--wait` polls up
 to SECONDS, printing progress on stderr. `simulator touch JSON` and
 `simulator release JSON` accept `seatId`, optional `fleet` and `holderId`, and lease `id`.
+`simulator verify JSON` accepts the same seat/fleet/holder, lease `id` and
+`deviceId`. It checks the live native occupant, exact owned device and booted
+state without acquiring or touching a lease. Use it before install, launch and
+drive operations; refuse means stop that operation. Raw simctl, Xcode and external
+MCP calls must invoke this preflight themselves; this API cannot intercept them
+or make their later command atomic. Native Claude Bash hooks provide each
+subagent's holder in a command-scoped subshell; Codex prefers its executing
+thread over an inherited holder. Explicit task holder arguments retain precedence.
+The CLI validates successful acquire/verify grants against that holder and the
+requested device. A different exact selection cannot reuse an existing lease or
+a concurrent acquire result. Busy explicit UDIDs wait without substituting another
+device. Worker plugin 0.6.11 and doctor/setup checks identify profiles missing the
+resource hook; new hooks need the session's native reload to affect existing seats.
 `simulator status` lists leases and external devices with the processes and
 seats that name them; `clankie doctor` shows the same. The operator credential
 is required; native occupant, process proof and binding fields are rejected as
@@ -2479,9 +2493,11 @@ never substitutes a different model; an explicit `deviceId` remains strict.
 Missing or malformed metadata is unknown, never proof of a previous boot.
 
 Native Claude Bash hooks supply a holder from their session and subagent ID;
-Codex uses its `CODEX_THREAD_ID`. Both CLIs also accept `CLANKIE_RESOURCE_HOLDER`.
+Codex prefers its executing `CODEX_THREAD_ID` over an inherited holder. Outside
+Codex, both CLIs accept `CLANKIE_RESOURCE_HOLDER`.
 Heavy commands accept `--holder ID`; simulator JSON accepts `holderId`, which
-must stay the same for acquire, touch and release. A different child holder
+must stay the same for acquire, verify, touch and release. Missing task metadata
+refuses acquire/plan instead of falling back to a seat-level lease. A different child holder
 cannot inherit or release the lease. Status lists that holder beside the seat.
 These labels never replace native seat proof or grant cleanup authority.
 

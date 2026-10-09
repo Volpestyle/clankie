@@ -196,6 +196,7 @@ const view = (lease: SimulatorReservation, requestedDeviceType?: string): Simula
 type Plan =
   | { kind: "existing"; device: SimulatorDevice }
   | { kind: "create"; deviceType: string; runtime: string }
+  | { kind: "waiting"; detail: string }
   | {
       kind: "refuse";
       detail: string;
@@ -419,6 +420,12 @@ export function createSimulatorManager(input: {
     if (request.deviceId) {
       const device = devices.find((row) => row.udid.toUpperCase() === request.deviceId!.toUpperCase());
       if (!device) return { kind: "refuse", detail: `No simulator has UDID ${request.deviceId}.` };
+      const holder = leases.find((lease) => lease.deviceId?.toUpperCase() === device.udid.toUpperCase());
+      if (device.available && holder)
+        return {
+          kind: "waiting",
+          detail: `Requested device ${device.name} (${device.udid}) is leased to seat ${holder.seatId}${holder.holderId ? ` holder ${holder.holderId}` : ""}. Wait for that exact device; no alternative will be used.`,
+        };
       if (!free(device))
         return {
           kind: "refuse",
@@ -484,6 +491,7 @@ export function createSimulatorManager(input: {
   const blockersFor = async (
     reason: "simulator_capacity" | "shared_capacity" | "pressure",
     snapshot: ResourceSnapshot,
+    hint?: string,
   ): Promise<SimulatorResult> => {
     const leases = await reservations();
     const devices = await inventory().catch(() => [] as SimulatorDevice[]);
@@ -517,7 +525,13 @@ export function createSimulatorManager(input: {
           }
         : {}),
     };
-    return { outcome: "waiting", reason, blockers, retryAfterMs: RETRY_MS, hint: hintFor(reason, blockers) };
+    return {
+      outcome: "waiting",
+      reason,
+      blockers,
+      retryAfterMs: RETRY_MS,
+      hint: hint ?? hintFor(reason, blockers),
+    };
   };
 
   /** Each stage runs in the serial section; the long boot wait does not block other seats. */
@@ -548,6 +562,10 @@ export function createSimulatorManager(input: {
           let plan = await choose(request, devices, others);
           if (plan.kind === "create")
             plan = await choose(request, devices, others, await adapter.catalog().catch(() => undefined));
+          if (plan.kind === "waiting") {
+            await forget(lease);
+            return blockersFor("simulator_capacity", await input.governor.snapshot(), plan.detail);
+          }
           if (plan.kind === "refuse") {
             await forget(lease);
             return rejected("device_unavailable", plan.detail, plan.alternatives);
@@ -735,6 +753,11 @@ export function createSimulatorManager(input: {
 
   const acquire = async (request: SimulatorAcquireRequest): Promise<SimulatorResult> => {
     if (closed) return rejected("service_restarting", "The simulator manager is stopping.");
+    if (!request.holderId)
+      return rejected(
+        "owner_unavailable",
+        "A task holder is required; refresh the native resource hook or supply your own stable holderId. A seat alone cannot identify a native subagent.",
+      );
     if (!request.deviceId && (!request.deviceType || !request.runtime))
       return rejected("device_unavailable", "Give deviceType and runtime, or the deviceId to lease.");
     const owner = await prove(request);
@@ -744,10 +767,19 @@ export function createSimulatorManager(input: {
     if (!(await authorized(request))) return revoked();
     if (existing) {
       if (!matchesOwner(existing, owner)) return rejected("stale_owner");
-      if (request.deviceId && existing.deviceId?.toUpperCase() !== request.deviceId.toUpperCase())
+      if (
+        (request.deviceId &&
+          existing.deviceId &&
+          existing.deviceId.toUpperCase() !== request.deviceId.toUpperCase()) ||
+        (request.exact &&
+          request.deviceType &&
+          existing.deviceType &&
+          existing.deviceType !== request.deviceType) ||
+        (request.runtime && existing.runtime && existing.runtime !== request.runtime)
+      )
         return rejected(
           "lease_unavailable",
-          `This seat already holds lease ${existing.id}; release it first.`,
+          `This holder already holds lease ${existing.id} on ${existing.deviceName ?? "a pending device"} (${existing.deviceId ?? "UDID pending"}); it does not match this request. Release it first.`,
         );
       return resume(existing, request, owner);
     }
@@ -765,6 +797,8 @@ export function createSimulatorManager(input: {
     let preview = await choose(request, devices, leases);
     if (preview.kind === "create")
       preview = await choose(request, devices, leases, await adapter.catalog().catch(() => undefined));
+    if (preview.kind === "waiting")
+      return blockersFor("simulator_capacity", await input.governor.snapshot(), preview.detail);
     if (preview.kind === "refuse")
       return rejected("device_unavailable", preview.detail, preview.alternatives);
     const excluding = request.deviceId && preview.kind === "existing" ? preview.device.udid : undefined;
@@ -817,6 +851,11 @@ export function createSimulatorManager(input: {
     /** Read-only advice; acquire rechecks inventory and authority before effects. */
     async plan(request: SimulatorAcquireRequest): Promise<SimulatorResult> {
       if (closed) return rejected("service_restarting", "The simulator manager is stopping.");
+      if (!request.holderId)
+        return rejected(
+          "owner_unavailable",
+          "A task holder is required; refresh the native resource hook or supply your own stable holderId.",
+        );
       if (!request.deviceId && (!request.deviceType || !request.runtime))
         return rejected("device_unavailable", "Give deviceType and runtime, or the deviceId to lease.");
       const owner = await prove(request);
@@ -836,6 +875,8 @@ export function createSimulatorManager(input: {
         if (!(await authorized(request))) return revoked();
         if (policy.simulatorSlots === 0)
           return rejected("simulators_disabled", "The owner's simulator limit is 0.");
+        if (plan.kind === "waiting")
+          return blockersFor("simulator_capacity", await input.governor.snapshot(), plan.detail);
         if (plan.kind === "refuse") return rejected("device_unavailable", plan.detail, plan.alternatives);
         return {
           outcome: "planned",
@@ -854,10 +895,49 @@ export function createSimulatorManager(input: {
         request.holderId,
       ]);
       const pending = acquisitions.get(key);
-      if (pending) return pending.then(async (result) => ((await authorized(request)) ? result : revoked()));
-      const result = acquire(request).finally(() => acquisitions.delete(key));
+      // Serialize a holder's requests, but never reuse another request's grant:
+      // its exact UDID/model/runtime may differ, even while boot is in flight.
+      if (pending) return pending.then(() => manager.acquire(request));
+      const result = acquire(request)
+        .then((result): SimulatorResult => {
+          // A reservation can still lack a device when a poll arrives. Check
+          // again after preparation rather than treating that absence as mismatch.
+          if (
+            result.outcome === "acquired" &&
+            ((request.deviceId && result.lease.deviceId?.toUpperCase() !== request.deviceId.toUpperCase()) ||
+              (request.exact && request.deviceType && result.lease.deviceType !== request.deviceType) ||
+              (request.runtime && result.lease.runtime !== request.runtime))
+          )
+            return rejected(
+              "lease_unavailable",
+              "This holder's acquired device does not match the requested device; inspect status and release its original lease before changing devices.",
+            );
+          return result;
+        })
+        .finally(() => acquisitions.delete(key));
       acquisitions.set(key, result);
       return result;
+    },
+    /** Read-only preflight for install/launch/drive clients; never adopts another holder. */
+    async verify(
+      id: string,
+      deviceId: string,
+      owner: SimulatorOwner,
+      authority?: SimulatorRequestOptions,
+    ): Promise<SimulatorResult> {
+      const lease = await find(id);
+      const current = await prove(owner);
+      if (!(await authorized(authority))) return revoked();
+      if (!lease) return rejected("lease_unavailable");
+      if (!current || !matchesOwner(lease, owner) || !matchesOwner(lease, current))
+        return rejected("stale_owner");
+      if (lease.deviceId?.toUpperCase() !== deviceId.toUpperCase())
+        return rejected("lease_unavailable", "The requested device is not this holder's leased device.");
+      const device = deviceFor(lease, await inventory());
+      if (!(await authorized(authority))) return revoked();
+      if (lease.phase !== "booted" || device?.state !== "Booted")
+        return rejected("lease_unavailable", "This holder's device is not confirmed booted.");
+      return { outcome: "acquired", lease: view(lease) };
     },
     async touch(
       id: string,

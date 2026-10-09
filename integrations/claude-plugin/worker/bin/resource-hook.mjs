@@ -29,7 +29,9 @@ process.stdout.write(
       hookEventName: "PreToolUse",
       updatedInput: {
         ...hook.tool_input,
-        command: `export CLANKIE_RESOURCE_HOLDER=${quoted}\n${hook.tool_input.command}`,
+        // A subshell prevents a persistent Bash session from exporting one
+        // child's identity into sibling calls. Ignore an ancestor Codex thread.
+        command: `(unset CODEX_THREAD_ID\nexport CLANKIE_RESOURCE_HOLDER=${quoted}\n${hook.tool_input.command}\n)`,
       },
     },
   }) + "\n",

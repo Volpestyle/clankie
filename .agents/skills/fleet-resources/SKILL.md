@@ -74,14 +74,25 @@ clankie simulator touch '{"seatId":"SEAT","id":"LEASE_ID"}'
 clankie simulator release '{"seatId":"SEAT","id":"LEASE_ID"}'
 ```
 
+Acquire/plan require a stable task holder: a missing native hook now refuses
+instead of silently borrowing a seat-level lease. Explicit owner calls outside a
+native harness must supply their own `holderId`. Older holderless leases remain
+releasable through their original root identity.
+
 Acquire answers within about 20 seconds; `--wait SECONDS` keeps polling and
-prints progress on stderr. Acquire is idempotent per seat, occupant and holder, so repeating it
-returns your lease. Native Claude Bash hooks supply a session/subagent holder;
-Codex uses its thread ID. Status names `holderId` beside the seat. A child cannot
+prints progress on stderr. Acquire is idempotent per seat, occupant and holder for a matching selection.
+Changing the device or exact model refuses while that holder has a different lease;
+concurrent requests validate their own selection instead of sharing another grant. Native Claude Bash hooks supply a session/subagent holder;
+Codex uses its executing thread ID even when a parent holder is inherited. The
+Claude hook scopes its identity to a subshell and clears an ancestor Codex thread.
+`clankie doctor` detects an installed worker plugin without the resource Bash hook;
+refresh that linked profile with the approved harness setup route. Installing a
+new hook does not update an existing session that has cached hook definitions. Status names `holderId` beside the seat. A child cannot
 touch or release a sibling holder’s lease. Other harnesses must supply a stable
 `holderId` in every simulator request (including touch/release), and `--holder ID`
-for heavy commands. `CLANKIE_RESOURCE_HOLDER` supplies the same identity to both
-CLIs. These labels do not grant seat authority. Never choose your lead’s or a
+for heavy commands. `CLANKIE_RESOURCE_HOLDER` supplies the identity outside Codex; a Codex thread
+takes precedence. An explicit simulator `holderId` or heavy `--holder` overrides
+that automatic choice for an owned task. These labels do not grant seat authority. Never choose your lead’s or a
 sibling’s identity. Outcomes:
 
 - `acquired`: use `lease.deviceId`, the exact UDID, for every simulator command.
@@ -111,6 +122,21 @@ even when the latter match the requested model exactly. Among those candidates,
 exact model then close model then family determines preference. `exact: true`
 never substitutes a different model; an explicit `deviceId` remains strict.
 Missing or malformed metadata is unknown, never proof of a previous boot.
+
+Before installing, launching or driving a device, verify its lease with the same
+holder. This read-only preflight checks the live occupant, holder, lease and exact
+UDID, and requires a confirmed booted device:
+
+```sh
+clankie simulator verify '{"seatId":"SEAT","id":"LEASE_ID","deviceId":"UDID"}'
+```
+
+A successful verification describes the existing owned lease; it acquires nothing
+and does not renew its heartbeat. Abort the device operation if verification
+refuses. Raw `simctl`, Xcode and external MCP tools are outside this API; the
+preflight cannot prevent a separately issued raw command or hold an atomic lock
+through it. Those clients must perform the check before their device operation.
+Never drive a sibling's device just because its UDID is visible in status.
 
 Touch the lease while actively using it; its default idle timeout is ten
 minutes. Release when finished. Release, idle expiry or a verified seat exit

@@ -1,0 +1,62 @@
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { runSimulatorCommand } from '../../apps/tui/src/command/fleet-resources.ts';
+const seatId = 'term_65d5e6b78aa88b6';
+const deviceId = 'ECF31A58-614F-40A7-87C9-914A4930D974';
+const threads = [randomUUID(), randomUUID()];
+const holders = threads.map(id => `codex:${id}`);
+const options = (index: number) => ({ env: { ...process.env, CODEX_THREAD_ID: threads[index], CLANKIE_RESOURCE_HOLDER: 'codex:inherited-parent' } });
+const request = { seatId, deviceId, exact: true };
+const events: unknown[] = [];
+const status = () => runSimulatorCommand(['status'], options(0)) as Promise<any>;
+const call = async (index: number) => {
+  const result: any = await runSimulatorCommand(['acquire', JSON.stringify(request)], options(index));
+  events.push({ at: new Date().toISOString(), holder: holders[index], result });
+  console.log(JSON.stringify({ holder: holders[index], outcome: result.outcome, reason: result.reason, deviceId: result.lease?.deviceId }));
+  if (result.outcome === 'acquired') {
+    assert.equal(result.lease.holderId, holders[index]);
+    assert.equal(result.lease.deviceId.toUpperCase(), deviceId);
+  }
+  return result;
+};
+const before = await status();
+console.log('Owned exact-device holders entering normal simulator admission polling.');
+let complete = false;
+try {
+  const deadline = Date.now() + 180_000;
+  while (Date.now() < deadline) {
+    const a = await call(0);
+    const b = await call(1);
+    if (a.outcome === 'acquired' || b.outcome === 'acquired') {
+      const winner = a.outcome === 'acquired' ? 0 : 1;
+      const held = winner === 0 ? a : b;
+      const loser = winner === 0 ? b : a;
+      assert.notEqual(loser.outcome, 'acquired');
+      const denied: any = await runSimulatorCommand(['release', JSON.stringify({ seatId, id: held.lease.id })], options(1 - winner));
+      assert.equal(denied.outcome, 'rejected');
+      events.push({ crossHolderRelease: denied });
+      const released: any = await runSimulatorCommand(['release', JSON.stringify({ seatId, id: held.lease.id })], options(winner));
+      assert.equal(released.outcome, 'released');
+      const next = await call(1 - winner);
+      if (next.outcome === 'acquired') complete = true;
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 10_000));
+  }
+} finally {
+  // Only exact, visibly owned claims. No app worker lease or external device is touched.
+  const snapshot = await status();
+  for (const lease of snapshot.leases) {
+    const index = holders.indexOf(lease.holderId);
+    if (lease.seatId !== seatId || index < 0) continue;
+    const released: any = await runSimulatorCommand(['release', JSON.stringify({ seatId, id: lease.id })], options(index));
+    events.push({ cleanup: released });
+    assert.equal(released.outcome, 'released');
+  }
+  const after = await status();
+  assert.equal(after.leases.filter((lease: any) => holders.includes(lease.holderId)).length, 0);
+  await mkdir('docs/testing/2026-10-08-simulator-holders', { recursive: true });
+  await writeFile('docs/testing/2026-10-08-simulator-holders/live.json', JSON.stringify({ complete, seatId, deviceId, holders, before, events, after, scope: 'Source CLI against installed service; explicit existing UDID only; no app leases touched; source manager verify endpoint is not deployed.' }, null, 2) + '\n');
+  console.log(JSON.stringify({ complete, ownedLeasesRemaining: 0 }));
+}

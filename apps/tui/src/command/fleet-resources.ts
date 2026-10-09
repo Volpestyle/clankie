@@ -60,7 +60,7 @@ export async function runSimulatorCommand(
   if (args.length === 0 || (args.length === 1 && args[0] === "status"))
     return FleetSimulatorStatusSchema.parse(await request(FLEET_SIMULATORS_PATH, undefined, options));
   const usage =
-    "Usage: clankie simulator status | plan JSON | acquire JSON [--wait SECONDS] | touch JSON | release JSON";
+    "Usage: clankie simulator status | plan JSON | acquire JSON [--wait SECONDS] | verify JSON | touch JSON | release JSON";
   let waitSeconds = 0;
   const rest = [...args];
   const flag = rest.indexOf("--wait");
@@ -70,7 +70,7 @@ export async function runSimulatorCommand(
     if (!Number.isInteger(waitSeconds) || waitSeconds < 0 || waitSeconds > 3600) throw new Error(usage);
     rest.splice(flag, 2);
   }
-  if (rest.length !== 2 || !["plan", "acquire", "touch", "release"].includes(rest[0] ?? ""))
+  if (rest.length !== 2 || !["plan", "acquire", "verify", "touch", "release"].includes(rest[0] ?? ""))
     throw new Error(usage);
   const value: unknown = JSON.parse(rest[1]!);
   if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -105,11 +105,28 @@ export async function runSimulatorCommand(
         }
       }
     }
-    return FleetSimulatorResultSchema.parse(await request(FLEET_SIMULATORS_PATH, input, options));
+    const result = FleetSimulatorResultSchema.parse(await request(FLEET_SIMULATORS_PATH, input, options));
+    if ((input.action === "acquire" || input.action === "verify") && result.outcome === "acquired") {
+      const lease = result.lease;
+      if (
+        !lease.deviceId ||
+        (input.holderId !== undefined && lease.holderId !== input.holderId) ||
+        (input.deviceId && lease.deviceId.toUpperCase() !== input.deviceId.toUpperCase()) ||
+        (input.action === "acquire" &&
+          input.exact &&
+          input.deviceType &&
+          lease.deviceType !== input.deviceType) ||
+        (input.action === "acquire" && input.runtime && lease.runtime !== input.runtime)
+      )
+        throw new Error(
+          `Simulator grant does not match this holder/device request: lease ${lease.id}, device ${lease.deviceId ?? "unknown"}. Do not drive or release it; inspect simulator status.`,
+        );
+    }
+    return result;
   };
   let result = await call();
-  // Acquire is idempotent per seat: polling it re-reads this seat's lease, or
-  // admits it once a slot frees. Nothing is left behind if waiting stops.
+  // Acquire is idempotent per native seat/occupant/task holder: polling reads
+  // that holder's matching lease, or admits it once a slot frees. Nothing is left behind if waiting stops.
   const deadline = Date.now() + waitSeconds * 1000;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let last = "";

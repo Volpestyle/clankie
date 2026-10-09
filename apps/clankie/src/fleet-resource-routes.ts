@@ -73,9 +73,11 @@ export function createFleetResourceRoutes(
               ...(request.exact === undefined ? {} : { exact: request.exact }),
               authorize: owned,
             })
-          : request.action === "touch"
-            ? await resources!.simulators.touch(request.id, owner, options)
-            : await resources!.simulators.release(request.id, owner, options);
+          : request.action === "verify"
+            ? await resources!.simulators.verify(request.id, request.deviceId, owner, options)
+            : request.action === "touch"
+              ? await resources!.simulators.touch(request.id, owner, options)
+              : await resources!.simulators.release(request.id, owner, options);
       return context.json(
         FleetSimulatorResultSchema.parse(result),
         result.outcome === "rejected" ? (result.reason === "service_restarting" ? 503 : 409) : 200,

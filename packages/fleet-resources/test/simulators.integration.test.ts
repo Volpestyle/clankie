@@ -53,12 +53,13 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
   await once(child, "spawn");
   const observedProcess = await processIdentity(child.pid!);
   if (!observedProcess) throw new Error("Fixture owner process was not observed");
-  const owner: SimulatorOwner = {
+  const owner = {
     seatId: "seat-fixture",
+    holderId: "root-task",
     occupantId: "native-fixture",
     pane: "w1:p1",
     processes: [{ pid: observedProcess.pid, startTime: observedProcess.startTime }],
-  };
+  } satisfies SimulatorOwner;
   let loadRatio = 0;
   const governorOptions = {
     directory: join(directory, "governor"),
@@ -102,7 +103,13 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
       .split("\n")
       .filter(Boolean)
       .map((row) => JSON.parse(row) as string[]);
-  const request = { seatId: owner.seatId, occupantId: owner.occupantId, deviceType, runtime };
+  const request = {
+    seatId: owner.seatId,
+    holderId: owner.holderId,
+    occupantId: owner.occupantId,
+    deviceType,
+    runtime,
+  };
   let ownerAuthorized = true;
   const authorize = async () => ownerAuthorized;
   const server = createServer(async (req, res) => {
@@ -114,6 +121,8 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
       if (req.url === "/plan") result = await manager.plan({ ...body, authorize });
       else if (req.url === "/acquire") result = await manager.acquire({ ...body, authorize });
       else if (req.url === "/release") result = await manager.release(body.id, body.owner, { authorize });
+      else if (req.url === "/verify")
+        result = await manager.verify(body.id, body.deviceId, body.owner, { authorize });
       else if (req.url === "/touch") result = await manager.touch(body.id, body.owner, { authorize });
       else if (req.url === "/snapshot") result = await manager.snapshot();
       else throw new Error("Unknown fixture API");
@@ -623,7 +632,12 @@ it("a seat leases a device it booted by hand by its UDID without booting or dele
   });
   expect((await f.manager.acquire(f.request)).outcome).toBe("waiting");
   const adopted = lease(
-    await f.manager.acquire({ seatId: f.owner.seatId, occupantId: f.owner.occupantId, deviceId: handBooted }),
+    await f.manager.acquire({
+      seatId: f.owner.seatId,
+      holderId: f.owner.holderId,
+      occupantId: f.owner.occupantId,
+      deviceId: handBooted,
+    }),
   );
   expect(adopted).toMatchObject({ deviceId: handBooted, phase: "booted", origin: "existing" });
   expect((await f.manager.snapshot()).externalActive).toBe(0);
@@ -928,4 +942,99 @@ it("the load guard gates both independent budgets with concurrent requests", asy
     cancel.abort();
     await heavy;
   }
+});
+
+it("exact busy UDIDs wait for their holder with idle alternatives present, then grant only that device", async () => {
+  const f = await fixture();
+  await f.governor.configure({ ...defaultResourcePolicy(), simulatorSlots: 2 });
+  const busy = randomUUID().toUpperCase(),
+    idle = randomUUID().toUpperCase();
+  await f.mutate((state) => {
+    state.devices[runtime] = [busy, idle].map((udid) => ({
+      udid,
+      name: udid,
+      state: "Shutdown",
+      isAvailable: true,
+      deviceTypeIdentifier: deviceType,
+    }));
+  });
+  const a = { ...f.request, deviceId: busy, exact: true, holderId: "child-a" };
+  const b = { ...a, holderId: "child-b" };
+  const first = lease(await f.http("/acquire", a));
+  expect(first.deviceId).toBe(busy);
+  expect(
+    await f.http("/verify", { id: first.id, deviceId: busy, owner: { ...f.owner, holderId: b.holderId } }),
+  ).toMatchObject({ outcome: "rejected", reason: "stale_owner" });
+  expect(
+    await f.http("/verify", { id: first.id, deviceId: idle, owner: { ...f.owner, holderId: a.holderId } }),
+  ).toMatchObject({ outcome: "rejected", reason: "lease_unavailable" });
+  expect(
+    lease(
+      await f.http("/verify", { id: first.id, deviceId: busy, owner: { ...f.owner, holderId: a.holderId } }),
+    ).deviceId,
+  ).toBe(busy);
+  expect(await f.http("/plan", b)).toMatchObject({ outcome: "waiting" });
+  const second = await f.http("/acquire", b);
+  expect(second).toMatchObject({ outcome: "waiting", reason: "simulator_capacity" });
+  if (second.outcome !== "waiting") throw new Error("Expected exact-device waiter");
+  expect(second.hint).toContain("Requested device");
+  expect(second.hint).toContain(a.holderId);
+  expect(second.hint).not.toContain("All 2 simulator");
+  expect((await f.read()).devices[runtime]!.find((row) => row.udid === idle)!.state).toBe("Shutdown");
+  expect(
+    (await f.http("/release", { id: first.id, owner: { ...f.owner, holderId: a.holderId } })).outcome,
+  ).toBe("released");
+  expect(lease(await f.http("/acquire", b))).toMatchObject({ deviceId: busy, holderId: b.holderId });
+});
+
+it("concurrent requests from one holder validate each exact device instead of sharing the first grant", async () => {
+  const f = await fixture();
+  const ipadType = "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4";
+  const ipad = randomUUID().toUpperCase(),
+    iphone = randomUUID().toUpperCase();
+  await f.mutate((state) => {
+    state.devices[runtime] = [
+      { udid: ipad, name: "iPad", state: "Shutdown", isAvailable: true, deviceTypeIdentifier: ipadType },
+      {
+        udid: iphone,
+        name: "iPhone",
+        state: "Shutdown",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+      },
+    ];
+  });
+  const barrier = f.pauseInventory();
+  const first = f.http("/acquire", {
+    ...f.request,
+    deviceType: ipadType,
+    deviceId: ipad,
+    exact: true,
+    holderId: "same-child",
+  });
+  await barrier.waiting;
+  const second = f.http("/acquire", { ...f.request, deviceId: iphone, exact: true, holderId: "same-child" });
+  barrier.resume();
+  expect(lease(await first).deviceId).toBe(ipad);
+  expect(await second).toMatchObject({ outcome: "rejected", reason: "lease_unavailable" });
+  expect(await f.http("/acquire", { ...f.request, exact: true, holderId: "same-child" })).toMatchObject({
+    outcome: "rejected",
+    reason: "lease_unavailable",
+  });
+  expect(await f.governor.simulatorReservations()).toHaveLength(1);
+});
+
+it("a missing native task holder cannot acquire the seat's existing lease", async () => {
+  const f = await fixture();
+  const held = lease(await f.http("/acquire", f.request));
+  const { holderId: _holder, ...unidentified } = f.request;
+  expect(await f.http("/acquire", unidentified)).toMatchObject({
+    outcome: "rejected",
+    reason: "owner_unavailable",
+  });
+  expect(await f.http("/plan", unidentified)).toMatchObject({
+    outcome: "rejected",
+    reason: "owner_unavailable",
+  });
+  expect(lease(await f.http("/acquire", f.request)).id).toBe(held.id);
 });

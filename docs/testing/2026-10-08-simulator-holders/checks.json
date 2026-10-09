@@ -1,0 +1,703 @@
+{
+  "reports": [
+    {
+      "report": "tests",
+      "success": false,
+      "passed": 68,
+      "failed": 2,
+      "pending": 1,
+      "startTime": 1791516710109,
+      "files": [
+        {
+          "file": "packages/fleet-resources/test/simulators.integration.test.ts",
+          "status": "failed",
+          "cases": [
+            {
+              "name": "crosses real HTTP, durable admission and child-process simctl boundaries; heavy work proceeds while the simulator is held",
+              "status": "passed"
+            },
+            {
+              "name": "concurrent named seats reserve one global simulator slot; the other is told who holds it",
+              "status": "passed"
+            },
+            {
+              "name": "counts unmanaged booted and booting devices without shutting down or deleting them",
+              "status": "passed"
+            },
+            {
+              "name": "unknown native inventory refuses admission and cannot free existing capacity",
+              "status": "passed"
+            },
+            {
+              "name": "only simulator heartbeats renew idle use; unrelated working turns do not",
+              "status": "passed"
+            },
+            {
+              "name": "observer close and missing-seat hints preserve leases; independently proven native exit stops and retains its exact created device",
+              "status": "passed"
+            },
+            {
+              "name": "a lost create receipt retains its reservation across restart and never adopts or deletes a device by name",
+              "status": "passed"
+            },
+            {
+              "name": "a lost boot receipt holds capacity and reconciles only a later booted observation without boot resubmission",
+              "status": "passed"
+            },
+            {
+              "name": "failed shutdown holds capacity until native stop is observed; cleanup never deletes an unrelated device",
+              "status": "passed"
+            },
+            {
+              "name": "mismatched native occupants and process births cannot touch or release another lease",
+              "status": "passed"
+            },
+            {
+              "name": "revoking HTTP authorization while native preflight is awaiting cannot create a simulator or retain an unsubmitted reservation",
+              "status": "passed"
+            },
+            {
+              "name": "revoking HTTP authorization after the exact Create receipt prevents boot and retains the owned shutdown device",
+              "status": "passed"
+            },
+            {
+              "name": "a held HTTP acquisition retains its rejection until awaited after the connection closes",
+              "status": "passed"
+            },
+            {
+              "name": "revoked HTTP authority cannot renew activity or shut down an existing simulator",
+              "status": "passed"
+            },
+            {
+              "name": "a slow boot outlives a caller that hung up: the lease stays the seat's and its next acquire returns it booted",
+              "status": "passed"
+            },
+            {
+              "name": "answers booting within its bound and keeps booting server-side",
+              "status": "passed"
+            },
+            {
+              "name": "prefers an idle existing device of the exact type, and returns it stopped rather than deleted",
+              "status": "passed"
+            },
+            {
+              "name": "substitutes a close existing model for a missing one, and refuses with alternatives when exact",
+              "status": "passed"
+            },
+            {
+              "name": "a seat leases a device it booted by hand by its UDID without booting or deleting it",
+              "status": "passed"
+            },
+            {
+              "name": "a boot that failed is resubmitted by the seat's next acquire instead of stranding the slot",
+              "status": "passed"
+            },
+            {
+              "name": "reuses the installed runtime's idle family before creating requested com.apple.CoreSimulator.SimDeviceType.iPhone-13-mini",
+              "status": "passed"
+            },
+            {
+              "name": "reuses the installed runtime's idle family before creating requested com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro",
+              "status": "passed"
+            },
+            {
+              "name": "two consecutive family leases across a manager restart boot the same retained created device",
+              "status": "passed"
+            },
+            {
+              "name": "planning is read-only and a missing create receipt still excludes its named device from reuse",
+              "status": "passed"
+            },
+            {
+              "name": "prefers boot history within com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro before a cold exact model, respecting explicit constraints",
+              "status": "passed"
+            },
+            {
+              "name": "prefers boot history within com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro before a cold exact model, respecting explicit constraints",
+              "status": "passed"
+            },
+            {
+              "name": "boot history prefers a warm exact device even when a cold one sorts first",
+              "status": "passed"
+            },
+            {
+              "name": "two native children in one seat have separate idempotency and release identities across restart",
+              "status": "passed"
+            },
+            {
+              "name": "two real heavy runners and a simulator use independent budgets in either admission order",
+              "status": "passed"
+            },
+            {
+              "name": "the load guard gates both independent budgets with concurrent requests",
+              "status": "passed"
+            },
+            {
+              "name": "exact busy UDIDs wait for their holder with idle alternatives present, then grant only that device",
+              "status": "passed"
+            },
+            {
+              "name": "concurrent requests from one holder validate each exact device instead of sharing the first grant",
+              "status": "failed"
+            }
+          ]
+        },
+        {
+          "file": "apps/tui/test/fleet-resources-cli.integration.test.ts",
+          "status": "passed",
+          "cases": [
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries runs actual headless heavy locally in hosted mode, preserves child --chat args and nonzero exit",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries passes Ctrl-C through the actual heavy CLI to the owned native command",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries persists owner overrides into real settings and the common registry, and clears them back to automatic",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries reads legacy settings without introducing resource configuration or mutating files",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries shows a real holder PID and named FIFO waiter in authenticated doctor status without secrets",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries keeps doctor usable when resource status is legacy",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries keeps doctor usable when resource status is invalid",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries keeps doctor usable when resource status is unavailable",
+              "status": "passed"
+            },
+            {
+              "name": "fleet resource CLI and doctor across real OS/files/HTTP boundaries bounds a stalled real resource HTTP read to five seconds without losing doctor diagnostics",
+              "status": "passed"
+            },
+            {
+              "name": "native child heavy CLIs under the same pane keep separate holder labels and permits",
+              "status": "passed"
+            }
+          ]
+        },
+        {
+          "file": "apps/tui/test/harness-profiles.test.ts",
+          "status": "passed",
+          "cases": [
+            {
+              "name": "reports installed, enabled, version, bridge, hook and skill gaps independently for each Claude profile",
+              "status": "passed"
+            },
+            {
+              "name": "checks Codex plugin activation, bridge and forwarding separately: current",
+              "status": "passed"
+            },
+            {
+              "name": "checks Codex plugin activation, bridge and forwarding separately: stale",
+              "status": "passed"
+            },
+            {
+              "name": "checks Codex plugin activation, bridge and forwarding separately: disabled",
+              "status": "passed"
+            },
+            {
+              "name": "checks Codex plugin activation, bridge and forwarding separately: missing-bridge",
+              "status": "passed"
+            },
+            {
+              "name": "checks Codex plugin activation, bridge and forwarding separately: missing-forwarding",
+              "status": "passed"
+            },
+            {
+              "name": "identifies the legacy shipped Node registration and checks identity forwarding (true)",
+              "status": "passed"
+            },
+            {
+              "name": "identifies the legacy shipped Node registration and checks identity forwarding (false)",
+              "status": "passed"
+            },
+            {
+              "name": "ships matching Claude and Codex worker versions for doctor comparisons",
+              "status": "passed"
+            }
+          ]
+        },
+        {
+          "file": "apps/tui/test/harness-refresh.integration.test.ts",
+          "status": "passed",
+          "cases": [
+            {
+              "name": "refreshes native linked profiles through the API and remote preparation without enrolling or restarting",
+              "status": "skipped"
+            },
+            {
+              "name": "leaves absent unlinked harnesses alone and reports an absent already-linked harness",
+              "status": "passed"
+            }
+          ]
+        },
+        {
+          "file": "apps/clankie/test/fleet-resource-routes.integration.test.ts",
+          "status": "failed",
+          "cases": [
+            {
+              "name": "denies unauthenticated/foreign callers before any resource or native mutation",
+              "status": "passed"
+            },
+            {
+              "name": "returns503 on real native registry unavailability without exposing its path or error",
+              "status": "passed"
+            },
+            {
+              "name": "serves validated metadata and crosses actual TCP/governor/process-based simulator effects",
+              "status": "passed"
+            },
+            {
+              "name": "rejects caller kernel/occupant authority {\"occupantId\":\"caller-claimed-native\"}",
+              "status": "passed"
+            },
+            {
+              "name": "rejects caller kernel/occupant authority {\"processes\":[{\"pid\":2,\"startTime\":\"claimed\"}]}",
+              "status": "passed"
+            },
+            {
+              "name": "rejects caller kernel/occupant authority {\"binding\":{\"socketPath\":\"/caller-socket\"}}",
+              "status": "passed"
+            },
+            {
+              "name": "rejects malformed JSON, unknown actions and oversized bodies before native effects",
+              "status": "passed"
+            },
+            {
+              "name": "rechecks owner authority after an awaited real native seat proof",
+              "status": "passed"
+            },
+            {
+              "name": "rechecks owner authority after actual simulator inventory before Create",
+              "status": "passed"
+            },
+            {
+              "name": "sanitizes native proof errors instead of returning private diagnostics",
+              "status": "passed"
+            },
+            {
+              "name": "answers service_restarting (503) while seat proof is not bound, not owner_unavailable",
+              "status": "passed"
+            },
+            {
+              "name": "names a hand-booted simulator, the seat whose process uses it, and tells that seat's lead; the CLI waits with progress",
+              "status": "passed"
+            },
+            {
+              "name": "plans through authenticated HTTP and the CLI warns before submitting a new device effect",
+              "status": "passed"
+            },
+            {
+              "name": "Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal boundaries",
+              "status": "passed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"deviceId\":\"11111111-1111-4111-8111-111111111111\"}",
+              "status": "failed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"holderId\":\"sibling-holder\"}",
+              "status": "passed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"deviceType\":\"com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4\"}",
+              "status": "passed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"runtime\":\"com.apple.CoreSimulator.SimRuntime.iOS-26-0\"}",
+              "status": "passed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "report": "final-boundaries",
+      "success": true,
+      "passed": 51,
+      "failed": 0,
+      "pending": 0,
+      "startTime": 1791517011649,
+      "files": [
+        {
+          "file": "apps/clankie/test/fleet-resource-routes.integration.test.ts",
+          "status": "passed",
+          "cases": [
+            {
+              "name": "denies unauthenticated/foreign callers before any resource or native mutation",
+              "status": "passed"
+            },
+            {
+              "name": "returns503 on real native registry unavailability without exposing its path or error",
+              "status": "passed"
+            },
+            {
+              "name": "serves validated metadata and crosses actual TCP/governor/process-based simulator effects",
+              "status": "passed"
+            },
+            {
+              "name": "rejects caller kernel/occupant authority {\"occupantId\":\"caller-claimed-native\"}",
+              "status": "passed"
+            },
+            {
+              "name": "rejects caller kernel/occupant authority {\"processes\":[{\"pid\":2,\"startTime\":\"claimed\"}]}",
+              "status": "passed"
+            },
+            {
+              "name": "rejects caller kernel/occupant authority {\"binding\":{\"socketPath\":\"/caller-socket\"}}",
+              "status": "passed"
+            },
+            {
+              "name": "rejects malformed JSON, unknown actions and oversized bodies before native effects",
+              "status": "passed"
+            },
+            {
+              "name": "rechecks owner authority after an awaited real native seat proof",
+              "status": "passed"
+            },
+            {
+              "name": "rechecks owner authority after actual simulator inventory before Create",
+              "status": "passed"
+            },
+            {
+              "name": "sanitizes native proof errors instead of returning private diagnostics",
+              "status": "passed"
+            },
+            {
+              "name": "answers service_restarting (503) while seat proof is not bound, not owner_unavailable",
+              "status": "passed"
+            },
+            {
+              "name": "names a hand-booted simulator, the seat whose process uses it, and tells that seat's lead; the CLI waits with progress",
+              "status": "passed"
+            },
+            {
+              "name": "plans through authenticated HTTP and the CLI warns before submitting a new device effect",
+              "status": "passed"
+            },
+            {
+              "name": "Claude Bash hook child IDs survive the CLI, verified seat, HTTP and journal boundaries",
+              "status": "passed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"deviceId\":\"11111111-1111-4111-8111-111111111111\"}",
+              "status": "passed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"holderId\":\"sibling-holder\"}",
+              "status": "passed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"deviceType\":\"com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4\"}",
+              "status": "passed"
+            },
+            {
+              "name": "CLI rejects a mismatched successful native HTTP grant: {\"runtime\":\"com.apple.CoreSimulator.SimRuntime.iOS-26-0\"}",
+              "status": "passed"
+            }
+          ]
+        },
+        {
+          "file": "packages/fleet-resources/test/simulators.integration.test.ts",
+          "status": "passed",
+          "cases": [
+            {
+              "name": "crosses real HTTP, durable admission and child-process simctl boundaries; heavy work proceeds while the simulator is held",
+              "status": "passed"
+            },
+            {
+              "name": "concurrent named seats reserve one global simulator slot; the other is told who holds it",
+              "status": "passed"
+            },
+            {
+              "name": "counts unmanaged booted and booting devices without shutting down or deleting them",
+              "status": "passed"
+            },
+            {
+              "name": "unknown native inventory refuses admission and cannot free existing capacity",
+              "status": "passed"
+            },
+            {
+              "name": "only simulator heartbeats renew idle use; unrelated working turns do not",
+              "status": "passed"
+            },
+            {
+              "name": "observer close and missing-seat hints preserve leases; independently proven native exit stops and retains its exact created device",
+              "status": "passed"
+            },
+            {
+              "name": "a lost create receipt retains its reservation across restart and never adopts or deletes a device by name",
+              "status": "passed"
+            },
+            {
+              "name": "a lost boot receipt holds capacity and reconciles only a later booted observation without boot resubmission",
+              "status": "passed"
+            },
+            {
+              "name": "failed shutdown holds capacity until native stop is observed; cleanup never deletes an unrelated device",
+              "status": "passed"
+            },
+            {
+              "name": "mismatched native occupants and process births cannot touch or release another lease",
+              "status": "passed"
+            },
+            {
+              "name": "revoking HTTP authorization while native preflight is awaiting cannot create a simulator or retain an unsubmitted reservation",
+              "status": "passed"
+            },
+            {
+              "name": "revoking HTTP authorization after the exact Create receipt prevents boot and retains the owned shutdown device",
+              "status": "passed"
+            },
+            {
+              "name": "a held HTTP acquisition retains its rejection until awaited after the connection closes",
+              "status": "passed"
+            },
+            {
+              "name": "revoked HTTP authority cannot renew activity or shut down an existing simulator",
+              "status": "passed"
+            },
+            {
+              "name": "a slow boot outlives a caller that hung up: the lease stays the seat's and its next acquire returns it booted",
+              "status": "passed"
+            },
+            {
+              "name": "answers booting within its bound and keeps booting server-side",
+              "status": "passed"
+            },
+            {
+              "name": "prefers an idle existing device of the exact type, and returns it stopped rather than deleted",
+              "status": "passed"
+            },
+            {
+              "name": "substitutes a close existing model for a missing one, and refuses with alternatives when exact",
+              "status": "passed"
+            },
+            {
+              "name": "a seat leases a device it booted by hand by its UDID without booting or deleting it",
+              "status": "passed"
+            },
+            {
+              "name": "a boot that failed is resubmitted by the seat's next acquire instead of stranding the slot",
+              "status": "passed"
+            },
+            {
+              "name": "reuses the installed runtime's idle family before creating requested com.apple.CoreSimulator.SimDeviceType.iPhone-13-mini",
+              "status": "passed"
+            },
+            {
+              "name": "reuses the installed runtime's idle family before creating requested com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro",
+              "status": "passed"
+            },
+            {
+              "name": "two consecutive family leases across a manager restart boot the same retained created device",
+              "status": "passed"
+            },
+            {
+              "name": "planning is read-only and a missing create receipt still excludes its named device from reuse",
+              "status": "passed"
+            },
+            {
+              "name": "prefers boot history within com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro before a cold exact model, respecting explicit constraints",
+              "status": "passed"
+            },
+            {
+              "name": "prefers boot history within com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro before a cold exact model, respecting explicit constraints",
+              "status": "passed"
+            },
+            {
+              "name": "boot history prefers a warm exact device even when a cold one sorts first",
+              "status": "passed"
+            },
+            {
+              "name": "two native children in one seat have separate idempotency and release identities across restart",
+              "status": "passed"
+            },
+            {
+              "name": "two real heavy runners and a simulator use independent budgets in either admission order",
+              "status": "passed"
+            },
+            {
+              "name": "the load guard gates both independent budgets with concurrent requests",
+              "status": "passed"
+            },
+            {
+              "name": "exact busy UDIDs wait for their holder with idle alternatives present, then grant only that device",
+              "status": "passed"
+            },
+            {
+              "name": "concurrent requests from one holder validate each exact device instead of sharing the first grant",
+              "status": "passed"
+            },
+            {
+              "name": "a missing native task holder cannot acquire the seat's existing lease",
+              "status": "passed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "report": "final-hints",
+      "success": true,
+      "passed": 3,
+      "failed": 0,
+      "pending": 30,
+      "startTime": 1791517262456,
+      "files": [
+        {
+          "file": "packages/fleet-resources/test/simulators.integration.test.ts",
+          "status": "passed",
+          "cases": [
+            {
+              "name": "crosses real HTTP, durable admission and child-process simctl boundaries; heavy work proceeds while the simulator is held",
+              "status": "skipped"
+            },
+            {
+              "name": "concurrent named seats reserve one global simulator slot; the other is told who holds it",
+              "status": "skipped"
+            },
+            {
+              "name": "counts unmanaged booted and booting devices without shutting down or deleting them",
+              "status": "skipped"
+            },
+            {
+              "name": "unknown native inventory refuses admission and cannot free existing capacity",
+              "status": "skipped"
+            },
+            {
+              "name": "only simulator heartbeats renew idle use; unrelated working turns do not",
+              "status": "skipped"
+            },
+            {
+              "name": "observer close and missing-seat hints preserve leases; independently proven native exit stops and retains its exact created device",
+              "status": "skipped"
+            },
+            {
+              "name": "a lost create receipt retains its reservation across restart and never adopts or deletes a device by name",
+              "status": "skipped"
+            },
+            {
+              "name": "a lost boot receipt holds capacity and reconciles only a later booted observation without boot resubmission",
+              "status": "skipped"
+            },
+            {
+              "name": "failed shutdown holds capacity until native stop is observed; cleanup never deletes an unrelated device",
+              "status": "skipped"
+            },
+            {
+              "name": "mismatched native occupants and process births cannot touch or release another lease",
+              "status": "skipped"
+            },
+            {
+              "name": "revoking HTTP authorization while native preflight is awaiting cannot create a simulator or retain an unsubmitted reservation",
+              "status": "skipped"
+            },
+            {
+              "name": "revoking HTTP authorization after the exact Create receipt prevents boot and retains the owned shutdown device",
+              "status": "skipped"
+            },
+            {
+              "name": "a held HTTP acquisition retains its rejection until awaited after the connection closes",
+              "status": "skipped"
+            },
+            {
+              "name": "revoked HTTP authority cannot renew activity or shut down an existing simulator",
+              "status": "skipped"
+            },
+            {
+              "name": "a slow boot outlives a caller that hung up: the lease stays the seat's and its next acquire returns it booted",
+              "status": "skipped"
+            },
+            {
+              "name": "answers booting within its bound and keeps booting server-side",
+              "status": "skipped"
+            },
+            {
+              "name": "prefers an idle existing device of the exact type, and returns it stopped rather than deleted",
+              "status": "skipped"
+            },
+            {
+              "name": "substitutes a close existing model for a missing one, and refuses with alternatives when exact",
+              "status": "skipped"
+            },
+            {
+              "name": "a seat leases a device it booted by hand by its UDID without booting or deleting it",
+              "status": "skipped"
+            },
+            {
+              "name": "a boot that failed is resubmitted by the seat's next acquire instead of stranding the slot",
+              "status": "skipped"
+            },
+            {
+              "name": "reuses the installed runtime's idle family before creating requested com.apple.CoreSimulator.SimDeviceType.iPhone-13-mini",
+              "status": "skipped"
+            },
+            {
+              "name": "reuses the installed runtime's idle family before creating requested com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro",
+              "status": "skipped"
+            },
+            {
+              "name": "two consecutive family leases across a manager restart boot the same retained created device",
+              "status": "skipped"
+            },
+            {
+              "name": "planning is read-only and a missing create receipt still excludes its named device from reuse",
+              "status": "skipped"
+            },
+            {
+              "name": "prefers boot history within com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro before a cold exact model, respecting explicit constraints",
+              "status": "skipped"
+            },
+            {
+              "name": "prefers boot history within com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro before a cold exact model, respecting explicit constraints",
+              "status": "skipped"
+            },
+            {
+              "name": "boot history prefers a warm exact device even when a cold one sorts first",
+              "status": "skipped"
+            },
+            {
+              "name": "two native children in one seat have separate idempotency and release identities across restart",
+              "status": "skipped"
+            },
+            {
+              "name": "two real heavy runners and a simulator use independent budgets in either admission order",
+              "status": "skipped"
+            },
+            {
+              "name": "the load guard gates both independent budgets with concurrent requests",
+              "status": "skipped"
+            },
+            {
+              "name": "exact busy UDIDs wait for their holder with idle alternatives present, then grant only that device",
+              "status": "passed"
+            },
+            {
+              "name": "concurrent requests from one holder validate each exact device instead of sharing the first grant",
+              "status": "passed"
+            },
+            {
+              "name": "a missing native task holder cannot acquire the seat's existing lease",
+              "status": "passed"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "note": "Use the later final-boundaries result for both boundary files. CLI and profile successes in tests.json remain valid; prior failures there were corrected fixture inputs. final-hints supersedes the three selected cases after the exact-device wait hint change."
+}
