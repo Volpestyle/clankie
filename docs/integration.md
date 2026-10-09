@@ -14,7 +14,7 @@ clankie integrate push UUID
 clankie integrate revert PASSED_BATCH_UUID --push
 ```
 
-Using it is optional: changes land directly on `main` after their narrow checks
+Using it is optional: changes land directly on `main` after their root landing gate passes
 ([ADR 0240](adr/0240-changes-land-directly-on-main.md)). When you want a composed,
 gated batch, push a branch, run `clankie integrate <sha> --push --no-wait`, then
 follow with `clankie integrate status`. `status` without a UUID shows

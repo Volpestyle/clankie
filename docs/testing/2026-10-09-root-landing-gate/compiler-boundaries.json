@@ -1,0 +1,36 @@
+{
+  "relativeDeletedProbe": [
+    {
+      "name": "unchanged",
+      "packages": [],
+      "total": 3,
+      "changed": [],
+      "modules": 5,
+      "reason": "real compiler import graph"
+    },
+    {
+      "name": "relative type-only cross-package import",
+      "packages": ["@probe/consumer", "@probe/producer"],
+      "total": 3,
+      "changed": ["packages/producer/index.ts"],
+      "modules": 5,
+      "reason": "real compiler import graph"
+    },
+    {
+      "name": "deleted relative type-only module",
+      "packages": ["@probe/consumer", "@probe/producer"],
+      "total": 3,
+      "changed": ["packages/producer/index.ts"],
+      "modules": 5,
+      "reason": "real compiler import graph"
+    }
+  ],
+  "realRelativeCacheProbe": {
+    "base": "29d4139435ce46cc94afe790e74808332b489f5b",
+    "packages": ["@clankie/clankie", "@clankie/tui"],
+    "total": 31,
+    "cacheInputs": 1645,
+    "beforeHash": "76069ffc6fb78ee6",
+    "afterHash": "a89ad1682b83f8e1"
+  }
+}

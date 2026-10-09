@@ -21,18 +21,20 @@ suites for releases and explicit manual runs.
 Agents and the owner commit to `main` and push it directly:
 
 1. Stage only your own files.
-2. Run the narrow checks for what you changed: formatting, typecheck, and the
-   tests that cover the change (through `clankie heavy --` on this Mac).
-3. `git pull --rebase origin main`, then `git push origin main`. Resolve
-   conflicts only in your own files; coordinate with the owner of the rest.
+2. Commit, then `git pull --rebase origin main`. Resolve conflicts only in your
+   own files; coordinate with the owner of the rest.
+3. Run the repository-root `clankie heavy -- pnpm check:landing`, with its own
+   `--changed` selection against fetched `origin/main`, then `git push origin main`.
+   Focused checks are for iteration, not a substitute for this gate. A source or
+   base change after checking requires another root gate (ADR 0247).
 
 The full `pnpm check` runs for releases and on request. `clankie integrate`
 stays available for anyone who wants a composed, gated batch, but nothing
-requires it, and the direct-main pre-push guard is no longer offered as policy.
+requires the queue. The root landing gate is required for direct pushes.
 
 ## Consequences
 
-- Fixes reach `main` minutes after their narrow checks pass.
+- Fixes reach `main` after their root landing gate passes; focused checks support iteration.
 - A change that breaks something outside its own checks is not caught until a
   release or manual full run. Restoring a green full suite is separate work.
 - Concurrent agents in a shared checkout must commit only their own files and

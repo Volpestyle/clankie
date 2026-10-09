@@ -1,0 +1,198 @@
+[
+  {
+    "replay": "1870",
+    "sha": "cb6e0b4b64e6137169426528baadd1a3930c7295",
+    "base": "733382a376b355699ed5d726f9c12874677fbf5a",
+    "exitCode": 0,
+    "elapsedSeconds": 10.138222292,
+    "expectedConsumers": [
+      "apps/clankie/test/captain-native-chat.test.ts",
+      "apps/clankie/test/seat-outbox.test.ts"
+    ],
+    "consumerExitCode": 1,
+    "consumerElapsedSeconds": 8.106581541,
+    "selectedFiles": 686,
+    "expectedSelected": {
+      "apps/clankie/test/captain-native-chat.test.ts": true,
+      "apps/clankie/test/seat-outbox.test.ts": true
+    },
+    "passedTests": 12,
+    "failedTests": 7,
+    "consumerResults": [
+      {
+        "file": "apps/clankie/test/captain-native-chat.test.ts",
+        "passed": 0,
+        "failed": [
+          {
+            "name": "reads native history on demand without importing it (remote=false)",
+            "error": "AssertionError: expected \"deliverToSeat\" to be called with arguments: [ 'external', 'From the app', \u2026(1) ]\n\nReceived:\n\n  1st deliverToSeat call:\n\n  [\n    \"external\",\n    \"From the app\",\n-   Any<Function>,\n+   [Function fallback],\n+   {\n+     \"conversationId\": \"conv-3f693969-7d7c-4dd5-950d-a84129f1b2e8\",\n+   },\n  ]\n\n\nNumber of calls: 1\n"
+          },
+          {
+            "name": "reads native history on demand without importing it (remote=true)",
+            "error": "AssertionError: expected \"deliverToSeat\" to be called with arguments: [ 'pc/external', 'From the app', \u2026(1) ]\n\nReceived:\n\n  1st deliverToSeat call:\n\n  [\n    \"pc/external\",\n    \"From the app\",\n-   Any<Function>,\n+   [Function fallback],\n+   {\n+     \"conversationId\": \"conv-9e921425-c3c5-4745-8113-5730fe518038\",\n+   },\n  ]\n\n\nNumber of calls: 1\n"
+          }
+        ]
+      },
+      {
+        "file": "apps/clankie/test/seat-outbox.test.ts",
+        "passed": 12,
+        "failed": [
+          {
+            "name": "seat outbox is unbound until a poller parks, then hands queued turns to the poller",
+            "error": "Error: expected { outcome: 'delivered', \u2026(2) } to deeply equal { outcome: 'delivered', \u2026(1) }"
+          },
+          {
+            "name": "seat outbox wakes a parked poll the moment a turn arrives",
+            "error": "Error: expected { outcome: 'delivered', \u2026(2) } to deeply equal { outcome: 'delivered', \u2026(1) }"
+          },
+          {
+            "name": "seat outbox marks a taken event delivered only after the next poll, and unconfirmed if none arrives",
+            "error": "Error: expected { outcome: 'delivered', \u2026(2) } to deeply equal { outcome: 'delivered', \u2026(1) }"
+          },
+          {
+            "name": "seat outbox keeps one live waiter: a newer poll supersedes the older with an empty page",
+            "error": "Error: expected { outcome: 'delivered', \u2026(2) } to deeply equal { outcome: 'delivered', \u2026(1) }"
+          },
+          {
+            "name": "seat outbox delivers two successive turns in order to one live bridge that re-polls",
+            "error": "Error: expected { outcome: 'delivered', \u2026(2) } to deeply equal { outcome: 'delivered', \u2026(1) }"
+          }
+        ]
+      }
+    ],
+    "rawEvidence": {
+      "old-selection-1870.json": "845cc6a2f59714ba00863bf77ced6b0535c8fd3f086be5df93a050c269e1fa55",
+      "broken-consumers-1870.json": "aa253b876194af34d03c8c0b06db497f409307f6fc2b44ef187b52731f3a3d93"
+    }
+  },
+  {
+    "replay": "1869",
+    "sha": "29d4139435ce46cc94afe790e74808332b489f5b",
+    "base": "4fb5ef8c7665ea810ab78f3f56cedefddd5cd34a",
+    "exitCode": 0,
+    "elapsedSeconds": 10.095693375000003,
+    "expectedConsumers": [
+      "apps/clankie/test/opencode-fleet-lifecycle.integration.test.ts",
+      "apps/clankie/test/worker-accounts.integration.test.ts"
+    ],
+    "consumerExitCode": 1,
+    "consumerElapsedSeconds": 21.369343459,
+    "selectedFiles": 690,
+    "expectedSelected": {
+      "apps/clankie/test/opencode-fleet-lifecycle.integration.test.ts": true,
+      "apps/clankie/test/worker-accounts.integration.test.ts": true
+    },
+    "passedTests": 7,
+    "failedTests": 23,
+    "consumerResults": [
+      {
+        "file": "apps/clankie/test/opencode-fleet-lifecycle.integration.test.ts",
+        "passed": 0,
+        "failed": [
+          {
+            "name": "a hire without an explicit brief delivers resolved working preferences through the real native channel once",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: expected 'native' to be 'Oriana Vale \u00b7 tester' // Object.is equality\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "native prepared hire survives real census/roster reconciliation and exits only its original TUI",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: expected 'native' to be 'Oriana Vale \u00b7 tester' // Object.is equality\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "a switched native session cannot exit through the previously hired seat",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: expected 'opencode-fleet-integration-XL5BQD wor\u2026' to be 'Oriana Vale \u00b7 tester' // Object.is equality\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "SSH native hire, API history and follow-up reuse the original controller without local allocation",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote birth change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote uid change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote socket-owner change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote disconnect change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote retarget change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote during-probe change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote windows change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote link-loss change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "remote session change refuses follow-up/reuse without another writer or local fallback",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "the global operator seat hires on a linked machine only into a registered project workspace",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "conflicting host and fleet SSH identities refuse every native history API before transport",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "lost native send receipt over SSH is not replayed by a repeated live-session follow-up",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "stored remote history grants no cold controller adoption, and unknown hosts do not read local history",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "history-first native hire keeps Captain admission during a prepare drop and return",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "Captain-first history works after a reconnect without adopting its old controller",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          },
+          {
+            "name": "advancing a fleet revision closes and evicts the old helper and SSH forward",
+            "error": "Error: {\"op\":\"spawn_seat\",\"schemaVersion\":1,\"result\":{\"outcome\":\"failed\",\"reason\":\"start_unconfirmed\",\"detail\":\"Native pane creation unconfirmed; inspect Herdr before retrying: Remote native OpenCode operation unavailable\",\"deliveryStage\":\"uncertain\"}}"
+          }
+        ]
+      },
+      {
+        "file": "apps/clankie/test/worker-accounts.integration.test.ts",
+        "passed": 7,
+        "failed": [
+          {
+            "name": "a remote hire runs as the account Clankie chose on that machine skips a signed-out default Claude profile for a signed-in one and starts there",
+            "error": "AssertionError: expected { outcome: 'failed', \u2026(3) } to match object { outcome: 'spawned', \u2026(1) }\n(3 matching properties omitted from actual)"
+          },
+          {
+            "name": "a remote hire runs as the account Clankie chose on that machine leaves a held Codex account to an explicit choice",
+            "error": "AssertionError: expected { outcome: 'failed', \u2026(3) } to match object { outcome: 'spawned' }\n(3 matching properties omitted from actual)"
+          },
+          {
+            "name": "a remote hire runs as the account Clankie chose on that machine with no harness at any layer, chooses one from the machine's accounts instead of assuming Codex",
+            "error": "AssertionError: expected { outcome: 'failed', \u2026(3) } to match object { outcome: 'spawned', \u2026(1) }\n(3 matching properties omitted from actual)"
+          }
+        ]
+      }
+    ],
+    "rawEvidence": {
+      "old-selection-1869.json": "ccad82f13cc9374ae21819e30ce7f34b313b7d3dad072614db40cbcda1bdca88",
+      "broken-consumers-1869.json": "01f0f5418fe7eea90b68dc8b4dc9c83eddf3c8a3e38481878fdc38abfe59bb1b"
+    }
+  }
+]

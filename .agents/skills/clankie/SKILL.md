@@ -17,6 +17,15 @@ Native hire briefs include its command contract. `clankie heavy -- COMMAND` shar
 machine capacity across worktrees; `clankie fleet resources` names current holders
 and waits. Preserve task-specific permission and verification requirements.
 
+For Clankie's own repository changes, use focused checks while iterating. Before
+pushing, commit your files, `git pull --rebase origin main`, then run
+`clankie heavy -- pnpm check:landing` from the repository root. Keep its own
+`--changed` selection against fetched `origin/main`; hand-picked subsets do not
+count as that gate. Push only after it passes. If source or base changes after
+the check, run the root gate again. Report the checked HEAD, fixed base, exit
+status and gate evidence path to your lead. A zero-test check after pushing is
+not evidence for the landing.
+
 Don't add tests nobody asked for. A test you write is your own reading of the
 intent written a second time; when it later fails, nobody can tell whether the
 code or the test is wrong. Add or change a test only when it comes from the

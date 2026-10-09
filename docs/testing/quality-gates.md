@@ -1,15 +1,28 @@
 # Repeatable quality gates
 
-`pnpm check` is the full manual and release gate. Per-change handoffs use the
-focused checks in ADR 0240. The full gate includes the
+`pnpm check` is the full manual and release gate. Per-change handoffs require the
+root landing gate in ADR 0240. The full gate includes the
 HTTP journey, unit, integration, Rust, IPC, type, lint and documentation checks.
 Pushes and pull requests run fast formatting, lint and native MCP contracts on Linux. Run the
 complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,
 live gateway or running operator service is required.
 
-`pnpm check:landing` runs static checks, typechecks and the affected Vitest
-selection against `CLANKIE_LANDING_BASE` (default: `origin/main`). For repeated
+The repository-root `pnpm check:landing` is required before a push. Focused
+checks are for iteration; hand-picked subsets do not count as this gate. Rebase
+onto fetched `origin/main` first. The command fixes `CLANKIE_LANDING_BASE`
+(default: `origin/main`) to a SHA, runs static checks, then the compiler projects
+affected through real imports (including type-only and relative cross-package
+imports), with serial compiler execution. Compiler/dependency configuration
+changes check all projects. Vitest's existing `--changed` selection is unchanged.
+The compiler-input hash participates in Turbo's cache key, including imports
+across package boundaries that are absent from package manifests.
+The checked HEAD, base, source fingerprint, compiler scope, phase times and exit
+are saved to `.local/landing-gate.json`; source changes during the run fail it.
+Pass Vitest reporter options after `--`, for example `pnpm check:landing --
+--reporter=json --outputFile=.local/landing-tests.json`.
+
+For repeated
 reliability checks on unchanged main, keep a fixed baseline that selects the
 regression and retain its individual result with `--reporter=json
 --outputFile=PATH`. A clean comparison against `origin/main` may select zero

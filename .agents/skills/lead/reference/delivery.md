@@ -29,15 +29,20 @@ keep what is missing in a focused follow-up.
 
 Everyone, including James's interactive panes and their subagents, lands
 clankie and clankie-app directly on `main` (ADR 0240). Brief workers to stage
-only their files, run the narrow checks for what they changed, then
-`git pull --rebase origin main` and `git push origin main`, reporting the SHA.
+only their files, commit, and `git pull --rebase origin main`. Before pushing,
+require the repository-root `clankie heavy -- pnpm check:landing`, using its own
+`--changed` test selection against fetched `origin/main`. Focused checks are for
+iteration; a hand-picked subset is not the landing gate. A source/base change
+after the gate requires another root gate. Require the checked HEAD, fixed base,
+exit status and evidence path in the worker's report; a clean-main zero-test run
+does not verify an earlier landing. Then `git push origin main`, reporting the SHA.
 The full `pnpm check` runs for releases and on request. The running service
 automatically syncs registered local owner checkouts when main advances,
 including direct pushes; blocked edits are preserved and reported.
 `clankie checkouts sync` is the immediate/manual recovery route.
 
 `clankie integrate` remains optional for a composed, gated batch. The service composes fresh origin in independent worktrees. Compatible requests
-waiting during a gate join the next batch, with one full gate for the composed
+waiting during a gate join the next batch, with one root landing gate for the composed
 core/app pair. Conflicting requests roll back as a whole; failed shared gates
 split into smaller batches until the failing request is reported. Each receipt
 keeps its original input, shared batch ID and attempted evidence. Restores,

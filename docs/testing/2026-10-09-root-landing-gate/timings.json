@@ -1,0 +1,214 @@
+[
+  {
+    "label": "1870",
+    "mode": "before",
+    "base": "733382a376b355699ed5d726f9c12874677fbf5a",
+    "wrapperExit": 1,
+    "elapsedSeconds": 193.94264758399999,
+    "exitCode": 1,
+    "loadBefore": [24.7734375, 39.64599609375, 35.921875],
+    "loadAfter": [23.6572265625, 35.5703125, 35.2685546875],
+    "turboTime": "2m31.125s",
+    "turboCache": "0 cached, 31 total",
+    "selectedFiles": 686,
+    "logSha256": "d763f1f1dd06380fa11087b4c67f41130a0169d7fdaf3ff43507eec4960100b8"
+  },
+  {
+    "label": "1870",
+    "mode": "after",
+    "base": "733382a376b355699ed5d726f9c12874677fbf5a",
+    "wrapperExit": 1,
+    "elapsedSeconds": 183.423837959,
+    "exitCode": 1,
+    "loadBefore": [22.8037109375, 35.1953125, 35.1376953125],
+    "loadAfter": [17.54345703125, 28.64013671875, 32.54345703125],
+    "turboTime": "2m16.865s",
+    "turboCache": "0 cached, 24 total",
+    "selectedFiles": 686,
+    "logSha256": "060a59823941b92e5ab281025f9737478f2e9063733328067c909398458d869a",
+    "sourceStable": true,
+    "compilerProjects": [
+      "@clankie/agent-hosts",
+      "@clankie/agent-transcript",
+      "@clankie/api-client",
+      "@clankie/clankie",
+      "@clankie/credential-broker",
+      "@clankie/discord-activity",
+      "@clankie/discord-bridge",
+      "@clankie/discord-presence-core",
+      "@clankie/discord-user-session",
+      "@clankie/game-extension",
+      "@clankie/interactive-environment",
+      "@clankie/minecraft",
+      "@clankie/minecraft-mcp",
+      "@clankie/model-provider",
+      "@clankie/play",
+      "@clankie/play-voice",
+      "@clankie/pokemon",
+      "@clankie/protocol",
+      "@clankie/relay",
+      "@clankie/rendered-surface-client",
+      "@clankie/rivals",
+      "@clankie/settings",
+      "@clankie/tui",
+      "@clankie/work-items"
+    ],
+    "graphSeconds": 2.596402709,
+    "phases": [
+      {
+        "name": "skills",
+        "elapsedSeconds": 1.0322039170000001,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "format",
+        "elapsedSeconds": 4.2227035,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "lint",
+        "elapsedSeconds": 2.1405762909999995,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "deadcode",
+        "elapsedSeconds": 3.887863458000001,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "doc-links",
+        "elapsedSeconds": 0.423387791000001,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "retired-claims",
+        "elapsedSeconds": 0.6197349169999997,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "typecheck",
+        "elapsedSeconds": 137.69673254199998,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "tests",
+        "elapsedSeconds": 29.82704704199999,
+        "exitCode": 1,
+        "signal": null
+      }
+    ]
+  },
+  {
+    "label": "1869",
+    "mode": "before",
+    "base": "4fb5ef8c7665ea810ab78f3f56cedefddd5cd34a",
+    "wrapperExit": 1,
+    "elapsedSeconds": 191.624825291,
+    "exitCode": 1,
+    "loadBefore": [16.77880859375, 28.29736328125, 32.3994140625],
+    "loadAfter": [27.5947265625, 29.3134765625, 32.0556640625],
+    "turboTime": "2m45.808s",
+    "turboCache": "0 cached, 31 total",
+    "selectedFiles": 690,
+    "logSha256": "1138c31d4d0a5a312c9cfb489bbe6aa2011ed6102c8dab5faaac535cc8593f1b"
+  },
+  {
+    "label": "1869",
+    "mode": "after",
+    "base": "4fb5ef8c7665ea810ab78f3f56cedefddd5cd34a",
+    "wrapperExit": 1,
+    "elapsedSeconds": 214.74821954200002,
+    "exitCode": 1,
+    "loadBefore": [25.73583984375, 31.296875, 32.65771484375],
+    "loadAfter": [19.31201171875, 26.0341796875, 30.16455078125],
+    "turboTime": "2m45.642s",
+    "turboCache": "0 cached, 24 total",
+    "selectedFiles": 690,
+    "logSha256": "61b284d67efce44ea709c47ae745ae3864187318c4427982eca54a3ac0dd92dc",
+    "sourceStable": true,
+    "compilerProjects": [
+      "@clankie/agent-hosts",
+      "@clankie/agent-transcript",
+      "@clankie/api-client",
+      "@clankie/clankie",
+      "@clankie/credential-broker",
+      "@clankie/discord-activity",
+      "@clankie/discord-bridge",
+      "@clankie/discord-presence-core",
+      "@clankie/discord-user-session",
+      "@clankie/game-extension",
+      "@clankie/interactive-environment",
+      "@clankie/minecraft",
+      "@clankie/minecraft-mcp",
+      "@clankie/model-provider",
+      "@clankie/play",
+      "@clankie/play-voice",
+      "@clankie/pokemon",
+      "@clankie/protocol",
+      "@clankie/relay",
+      "@clankie/rendered-surface-client",
+      "@clankie/rivals",
+      "@clankie/settings",
+      "@clankie/tui",
+      "@clankie/work-items"
+    ],
+    "graphSeconds": 4.235241875,
+    "phases": [
+      {
+        "name": "skills",
+        "elapsedSeconds": 1.1638948329999999,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "format",
+        "elapsedSeconds": 6.4534164579999995,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "lint",
+        "elapsedSeconds": 4.049239958,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "deadcode",
+        "elapsedSeconds": 5.626987124999998,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "doc-links",
+        "elapsedSeconds": 1.1321388329999973,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "retired-claims",
+        "elapsedSeconds": 1.2967492079999974,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "typecheck",
+        "elapsedSeconds": 167.133484542,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "tests",
+        "elapsedSeconds": 22.820703707999986,
+        "exitCode": 1,
+        "signal": null
+      }
+    ]
+  }
+]

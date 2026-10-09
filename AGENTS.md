@@ -64,8 +64,10 @@ This repository is public. Both neighbors are private and consume
 ## Rules
 
 - Project planning and issue tracking live in the [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview).
-- Match the surrounding code. Run the narrowest relevant checks and follow the
-  current worker/lead gate assignment. New tests follow
+- Match the surrounding code. Use focused checks while iterating, and run the
+  repository-root `pnpm check:landing` before pushing. Its own `--changed`
+  selection is the landing gate; hand-picked test subsets do not substitute for
+  it. Follow the current worker/lead gate assignment. New tests follow
   [ADR 0221](docs/adr/0221-tests-prove-the-product-and-its-boundaries.md):
   full E2E with real dependencies and nothing mocked, then integration across
   data/API/schema boundaries, then goldens grounded in real examples. Do not add
@@ -84,9 +86,11 @@ This repository is public. Both neighbors are private and consume
   integrator gates take precedence; the private app reads its own project policy.
 - Land clankie and clankie-app changes directly on `main`
   ([ADR 0240](docs/adr/0240-changes-land-directly-on-main.md)): stage only your
-  files, run the narrow checks for what you changed (formatting, typecheck, the
-  covering tests), `git pull --rebase origin main`, then `git push origin main`.
-  Resolve conflicts only in your own files. The full `pnpm check` runs for
+  files, commit, and `git pull --rebase origin main`. Then run
+  `clankie heavy -- pnpm check:landing` from the repository root against the
+  fetched `origin/main`, and push only after it passes. If a rebase changes the
+  checked source or base, run the root gate again. Resolve conflicts only in your
+  own files. The full `pnpm check` runs for
   releases and on request; `clankie integrate` is optional, never required.
 - Build every feature API- and CLI-first, and update the relevant agent-facing
   skill and human-facing docs. A setting the owner cares about is settable from
