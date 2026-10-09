@@ -62,6 +62,11 @@ it.each([false, true])("reads native history on demand without importing it (rem
     const roster = await captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
     if (roster.op !== "roster") throw new Error("roster expected");
     expect(roster.seats[0]?.conversationId).toBeUndefined();
+    expect(roster.seats[0]?.inputCapabilities).toEqual({
+      deliveryModes: [],
+      interrupt: false,
+      nextTurnOnly: false,
+    });
     expect(read).not.toHaveBeenCalled();
     const created = await captain.serveOperatorConversation({
       schemaVersion: 1,

@@ -25,6 +25,44 @@ TUI; this helper preserves their decoded JSON for app detail views.
 
 ## Consumers and compatibility
 
+### Seat input capabilities (VUH-1882 service contract)
+
+Every current roster/fleet seat publishes optional `inputCapabilities`:
+
+```json
+{
+  "deliveryModes": ["steer", "queue"],
+  "interrupt": true,
+  "nextTurnOnly": false
+}
+```
+
+The source is `FleetSeatInputCapabilitiesSchema`. `deliveryModes` lists only
+explicit choices the current native connection can honor; array order has no
+meaning. `interrupt` means the existing authenticated `stop_task` operator
+operation can stop that exact task. A harness's generic interrupt method or
+terminal Escape key does not establish this capability. `nextTurnOnly` means
+Claude has only an authenticated next-UserPromptSubmit receiver: Queue can be
+stored, but Steer cannot wake or modify its current turn. A live exact-session
+Claude poll offers both modes; unverified Claude offers neither. Codex's native
+queue is separate from its steer control; OpenCode declares Queue, Pi and Grok
+declare neither. Mailbox-only seats do not gain native choices from storage.
+
+App composers should match the current seat by `occupantId` and offer only the
+listed modes. No modes means plain Send. Missing `inputCapabilities` on an older
+service means unknown: offer plain Send, with no inferred Steer/Queue/Stop.
+Show Stop only when `interrupt` is true and a task is running; keep ordinary
+authorization and operation-result handling. Capabilities are observations,
+never authority or a delivery guarantee. They can disappear after a receiver
+expires, a native control releases or the occupant changes. Re-read the roster;
+the service still refuses unsupported explicit modes from older clients.
+Explicit Steer to next-turn-only Claude is rejected without sending or storage,
+including when the same text already has a next-turn receipt. Plain Send keeps
+its existing automatic routing.
+
+This additive service contract supports the separate VUH-1882 composer work and
+VUH-1883 Send-to-Stop UI. No app UI is changed in this repository.
+
 The private companion-app and managed-service repositories consume this package
 from a sibling checkout. A contract change here can affect both. Keep wire
 identifiers stable, validate at trust boundaries, and coordinate incompatible

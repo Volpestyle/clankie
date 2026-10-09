@@ -623,6 +623,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         settle: (evidence) => original.mailbox.settleRecoveredDelivery(id, evidence),
       };
     },
+    messageReceiver: seatMessageReceiver,
     ...(options.fleetHireTools ? { fleetHireTools: options.fleetHireTools } : {}),
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},
@@ -1138,6 +1139,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   const nextTurnMailboxes = new NextTurnMailbox(join(options.stateDir, "next-turn-mailboxes.json"));
+  function seatMessageReceiver(native: HerdrAgentSnapshot) {
+    const binding = inboundBinding(native);
+    const attached = conversations.attachedConversationForNative(native);
+    const live =
+      !!binding &&
+      (fleetMailboxes.get(native.terminalId)?.boundTo(binding) === true ||
+        (attached !== undefined && seatOutboxes.get(attached)?.boundTo(binding) === true));
+    return nextTurnMailboxes.messageReceiver(
+      native.terminalId,
+      binding,
+      live,
+      native.session?.kind === "id" ? native.session.value : undefined,
+    );
+  }
   async function publishWaitingNotice(seat: string, binding: string | undefined, pane: string) {
     const notice = nextTurnMailboxes.waitingNotice(seat, binding, pane);
     if (!notice) return;
@@ -2427,6 +2442,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       conversationId: context.conversationId,
       ...(inboundBinding(current) === undefined ? {} : { recipientBinding: inboundBinding(current)! }),
     };
+    if (
+      context.delivery &&
+      current?.agent === "claude" &&
+      !(await herdrWatches.inputCapabilities(current)).deliveryModes.includes(context.delivery)
+    )
+      return {
+        outcome: "undelivered",
+        deliveryStage: "rejected",
+        detail: `This Claude session cannot ${context.delivery} through its current receiver. Nothing was sent.`,
+      };
     const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
     if (prior && deliveryOptions?.stableReceiptKey === undefined) return prior;
     const mailbox = fleetSeatMailbox(
@@ -2442,7 +2467,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // waits for the harness's own receipt; any other seat needs a structured lane.
     const fallback = async (): Promise<FleetSeatDelivery> => {
       const live = fleetMailboxes.get(seatId);
-      if (live?.bound() || live?.uncertain()) {
+      if (live?.boundTo(inboundBinding(current) ?? "") || live?.uncertain()) {
         await deliveryOptions?.guard?.();
         if (deliveryOptions?.fence && !(await deliveryOptions.fence(current)))
           return {
@@ -3021,20 +3046,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const pane = qualified?.id ?? observed.paneId;
       if (options.workerBridgeStatus) seat.workerTools = options.workerBridgeStatus(fleetId, pane);
       const native = observedAgent(observed);
-      const binding = inboundBinding(native);
       if (seat.harness === "claude") {
-        const attached = conversations.attachedConversationForNative(native);
-        const live =
-          !!binding &&
-          (fleetMailboxes.get(observed.seatId)?.boundTo(binding) === true ||
-            (attached !== undefined && seatOutboxes.get(attached)?.boundTo(binding) === true));
-        seat.messageReceiver = nextTurnMailboxes.messageReceiver(
-          observed.seatId,
-          binding,
-          live,
-          native.session?.kind === "id" ? native.session.value : undefined,
-        );
+        seat.messageReceiver = seatMessageReceiver(native);
       }
+      seat.inputCapabilities = await herdrWatches.inputCapabilities(native);
       seat.waitingMessages = nextTurnMailboxes.waiting(
         observed.seatId,
         inboundBinding(observedAgent(observed)),
@@ -3071,6 +3086,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.workerReportBridge,
         seat.waitingMessages,
         seat.messageReceiver,
+        seat.inputCapabilities,
         seat.status,
         seat.summary,
       ]),

@@ -848,6 +848,18 @@ export const FleetSeatMessageReceiverSchema = z
   .strict();
 export type FleetSeatMessageReceiver = z.infer<typeof FleetSeatMessageReceiverSchema>;
 
+/** Current native input choices, independent of the caller's authorization. */
+export const FleetSeatInputCapabilitiesSchema = z
+  .object({
+    deliveryModes: z.array(z.enum(["steer", "queue"])).max(2),
+    /** The authenticated exact-task Stop route, never terminal keys. */
+    interrupt: z.boolean(),
+    /** Claude has only an authenticated next UserPromptSubmit receiver. */
+    nextTurnOnly: z.boolean(),
+  })
+  .strict();
+export type FleetSeatInputCapabilities = z.infer<typeof FleetSeatInputCapabilitiesSchema>;
+
 export const OperatorFleetSeatSchema = z
   .object({
     /** Cached owner repository observation; not freshness admission proof. */
@@ -862,6 +874,8 @@ export const OperatorFleetSeatSchema = z
     waitingMessages: FleetSeatWaitingMessagesSchema.optional(),
     /** Claude's current inbound receiver, independent of tools and queued mail. */
     messageReceiver: FleetSeatMessageReceiverSchema.optional(),
+    /** Absent on older services: unknown, never permission to offer a mode. */
+    inputCapabilities: FleetSeatInputCapabilitiesSchema.optional(),
     /** Sender receipt health is independent of the served tool catalog. */
     workerReportBridge: WorkerReportBridgeStatusSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),

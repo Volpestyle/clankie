@@ -284,3 +284,9 @@ plugin installation alone cannot enable a live channel. The owner can use the
 shown `claude --resume UUID --channels plugin:clankie-worker@clankie` command.
 Do not restart existing panes or substitute terminal input for messages. Explicit
 development-plugin opt-in retains Claude's own confirmation and policy checks.
+
+The roster's `inputCapabilities` lists current explicit `deliveryModes`, exact-task
+`interrupt` support and Claude `nextTurnOnly`. Use the observed modes, not a
+harness-name guess. Next-turn-only Claude supports Queue, never Steer; absence
+of capabilities on an older service means unknown. Capabilities do not grant
+authority, and a changed occupant or disconnected receiver can remove them.

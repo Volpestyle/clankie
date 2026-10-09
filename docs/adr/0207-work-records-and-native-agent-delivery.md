@@ -216,3 +216,24 @@ The [official channel controls](https://code.claude.com/docs/en/channels#enterpr
 and [hook output contract](https://code.claude.com/docs/en/hooks#json-output)
 support this decision. [VUH-1867 verification](../verification/vuh-1867-claude-channel-startup.md)
 records the native Mac startup display and focused subprocess boundaries.
+
+## Seat input choices follow current native support (2026-10-09)
+
+James assigned VUH-1882's service half to expose actual input choices and leave
+composer and Send-to-Stop work to the app worker. The implementing lead chose
+one optional roster `inputCapabilities` object with `deliveryModes`, `interrupt`
+and `nextTurnOnly`, derived from the attached live control and exact-session
+receiver observations. The same support check rejects explicit delivery modes
+before dispatch or receipt substitution. A next-turn-only Claude can Queue but
+cannot Steer; a stored receipt cannot turn a later Steer into a silent hold.
+No mode means plain automatic Send, not an invented harness capability.
+
+Codex's queue remains a separate native route for owned and unowned sessions;
+steer requires its available controller. OpenCode offers its declared Queue;
+Pi, Grok and mailbox-only seats offer no explicit delivery mode. Stop is
+advertised only for a live control implementing the authenticated exact-task
+`stop_task` route, not a generic interrupt or terminal key. Current capabilities
+do not grant access and cannot override occupant, owner or machine checks.
+
+The [protocol contract](../../packages/protocol/README.md#seat-input-capabilities-vuh-1882-service-contract)
+documents the fields, older-service fallback, live changes and app usage.

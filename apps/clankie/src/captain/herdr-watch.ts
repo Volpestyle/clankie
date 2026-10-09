@@ -1,4 +1,8 @@
-import type { StopNativeTaskResult } from "@clankie/protocol";
+import type {
+  StopNativeTaskResult,
+  FleetSeatInputCapabilities,
+  FleetSeatMessageReceiver,
+} from "@clankie/protocol";
 import { nativeHerdrRead } from "../herdr-native-read.ts";
 import { createHireLayout, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
@@ -874,6 +878,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly validateOwner?: (owner: ConversationOwner) => Promise<boolean>;
       readonly remoteHireReceipts?: RemoteHireReceipts;
       readonly channelReceipt?: HerdrWatchStore["channelReceipt"];
+      readonly messageReceiver?: (agent: HerdrAgentSnapshot) => FleetSeatMessageReceiver;
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly fleetResources?: FleetResourceRuntime;
       readonly requireWorkerAccess?: (fleet?: string) => Promise<void>;
@@ -1003,6 +1008,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       options.remoteCodexControl,
       `${this.path}.delivery-receipts.json`,
       options.channelReceipt,
+      options.messageReceiver,
     );
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
@@ -1177,6 +1183,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     }
     return { agent: live === undefined ? { ...agent, status: "offline" } : agent, transcript };
+  }
+
+  /** Controller observations and actions retain the exact native occupant. */
+  public async inputCapabilities(agent: HerdrAgentSnapshot): Promise<FleetSeatInputCapabilities> {
+    const capabilities = await this.seatControl.inputCapabilities(agent);
+    const current = await this.runner.resolveTerminal(agent.terminalId).catch(() => undefined);
+    return current?.paneId === agent.paneId &&
+      current.agent === agent.agent &&
+      isDeepStrictEqual(current.session, agent.session)
+      ? capabilities
+      : { deliveryModes: [], interrupt: false, nextTurnOnly: false };
   }
 
   /** Controller observations and actions retain the exact native occupant. */

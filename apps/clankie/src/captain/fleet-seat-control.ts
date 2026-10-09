@@ -1,4 +1,8 @@
-import { fleetDeliveryStage } from "@clankie/protocol";
+import {
+  fleetDeliveryStage,
+  type FleetSeatInputCapabilities,
+  type FleetSeatMessageReceiver,
+} from "@clankie/protocol";
 import { DeliveryFence, deliveryFingerprint, type UncertainReceipt } from "./delivery-fence.ts";
 import { externalCodexQuestions, guardedCodexQuestions } from "./external-codex-questions.ts";
 import { openCodexSocket } from "./codex-app-server.ts";
@@ -41,6 +45,7 @@ export function createFleetSeatControl(
       }
     | undefined
   >,
+  receiver?: (agent: HerdrAgentSnapshot) => FleetSeatMessageReceiver,
 ) {
   const fence = new DeliveryFence(uncertaintyPath);
   const questionFence = new DeliveryFence(
@@ -98,6 +103,51 @@ export function createFleetSeatControl(
       assertCurrent,
       questionFence,
     );
+  };
+
+  const inputCapabilities = async (agent: HerdrAgentSnapshot): Promise<FleetSeatInputCapabilities> => {
+    const result: FleetSeatInputCapabilities = { deliveryModes: [], interrupt: false, nextTurnOnly: false };
+    if (!isMessageableSeat(agent) || !agent.session || ["offline", "released"].includes(agent.status))
+      return result;
+    const control = await attach(agent);
+    if (control && !["offline", "released"].includes(await control.status().catch(() => "offline"))) {
+      result.deliveryModes = [...(control.deliveryModes ?? [])];
+      result.interrupt = control.stopTask !== undefined;
+    }
+    if (agent.agent === "claude") {
+      const state = receiver?.(agent).state;
+      result.deliveryModes =
+        state === "live" ? ["steer", "queue"] : state === "next-turn-only" ? ["queue"] : [];
+      result.nextTurnOnly = state === "next-turn-only";
+    } else if (agent.agent === "codex") {
+      const fleet = splitFleetQualified(agent.paneId)?.fleet;
+      if (fleet !== undefined) {
+        if (agent.session.kind === "id" && remoteCodexQueue && !result.deliveryModes.includes("queue"))
+          result.deliveryModes.push("queue");
+        if (
+          agent.session.kind === "id" &&
+          remoteCodexControl?.(fleet, agent.paneId) &&
+          !result.deliveryModes.includes("steer")
+        )
+          result.deliveryModes.push("steer");
+      } else if (runner.paneProcesses && runner.openFiles && runner.codexQueue) {
+        const process = codexProcess(await runner.paneProcesses(agent.paneId).catch(() => []));
+        const files = process ? await runner.openFiles(process.pid).catch(() => "") : "";
+        const expected = agent.session.kind === "id" ? agent.session.value : undefined;
+        const session = resolveCodexSessionId(process ? [process] : [], files, expected) ?? expected;
+        if (session && (expected === undefined || session === expected)) {
+          if (!result.deliveryModes.includes("queue")) result.deliveryModes.push("queue");
+          if (
+            process &&
+            codexControlEndpoint(process) !== null &&
+            runner.codexControl &&
+            !result.deliveryModes.includes("steer")
+          )
+            result.deliveryModes.push("steer");
+        }
+      }
+    }
+    return result;
   };
 
   /** Existing unowned Codex sessions may take their native queue instead of PTY input. */
@@ -205,9 +255,10 @@ export function createFleetSeatControl(
             return options.fence ? options.fence(current) : true;
           }
         : undefined;
-    // Claude's channel supports both choices through the turn-aware mailbox.
-    // Its older adapter receipt alone cannot distinguish a live steer from a hold.
+    // Only a live exact-session receiver can steer; a hook mailbox cannot.
     if (options?.delivery && isMessageableSeat(current) && current.agent === "claude" && uncontrolled) {
+      if (!(await inputCapabilities(current)).deliveryModes.includes(options.delivery))
+        return modeUnavailable(options.delivery);
       if (authorized && !(await authorized())) return refused();
       if (options.stableReceiptKey !== undefined) begin();
       return uncontrolled();
@@ -261,7 +312,7 @@ export function createFleetSeatControl(
       if (delivery !== undefined) return delivery;
       clear();
     }
-    if (options?.delivery === "steer") return modeUnavailable("steer");
+    if (options?.delivery) return modeUnavailable(options.delivery);
     if (uncontrolled !== undefined) {
       if (authorized && !(await authorized())) return refused();
       if (options?.stableReceiptKey !== undefined) begin();
@@ -336,6 +387,7 @@ export function createFleetSeatControl(
     };
   };
   return {
+    inputCapabilities,
     attach,
     attachQuestion,
     locateDelivery,
@@ -365,6 +417,11 @@ export function createFleetSeatControl(
       options?: PeerDeliveryOptions,
     ): Promise<FleetSeatDelivery> {
       const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
+      if (
+        options?.delivery &&
+        (!agent || !(await inputCapabilities(agent)).deliveryModes.includes(options.delivery))
+      )
+        return modeUnavailable(options.delivery);
       const stableReceiptKey = options?.stableReceiptKey;
       const key = stableReceiptKey ?? seatId;
       const completed = stableReceiptKey === undefined ? undefined : fence.completed(key);
