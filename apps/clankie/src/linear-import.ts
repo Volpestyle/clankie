@@ -163,7 +163,7 @@ async function importLinearMedia(
   const urls = new Map<string, string | undefined>();
   const visit = (value: unknown, issueKey?: string) => {
     if (typeof value === "string")
-      for (const match of value.matchAll(/https:\/\/(?:uploads|public)\.linear\.app\/[^\s<>\)\]"\\]+/gu))
+      for (const match of value.matchAll(/https:\/\/(?:uploads|public)\.linear\.app\/[^\s<>)\]"\\]+/gu))
         urls.set(match[0], issueKey);
     else if (Array.isArray(value)) value.forEach((child) => visit(child, issueKey));
     else if (value && typeof value === "object")

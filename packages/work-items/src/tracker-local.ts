@@ -3452,7 +3452,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
                 { type: "comment", body: String(record.body), commentId: record.id },
               );
           }
-        const merged = { ...(store.linearMirror?.records ?? {}) };
+        const merged = { ...store.linearMirror?.records };
         for (const [kind, incoming] of Object.entries(records))
           merged[kind] = [
             ...new Map([...(merged[kind] ?? []), ...incoming].map((record) => [record.id, record])).values(),

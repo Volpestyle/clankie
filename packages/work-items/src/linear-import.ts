@@ -73,7 +73,7 @@ export async function collectLinearImport(input: {
         throw new Error("Nonadvancing Linear cursor");
       seen.add(info.endCursor);
       after = info.endCursor;
-    } while (true);
+    } while (after !== null);
     return records;
   };
   const issues = await page("project", project.id, "issues", ISSUE);
