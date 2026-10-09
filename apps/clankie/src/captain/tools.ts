@@ -9,7 +9,6 @@ import {
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import { VOICE_JOIN_REQUEST_MAX_CHARS } from "@clankie/discord-presence-core";
 import {
-  CAPTAIN_EPISODE_SUMMARY_MAX,
   CAPTAIN_SILENT_REPLY_SENTINEL,
   DrawErDiagramRequestSchema,
   DrawSequenceDiagramRequestSchema,
@@ -721,7 +720,7 @@ export function captainTools(
         Type.Object(
           {
             action: Type.Literal("write"),
-            text: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
+            text: Type.String({ minLength: 1 }),
           },
           { additionalProperties: false },
         ),
@@ -733,7 +732,7 @@ export function captainTools(
           {
             action: Type.Literal("edit"),
             id: Type.String({ minLength: 1, maxLength: 256 }),
-            text: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
+            text: Type.String({ minLength: 1 }),
           },
           { additionalProperties: false },
         ),

@@ -205,12 +205,21 @@ it("migrates legacy notes and exercises memory through the real MCP endpoint wit
       { action: "write", text: "forged room", lane: "discord_presence" },
       { action: "write", text: "retained shelf", retain: true },
       { action: "edit", id, text: "forged source", sourceConversationId: "global-default" },
-      { action: "write", text: "x".repeat(513) },
     ]) {
       const invalid = await consoleClient.callTool({ name: "memory", arguments: args });
       expect(invalid.isError).toBe(true);
     }
     expect(memory.catalog().captainEpisodes).toHaveLength(count);
+    // Notes are uncapped (James, 2026-10-09): a long note is stored whole.
+    const long = "y".repeat(5_000);
+    const longWrite = await invoke(consoleClient, { action: "write", text: long });
+    expect(longWrite).toMatchObject({ written: true });
+    expect(memory.catalog().captainEpisodes.find((note) => note.episodeId === longWrite.id)?.summary).toBe(
+      long,
+    );
+    expect(await invoke(consoleClient, { action: "forget", id: longWrite.id })).toMatchObject({
+      forgotten: true,
+    });
     const restarted = createFileMemory({ dataDir });
     expect(restarted.catalog().captainEpisodes.find((note) => note.episodeId === id)).toEqual(edited);
     for (const note of normalizedLegacy) expect(restarted.catalog().captainEpisodes).toContainEqual(note);

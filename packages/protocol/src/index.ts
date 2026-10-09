@@ -666,7 +666,6 @@ export {
 export {
   CaptainEpisodeVisibilitySchema,
   type CaptainEpisodeVisibility,
-  CAPTAIN_EPISODE_SUMMARY_MAX,
   CaptainEpisodeSchema,
   type CaptainEpisode,
   CaptainEpisodeEditSchema,

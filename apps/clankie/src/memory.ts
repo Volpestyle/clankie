@@ -41,6 +41,8 @@ const EPISODE_SEARCH_LIMIT = 8;
 const MAX_EPISODE_SEARCH_LIMIT = 32;
 /** A recall card never grows the prompt without bound, regardless of store size. */
 const MEMORY_CARD_MAX_CHARACTERS = 8_000;
+/** One note's share of a card; the full note stays in the store and in `search`. */
+const MEMORY_CARD_NOTE_CHARACTERS = 1_200;
 /** Facts a recall card renders. */
 const FACT_RECALL_LIMIT = 8;
 
@@ -138,7 +140,14 @@ export class MemoryConflictError extends Error {
 /** One memory as recall renders it: where and when it happened, then the note. */
 function episodeLine(episode: CaptainEpisode): string {
   const suffix = episode.correctedAt === undefined ? "" : ` [corrected ${episode.correctedAt}]`;
-  return `${episode.lane} · ${episode.targetId}${episode.sourceConversationId === undefined || episode.sourceConversationId === episode.targetId ? "" : ` · source ${episode.sourceConversationId}`} · ${episode.occurredAt} · ${episode.episodeId}${suffix}: ${episode.summary.replace(/\s+/gu, " ")}`;
+  return `${episode.lane} · ${episode.targetId}${episode.sourceConversationId === undefined || episode.sourceConversationId === episode.targetId ? "" : ` · source ${episode.sourceConversationId}`} · ${episode.occurredAt} · ${episode.episodeId}${suffix}: ${cardNote(episode.summary)}`;
+}
+
+function cardNote(summary: string): string {
+  const note = summary.replace(/\s+/gu, " ");
+  return note.length <= MEMORY_CARD_NOTE_CHARACTERS
+    ? note
+    : `${note.slice(0, MEMORY_CARD_NOTE_CHARACTERS)}… (shortened; search memory for the full note)`;
 }
 
 /** Limit rendered context, never the notes persisted in the store. */

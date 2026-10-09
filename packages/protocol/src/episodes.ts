@@ -16,8 +16,6 @@ import { DiscordPersonIdentitySchema, DiscordPersonMemoryFactSchema } from "./di
 export const CaptainEpisodeVisibilitySchema = z.enum(["shareable", "operator_private"]);
 export type CaptainEpisodeVisibility = z.infer<typeof CaptainEpisodeVisibilitySchema>;
 
-export const CAPTAIN_EPISODE_SUMMARY_MAX = 512;
-
 export const CaptainEpisodeSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -27,7 +25,8 @@ export const CaptainEpisodeSchema = z
     /** The room it happened in, so recall can say where without holding its transcript. */
     lane: CaptainSessionLaneV2Schema,
     targetId: z.string().trim().min(1).max(512),
-    summary: z.string().trim().min(1).max(CAPTAIN_EPISODE_SUMMARY_MAX),
+    /** Uncapped: notes are stored whole; recall shortens what it renders. */
+    summary: z.string().trim().min(1),
     visibility: CaptainEpisodeVisibilitySchema,
     /**
      * Lifts this note out of the recent ring into the durable set, where newer
@@ -59,7 +58,7 @@ export type CaptainEpisode = z.infer<typeof CaptainEpisodeSchema>;
 /** Owner curation may change the note, its reach, or whether it lasts — never its room or provenance. */
 export const CaptainEpisodeEditSchema = z
   .object({
-    summary: z.string().trim().min(1).max(CAPTAIN_EPISODE_SUMMARY_MAX).optional(),
+    summary: z.string().trim().min(1).optional(),
     visibility: CaptainEpisodeVisibilitySchema.optional(),
     retained: z.boolean().optional(),
   })
