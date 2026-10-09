@@ -7,7 +7,7 @@ the approval. Owner/lead steer, pause and stop are run events.
 
 ## Proof
 
-[Scratch service capture](clankie://evidence/sha256/637012934b34d671857eb0f2c7f4ebccc97ebadde17f7bddf240a84608980739)
+Scratch service capture: `clankie://evidence/sha256/637012934b34d671857eb0f2c7f4ebccc97ebadde17f7bddf240a84608980739`
 contains the real replies and durable tracker journal.
 
 - Four focused package typechecks passed: protocol, work-items, clankie and TUI.
