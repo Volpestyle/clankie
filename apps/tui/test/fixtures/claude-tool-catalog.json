@@ -1,0 +1,22 @@
+{
+  "accepted": {
+    "report": {
+      "schemaVersion": 1,
+      "harness": "claude",
+      "sessionId": "e75bca9d-1087-4159-aa9e-362d3cd1b6ea",
+      "bridge": "worker",
+      "tools": ["native_catalog_probe"],
+      "checkedAt": "2026-10-05T02:44:32.419Z"
+    }
+  },
+  "rejectedRoot": {
+    "report": {
+      "schemaVersion": 1,
+      "harness": "claude",
+      "sessionId": "9af5ccfd-0cf2-44ec-bcce-50ce60f1059a",
+      "bridge": "worker",
+      "tools": [],
+      "checkedAt": "2026-10-05T02:45:51.496Z"
+    }
+  }
+}

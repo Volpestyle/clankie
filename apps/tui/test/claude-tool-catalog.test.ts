@@ -11,7 +11,7 @@ const helper = join(pluginRoot, "worker/mods/report.mjs");
 // Captured from the real native TUI, stdio MCP server and HTTP reporter.
 const nativeSmoke = JSON.parse(
   readFileSync(
-    join(import.meta.dirname, "../../../docs/testing/2026-10-04-native-tool-catalog/claude-smoke.json"),
+    join(import.meta.dirname, "fixtures/claude-tool-catalog.json"),
     "utf8",
   ),
 );

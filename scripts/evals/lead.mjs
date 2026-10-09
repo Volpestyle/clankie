@@ -479,7 +479,7 @@ export function dependencySnapshot(directory) {
   return { sha256: sha(JSON.stringify(entries)), files: entries.length };
 }
 
-const referencePath = join(repo, "docs/testing/2026-10-03-lead-eval/reference-checks.json");
+const referencePath = join(repo, "scripts/evals/fixtures/reference-checks.json");
 // Per-file declarations from the pinned test blobs, reconciled with retained after-pass totals.
 // text-inbox has 10 ordinary tests plus it.each tables of 2, 3 and 3 cases.
 const referenceFileCounts = {
@@ -487,7 +487,7 @@ const referenceFileCounts = {
   "owner-attachments": [9, 2],
   "async-discord-text": [9, 18, 8],
 };
-const referenceSha256 = "e33d17ee80de218202f66b46c73a851f4fc869e3463cab7eb159d7327084ecfd";
+const referenceSha256 = "2106cf7404cbaaf1c9ffa328635b3aaf80eb07a24c6840cc0127de1e2a0ee6ab";
 
 /** A process exit alone is never a green result: require every pinned file and test. */
 export function validateGraderReport(task, workspace, report, { expectedFailure = false } = {}) {
