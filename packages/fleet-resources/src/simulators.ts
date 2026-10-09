@@ -1035,10 +1035,10 @@ export function createSimulatorManager(input: {
           }
           await waitForChange(Math.min(RETRY_MS, deadline - Date.now()), request.waitSignal);
           if (request.waitSignal?.aborted) {
-            if (result.outcome === "booting") return result;
-            if (ticketId) await input.governor.cancelSimulatorTicket(ticketId, request);
-            changed();
-            return { outcome: "cancelled" } as const;
+            // A socket timeout is not the holder cancelling its queue position.
+            // Stop this wait without admitting new effects; the persisted ticket
+            // remains resumable until stale expiry or an explicit cancel.
+            return result;
           }
           result = await acquire({ ...request, ...(ticketId ? { ticketId } : {}) });
           if (result.outcome === "waiting") ticketId = result.ticket?.id ?? ticketId;

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import { afterEach, expect, it } from "vitest";
+import { Agent } from "undici";
 import {
   createResourceGovernor,
   createSimctlAdapter,
@@ -490,6 +491,122 @@ it("names a hand-booted simulator, the seat whose process uses it, and tells tha
   // The freed device is the exact idle type, so it is leased instead of creating one.
   expect(result).toMatchObject({ outcome: "acquired", lease: { deviceId: udid, origin: "existing" } });
   expect((await f.commands()).some((command) => command[0] === "create")).toBe(false);
+});
+
+it("keeps FIFO tickets across a real headers timeout and a blocking CLI wait beyond it", async () => {
+  const f = await fixture();
+  const admitted = FleetSimulatorResultSchema.parse(
+    (await f.send("POST", FLEET_SIMULATORS_PATH, f.acquire)).json,
+  );
+  if (admitted.outcome !== "acquired") throw new Error("Fixture lease was not admitted");
+  const selection = {
+    ...f.acquire,
+    holderId: "first-waiter",
+    deviceId: admitted.lease.deviceId,
+    exact: true,
+  };
+  const short = new Agent({ headersTimeout: 1000, bodyTimeout: 1000 });
+  cleanup.push(() => short.destroy());
+  const options = {
+    host: f.host,
+    env: { HOME: f.root, CLANKIE_OPERATOR_TOKEN: bearer },
+    operatorCredentialStore: new FileCredentialStore(join(f.root, "credentials.json")),
+  };
+  const shortFetch: typeof fetch = (url, init) => fetch(url, { ...init, dispatcher: short } as RequestInit);
+  const args = ["acquire", JSON.stringify(selection), "--wait", "20"];
+  const failed = runSimulatorCommand(args, { ...options, fetchImpl: shortFetch }).catch(
+    (error: unknown) => error,
+  );
+  const queued = async (holderId: string) => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      await f.resources.refresh();
+      const ticket = f.resources
+        .status()
+        ?.queue.find((entry) => entry.kind === "simulator" && entry.holderId === holderId);
+      if (ticket) return ticket;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(`Fixture ticket for ${holderId} was not persisted`);
+  };
+  const original = await queued(selection.holderId);
+  expect(original.queuedAtMs).toEqual(expect.any(Number));
+  expect(await failed).toMatchObject({
+    message: expect.stringContaining("UND_ERR_HEADERS_TIMEOUT: HeadersTimeoutError"),
+  });
+  expect(await queued(selection.holderId)).toMatchObject({
+    id: original.id,
+    queuedAtMs: original.queuedAtMs,
+    position: 1,
+  });
+
+  const later = { ...selection, holderId: "later-waiter", waitMs: 0 };
+  expect(
+    FleetSimulatorResultSchema.parse((await f.send("POST", FLEET_SIMULATORS_PATH, later)).json),
+  ).toMatchObject({ outcome: "waiting", ticket: { position: 2 } });
+  let acquirePosts = 0;
+  let started!: () => void;
+  const fixedStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  // A real fetch with a short fallback dispatcher reproduces the old transport.
+  // The fixed CLI supplies its own deadline-aware dispatcher for acquire.
+  const pending = runSimulatorCommand(
+    ["acquire", JSON.stringify({ ...selection, ticketId: original.id }), "--wait", "20"],
+    {
+      ...options,
+      fetchImpl: (url, init) => {
+        if (init?.body && JSON.parse(String(init.body)).action === "acquire") {
+          acquirePosts++;
+          started();
+        }
+        return fetch(url, { dispatcher: short, ...init } as RequestInit);
+      },
+    },
+  );
+  void pending.catch(() => undefined);
+  await fixedStarted;
+  // This third real HTTP wait expiring proves the fixed request stayed open
+  // beyond the shortened headers deadline, without guessing a sleep duration.
+  const probe = await runSimulatorCommand(
+    ["acquire", JSON.stringify({ ...selection, holderId: "timeout-probe" }), "--wait", "20"],
+    {
+      ...options,
+      fetchImpl: shortFetch,
+    },
+  ).catch((error: unknown) => error);
+  expect(probe).toMatchObject({ message: expect.stringContaining("UND_ERR_HEADERS_TIMEOUT") });
+  expect(await queued(selection.holderId)).toMatchObject({
+    id: original.id,
+    queuedAtMs: original.queuedAtMs,
+    position: 1,
+  });
+  expect(await queued(later.holderId)).toMatchObject({ position: 2 });
+  await f.send("POST", FLEET_SIMULATORS_PATH, {
+    action: "release",
+    seatId: selection.seatId,
+    holderId: f.acquire.holderId,
+    id: admitted.lease.id,
+  });
+  const granted = FleetSimulatorResultSchema.parse(await pending);
+  expect(granted).toMatchObject({
+    outcome: "acquired",
+    lease: { holderId: selection.holderId, deviceId: selection.deviceId },
+  });
+  expect(acquirePosts).toBe(1);
+  expect(
+    FleetSimulatorResultSchema.parse((await f.send("POST", FLEET_SIMULATORS_PATH, later)).json),
+  ).toMatchObject({ outcome: "waiting", ticket: { position: 1 } });
+  if (granted.outcome !== "acquired") throw new Error("Waiting holder was not granted");
+  await f.send("POST", FLEET_SIMULATORS_PATH, {
+    action: "release",
+    seatId: selection.seatId,
+    holderId: selection.holderId,
+    id: granted.lease.id,
+  });
+  expect(
+    FleetSimulatorResultSchema.parse((await f.send("POST", FLEET_SIMULATORS_PATH, later)).json),
+  ).toMatchObject({ outcome: "acquired", lease: { holderId: later.holderId, deviceId: selection.deviceId } });
 });
 
 it("plans through authenticated HTTP and the CLI warns before submitting a new device effect", async () => {

@@ -82,7 +82,11 @@ native harness must supply their own `holderId`. Older holderless leases remain
 releasable through their original root identity.
 
 Acquire takes one persisted FIFO ticket and blocks on the service, by default
-for up to one hour. `--wait SECONDS` bounds that single request (0 returns the
+for up to one hour. Its request-scoped headers/body timeout covers that whole
+wait, rather than the HTTP client's five-minute default. A transport failure names
+its native cause and leaves the ticket resumable with its original FIFO position
+until stale expiry; check status, then resume or cancel explicitly. A disconnected
+wait stops waiting without admitting another effect. `--wait SECONDS` bounds that single request (0 returns the
 ticket immediately); it never repeats acquire HTTP calls. Use `fleet resources`
 to see the holder, resolved target, per-device queue position and estimated wait.
 The estimate uses the current lease's remaining idle budget and queued rounds;

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "artifacts/focused-first.json",
+      "size": 23433,
+      "sha256": "8294282ed4f40def95ab668bfcd44cde166c60baa04bf479d754334cdfcbfde1",
+      "url": "clankie://evidence/sha256/8294282ed4f40def95ab668bfcd44cde166c60baa04bf479d754334cdfcbfde1"
+    },
+    {
+      "path": "artifacts/prelanding-proof.json",
+      "size": 39706,
+      "sha256": "a760265efce42643b416725d5804a1a01b4870a0d1e7894e9fb21f19b79407a0",
+      "url": "clankie://evidence/sha256/a760265efce42643b416725d5804a1a01b4870a0d1e7894e9fb21f19b79407a0"
+    }
+  ]
+}

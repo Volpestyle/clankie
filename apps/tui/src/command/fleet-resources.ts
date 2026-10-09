@@ -1,3 +1,4 @@
+import { Agent } from "undici";
 import { resourceHolderIdentity } from "@clankie/fleet-resources";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import {
@@ -23,32 +24,71 @@ async function request(
     ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
   });
   if (!credential?.token) throw new Error("No operator credential is available");
-  const response = await (options.fetchImpl ?? fetch)(new URL(path, commandHost({ ...options, env })), {
-    method: body === undefined ? "GET" : "POST",
-    headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    // Blocking acquire spends its requested wait on the server's persisted ticket.
-    // Other calls remain bounded; status includes a CoreSimulator listing.
-    signal: AbortSignal.timeout(
-      timeoutMs ?? (body !== undefined ? 60_000 : path === FLEET_SIMULATORS_PATH ? 10_000 : 5_000),
-    ),
-  }).catch((error: unknown) => {
-    if (error instanceof Error && error.name === "TimeoutError")
-      throw new Error(
-        "Fleet resource request timed out. Any lease the service admitted is kept for this seat; run `clankie simulator status`, or acquire again to get it.",
-      );
-    throw error;
-  });
-  // Rejections carry their reason as JSON (409, and 503 while the service restarts).
-  if (
-    !response.ok &&
-    response.status !== 409 &&
-    !(body !== undefined && [500, 503].includes(response.status))
-  )
-    throw new Error(`Fleet resource request failed (HTTP ${response.status})`);
-  return await response.json().catch(() => {
-    throw new Error("Fleet resource response is invalid");
-  });
+  const deadlineMs =
+    timeoutMs ?? (body !== undefined ? 60_000 : path === FLEET_SIMULATORS_PATH ? 10_000 : 5_000);
+  // Undici otherwise stops waiting for headers after 300 seconds, before the
+  // simulator's blocking FIFO wait ends. Scope this policy to this request,
+  // including response consumption; never change the process-global dispatcher.
+  const dispatcher =
+    timeoutMs === undefined
+      ? undefined
+      : new Agent({
+          headersTimeout: deadlineMs,
+          bodyTimeout: deadlineMs,
+        });
+  try {
+    const init: RequestInit & { dispatcher?: Agent } = {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(dispatcher === undefined ? {} : { dispatcher }),
+      signal: AbortSignal.timeout(deadlineMs),
+    };
+    const response = await (options.fetchImpl ?? fetch)(
+      new URL(path, commandHost({ ...options, env })),
+      init,
+    ).catch((error: unknown) => {
+      throw transportError(error);
+    });
+    // Rejections carry their reason as JSON (409, and 503 while the service restarts).
+    if (
+      !response.ok &&
+      response.status !== 409 &&
+      !(body !== undefined && [500, 503].includes(response.status))
+    ) {
+      await response.body?.cancel();
+      throw new Error(`Fleet resource request failed (HTTP ${response.status})`);
+    }
+    return await response.json().catch((error: unknown) => {
+      if (error instanceof SyntaxError)
+        throw new Error("Fleet resource response is invalid", { cause: error });
+      throw transportError(error);
+    });
+  } finally {
+    await dispatcher?.destroy();
+  }
+}
+
+function transportError(error: unknown): Error {
+  if (error instanceof Error && error.name === "TimeoutError")
+    return new Error(
+      "Fleet resource request timed out. Check simulator status: a waiting ticket can resume before expiry, and an admitted lease is kept for this holder.",
+      { cause: error },
+    );
+  let cause = error;
+  let label = "unknown transport error";
+  // Fetch wraps native socket/timeout errors in TypeError. Surface the native
+  // name/code without including URLs, bearer headers or other request data.
+  for (let depth = 0; depth < 8 && cause instanceof Error; depth++) {
+    const code = "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
+    label = code ? `${code}: ${cause.name}` : cause.name;
+    if (!cause.cause) break;
+    cause = cause.cause;
+  }
+  return new Error(
+    `Fleet resource transport failed (${label}). Check simulator status; resume a waiting ticket with the same selection and ticketId before expiry. No acquire was retried.`,
+    { cause: error },
+  );
 }
 
 export async function runResourceStatusCommand(options: BrowserCommandOptions = {}) {

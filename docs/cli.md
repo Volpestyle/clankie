@@ -2722,7 +2722,12 @@ Only that holder can cancel; cancel before changing its selection. Active waits
 renew a five-minute stale deadline. Expired tickets and proven dead native owners
 leave the queue; unknown observations do not establish exit. A ticket is not a
 lease and never authorizes driving a device. An ended bounded wait can resume its
-ticket before expiry; a client wait abort cancels the pending ticket. Once admitted,
+ticket before expiry. A disconnected or aborted HTTP wait keeps that ticket and
+its FIFO position until stale expiry; use `simulator cancel` to leave the queue.
+The CLI gives blocking acquire its own headers/body timeout covering `--wait`
+plus response time, so the transport's five-minute default cannot end an hour-long
+wait. Transport failures name their native cause; acquire is never silently
+retried. Once admitted,
 the service keeps booting and retains its lease even if the caller disconnects.
 Results include `acquired`, `booting`, `waiting` with ticket/blockers/hint,
 `cancelled`, and `rejected` with its cause (`service_restarting` is HTTP 503).
