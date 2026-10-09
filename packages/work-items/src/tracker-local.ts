@@ -6,6 +6,7 @@ import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 import {
   applyTrackerDescriptionPatch,
   DELIVERY_STAGES,
+  TRACKER_LEAD,
   TRACKER_TOOLS,
   validateTrackerToolArgs,
   type DeliveryStage,
@@ -112,6 +113,8 @@ interface Issue extends Entity {
   links: Link[];
   /** Derived from the event stream; absent on items written before VUH-1917 (reported). */
   stage?: DeliveryStage;
+  /** The project cycle it is in (VUH-1931); set by the owner or lead, moved by rollover. */
+  cycleId?: string | null;
   blocked?: boolean;
   asking?: boolean;
   errored?: boolean;
@@ -135,6 +138,17 @@ interface Project extends Entity {
   startDate: string | null;
   targetDate: string | null;
   links: Link[];
+  /** Cycle length in days (VUH-1931); absent means one week. */
+  cycleDays?: number;
+}
+/** A time box of one project. Consecutive: each starts where the previous one ended. */
+interface Cycle {
+  id: string;
+  projectId: string;
+  number: number;
+  startsAt: string;
+  endsAt: string;
+  createdAt: string;
 }
 interface Comment extends Entity {
   body: string;
@@ -190,6 +204,8 @@ interface Store {
   events?: TrackerItemEvent[];
   /** Shipped versions, derived from repository tags and commits (VUH-1930). */
   releases?: Release[];
+  /** Project cycles (VUH-1931), created as they are first needed. */
+  cycles?: Cycle[];
 }
 
 /** Who and why for one write, threaded into item events. */
@@ -374,6 +390,12 @@ function parseStore(content: string): Store {
     });
   }
   bindStageStatuses(store);
+  if (
+    store.cycles !== undefined &&
+    (!Array.isArray(store.cycles) ||
+      store.cycles.some((entry) => typeof entry?.id !== "string" || typeof entry.endsAt !== "string"))
+  )
+    throw new Error("Invalid local tracker cycles");
   if (
     store.releases !== undefined &&
     (!Array.isArray(store.releases) ||
@@ -600,7 +622,7 @@ function recordIssueChanges(
   now: string,
 ): void {
   // These record their own stage events.
-  if (name === "post_issue_event" || name === "sync_releases") return;
+  if (name === "post_issue_event" || name === "sync_releases" || name === "rollover_cycles") return;
   for (const issue of store.issues) {
     if (issue.updatedAt !== now) continue;
     const previous = before.issues.find((entry) => entry.id === issue.id);
@@ -776,6 +798,222 @@ function unsupportedReleaseNotes(args: Record<string, unknown>): void {
     throw new Error("Release notes are not available on the built-in tracker");
 }
 
+const DAY = 86_400_000;
+/** The automatic move of unfinished items into the next cycle. */
+const ROLLOVER = "rollover";
+const DEFAULT_CYCLE_DAYS = 7;
+const cycleName = (cycle: Cycle) => `Cycle ${String(cycle.number)}`;
+const projectCycles = (store: Store, projectId: string) =>
+  (store.cycles ?? []).filter((cycle) => cycle.projectId === projectId).sort((a, b) => a.number - b.number);
+const isOpen = (store: Store, issue: Issue) =>
+  !["completed", "canceled", "duplicate"].includes(categoryOf(store, issue.statusId) ?? "");
+/** The owner (directly or through the owner's app) and Clankie as lead plan cycles; workers do not. */
+const plansCycles = (actor: TrackerActor) =>
+  isOwnerActivity(actor) || (actor.type === "agent-worker" && actor.id === TRACKER_LEAD.id);
+
+function addCycle(store: Store, project: Project, startsAt: string, now: string): Cycle {
+  const previous = projectCycles(store, project.id).at(-1);
+  const cycle: Cycle = {
+    id: randomUUID(),
+    projectId: project.id,
+    number: (previous?.number ?? 0) + 1,
+    startsAt,
+    endsAt: new Date(Date.parse(startsAt) + (project.cycleDays ?? DEFAULT_CYCLE_DAYS) * DAY).toISOString(),
+    createdAt: now,
+  };
+  (store.cycles ??= []).push(cycle);
+  return cycle;
+}
+
+/**
+ * True when a project's latest cycle has ended, or an unfinished item sits in an
+ * ended cycle (a later cycle may already exist, planned ahead): the next access rolls over.
+ */
+function cyclesDue(store: Store, clock: string): boolean {
+  const ended = new Set(
+    (store.cycles ?? []).filter((cycle) => cycle.endsAt <= clock).map((cycle) => cycle.id),
+  );
+  return (
+    store.issues.some((issue) => issue.cycleId != null && ended.has(issue.cycleId) && isOpen(store, issue)) ||
+    store.projects.some((project) => {
+      const last = projectCycles(store, project.id).at(-1);
+      return last !== undefined && last.endsAt <= clock;
+    })
+  );
+}
+
+function moveCycle(
+  store: Store,
+  issue: Issue,
+  target: Cycle | undefined,
+  context: WriteContext,
+  now: string,
+): void {
+  const current = (store.cycles ?? []).find((cycle) => cycle.id === issue.cycleId);
+  if (current?.id === target?.id) return;
+  issue.cycleId = target?.id ?? null;
+  issue.updatedAt = now;
+  appendEvent(store, context, now, issue, {
+    type: "cycle",
+    ...(current === undefined ? {} : { from: current.id }),
+    ...(target === undefined ? {} : { to: target.id }),
+    body: `${current === undefined ? "No cycle" : cycleName(current)} → ${target === undefined ? "no cycle" : cycleName(target)}`,
+  });
+}
+
+/**
+ * Advance every project with cycles to the cycle containing now, creating each
+ * elapsed cycle, and roll its unfinished items into the current one (VUH-1931).
+ */
+function rolloverCycles(
+  store: Store,
+  clock: string,
+  context: WriteContext,
+  now: string,
+): { rolled: string[] } {
+  const rolled: string[] = [];
+  for (const project of store.projects) {
+    const cycles = projectCycles(store, project.id);
+    let last = cycles.at(-1);
+    if (last === undefined) continue;
+    while (last.endsAt <= clock) last = addCycle(store, project, last.endsAt, now);
+    const target = projectCycles(store, project.id).find(
+      (cycle) => cycle.startsAt <= clock && clock < cycle.endsAt,
+    );
+    if (target === undefined) continue; // A clock behind the first cycle's start; nothing has ended.
+    const ended = new Set(
+      projectCycles(store, project.id)
+        .filter((cycle) => cycle.endsAt <= clock)
+        .map((cycle) => cycle.id),
+    );
+    for (const issue of store.issues)
+      if (issue.cycleId != null && ended.has(issue.cycleId) && isOpen(store, issue)) {
+        moveCycle(store, issue, target, context, now);
+        rolled.push(issue.identifier);
+      }
+  }
+  return { rolled };
+}
+
+/** The project's current cycle, starting its first at today's UTC midnight when it has none. */
+function currentCycle(store: Store, project: Project, now: string, create: boolean): Cycle | undefined {
+  const found = projectCycles(store, project.id).find((cycle) => cycle.startsAt <= now && now < cycle.endsAt);
+  if (found !== undefined || !create) return found;
+  return addCycle(store, project, `${now.slice(0, 10)}T00:00:00.000Z`, now);
+}
+
+function findCycle(
+  store: Store,
+  reference: string | number,
+  project: Project | undefined,
+  now: string,
+  create: boolean,
+): Cycle {
+  const key = typeof reference === "number" ? String(reference) : norm(reference);
+  if (["current", "next", "previous"].includes(key)) {
+    if (project === undefined) throw new Error(`Cycle ${key} needs a project; cycles are per project`);
+    const current = currentCycle(store, project, now, create);
+    if (current === undefined) throw new Error(`${project.name} has no cycles yet`);
+    if (key === "current") return current;
+    const neighbour = projectCycles(store, project.id).find(
+      (cycle) => cycle.number === current.number + (key === "next" ? 1 : -1),
+    );
+    if (neighbour !== undefined) return neighbour;
+    if (key === "next" && create) return addCycle(store, project, current.endsAt, now);
+    throw new Error(`${project.name} has no ${key} cycle`);
+  }
+  const matches = (store.cycles ?? []).filter(
+    (cycle) =>
+      norm(cycle.id) === key ||
+      ((String(cycle.number) === key || norm(cycleName(cycle)) === key) &&
+        (project === undefined || cycle.projectId === project.id)),
+  );
+  if (matches.length !== 1)
+    throw new Error(
+      matches.length === 0
+        ? `Cycle not found: ${String(reference)}`
+        : `Cycle ${String(reference)} is ambiguous; pass a project or its id`,
+    );
+  return matches[0]!;
+}
+
+/** Membership is the owner's or the lead's call; a cycle belongs to the issue's project. */
+function setIssueCycle(
+  store: Store,
+  issue: Issue,
+  reference: unknown,
+  context: WriteContext,
+  now: string,
+): void {
+  if (!plansCycles(context.actor))
+    throw new TrackerWriteRefused(
+      "cycle_planning_reserved",
+      "only the owner or the lead adds items to cycles or removes them",
+    );
+  if (reference === null) return moveCycle(store, issue, undefined, context, now);
+  const project =
+    issue.projectId === null ? undefined : store.projects.find((entry) => entry.id === issue.projectId);
+  if (project === undefined) throw new Error("Cycles are per project; give the issue a project first");
+  const cycle = findCycle(store, reference as string | number, project, now, true);
+  if (cycle.projectId !== project.id) throw new Error(`${cycleName(cycle)} belongs to a different project`);
+  if (cycle.endsAt <= now) throw new Error(`${cycleName(cycle)} has ended`);
+  moveCycle(store, issue, cycle, context, now);
+}
+
+/**
+ * What happened in a cycle, read from the event stream: planned (in it before it
+ * started), added after it started, rolled in, removed, finished while in it,
+ * rolled over out of it, and still in flight.
+ */
+function cycleView(store: Store, cycle: Cycle, now: string): Record<string, unknown> {
+  const project = store.projects.find((entry) => entry.id === cycle.projectId);
+  const summary = {
+    planned: new Set<string>(),
+    added: new Set<string>(),
+    rolledIn: new Set<string>(),
+    removed: new Set<string>(),
+    finished: new Set<string>(),
+    rolledOver: new Set<string>(),
+    inFlight: new Set<string>(),
+  };
+  const members = new Set<string>();
+  for (const event of store.events ?? []) {
+    if (event.type === "cycle" && event.to === cycle.id) {
+      members.add(event.issueId);
+      const rolled = event.via === ROLLOVER;
+      (rolled ? summary.rolledIn : event.at < cycle.startsAt ? summary.planned : summary.added).add(
+        event.identifier,
+      );
+    } else if (event.type === "cycle" && event.from === cycle.id) {
+      members.delete(event.issueId);
+      (event.via === ROLLOVER ? summary.rolledOver : summary.removed).add(event.identifier);
+    } else if (members.has(event.issueId) && event.at < cycle.endsAt) {
+      const completed =
+        event.type === "verified" ||
+        (event.type === "state" &&
+          store.issueStatuses.find((status) => status.name === event.to)?.type === "completed");
+      if (completed) summary.finished.add(event.identifier);
+    }
+  }
+  for (const issue of store.issues)
+    if (issue.cycleId === cycle.id && isOpen(store, issue) && cycle.startsAt <= now && now < cycle.endsAt)
+      summary.inFlight.add(issue.identifier);
+  return {
+    id: cycle.id,
+    number: cycle.number,
+    name: cycleName(cycle),
+    startsAt: cycle.startsAt,
+    endsAt: cycle.endsAt,
+    project: project?.name ?? null,
+    projectId: cycle.projectId,
+    isActive: cycle.startsAt <= now && now < cycle.endsAt,
+    isPast: cycle.endsAt <= now,
+    isFuture: now < cycle.startsAt,
+    issues: store.issues.filter((issue) => issue.cycleId === cycle.id).map((issue) => issue.identifier),
+    summary: Object.fromEntries(Object.entries(summary).map(([key, value]) => [key, [...value]])),
+  };
+}
+
 /** Precondition on the record as currently stored; checked before any field changes. */
 function refuseCreatePrecondition(args: Record<string, unknown>): void {
   if (args.ifUpdatedAt !== undefined) throw new Error("ifUpdatedAt is only valid when updating a record");
@@ -940,6 +1178,7 @@ function projectView(store: Store, project: Project): Record<string, unknown> {
     milestones: [],
     resources: { links: project.links, documents: [], attachments: [] },
     latestStatusUpdate: latest === undefined ? null : updateView(store, latest),
+    cycleDays: project.cycleDays ?? DEFAULT_CYCLE_DAYS,
     url: localUrl("project", project.id),
   };
 }
@@ -1209,6 +1448,7 @@ function saveProject(store: Store, args: Record<string, unknown>, now: string): 
     project.labels = labelNames(store, values(args, "labels"), project.leadTeamId);
   if (args.lead !== undefined)
     project.leadId = args.lead === null ? null : findUser(store, args.lead as string).id;
+  if (args.cycleDays !== undefined) project.cycleDays = args.cycleDays as number;
   if (args.startDate !== undefined) project.startDate = args.startDate as string;
   if (args.targetDate !== undefined) project.targetDate = args.targetDate as string;
   for (const link of (args.links ?? []) as Link[]) {
@@ -1379,9 +1619,36 @@ async function dispatch(
     case "save_issue": {
       if (typeof args.id === "string")
         options.assertIssueWrite?.(issueView(store, findIssue(store, args.id)));
-      const saved = saveIssue(store, args, now);
+      const { cycle, ...fields } = args;
+      const saved = saveIssue(store, fields, now);
       options.assertIssueWrite?.(saved);
-      return saved;
+      const issue = findIssue(store, saved.id as string);
+      const inCycle = (store.cycles ?? []).find((entry) => entry.id === issue.cycleId);
+      // A cycle belongs to one project; moving the issue out of it leaves the cycle.
+      if (cycle === undefined && inCycle !== undefined && inCycle.projectId !== issue.projectId)
+        moveCycle(store, issue, undefined, context, now);
+      if (cycle !== undefined) setIssueCycle(store, issue, cycle, context, now);
+      return cycle === undefined && inCycle?.projectId === issue.projectId
+        ? saved
+        : issueView(store, issue, true);
+    }
+    case "list_cycles": {
+      if (args.teamId !== undefined) findTeam(store, args.teamId as string);
+      const project = args.project === undefined ? undefined : findProject(store, args.project as string);
+      const projects = project === undefined ? store.projects : [project];
+      const cycles = projects.flatMap((entry) => {
+        if (args.type === undefined) return projectCycles(store, entry.id);
+        try {
+          return [findCycle(store, args.type as string, entry, now, false)];
+        } catch {
+          return [];
+        }
+      });
+      return { cycles: cycles.map((cycle) => cycleView(store, cycle, now)), hasNextPage: false };
+    }
+    case "get_cycle": {
+      const project = args.project === undefined ? undefined : findProject(store, args.project as string);
+      return cycleView(store, findCycle(store, args.id as string, project, now, false), now);
     }
     case "list_issues":
     case "search_issues": {
@@ -1398,6 +1665,16 @@ async function dispatch(
       const label =
         args.label === undefined ? undefined : labelNames(store, [args.label as string], store.team.id)[0];
       const state = args.state === undefined ? undefined : norm(args.state as string);
+      const cycle =
+        args.cycle === undefined
+          ? undefined
+          : findCycle(
+              store,
+              args.cycle as string,
+              args.project === undefined ? undefined : findProject(store, args.project as string),
+              now,
+              false,
+            ).id;
       const query = norm(text(args, "query") ?? "");
       const result = store.issues.filter((entry) => {
         const status = findStatus(store.issueStatuses, entry.statusId);
@@ -1413,6 +1690,7 @@ async function dispatch(
           (creator === undefined || entry.creatorId === creator) &&
           (label === undefined || entry.labels.includes(label)) &&
           (args.priority === undefined || entry.priority === args.priority) &&
+          (cycle === undefined || entry.cycleId === cycle) &&
           matchesDates(entry, args, now) &&
           `${entry.identifier}\n${entry.title}\n${entry.description}`.toLowerCase().includes(query)
         );
@@ -1854,6 +2132,19 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       validateTrackerToolArgs(name, args);
       return withTrackerStoreLock(path, async (assertHeld) => {
         const { store, clock, initialized } = await load();
+        // Cycles roll over on the first access after one ends, as Clankie's own write.
+        if (cyclesDue(store, clock))
+          await write(
+            store,
+            clock,
+            "rollover_cycles",
+            {},
+            undefined,
+            { ...TRACKER_LEAD, onBehalfOf: [] },
+            { via: ROLLOVER },
+            assertHeld,
+            (target, now, context) => rolloverCycles(target, clock, context, now),
+          );
         const actor = callOptions?.actor ?? localActor(store);
         const writing = /^(?:save|create|post)_/u.test(name);
         if (!writing) {

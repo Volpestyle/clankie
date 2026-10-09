@@ -1789,6 +1789,15 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
 ID|VERSION` shows one release, with each item's commits and, for built-in
   items, their stage. These run as the owner through
   `POST /v1/tracker/releases/sync` and `POST /v1/tracker/owner/call`.
+- `clankie work cycle [--project P] [--type current|previous|next|all]` reads
+  built-in tracker cycles with their event-stream summary: planned, added,
+  rolled in, removed, finished, rolled over, in flight. `work cycle show ID
+[--project P]` reads one cycle. `work cycle add ITEM [--to current|next|N]`
+  and `work cycle remove ITEM` set membership as the owner. `work cycle length
+PROJECT DAYS` sets the project's cycle length (default 7), starting with its
+  next cycle. Unfinished items roll into the next cycle on the first access after
+  one ends
+  ([ADR 0226 amendment, VUH-1931](adr/0226-one-tracker-tool-surface.md#amendment-cycles-2026-10-09-vuh-1931)).
 - `clankie work owner TOOL [--json ARGS]` makes the owner's own call to the
   built-in tracker (`POST /v1/tracker/owner/call`) with a `linear_*` tool name
   (prefix optional), for example `work owner get_issue --json

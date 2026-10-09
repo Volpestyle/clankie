@@ -19,6 +19,8 @@ const WORK_USAGE = [
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
   "  | releases [--lane L] [--item KEY] [--limit N] | releases sync | release ID|VERSION",
+  "  | cycle [--project P] [--type current|previous|next|all] | cycle show ID [--project P]",
+  "  | cycle add ITEM [--to current|next|NUMBER] | cycle remove ITEM | cycle length PROJECT DAYS",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
@@ -268,6 +270,28 @@ function trackerRequest(
     case "release":
       if (rest.length !== 1) throw new Error(WORK_USAGE);
       return owner("get_release", { id: rest[0] });
+    case "cycle": {
+      const [action, ...targets] = rest;
+      const project = one(parsed, "--project");
+      if (action === undefined) {
+        const type = one(parsed, "--type") ?? "current";
+        return owner("list_cycles", {
+          ...(project === undefined ? {} : { project }),
+          ...(type === "all" ? {} : { type }),
+        });
+      }
+      if (action === "show" && targets.length === 1)
+        return owner("get_cycle", { id: targets[0], ...(project === undefined ? {} : { project }) });
+      if (action === "add" && targets.length === 1) {
+        const to = one(parsed, "--to") ?? "current";
+        return owner("save_issue", { id: targets[0], cycle: /^\d+$/u.test(to) ? Number(to) : to });
+      }
+      if (action === "remove" && targets.length === 1)
+        return owner("save_issue", { id: targets[0], cycle: null });
+      if (action === "length" && targets.length === 2 && /^\d+$/u.test(targets[1]!))
+        return owner("save_project", { id: targets[0], cycleDays: Number(targets[1]) });
+      throw new Error(WORK_USAGE);
+    }
     case "owner": {
       if (rest.length !== 1) throw new Error(WORK_USAGE);
       const json = one(parsed, "--json");

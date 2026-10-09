@@ -358,6 +358,7 @@ export function createLinearApiTracker(options: {
       return issueProjection(issue);
     }
     if (name === "list_issues" || name === "search_issues") {
+      unsupported(args, ["cycle"]);
       const filter: RecordValue = {};
       for (const [field, kind] of [
         ["team", "team"],
@@ -612,6 +613,7 @@ export function createLinearApiTracker(options: {
       if (args.project) input.projectId = await id("project", args.project);
       return mutation("projectUpdate", UPDATE, input, publication, args.id as string | undefined);
     }
+    if (name === "save_issue") unsupported(args, ["cycle"]);
     if (name === "save_issue" || name === "save_project")
       return serialized(`${name}:${String(args.id ?? "create")}`, async () => {
         const isIssue = name === "save_issue";

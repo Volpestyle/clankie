@@ -242,3 +242,13 @@ the commit message. Read releases with `linear_list_releases` (`query` also
 matches an item key), `linear_get_release` and
 `linear_get_issue {includeReleases: true}`, or `clankie work releases`,
 `work release ID|VERSION` and `work releases --item KEY`.
+
+Cycles are per project on the built-in tracker. The default length is one week,
+and `clankie work cycle length PROJECT DAYS` changes it. The owner or the lead
+plans a cycle with `linear_save_issue {cycle: "current"|"next"|N|null}` (or
+`clankie work cycle add|remove ITEM`); a worker is refused. Unfinished items
+roll over into the next cycle on the first access after a cycle ends.
+`linear_list_cycles {project, type: "current"}`, `linear_get_cycle` and
+`clankie work cycle` show each cycle's summary from the event stream: planned,
+added, rolled in, removed, finished, rolled over, in flight.
+`linear_list_issues {project, cycle: "current"}` lists the current cycle's items.

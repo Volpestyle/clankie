@@ -15,7 +15,9 @@ the built-in tracker. A second proposed
 [amendment](#amendment-typed-events-delivery-stages-and-owner-wakes-2026-10-09-vuh-1917)
 (VUH-1917) adds the item event stream, derived state, delivery stages and owner
 wakes. A third proposed [amendment](#amendment-releases-2026-10-09-vuh-1930)
-(VUH-1930) makes releases records whose items come from landed commits.
+(VUH-1930) makes releases records whose items come from landed commits, and a
+fourth [amendment](#amendment-cycles-2026-10-09-vuh-1931) (VUH-1931) adds
+per-project cycles with automatic rollover.
 
 ## Context
 
@@ -254,3 +256,50 @@ oldest first. GitHub and Markdown repository trackers refuse release tools.
 
 Release notes, planned releases and lanes beyond one per repository convention
 are outside this change. So is a release that does not ship as a `v*` tag.
+
+## Amendment: cycles (2026-10-09, VUH-1931)
+
+Status: proposed. Tracks [VUH-1931](https://linear.app/vuhlp/issue/VUH-1931).
+Built-in tracker only. James's choice of cycle length and scope is still open,
+so this uses the issue's default: one week, per project. The length is a stored
+project setting (`save_project` `cycleDays`, `clankie work cycle length`), not a
+constant, so changing it later is a setting change.
+
+**Cycles.** A cycle is a numbered time box of one project, with a start and an
+end. A project's first cycle starts at UTC midnight on the day its first item
+joins a cycle. After that, each cycle starts where the previous one ended. A
+length change applies from the next cycle, and the current cycle keeps its end.
+Cycles are records in `tracker.json`.
+
+**Membership.** An item joins or leaves a cycle through `save_issue` `cycle`
+(an id, a number, `current` or `next`, or `null`), Linear's own field. Only the
+owner, the owner's app or Clankie as lead may set it; a hired worker is refused
+(`cycle_planning_reserved`). An item needs a project, and leaves its cycle if
+it moves to another project. An ended cycle takes no new items. Every change is
+a `cycle` event, with `from` and `to` set to cycle ids.
+
+**Rollover.** Rollover needs no timer. The first tracker access after a cycle
+ends performs it as Clankie's own write (`via: rollover`, self-echo). That write
+creates each elapsed cycle and moves every unfinished item from an ended cycle
+into the current one. Unfinished means a status that is not completed, canceled
+or duplicate, so a delivered item that the owner has not yet verified rolls
+over. Several elapsed cycles roll straight into the current one.
+
+**The view comes from the event stream.** Each cycle's summary is read from its
+`cycle` events and completions:
+
+- planned: joined before the cycle started;
+- added: joined after it started;
+- rolled in;
+- removed;
+- finished: completed while in the cycle;
+- rolled over;
+- in flight: unfinished members of the current cycle.
+
+There is no burn-down. `list_cycles` keeps Linear's
+`type: current|previous|next` and adds `project`. `get_cycle` and
+`list_issues` `cycle` read one cycle and its items. The current cycle is
+what the ready queue (VUH-1918) will prefer.
+
+Other backends refuse `cycle` and the cycle tools explicitly. Connected Linear
+keeps its own team cycles, and the Linear import (VUH-1907) will map them.

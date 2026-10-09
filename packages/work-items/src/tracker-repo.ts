@@ -174,6 +174,8 @@ export function createRepoTracker(
     refuseBuiltInTrackerFeatures(name, args);
     if (name === "list_releases" || name === "get_release")
       throw new Error("Releases live in Clankie's built-in tracker; read them with clankie work releases");
+    if (name === "list_cycles" || args.cycle !== undefined)
+      throw new Error("Cycles live in Clankie's built-in tracker; use clankie work cycle");
     switch (name) {
       case "list_issue_statuses":
         return Object.entries(STATES).map(([id, state]) => ({ id, ...state }));

@@ -50,6 +50,7 @@ export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   "post_issue_event",
   "list_issue_events",
   "save_issue_status",
+  "get_cycle",
 ]);
 
 /** What a worker reports about an item; the tracker derives the item's state from these. */
@@ -67,7 +68,10 @@ export interface TrackerItemEvent {
   readonly at: string;
   readonly issueId: string;
   readonly identifier: string;
-  /** Worker-reported types, or what the tracker recorded: created, comment, state, priority, stage, verified, reopened. */
+  /**
+   * Worker-reported types, or what the tracker recorded: created, comment, state, priority,
+   * stage, verified, reopened, and cycle (from/to are cycle ids; via rollover when automatic).
+   */
   readonly type:
     | IssueEventType
     | "created"
@@ -76,7 +80,8 @@ export interface TrackerItemEvent {
     | "priority"
     | "stage"
     | "verified"
-    | "reopened";
+    | "reopened"
+    | "cycle";
   readonly actor: TrackerActor;
   /** True when Clankie or his workers wrote it; owner activity (human or the owner's app) is false. */
   readonly selfEcho: boolean;
@@ -89,7 +94,7 @@ export interface TrackerItemEvent {
   readonly prevHash: string;
   readonly hash: string;
 }
-const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt"] as const;
+const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt", "cycleDays"] as const;
 
 /** Other backends fail explicitly instead of silently dropping exactly-once or precondition input. */
 export function refuseBuiltInTrackerFeatures(name: string, args: Record<string, unknown>): void {
@@ -191,6 +196,10 @@ const issueFilters = {
   project: string,
   priority,
   parentId: string,
+  cycle: {
+    ...string,
+    description: "Cycle ID, number, or current/next/previous (with project on the built-in tracker).",
+  },
   fields: strings,
   createdAt: string,
   updatedAt: string,
@@ -255,6 +264,11 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       removeBlockedBy: strings,
       removeRelatedTo: strings,
       duplicateOf: nullableString,
+      cycle: {
+        type: ["string", "number", "null"],
+        description:
+          "Cycle ID, number, or current/next; null removes the issue from its cycle. On the built-in tracker the issue needs a project, and only the owner or the lead sets cycle membership.",
+      },
       dueDate: nullableString,
       estimate: { type: ["number", "null"] },
       links,
@@ -324,6 +338,13 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       leadTeam: string,
       labels: strings,
       lead: nullableString,
+      cycleDays: {
+        type: "integer",
+        minimum: 1,
+        maximum: 56,
+        description:
+          "Built-in tracker only. Cycle length in days for this project (default 7). Applies from the next cycle; the current one keeps its end.",
+      },
       startDate: string,
       targetDate: string,
       links,
@@ -476,6 +497,21 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     "get_release",
     "Retrieve a release by ID or slug, with its items. On the built-in tracker the id may also be an unambiguous version; built-in items carry their title and delivery stage, and every item lists the commits that name it.",
     { id: { ...string, minLength: 1 }, includeReleaseNotes: boolean },
+    ["id"],
+  ),
+  tool(
+    "list_cycles",
+    "Retrieve cycles. On the built-in tracker cycles are per project (default one week), unfinished items roll over to the next cycle automatically, and each cycle carries its summary from the event stream: planned, added, rolled in, removed, finished, rolled over and in flight.",
+    {
+      teamId: string,
+      type: { type: "string", enum: ["current", "previous", "next"] },
+      project: { ...string, description: "Built-in tracker: the project whose cycles to read." },
+    },
+  ),
+  tool(
+    "get_cycle",
+    "Built-in tracker only. One cycle by ID, or by number with project, with its summary from the event stream.",
+    { id: { ...string, minLength: 1 }, project: string },
     ["id"],
   ),
   tool(
