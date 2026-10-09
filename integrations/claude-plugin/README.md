@@ -442,3 +442,12 @@ MCP results put a readable summary in the first text block and decoded data in
 Service HTTP results and receipt journals retain their original format so older
 installed CLI publishers keep working; the display projection runs in native bridges. Errors, media and receipt metadata
 remain part of the result; an uncertain outcome must be reconciled, never retried.
+
+### Hook module paths
+
+Claude resolves `hooks/hooks.json` module declarations inside the hooks directory.
+Both plugins declare `./mods/tool-catalog.mjs`. Edit only
+`worker/mods/tool-catalog.mjs`; `node integrations/claude-plugin/build.mjs` copies
+it into `hooks/mods/` and `worker/hooks/mods/`, and `--check` rejects stale copies.
+Keep declared module paths inside that directory; `../` paths are rejected by
+native `/reload-plugins`.

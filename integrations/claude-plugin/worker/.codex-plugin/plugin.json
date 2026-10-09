@@ -1,6 +1,6 @@
 {
   "name": "clankie-worker",
-  "version": "0.6.12",
+  "version": "0.6.13",
   "description": "Clankie's project-scoped tools for native fleet agents; no operator authority.",
   "author": { "name": "James Volpe" },
   "license": "Apache-2.0",

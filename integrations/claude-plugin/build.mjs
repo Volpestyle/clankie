@@ -2,7 +2,7 @@
 // Renders the plugin's output style from the captain's identity prompt so the
 // seat and the pi lanes share one identity file. `node build.mjs` rewrites
 // output-styles/clankie.md; `node build.mjs --check` exits 1 when it is stale.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,6 +48,23 @@ export function renderOutputStyle(identity = readFileSync(IDENTITY_PATH, "utf8")
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const catalog = readFileSync(join(pluginRoot, "worker/mods/tool-catalog.mjs"), "utf8");
+  for (const relativePath of ["hooks/mods/tool-catalog.mjs", "worker/hooks/mods/tool-catalog.mjs"]) {
+    const catalogPath = join(pluginRoot, relativePath);
+    if (process.argv.includes("--check")) {
+      let current;
+      try {
+        current = readFileSync(catalogPath, "utf8");
+      } catch {
+        /* Missing is stale. */
+      }
+      if (current !== catalog)
+        throw new Error(`${relativePath} is stale; run node integrations/claude-plugin/build.mjs`);
+    } else {
+      mkdirSync(dirname(catalogPath), { recursive: true });
+      writeFileSync(catalogPath, catalog);
+    }
+  }
   const projection = readFileSync(join(pluginRoot, "../../packages/protocol/src/mcp-result.mjs"), "utf8");
   const projectionPath = join(pluginRoot, "worker/bin/mcp-result.mjs");
   if (process.argv.includes("--check")) {

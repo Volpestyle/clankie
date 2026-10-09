@@ -1,6 +1,6 @@
 {
   "description": "Clankie seat context, memory and settled transcript projection to the selected conversation.",
-  "modules": ["../worker/mods/tool-catalog.mjs"],
+  "modules": ["./mods/tool-catalog.mjs"],
   "hooks": {
     "SessionStart": [
       {
