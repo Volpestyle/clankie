@@ -5,7 +5,8 @@ an exited intermediate with the same live claimant (`ancestor_exited`). Private
 request diagnostics record the failed chain position and failure-time claimant
 status. PID/birth stay private; metrics and alerts use fixed reasons.
 
-[Native capture and source archive](clankie://evidence/sha256/4fbb520a27eb9dc0b3bc3d32652f1504629b850c32a088b20d49dc8ab5328f70)
+Native capture and source archive:
+`clankie://evidence/sha256/4fbb520a27eb9dc0b3bc3d32652f1504629b850c32a088b20d49dc8ab5328f70`
 records implementation `8f91a34512ff578c35d7191749f6a8e021dd6ed3`, based on
 `29e57808265ca7c1e9f4f460b569c12fd688b86a`.
 
