@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "artifacts/lifecycle-1.log",
+      "size": 22881,
+      "sha256": "f47eaab8ab9ce4ac589abd10e14059500493a07c453df1c463a3ff90bcd7625e",
+      "url": "clankie://evidence/sha256/f47eaab8ab9ce4ac589abd10e14059500493a07c453df1c463a3ff90bcd7625e"
+    },
+    {
+      "path": "artifacts/lifecycle-2.log",
+      "size": 22895,
+      "sha256": "05099ffb6b486c83313476d69802e88db16c4964b7f29748cae186db1f7a8088",
+      "url": "clankie://evidence/sha256/05099ffb6b486c83313476d69802e88db16c4964b7f29748cae186db1f7a8088"
+    },
+    {
+      "path": "artifacts/lifecycle-3.log",
+      "size": 22877,
+      "sha256": "8bdafcf83f92490782b2599dc9e5c83f80c62df353d8d0b5022de5b0a03353b3",
+      "url": "clankie://evidence/sha256/8bdafcf83f92490782b2599dc9e5c83f80c62df353d8d0b5022de5b0a03353b3"
+    },
+    {
+      "path": "artifacts/proof.json",
+      "size": 84747,
+      "sha256": "36193facfba4c7c7adc7ba40a2b03586d9d5b42d9802da07affd9e4db8772977",
+      "url": "clankie://evidence/sha256/36193facfba4c7c7adc7ba40a2b03586d9d5b42d9802da07affd9e4db8772977"
+    }
+  ]
+}

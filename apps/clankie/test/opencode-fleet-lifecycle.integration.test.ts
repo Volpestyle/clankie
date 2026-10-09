@@ -777,6 +777,15 @@ test("SSH native hire, API history and follow-up reuse the original controller w
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
 });
 
+function waitForPendingReport<T>(waiting: Promise<void>, sending: Promise<T>): Promise<void> {
+  return Promise.race([
+    waiting,
+    sending.then((receipt) => {
+      throw new Error(`Native follow-up finished before its Herdr report: ${JSON.stringify(receipt)}`);
+    }),
+  ]);
+}
+
 test("SSH native follow-up keeps its original controller while a valid Herdr reply is pending", async (context) => {
   const started = performance.now();
   const stages: { stage: string; elapsedMs: number }[] = [];
@@ -793,18 +802,15 @@ test("SSH native follow-up keeps its original controller while a valid Herdr rep
   const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
   const message = bank.tools.find((tool) => tool.name === "message_seat")!;
   const before = f.ssh!.transportState().filter((entry) => !entry.closed);
+  expect(before.some((entry) => entry.kind === "helper")).toBe(true);
+  expect(before.some((entry) => entry.kind === "forward")).toBe(true);
   const barrier = f.pauseNextReport();
   f.startNextPrompt();
   const sending = message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
   void sending.catch(() => {});
   try {
     stage("sending");
-    await Promise.race([
-      barrier.waiting,
-      sending.then((receipt) => {
-        throw new Error(`Native follow-up finished before its Herdr report: ${JSON.stringify(receipt)}`);
-      }),
-    ]);
+    await waitForPendingReport(barrier.waiting, sending);
     stage("report-pending");
     // Herdr permits ten seconds for this native request. A valid response
     // after four seconds must not retire its otherwise unchanged controller.
@@ -991,11 +997,39 @@ test("advancing a fleet revision closes and evicts the old helper and SSH forwar
   const owned = ssh.transportState();
   expect(owned.some((entry) => entry.kind === "helper" && !entry.closed)).toBe(true);
   expect(owned.some((entry) => entry.kind === "forward" && !entry.closed)).toBe(true);
+  const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
+  const message = bank.tools.find((tool) => tool.name === "message_seat")!;
+  const barrier = f.pauseNextReport();
   ssh.workers.forFleet(ssh.fleet, async () => {}, 1);
   for (const entry of owned)
     expect(ssh.transportState().find((current) => current.id === entry.id)).toMatchObject({ closed: true });
   await expect(old.list()).rejects.toThrow("retired");
   expect(() => ssh.workers.forFleet(ssh.fleet, async () => {}, 0)).toThrow("revision");
+  const sending = message.call({ seat: f.hired.seat.seatId, message: "Retired native follow-up" });
+  try {
+    const failure = await waitForPendingReport(barrier.waiting, sending).then(
+      () => {
+        throw new Error("Retired follow-up unexpectedly entered its Herdr report");
+      },
+      (error: unknown) => error,
+    );
+    const receipt = await sending;
+    console.log("Retired native follow-up receipt", JSON.stringify(receipt));
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
+      `Native follow-up finished before its Herdr report: ${JSON.stringify(receipt)}`,
+    );
+    expect(JSON.parse((receipt.content[0] as { text: string }).text)).toMatchObject({
+      outcome: "undelivered",
+      deliveryStage: "unavailable",
+      detail: "Remote native fleet revision is retired",
+    });
+    expect(f.reportedStates).not.toContain("working");
+    expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+  } finally {
+    barrier.resume();
+    await sending.catch(() => undefined);
+  }
   const ref = ssh.fleet.id + ":ses_nativeWorker123";
   expect(await f.sessions.read(ref)).toMatchObject({ session: { ref } });
   expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
