@@ -1,0 +1,168 @@
+{
+  "session": "hire-layout-SNgpC4",
+  "scope": "Actual Git/worktree/Herdr CLI and socket journey; no authenticated model turn. All assertions passed in the 179-test run.",
+  "groupTabs": [
+    {
+      "agent_status": "unknown",
+      "focused": false,
+      "label": "VUH-1869 authors",
+      "number": 8,
+      "pane_count": 4,
+      "tab_id": "w3:t8",
+      "workspace_id": "w3"
+    },
+    {
+      "agent_status": "unknown",
+      "focused": false,
+      "label": "VUH-1869 authors \u00b7 2",
+      "number": 9,
+      "pane_count": 1,
+      "tab_id": "w3:t9",
+      "workspace_id": "w3"
+    }
+  ],
+  "gridLayout": {
+    "area": {
+      "height": 40,
+      "width": 120,
+      "x": 0,
+      "y": 0
+    },
+    "focused_pane_id": "w3:pA",
+    "panes": [
+      {
+        "focused": true,
+        "pane_id": "w3:pA",
+        "rect": {
+          "height": 20,
+          "width": 60,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "focused": false,
+        "pane_id": "w3:pC",
+        "rect": {
+          "height": 20,
+          "width": 60,
+          "x": 0,
+          "y": 20
+        }
+      },
+      {
+        "focused": false,
+        "pane_id": "w3:pB",
+        "rect": {
+          "height": 20,
+          "width": 60,
+          "x": 60,
+          "y": 0
+        }
+      },
+      {
+        "focused": false,
+        "pane_id": "w3:pD",
+        "rect": {
+          "height": 20,
+          "width": 60,
+          "x": 60,
+          "y": 20
+        }
+      }
+    ],
+    "splits": [
+      {
+        "direction": "right",
+        "id": "split_0_root",
+        "ratio": 0.5,
+        "rect": {
+          "height": 40,
+          "width": 120,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "direction": "down",
+        "id": "split_1_0",
+        "ratio": 0.5,
+        "rect": {
+          "height": 40,
+          "width": 60,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "direction": "down",
+        "id": "split_2_1",
+        "ratio": 0.5,
+        "rect": {
+          "height": 40,
+          "width": 60,
+          "x": 60,
+          "y": 0
+        }
+      }
+    ],
+    "tab_id": "w3:t8",
+    "workspace_id": "w3",
+    "zoomed": false
+  },
+  "mutations": {
+    "api snapshot": 39,
+    "workspace create": 4,
+    "tab create": 11,
+    "worktree list": 21,
+    "tab rename": 2,
+    "workspace report-metadata": 2,
+    "pane rename": 16,
+    "pane report-metadata": 13,
+    "pane layout": 8,
+    "pane split": 6,
+    "session list": 1,
+    "pane process-info": 3,
+    "pane move": 1,
+    "pane list": 1
+  },
+  "uncertainty": [
+    {
+      "fault": "tab-reply",
+      "firstResult": {
+        "outcome": "failed",
+        "reason": "start_unconfirmed",
+        "detail": "Native pane creation unconfirmed; inspect Herdr before retrying: Fixture dropped the real successful mutation reply",
+        "deliveryStage": "uncertain"
+      },
+      "retry": {
+        "outcome": "failed",
+        "reason": "delivery_unconfirmed",
+        "deliveryStage": "uncertain",
+        "detail": "The original hire remains uncertain; reconcile its exact session and brief before any retry. No new seat was started."
+      }
+    },
+    {
+      "fault": "pane-label",
+      "firstResult": {
+        "outcome": "failed",
+        "reason": "start_unconfirmed",
+        "detail": "Hire layout creation unconfirmed at w4:p5; inspect Herdr before retrying. No existing pane was closed.",
+        "deliveryStage": "uncertain"
+      },
+      "retry": {
+        "outcome": "failed",
+        "reason": "delivery_unconfirmed",
+        "deliveryStage": "uncertain",
+        "detail": "The original hire remains uncertain in pane w4:p5; reconcile its exact session and brief before any retry. No new seat was started."
+      }
+    }
+  ],
+  "cleanup": {
+    "session": "hire-layout-SNgpC4",
+    "serverPid": 68390,
+    "exitCode": 0,
+    "signalCode": null,
+    "removedPrivateRoot": "/tmp/cl1550-SNgpC4"
+  }
+}

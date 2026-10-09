@@ -100,6 +100,7 @@ describe("remote Herdr transport", () => {
       ["agent", "list"],
       ["agent", "read", "w2:p1", "--source", "visible"],
       ["pane", "send-text", "w2:p1", "hi"],
+      ["pane", "move", "w2:p3", "--tab", "w2:t1", "--split", "down", "--target-pane", "w2:p2", "--no-focus"],
       ["api", "snapshot"],
       ["session", "list", "--json"],
     ])
@@ -243,7 +244,7 @@ describe("fleet routing", () => {
             },
           },
         });
-      if (args[0] === "pane" && args[1] === "rename") return "{}";
+      if (args[0] === "pane" && (args[1] === "rename" || args[1] === "report-metadata")) return "{}";
       if (args[0] === "tab") return JSON.stringify({ result: { root_pane: { pane_id: "w2:p9" } } });
       return "{}";
     };
@@ -399,7 +400,7 @@ describe("watches and hires on a remote fleet", () => {
             },
           },
         });
-      if (args[0] === "pane" && args[1] === "rename") return "{}";
+      if (args[0] === "pane" && (args[1] === "rename" || args[1] === "report-metadata")) return "{}";
       if (args[0] === "tab") return JSON.stringify({ result: { root_pane: { pane_id: "w2:p9" } } });
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w2:p9", "term_new", "idle")] } });

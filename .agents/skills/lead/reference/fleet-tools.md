@@ -44,11 +44,19 @@ than inventing a new key. `panes` lets independently owned slices have separate
 hires.
 
 Placement: one workspace per repository in the selected fleet (linked worktrees
-share it); `new-tab` is normal, one worker per tab named `Name · role`. A shared
-workflow passes an explicit named `pipeline`: its first member creates the tab
-and later stages `split` into it. Tabs need matching repo and pipeline metadata
-on every pane; unmarked or ambiguous tabs refuse. Never substitute the lead's or
-the focused pane.
+share it). Omit placement to fill named 2x2 worker tabs, at most four per tab,
+before opening the next numbered tab. Positions are top-left, top-right,
+bottom-left, bottom-right. The group defaults to the project or deliverable
+(and the repository when neither is supplied). `pipeline` overrides its name,
+for example `VUH-1869 authors`. Explicit `new-tab` keeps a solo `Name · role`
+tab; explicit `split` requires a pipeline. Verified repo/group/grid metadata
+keeps hires out of unmarked or older lanes. Prepared native hires move only
+their newly created initial-command pane into the group. Never rearrange
+existing panes or substitute the lead's or focused pane.
+
+Sub-leads without `hire_agent` use the exact [worker grid commands](../../clankie/reference/worker-layout.md).
+The old generated `lead/reference/operations.md` is now this canonical source;
+plugin builds copy the shipped skills rather than maintaining a second guide.
 
 Accounts: `worker_accounts` (omit `fleet` for this Mac, or pass one such as
 `pc`) reads that machine's Claude profiles and Codex accounts now: identity,

@@ -1178,7 +1178,7 @@ export const SpawnOperatorSeatSchema = z
       .string()
       .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
       .optional(),
-    /** Explicit shared workflow tab; split joins its last pane, never a focused/lead tab. */
+    /** Override the named worker group; fills a 2x2 grid, never a focused/lead tab. */
     pipeline: z
       .string()
       .trim()

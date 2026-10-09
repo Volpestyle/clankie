@@ -3094,15 +3094,20 @@ An unmarked hand-created workspace is reused only when all its observed pane
 directories belong to that repo. Mixed legacy workspaces stay untouched.
 Non-Git directories use their exact working directory instead.
 
-`new-tab` is the normal placement: a solo worker gets a `Name · role` tab.
-A deliberate pipeline supplies a per-hire `pipeline` name, for example
-`"VUH-1550 design → implement → review"`. Its first hire opens that named tab;
-later hires use `placement: "split"` with the same pipeline and split its last
-stage, preserving focus. `split` without a pipeline refuses. A same-named tab
-with unmarked panes refuses instead of appending to an unrelated lane. Pipeline
-names belong to the hire, not a blanket role or fleet default. Prepared
-initial-command Pi/OpenCode/Grok hires can create the first pipeline tab but cannot
-yet split into an existing one; they refuse rather than rebuild it.
+Omitted placement fills named 2x2 worker tabs, with at most four panes before
+opening the next numbered tab. Positions fill top-left, top-right, bottom-left,
+bottom-right. The name defaults to the project or deliverable (otherwise the
+repository); a per-hire `pipeline`, such as `"VUH-1869 authors"`, overrides it.
+Explicit `new-tab` requests a solo `Name · role` tab. Explicit `split` requires
+a pipeline and fills its grid. Existing unmarked pipeline tabs refuse instead
+of appending to an unrelated lane. Existing owner placement preferences still
+win; unset a `new-tab` preference to use the grid default.
+
+Only tabs with matching repo/group/grid metadata are reused. Prepared native
+initial-command hires create their own temporary tab and move only the new
+pane into the group; their terminal and native process survive. Herdr's
+same-tab `pane move` silently does nothing: sub-leads use the exact
+[worker grid commands](../.agents/skills/clankie/reference/worker-layout.md).
 
 This policy allocates new panes only. Resuming an already live native session
 keeps its existing pane; a saved-session resume that needs a new pane uses the
@@ -5508,13 +5513,13 @@ memory card come from the selected service conversation; selected skills are
 provided as paths to their `SKILL.md` files. Native transcripts and service wakes
 follow that conversation through the existing operator API/outbox.
 
-`hire_agent` with `harness: "grok"` creates a visible worker in its own repo tab.
+`hire_agent` with `harness: "grok"` creates a visible worker in its named repo grid.
 The brief and `message_seat` follow-ups use leader IPC/ACP on that exact TUI
 session. Explicit model/effort choices must match the native registry; unavailable
 choices refuse. The worker gets the fleet meta tools and `message_clankie`.
 Queue consumption is a delivery receipt, not a completed reply. A saved Grok
 transcript without its original live controller cannot be resumed as a hire.
-Pipeline splitting and control adoption after a service restart are unsupported.
+New Grok panes can join the named grid; control adoption after a service restart is unsupported.
 
 Native permissions remain owner decisions. Grok leader mode ignores CLI
 `--allow`/`--deny`; this launcher does not claim they isolate tools. An observed

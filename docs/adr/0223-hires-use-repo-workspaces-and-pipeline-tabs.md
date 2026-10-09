@@ -27,13 +27,20 @@ then the oldest workspace when existing duplicates require a deterministic choic
 Do not merge duplicates or rename existing workspaces. Create and name a missing
 workspace once, with its initial root tab reserved separately as `Clankie`.
 
-The normal placement is `new-tab`: one solo worker per tab, named `Name · role`.
-A per-hire `pipeline` explicitly names a shared workflow such as an issue's
-`design → implement → review`. The first stage creates that named tab. Later
-stages request `split` with the same pipeline and split the last observed stage;
-wide panes split right, others down. Independent workers omit `pipeline`.
-A role's or fleet's `split` preference still requires the per-hire pipeline.
-Profile precedence remains owner's words, then role, then fleet defaults.
+Updated 2026-10-08 for [VUH-1869](https://linear.app/vuhlp/issue/VUH-1869):
+omitted placement fills named 2x2 worker tabs, at most four per tab, before
+opening the next numbered tab. Positions fill top-left, top-right, bottom-left,
+bottom-right. A project or deliverable names the group; without either, use
+`repository workers`. Per-hire `pipeline` overrides that group name. Explicit
+`new-tab` retains a solo `Name · role` tab; explicit `split` requires a pipeline.
+Owner/role/fleet placement overrides keep their precedence.
+
+Each grid pane carries a `clankie_grid=2x2` version token alongside repo/group
+identity. Older pipeline tabs are not adopted or rearranged. Allocate the next
+position by splitting a verified worker leaf at ratio 0.5: right of the first,
+below the first, then below the second. This fills positions right/down/right
+without creating narrow leaves inside the left column. Read the native layout,
+not focus or snapshot pane order, to find the target. A changed layout refuses.
 
 Pipeline grouping requires both matching repo and pipeline metadata on every
 existing pane in the named tab. Ambiguous names and unmarked tabs refuse; no
@@ -46,10 +53,14 @@ Pass the selected workspace explicitly to both CLI `tab create` and native
 initial-command `layout.apply`. Serialize new allocations within a bound runner and the fleet router, whose
 bound runner factories refresh per call.
 Keep client focus. Rename and mark only panes created by the new allocation.
-Prepared native Pi/OpenCode launches can create a first pipeline stage, but
-splitting an existing pipeline is unsupported: Herdr's supported split operation
-has no initial-argv field, and rebuilding a live tab would risk existing panes.
-Refuse that combination until the native capability exists.
+Prepared native Pi/OpenCode/Grok launches create an initial-command pane in a
+new temporary tab, then move only that newly allocated pane into the group.
+The native terminal/process survives and the empty temporary tab closes.
+Never rebuild a tab with existing processes. Same-tab `pane move` silently does
+nothing; sub-leads have exact commands and the out-and-back workaround in the
+[worker grid guide](../../.agents/skills/clankie/reference/worker-layout.md).
+A failed/unknown create, move or metadata reply retains an uncertain allocation,
+not a replacement pane.
 
 A live-session resume reuses its existing pane without rearrangement. A resume
 that needs a new pane, or the destination allocation of an explicitly requested
@@ -80,3 +91,8 @@ Unknown or missing pipeline metadata refuses rather than reconstructing ownershi
 Concurrent allocations by separate Clankie services are not a distributed lock;
 the supported fleet has one allocating controller. Unknown native creation must
 be inspected before retrying, rather than allocating a replacement pane.
+
+VUH-1869 extends the real-socket journey with five allocations, exact 2x2
+geometry, numbered overflow, prepared initial-command joining and preserved
+foreign lanes. Its [live evidence](../testing/2026-10-08-worker-layout/README.md)
+uses only newly created throwaway panes in the owner's running session.

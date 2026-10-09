@@ -36,6 +36,7 @@ const Snapshot = z.object({
 });
 const REPO = "clankie_repo";
 const PIPELINE = "clankie_pipeline";
+const GRID = "clankie_grid";
 const SOURCE = "clankie-hire-layout";
 export class HireLayoutUnconfirmed extends Error {
   readonly paneId: string | undefined;
@@ -49,6 +50,7 @@ interface HireLayoutInput {
   readonly label: string;
   readonly paneLabel?: string;
   readonly pipeline?: string;
+  readonly group?: string;
   readonly placement?: "new-tab" | "split";
   readonly env?: Readonly<Record<string, string>>;
   readonly command?: readonly string[];
@@ -90,8 +92,8 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       };
     }
     const repoToken = createHash("sha256").update(repo.key).digest("hex");
-    const pipelineToken =
-      input.pipeline === undefined ? undefined : createHash("sha256").update(input.pipeline).digest("hex");
+    const group = input.pipeline ?? input.group ?? `${repo.label} workers`;
+    const pipelineToken = createHash("sha256").update(group).digest("hex");
     let current = await snapshot();
     const candidates = current.workspaces.filter(
       (ws) => ws.worktree?.repo_key === repo.key || ws.tokens[REPO] === repoToken,
@@ -155,45 +157,75 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       ]);
       current = await snapshot();
     }
-    const tabs =
-      input.pipeline === undefined
-        ? []
-        : current.tabs.filter(
-            (t) => t.workspace_id === workspace!.workspace_id && t.label === input.pipeline,
-          );
-    if (tabs.length > 1)
-      throw new Error(
-        "Several tabs have this pipeline name; choose an unambiguous pipeline. No pane was opened.",
+    const grouped = input.placement !== "new-tab";
+    const tabs = current.tabs.filter((t) => t.workspace_id === workspace!.workspace_id);
+    const matching = tabs.filter((t) => {
+      const members = current.panes.filter((p) => p.tab_id === t.tab_id);
+      return (
+        members.length > 0 &&
+        members.every(
+          (p) =>
+            p.tokens[PIPELINE] === pipelineToken && p.tokens[REPO] === repoToken && p.tokens[GRID] === "2x2",
+        )
       );
-    const pipeline = tabs[0];
-    let paneId: string;
-    if (pipeline) {
-      if (input.placement !== "split")
-        throw new Error("This pipeline tab already exists; use split to join it. No pane was opened.");
-      const members = current.panes.filter((p) => p.tab_id === pipeline.tab_id);
-      if (
-        !members.length ||
-        members.some((p) => p.tokens[PIPELINE] !== pipelineToken || p.tokens[REPO] !== repoToken)
-      )
-        throw new Error("The named tab is not a verified hire pipeline; existing panes were left untouched.");
-      if (input.command)
-        throw new Error(
-          "Prepared native initial-command hires require a new tab; pipeline splitting is unsupported. Existing panes were left untouched.",
-        );
-      const tail = members.at(-1)!;
+    });
+    if (input.pipeline && tabs.some((t) => t.label === group && !matching.includes(t)))
+      throw new Error("The named tab is not a verified hire grid; existing panes were left untouched.");
+    if (!grouped && input.pipeline && matching.length)
+      throw new Error(
+        "This pipeline tab already exists; omit placement or use split to join it. No pane was opened.",
+      );
+    // Fill the current verified group before creating its next numbered tab.
+    const pipeline = grouped ? matching.at(-1) : undefined;
+    const members = pipeline ? current.panes.filter((p) => p.tab_id === pipeline.tab_id) : [];
+    if (members.length > 4)
+      throw new Error("Hire grid exceeds four panes; existing panes were left untouched.");
+    let target: string | undefined;
+    let direction: "right" | "down" = "right";
+    if (pipeline && members.length < 4) {
       const layout = z
         .object({
           result: z.object({
             layout: z.object({
               panes: z.array(
-                z.object({ pane_id: z.string(), rect: z.object({ width: z.number(), height: z.number() }) }),
+                z.object({
+                  pane_id: z.string(),
+                  rect: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+                }),
               ),
             }),
           }),
         })
-        .parse(JSON.parse(await run(["pane", "layout", "--pane", tail.pane_id]))).result.layout;
-      const area = layout.panes.find((p) => p.pane_id === tail.pane_id)?.rect;
-      if (!area) throw new Error("Pipeline tail disappeared; no pane was opened.");
+        .parse(JSON.parse(await run(["pane", "layout", "--pane", members[0]!.pane_id]))).result.layout;
+      const panes = layout.panes;
+      if (panes.length !== members.length || panes.some((p) => !members.some((m) => m.pane_id === p.pane_id)))
+        throw new Error("Hire grid changed; no pane was opened.");
+      const left = [...panes].sort((a, b) => a.rect.x - b.rect.x || a.rect.y - b.rect.y);
+      const topLeft = left[0]!;
+      const topRight = panes.find((p) => p.rect.x > topLeft.rect.x && p.rect.y === topLeft.rect.y);
+      const bottomLeft = panes.find((p) => p.rect.x === topLeft.rect.x && p.rect.y > topLeft.rect.y);
+      const valid =
+        members.length === 1 ||
+        (topRight !== undefined &&
+          Math.abs(topLeft.rect.width - topRight.rect.width) <= 1 &&
+          (members.length === 2
+            ? topLeft.rect.height === topRight.rect.height
+            : bottomLeft !== undefined &&
+              bottomLeft.rect.width === topLeft.rect.width &&
+              Math.abs(topLeft.rect.height - bottomLeft.rect.height) <= 1 &&
+              topRight.rect.height === topLeft.rect.height + bottomLeft.rect.height));
+      if (!valid) throw new Error("Hire grid is no longer 2x2; existing panes were left untouched.");
+      target = members.length === 3 ? topRight!.pane_id : topLeft.pane_id;
+      direction = members.length === 1 ? "right" : "down";
+    }
+    let tabLabel = input.pipeline ?? input.label;
+    if (grouped) {
+      let number = 1;
+      tabLabel = group;
+      while (tabs.some((t) => t.label === tabLabel)) tabLabel = `${group} · ${++number}`;
+    }
+    let paneId: string;
+    if (target && !input.command) {
       paneId = await createPane(
         async () =>
           z
@@ -204,9 +236,11 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
                   "pane",
                   "split",
                   "--pane",
-                  tail.pane_id,
+                  target!,
                   "--direction",
-                  area.width > area.height * 2 ? "right" : "down",
+                  direction,
+                  "--ratio",
+                  "0.5",
                   "--cwd",
                   input.cwd,
                   "--no-focus",
@@ -220,12 +254,45 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       paneId = await createPane(() =>
         commandTab({
           cwd: input.cwd,
-          label: input.pipeline ?? input.label,
+          label: target ? `${group} · allocating` : tabLabel,
           workspaceId: workspace.workspace_id,
           command: input.command!,
           ...(input.env === undefined ? {} : { env: input.env }),
         }),
       );
+      if (target) {
+        // Only the newly created pane moves, from its own temporary tab. Same-tab
+        // moves silently do nothing in Herdr; never rebuild a live tab's layout.
+        try {
+          paneId = z
+            .object({
+              result: z.object({ move_result: z.object({ pane: z.object({ pane_id: z.string().min(1) }) }) }),
+            })
+            .parse(
+              JSON.parse(
+                await run([
+                  "pane",
+                  "move",
+                  paneId,
+                  "--tab",
+                  pipeline!.tab_id,
+                  "--split",
+                  direction,
+                  "--target-pane",
+                  target,
+                  "--ratio",
+                  "0.5",
+                  "--no-focus",
+                ]),
+              ),
+            ).result.move_result.pane.pane_id;
+        } catch (error) {
+          throw new HireLayoutUnconfirmed(
+            `Hire grid move unconfirmed at ${paneId}; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
+            paneId,
+          );
+        }
+      }
     } else {
       paneId = await createPane(
         async () =>
@@ -241,7 +308,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
                   "--cwd",
                   input.cwd,
                   "--label",
-                  input.pipeline ?? input.label,
+                  tabLabel,
                   "--no-focus",
                   ...envArgs,
                 ]),
@@ -252,7 +319,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
     // Failure after creation must be reconciled, never retried with a new pane.
     try {
       await run(["pane", "rename", paneId, input.paneLabel ?? input.label]);
-      if (input.pipeline)
+      if (grouped)
         await run([
           "pane",
           "report-metadata",
@@ -263,10 +330,12 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
           `${REPO}=${repoToken}`,
           "--token",
           `${PIPELINE}=${pipelineToken}`,
+          "--token",
+          `${GRID}=2x2`,
         ]);
-    } catch {
+    } catch (error) {
       throw new HireLayoutUnconfirmed(
-        `Hire layout creation unconfirmed at ${paneId}; inspect Herdr before retrying. No existing pane was closed.`,
+        `Hire layout creation unconfirmed at ${paneId}; inspect Herdr before retrying. No existing pane was closed. ${error instanceof Error ? error.message : String(error)}`,
         paneId,
       );
     }

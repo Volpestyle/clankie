@@ -220,6 +220,7 @@ export interface HerdrWatchRunner {
     readonly label: string;
     readonly paneLabel?: string;
     readonly pipeline?: string;
+    readonly group?: string;
     readonly placement?: "new-tab" | "split";
     readonly env?: Readonly<Record<string, string>>;
     /** Initial native argv, never terminal input. Only prepared adapters use this. */
@@ -3360,7 +3361,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // command can create its native process.
       if (this.fleetResources) await this.admitResourceMutation(input, authority);
       await this.admitProjectLaunch(input, true);
+      const group = this.projectContexts.get(input)?.projectId ?? input.projectId ?? input.deliverable;
       paneId = await createTab({
+        ...(group === undefined ? {} : { group }),
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),
         cwd: input.workingDirectory,

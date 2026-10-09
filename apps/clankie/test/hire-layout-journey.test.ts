@@ -137,7 +137,11 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       placement: first.placement!,
     });
     const secondRunner = createHerdrWatchRunner(undefined, run); // no in-memory identity shortcut
-    const secondPane = await secondRunner.createTab!({ cwd: worktree, label: "Rafa · reviewer" });
+    const secondPane = await secondRunner.createTab!({
+      cwd: worktree,
+      label: "Rafa · reviewer",
+      placement: "new-tab",
+    });
     const afterSolo = await snapshot();
     const p1 = afterSolo.panes.find((p: any) => p.pane_id === firstPane);
     const p2 = afterSolo.panes.find((p: any) => p.pane_id === secondPane);
@@ -194,7 +198,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       calls
         .filter((c) => c.args[0] === "pane" && c.args[1] === "split")
         .map((c) => c.args[c.args.indexOf("--pane") + 1]),
-    ).toEqual(stages.slice(0, 2));
+    ).toEqual([stages[0], stages[0]]);
     // Unknown pipeline ownership and unnamed split fail without native effects.
     const count = pipelineSnapshot.panes.length;
     await expect(runner.createTab!({ cwd: repoA, label: "Zuri", placement: "split" })).rejects.toThrow(
@@ -250,7 +254,14 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
         }),
         processHelper: "unused-capture-helper",
       });
-      const prepared = createHerdrWatchRunner(undefined, run, native.createCommandTab);
+      const allocations: { id: string; pid: number; terminal: string }[] = [];
+      const prepared = createHerdrWatchRunner(undefined, run, async (input) => {
+        const id = await native.createCommandTab(input);
+        const process = JSON.parse(await run(["pane", "process-info", "--pane", id])).result.process_info;
+        const pane = (await snapshot()).panes.find((p: any) => p.pane_id === id);
+        allocations.push({ id, pid: process.shell_pid, terminal: pane.terminal_id });
+        return id;
+      });
       const pane = await prepared.createTab!({
         cwd: repoA,
         label: "Juno · tester",
@@ -259,16 +270,55 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       expect((await snapshot()).panes.find((p: any) => p.pane_id === pane).workspace_id).toBe(
         p1.workspace_id,
       );
-      await expect(
-        prepared.createTab!({
-          cwd: repoA,
-          label: "Juno · tester",
-          pipeline: pipeline.pipeline!,
-          placement: "split",
-          command: ["/bin/sh", "-c", "sleep 60"],
-        }),
-      ).rejects.toThrow("unsupported");
+      const joined = await prepared.createTab!({
+        cwd: repoA,
+        label: "Juno · tester",
+        pipeline: pipeline.pipeline!,
+        placement: "split",
+        command: ["/bin/sh", "-c", "sleep 60"],
+      });
+      const joinedPane = (await snapshot()).panes.find((p: any) => p.pane_id === joined);
+      expect(joinedPane.tab_id).toBe(stagePanes[0].tab_id);
+      expect(joinedPane.terminal_id).toBe(allocations.at(-1)!.terminal);
+      expect(
+        JSON.parse(await run(["pane", "process-info", "--pane", joined])).result.process_info.shell_pid,
+      ).toBe(allocations.at(-1)!.pid);
     }
+    // Five ordinary hires fill row-major 2x2, then a named second tab, with
+    // independent runner recreation and prepared native argv in the same grid.
+    const grid: string[] = [];
+    for (let i = 0; i < 5; i++)
+      grid.push(
+        await createHerdrWatchRunner(undefined, run).createTab!({
+          cwd: repoA,
+          label: `Grid ${i + 1}`,
+          group: "VUH-1869 authors",
+        }),
+      );
+    const gridSnapshot = await snapshot();
+    const gridPanes = grid.map((id) => gridSnapshot.panes.find((p: any) => p.pane_id === id));
+    expect(new Set(gridPanes.slice(0, 4).map((p: any) => p.tab_id)).size).toBe(1);
+    expect(gridPanes[4].tab_id).not.toBe(gridPanes[0].tab_id);
+    expect(gridSnapshot.tabs.find((t: any) => t.tab_id === gridPanes[0].tab_id).label).toBe(
+      "VUH-1869 authors",
+    );
+    expect(gridSnapshot.tabs.find((t: any) => t.tab_id === gridPanes[4].tab_id).label).toBe(
+      "VUH-1869 authors · 2",
+    );
+    const gridLayout = JSON.parse(await run(["pane", "layout", "--pane", grid[0]!])).result.layout;
+    const rects = grid.slice(0, 4).map((id) => gridLayout.panes.find((p: any) => p.pane_id === id).rect);
+    expect(rects[0].x).toBe(rects[2].x);
+    expect(rects[1].x).toBe(rects[3].x);
+    expect(rects[0].y).toBe(rects[1].y);
+    expect(rects[2].y).toBe(rects[3].y);
+    expect(rects[1].x).toBeGreaterThan(rects[0].x);
+    expect(rects[2].y).toBeGreaterThan(rects[0].y);
+    expect(
+      Math.max(...rects.map((r: any) => r.width)) - Math.min(...rects.map((r: any) => r.width)),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.max(...rects.map((r: any) => r.height)) - Math.min(...rects.map((r: any) => r.height)),
+    ).toBeLessThanOrEqual(1);
     // Real transport fault after a successful mutation: preserve the uncertain
     // hire receipt across a new store instance, never start/retry a harness.
     const uncertainty: unknown[] = [];
@@ -291,6 +341,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
         schemaVersion: 1,
         harness: "claude",
         title: "Transport fault",
+        placement: "new-tab",
         role: "implementer",
         workingDirectory: plain,
       });
@@ -344,11 +395,30 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     expect(final.tabs.filter((t: any) => t.workspace_id === mixed.workspace.workspace_id)).toEqual(
       before.tabs.filter((t: any) => t.workspace_id === mixed.workspace.workspace_id),
     );
-    expect(calls.some((c) => c.args.includes("close") || c.args.includes("move"))).toBe(false);
+    expect(calls.some((c) => c.args.includes("close"))).toBe(false);
+    expect(
+      calls
+        .filter((c) => c.args[0] === "pane" && c.args[1] === "move")
+        .every((c) => c.args[2] !== original.root_pane.pane_id && c.args[2] !== mixed.root_pane.pane_id),
+    ).toBe(true);
     if (process.env.VUH1550_EVIDENCE) {
       await writeFile(
         join(process.env.VUH1550_EVIDENCE, "herdr-layout-journey.json"),
-        JSON.stringify({ session, before, afterSolo, pipelineSnapshot, final, uncertainty, calls }, null, 2),
+        JSON.stringify(
+          {
+            session,
+            before,
+            afterSolo,
+            pipelineSnapshot,
+            gridSnapshot,
+            gridLayout,
+            final,
+            uncertainty,
+            calls,
+          },
+          null,
+          2,
+        ),
       );
     }
   } finally {

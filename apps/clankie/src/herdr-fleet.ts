@@ -53,6 +53,7 @@ const REMOTE_VERBS: Readonly<Record<string, ReadonlySet<string> | true>> = {
     "process-info",
     "layout",
     "split",
+    "move",
     "report-agent",
     "report-metadata",
     "rename",

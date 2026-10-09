@@ -103,13 +103,15 @@ model/effort in the first brief. Another pane for that project/deliverable is
 refused while starting, live or uncertain. Message that worker rather than
 changing the key. `panes` permits independent slices in separate authorized hires.
 New hires target the repo's Herdr workspace in the selected fleet. Linked Git
-worktrees share it; solo workers get a `Name · role` tab regardless of lead/client
-focus. Existing mixed workspaces and their labels stay untouched. A deliberate
-pipeline supplies `pipeline: "ISSUE design → implement → review"` per hire:
-its first member opens that named tab, later members use `placement: "split"`.
-An unnamed split or an unmarked same-named tab refuses. `new-tab` is normal;
-role/fleet placement defaults still need an explicit pipeline for split.
-Prepared initial-command Pi/OpenCode hires cannot split into an existing pipeline.
+worktrees share it. Omitted placement fills named 2x2 worker tabs, at most four
+per tab before opening the next numbered tab. Group names come from the
+project or deliverable (otherwise the repo); `pipeline` overrides the group
+name. Explicit `new-tab` keeps a solo `Name · role` tab. Explicit `split` still
+requires a pipeline. Owner/role/fleet placement preferences win. Matching
+repo/group/grid tokens keep new hires out of unmarked and older lanes.
+Prepared initial-command hires move only their new pane from a temporary tab
+into the grid. Existing mixed workspaces, labels and panes stay untouched.
+Sub-leads use the exact [worker grid commands](../../clankie/reference/worker-layout.md).
 A live-session resume keeps its pane; a new resume uses the repo rule. An
 explicit move allocates a solo tab at its destination with its known role. Never rearrange existing lanes to adopt this layout.
 Local account labels select registered profiles; on a linked machine they are

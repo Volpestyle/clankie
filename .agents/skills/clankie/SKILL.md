@@ -398,3 +398,10 @@ Connected tools with incompatible client schemas are omitted individually;
 tool can be a schema rejection even when the rest of that server is healthy.
 For repository changes, `pnpm mcp:check` checks every lane and the fleet bridge
 against the strict native client contracts and identifies the offending tool.
+
+## Worker layout
+
+New workers fill named 2x2 tabs, at most four per tab, before opening the next.
+Sub-leads without `hire_agent` use the exact [worker grid commands](reference/worker-layout.md),
+including the same-tab move gotcha. Allocate only your new panes; existing panes
+stay where they are unless the owner asks to rearrange them.

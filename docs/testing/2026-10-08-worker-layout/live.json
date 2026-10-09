@@ -1,0 +1,1542 @@
+{
+  "group": "VUH-1869 live 1791514250720",
+  "startedAt": "2026-10-09T02:50:50.720Z",
+  "scope": "Five live hire-layout allocations; throwaway shell panes, no model dispatch.",
+  "panes": [
+    {
+      "paneId": "w47:pM",
+      "tabId": "w47:tK",
+      "terminalId": "term_65d5f6a8acac7bc"
+    },
+    {
+      "paneId": "w47:pN",
+      "tabId": "w47:tK",
+      "terminalId": "term_65d5f6a91920cbd"
+    },
+    {
+      "paneId": "w47:pP",
+      "tabId": "w47:tK",
+      "terminalId": "term_65d5f6a98d632be"
+    },
+    {
+      "paneId": "w47:pQ",
+      "tabId": "w47:tK",
+      "terminalId": "term_65d5f6a9e5876bf"
+    },
+    {
+      "paneId": "w47:pR",
+      "tabId": "w47:tM",
+      "terminalId": "term_65d5f6aa48deec0"
+    }
+  ],
+  "tabs": [
+    {
+      "agent_status": "unknown",
+      "focused": false,
+      "label": "VUH-1869 live 1791514250720",
+      "number": 19,
+      "pane_count": 4,
+      "tab_id": "w47:tK",
+      "workspace_id": "w47"
+    },
+    {
+      "agent_status": "unknown",
+      "focused": false,
+      "label": "VUH-1869 live 1791514250720 · 2",
+      "number": 20,
+      "pane_count": 1,
+      "tab_id": "w47:tM",
+      "workspace_id": "w47"
+    }
+  ],
+  "layout": {
+    "area": {
+      "height": 71,
+      "width": 272,
+      "x": 0,
+      "y": 0
+    },
+    "focused_pane_id": "w47:pM",
+    "panes": [
+      {
+        "focused": true,
+        "pane_id": "w47:pM",
+        "rect": {
+          "height": 36,
+          "width": 136,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "focused": false,
+        "pane_id": "w47:pP",
+        "rect": {
+          "height": 35,
+          "width": 136,
+          "x": 0,
+          "y": 36
+        }
+      },
+      {
+        "focused": false,
+        "pane_id": "w47:pN",
+        "rect": {
+          "height": 36,
+          "width": 136,
+          "x": 136,
+          "y": 0
+        }
+      },
+      {
+        "focused": false,
+        "pane_id": "w47:pQ",
+        "rect": {
+          "height": 35,
+          "width": 136,
+          "x": 136,
+          "y": 36
+        }
+      }
+    ],
+    "splits": [
+      {
+        "direction": "right",
+        "id": "split_0_root",
+        "ratio": 0.5,
+        "rect": {
+          "height": 71,
+          "width": 272,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "direction": "down",
+        "id": "split_1_0",
+        "ratio": 0.5,
+        "rect": {
+          "height": 71,
+          "width": 136,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "direction": "down",
+        "id": "split_2_1",
+        "ratio": 0.5,
+        "rect": {
+          "height": 71,
+          "width": 136,
+          "x": 136,
+          "y": 0
+        }
+      }
+    ],
+    "tab_id": "w47:tK",
+    "workspace_id": "w47",
+    "zoomed": false
+  },
+  "sameTabNoopVerified": true,
+  "shellPidPreserved": 6446,
+  "existingPaneCountPreserved": 12,
+  "focusPreserved": true,
+  "result": "passed",
+  "cleanup": {
+    "ownedPanesRemaining": 0,
+    "ownedTabsRemaining": 0
+  },
+  "calls": [
+    {
+      "args": [
+        "tab",
+        "create",
+        "--workspace",
+        "w47",
+        "--cwd",
+        "/Users/james/dev/clankie-wt/vuh-1869",
+        "--label",
+        "VUH-1869 live 1791514250720",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:tab:create",
+        "result": {
+          "root_pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "pane_id": "w47:pM",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 71
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a8acac7bc",
+            "workspace_id": "w47"
+          },
+          "tab": {
+            "agent_status": "unknown",
+            "focused": false,
+            "label": "VUH-1869 live 1791514250720",
+            "number": 19,
+            "pane_count": 1,
+            "tab_id": "w47:tK",
+            "workspace_id": "w47"
+          },
+          "type": "tab_created"
+        }
+      }
+    },
+    {
+      "args": ["pane", "rename", "w47:pM", "Layout check 1"],
+      "result": {
+        "id": "cli:pane:rename",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "label": "Layout check 1",
+            "pane_id": "w47:pM",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 71
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a8acac7bc",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "report-metadata",
+        "w47:pM",
+        "--source",
+        "clankie-hire-layout",
+        "--token",
+        "clankie_repo=3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102",
+        "--token",
+        "clankie_pipeline=1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+        "--token",
+        "clankie_grid=2x2"
+      ],
+      "result": null
+    },
+    {
+      "args": ["pane", "layout", "--pane", "w47:pM"],
+      "result": {
+        "id": "cli:pane:layout",
+        "result": {
+          "layout": {
+            "area": {
+              "height": 71,
+              "width": 272,
+              "x": 0,
+              "y": 0
+            },
+            "focused_pane_id": "w47:pM",
+            "panes": [
+              {
+                "focused": true,
+                "pane_id": "w47:pM",
+                "rect": {
+                  "height": 71,
+                  "width": 272,
+                  "x": 0,
+                  "y": 0
+                }
+              }
+            ],
+            "splits": [],
+            "tab_id": "w47:tK",
+            "workspace_id": "w47",
+            "zoomed": false
+          },
+          "type": "pane_layout"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "split",
+        "--pane",
+        "w47:pM",
+        "--direction",
+        "right",
+        "--ratio",
+        "0.5",
+        "--cwd",
+        "/Users/james/dev/clankie-wt/vuh-1869",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:pane:split",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "pane_id": "w47:pN",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 71
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a91920cbd",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": ["pane", "rename", "w47:pN", "Layout check 2"],
+      "result": {
+        "id": "cli:pane:rename",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "label": "Layout check 2",
+            "pane_id": "w47:pN",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 69
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a91920cbd",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "report-metadata",
+        "w47:pN",
+        "--source",
+        "clankie-hire-layout",
+        "--token",
+        "clankie_repo=3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102",
+        "--token",
+        "clankie_pipeline=1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+        "--token",
+        "clankie_grid=2x2"
+      ],
+      "result": null
+    },
+    {
+      "args": ["pane", "layout", "--pane", "w47:pM"],
+      "result": {
+        "id": "cli:pane:layout",
+        "result": {
+          "layout": {
+            "area": {
+              "height": 71,
+              "width": 272,
+              "x": 0,
+              "y": 0
+            },
+            "focused_pane_id": "w47:pM",
+            "panes": [
+              {
+                "focused": true,
+                "pane_id": "w47:pM",
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pN",
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 136,
+                  "y": 0
+                }
+              }
+            ],
+            "splits": [
+              {
+                "direction": "right",
+                "id": "split_0_root",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 272,
+                  "x": 0,
+                  "y": 0
+                }
+              }
+            ],
+            "tab_id": "w47:tK",
+            "workspace_id": "w47",
+            "zoomed": false
+          },
+          "type": "pane_layout"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "split",
+        "--pane",
+        "w47:pM",
+        "--direction",
+        "down",
+        "--ratio",
+        "0.5",
+        "--cwd",
+        "/Users/james/dev/clankie-wt/vuh-1869",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:pane:split",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "pane_id": "w47:pP",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 71
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a98d632be",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": ["pane", "rename", "w47:pP", "Layout check 3"],
+      "result": {
+        "id": "cli:pane:rename",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "label": "Layout check 3",
+            "pane_id": "w47:pP",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 33
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a98d632be",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "report-metadata",
+        "w47:pP",
+        "--source",
+        "clankie-hire-layout",
+        "--token",
+        "clankie_repo=3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102",
+        "--token",
+        "clankie_pipeline=1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+        "--token",
+        "clankie_grid=2x2"
+      ],
+      "result": null
+    },
+    {
+      "args": ["pane", "layout", "--pane", "w47:pM"],
+      "result": {
+        "id": "cli:pane:layout",
+        "result": {
+          "layout": {
+            "area": {
+              "height": 71,
+              "width": 272,
+              "x": 0,
+              "y": 0
+            },
+            "focused_pane_id": "w47:pM",
+            "panes": [
+              {
+                "focused": true,
+                "pane_id": "w47:pM",
+                "rect": {
+                  "height": 36,
+                  "width": 136,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pP",
+                "rect": {
+                  "height": 35,
+                  "width": 136,
+                  "x": 0,
+                  "y": 36
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pN",
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 136,
+                  "y": 0
+                }
+              }
+            ],
+            "splits": [
+              {
+                "direction": "right",
+                "id": "split_0_root",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 272,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "direction": "down",
+                "id": "split_1_0",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 0,
+                  "y": 0
+                }
+              }
+            ],
+            "tab_id": "w47:tK",
+            "workspace_id": "w47",
+            "zoomed": false
+          },
+          "type": "pane_layout"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "split",
+        "--pane",
+        "w47:pN",
+        "--direction",
+        "down",
+        "--ratio",
+        "0.5",
+        "--cwd",
+        "/Users/james/dev/clankie-wt/vuh-1869",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:pane:split",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "pane_id": "w47:pQ",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 71
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a9e5876bf",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": ["pane", "rename", "w47:pQ", "Layout check 4"],
+      "result": {
+        "id": "cli:pane:rename",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "label": "Layout check 4",
+            "pane_id": "w47:pQ",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 33
+            },
+            "tab_id": "w47:tK",
+            "terminal_id": "term_65d5f6a9e5876bf",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "report-metadata",
+        "w47:pQ",
+        "--source",
+        "clankie-hire-layout",
+        "--token",
+        "clankie_repo=3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102",
+        "--token",
+        "clankie_pipeline=1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+        "--token",
+        "clankie_grid=2x2"
+      ],
+      "result": null
+    },
+    {
+      "args": [
+        "tab",
+        "create",
+        "--workspace",
+        "w47",
+        "--cwd",
+        "/Users/james/dev/clankie-wt/vuh-1869",
+        "--label",
+        "VUH-1869 live 1791514250720 · 2",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:tab:create",
+        "result": {
+          "root_pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "pane_id": "w47:pR",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 71
+            },
+            "tab_id": "w47:tM",
+            "terminal_id": "term_65d5f6aa48deec0",
+            "workspace_id": "w47"
+          },
+          "tab": {
+            "agent_status": "unknown",
+            "focused": false,
+            "label": "VUH-1869 live 1791514250720 · 2",
+            "number": 20,
+            "pane_count": 1,
+            "tab_id": "w47:tM",
+            "workspace_id": "w47"
+          },
+          "type": "tab_created"
+        }
+      }
+    },
+    {
+      "args": ["pane", "rename", "w47:pR", "Layout check 5"],
+      "result": {
+        "id": "cli:pane:rename",
+        "result": {
+          "pane": {
+            "agent_status": "unknown",
+            "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "focused": false,
+            "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+            "label": "Layout check 5",
+            "pane_id": "w47:pR",
+            "revision": 0,
+            "scroll": {
+              "max_offset_from_bottom": 0,
+              "offset_from_bottom": 0,
+              "viewport_rows": 71
+            },
+            "tab_id": "w47:tM",
+            "terminal_id": "term_65d5f6aa48deec0",
+            "workspace_id": "w47"
+          },
+          "type": "pane_info"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "report-metadata",
+        "w47:pR",
+        "--source",
+        "clankie-hire-layout",
+        "--token",
+        "clankie_repo=3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102",
+        "--token",
+        "clankie_pipeline=1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+        "--token",
+        "clankie_grid=2x2"
+      ],
+      "result": null
+    },
+    {
+      "args": ["pane", "layout", "--pane", "w47:pM"],
+      "result": {
+        "id": "cli:pane:layout",
+        "result": {
+          "layout": {
+            "area": {
+              "height": 71,
+              "width": 272,
+              "x": 0,
+              "y": 0
+            },
+            "focused_pane_id": "w47:pM",
+            "panes": [
+              {
+                "focused": true,
+                "pane_id": "w47:pM",
+                "rect": {
+                  "height": 36,
+                  "width": 136,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pP",
+                "rect": {
+                  "height": 35,
+                  "width": 136,
+                  "x": 0,
+                  "y": 36
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pN",
+                "rect": {
+                  "height": 36,
+                  "width": 136,
+                  "x": 136,
+                  "y": 0
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pQ",
+                "rect": {
+                  "height": 35,
+                  "width": 136,
+                  "x": 136,
+                  "y": 36
+                }
+              }
+            ],
+            "splits": [
+              {
+                "direction": "right",
+                "id": "split_0_root",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 272,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "direction": "down",
+                "id": "split_1_0",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "direction": "down",
+                "id": "split_2_1",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 136,
+                  "y": 0
+                }
+              }
+            ],
+            "tab_id": "w47:tK",
+            "workspace_id": "w47",
+            "zoomed": false
+          },
+          "type": "pane_layout"
+        }
+      }
+    },
+    {
+      "args": ["pane", "process-info", "--pane", "w47:pQ"],
+      "result": {
+        "id": "cli:pane:process_info",
+        "result": {
+          "process_info": {
+            "foreground_process_group_id": 6446,
+            "foreground_processes": [
+              {
+                "argv": ["-zsh"],
+                "argv0": "zsh",
+                "cmdline": "-zsh",
+                "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+                "name": "zsh",
+                "pid": 6446
+              }
+            ],
+            "pane_id": "w47:pQ",
+            "shell_pid": 6446
+          },
+          "type": "pane_process_info"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "move",
+        "w47:pQ",
+        "--tab",
+        "w47:tK",
+        "--split",
+        "right",
+        "--target-pane",
+        "w47:pP",
+        "--ratio",
+        "0.5",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:pane:move",
+        "result": {
+          "move_result": {
+            "changed": false,
+            "focused_pane_id": "w47:pM",
+            "pane": {
+              "agent_status": "unknown",
+              "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+              "focused": false,
+              "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+              "label": "Layout check 4",
+              "pane_id": "w47:pQ",
+              "revision": 2,
+              "scroll": {
+                "max_offset_from_bottom": 0,
+                "offset_from_bottom": 0,
+                "viewport_rows": 33
+              },
+              "tab_id": "w47:tK",
+              "terminal_id": "term_65d5f6a9e5876bf",
+              "terminal_title": "james@Jamess-MacBook-Pro:~/dev/clankie-wt/vuh-1869",
+              "terminal_title_stripped": "james@Jamess-MacBook-Pro:~/dev/clankie-wt/vuh-1869",
+              "tokens": {
+                "clankie_grid": "2x2",
+                "clankie_pipeline": "1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+                "clankie_repo": "3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102"
+              },
+              "workspace_id": "w47"
+            },
+            "previous_pane_id": "w47:pQ",
+            "previous_tab_id": "w47:tK",
+            "previous_workspace_id": "w47",
+            "reason": "same_tab",
+            "source_layout": {
+              "area": {
+                "height": 71,
+                "width": 272,
+                "x": 0,
+                "y": 0
+              },
+              "focused_pane_id": "w47:pM",
+              "panes": [
+                {
+                  "focused": true,
+                  "pane_id": "w47:pM",
+                  "rect": {
+                    "height": 36,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pP",
+                  "rect": {
+                    "height": 35,
+                    "width": 136,
+                    "x": 0,
+                    "y": 36
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pN",
+                  "rect": {
+                    "height": 36,
+                    "width": 136,
+                    "x": 136,
+                    "y": 0
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pQ",
+                  "rect": {
+                    "height": 35,
+                    "width": 136,
+                    "x": 136,
+                    "y": 36
+                  }
+                }
+              ],
+              "splits": [
+                {
+                  "direction": "right",
+                  "id": "split_0_root",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 272,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "direction": "down",
+                  "id": "split_1_0",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "direction": "down",
+                  "id": "split_2_1",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 136,
+                    "y": 0
+                  }
+                }
+              ],
+              "tab_id": "w47:tK",
+              "workspace_id": "w47",
+              "zoomed": false
+            },
+            "target_layout": {
+              "area": {
+                "height": 71,
+                "width": 272,
+                "x": 0,
+                "y": 0
+              },
+              "focused_pane_id": "w47:pM",
+              "panes": [
+                {
+                  "focused": true,
+                  "pane_id": "w47:pM",
+                  "rect": {
+                    "height": 36,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pP",
+                  "rect": {
+                    "height": 35,
+                    "width": 136,
+                    "x": 0,
+                    "y": 36
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pN",
+                  "rect": {
+                    "height": 36,
+                    "width": 136,
+                    "x": 136,
+                    "y": 0
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pQ",
+                  "rect": {
+                    "height": 35,
+                    "width": 136,
+                    "x": 136,
+                    "y": 36
+                  }
+                }
+              ],
+              "splits": [
+                {
+                  "direction": "right",
+                  "id": "split_0_root",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 272,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "direction": "down",
+                  "id": "split_1_0",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "direction": "down",
+                  "id": "split_2_1",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 136,
+                    "y": 0
+                  }
+                }
+              ],
+              "tab_id": "w47:tK",
+              "workspace_id": "w47",
+              "zoomed": false
+            }
+          },
+          "type": "pane_move"
+        }
+      }
+    },
+    {
+      "args": ["pane", "layout", "--pane", "w47:pM"],
+      "result": {
+        "id": "cli:pane:layout",
+        "result": {
+          "layout": {
+            "area": {
+              "height": 71,
+              "width": 272,
+              "x": 0,
+              "y": 0
+            },
+            "focused_pane_id": "w47:pM",
+            "panes": [
+              {
+                "focused": true,
+                "pane_id": "w47:pM",
+                "rect": {
+                  "height": 36,
+                  "width": 136,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pP",
+                "rect": {
+                  "height": 35,
+                  "width": 136,
+                  "x": 0,
+                  "y": 36
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pN",
+                "rect": {
+                  "height": 36,
+                  "width": 136,
+                  "x": 136,
+                  "y": 0
+                }
+              },
+              {
+                "focused": false,
+                "pane_id": "w47:pQ",
+                "rect": {
+                  "height": 35,
+                  "width": 136,
+                  "x": 136,
+                  "y": 36
+                }
+              }
+            ],
+            "splits": [
+              {
+                "direction": "right",
+                "id": "split_0_root",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 272,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "direction": "down",
+                "id": "split_1_0",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 0,
+                  "y": 0
+                }
+              },
+              {
+                "direction": "down",
+                "id": "split_2_1",
+                "ratio": 0.5,
+                "rect": {
+                  "height": 71,
+                  "width": 136,
+                  "x": 136,
+                  "y": 0
+                }
+              }
+            ],
+            "tab_id": "w47:tK",
+            "workspace_id": "w47",
+            "zoomed": false
+          },
+          "type": "pane_layout"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "move",
+        "w47:pQ",
+        "--new-tab",
+        "--label",
+        "VUH-1869 live 1791514250720 temporary",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:pane:move",
+        "result": {
+          "move_result": {
+            "changed": true,
+            "created_tab": {
+              "agent_status": "unknown",
+              "focused": false,
+              "label": "VUH-1869 live 1791514250720 temporary",
+              "number": 21,
+              "pane_count": 1,
+              "tab_id": "w47:tN",
+              "workspace_id": "w47"
+            },
+            "focused_pane_id": "w47:pQ",
+            "pane": {
+              "agent_status": "unknown",
+              "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+              "focused": false,
+              "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+              "label": "Layout check 4",
+              "pane_id": "w47:pQ",
+              "revision": 2,
+              "scroll": {
+                "max_offset_from_bottom": 0,
+                "offset_from_bottom": 0,
+                "viewport_rows": 33
+              },
+              "tab_id": "w47:tN",
+              "terminal_id": "term_65d5f6a9e5876bf",
+              "terminal_title": "james@Jamess-MacBook-Pro:~/dev/clankie-wt/vuh-1869",
+              "terminal_title_stripped": "james@Jamess-MacBook-Pro:~/dev/clankie-wt/vuh-1869",
+              "tokens": {
+                "clankie_grid": "2x2",
+                "clankie_pipeline": "1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+                "clankie_repo": "3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102"
+              },
+              "workspace_id": "w47"
+            },
+            "previous_pane_id": "w47:pQ",
+            "previous_tab_id": "w47:tK",
+            "previous_workspace_id": "w47",
+            "source_layout": {
+              "area": {
+                "height": 71,
+                "width": 272,
+                "x": 0,
+                "y": 0
+              },
+              "focused_pane_id": "w47:pM",
+              "panes": [
+                {
+                  "focused": true,
+                  "pane_id": "w47:pM",
+                  "rect": {
+                    "height": 36,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pP",
+                  "rect": {
+                    "height": 35,
+                    "width": 136,
+                    "x": 0,
+                    "y": 36
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pN",
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 136,
+                    "y": 0
+                  }
+                }
+              ],
+              "splits": [
+                {
+                  "direction": "right",
+                  "id": "split_0_root",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 272,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "direction": "down",
+                  "id": "split_1_0",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                }
+              ],
+              "tab_id": "w47:tK",
+              "workspace_id": "w47",
+              "zoomed": false
+            },
+            "target_layout": {
+              "area": {
+                "height": 71,
+                "width": 272,
+                "x": 0,
+                "y": 0
+              },
+              "focused_pane_id": "w47:pQ",
+              "panes": [
+                {
+                  "focused": true,
+                  "pane_id": "w47:pQ",
+                  "rect": {
+                    "height": 71,
+                    "width": 272,
+                    "x": 0,
+                    "y": 0
+                  }
+                }
+              ],
+              "splits": [],
+              "tab_id": "w47:tN",
+              "workspace_id": "w47",
+              "zoomed": false
+            }
+          },
+          "type": "pane_move"
+        }
+      }
+    },
+    {
+      "args": [
+        "pane",
+        "move",
+        "w47:pQ",
+        "--tab",
+        "w47:tK",
+        "--split",
+        "down",
+        "--target-pane",
+        "w47:pN",
+        "--ratio",
+        "0.5",
+        "--no-focus"
+      ],
+      "result": {
+        "id": "cli:pane:move",
+        "result": {
+          "move_result": {
+            "changed": true,
+            "closed_tab_id": "w47:tN",
+            "focused_pane_id": "w47:pM",
+            "pane": {
+              "agent_status": "unknown",
+              "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+              "focused": false,
+              "foreground_cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+              "label": "Layout check 4",
+              "pane_id": "w47:pQ",
+              "revision": 2,
+              "scroll": {
+                "max_offset_from_bottom": 0,
+                "offset_from_bottom": 0,
+                "viewport_rows": 33
+              },
+              "tab_id": "w47:tK",
+              "terminal_id": "term_65d5f6a9e5876bf",
+              "terminal_title": "james@Jamess-MacBook-Pro:~/dev/clankie-wt/vuh-1869",
+              "terminal_title_stripped": "james@Jamess-MacBook-Pro:~/dev/clankie-wt/vuh-1869",
+              "tokens": {
+                "clankie_grid": "2x2",
+                "clankie_pipeline": "1656e9d4c612e729ce4a6621c973a78976d6605ee9cfda22f03239482b7259a9",
+                "clankie_repo": "3725ca7868e1c77f0a46fe917a9b6e1cf099087335d8045d8f6b88f389893102"
+              },
+              "workspace_id": "w47"
+            },
+            "previous_pane_id": "w47:pQ",
+            "previous_tab_id": "w47:tN",
+            "previous_workspace_id": "w47",
+            "target_layout": {
+              "area": {
+                "height": 71,
+                "width": 272,
+                "x": 0,
+                "y": 0
+              },
+              "focused_pane_id": "w47:pM",
+              "panes": [
+                {
+                  "focused": true,
+                  "pane_id": "w47:pM",
+                  "rect": {
+                    "height": 36,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pP",
+                  "rect": {
+                    "height": 35,
+                    "width": 136,
+                    "x": 0,
+                    "y": 36
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pN",
+                  "rect": {
+                    "height": 36,
+                    "width": 136,
+                    "x": 136,
+                    "y": 0
+                  }
+                },
+                {
+                  "focused": false,
+                  "pane_id": "w47:pQ",
+                  "rect": {
+                    "height": 35,
+                    "width": 136,
+                    "x": 136,
+                    "y": 36
+                  }
+                }
+              ],
+              "splits": [
+                {
+                  "direction": "right",
+                  "id": "split_0_root",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 272,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "direction": "down",
+                  "id": "split_1_0",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 0,
+                    "y": 0
+                  }
+                },
+                {
+                  "direction": "down",
+                  "id": "split_2_1",
+                  "ratio": 0.5,
+                  "rect": {
+                    "height": 71,
+                    "width": 136,
+                    "x": 136,
+                    "y": 0
+                  }
+                }
+              ],
+              "tab_id": "w47:tK",
+              "workspace_id": "w47",
+              "zoomed": false
+            }
+          },
+          "type": "pane_move"
+        }
+      }
+    },
+    {
+      "args": ["pane", "process-info", "--pane", "w47:pQ"],
+      "result": {
+        "id": "cli:pane:process_info",
+        "result": {
+          "process_info": {
+            "foreground_process_group_id": 6446,
+            "foreground_processes": [
+              {
+                "argv": ["-zsh"],
+                "argv0": "zsh",
+                "cmdline": "-zsh",
+                "cwd": "/Users/james/dev/clankie-wt/vuh-1869",
+                "name": "zsh",
+                "pid": 6446
+              }
+            ],
+            "pane_id": "w47:pQ",
+            "shell_pid": 6446
+          },
+          "type": "pane_process_info"
+        }
+      }
+    },
+    {
+      "args": ["pane", "close", "w47:pR"],
+      "result": {
+        "id": "cli:pane:close",
+        "result": {
+          "type": "ok"
+        }
+      }
+    },
+    {
+      "args": ["pane", "close", "w47:pQ"],
+      "result": {
+        "id": "cli:pane:close",
+        "result": {
+          "type": "ok"
+        }
+      }
+    },
+    {
+      "args": ["pane", "close", "w47:pP"],
+      "result": {
+        "id": "cli:pane:close",
+        "result": {
+          "type": "ok"
+        }
+      }
+    },
+    {
+      "args": ["pane", "close", "w47:pN"],
+      "result": {
+        "id": "cli:pane:close",
+        "result": {
+          "type": "ok"
+        }
+      }
+    },
+    {
+      "args": ["pane", "close", "w47:pM"],
+      "result": {
+        "id": "cli:pane:close",
+        "result": {
+          "type": "ok"
+        }
+      }
+    }
+  ]
+}
