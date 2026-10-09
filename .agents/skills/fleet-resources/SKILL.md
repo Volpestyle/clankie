@@ -14,6 +14,13 @@ clankie heavy -- node path/to/owned-runtime.js
 ```
 
 Keep the complete owned runtime and its children inside the wrapper's lifetime.
+Each permit passes `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4` to its
+children, including package scripts and nested commands, preserving lower
+positive integer environment limits. Turbo tasks must pass these variables
+through strict environment filtering (this repo's `turbo.json` does).
+Do not override Turbo's limit with a higher `--concurrency` or `--parallel`.
+These tool-native limits do not restrict arbitrary subprocesses or CPU affinity;
+serialize compilers and other tools that do not honor them.
 Serialize multi-package compilers inside one permit. An optional `--seat LABEL`
 before `--` labels the seat in status; `--holder ID` identifies its native child. Neither grants seat authority. Arguments
 after `--`, including flags such as `--chat`, belong to the child. The wrapper

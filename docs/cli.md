@@ -2387,6 +2387,12 @@ in the TUI call the same code. A listed harness is hired with `hire_agent`;
 ### `heavy [--seat LABEL] [--holder ID] -- COMMAND [ARGS...]` / `fleet resources` / `simulator`
 
 `heavy` runs a local command inside the shared OS-account resource governor.
+Its child environment caps Vitest workers and Turbo tasks at four through
+`VITEST_MAX_WORKERS` and `TURBO_CONCURRENCY`, preserving lower positive integer
+environment limits. This reaches package scripts and nested commands. Turbo's
+strict task environment must pass these variables through; this repo does.
+Higher Turbo CLI concurrency and `--parallel` override its environment limit;
+keep those within four. Other tools still need their own parallelism limits.
 It preserves child arguments, exit status and signals. Keep installs, compilers,
 test suites, builds and entire owned runtime lifetimes inside the wrapper, and
 serialize multi-package compilers with `--workspace-concurrency=1`. Native local

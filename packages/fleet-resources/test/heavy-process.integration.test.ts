@@ -115,6 +115,43 @@ async function fixture() {
 }
 
 describe("machine shared heavy permits with actual OS children", () => {
+  it("passes bounded tool concurrency through real commands and nested permits", async () => {
+    const f = await fixture();
+    try {
+      for (const [vitest, turbo, expected] of [
+        ["", "", ["4", "4"]],
+        ["99", "100%", ["4", "4"]],
+        ["2", "1", ["2", "1"]],
+      ] as const) {
+        const receipt = join(f.directory, "parallelism.json");
+        const child = spawn(
+          process.execPath,
+          [
+            driver,
+            f.directory,
+            "parallelism",
+            process.execPath,
+            driver,
+            f.directory,
+            "nested-parallelism",
+            process.execPath,
+            "-e",
+            "require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.env.VITEST_MAX_WORKERS, process.env.TURBO_CONCURRENCY]))",
+            receipt,
+          ],
+          {
+            stdio: "ignore",
+            env: { ...process.env, VITEST_MAX_WORKERS: vitest, TURBO_CONCURRENCY: turbo },
+          },
+        );
+        expect(await new Promise((resolve) => child.once("exit", resolve))).toBe(0);
+        expect(JSON.parse(await readFile(receipt, "utf8"))).toEqual(expected);
+        expect((await f.governor.snapshot()).capacity.used).toBe(0);
+      }
+    } finally {
+      await f.close();
+    }
+  }, 30_000);
   it("keeps eleven queued requests and their tickets through more than fifteen seconds of OS lock contention", async () => {
     const f = await fixture();
     let holder: ChildProcess | undefined;

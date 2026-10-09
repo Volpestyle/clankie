@@ -20,6 +20,7 @@ import {
 import { processIdentity, observeProcesses, resourceNativeHelperPath, resourcePython } from "./process.ts";
 import { resourceCapacity, ResourcePressureSampler } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
+import { heavyJobEnvironment } from "./parallelism.ts";
 
 const abort = () => new DOMException("Fleet resource wait cancelled", "AbortError");
 type SimulatorBlock = "simulator_capacity" | "shared_capacity" | "pressure";
@@ -306,7 +307,10 @@ export function createResourceGovernor(
       const parentLease = await inherited(options.holderId);
       if (signal.aborted) throw abort();
       if (parentLease) {
-        child = spawn(command, [...args], { stdio: "inherit" });
+        child = spawn(command, [...args], {
+          stdio: "inherit",
+          env: heavyJobEnvironment(process.env),
+        });
         const done = new Promise<number>((resolve, reject) => {
           child!.once("error", () => reject(new Error("Heavy command could not start")));
           child!.once("exit", (code, sig) => resolve(code ?? (sig ? 128 + constants.signals[sig] : 1)));
@@ -338,7 +342,11 @@ export function createResourceGovernor(
       child = spawn(
         resourcePython,
         ["-I", resourceNativeHelperPath(), "run", directory, lease.id, lease.token],
-        { detached: true, stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"] },
+        {
+          detached: true,
+          stdio: ["inherit", "inherit", "inherit", "pipe", "pipe"],
+          env: heavyJobEnvironment(process.env),
+        },
       );
       const done = new Promise<number>((resolve, reject) => {
         child!.once("error", () => reject(new Error("Fleet heavy runner requires Python 3")));

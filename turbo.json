@@ -1,6 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
+  "globalPassThroughEnv": ["VITEST_MAX_WORKERS", "TURBO_CONCURRENCY"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

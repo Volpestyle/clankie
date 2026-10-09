@@ -1,5 +1,13 @@
 # Fleet resources
 
+Every heavy command inherits `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4`,
+or a lower positive integer supplied by the caller. These tool-native limits
+reach package scripts and verified nested permits. Turbo tasks must allow them
+through strict environment filtering (`globalPassThroughEnv` in this repository).
+Turbo CLI flags can override its environment: avoid higher `--concurrency` or
+`--parallel`. Arbitrary tools and subprocesses need their own limits; this is
+not an OS CPU quota.
+
 The governor shares one OS-account registry in `~/.clankie/fleet-resources` across
 Clankie worktrees and native worker environments. Owner-authenticated control
 calls `configure`; command callers read that policy. `HOME`, `CLANKIE_STATE`,
