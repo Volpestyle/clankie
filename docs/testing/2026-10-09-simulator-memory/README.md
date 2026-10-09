@@ -17,15 +17,15 @@ The first useful simulator-tree sample was about 48 seconds after boot: the
 initial sampler assumed `comm` included a path, whereas `launchd_sim` was a
 bare name. This was corrected; the first 48 seconds are not measured.
 
-| UTC | Processes | Summed RSS, GiB | Summed footprint, GiB | Host load, 1 min |
-| --- | ---: | ---: | ---: | ---: |
-| 04:53:46 | 176 | 50.82 | 20.58 | 162.80 |
-| 04:53:54 | 192 | 54.63 | 22.68 | 165.61 |
-| 04:54:44 | 237 | 62.14 | 28.55 | 107.74 |
-| 04:55:35 | 242 | 56.24 | 30.05 | 76.71 |
-| 04:58:18 | 264 | 57.36 | 32.84 | 55.04 |
-| 05:00:19 | 267 | 57.96 | 32.88 | 19.11 |
-| 05:04:57 | 267 | 58.85 | 32.82 | 25.24 |
+| UTC      | Processes | Summed RSS, GiB | Summed footprint, GiB | Host load, 1 min |
+| -------- | --------: | --------------: | --------------------: | ---------------: |
+| 04:53:46 |       176 |           50.82 |                 20.58 |           162.80 |
+| 04:53:54 |       192 |           54.63 |                 22.68 |           165.61 |
+| 04:54:44 |       237 |           62.14 |                 28.55 |           107.74 |
+| 04:55:35 |       242 |           56.24 |                 30.05 |            76.71 |
+| 04:58:18 |       264 |           57.36 |                 32.84 |            55.04 |
+| 05:00:19 |       267 |           57.96 |                 32.88 |            19.11 |
+| 05:04:57 |       267 |           58.85 |                 32.82 |            25.24 |
 
 Early large footprint charges included SpringBoard, Campo, Spotlight,
 PosterBoard, widget/poster extensions and Clankie; a later app process exceeded
