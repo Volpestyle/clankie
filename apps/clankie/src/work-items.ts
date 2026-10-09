@@ -14,6 +14,7 @@ import {
   type WorkProjectResult,
   type WorkConvention,
   type WorkItem,
+  type WorkActivityEntry,
   type WorkRepo,
   type WorkSignal,
 } from "@clankie/protocol/work-items";
@@ -81,6 +82,13 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
     .strict(),
   z
     .object({ action: z.literal("show"), repo: z.string().min(1).max(4096), id: z.string().min(1).max(64) })
+    .strict(),
+  z
+    .object({
+      action: z.literal("activity"),
+      repo: z.string().min(1).max(4096),
+      id: z.string().min(1).max(64),
+    })
     .strict(),
   z
     .object({
@@ -167,7 +175,8 @@ export type WorkResult =
     }
   | { readonly repo: WorkRepo; readonly convention: WorkConvention }
   | { readonly repo: WorkRepo; readonly items: WorkItem[] }
-  | { readonly repo: WorkRepo; readonly item: WorkItem };
+  | { readonly repo: WorkRepo; readonly item: WorkItem }
+  | { readonly repo: WorkRepo; readonly itemId: string; readonly entries: WorkActivityEntry[] };
 
 export class WorkRequestError extends Error {
   readonly code:
@@ -911,7 +920,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         return { repos };
       }
       if (/^project-[a-f0-9]{48}$/u.test(request.repo)) {
-        if (request.action !== "list" && request.action !== "show" && request.action !== "project")
+        if (
+          request.action !== "list" &&
+          request.action !== "show" &&
+          request.action !== "project" &&
+          request.action !== "activity"
+        )
           throw new WorkRequestError("invalid", "Project tracker references are read-only");
         try {
           if (!projectReader) throw new Error("Project settings unavailable");
@@ -935,6 +949,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             });
             await read.validate();
             return { repo: read.repo, items };
+          }
+          if (request.action === "activity") {
+            if (backend.activity === undefined) throw new Error("This tracker keeps no activity");
+            const entries = await backend.activity(request.id);
+            await read.validate();
+            return { repo: read.repo, itemId: request.id, entries };
           }
           const item = await backend.get(request.id);
           await read.validate();
@@ -1018,6 +1038,25 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           const item = await backend.get(request.id);
           if (item === undefined) throw new WorkRequestError("not_found", `No work item ${request.id}`);
           return { repo: await describe(entry), item };
+        }
+        case "activity": {
+          const { backend } = await tracker(entry.path, false);
+          if (backend.activity === undefined)
+            throw new WorkRequestError(
+              "backend_unavailable",
+              "This repo’s tracker doesn’t keep comments Clankie can read.",
+            );
+          try {
+            return {
+              repo: await describe(entry),
+              itemId: request.id,
+              entries: await backend.activity(request.id),
+            };
+          } catch (error) {
+            if (error instanceof Error && error.name === "WorkItemNotFoundError")
+              throw new WorkRequestError("not_found", `No work item ${request.id}`);
+            throw error;
+          }
         }
         case "create": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");

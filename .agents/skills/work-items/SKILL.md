@@ -25,6 +25,7 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | What is open?                  | `clankie work list --status todo,in_progress`                 |
 | One role's backlog             | `clankie work list --label designer` (case-insensitive)       |
 | One item                       | `clankie work show ID`                                        |
+| What happened on it            | `clankie work activity ID` (comments, state changes)          |
 | New item                       | `clankie work create "Title" --criterion "..." --owner NAME`  |
 | Progress                       | `clankie work update ID --status in_progress --check 1`       |
 | Finished                       | `clankie work close ID` (`--canceled` if dropped)             |

@@ -58,6 +58,8 @@ import {
   WorkReposResultSchema,
   WorkItemsResultSchema,
   WorkProjectResultSchema,
+  WorkItemActivityResultSchema,
+  type WorkItemActivityResult,
   type WorkProjectResult,
 } from "./work-items.ts";
 import {
@@ -416,6 +418,15 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({ op: z.literal("work_project"), schemaVersion: z.literal(1), repoId: WorkRepoSchema.shape.id })
     .strict(),
+  /** One item's comments and state changes, read-only (VUH-1936). */
+  z
+    .object({
+      op: z.literal("work_item_activity"),
+      schemaVersion: z.literal(1),
+      repoId: WorkRepoSchema.shape.id,
+      itemId: z.string().trim().min(1).max(64),
+    })
+    .strict(),
   z
     .object({
       op: z.literal("work_items"),
@@ -681,6 +692,10 @@ export type OperatorWorkProjectOutcome =
   | (WorkProjectResult & { readonly outcome: "ready" })
   | { readonly outcome: "unavailable"; readonly message: string };
 
+export type OperatorWorkItemActivityOutcome =
+  | (WorkItemActivityResult & { readonly outcome: "ready" })
+  | { readonly outcome: "unavailable"; readonly message: string };
+
 export type OperatorWorkItemsOutcome =
   | (WorkItemsResult & { readonly outcome: "ready" })
   | {
@@ -928,6 +943,16 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       result: z.discriminatedUnion("outcome", [
         WorkProjectResultSchema.extend({ outcome: z.literal("ready") }).strict(),
+        z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
+      ]),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_item_activity"),
+      schemaVersion: z.literal(1),
+      result: z.discriminatedUnion("outcome", [
+        WorkItemActivityResultSchema.extend({ outcome: z.literal("ready") }).strict(),
         z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
       ]),
     })
@@ -1315,6 +1340,8 @@ export interface OperatorConversationServiceClient {
   workRepos?(): Promise<readonly WorkRepo[]>;
   /** One repo's work items, or why they cannot be read yet. */
   workProject?(repoId: string): Promise<OperatorWorkProjectOutcome>;
+  /** One item's comments and state changes, or why they cannot be read. */
+  workItemActivity?(repoId: string, itemId: string): Promise<OperatorWorkItemActivityOutcome>;
   workItems?(
     repoId: string,
     options?: { readonly label?: string; readonly statusVersion?: 2 },
@@ -1686,6 +1713,12 @@ export function createOperatorConversationServiceClient(
     async workProject(repoId) {
       const result = await dispatch({ op: "work_project", schemaVersion: 1, repoId });
       if (result.op !== "work_project") throw new Error(`Unexpected ${result.op} result for work_project`);
+      return result.result;
+    },
+    async workItemActivity(repoId, itemId) {
+      const result = await dispatch({ op: "work_item_activity", schemaVersion: 1, repoId, itemId });
+      if (result.op !== "work_item_activity")
+        throw new Error(`Unexpected ${result.op} result for work_item_activity`);
       return result.result;
     },
     async workItems(repoId, options) {

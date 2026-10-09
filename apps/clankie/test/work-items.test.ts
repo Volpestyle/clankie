@@ -298,3 +298,50 @@ it("negotiates backlog at the device boundary and exposes project facts over the
     code: "unknown_repo",
   });
 });
+
+it("reads an item's comments over the device contract and answers unavailable where the tracker keeps none", async () => {
+  const { service, repo } = await fixture();
+  await service.handle(
+    { action: "init", repo, backend: "linear", linearTeam: "VUH", linearProject: "Clankie" },
+    true,
+  );
+  const created = await service.handle({ action: "create", repo, title: "Offline task" }, true);
+  if (!("item" in created)) throw new Error("Expected an issue");
+  await service.callTracker(
+    "save_comment",
+    { issueId: created.item.id, body: "Landed on main (Codex, gpt-5.5)." },
+    { repo, local: true },
+  );
+  const { repos } = (await service.handle({ action: "repos" }, true)) as {
+    repos: { id: string; root?: string }[];
+  };
+  const repoId = repos.find((entry) => entry.root === repo)!.id;
+  const { app } = await createClankieApp({
+    captain: createStubCaptain(),
+    workItems: service,
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+    authenticateCaptain: async () => ({ captainId: "operator", steerSourceLane: "api" }),
+  });
+  const dispatch = async (body: unknown) => {
+    const response = await app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(200);
+    return OperatorConversationServiceResultSchema.parse(await response.json());
+  };
+  expect(
+    await dispatch({ op: "work_item_activity", schemaVersion: 1, repoId, itemId: created.item.id }),
+  ).toMatchObject({
+    result: {
+      outcome: "ready",
+      itemId: created.item.id,
+      entries: [{ kind: "comment", body: "Landed on main (Codex, gpt-5.5).", actor: expect.any(String) }],
+    },
+  });
+  // A Markdown tracker keeps no comments: the device hears why, never an empty trail.
+  expect(
+    await dispatch({ op: "work_item_activity", schemaVersion: 1, repoId: "workspace", itemId: "W-none00" }),
+  ).toMatchObject({ result: { outcome: "unavailable" } });
+});

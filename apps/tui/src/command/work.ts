@@ -14,7 +14,7 @@ import { commandHost } from "./io.ts";
 const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
   "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]",
-  "  | project | list [--status S,S] [--owner O] [--label L] | show ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S] [--priority 0..4|none|urgent|high|medium|low]",
+  "  | project | list [--status S,S] [--owner O] [--label L] | show ID | activity ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S] [--priority 0..4|none|urgent|high|medium|low]",
   "  | update ID [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
@@ -126,6 +126,9 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
     case "show":
       if (rest[0] === undefined) throw new Error(WORK_USAGE);
       return { action: "show", repo, id: rest[0] };
+    case "activity":
+      if (rest[0] === undefined) throw new Error(WORK_USAGE);
+      return { action: "activity", repo, id: rest[0] };
     case "create":
       if (rest.length === 0) throw new Error(WORK_USAGE);
       return {

@@ -494,6 +494,30 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       }
     }
+    if (parsed.data.op === "work_item_activity") {
+      try {
+        if (!ctx.dependencies.workItems) throw new Error("Work tracking is not running on this host");
+        const result = await ctx.dependencies.workItems.handle(
+          { action: "activity", repo: parsed.data.repoId, id: parsed.data.itemId },
+          false,
+        );
+        if (!("entries" in result)) throw new Error("Unexpected work activity result");
+        return context.json({
+          op: "work_item_activity",
+          schemaVersion: 1,
+          result: { outcome: "ready", ...result },
+        });
+      } catch {
+        return context.json({
+          op: "work_item_activity",
+          schemaVersion: 1,
+          result: {
+            outcome: "unavailable",
+            message: "This item’s comments can’t be read here. Read the work again.",
+          },
+        });
+      }
+    }
     if (parsed.data.op === "work_items") {
       const repoId = parsed.data.repoId;
       if (ctx.dependencies.workItems === undefined)

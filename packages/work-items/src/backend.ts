@@ -5,6 +5,7 @@ import {
   type WorkBackendKind,
   type WorkCriterion,
   type WorkEvidence,
+  type WorkActivityEntry,
   type WorkItem,
   type WorkItemStatus,
   type WorkItemPriority,
@@ -100,6 +101,8 @@ export interface WorkBackend {
   create(draft: WorkItemDraft): Promise<WorkItem>;
   update(id: string, patch: WorkItemPatch): Promise<WorkItem>;
   attach(id: string, evidence: WorkEvidence): Promise<WorkItem>;
+  /** The item's comments and state changes, oldest first; absent where the tracker keeps none. */
+  activity?(id: string): Promise<WorkActivityEntry[]>;
 }
 
 export class WorkItemNotFoundError extends Error {

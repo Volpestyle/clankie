@@ -1,4 +1,11 @@
-import { WorkItemSchema, type WorkItem, type WorkItemStatus } from "@clankie/protocol/work-items";
+import {
+  WORK_ACTIVITY_MAX,
+  WorkActivityEntrySchema,
+  WorkItemSchema,
+  type WorkActivityEntry,
+  type WorkItem,
+  type WorkItemStatus,
+} from "@clankie/protocol/work-items";
 import {
   matchesFilter,
   patchCriteria,
@@ -58,6 +65,39 @@ export async function assertLinearIssueScope(
     throw new WorkItemScopeError();
 }
 
+interface LinearComment {
+  readonly id?: string;
+  readonly body?: string | null;
+  readonly createdAt?: string;
+  readonly parentId?: string | null;
+  readonly author?: { readonly name?: string | null } | null;
+  readonly user?: { readonly name?: string | null } | null;
+  readonly onBehalfOf?: { readonly name?: string | null } | null;
+  readonly attachments?: readonly { readonly url?: string; readonly title?: string | null }[] | null;
+}
+
+/** A tracker comment as an activity entry; a comment without an id or time is left out, never invented. */
+function commentEntry(comment: LinearComment): WorkActivityEntry | undefined {
+  const actor = comment.author?.name ?? comment.user?.name ?? undefined;
+  const attachments = (comment.attachments ?? [])
+    .filter((attachment) => typeof attachment.url === "string" && attachment.url.length > 0)
+    .slice(0, 20)
+    .map((attachment) => ({
+      url: attachment.url!.slice(0, 2048),
+      ...(attachment.title ? { title: attachment.title.slice(0, 500) } : {}),
+    }));
+  const entry = WorkActivityEntrySchema.safeParse({
+    id: comment.id,
+    kind: "comment",
+    at: comment.createdAt,
+    ...(actor ? { actor: actor.slice(0, 200) } : {}),
+    body: (comment.body ?? "").slice(0, 20_000),
+    ...(comment.parentId ? { replyTo: comment.parentId } : {}),
+    ...(attachments.length === 0 ? {} : { attachments }),
+  });
+  return entry.success ? entry.data : undefined;
+}
+
 interface LinearIssue {
   readonly id: string;
   readonly identifier?: string;
@@ -68,6 +108,11 @@ interface LinearIssue {
   readonly priority?: number | { readonly value?: number };
   readonly milestone?: { readonly id: string; readonly name: string } | null;
   readonly projectMilestone?: { readonly id: string; readonly name: string } | null;
+  /** Linear's own record of the states the issue entered, when the read includes it. */
+  readonly stateHistory?: readonly {
+    readonly state?: { readonly id?: string; readonly name?: string; readonly type?: string } | null;
+    readonly startedAt?: string;
+  }[];
   readonly state?: string;
   readonly description?: string | null;
   readonly owner?: string;
@@ -331,6 +376,46 @@ export function createLinearBackend(
         cursors.add(cursor);
       }
       return sortWorkItems(items).slice(0, limit);
+    },
+    async activity(id) {
+      const issue = await fetchIssue(id);
+      const entries: WorkActivityEntry[] = [];
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      // Comments page oldest to newest; a busy issue keeps its latest entries.
+      for (;;) {
+        const result = (await options.call("list_comments", {
+          issueId: issue.identifier ?? issue.id,
+          ...(cursor === undefined ? {} : { cursor }),
+        })) as
+          | { comments?: LinearComment[]; hasNextPage?: boolean; cursor?: string }
+          | LinearComment[]
+          | undefined;
+        const comments = Array.isArray(result) ? result : (result?.comments ?? []);
+        for (const comment of comments) {
+          const entry = commentEntry(comment);
+          if (entry !== undefined) entries.push(entry);
+        }
+        if (result === undefined || Array.isArray(result) || result.hasNextPage !== true) break;
+        if (typeof result.cursor !== "string" || result.cursor.length === 0 || cursors.has(result.cursor))
+          throw new LinearPaginationError();
+        cursors.add(result.cursor);
+        cursor = result.cursor;
+      }
+      for (const [index, change] of (issue.stateHistory ?? []).entries()) {
+        const name = change.state?.name;
+        if (typeof change.startedAt !== "string" || typeof name !== "string" || name.trim() === "") continue;
+        const entry = WorkActivityEntrySchema.safeParse({
+          id: `state:${change.state?.id ?? index}:${change.startedAt}`,
+          kind: "state",
+          at: change.startedAt,
+          state: name.trim().slice(0, 64),
+          status: linearStatusOf((change.state?.type ?? "").toLowerCase(), name),
+        });
+        if (entry.success) entries.push(entry.data);
+      }
+      entries.sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+      return entries.slice(-WORK_ACTIVITY_MAX);
     },
     async get(id) {
       try {

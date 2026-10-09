@@ -274,6 +274,52 @@ export type WorkProjectFacts = z.infer<typeof WorkProjectFactsSchema>;
 export const WorkProjectResultSchema = WorkProjectFactsSchema.extend({ repo: WorkRepoSchema }).strict();
 export type WorkProjectResult = z.infer<typeof WorkProjectResultSchema>;
 
+export const WORK_ACTIVITY_MAX = 200;
+
+/**
+ * One thing that happened to an item, as its tracker records it: a comment
+ * (an agent's report, an owner's reply) or a change of state. `actor` is the
+ * tracker's own name for who did it; it is absent when the tracker doesn't say
+ * (Linear's state history names no one). Nothing here guesses a model.
+ */
+export const WorkActivityEntrySchema = z
+  .object({
+    id: z.string().trim().min(1).max(256),
+    kind: z.enum(["comment", "state"]),
+    at: z.string().max(64),
+    actor: z.string().trim().min(1).max(200).optional(),
+    /** A comment's Markdown body. */
+    body: z.string().max(20_000).optional(),
+    /** The comment this one answers. */
+    replyTo: z.string().trim().min(1).max(256).optional(),
+    /** The tracker's name for the state entered, and its unified status. */
+    state: z.string().trim().min(1).max(64).optional(),
+    status: WorkItemStatusSchema.optional(),
+    attachments: z
+      .array(
+        z
+          .object({
+            url: z.string().trim().min(1).max(2048),
+            title: z.string().trim().min(1).max(500).optional(),
+          })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
+  })
+  .strict();
+export type WorkActivityEntry = z.infer<typeof WorkActivityEntrySchema>;
+
+/** An item's activity, oldest first, bounded to its latest `WORK_ACTIVITY_MAX` entries. */
+export const WorkItemActivityResultSchema = z
+  .object({
+    repo: WorkRepoSchema,
+    itemId: z.string().trim().min(1).max(64),
+    entries: z.array(WorkActivityEntrySchema).max(WORK_ACTIVITY_MAX),
+  })
+  .strict();
+export type WorkItemActivityResult = z.infer<typeof WorkItemActivityResultSchema>;
+
 /** A legacy device has not opted into backlog/milestones yet. */
 export function legacyWorkItem(item: WorkItem): WorkItem {
   const { milestone: _milestone, ...legacy } = item;

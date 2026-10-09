@@ -1799,6 +1799,11 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   On a scoped Linear board, `--label` intersects the saved repo label along
   with status/owner filters; it does not replace the scope. `show ID` remains
   a direct known-item read. Board scope does not grant or restrict tool authority.
+- `clankie work activity ID` reads an item's comments and state changes, oldest
+  first: each names its actor as the tracker records it (Linear's state history
+  names none), with body, attachments and reply target. Linear and the local
+  tracker keep activity; Markdown and GitHub repos answer unavailable. Devices
+  read the same through `work_item_activity`.
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
 [--status S] [--priority 0..4]`.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]

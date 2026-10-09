@@ -362,6 +362,7 @@ export {
   type OperatorConversationServiceRequest,
   type OperatorWorkItemsOutcome,
   type OperatorWorkProjectOutcome,
+  type OperatorWorkItemActivityOutcome,
   OperatorConversationServiceResultSchema,
   type OperatorConversationServiceResult,
   type OperatorConversationServiceDispatch,
