@@ -170,7 +170,7 @@ async function fixture(beforeReply?: (path: string) => Promise<void>) {
         "discord",
         ...args,
       ],
-      { env, cwd: repoRoot, timeout: 15_000 },
+      { env, cwd: repoRoot },
     );
     expect(result.stderr).toBe("");
     expect(await readFile(descriptorPath)).toEqual(descriptor);

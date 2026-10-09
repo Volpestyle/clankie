@@ -32,12 +32,26 @@ async function exists(path: string) {
     return false;
   }
 }
-async function eventually<T>(read: () => Promise<T>, predicate: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 8_000;
+/**
+ * Polls until the condition holds. A cold CLI under machine load may take
+ * longer than any fixed budget, so the only early stop is the owned process
+ * exiting first; the test's own timeout remains the backstop (VUH-1981).
+ */
+async function eventually<T>(
+  read: () => Promise<T>,
+  predicate: (value: T) => boolean,
+  owner?: { done: Promise<number>; output: string[] },
+): Promise<T> {
+  let exited: number | undefined;
+  void owner?.done.then(
+    (code) => (exited = code),
+    () => (exited = -1),
+  );
   for (;;) {
     const value = await read();
     if (predicate(value)) return value;
-    if (Date.now() > deadline) throw new Error("Owned CLI boundary did not become ready");
+    if (exited !== undefined)
+      throw new Error(`Owned CLI exited ${exited} before it was ready: ${owner!.output.join("")}`);
     await delay(40);
   }
 }
@@ -234,7 +248,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
         "require('node:fs').writeFileSync(process.argv[1],JSON.stringify({pid:process.pid}));setInterval(()=>{},1000)",
         receipt,
       ]);
-      await eventually(() => exists(receipt), Boolean);
+      await eventually(() => exists(receipt), Boolean, run);
       const { pid } = JSON.parse(await readFile(receipt, "utf8")) as { pid: number };
       run.child.kill("SIGINT");
       expect(await run.done, run.output.join("")).toBe(130);
@@ -347,7 +361,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
           { signal: cancellation.signal },
         ),
       );
-      await eventually(() => exists(receipt), Boolean);
+      await eventually(() => exists(receipt), Boolean, { done: jobs[0]!, output: [] });
       track(
         f.governor.runHeavy(process.execPath, ["-e", "process.exit(0)"], {
           seatId: "Bex",
@@ -476,7 +490,7 @@ it("native child heavy CLIs under the same pane keep separate holder labels and 
         CODEX_THREAD_ID: undefined,
       },
     );
-    await eventually(() => exists(marker), Boolean);
+    await eventually(() => exists(marker), Boolean, first);
     const second = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"], {
       HERDR_PANE_ID: "parent-seat",
       CLANKIE_RESOURCE_HOLDER: "",

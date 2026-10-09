@@ -1,100 +1,10 @@
-import { runJoinCommand } from "../src/command/join.ts";
 import type { CaptainRouteFetcher } from "../src/session/operator-conversations.ts";
-import { runCheckoutsCommand } from "../src/command/checkouts.ts";
-import { runComputerCommand } from "../src/command/computer.ts";
-import { runShareCommand } from "../src/command/share.ts";
-import { runDesktopCommand } from "../src/command/desktop.ts";
-import {
-  runHarnessCommand,
-  runWorkerToolRefreshCommand,
-  runWorkerToolRestartCommand,
-} from "../src/command/harness.ts";
-import { runHarnessLoginCommand } from "../src/command/harness-login.ts";
-import { runUpdateCli } from "../src/command/update-output.ts";
-import { runBodyCommand } from "../src/command/body.ts";
-import { MachineInventorySchema, GAME_EXTENSIONS_PATH, GameExtensionCatalogSchema } from "@clankie/protocol";
-import { runMachinesCommand, formatMachines, MACHINE_RESTART_HINT } from "../src/command/machines.ts";
-import { runWorkOnCommand } from "../src/command/work-on.ts";
-import { runHireReceiptCommand } from "../src/command/hire-receipt.ts";
-import { runSeatDeliveryCommand } from "../src/command/seat-delivery.ts";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
-import {
-  connectHostedCli,
-  disconnectHostedCli,
-  hostedCommand,
-  hostedWhoami,
-  hostedTransportFor,
-  HOSTED_LOCAL_ONLY,
-} from "../src/command/hosted.ts";
-import { runRuntimeCommand } from "../src/command/runtime.ts";
-import { runSeatHookCommand } from "../src/command/seat-hook.ts";
-import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
-import { runAgentsCommand } from "../src/command/agents.ts";
-import { runProjectCommand } from "../src/command/project.ts";
-import { runProjectSettingsCommand } from "../src/command/project-settings.ts";
-import { runAccessCommand } from "../src/command/access.ts";
-import { runEvaluatorCommand } from "../src/command/evaluator.ts";
-import { runConversationsCommand } from "../src/command/conversations.ts";
-import { openHerdr, runFleetHerdr } from "../src/session/herdr-connection.ts";
-import { type CredentialStore } from "@clankie/credential-broker";
-import { type ServiceRegistryOptions } from "./services.ts";
-import {
-  doctorCommand,
-  machineDoctorCommand,
-  formatDoctorSummary,
-  formatMachineDoctorSummary,
-  type ExecFileImpl,
-} from "../src/command/doctor.ts";
-import { statusCommand } from "../src/command/status.ts";
-import { runModelCommand } from "../src/command/model.ts";
-import { runPersonaCommand } from "../src/command/persona.ts";
-import { runBrowserCommand } from "../src/command/browser.ts";
-import { runSkillsCommand } from "../src/command/skills.ts";
-import { runGamesCommand, runGameExtensionsCommand } from "../src/command/games.ts";
-import { runLinearCommand } from "../src/command/linear.ts";
-import { runAccountsCommand } from "../src/command/accounts.ts";
-import { runWorkCommand } from "../src/command/work.ts";
-import { runEvidenceCommand } from "../src/command/evidence.ts";
-import { runIntegrationCommand } from "../src/command/integrate.ts";
-import { runFleetCommand } from "../src/command/fleet.ts";
-import { runHeavyCommand } from "../src/command/heavy.ts";
-import { runResourceStatusCommand, runSimulatorCommand } from "../src/command/fleet-resources.ts";
-import { forwardsToFleetHerdr, herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
-import { runWorkdirCommand } from "../src/command/workdir.ts";
-import { runEffortCommand } from "../src/command/effort.ts";
-import { runVoiceCommand } from "../src/command/voice.ts";
-import { runImageModelCommand } from "../src/command/image-model.ts";
-import { runVideoModelCommand } from "../src/command/video-model.ts";
-import { runDiscordCommand } from "../src/command/discord.ts";
-import { runRestartCommand, runDownCommand, runStartCommand } from "../src/command/restart.ts";
-import { runPairCommand } from "../src/command/pair.ts";
-import { runDevicesCommand } from "../src/command/devices.ts";
-import { runSupportCommand } from "../src/command/support.ts";
-import { runPlayCommand } from "../src/command/play.ts";
-import { runRivalsCommand } from "../src/command/rivals.ts";
-import { runMinecraftCommand } from "../src/command/minecraft.ts";
-import { runStanceCommand } from "../src/command/stance.ts";
-import { runPromptCommand } from "../src/command/prompt.ts";
-import { runResetCommand } from "../src/command/reset.ts";
-import { runSendCommand } from "../src/command/send.ts";
-import { runFileCommand } from "../src/command/file.ts";
-import { runMemoryCardCommand } from "../src/command/memory-card.ts";
-import { runMemoryCommand } from "../src/command/memory.ts";
-import { runMetricsCommand } from "../src/command/metrics.ts";
-import { runTelemetryCommand } from "../src/command/telemetry.ts";
-import { runSeatCommand } from "../src/command/seat.ts";
-import { operatorHarness } from "../src/command/harness-command.ts";
-import { runMcpCommand } from "../src/command/mcp.ts";
-import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
-import { runGatewayCommand } from "../src/command/gateway.ts";
-import { runAutostartCommand } from "../src/command/autostart.ts";
-import { runRecoverCommand } from "../src/command/recover.ts";
-import { runAwakeCommand } from "../src/command/awake.ts";
-import { formatUsageTable, runUsageCommand } from "../src/command/usage.ts";
-import { runRuntimeHealthCommand } from "../src/command/runtime-health.ts";
+import type { CredentialStore } from "@clankie/credential-broker";
+import type { ServiceRegistryOptions } from "./services.ts";
+import type { ExecFileImpl } from "../src/command/doctor.ts";
 import { commandHelp } from "../src/command/registry.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
-
 export { isHeadlessCaptainCommand, unknownLauncherCommand } from "../src/command/registry.ts";
 
 export interface HeadlessCaptainCommandOptions {
@@ -139,13 +49,17 @@ export async function runHeadlessCaptainCommand(
   try {
     const env = options.env ?? process.env;
     if (command === "heavy")
-      return await runHeavyCommand(rest, {
+      return await (
+        await import("../src/command/heavy.ts")
+      ).runHeavyCommand(rest, {
         stderr,
         env,
         ...(options.resourceGovernor === undefined ? {} : { governor: options.resourceGovernor }),
       });
     if (command === "connect" || command === "login") {
-      await connectHostedCli(
+      await (
+        await import("../src/command/hosted.ts")
+      ).connectHostedCli(
         command === "login" ? ["hosted", ...rest] : rest,
         env,
         stdout,
@@ -154,17 +68,20 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if ((command === "gateway" || command === "remote-access") && rest[0] === "on") {
-      await connectHostedCli(["hosted", ...rest.slice(1)], env, stdout, { target: "this-mac" });
+      await (
+        await import("../src/command/hosted.ts")
+      ).connectHostedCli(["hosted", ...rest.slice(1)], env, stdout, { target: "this-mac" });
       return 0;
     }
     // Joining/resuming is a local foreground transport even when the CLI talks to hosted Clankie.
-    if (command === "join" && rest[0] !== "approve") return runJoinCommand(rest, options);
+    if (command === "join" && rest[0] !== "approve")
+      return (await import("../src/command/join.ts")).runJoinCommand(rest, options);
     if (command === "whoami") {
-      outputJson(stdout, await hostedWhoami(env));
+      outputJson(stdout, await (await import("../src/command/hosted.ts")).hostedWhoami(env));
       return 0;
     }
     if (command === "disconnect" || command === "logout") {
-      outputJson(stdout, await disconnectHostedCli(env));
+      outputJson(stdout, await (await import("../src/command/hosted.ts")).disconnectHostedCli(env));
       return 0;
     }
     if (
@@ -177,15 +94,20 @@ export async function runHeadlessCaptainCommand(
         command === "discord" &&
         ["setup", "definition", "directory", "rooms", "guide", "call"].includes(rest[0] ?? "");
       if (
-        (HOSTED_LOCAL_ONLY.has(command ?? "") &&
+        ((await import("../src/command/hosted.ts")).HOSTED_LOCAL_ONLY.has(command ?? "") &&
           !discordHttp &&
           !(command === "update" && rest[0] === "auto")) ||
-        operatorHarness(command) !== undefined
+        (await import("../src/command/harness-command.ts")).operatorHarness(command) !== undefined
       )
         throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
-      const transport = await hostedTransportFor(env);
+      const transport = await (await import("../src/command/hosted.ts")).hostedTransportFor(env);
       if (command === "games" && rest.length === 1 && rest[0] === "extensions") {
-        outputJson(stdout, GameExtensionCatalogSchema.parse(await transport.request(GAME_EXTENSIONS_PATH)));
+        outputJson(
+          stdout,
+          (await import("@clankie/protocol")).GameExtensionCatalogSchema.parse(
+            await transport.request((await import("@clankie/protocol")).GAME_EXTENSIONS_PATH),
+          ),
+        );
         return 0;
       }
       // These existing commands are HTTP-only. The transport replaces their local
@@ -203,11 +125,11 @@ export async function runHeadlessCaptainCommand(
             CLANKIE_OPERATOR_TOKEN: "hosted-device-transport",
           },
         });
-      outputJson(stdout, await hostedCommand(args, transport));
+      outputJson(stdout, await (await import("../src/command/hosted.ts")).hostedCommand(args, transport));
       return 0;
     }
     if (command === "health" || command === "status") {
-      const result = await statusCommand(options);
+      const result = await (await import("../src/command/status.ts")).statusCommand(options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
@@ -220,34 +142,50 @@ export async function runHeadlessCaptainCommand(
       )
         throw new Error("Usage: clankie doctor [--machine FLEET_ID] [--json]");
       if (args.length) {
-        const result = await machineDoctorCommand(args[1]!, options);
+        const result = await (
+          await import("../src/command/doctor.ts")
+        ).machineDoctorCommand(args[1]!, options);
         if (json) outputJson(stdout, result);
-        else stdout.write(`${formatMachineDoctorSummary(result)}\n`);
+        else
+          stdout.write(`${(await import("../src/command/doctor.ts")).formatMachineDoctorSummary(result)}\n`);
         return 0;
       }
-      const result = await doctorCommand({
+      const result = await (
+        await import("../src/command/doctor.ts")
+      ).doctorCommand({
         repoRoot: options.repoRoot,
         cwd: process.cwd(),
         env: options.env ?? process.env,
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
       });
       if (json) outputJson(stdout, result);
-      else stdout.write(`${formatDoctorSummary(result)}\n`);
+      else stdout.write(`${(await import("../src/command/doctor.ts")).formatDoctorSummary(result)}\n`);
       return 0;
     }
     if (command === "checkouts") {
-      outputJson(stdout, await runCheckoutsCommand(rest, options));
+      outputJson(
+        stdout,
+        await (await import("../src/command/checkouts.ts")).runCheckoutsCommand(rest, options),
+      );
       return 0;
     }
     if (command === "update") {
-      return await runUpdateCli(rest, { ...options, stdout });
+      return await (
+        await import("../src/command/update-output.ts")
+      ).runUpdateCli(rest, { ...options, stdout });
     }
-    if (command === "restart") return await runRestartCommand(rest, options);
-    if (command === "start") return await runStartCommand(rest, options);
-    if (command === "stop" || command === "down") return await runDownCommand(rest, options);
-    if (command === "recover") return await runRecoverCommand(rest, options);
+    if (command === "restart")
+      return await (await import("../src/command/restart.ts")).runRestartCommand(rest, options);
+    if (command === "start")
+      return await (await import("../src/command/restart.ts")).runStartCommand(rest, options);
+    if (command === "stop" || command === "down")
+      return await (await import("../src/command/restart.ts")).runDownCommand(rest, options);
+    if (command === "recover")
+      return await (await import("../src/command/recover.ts")).runRecoverCommand(rest, options);
     if (command === "autostart") {
-      const result = await runAutostartCommand(rest, {
+      const result = await (
+        await import("../src/command/autostart.ts")
+      ).runAutostartCommand(rest, {
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
       });
@@ -255,26 +193,37 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "awake") {
-      outputJson(stdout, await runAwakeCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/awake.ts")).runAwakeCommand(rest, options));
       return 0;
     }
     if (command === "usage") {
-      const result = await runUsageCommand(rest, options);
+      const result = await (await import("../src/command/usage.ts")).runUsageCommand(rest, options);
       // The report reads as a table by default; --json (and overlay settings) stay machine-readable.
       if (rest.includes("--json") || !("accounts" in result)) outputJson(stdout, result);
-      else stdout.write(`${formatUsageTable(result)}\n`);
+      else stdout.write(`${(await import("../src/command/usage.ts")).formatUsageTable(result)}\n`);
       return 0;
     }
     if (command === "runtime-health") {
-      outputJson(stdout, await runRuntimeHealthCommand(rest, options));
+      outputJson(
+        stdout,
+        await (await import("../src/command/runtime-health.ts")).runRuntimeHealthCommand(rest, options),
+      );
       return 0;
     }
-    if (command === "pair") return await runPairCommand(rest, options);
-    if (command === "devices") return await runDevicesCommand(rest, options);
-    if (command === "support") return await runSupportCommand(rest, options);
-    if (command === "operator-credential") return await runOperatorCredentialCommand(rest, options);
+    if (command === "pair")
+      return await (await import("../src/command/pair.ts")).runPairCommand(rest, options);
+    if (command === "devices")
+      return await (await import("../src/command/devices.ts")).runDevicesCommand(rest, options);
+    if (command === "support")
+      return await (await import("../src/command/support.ts")).runSupportCommand(rest, options);
+    if (command === "operator-credential")
+      return await (
+        await import("../src/command/operator-credential.ts")
+      ).runOperatorCredentialCommand(rest, options);
     if (command === "gateway" || command === "remote-access") {
-      const result = await runGatewayCommand(rest, {
+      const result = await (
+        await import("../src/command/gateway.ts")
+      ).runGatewayCommand(rest, {
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.operatorCredentialStore === undefined
           ? {}
@@ -284,130 +233,154 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "share") {
-      const result = await runShareCommand(rest, options);
+      const result = await (await import("../src/command/share.ts")).runShareCommand(rest, options);
       outputJson(stdout, result.body);
       return result.ok ? 0 : 1;
     }
-    if (command === "play") return await runPlayCommand(rest, options);
+    if (command === "play")
+      return await (await import("../src/command/play.ts")).runPlayCommand(rest, options);
     if (command === "computer") {
-      outputJson(stdout, await runComputerCommand(rest, options));
+      outputJson(
+        stdout,
+        await (await import("../src/command/computer.ts")).runComputerCommand(rest, options),
+      );
       return 0;
     }
     if (command === "minecraft") {
-      outputJson(stdout, await runMinecraftCommand(rest, options));
+      outputJson(
+        stdout,
+        await (await import("../src/command/minecraft.ts")).runMinecraftCommand(rest, options),
+      );
       return 0;
     }
     if (command === "rivals") {
-      const result = await runRivalsCommand(rest, options);
+      const result = await (await import("../src/command/rivals.ts")).runRivalsCommand(rest, options);
       outputJson(stdout, result);
       return result.outcome === "refused" ? 1 : 0;
     }
     if (command === "model") {
-      const result = await runModelCommand(rest, options);
+      const result = await (await import("../src/command/model.ts")).runModelCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     if (command === "effort") {
-      const result = await runEffortCommand(rest, options);
+      const result = await (await import("../src/command/effort.ts")).runEffortCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     if (command === "voice") {
-      outputJson(stdout, await runVoiceCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/voice.ts")).runVoiceCommand(rest, options));
       return 0;
     }
     if (command === "image-model") {
-      const result = await runImageModelCommand(rest, options);
+      const result = await (
+        await import("../src/command/image-model.ts")
+      ).runImageModelCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     if (command === "video-model") {
-      const result = await runVideoModelCommand(rest, options);
+      const result = await (
+        await import("../src/command/video-model.ts")
+      ).runVideoModelCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     if (command === "persona") {
-      const result = await runPersonaCommand(rest, options);
+      const result = await (await import("../src/command/persona.ts")).runPersonaCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }
     if (command === "body") {
-      outputJson(stdout, await runBodyCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/body.ts")).runBodyCommand(rest, options));
       return 0;
     }
     if (command === "browser") {
-      outputJson(stdout, await runBrowserCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/browser.ts")).runBrowserCommand(rest, options));
       return 0;
     }
     if (command === "skills") {
-      outputJson(stdout, await runSkillsCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/skills.ts")).runSkillsCommand(rest, options));
       return 0;
     }
     if (command === "desktop") {
-      outputJson(stdout, await runDesktopCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/desktop.ts")).runDesktopCommand(rest, options));
       return 0;
     }
     if (command === "games") {
       if (rest.length === 1 && rest[0] === "extensions") {
-        outputJson(stdout, await runGameExtensionsCommand(options));
+        outputJson(stdout, await (await import("../src/command/games.ts")).runGameExtensionsCommand(options));
         return 0;
       }
-      const result = await runGamesCommand(rest, options);
+      const result = await (await import("../src/command/games.ts")).runGamesCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }
     if (command === "linear") {
-      const result = await runLinearCommand(rest, options);
+      const result = await (await import("../src/command/linear.ts")).runLinearCommand(rest, options);
       outputJson(stdout, result);
       return result.ok === false ? 1 : 0;
     }
     if (command === "accounts") {
-      outputJson(stdout, await runAccountsCommand(rest, options));
+      outputJson(
+        stdout,
+        await (await import("../src/command/accounts.ts")).runAccountsCommand(rest, options),
+      );
       return 0;
     }
     if (command === "work") {
-      const result = await runWorkCommand(rest, options);
+      const result = await (await import("../src/command/work.ts")).runWorkCommand(rest, options);
       outputJson(stdout, result.body);
       return result.ok ? 0 : 1;
     }
     if (command === "evidence") {
-      const result = await runEvidenceCommand(rest, { ...options, stderr });
+      const result = await (
+        await import("../src/command/evidence.ts")
+      ).runEvidenceCommand(rest, { ...options, stderr });
       outputJson(stdout, result.body);
       return result.ok ? 0 : 1;
     }
     if (command === "integrate") {
-      const result = await runIntegrationCommand(rest, options);
+      const result = await (await import("../src/command/integrate.ts")).runIntegrationCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     if (command === "connections") {
-      outputJson(stdout, await runRuntimeCommand(["inventory"], options));
+      outputJson(
+        stdout,
+        await (await import("../src/command/runtime.ts")).runRuntimeCommand(["inventory"], options),
+      );
       return 0;
     }
-    if (command === "join") return runJoinCommand(rest, options);
+    if (command === "join") return (await import("../src/command/join.ts")).runJoinCommand(rest, options);
     if (command === "machines") {
-      const result = await runMachinesCommand(rest, options);
-      const inventory = MachineInventorySchema.safeParse(result);
-      if (!rest.includes("--json") && inventory.success) stdout.write(`${formatMachines(inventory.data)}\n`);
+      const result = await (await import("../src/command/machines.ts")).runMachinesCommand(rest, options);
+      const inventory = (await import("@clankie/protocol")).MachineInventorySchema.safeParse(result);
+      if (!rest.includes("--json") && inventory.success)
+        stdout.write(`${(await import("../src/command/machines.ts")).formatMachines(inventory.data)}\n`);
       else outputJson(stdout, result);
       return 0;
     }
     if (command === "runtime") {
-      outputJson(stdout, await runRuntimeCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/runtime.ts")).runRuntimeCommand(rest, options));
       return 0;
     }
     if (command === "agents" || command === "sessions") {
-      outputJson(stdout, await runAgentsCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/agents.ts")).runAgentsCommand(rest, options));
       return 0;
     }
     if (command === "harness") {
       if (rest[0] === "restart-tools") {
-        const result = await runWorkerToolRestartCommand(rest, options);
+        const result = await (
+          await import("../src/command/harness.ts")
+        ).runWorkerToolRestartCommand(rest, options);
         outputJson(stdout, result);
         return result.outcome === "restarted" ? 0 : 1;
       }
       if (rest[0] === "login") {
-        const result = await runHarnessLoginCommand(rest, options);
+        const result = await (
+          await import("../src/command/harness-login.ts")
+        ).runHarnessLoginCommand(rest, options);
         outputJson(stdout, result);
         return typeof result === "object" && result !== null && "ok" in result && result.ok === false
           ? 1
@@ -416,11 +389,13 @@ export async function runHeadlessCaptainCommand(
             : 0;
       }
       if (rest[0] === "refresh-tools") {
-        const result = await runWorkerToolRefreshCommand(rest, options);
+        const result = await (
+          await import("../src/command/harness.ts")
+        ).runWorkerToolRefreshCommand(rest, options);
         outputJson(stdout, result);
         return result.seats.some((seat) => seat.outcome === "failed") ? 1 : 0;
       }
-      const result = await runHarnessCommand(rest, options);
+      const result = await (await import("../src/command/harness.ts")).runHarnessCommand(rest, options);
       outputJson(stdout, result);
       return !Array.isArray(result) && result.ok === false ? 1 : 0;
     }
@@ -428,24 +403,26 @@ export async function runHeadlessCaptainCommand(
       outputJson(
         stdout,
         await (["list", "settings", "update", "create", "membership"].includes(rest[0] ?? "")
-          ? runProjectSettingsCommand(rest, options)
-          : runProjectCommand(rest, options)),
+          ? (await import("../src/command/project-settings.ts")).runProjectSettingsCommand(rest, options)
+          : (await import("../src/command/project.ts")).runProjectCommand(rest, options)),
       );
       return 0;
     }
     if (command === "access") {
-      outputJson(stdout, await runAccessCommand(rest, options));
+      outputJson(stdout, await (await import("../src/command/access.ts")).runAccessCommand(rest, options));
       return 0;
     }
     if (command === "fleet") {
       if (rest[0] === "processes") {
-        outputJson(stdout, await runAgentsCommand(rest, options));
+        outputJson(stdout, await (await import("../src/command/agents.ts")).runAgentsCommand(rest, options));
         return 0;
       }
       if (rest[0] === "simulator") {
         outputJson(
           stdout,
-          await runSimulatorCommand(rest.slice(1), {
+          await (
+            await import("../src/command/fleet-resources.ts")
+          ).runSimulatorCommand(rest.slice(1), {
             ...options,
             progress: (line) => stderr.write(`${line}\n`),
           }),
@@ -453,22 +430,27 @@ export async function runHeadlessCaptainCommand(
         return 0;
       }
       if (rest.length === 1 && rest[0] === "resources") {
-        outputJson(stdout, await runResourceStatusCommand(options));
+        outputJson(
+          stdout,
+          await (await import("../src/command/fleet-resources.ts")).runResourceStatusCommand(options),
+        );
         return 0;
       }
-      const result = await runFleetCommand(rest, options);
+      const result = await (await import("../src/command/fleet.ts")).runFleetCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }
     if (command === "simulator") {
       outputJson(
         stdout,
-        await runSimulatorCommand(rest, { ...options, progress: (line) => stderr.write(`${line}\n`) }),
+        await (
+          await import("../src/command/fleet-resources.ts")
+        ).runSimulatorCommand(rest, { ...options, progress: (line) => stderr.write(`${line}\n`) }),
       );
       return 0;
     }
     if (command === "herdr") {
-      if (!rest.length) return await openHerdr(options);
+      if (!rest.length) return await (await import("../src/session/herdr-connection.ts")).openHerdr(options);
       if (rest[0] === "help" || rest[0] === "--help") {
         stdout.write(
           "clankie herdr: open | status [--json] | use NAME | create | disable | fleets | add | remove | prepare\n",
@@ -476,20 +458,33 @@ export async function runHeadlessCaptainCommand(
         return 0;
       }
       if (rest[0] === "status") {
-        const inventory = MachineInventorySchema.parse(await runMachinesCommand([], options));
+        const inventory = (await import("@clankie/protocol")).MachineInventorySchema.parse(
+          await (await import("../src/command/machines.ts")).runMachinesCommand([], options),
+        );
         if (rest.includes("--json"))
-          outputJson(stdout, { ...(await runHerdrCommand(["status"], options)), ...inventory });
-        else stdout.write(`${formatMachines(inventory)}\n`);
+          outputJson(stdout, {
+            ...(await (await import("../src/command/herdr.ts")).runHerdrCommand(["status"], options)),
+            ...inventory,
+          });
+        else stdout.write(`${(await import("../src/command/machines.ts")).formatMachines(inventory)}\n`);
         return 0;
       }
       if (rest[0] === "fleets") {
-        const result = await runMachinesCommand(rest.includes("--json") ? ["--json"] : [], options);
+        const result = await (
+          await import("../src/command/machines.ts")
+        ).runMachinesCommand(rest.includes("--json") ? ["--json"] : [], options);
         if (rest.includes("--json")) outputJson(stdout, result);
-        else stdout.write(`${formatMachines(MachineInventorySchema.parse(result))}\n`);
+        else
+          stdout.write(
+            `${(await import("../src/command/machines.ts")).formatMachines((await import("@clankie/protocol")).MachineInventorySchema.parse(result))}\n`,
+          );
         return 0;
       }
       if (rest[0] === "remove" || (rest[0] === "add" && !rest.includes("--session"))) {
-        outputJson(stdout, await runMachinesCommand(rest, options));
+        outputJson(
+          stdout,
+          await (await import("../src/command/machines.ts")).runMachinesCommand(rest, options),
+        );
         return 0;
       }
       if (rest[0] === "--connection") {
@@ -498,72 +493,96 @@ export async function runHeadlessCaptainCommand(
           throw new Error("Select a runtime connection ID");
         const target = { ...options, connectionId };
         const args = rest.slice(2);
-        if (args.length === 1 && args[0] === "open") return await openHerdr(target);
+        if (args.length === 1 && args[0] === "open")
+          return await (await import("../src/session/herdr-connection.ts")).openHerdr(target);
         if (!args.length) throw new Error("Supply a Herdr command or open");
-        return await runFleetHerdr(args, target);
+        return await (await import("../src/session/herdr-connection.ts")).runFleetHerdr(args, target);
       }
-      if (rest.length === 1 && rest[0] === "open") return await openHerdr(options);
-      const fleetArgs = herdrFleetRuntimeArgs(rest);
+      if (rest.length === 1 && rest[0] === "open")
+        return await (await import("../src/session/herdr-connection.ts")).openHerdr(options);
+      const fleetArgs = (await import("../src/command/herdr.ts")).herdrFleetRuntimeArgs(rest);
       if (fleetArgs !== undefined) {
         outputJson(stdout, {
-          ...(await runRuntimeCommand(fleetArgs, options)),
-          hint: MACHINE_RESTART_HINT,
+          ...(await (await import("../src/command/runtime.ts")).runRuntimeCommand(fleetArgs, options)),
+          hint: (await import("../src/command/machines.ts")).MACHINE_RESTART_HINT,
         });
         return 0;
       }
-      if (forwardsToFleetHerdr(rest)) return await runFleetHerdr(rest, options);
-      const result = await runHerdrCommand(rest, options);
+      if ((await import("../src/command/herdr.ts")).forwardsToFleetHerdr(rest))
+        return await (await import("../src/session/herdr-connection.ts")).runFleetHerdr(rest, options);
+      const result = await (await import("../src/command/herdr.ts")).runHerdrCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }
     if (command === "workdir") {
-      const result = await runWorkdirCommand(rest, options);
+      const result = await (await import("../src/command/workdir.ts")).runWorkdirCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }
     if (command === "stance") {
-      return await runStanceCommand(rest, { ...options, stdout });
+      return await (await import("../src/command/stance.ts")).runStanceCommand(rest, { ...options, stdout });
     }
     if (command === "work-on") {
-      return await runWorkOnCommand(rest, { ...options, stdout });
+      return await (await import("../src/command/work-on.ts")).runWorkOnCommand(rest, { ...options, stdout });
     }
-    if (command === "hire-receipt") return await runHireReceiptCommand(rest, { ...options, stdout });
-    if (command === "seat-delivery") return await runSeatDeliveryCommand(rest, { ...options, stdout });
+    if (command === "hire-receipt")
+      return await (
+        await import("../src/command/hire-receipt.ts")
+      ).runHireReceiptCommand(rest, { ...options, stdout });
+    if (command === "seat-delivery")
+      return await (
+        await import("../src/command/seat-delivery.ts")
+      ).runSeatDeliveryCommand(rest, { ...options, stdout });
     // Prompt and memory card print the words themselves, not a JSON envelope:
     // the consumer is another harness's system prompt or a per-turn hook.
     if (command === "prompt") {
-      return await runPromptCommand(rest, { ...options, stdout });
+      return await (await import("../src/command/prompt.ts")).runPromptCommand(rest, { ...options, stdout });
     }
-    if (command === "reset") return await runResetCommand(rest, options);
+    if (command === "reset")
+      return await (await import("../src/command/reset.ts")).runResetCommand(rest, options);
     if (command === "conversations" || command === "conversation")
-      return await runConversationsCommand(rest, options);
-    if (command === "send") return await runSendCommand(rest, { ...options, stdout });
-    if (command === "file") return await runFileCommand(rest, { ...options, stdout });
+      return await (await import("../src/command/conversations.ts")).runConversationsCommand(rest, options);
+    if (command === "send")
+      return await (await import("../src/command/send.ts")).runSendCommand(rest, { ...options, stdout });
+    if (command === "file")
+      return await (await import("../src/command/file.ts")).runFileCommand(rest, { ...options, stdout });
     if (command === "memory-card") {
-      return await runMemoryCardCommand(rest, { ...options, stdout });
+      return await (
+        await import("../src/command/memory-card.ts")
+      ).runMemoryCardCommand(rest, { ...options, stdout });
     }
     if (command === "memory") {
-      const result = await runMemoryCommand(rest, options);
+      const result = await (await import("../src/command/memory.ts")).runMemoryCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     if (command === "evaluator") {
-      const result = await runEvaluatorCommand(rest, options);
+      const result = await (await import("../src/command/evaluator.ts")).runEvaluatorCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
-    if (command === "telemetry") return await runTelemetryCommand(rest, { stdout, stderr });
+    if (command === "telemetry")
+      return await (
+        await import("../src/command/telemetry.ts")
+      ).runTelemetryCommand(rest, { stdout, stderr });
     if (command === "metrics") {
-      const result = await runMetricsCommand(rest, options);
+      const result = await (await import("../src/command/metrics.ts")).runMetricsCommand(rest, options);
       outputJson(stdout, result);
       return result.ok ? 0 : 1;
     }
     // The seat: Claude Code as Clankie (ADR 0152). `mcp` is its stdio side and
     // speaks JSON-RPC on stdout, so it never goes through outputJson.
-    if (command === "seat-sync") return await runSeatSyncCommand(rest, options);
-    if (command === "seat-hook") return await runSeatHookCommand(rest, options);
-    if (command === "seat" || operatorHarness(command) !== undefined) {
-      return await runSeatCommand(rest, {
+    if (command === "seat-sync")
+      return await (await import("../src/command/seat-sync.ts")).runSeatSyncCommand(rest, options);
+    if (command === "seat-hook")
+      return await (await import("../src/command/seat-hook.ts")).runSeatHookCommand(rest, options);
+    if (
+      command === "seat" ||
+      (await import("../src/command/harness-command.ts")).operatorHarness(command) !== undefined
+    ) {
+      return await (
+        await import("../src/command/seat.ts")
+      ).runSeatCommand(rest, {
         ...(command === "seat" ? {} : { harnessCommand: command }),
         repoRoot: options.repoRoot,
         ...(options.env === undefined ? {} : { env: options.env }),
@@ -578,10 +597,10 @@ export async function runHeadlessCaptainCommand(
       });
     }
     if (command === "mcp") {
-      return await runMcpCommand(rest, { ...options, stderr });
+      return await (await import("../src/command/mcp.ts")).runMcpCommand(rest, { ...options, stderr });
     }
     if (command === "discord") {
-      const result = await runDiscordCommand(rest, options);
+      const result = await (await import("../src/command/discord.ts")).runDiscordCommand(rest, options);
       outputJson(stdout, result);
       return 0;
     }

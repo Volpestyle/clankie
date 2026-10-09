@@ -1,6 +1,5 @@
 import { access } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { connectHostedCli } from "../src/command/hosted.ts";
 // The `clankie` command exposes non-interactive controls or attaches the
 // fullscreen face to the one healthy clankie service.
 import { resolve } from "node:path";
@@ -106,7 +105,7 @@ async function runOperatorConsole(): Promise<void> {
     if (choice.trim() === "2") {
       // A sign-in the owner can fix is a message, not a crash with a stack trace.
       try {
-        await connectHostedCli(["hosted"]);
+        await (await import("../src/command/hosted.ts")).connectHostedCli(["hosted"]);
       } catch (error) {
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
         process.exitCode = 1;
