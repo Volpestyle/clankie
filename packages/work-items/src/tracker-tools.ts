@@ -15,6 +15,48 @@ export interface TrackerToolCallOptions {
   readonly beforeWrite?: () => void | Promise<void>;
   readonly onDispatch?: () => void;
   readonly effectConfirmed?: () => void;
+  /**
+   * Who is writing, stamped by the host from an authenticated Clankie identity.
+   * Never derived from tool arguments. The built-in tracker records it on every
+   * write; other backends ignore it (ADR 0226 amendment, VUH-1916).
+   */
+  readonly actor?: TrackerActor;
+}
+
+/** human: the owner; agent-worker: Clankie or a hired worker; app: an enrolled device. */
+export type TrackerActorType = "human" | "agent-worker" | "app";
+export interface TrackerActorRef {
+  readonly type: TrackerActorType;
+  readonly id: string;
+  readonly name?: string;
+}
+export interface TrackerActor extends TrackerActorRef {
+  /** The model that produced the write, when the host knows it. */
+  readonly model?: string;
+  /** Outermost principal first (owner, then lead); empty when the actor acts for itself. */
+  readonly onBehalfOf: readonly TrackerActorRef[];
+}
+
+/** The machine owner and Clankie as they appear in on-behalf-of chains. */
+export const TRACKER_OWNER: TrackerActorRef = { type: "human", id: "owner", name: "Owner" };
+export const TRACKER_LEAD: TrackerActorRef = { type: "agent-worker", id: "clankie", name: "Clankie" };
+
+/** Built-in tracker only: write receipts, the audit log and preconditions. */
+export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
+  "get_write_receipt",
+  "list_audit_events",
+]);
+const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt"] as const;
+
+/** Other backends fail explicitly instead of silently dropping exactly-once or precondition input. */
+export function refuseBuiltInTrackerFeatures(name: string, args: Record<string, unknown>): void {
+  if (BUILT_IN_TRACKER_TOOLS.has(name))
+    throw new Error(`${name} is available only on Clankie's built-in tracker`);
+  const used = BUILT_IN_ARGUMENTS.filter((key) => args[key] !== undefined);
+  if (used.length > 0)
+    throw new Error(
+      `${used.join(" and ")} ${used.length === 1 ? "is" : "are"} supported only by Clankie's built-in tracker`,
+    );
 }
 
 const string = { type: "string" };
@@ -36,6 +78,21 @@ const pagination = {
 function object(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
   return { type: "object", properties, required, additionalProperties: false };
 }
+
+const idempotencyKey = {
+  type: "string",
+  minLength: 8,
+  maxLength: 128,
+  description:
+    "Built-in tracker only. A key you choose for this write, unique per intended change. A retry with the same key and arguments returns the original result instead of writing twice; read get_write_receipt with it when a result was lost.",
+};
+const ifUpdatedAt = {
+  type: "string",
+  minLength: 1,
+  description:
+    "Built-in tracker only, updates only. The updatedAt you last read; the write is refused, changing nothing, if the record changed since.",
+};
+const writeControls = { idempotencyKey, ifUpdatedAt };
 
 const patch = {
   type: "array",
@@ -158,6 +215,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       dueDate: nullableString,
       estimate: { type: ["number", "null"] },
       links,
+      ...writeControls,
     },
   ),
   tool(
@@ -168,13 +226,13 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   tool(
     "save_comment",
     "Create or edit a comment. On create provide exactly one issueId/projectId/statusUpdateId; a reply uses parentId and inherits its target. On edit provide id. body replaces the current body.",
-    { id: string, ...commentTargets, parentId: string, body: string },
+    { id: string, ...commentTargets, parentId: string, body: string, ...writeControls },
     ["body"],
   ),
   tool(
     "create_comment",
     "Create a comment or reply (compatibility alias for save_comment).",
-    { ...commentTargets, parentId: string, body: string },
+    { ...commentTargets, parentId: string, body: string, idempotencyKey },
     ["body"],
   ),
   tool(
@@ -226,6 +284,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       startDate: string,
       targetDate: string,
       links,
+      ...writeControls,
     },
   ),
   tool(
@@ -253,6 +312,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       body: string,
       health: { type: "string", enum: ["onTrack", "atRisk", "offTrack"] },
       isDiffHidden: boolean,
+      ...writeControls,
     },
     ["type"],
   ),
@@ -288,6 +348,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       teamId: string,
       parent: string,
       isGroup: boolean,
+      ...writeControls,
     },
   ),
   tool(
@@ -300,6 +361,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       teamId: string,
       parent: string,
       isGroup: boolean,
+      idempotencyKey,
     },
     ["name"],
   ),
@@ -307,6 +369,17 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     "list_initiatives",
     "List Linear initiatives (goals). includeProjects carries native project progress; the local subset has no goals.",
     { ...pagination, query: string, includeProjects: boolean, includeArchived: boolean, fields: strings },
+  ),
+  tool(
+    "get_write_receipt",
+    "Built-in tracker only. Look up a write you sent with idempotencyKey: applied (with its original result), refused (with the reason), or unknown (nothing was applied or refused under that key from you, so sending it again is safe).",
+    { idempotencyKey: { ...idempotencyKey, description: "The key the write was sent with." } },
+    ["idempotencyKey"],
+  ),
+  tool(
+    "list_audit_events",
+    "Built-in tracker only. The append-only audit log, newest first: every applied or refused write with its actor, on-behalf-of chain, model and the records it touched.",
+    { limit: pagination.limit, cursor: string, entityId: string },
   ),
   tool(
     "list_milestones",

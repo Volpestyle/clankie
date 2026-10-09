@@ -208,3 +208,14 @@ the recorded convention with `backend_unavailable`; report them to your lead.
 Do not create another queue to compensate for an uncertain write. Explicit
 export/import identity mapping is designed in ADR 0226; migration is not yet
 implemented.
+
+On the built-in (local) tracker, send writes with an `idempotencyKey` you choose,
+unique per intended change. Retrying with the same key and arguments returns the
+original result instead of writing twice; after a lost reply, read
+`linear_get_write_receipt` with that key: `applied`, `refused` or `unknown`
+(safe to send again). Pass the `updatedAt` you read as `ifUpdatedAt` on updates
+so a concurrent change is refused (`precondition_failed`) rather than
+overwritten. Records show who wrote them (`createdByActor`, `updatedByActor`,
+with the on-behalf-of chain); `linear_list_audit_events` reads the append-only
+history. You never name yourself: the host stamps your identity. Other backends
+refuse these arguments explicitly.

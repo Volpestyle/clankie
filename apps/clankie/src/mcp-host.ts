@@ -77,7 +77,14 @@ import {
 } from "./linear-graphql.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
-import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
+import {
+  refuseBuiltInTrackerFeatures,
+  TRACKER_LEAD,
+  TRACKER_OWNER,
+  TRACKER_TOOLS,
+  type TrackerActor,
+  type TrackerToolBackend,
+} from "@clankie/work-items";
 import { createPrioritySortedLinearIssueReader, callCachedLinearCollection } from "./tracker-tool-router.ts";
 import {
   currentLinearRequestPriority,
@@ -239,6 +246,8 @@ export interface McpHost {
     readonly fence?: () => Promise<void | (() => void)>;
     /** Host-stamped turn attribution; it grants no provider tools. */
     readonly conversationAuthority?: ConversationAuthority;
+    /** Host-stamped model of the calling turn, recorded by the built-in tracker; never a tool argument. */
+    readonly model?: string;
     /** Host-only socket/controller proof for native author attribution; never a grant. */
     readonly nativeWriteProof?: (signal?: AbortSignal) => Promise<ProjectProcessProof | undefined>;
     /** Internal receipt hooks; never caller/model arguments. */
@@ -321,10 +330,14 @@ export interface McpHostOptions {
     lane: CaptainSessionLaneV2;
     /** Only the native owner operator, never a delegated worker, may enroll paths. */
     local: boolean;
+    /** Host-authenticated writer the built-in tracker records. */
+    actor: TrackerActor;
     beforeWrite(): Promise<void>;
     onDispatch(): void;
     effectConfirmed(): void;
   }) => Promise<unknown>;
+  /** Display name for a delegated worker principal (its hired seat); never from tool arguments. */
+  readonly trackerWorkerName?: (principalId: string) => string | undefined;
   /** Shipped lazy motor, reserved for the service's MinecraftPort rather than raw catalogs. */
   readonly minecraftMotor?: {
     readonly command: string;
@@ -1180,6 +1193,42 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             detail: "Repository tracker access requires operator tools and a registered repository.",
           };
         }
+        // Connected Linear MCP has no receipts or preconditions; never forward or drop them silently.
+        if (
+          server.id === "linear" &&
+          !repositoryCall &&
+          !graphqlCall &&
+          !isLocalTracker(server) &&
+          !isApiTracker(server)
+        ) {
+          try {
+            refuseBuiltInTrackerFeatures(input.tool, input.arguments);
+          } catch (error) {
+            return {
+              outcome: "refused",
+              reason: "invalid_arguments",
+              possiblyDispatched: false,
+              detail: (error as Error).message,
+            };
+          }
+        }
+        // Who writes: an authenticated host identity, never tool arguments (VUH-1916).
+        const workerName = input.delegation
+          ? options.trackerWorkerName?.(input.delegation.principalId)
+          : undefined;
+        const trackerActor: TrackerActor = input.delegation
+          ? {
+              type: "agent-worker",
+              id: input.delegation.principalId,
+              ...(workerName === undefined ? {} : { name: workerName }),
+              onBehalfOf: [TRACKER_OWNER, TRACKER_LEAD],
+            }
+          : {
+              ...TRACKER_LEAD,
+              ...(input.model === undefined ? {} : { model: input.model }),
+              // Operator tools act for the owner; a social room is Clankie's own act.
+              onBehalfOf: input.lane === "operator" ? [TRACKER_OWNER] : [],
+            };
         let state: ServerState | undefined;
         let confirmed = false;
 
@@ -1298,6 +1347,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             }
           };
           const publication = {
+            actor: trackerActor,
             beforeWrite: async () => {
               try {
                 await refreshAttribution();

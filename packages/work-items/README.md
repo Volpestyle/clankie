@@ -33,6 +33,12 @@ failures retain their errors and never replay locally. `clankie doctor` reports
 selection and reason. Repository adapters keep GitHub/Markdown issue storage
 and carry ancillary records in durable local metadata within that scope.
 
+The local store also records the host-stamped actor (`TrackerToolCallOptions.actor`)
+on every write, keeps per-actor `idempotencyKey` receipts and a hash-chained
+audit log in the same atomic replacement as the effect, and refuses stale
+`ifUpdatedAt` updates. `get_write_receipt` and `list_audit_events` read them.
+Other backends refuse these inputs explicitly (ADR 0226 amendment, VUH-1916).
+
 Hosted registered OAuth selects the service's in-process GraphQL adapter with
 broker entry `linear-api` ([ADR 0232](../../docs/adr/0232-hosted-connections-use-the-body-broker.md)).
 It retains account/repository/fleet fences and mutation receipts, and never

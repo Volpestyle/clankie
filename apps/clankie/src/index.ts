@@ -686,8 +686,15 @@ const mcpHost = createMcpHost({
   localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
-  trackerForRepo: ({ name, args, repo, local, beforeWrite, onDispatch, effectConfirmed }) =>
-    workItems.callTracker(name, args, { repo, local, beforeWrite, onDispatch, effectConfirmed }),
+  trackerForRepo: ({ name, args, repo, local, actor, beforeWrite, onDispatch, effectConfirmed }) =>
+    workItems.callTracker(name, args, { repo, local, actor, beforeWrite, onDispatch, effectConfirmed }),
+  // A fleet worker is named by the seat it was hired into, as the host recorded it.
+  trackerWorkerName: (principalId) => {
+    const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
+    if (!match || match[2] === "unverified") return undefined;
+    const candidate = captain.projectHireMembershipCandidate(match[1]!, match[2]!);
+    return candidate.state === "confirmed" ? candidate.seat : undefined;
+  },
   minecraftMotor: {
     command: process.execPath,
     args: [

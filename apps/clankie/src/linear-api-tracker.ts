@@ -8,6 +8,7 @@ import {
 import {
   TRACKER_TOOLS,
   applyTrackerDescriptionPatch,
+  refuseBuiltInTrackerFeatures,
   validateTrackerToolArgs,
   type TrackerToolBackend,
   type TrackerToolCallOptions,
@@ -346,6 +347,7 @@ export function createLinearApiTracker(options: {
     publication: TrackerToolCallOptions = {},
   ): Promise<unknown> => {
     validateTrackerToolArgs(name, args);
+    refuseBuiltInTrackerFeatures(name, args);
     if (name === "get_issue") {
       unsupported(args, ["includeCustomerNeeds", "includeReleases"]);
       const issue = await one(

@@ -9,6 +9,9 @@ A proposed
 [ADR 0181 amendment](0181-clankie-is-independent-of-his-connections.md#amendment-the-built-in-tracker-is-the-default-2026-10-09-vuh-1904)
 (VUH-1904) grows the built-in default tracker from the durable local backend and
 makes Linear an optional connection; these tools stay the agent vocabulary.
+A proposed [amendment](#amendment-actors-receipts-and-audit-2026-10-09-vuh-1916)
+(VUH-1916) adds actors, exactly-once writes, preconditions and an audit log to
+the built-in tracker.
 
 ## Context
 
@@ -88,3 +91,65 @@ Each mutation records intent and its provider receipt before continuing. A
 rerun reconciles the mapping and uncertain receipts instead of duplicating
 records; unmapped labels or states require a decision. Export/import execution
 and automatic synchronization are outside this change.
+
+## Amendment: actors, receipts and audit (2026-10-09, VUH-1916)
+
+Status: proposed. Tracks [VUH-1916](https://linear.app/vuhlp/issue/VUH-1916).
+Applies to the built-in tracker (the durable local backend); connected Linear,
+the Linear API tracker and the GitHub/Markdown adapters are unchanged.
+
+**Actors.** Every write records who made it. The host stamps the actor from an
+authenticated Clankie identity and passes it beside the call, never in tool
+arguments. There are three types: `human` (the owner), `agent-worker` (Clankie
+himself or a hired worker) and `app` (an enrolled device). Each actor carries
+its on-behalf-of chain, outermost first, and the model when the host knows it.
+
+| Caller                                   | Actor                                | Chain           |
+| ---------------------------------------- | ------------------------------------ | --------------- |
+| Fleet or granted worker (`clankie_call`) | `agent-worker`, its grant principal  | owner → Clankie |
+| Clankie's operator tools                 | `agent-worker` `clankie`, turn model | owner           |
+| Clankie in a social room                 | `agent-worker` `clankie`, turn model | none            |
+| Owner write from the operator console    | `human` `owner`                      | none            |
+| Owner write from an app device           | `app` `device:<id>`                  | owner           |
+| Standalone use with no host              | the store's visibly local user       | none            |
+
+A fleet worker is named by the seat its hire recorded. The records it creates
+or changes carry `createdByActor` and `updatedByActor`; existing Linear-shaped
+fields such as `author` and `createdBy` keep their meaning.
+
+**Exactly-once writes.** Write tools accept an optional `idempotencyKey`. The
+store keeps one receipt per (actor, key): the request fingerprint, `applied` or
+`refused`, and the original result or reason. Receipts are committed in the same
+atomic replacement as the effect, so a crash leaves both or neither. A retry
+with the same key and arguments returns the original result without writing
+again. The same key with different arguments is refused (`idempotency_conflict`).
+`get_write_receipt` answers `applied`, `refused` or `unknown`. `unknown` means
+nothing was applied or refused under that key by that actor, so sending again is
+safe. This is the evidence store's receipt pattern
+([ADR 0258](0258-evidence-lives-in-the-evidence-store.md)) applied to the tracker.
+The worker channel's own call receipts stay a transport journal above it.
+
+**Patch-safe updates.** Field and label deltas already exist (omitted fields are
+unchanged; `addLabels`/`removeLabels`; description `patch`). Updates now accept
+`ifUpdatedAt`. A record changed since then is refused with
+`precondition_failed`, and nothing changes. Each write gets a strictly
+increasing timestamp, so `updatedAt` works as a version even under a coarse or
+fixed clock.
+
+**Audit log.** Every applied or refused write appends an event with its tool,
+actor, key, field names (not values), touched records or target, and refusal
+reason. Events are hash-chained. The store refuses to open, and so to extend, a
+log whose entries were edited, removed or reordered. `list_audit_events` reads
+it newest first, optionally for one record.
+
+**Where it lives.** Receipts and the audit log live inside the store file
+(`tracker.json`), beside the records they describe, so one atomic replacement
+covers effect, receipt and audit. Both grow without bound until a retention
+decision. The hosted Postgres backend replaces this layout without changing the
+tools.
+
+**Other backends.** `idempotencyKey`, `ifUpdatedAt`, `get_write_receipt` and
+`list_audit_events` fail explicitly on every other backend rather than being
+dropped. `linear-writes.json` and `linear-attribution.json` already record only
+connected-Linear activity; the built-in tracker never needed them, and they stay
+unchanged for connected Linear.

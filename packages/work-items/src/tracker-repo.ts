@@ -14,6 +14,7 @@ import { createLocalTracker } from "./tracker-local.ts";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 import {
   applyTrackerDescriptionPatch,
+  refuseBuiltInTrackerFeatures,
   TRACKER_TOOLS,
   validateTrackerToolArgs,
   type TrackerToolBackend,
@@ -170,6 +171,7 @@ export function createRepoTracker(
     assertHeld?: () => void,
   ): Promise<unknown> => {
     validateTrackerToolArgs(name, args);
+    refuseBuiltInTrackerFeatures(name, args);
     switch (name) {
       case "list_issue_statuses":
         return Object.entries(STATES).map(([id, state]) => ({ id, ...state }));

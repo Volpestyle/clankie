@@ -2006,13 +2006,15 @@ export function mcpExtension(
           description: tool.description,
           parameters: tool.inputSchema as TSchema,
           executionMode: "sequential",
-          execute: async (_id, params) => {
+          execute: async (_id, params, _signal, _update, context) => {
             const result = await deps.mcp.call({
               lane,
               server: tool.server,
               tool: tool.name,
               arguments: (params ?? {}) as Record<string, unknown>,
               ...(turn?.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
+              // The session's own model, for tracker provenance; the model cannot set it.
+              ...(context?.model ? { model: `${context.model.provider}/${context.model.id}` } : {}),
             });
             // A server's own error is the model's to react to, so it is raised
             // rather than returned as a successful-looking payload.

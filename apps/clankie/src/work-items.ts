@@ -35,6 +35,7 @@ import {
   type LinearToolCall,
   type TrackerDeps,
   type TrackerToolCallOptions,
+  TRACKER_OWNER,
 } from "@clankie/work-items";
 import type { McpHost } from "./mcp-host.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
@@ -529,6 +530,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         const writeDeps: { -readonly [K in keyof TrackerDeps]: TrackerDeps[K] } = {
           ...dependencies,
           scopedWrites: true,
+          // The authenticated principal: the owner at the operator console, or an enrolled app device.
+          actor:
+            authority.principal.kind === "device"
+              ? { type: "app", id: `device:${authority.principal.id}`, onBehalfOf: [TRACKER_OWNER] }
+              : { ...TRACKER_OWNER, onBehalfOf: [] },
           beforeWrite: async () => {
             await free?.guard();
             beforeWrite();

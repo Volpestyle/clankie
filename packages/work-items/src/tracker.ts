@@ -12,7 +12,12 @@ import {
 import { WorkItemScopeError } from "./backend.ts";
 import { createLocalTracker } from "./tracker-local.ts";
 import { createRepoTracker } from "./tracker-repo.ts";
-import { TRACKER_TOOLS, type TrackerToolBackend } from "./tracker-tools.ts";
+import {
+  refuseBuiltInTrackerFeatures,
+  TRACKER_TOOLS,
+  type TrackerActor,
+  type TrackerToolBackend,
+} from "./tracker-tools.ts";
 import {
   DEFAULT_WORK_DIRECTORY,
   discoverConvention,
@@ -32,6 +37,8 @@ export interface TrackerDeps extends WorkWriteCallbacks {
   readonly scopedWrites?: boolean;
   /** Ancillary repo state belongs in service state, or ignored `.local/` for standalone use. */
   readonly trackerDirectory?: string;
+  /** Host-authenticated writer, recorded by the built-in tracker; never from tool arguments. */
+  readonly actor?: TrackerActor;
 }
 
 /** Raised instead of guessing: the owner has to answer once (ADR 0191). */
@@ -81,6 +88,7 @@ function nativeBackendFor(root: string, convention: WorkConvention, deps: Tracke
     ...(deps.onDispatch === undefined ? {} : { onDispatch: deps.onDispatch }),
     ...(deps.effectConfirmed === undefined ? {} : { effectConfirmed: deps.effectConfirmed }),
     ...(deps.scopedWrites === undefined ? {} : { scopedWrites: deps.scopedWrites }),
+    ...(deps.actor === undefined ? {} : { actor: deps.actor }),
   };
   switch (convention.backend) {
     case "default":
@@ -139,6 +147,7 @@ export function trackerToolsFor(
     return {
       catalog: () => TRACKER_TOOLS,
       async call(name, args, callbacks) {
+        if (local === undefined) refuseBuiltInTrackerFeatures(name, args);
         const scoped =
           name === "list_issues" ||
           name === "search_issues" ||

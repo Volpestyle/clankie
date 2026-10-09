@@ -6,6 +6,7 @@ import {
   applyTrackerDescriptionPatch,
   TRACKER_TOOLS,
   validateTrackerToolArgs,
+  type TrackerActor,
   type TrackerToolBackend,
   type TrackerToolCallOptions,
 } from "./tracker-tools.ts";
@@ -14,6 +15,50 @@ interface Entity {
   id: string;
   createdAt: string;
   updatedAt: string;
+  /** Host-authenticated writers (VUH-1916); absent on records written before actors. */
+  createdByActor?: TrackerActor;
+  updatedByActor?: TrackerActor;
+}
+
+/** One idempotency key's settled outcome, committed in the same replacement as its effect. */
+interface WriteReceipt {
+  actorKey: string;
+  idempotencyKey: string;
+  tool: string;
+  fingerprint: string;
+  state: "applied" | "refused";
+  at: string;
+  result?: unknown;
+  reason?: string;
+  detail?: string;
+}
+
+/** Append-only: entries are never edited or removed, and each hashes its predecessor. */
+interface AuditEvent {
+  id: string;
+  seq: number;
+  at: string;
+  tool: string;
+  outcome: "applied" | "refused";
+  actor: TrackerActor;
+  idempotencyKey?: string;
+  fields: string[];
+  entities: { type: string; id: string; identifier?: string }[];
+  target?: string;
+  reason?: string;
+  detail?: string;
+  prevHash: string;
+  hash: string;
+}
+
+/** A write the tracker declined. Nothing changed; a keyed retry returns the same refusal. */
+export class TrackerWriteRefused extends Error {
+  readonly reason: string;
+  constructor(reason: string, detail: string) {
+    super(`Write refused (${reason}): ${detail}`);
+    this.name = "TrackerWriteRefused";
+    this.reason = reason;
+  }
 }
 interface Team {
   id: string;
@@ -108,6 +153,11 @@ interface Store {
   projects: Project[];
   comments: Comment[];
   statusUpdates: StatusUpdate[];
+  /** Absent in stores written before VUH-1916; created on their next write. */
+  receipts?: WriteReceipt[];
+  audit?: AuditEvent[];
+  /** Strictly increasing write time, so updatedAt is a usable precondition. */
+  lastWriteAt?: string;
 }
 
 export interface LocalTrackerOptions {
@@ -254,7 +304,114 @@ function parseStore(content: string): Store {
   }
   if (store.issueStatuses.length === 0 || store.projectStatuses.length === 0)
     throw new Error("Local tracker statuses are missing");
+  if (store.receipts !== undefined && !Array.isArray(store.receipts))
+    throw new Error("Invalid local tracker write receipts");
+  if (store.audit !== undefined) {
+    if (!Array.isArray(store.audit)) throw new Error("Invalid local tracker audit log");
+    // An edited, removed or reordered entry breaks the chain; refuse rather than extend it.
+    let previous = "";
+    store.audit.forEach((event, index) => {
+      if (event?.seq !== index + 1 || event.prevHash !== previous || auditHash(event) !== event.hash)
+        throw new Error(`Local tracker audit log is not intact at entry ${String(index + 1)}`);
+      previous = event.hash;
+    });
+  }
   return store;
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object")
+    return `{${Object.keys(value)
+      .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
+      .join(",")}}`;
+  return JSON.stringify(value);
+}
+function auditHash(event: Omit<AuditEvent, "hash"> & { hash?: string }): string {
+  return createHash("sha256")
+    .update(canonical({ ...event, hash: undefined }))
+    .digest("hex");
+}
+const actorKey = (actor: TrackerActor) => `${actor.type}:${actor.id}`;
+/** Callers without a host (standalone CLI use) write as the store's visibly local owner. */
+const localActor = (store: Store): TrackerActor => ({
+  type: "human",
+  id: store.user.id,
+  name: store.user.name,
+  onBehalfOf: [],
+});
+
+/** Every write gets a distinct, increasing timestamp, even under a fixed or coarse clock. */
+function nextWriteTime(store: Store, clock: string): string {
+  let last = store.lastWriteAt;
+  if (last === undefined)
+    for (const entry of [
+      ...store.labels,
+      ...store.issues,
+      ...store.projects,
+      ...store.comments,
+      ...store.statusUpdates,
+    ])
+      if (last === undefined || entry.updatedAt > last) last = entry.updatedAt;
+  const now = last === undefined || clock > last ? clock : new Date(Date.parse(last) + 1).toISOString();
+  store.lastWriteAt = now;
+  return now;
+}
+
+const ENTITY_TYPES = [
+  ["issues", "issue"],
+  ["projects", "project"],
+  ["comments", "comment"],
+  ["statusUpdates", "status_update"],
+  ["labels", "label"],
+] as const;
+
+/** The write's unique timestamp identifies exactly the records it created or changed. */
+function stampActor(store: Store, actor: TrackerActor, now: string): AuditEvent["entities"] {
+  const touched: AuditEvent["entities"] = [];
+  for (const [collection, type] of ENTITY_TYPES)
+    for (const entry of store[collection] as (Entity & { identifier?: string })[]) {
+      if (entry.updatedAt !== now) continue;
+      if (entry.createdAt === now) entry.createdByActor = actor;
+      entry.updatedByActor = actor;
+      touched.push({
+        type,
+        id: entry.id,
+        ...(entry.identifier === undefined ? {} : { identifier: entry.identifier }),
+      });
+    }
+  return touched;
+}
+
+function appendAudit(store: Store, event: Omit<AuditEvent, "id" | "seq" | "prevHash" | "hash">): void {
+  store.audit ??= [];
+  const body = {
+    id: randomUUID(),
+    seq: store.audit.length + 1,
+    ...event,
+    prevHash: store.audit.at(-1)?.hash ?? "",
+  };
+  store.audit.push({ ...body, hash: auditHash(body) });
+}
+
+function auditTarget(args: Record<string, unknown>): string | undefined {
+  for (const key of ["id", "issueId", "parentId", "projectId", "statusUpdateId", "project"])
+    if (typeof args[key] === "string") return args[key] as string;
+  return undefined;
+}
+
+/** Precondition on the record as currently stored; checked before any field changes. */
+function refuseCreatePrecondition(args: Record<string, unknown>): void {
+  if (args.ifUpdatedAt !== undefined) throw new Error("ifUpdatedAt is only valid when updating a record");
+}
+function assertUnchangedSince(entity: Entity, args: Record<string, unknown>): void {
+  if (args.ifUpdatedAt !== undefined && entity.updatedAt !== args.ifUpdatedAt)
+    throw new TrackerWriteRefused(
+      "precondition_failed",
+      `the record changed since ${String(args.ifUpdatedAt)}; it is now at ${entity.updatedAt}. Read it again before updating.`,
+    );
 }
 
 /** Atomic rename prevents torn reads; fsync preserves completed writes across a process crash. */
@@ -531,6 +688,8 @@ function saveIssue(store: Store, args: Record<string, unknown>, now: string): Re
     throw new Error("Label deltas cannot be combined with a team change");
   if (args.team !== undefined) findTeam(store, args.team as string);
   const existing = creating ? undefined : findIssue(store, args.id as string);
+  if (existing === undefined) refuseCreatePrecondition(args);
+  else assertUnchangedSince(existing, args);
   const issue: Issue = existing ?? {
     id: randomUUID(),
     identifier: `${localKey(store.team)}-${String(store.nextIssue)}`,
@@ -643,9 +802,11 @@ function saveProject(store: Store, args: Record<string, unknown>, now: string): 
       (values(args, "setTeams").length === 0 && values(args, "addTeams").length === 0))
   )
     throw new Error("Creating a project requires name and addTeams or setTeams");
+  if (creating) refuseCreatePrecondition(args);
   const project = creating
     ? newProject(store, args.name as string, now)
     : findProject(store, args.id as string);
+  if (!creating) assertUnchangedSince(project, args);
   if (args.name !== undefined) {
     if ((args.name as string).trim() === "") throw new Error("Project name cannot be blank");
     project.name = args.name as string;
@@ -695,6 +856,8 @@ function saveLabel(store: Store, args: Record<string, unknown>, now: string): La
       : store.labels.find((entry) => entry.id === args.id || entry.name === args.id);
   if (args.id !== undefined && existing === undefined) throw new Error(`Label not found: ${String(args.id)}`);
   if (existing === undefined && args.name === undefined) throw new Error("Creating a label requires name");
+  if (existing === undefined) refuseCreatePrecondition(args);
+  else assertUnchangedSince(existing, args);
   const name = (text(args, "name") ?? existing!.name).trim();
   if (name === "") throw new Error("Label name cannot be blank");
   const teamId =
@@ -861,12 +1024,14 @@ async function dispatch(
           throw new Error("statusUpdateType cannot be combined with comment id");
         const comment = store.comments.find((entry) => entry.id === args.id);
         if (comment === undefined) throw new Error(`Comment not found: ${String(args.id)}`);
+        assertUnchangedSince(comment, args);
         if (comment.issueId !== null)
           options.assertIssueWrite?.(issueView(store, findIssue(store, comment.issueId)));
         comment.body = args.body as string;
         comment.updatedAt = now;
         return commentView(store, comment);
       }
+      refuseCreatePrecondition(args);
       let target: Pick<Comment, "issueId" | "projectId" | "statusUpdateId">;
       let parentId: string | null = null;
       if (args.parentId !== undefined) {
@@ -946,6 +1111,8 @@ async function dispatch(
         throw new Error(`Status update not found: ${String(args.id)}`);
       if (existing === undefined && (args.project === undefined || args.body === undefined))
         throw new Error("Creating a status update requires project and body");
+      if (existing === undefined) refuseCreatePrecondition(args);
+      else assertUnchangedSince(existing, args);
       const projectId =
         args.project === undefined ? existing!.projectId : findProject(store, args.project as string).id;
       if (existing !== undefined && existing.projectId !== projectId)
@@ -1021,6 +1188,50 @@ async function dispatch(
   }
 }
 
+/** Reads, including the caller's own write receipts and the audit log. */
+async function read(
+  store: Store,
+  name: string,
+  args: Record<string, unknown>,
+  options: LocalTrackerOptions,
+  actor: TrackerActor,
+  now: string,
+): Promise<unknown> {
+  if (name === "get_write_receipt") {
+    // Keys are scoped to the authenticated caller: another actor's key is unknown here.
+    const receipt = store.receipts?.find(
+      (entry) => entry.actorKey === actorKey(actor) && entry.idempotencyKey === args.idempotencyKey,
+    );
+    if (receipt === undefined) return { idempotencyKey: args.idempotencyKey, state: "unknown" };
+    return {
+      idempotencyKey: receipt.idempotencyKey,
+      state: receipt.state,
+      tool: receipt.tool,
+      at: receipt.at,
+      ...(receipt.state === "applied"
+        ? { result: receipt.result }
+        : { reason: receipt.reason, detail: receipt.detail }),
+    };
+  }
+  if (name === "list_audit_events") {
+    const wanted = args.entityId === undefined ? undefined : norm(args.entityId as string);
+    const events = [...(store.audit ?? [])]
+      .reverse()
+      .filter(
+        (event) =>
+          wanted === undefined ||
+          (event.target !== undefined && norm(event.target) === wanted) ||
+          event.entities.some(
+            (entity) =>
+              norm(entity.id) === wanted ||
+              (entity.identifier !== undefined && norm(entity.identifier) === wanted),
+          ),
+      );
+    return page(events as unknown as Record<string, unknown>[], args, "events", name);
+  }
+  return dispatch(store, name, args, options, now);
+}
+
 /** Durable local Linear-shaped tracker, also used as ancillary storage for repo backends. */
 export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBackend {
   const directory = resolve(options.directory);
@@ -1030,21 +1241,128 @@ export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBac
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
       return withTrackerStoreLock(path, async (assertHeld) => {
-        const now = (options.clock ?? (() => new Date()))().toISOString();
+        const clock = (options.clock ?? (() => new Date()))().toISOString();
         let store: Store;
         let initialized = false;
         try {
           store = parseStore(await readFile(path, "utf8"));
         } catch (error) {
           if (codeOf(error) !== "ENOENT") throw error;
-          store = seed(options, now);
+          store = seed(options, clock);
           initialized = true;
         }
-        const result = await dispatch(store, name, args, options, now);
+        const actor = callOptions?.actor ?? localActor(store);
         const writing = /^(?:save|create)_/u.test(name);
-        if (initialized || writing) await persist(path, store, assertHeld, writing ? callOptions : undefined);
-        // Callers cannot mutate objects subsequently reused by another backend call.
-        return structuredClone(result);
+        if (!writing) {
+          const result = await read(store, name, args, options, actor, clock);
+          if (initialized) await persist(path, store, assertHeld);
+          // Callers cannot mutate objects subsequently reused by another backend call.
+          return structuredClone(result);
+        }
+        const key = args.idempotencyKey as string | undefined;
+        const request = Object.fromEntries(
+          Object.entries(args).filter(([field]) => field !== "idempotencyKey"),
+        );
+        const fingerprint = createHash("sha256")
+          .update(canonical([name, request]))
+          .digest("hex");
+        const prior =
+          key === undefined
+            ? undefined
+            : store.receipts?.find(
+                (entry) => entry.actorKey === actorKey(actor) && entry.idempotencyKey === key,
+              );
+        if (prior !== undefined) {
+          if (prior.fingerprint !== fingerprint)
+            throw new TrackerWriteRefused(
+              "idempotency_conflict",
+              `idempotencyKey ${key!} was already used for a different ${prior.tool} write; choose a new key for a new change`,
+            );
+          if (prior.state === "refused") throw new TrackerWriteRefused(prior.reason!, prior.detail!);
+          // The original effect stands. Pass the host's fences so a revoked caller
+          // cannot read it back, and report it as settled rather than uncertain.
+          await callOptions?.beforeWrite?.();
+          assertHeld();
+          callOptions?.onDispatch?.();
+          callOptions?.effectConfirmed?.();
+          return structuredClone(prior.result);
+        }
+        const before = structuredClone(store);
+        const now = nextWriteTime(store, clock);
+        const fields = Object.keys(request).sort();
+        let result: unknown;
+        try {
+          result = await dispatch(store, name, request, options, now);
+        } catch (error) {
+          // Nothing the write changed survives. The refusal itself is recorded,
+          // so a keyed retry answers the same and the audit log shows the attempt.
+          const refusal =
+            error instanceof TrackerWriteRefused
+              ? error
+              : new TrackerWriteRefused(
+                  "invalid_request",
+                  error instanceof Error ? error.message : String(error),
+                );
+          const detail = refusal.message.replace(/^Write refused \([^)]*\): /u, "");
+          store = before;
+          store.lastWriteAt = now;
+          const target = auditTarget(request);
+          appendAudit(store, {
+            at: now,
+            tool: name,
+            outcome: "refused",
+            actor,
+            ...(key === undefined ? {} : { idempotencyKey: key }),
+            fields,
+            entities: [],
+            ...(target === undefined ? {} : { target }),
+            reason: refusal.reason,
+            detail,
+          });
+          if (key !== undefined)
+            (store.receipts ??= []).push({
+              actorKey: actorKey(actor),
+              idempotencyKey: key,
+              tool: name,
+              fingerprint,
+              state: "refused",
+              at: now,
+              reason: refusal.reason,
+              detail,
+            });
+          // Bookkeeping only: no tracker record changed, so no publication callbacks.
+          await persist(path, store, assertHeld);
+          throw refusal;
+        }
+        const entities = stampActor(store, actor, now);
+        // Views were built before stamping; the receipt keeps exactly what the caller sees.
+        const view = result as Record<string, unknown>;
+        if (view.updatedAt === now) {
+          view.updatedByActor = actor;
+          if (view.createdAt === now) view.createdByActor = actor;
+        }
+        const settled = structuredClone(result);
+        appendAudit(store, {
+          at: now,
+          tool: name,
+          outcome: "applied",
+          actor,
+          ...(key === undefined ? {} : { idempotencyKey: key }),
+          fields,
+          entities,
+        });
+        if (key !== undefined)
+          (store.receipts ??= []).push({
+            actorKey: actorKey(actor),
+            idempotencyKey: key,
+            tool: name,
+            fingerprint,
+            state: "applied",
+            at: now,
+            result: settled,
+          });
+        await persist(path, store, assertHeld, callOptions);
+        return settled;
       });
     },
   };
