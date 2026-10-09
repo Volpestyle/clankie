@@ -85,8 +85,8 @@ the service's reason. A notification never replays a tool call.
 Codex 0.160.0 logs this notification without updating its executable catalog.
 Plain `config/mcpServer/reload` also reuses an unchanged ready connection.
 For locally hired seats with a dedicated app-server and copied worker config,
-Clankie's controller changes a connection environment revision through
-`config/value/write`, then reloads. Codex reconnects Clankie's MCP connection
+Clankie's controller atomically persists the proven bridge registration, tool
+approval and connection environment revision through `config/batchWrite`, then reloads. Codex reconnects Clankie's MCP connection
 at the next model step on the same thread. The pane, conversation and message
 tool remain available. Refreshes are serialized and failed RPCs are retried at
 most three times per catalog change; no tool call or turn is retried.

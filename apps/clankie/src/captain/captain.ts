@@ -5596,18 +5596,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
-      const changed = reportChangeSignal();
-      const receipts = binding ? conversations.senderReportEvents(paneId, binding) : [];
-      const pending = mailbox.poll(
-        receipts.length ? 0 : waitMs,
-        AbortSignal.any([changed, ...(signal ? [signal] : [])]),
-        binding,
-      );
-      if (binding && !live) fleetChanges.touch();
-      const events = await pending;
-      const current = await herdrRunner.get(paneId).catch(() => undefined);
-      if (!binding || inboundBinding(current) !== binding) return [];
-      return [...events, ...conversations.senderReportEvents(paneId, binding)].slice(0, 64);
+      const deadline = Date.now() + waitMs;
+      let firstPoll = true;
+      for (;;) {
+        const changed = reportChangeSignal();
+        const receipts = binding ? conversations.senderReportEvents(paneId, binding) : [];
+        const pending = mailbox.poll(
+          receipts.length ? 0 : Math.max(0, deadline - Date.now()),
+          AbortSignal.any([changed, ...(signal ? [signal] : [])]),
+          binding,
+        );
+        if (firstPoll && binding && !live) fleetChanges.touch();
+        firstPoll = false;
+        const events = await pending;
+        const current = await herdrRunner.get(paneId).catch(() => undefined);
+        if (!binding || inboundBinding(current) !== binding) return [];
+        const result = [...events, ...conversations.senderReportEvents(paneId, binding)].slice(0, 64);
+        // Receipt changes wake every waiter. Another sender's receipt must not
+        // end this seat's long poll before its own mailbox delivery arrives.
+        if (result.length || !changed.aborted || signal?.aborted || Date.now() >= deadline) return result;
+      }
     },
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {

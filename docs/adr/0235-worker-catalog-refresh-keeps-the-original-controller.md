@@ -15,7 +15,7 @@ Local Codex registrations persist original process birth, occupant and socket
 provenance. The new service re-proves those facts and the original root's loaded
 descendants. An independent loaded root refuses refresh. A busy root or child
 defers it. Only native `config/read` provenance for the private copied worker
-configuration authorizes one `config/value/write` with `expectedVersion`, then
+configuration authorizes one `config/batchWrite` with `expectedVersion`, then
 one `config/mcpServer/reload`. Complete filtered native catalogs must contain
 the current service projection, including enabled peer tools.
 

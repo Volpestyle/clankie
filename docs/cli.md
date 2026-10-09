@@ -4581,7 +4581,7 @@ pump fix does not reload a worker's already-imported parser.
 For a Clankie-managed Codex seat with its original dedicated controller and
 isolated copied config, the controller replaces only Clankie's connection by
 updating `mcp_servers.worker.env.CLANKIE_CATALOG_REVISION` with
-`config/value/write`, then calling `config/mcpServer/reload`. The next model step
+`config/batchWrite`, then calling `config/mcpServer/reload`. The next model step
 uses the refreshed connection on the same loaded thread. Do not edit the owner's
 config, restart a shared daemon, fork the thread or delete a claim. An embedded
 or remote session without that controller needs its owner's exact-session
