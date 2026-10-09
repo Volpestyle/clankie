@@ -160,6 +160,20 @@ describe("clankie-worker claude plugin", () => {
           ...(event === "PreToolUse" ? { matcher: "AskUserQuestion" } : {}),
           ...(event === "Notification" ? { matcher: "idle_prompt|permission_prompt" } : {}),
         },
+        ...(event === "PreToolUse"
+          ? [
+              {
+                matcher: "Bash",
+                hooks: [
+                  {
+                    type: "command",
+                    command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/resource-hook.mjs"',
+                    timeout: 10,
+                  },
+                ],
+              },
+            ]
+          : []),
       ]);
     }
   });
