@@ -241,6 +241,7 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "seat-sync",
   "seat-hook",
   "mcp",
+  "evidence",
   "telemetry",
   "workdir",
   "stance",

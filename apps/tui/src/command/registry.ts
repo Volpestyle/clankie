@@ -322,6 +322,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["evidence"],
+    lines: [
+      "  evidence push [PATH] [--issue KEY] [--caption TEXT] | fetch [PATH]   Move evidence-root files to the evidence store",
+      "  evidence list --issue KEY | --commit SHA | receipt RECEIPT_ID   Read evidence records and upload receipts (JSON)",
+    ],
+  },
+  {
     nouns: ["skills"],
     lines: ["  skills                   Skills shipped with this body (JSON)"],
   },

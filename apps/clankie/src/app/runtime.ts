@@ -88,6 +88,7 @@ import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../even
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
 import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
+import { createEvidenceRoutes } from "../evidence-store.ts";
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
@@ -1159,6 +1160,18 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           );
         },
       };
+    }),
+  );
+
+  // Evidence (ADR 0258): the operator credential is the caller. The CLI and the
+  // operator seat's MCP bridge both present it; social lanes and devices do not.
+  app.route(
+    "/",
+    createEvidenceRoutes(dependencies.evidenceStore, async (request) => {
+      const operator = await authenticateOperator(request, dependencies);
+      if (operator === "unavailable") return "unavailable";
+      if (operator === undefined) return undefined;
+      return { kind: "operator", id: operator.operatorId, onBehalfOf: [] };
     }),
   );
 

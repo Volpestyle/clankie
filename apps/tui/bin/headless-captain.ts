@@ -54,6 +54,7 @@ import { runGamesCommand, runGameExtensionsCommand } from "../src/command/games.
 import { runLinearCommand } from "../src/command/linear.ts";
 import { runAccountsCommand } from "../src/command/accounts.ts";
 import { runWorkCommand } from "../src/command/work.ts";
+import { runEvidenceCommand } from "../src/command/evidence.ts";
 import { runIntegrationCommand } from "../src/command/integrate.ts";
 import { runFleetCommand } from "../src/command/fleet.ts";
 import { runHeavyCommand } from "../src/command/heavy.ts";
@@ -358,6 +359,11 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "work") {
       const result = await runWorkCommand(rest, options);
+      outputJson(stdout, result.body);
+      return result.ok ? 0 : 1;
+    }
+    if (command === "evidence") {
+      const result = await runEvidenceCommand(rest, { ...options, stderr });
       outputJson(stdout, result.body);
       return result.ok ? 0 : 1;
     }

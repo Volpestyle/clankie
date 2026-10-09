@@ -77,6 +77,7 @@ import {
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 import { runWorkerMcp } from "./worker-mcp.ts";
+import { callEvidenceTool, EVIDENCE_TOOLS, isEvidenceTool, type EvidenceOptions } from "./evidence.ts";
 import { clankieStateHome } from "../state-home.ts";
 
 // Capture when this module loads; a runtime update on disk cannot replace an
@@ -339,6 +340,8 @@ const REPLY_TOOL: Tool = {
 export function createSeatBridge(
   upstream: LaneToolUpstream,
   lane: CaptainSessionLaneV2,
+  /** Operator lane only: serve the evidence tools locally, resolving paths from this process's directory. */
+  evidence?: EvidenceOptions,
 ): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
     { name: "clankie", version: "0.2.0" },
@@ -351,9 +354,11 @@ export function createSeatBridge(
     void server.sendToolListChanged().catch(() => undefined);
   });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...(await upstream.listTools()), REPLY_TOOL],
+    tools: [...(await upstream.listTools()), REPLY_TOOL, ...(evidence === undefined ? [] : EVIDENCE_TOOLS)],
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (evidence !== undefined && isEvidenceTool(request.params.name))
+      return callEvidenceTool(request.params.name, request.params.arguments ?? {}, evidence);
     if (request.params.name !== REPLY_TOOL_NAME) {
       const purpose = request.params._meta?.clankieRequestPriority;
       if (purpose !== undefined && purpose !== "background")
@@ -1303,7 +1308,19 @@ export async function runMcpCommand(
     lane,
     ...(conversationId === undefined ? {} : { conversationId }),
   });
-  const server = createSeatBridge(upstream, lane);
+  const server = createSeatBridge(
+    upstream,
+    lane,
+    lane === "operator" && options.connectUpstream === undefined
+      ? {
+          env,
+          host: commandHost({ ...options, env }),
+          ...(options.operatorCredentialStore === undefined
+            ? {}
+            : { operatorCredentialStore: options.operatorCredentialStore }),
+        }
+      : undefined,
+  );
   const transport = options.transport ?? new StdioServerTransport();
   const closing = new AbortController();
   const closed = new Promise<void>((resolve) => {

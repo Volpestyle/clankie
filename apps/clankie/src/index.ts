@@ -200,6 +200,7 @@ import { startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
+import { EvidenceStore } from "./evidence-store.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
@@ -1784,6 +1785,7 @@ const clankie = await createClankieApp({
   },
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
+  evidenceStore: EvidenceStore.local(join(stateRoot, "evidence")),
   localFleet,
   runtimeProvider,
   ...(runtimeProvider.quota?.composer === undefined

@@ -108,7 +108,7 @@ fallback after an owner API error. See [ADR 0248](adr/0248-owner-settings-use-on
 | [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                                |
 | [Manage service lifecycle](#service-lifecycle)         | `start`, `stop`, `restart`, `recover`, `autostart`, `awake` |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                                |
-| [Connect accounts and track work](#account-setup)      | `accounts`, `work`                                          |
+| [Connect accounts and track work](#account-setup)      | `accounts`, `work`, `evidence`                              |
 | [List shipped skills](#skill-setup)                    | `skills`                                                    |
 | [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`             |
 | [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr`     |
@@ -1852,6 +1852,63 @@ zero provider requests rather than looking like another Linear scan.
 Local records persist across restart and do not automatically migrate on
 connection. Other unavailable repo providers answer `backend_unavailable`. The HTTP
 form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.
+
+### `evidence push|fetch` / `evidence list|receipt`
+
+Moves raw evidence out of git into Clankie's evidence store
+([ADR 0258](adr/0258-evidence-lives-in-the-evidence-store.md)). Git keeps each
+folder's `README.md` and an `evidence.json` manifest; the store keeps the bytes
+and the records that describe them. Paths resolve from the current directory
+inside any git repository, with no per-repository configuration. Each command
+prints one JSON document; push and fetch also print a plain summary on stderr.
+
+- `clankie evidence push [PATH] [--issue KEY] [--caption TEXT]` (default `.`)
+  works only inside an evidence root (`docs/testing/<folder>`). Outside one it
+  refuses, names the roots and changes nothing. It hashes the in-scope files
+  under `PATH`: media (png, jpg, gif, mp4, mov, webm) of any size, and any other
+  non-Markdown file of 16 KiB or more. Smaller text, Markdown and
+  `evidence.json` stay in git. It uploads only blobs the store lacks, then
+  writes or updates the folder's `evidence.json`. That is the nearest one
+  above `PATH`, or else the one beside the nearest `README.md`. The JSON
+  reports `added` and `changed` entries with their `clankie://evidence/sha256/…`
+  links, `uploaded`, `receipts` and `failures`. Each pushed raw file then
+  moves to `.local/evidence/<repo-relative folder>/<path>`, which git ignores.
+  A second push uploads nothing, leaves the manifest byte-identical and says
+  `Nothing uploaded; … unchanged`. A listed file that is missing locally keeps
+  its entry; removing one is an explicit manifest edit. Commit only the README
+  and `evidence.json`, and cite the printed links in tracker comments.
+- `clankie evidence fetch [PATH]` reads the manifest at or above `PATH`, or
+  every manifest below it. It downloads each listed object into
+  `.local/evidence/<repo-relative folder>/<path>` and verifies its size and
+  sha256 before moving it into place. Objects already present with the right
+  hash are reported as `present`. A local file whose hash differs is reported
+  and left untouched. Every object it cannot fetch or verify is named with its
+  reason, and the command exits 1.
+- `clankie evidence list --issue KEY | --commit SHA` returns the records
+  (file name, sha256, size, content type, issue, commit, actor, caption,
+  created-at, link).
+- `clankie evidence receipt RECEIPT_ID` reads an upload receipt: `applied`,
+  `pending` (with a fresh signed upload URL) or `refused` (`sha256_mismatch` or
+  `size_mismatch`). It exits 1 for an unknown receipt.
+
+The manifest is `{"version":1,"objects":[{path,size,sha256,url}]}`, sorted by
+`path` (relative to the manifest, `/` separators), so a change is a one-object
+diff. Uploads are idempotent. Push derives each receipt ID from the file's
+repository path, its sha256, the HEAD commit, the issue and the caption. A
+retried push therefore asks for the same receipt, and a lost answer is
+reconciled by looking that receipt up, never by a blind resend.
+
+The service side lives in `apps/clankie` and uses the operator bearer. Its
+routes are `POST /v1/evidence/uploads`, `GET /v1/evidence/receipts/ID`,
+`POST /v1/evidence/fetch` (`{sha256}` to a signed URL valid for at most 15
+minutes), `GET /v1/evidence/records?issue=KEY|commit=SHA` and
+`GET /v1/evidence/status`. Blob bytes move only through signed, expiring
+routes. The store accepts a blob only after its sha256 and size match the
+upload. Self-hosted blobs live under `~/.clankie/evidence/blobs`, keyed by
+sha256, with records in `~/.clankie/evidence/evidence.sqlite`. `clankie doctor`
+reports both as `evidenceStore`. The operator seat's `clankie mcp` exposes the
+same operations as `evidence_push`, `evidence_fetch` and `evidence_list`. Hosted
+Clankie does not offer these commands yet.
 
 ### `operator-credential rotate [--json]`
 

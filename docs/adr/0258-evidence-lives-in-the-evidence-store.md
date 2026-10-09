@@ -1,6 +1,6 @@
 # ADR 0258: Evidence lives in the evidence store
 
-Status: proposed (2026-10-09). Tracks [VUH-1902](https://linear.app/vuhlp/issue/VUH-1902).
+Status: accepted (2026-10-09; proposed 2026-10-09). Tracks [VUH-1902](https://linear.app/vuhlp/issue/VUH-1902).
 The first slice of the built-in tracker ("Clankie Work"); its evidence bundles
 reference the records defined here.
 
@@ -34,8 +34,13 @@ JSONL journals and logs. Markdown and smaller text stay in git. At 16 KiB, 46
 non-media files in clankie's `docs/testing` move, carrying 89k of their 118k
 lines; about 600 small receipts and fixtures stay readable in place.
 
-**Service.** The store is a Rust `axum` service in this monorepo
-(`apps/evidence-store`, beside the Rust `apps/vox`). Blobs are keyed by their
+**Service.** The store is a TypeScript module inside the clankie service
+(`apps/clankie/src/evidence-store.ts`). Its routes live on the service's
+existing HTTP API behind its existing operator authentication, so there is no
+second process, toolchain or supervisor. (2026-10-09, James: performance
+doesn't matter for a blob store; no second toolchain.) Blob storage and
+metadata storage each sit behind an interface, so the hosted S3/R2 and Postgres
+backends replace the local ones without changing the API. Blobs are keyed by their
 sha256, so identical files are stored once and every upload is idempotent.
 Blobs are immutable, and nothing deletes them in this slice. They live on local
 disk when self-hosted and in S3 or R2 when hosted. Hosted buckets, databases
@@ -149,5 +154,7 @@ everything in git is the cost above.
   same upload path.
 - Manifests in this public repo expose paths, sizes and hashes. Captions live
   in private records. Store access follows Clankie's identities.
-- A Rust service adds a second native toolchain to the service build, as Vox
-  already does. Store growth is unbounded until a retention decision.
+- The store ships inside the clankie service, so it adds no native toolchain
+  and no process to supervise; `clankie doctor` reports its backends and data
+  directory (2026-10-09, James: performance doesn't matter for a blob store; no
+  second toolchain). Store growth is unbounded until a retention decision.

@@ -29,6 +29,19 @@ An archive only needs its normal `README.md`, `evidence/`, and `flows/`
 contents. The viewer derives its title from the README heading and discovers
 all other capabilities from the files present.
 
+## Publishing raw evidence
+
+Raw captures belong in the evidence store, not in git
+([ADR 0258](../adr/0258-evidence-lives-in-the-evidence-store.md)). Write the
+folder's `README.md`, then run `clankie evidence push <folder> --issue <KEY>`
+(or the `evidence_push` MCP tool). It uploads media and other non-Markdown files
+of 16 KiB or more, writes the folder's `evidence.json` manifest, and moves the
+raw files into the ignored `.local/evidence/` mirror. Commit only the README and
+`evidence.json`, and cite the printed `clankie://evidence` links. Readers run
+`clankie evidence fetch <folder>`. See [the CLI reference](../cli.md) for the
+details. Existing folders have not been migrated yet, and the viewer does not
+read the `.local/` mirror yet.
+
 - [2026-10-08 PC Claude cache delivery](2026-10-08-pc-claude-cache-delivery/README.md)
 - [2026-10-06 Linear native delivery investigation](2026-10-06-linear-native-delivery/README.md)
 - [2026-10-06 Mac companion service setup](2026-10-06-mac-service-setup/README.md)

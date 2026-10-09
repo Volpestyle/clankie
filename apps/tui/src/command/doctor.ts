@@ -29,6 +29,7 @@ import {
   type InspectInstallOptions,
   type InstallDoctorReport,
 } from "../install-doctor.ts";
+import { EVIDENCE_STATUS_PATH, EvidenceStoreStatusSchema } from "@clankie/protocol/evidence";
 import {
   LINEAR_REQUEST_BUDGET_PATH,
   LinearRequestBudgetReportSchema,
@@ -238,6 +239,25 @@ export async function doctorCommand(
       detail: error instanceof Error ? error.message : String(error),
     };
   }
+  let evidenceStore: NonNullable<InstallDoctorReport["evidenceStore"]>;
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("Evidence store status needs the operator credential");
+    const response = await (options.fetchImpl ?? fetch)(`${commandHost(options)}${EVIDENCE_STATUS_PATH}`, {
+      headers: { authorization: `Bearer ${credential.token}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`Evidence store unavailable (HTTP ${response.status})`);
+    evidenceStore = EvidenceStoreStatusSchema.parse(await response.json());
+  } catch (error) {
+    evidenceStore = {
+      status: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
   let remoteHarnesses: readonly unknown[];
   let linearRequestBudget: NonNullable<InstallDoctorReport["linearRequestBudget"]>;
   try {
@@ -306,6 +326,7 @@ export async function doctorCommand(
     checkouts,
     ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
     linearRequestBudget,
+    evidenceStore,
     ...(serviceRecovery.length === 0 ? {} : { serviceRecovery }),
   };
 }

@@ -173,6 +173,8 @@ export interface ClankieAppDependencies {
   /** Tenant telemetry key or a dedicated random key persisted on this body volume. */
   supportDeviceRefKey?: Uint8Array;
   composerTranscriptions?: ComposerTranscriptions;
+  /** Evidence blobs and records (ADR 0258). */
+  evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /** Optional host policy; ordinary installations do not supply a provider. */
   runtimeProvider?: RuntimeProvider;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;

@@ -124,6 +124,10 @@ export interface InstallDoctorReport {
   readonly machineAccessRefusals?:
     | { refusals: import("@clankie/protocol").MachineAccessRefusal[] }
     | { status: "unavailable"; detail: string };
+  /** Where the service keeps evidence blobs and records (ADR 0258), as it reports them. */
+  readonly evidenceStore?:
+    | import("@clankie/protocol/evidence").EvidenceStoreStatus
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly linearRequestBudget?:
     | import("@clankie/protocol/linear-request-budget").LinearRequestBudgetReport
     | { readonly status: "unavailable"; readonly detail: string };
