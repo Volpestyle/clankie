@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "captures.json",
+      "size": 317578,
+      "sha256": "1b8ff3ec7ed3baeb6ad185c9c23457c8e04b6adc24058f743bbac8b13986c076",
+      "url": "clankie://evidence/sha256/1b8ff3ec7ed3baeb6ad185c9c23457c8e04b6adc24058f743bbac8b13986c076"
+    }
+  ]
+}

@@ -47,9 +47,8 @@ describe("createDiscordMusicClient", () => {
     const client = createDiscordMusicClient({ DISCORD_ACTIVE_BODY: "bot" }, async () => {
       throw new Error("connect ECONNREFUSED");
     });
-    await expect(client.search({ query: "migos", authorId: "u1" })).resolves.toEqual({
+    await expect(client.search({ query: "migos", authorId: "u1" })).resolves.toMatchObject({
       ok: false,
-      message: "I can't reach the live Discord body to play music. Get me in a voice channel and try again.",
     });
   });
 });

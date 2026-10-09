@@ -294,3 +294,107 @@ verified owner/grant separation, native head identity, corrupt-cache recovery
 and inode/hash-bound native capability lifetime. Ordinary filenames do not
 make these producer/consumer integrations removable unit coverage. No test is
 removed from these files and the helper fixtures do not run evaluations.
+
+## Further boundary review after VUH-1948
+
+These 50 additional files are retained. Reviews use the file bytes on
+`3ef50411d`, based on `6f7e23aa`; no deletion is authorized by this list.
+Rust whole-file line counts include production code, not only tests.
+
+- `apps/tui/test/linear-publishing-command.test.ts`: Keep published CLI/provider request decoding, fail-closed refused/uncertain/malformed envelopes and malformed-input no-call boundary.
+- `apps/tui/test/workspace.test.ts`: Keep real filesystem checkout/root/path resolution, non-directory refusal and conversation workspace scope contract.
+- `apps/discord-bridge/test/subcommand-authority.test.ts`: Keep Discord command authority, owner-only settings and revocable voice-consent fences. Source-wiring assertions remain because full dispatch duplication is not established; no speculative cuts.
+- `apps/tui/test/work-command.test.ts`: Keep published work CLI request mapping, criteria/status/owner/evidence preservation and malformed argument refusal.
+- `apps/discord-user-session/test/stream-discovery.test.ts`: Keep Discord stream producer/consumer opcodes, stream keys, credential events, DAVE channel identity and ended-stream cleanup.
+- `apps/tui/test/pair-routes.test.ts`: Keep pairing CLI reachability disclosure and JSON route contract across gateway/direct/no-route offers, including App Store plain-HTTP refusal.
+- `apps/clankie/test/project-worktree-membership.test.ts`: Keep native linked-worktree admission and cwd/process/authority/settings race refusal across Git observation.
+- `apps/tui/test/support-http.test.ts`: Keep real CLI/console/HTTP support-grant create/list/pair/revoke integration, expiration bound and invalid scope refusal.
+- `apps/clankie/test/gmail-mcp-canary.test.ts`: Keep credentialless no-network refusal and explicitly opt-in real broker/Google MCP canary. No live canary run authorized or performed.
+- `apps/clankie/test/codex-seat.test.ts`: Keep native foreground/open-file session resolution, exact parent preference versus child rollout and absent/replaced native session behavior.
+- `apps/clankie/test/hosted-wake-key.test.ts`: Keep real device-pairing HTTP authentication/schema/revocation boundary, local revocation through hosted cleanup failure and self-hosted route absence.
+- `apps/clankie/test/operator-conversation-workspace.test.ts`: Keep actual conversation-store turn workspace/native seat/run correlation and absolute-existing-directory refusal.
+- `apps/clankie/test/http-journey.test.ts`: Keep real HTTP/restart integration, pairing-code secrecy and operator-only offer refusal without event-log mutation.
+- `apps/clankie/test/local-fleet-discovery.test.ts`: Keep private/production filesystem isolation across publication/cleanup failures, actual native discovery reader and authenticated link boundary.
+- `apps/tui/test/harness-enable-idempotency.test.ts`: Keep captured native enable result regression, exact profile/source and native error proof, retarget/race/wrong-profile refusal.
+- `apps/clankie/test/inbound-seat-binding.test.ts`: Keep fresh native session identity before receipt/POST acceptance, alias/replacement refusal and no legacy unbound delivery.
+- `apps/clankie/test/work-items-linear-results.test.ts`: Keep actual MCP host/work service integration, lossless large JSON and explicit oversized UTF-8 byte refusal without truncation.
+- `apps/clankie/test/voice-receipt-activity.test.ts`: Keep real JSONL receipt consumer integration, open/closed room stay correlation and spoken/suppressed/token accounting.
+- `apps/clankie/test/codex-catalog-refresh.test.ts`: Keep real filesystem notification coordinator integration, bounded failures/no duplicate native mutation and private config symlink/home refusal.
+- `apps/clankie/test/project-routes.test.ts`: Keep HTTP settings mutation trust boundary, explicit workspace/revision and authority races, tracker binding protection and unrelated data preservation.
+- `apps/tui/test/project-settings-cli.test.ts`: Keep CLI operator-bearer/revision request contracts, conflict no-retry and exact seat/occupant membership without injected project.
+- `apps/clankie/test/discord-durable-room.test.ts`: Keep untrusted backlog isolation versus carried history, durable room/native voice session compatibility and silence sentinel streaming contract.
+- `apps/clankie/test/captain-turn-metrics-api.test.ts`: Keep operator-only bounded metrics API, no transcript disclosure and unknown legacy execution/usage without invented token accounting.
+- `apps/clankie/test/seat-ledger.test.ts`: Keep real durable file/restart accounting, seat/day isolation and honest observed run outcomes; disappeared panes never become success.
+- `apps/tui/test/seat-hook.test.ts`: Keep native hook CLI wire/auth/session correlation, actual transcript fallback and absent/unowned pane no-report boundary.
+- `apps/clankie/test/hosted-device-security.test.ts`: Keep real filesystem key identity/private modes, rollback/session revocation and lost-response recovery, unreachable authority and symlink refusal.
+- `apps/tui/test/metrics-cli.test.ts`: Keep documented CLI bounds/query/auth contracts and honest legacy unknowns; credentialless read never becomes anonymous network access.
+- `apps/tui/test/project-onboarding-cli.test.ts`: Keep reviewed proposal/hash/incarnation/revision contract, uncertain no-retry and malformed no-dispatch; review never implicitly confirms.
+- `apps/vox/src/media_sink_wants.rs`: Keep Discord opcode 15 producer/consumer payload stream/quality/pixelCounts contract. Whole-file LOC includes production code, not test-only LOC.
+- `apps/clankie/test/agent-sessions.test.ts`: Keep native transcript producer/consumer formats, bounded UTF-8 tails/cursors, replacement/partial-record lossless recovery and retargeted host cache isolation. No PC work executed.
+- `apps/clankie/test/agent-work.test.ts`: Keep real SQLite/file/restart goal and assignment contracts, exact occupant persistence, legacy-client compatibility and read-only unsupported/remote store isolation.
+- `apps/clankie/test/accounts.test.ts`: Keep real loopback OAuth/broker/HTTP integration, provider/account/consent/revocation/PKCE isolation and replay refusal, real subprocess stdout/events/telemetry credential redaction, hosted token separation.
+- `apps/clankie/test/body-lease-router.test.ts`: Keep real durable lease mutual exclusion/recovery, grant/identity rechecks before effects, uncertain no-replay, explicit scoped wake/head routing and overlapping receipts.
+- `apps/clankie/test/body-lease-routes.test.ts`: Keep authenticated HTTP writable conversation authority, scoped browser leases/refused close, actual-stop-before-release, stale/revoked token fences and explicit head designation.
+- `apps/clankie/test/body-leases.test.ts`: Keep real durable exclusive lease/restart and abrupt-death lock recovery, stale/expired token fencing, uncertain effects and corrupt/unwritable-state fail-closed.
+- `apps/clankie/test/herdr-runtime.test.ts`: Keep real socket ownership refusal/closure and real pane shell environment isolation, selected installed/bundled binary and harness-marker boundary.
+- `apps/clankie/test/operator-conversation-input.test.ts`: Keep actual durable conversation queue/steer producer-consumer ordering and replay behavior for both owner and internal turns.
+- `apps/discord-bridge/test/voice-presence.test.ts`: Keep Discord live-body authority/target/consent boundary, idempotent join and cross-guild leave refusal.
+- `apps/clankie/test/channel-projection.test.ts`: Keep Discord webhook wire/room/thread/credential transport contract, mentions disabled, content bounds and honest provider refusals.
+- `apps/clankie/test/fleet-membership-route.test.ts`: Keep authenticated HTTP/CLI membership integration, revoked-authority post-observation refusal and honest unavailable native card.
+- `apps/clankie/test/herdr-session.test.ts`: Keep exact owner-selected external runtime versus service-owned runtime, launch environment isolation and absent/native observation fallback.
+- `apps/clankie/test/linear-fleet-admission.test.ts`: Keep actual MCP/provider/HTTP write fences after asynchronous author attribution and credential/header selection; revoked fleet cannot dispatch.
+- `apps/tui/test/telemetry-support-http.test.ts`: Keep real CLI/loopback metadata/signed transport integration, mandatory support audit independent of diagnostic consent.
+- `apps/clankie/test/project-membership-latency.test.ts`: Keep native authority proof bounded-scan regression, two checkpoints and no cross-request stale process/cwd/failed observation reuse.
+- `apps/tui/test/restart.test.ts`: Keep delayed restart CLI/runtime contract: final complete answer versus partial/tool-use transcript, preserved service/Discord launch and harness environment isolation. No service restarted.
+- `apps/tui/test/send-stdin.test.ts`: Keep CLI UTF-8 stream/newline preservation and duplicate/empty input no-dispatch boundary.
+- `apps/clankie/test/lead-census.test.ts`: Keep fixture isolation from actual owner transcripts, native goals/work/subagents and ambient process access.
+- `apps/tui/test/harness-profile-alias.test.ts`: Keep canonical profile/symlink/source-manager boundaries and post-consent/native/skill-build races; no unapproved alias retarget/update.
+- `apps/clankie/test/connect-tools.test.ts`: Keep operator-only inbox trust boundary and sender-authored content untrusted marking without treating refusal as sender text.
+- `apps/clankie/test/pokeagent-mmo-boundary.test.ts`: Keep published player versus world-host dependency/transport boundary; no duplicate socket host implementation.
+
+## Discord helper presentation batch
+
+Reviewed both complete test files, their product functions, real readiness/live-proof
+CLI consumers and original changes (`71066d70c`, `f60806d86`) at main `3ef50411d`.
+Neither deleted detail is a documented actual bug regression or machine contract.
+
+- `packages/discord-presence-core/test/check-report.test.ts`: remove the human
+  PASS/FAIL table snapshot of exact padding, title and remediation placement.
+  Keep the JSON CLI payload case byte-identical: machine-readable output is a
+  published consumer contract. The writer and all real consumers remain.
+- `apps/clankie/test/discord-music.test.ts`: remove the exact authored sentence
+  for an unreachable body. Keep `ok: false` refusal, selected live-body routing,
+  author attribution and lossless provider replies; all three cases remain.
+
+These two files shrink from 103 to 74 lines, five to four cases: 29 lines and
+one case removed. No product code, exports, fixture or E2E/integration/golden
+tier changed. The actual text writer is run and its output inspected alongside
+the retained tests. [Measurements and evidence](../testing/2026-10-09-discord-helper-test-pruning/README.md)
+record the baseline and landing gates; temporary baseline selectors are absent
+from the committed files. Running subtotal: six unit-pruning batches, 688 lines
+and 39 cases removed; fixture bulk remains separate. The inventory is incomplete.
+
+Further full-file boundary reviews on the same main retain:
+
+- `apps/clankie/test/minecraft-host-authority.test.ts`: Keep final conversation/individual grant versus guild-only authority, post-await revoke and synchronous stale identity dispatch fences.
+- `apps/clankie/test/tracker-isolation.test.ts`: Keep real config/native subprocess boundary disabling inherited tracker connectors and listing failure fail-closed.
+- `apps/clankie/test/remote-lead-delegations.test.ts`: Keep launch-secret exact host/pane/occupant/process lifetime proof, retained grant revoke/downgrade/unavailable/post-await refusal. Reviewed only; no remote machine operation.
+- `apps/clankie/test/host-power.test.ts`: Keep real pmset-format producer/consumer schema and health API/CLI fresh opt-in, unknown/sleep-gap versus ordinary stall observation contracts.
+- `apps/clankie/test/minecraft-destination.test.ts`: Keep DNS/IP/SRV pinning and exact approved public host/port trust boundary, mixed/nonunicast/failure refusal and endpoint redaction.
+- `apps/clankie/test/minecraft-host-invite.test.ts`: Keep recipient/enrollment-bound ephemeral capability, revoke-before-dispatch, immutable origin/public credential redaction and private/invalid endpoint refusal. Mixed line-count/copy remains later incidental candidate.
+- `apps/clankie/test/composer-catalog.test.ts`: Keep real skill roots/native harness catalog syntax and enabled-only plugin/schema quick-action validation shared across API/seat producers.
+- `apps/clankie/test/email.test.ts`: Keep real credential/settings boundary and IMAP/SMTP/MIME consumer contract, absent credentials refuse. No live mail read/send.
+- `apps/clankie/test/opencode-profiles.test.ts`: Keep real native SQLite/file/API source lifetime, original prepared identity/fresh proof and retarget/session/foreign machine refusal; metadata cannot launch.
+- `apps/clankie/test/remote-herdr-transcript.test.ts`: Keep exact listed host/native session versus prefix/ambiguous/unlisted path boundary and lossless append/cache/concurrent producer reads. Reviewed only; no remote operation.
+- `apps/clankie/test/fleet-host-fence.test.ts`: Keep actual HTTP MCP/WorkerMcp/host credential and final-admission awaits revocation fence; changed/disabled authority cannot reach provider.
+- `apps/clankie/test/fleet-project-membership-routes.test.ts`: Keep independently authorized bounded no-store API, injected native proof/project refusal and post-await reauthorization, honest schema errors/private detail redaction.
+- `apps/tui/test/accounts-command.test.ts`: Keep secret-stdin authenticated account route/redaction, persisted OAuth settings and provider device-code poll interval/request contract. Mixed prompt copy is a later candidate.
+- `apps/tui/test/installer.test.ts`: Keep real installer/tar/checksum immutable version rollback with preserved owner state, one login PATH entry and linked harness refresh contract.
+- `apps/tui/test/project-role-cli.test.ts`: Keep operator revision API whole-role/null/default preservation and model validation no-write; alternate native profile registration does not modify login.
+- `apps/clankie/test/codex-hook-trust.test.ts`: Keep native discovered-hash trust limited to own installed worker hooks, owner-home and missing/guessed hash fail-closed, unrelated hooks/config untouched.
+- `apps/clankie/test/minecraft-capture.test.ts`: Keep renderer loopback/session/generation/stale/dimension/body bounds and post-await ended-session fence, broker reconnect sink recovery.
+- `apps/clankie/test/minecraft-host-tools.test.ts`: Keep host-proven identity versus forged tool args, typed admin injection/op refusal, diagnostics secret scrubbing and raw/delegated MCP hosting access denied.
+- `apps/clankie/test/channel-turns.test.ts`: Keep actual observed Discord PASS leak regression, silent versus spoken sentinel semantics, lossless bounded native transcript and truthful unavailable versus quiet outcomes. Mixed exact prose/tie ordering remains later incidental candidate; stale PTY explanation warrants provenance review.
+- `apps/clankie/test/hosted-security-wire.test.ts`: Keep real signed nonce/body digest/tenant/installation/lifetime schema state, persisted-before-register key rotation and device revoke versus account identity.
+- `apps/clankie/test/lead-native-claude-launch.test.ts`: Keep evaluation harness native containment/lifetime safety fixture cases. Evaluation-related inputs are outside pruning and were not executed.
+- `apps/clankie/test/captain-lane-prompt-assembly.test.ts`: Keep lane authority/private address/fleet preference exposure and VUH-1391/VUH-1456 documented instruction contracts, native harness project file compatibility. Mixed exact whitespace/section order remains an incidental case-level candidate.
