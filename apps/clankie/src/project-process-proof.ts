@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { delimiter, isAbsolute, join, normalize } from "node:path";
+import { basename, delimiter, isAbsolute, join, normalize } from "node:path";
 import { access, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createHash } from "node:crypto";
@@ -175,7 +175,7 @@ class ProjectProcessRefusalError extends Error {
   }
 }
 
-/** Host observation only. A foreground shell/wrapper is not an actual agent occupant. */
+/** Host observation only. Generic shells/wrappers never establish an agent occupant. */
 export function createProjectProcessObserver(options: {
   binding(): Promise<HerdrBinding | undefined>;
   herdrBinary: string;
@@ -259,7 +259,12 @@ export function createProjectProcessObserver(options: {
           pane,
         ])) as {
           result?: {
-            process_info?: { pane_id?: string; shell_pid?: number; foreground_process_group_id?: number };
+            process_info?: {
+              pane_id?: string;
+              shell_pid?: number;
+              foreground_process_group_id?: number;
+              foreground_processes?: { pid?: number; argv0?: string }[];
+            };
           };
         };
         const value = response?.result?.process_info;
@@ -325,6 +330,7 @@ export function createProjectProcessObserver(options: {
       if (shellPid === undefined || agentPid === undefined) return refuse("foreground_missing");
       if (![shellPid, agentPid].every((pid) => Number.isSafeInteger(pid) && pid > 1) || shellPid === agentPid)
         return refuse("foreground_invalid");
+      let claudePid: number | undefined;
       const snapshot = (checkpoint: "initial" | "final") =>
         observeNativeProcesses(
           shellPid,
@@ -335,11 +341,12 @@ export function createProjectProcessObserver(options: {
           options.nativeDiagnostics && ((event) => options.nativeDiagnostics!(event, checkpoint, pane)),
           options.nativeTransportDiagnostics &&
             ((reason) => options.nativeTransportDiagnostics!(reason, pane)),
+          claudePid,
         );
       checkpoint = "initial_process";
-      const initialProcesses = await snapshot("initial");
+      let initialProcesses = await snapshot("initial");
       if (!initialProcesses) return refuse("native_initial_unavailable");
-      const [shell, agent] = initialProcesses.processes;
+      let [shell, agent] = initialProcesses.processes;
       // The installed executable, or an earlier/later release beside it that a
       // harness auto-update left running. A superseded release may already be
       // pruned from disk; its kernel path is then compared without resolution.
@@ -366,7 +373,64 @@ export function createProjectProcessObserver(options: {
         if (interpreterRelease === false || (await canonical(script)) !== launcher.script) return false;
         return update(interpreterRelease ?? executable);
       };
-      const initialMatch = shell && agent ? await matchesLauncher(agent) : false;
+      let wrapperMatches: ((process: NonNullable<typeof agent>) => Promise<boolean>) | undefined;
+      let initialMatch = shell && agent ? await matchesLauncher(agent) : false;
+      if (!initialMatch && shell && agent && nativeInitial.harness === "claude") {
+        // clankie claude deliberately remains the foreground group leader.
+        // Accept only this installed Node launcher, never a generic wrapper.
+        const wrapper = await (options.launcher ?? installedLauncher)("clankie");
+        const matchesWrapper = async (process: NonNullable<typeof agent>) =>
+          wrapper?.script !== undefined &&
+          (await canonical(process.executable)) === wrapper.executable &&
+          process.argv[1] !== undefined &&
+          isAbsolute(process.argv[1]) &&
+          (await canonical(process.argv[1])) === wrapper.script;
+        wrapperMatches = matchesWrapper;
+        if (await matchesWrapper(agent)) {
+          // Native metadata is only a bounded discovery hint. The helper checks
+          // argv[2] == claude, direct parentage and the foreground process group
+          // against the kernel, bracketing all three lifetimes and executables.
+          const foreground = initial.foreground_processes;
+          if (Array.isArray(foreground) && foreground.length <= 64) {
+            const candidates = [
+              ...new Set(
+                foreground
+                  .filter(
+                    (process) => typeof process.argv0 === "string" && basename(process.argv0) === "claude",
+                  )
+                  .map((process) => process.pid)
+                  .filter(
+                    (pid): pid is number =>
+                      Number.isSafeInteger(pid) && pid! > 1 && pid !== agentPid && pid !== shellPid,
+                  ),
+              ),
+            ];
+            let match:
+              | {
+                  pid: number;
+                  processes: NonNullable<typeof initialProcesses>;
+                  launcher: { readonly update?: HarnessUpdate };
+                }
+              | undefined;
+            for (const candidate of candidates) {
+              claudePid = candidate;
+              const processes = await snapshot("initial");
+              if (!processes || !(await matchesWrapper(processes.processes[1]!))) continue;
+              const launcher = await matchesLauncher(processes.processes[2]!);
+              if (!launcher) continue;
+              if (match) return refuse("launcher_mismatch");
+              match = { pid: candidate, processes, launcher };
+            }
+            if (match) {
+              claudePid = match.pid;
+              initialProcesses = match.processes;
+              shell = initialProcesses.processes[0];
+              agent = initialProcesses.processes[2];
+              initialMatch = match.launcher;
+            }
+          }
+        }
+      }
       if (!shell || !agent) return refuse("native_initial_unavailable");
       if (!initialMatch) return refuse("launcher_mismatch");
       // Keep a roster read's permit until every owned native child has closed,
@@ -383,8 +447,12 @@ export function createProjectProcessObserver(options: {
       const latestNative = nativeRead.value;
       const finalProcesses = processRead.value;
       checkpoint = "final_process";
-      const finalMatch = finalProcesses ? await matchesLauncher(finalProcesses.processes[1]!) : false;
+      const finalMatch = finalProcesses
+        ? await matchesLauncher(finalProcesses.processes[claudePid === undefined ? 1 : 2]!)
+        : false;
       if (!finalProcesses) return refuse("native_final_unavailable");
+      if (claudePid !== undefined && !(await wrapperMatches?.(finalProcesses.processes[1]!)))
+        return refuse("launcher_mismatch");
       if (!finalMatch || JSON.stringify(finalMatch) !== JSON.stringify(initialMatch))
         return refuse("launcher_mismatch");
       if (JSON.stringify(latestNative) !== JSON.stringify(nativeInitial))

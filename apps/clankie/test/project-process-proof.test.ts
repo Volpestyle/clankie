@@ -384,3 +384,73 @@ it("matches only one version-named path segment with the same suffix", () => {
     expect(harnessReleaseSibling("/Users/a/.local/share/claude/versions/2.1.3", running)).toBeUndefined();
   expect(harnessReleaseSibling("/opt/1.0.0", "/opt/1.0.1")).toBeUndefined();
 });
+
+it.each(["installed", "other-script", "other-executable", "not-direct-child", "changed-wrapper"] as const)(
+  "classifies a clankie claude foreground launcher: %s",
+  async (mode) => {
+    let wrapperReads = 0;
+    const identity = (pid: number, ppid: number, executable: string, argv: string[]) => ({
+      pid,
+      ppid,
+      uid: process.getuid?.() ?? 501,
+      birth: ["1791520000", "123456"],
+      executable,
+      argv,
+    });
+    const observer = createProjectProcessObserver({
+      platform: "darwin",
+      herdrBinary: "herdr",
+      canonical: async (path) => path,
+      binding: async () => ({ runtime: "external", session: "default", socketPath: "/host/socket" }),
+      launcher: async (name) =>
+        name === "clankie"
+          ? { executable: "/trusted/node", script: "/trusted/clankie" }
+          : { executable: "/trusted/claude" },
+      run: async (command, args) => {
+        if (command === "herdr") {
+          if (args[0] === "agent")
+            return JSON.stringify({
+              result: {
+                agent: {
+                  pane_id: "w1:p2",
+                  terminal_id: "terminal",
+                  agent: "claude",
+                  agent_session: { source: "claude", kind: "id", value: "session" },
+                },
+              },
+            });
+          return JSON.stringify({
+            result: {
+              process_info: {
+                pane_id: "w1:p2",
+                shell_pid: 30,
+                foreground_process_group_id: 40,
+                foreground_processes: [{ pid: 50, argv0: "claude" }],
+              },
+            },
+          });
+        }
+        const wrapped = args[0] === "--claude-processes";
+        if (wrapped) wrapperReads++;
+        return JSON.stringify({
+          schemaVersion: 1,
+          processes: [
+            identity(30, 1, "/bin/zsh", []),
+            identity(40, 30, mode === "other-executable" ? "/untrusted/node" : "/trusted/node", [
+              "node",
+              mode === "other-script" || (mode === "changed-wrapper" && wrapperReads > 1)
+                ? "/untrusted/script"
+                : "/trusted/clankie",
+            ]),
+            ...(wrapped
+              ? [identity(50, mode === "not-direct-child" ? 99 : 40, "/trusted/claude", ["claude"])]
+              : []),
+          ],
+        });
+      },
+    });
+    const proof = await observer("default", "w1:p2");
+    if (mode === "installed") expect(proof?.processes.map((process) => process.pid)).toEqual([50]);
+    else expect(proof).toBeUndefined();
+  },
+);

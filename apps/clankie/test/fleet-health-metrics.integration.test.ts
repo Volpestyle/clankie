@@ -421,3 +421,29 @@ it("carries the helper's complete fixed diagnostic vocabulary through the collec
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it("keeps recovered ESRCH and EBADF scan observations separate from terminal proof refusals", () => {
+  const metrics = new FleetHealthMetrics();
+  // Fixed native events captured from the VUH-1922 live investigation. A retry
+  // is not an admission decision; even retry:true cannot hide a later failure.
+  for (const [reason, stage, errno] of [
+    ["process_unavailable", "process", 3],
+    ["socket_unavailable", "fd_socket", 9],
+  ] as const) {
+    metrics.observeProof("fleet", {
+      source: "native",
+      checkpoint: "initial",
+      event: { schemaVersion: 1, reason, stage, errno, attempt: 1, retry: true },
+    });
+  }
+  expect(metrics.snapshot().totals.proof).toMatchObject({ attempts: 0, refusals: 0 });
+  metrics.observeProof("fleet", { source: "proof_success" });
+  expect(metrics.snapshot().totals.proof).toMatchObject({ attempts: 1, refusals: 0 });
+  metrics.observeProof("fleet", { source: "proof", reason: "native_initial_unavailable" });
+  metrics.observeProof("project", { source: "proof", reason: "observation_failed" });
+  expect(metrics.snapshot().totals.proof).toMatchObject({ attempts: 3, refusals: 2 });
+  expect(metrics.snapshot().totals.nativeDiagnostics).toMatchObject({
+    process_unavailable: 1,
+    socket_unavailable: 1,
+  });
+});

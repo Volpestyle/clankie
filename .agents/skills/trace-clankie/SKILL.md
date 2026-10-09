@@ -95,6 +95,12 @@ project membership. `claimedPane` and `claimedBridgeId` are caller claims;
 `callerAttribution` and `callerObservedAt`: a previous observation is historical,
 and `unknown` does not identify a sender. A project pane-not-found is distinct
 from harness, launcher, foreground, process/session/binding and transport failures.
+For `launcher_mismatch`, compare the foreground group leader with the actual
+harness: `clankie claude` leaves its Node launcher in front of a direct Claude
+child. Only the exact installed launcher/command and kernel-proven child chain
+are supported; never exempt a mismatch just because the pane looks healthy.
+ESRCH/EBADF retry diagnostics from the global process/FD scan are not terminal
+refusals; join the final proof result before diagnosing an outage.
 Do not infer the historic sender from today's connected processes. Retain actual
 PID/pane/socket details privately and publish sanitized counts and stages. See
 `docs/cli.md` under `metrics --fleet` for the bounded diagnostic sampling.

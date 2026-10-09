@@ -356,7 +356,7 @@ static int executable_path(pid_t pid, char *path, size_t capacity) {
   return 0;
 }
 
-static int arguments(pid_t pid, struct process_record *out, const char *endpoint) {
+static int arguments(pid_t pid, struct process_record *out, const char *endpoint, int claude_launcher) {
   if (!within_budget()) return refuse();
   int maximum;
   size_t maximum_size = sizeof(maximum);
@@ -413,19 +413,23 @@ static int arguments(pid_t pid, struct process_record *out, const char *endpoint
   if (offset > bytes) { result = refuse_at("argv", "argv_invalid", 0); goto finish; }
   for (size_t i = sizeof(int) + path_length + 1; i < offset; ++i)
     if (blob[i] != '\0') { result = refuse_at("argv", "argv_invalid", 0); goto finish; }
-  if (endpoint != NULL && argc < 3) {
+  if ((endpoint != NULL || claude_launcher) && argc < 3) {
     result = refuse_at("argv", "argv_invalid", 0); goto finish;
   }
   int retained = argc > 2 ? 2 : argc;
   if (out != NULL) out->argc = retained;
-  int observed = endpoint == NULL ? retained : argc;
+  int observed = endpoint == NULL ? (claude_launcher ? 3 : retained) : argc;
   for (int i = 0; i < observed; ++i) {
     if (!within_budget()) { result = refuse(); goto finish; }
     size_t length = strnlen(blob + offset, bytes - offset);
     if (length == bytes - offset) {
       result = refuse_at("argv", "argv_invalid", 0); goto finish;
     }
-    if (endpoint == NULL) {
+    if (claude_launcher && i == 2) {
+      if (length != 6 || memcmp(blob + offset, "claude", 6) != 0) {
+        result = refuse_at("argv", "argv_invalid", 0); goto finish;
+      }
+    } else if (endpoint == NULL) {
       if (length > MAX_HEAD_ARG || !valid_utf8(blob + offset, length)) {
         result = refuse_at("argv", "argv_invalid", 0); goto finish;
       }
@@ -440,7 +444,7 @@ static int arguments(pid_t pid, struct process_record *out, const char *endpoint
     offset += length + 1;
   }
 finish:
-  /* Only first-two observations or the exact server tail enter checks. The
+  /* Only first-two observations, the fixed Claude subcommand, or the exact server tail enter checks. The
    * environment is never parsed; no additional argument is emitted/logged.
    * Erase the entire temporary kernel buffer on every path. */
   erase_buffer(blob, capacity);
@@ -448,12 +452,12 @@ finish:
   return result;
 }
 
-static int capture_process(pid_t pid, struct process_record *out) {
+static int capture_process(pid_t pid, struct process_record *out, int claude_launcher) {
   int result = target_identity(pid, &out->process, 1);
   if (result != 0) return result;
   result = executable_path(pid, out->executable, sizeof(out->executable));
   if (result != 0) return result;
-  result = arguments(pid, out, NULL);
+  result = arguments(pid, out, NULL, claude_launcher);
   if (result != 0) return result;
   struct identity after;
   result = target_identity(pid, &after, 1);
@@ -463,17 +467,25 @@ static int capture_process(pid_t pid, struct process_record *out) {
 }
 
 static int prove_processes(int argc, char **argv) {
-  uint64_t pids[2];
-  if (argc != 4 || !decimal(argv[2], INT_MAX, &pids[0]) || pids[0] <= 1 ||
-      !decimal(argv[3], INT_MAX, &pids[1]) || pids[1] <= 1)
+  int wrapped = strcmp(argv[1], "--claude-processes") == 0;
+  int count = wrapped ? 3 : 2;
+  uint64_t pids[3];
+  if (argc != count + 2 || !decimal(argv[2], INT_MAX, &pids[0]) || pids[0] <= 1 ||
+      !decimal(argv[3], INT_MAX, &pids[1]) || pids[1] <= 1 ||
+      (wrapped && (!decimal(argv[4], INT_MAX, &pids[2]) || pids[2] <= 1)))
     return refuse_at("arguments", "invalid_arguments", 0);
-  struct process_record first[2] = {0}, second[2] = {0};
-  for (int i = 0; i < 2; ++i) {
-    int result = capture_process((pid_t)pids[i], &first[i]);
+  struct process_record first[3] = {0}, second[3] = {0};
+  for (int i = 0; i < count; ++i) {
+    int result = capture_process((pid_t)pids[i], &first[i], wrapped && i == 1);
     if (result != 0) return result;
   }
-  for (int i = 0; i < 2; ++i) {
-    int result = capture_process((pid_t)pids[i], &second[i]);
+  if (wrapped && (first[1].process.ppid != (pid_t)pids[0] ||
+                  first[2].process.ppid != (pid_t)pids[1] ||
+                  getpgid((pid_t)pids[1]) != (pid_t)pids[1] ||
+                  getpgid((pid_t)pids[2]) != (pid_t)pids[1]))
+    return refuse_at("process", "process_changed", 0);
+  for (int i = 0; i < count; ++i) {
+    int result = capture_process((pid_t)pids[i], &second[i], wrapped && i == 1);
     if (result != 0) return result;
     if (!same_process(&first[i].process, &second[i].process))
       return refuse_at("process", "process_changed", 0);
@@ -485,7 +497,10 @@ static int prove_processes(int argc, char **argv) {
       if (strcmp(first[i].argv[j], second[i].argv[j]) != 0)
         return refuse_at("argv", "argv_changed", 0);
   }
-  for (int i = 0; i < 2; ++i) {
+  if (wrapped && (getpgid((pid_t)pids[1]) != (pid_t)pids[1] ||
+                  getpgid((pid_t)pids[2]) != (pid_t)pids[1]))
+    return refuse_at("process", "process_changed", 0);
+  for (int i = 0; i < count; ++i) {
     struct identity after;
     int result = target_identity((pid_t)pids[i], &after, 1);
     if (result != 0) return result;
@@ -493,7 +508,7 @@ static int prove_processes(int argc, char **argv) {
   }
   if (!within_budget()) return refuse();
   fprintf(proof_output, "{\"schemaVersion\":1,\"processes\":[");
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < count; ++i) {
     if (i) fputc(',', proof_output);
     print_identity(&first[i].process, 1);
     fprintf(proof_output, ",\"ppid\":%d,\"executable\":", first[i].process.ppid);
@@ -586,7 +601,7 @@ static int capture_codex_server(pid_t pid, const char *endpoint, const char *pat
   const char *base = strrchr(out->executable, '/');
   if (base == NULL || strcmp(base + 1, "codex") != 0)
     return refuse_at("executable", "executable_unavailable", 0);
-  result = arguments(pid, NULL, endpoint);
+  result = arguments(pid, NULL, endpoint, 0);
   if (result != 0) return result;
   struct proc_fdinfo *fds = calloc(MAX_FDS, sizeof(*fds));
   if (fds == NULL) return refuse_at("fd_list", "allocation_failed", errno);
@@ -902,7 +917,7 @@ static int execute_proof(int argc, char **argv) {
       return final_refusal();
     }
     int result;
-    if (argc > 1 && strcmp(argv[1], "--processes") == 0) result = prove_processes(argc, argv);
+    if (argc > 1 && (strcmp(argv[1], "--processes") == 0 || strcmp(argv[1], "--claude-processes") == 0)) result = prove_processes(argc, argv);
     else if (argc > 1 && strcmp(argv[1], "--birth") == 0) result = prove_birth(argc, argv);
     else if (argc > 1 && strcmp(argv[1], "--codex-server") == 0) result = prove_codex_server(argc, argv);
     else result = prove(argc, argv);

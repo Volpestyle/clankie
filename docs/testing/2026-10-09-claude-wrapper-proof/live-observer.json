@@ -1,0 +1,17 @@
+[
+  {
+    "label": "before",
+    "admitted": false,
+    "refusals": [
+      {
+        "reason": "launcher_mismatch",
+        "checkpoint": "initial_process"
+      }
+    ]
+  },
+  {
+    "label": "after",
+    "admitted": true,
+    "refusals": []
+  }
+]

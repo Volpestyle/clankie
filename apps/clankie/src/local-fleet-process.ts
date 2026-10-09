@@ -45,6 +45,10 @@ const ProcessSnapshotSchema = z
   })
   .strict();
 
+const ClaudeProcessSnapshotSchema = ProcessSnapshotSchema.extend({
+  processes: z.array(ProcessSnapshotSchema.shape.processes.element).length(3),
+});
+
 export type NativeProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
 
 /** Lossless kernel birth, including microseconds; never a display timestamp. */
@@ -125,17 +129,23 @@ export async function observeNativeProcesses(
   signal?: AbortSignal,
   report?: (event: NativeProcessDiagnostic) => void,
   transport?: (reason: NativeTransportReason) => void,
+  claudePid?: number,
 ): Promise<NativeProcessSnapshot | undefined> {
   if (
     (execute === undefined && process.platform !== "darwin") ||
     !isAbsolute(processHelper) ||
     !pid.safeParse(shellPid).success ||
     !pid.safeParse(agentPid).success ||
-    shellPid === agentPid
+    shellPid === agentPid ||
+    (claudePid !== undefined &&
+      (!pid.safeParse(claudePid).success || claudePid === shellPid || claudePid === agentPid))
   )
     return undefined;
   try {
-    const args = ["--processes", String(shellPid), String(agentPid)];
+    const args =
+      claudePid === undefined
+        ? ["--processes", String(shellPid), String(agentPid)]
+        : ["--claude-processes", String(shellPid), String(agentPid), String(claudePid)];
     let stdout: string | undefined;
     if (execute) stdout = await execute(processHelper, args);
     else {
@@ -151,12 +161,18 @@ export async function observeNativeProcesses(
       }
     }
     if (stdout === undefined) return undefined;
-    const parsed = ProcessSnapshotSchema.safeParse(JSON.parse(stdout));
+    const parsed = (claudePid === undefined ? ProcessSnapshotSchema : ClaudeProcessSnapshotSchema).safeParse(
+      JSON.parse(stdout),
+    );
     if (!parsed.success) return undefined;
     const snapshot = parsed.data;
     if (
       snapshot.processes[0]!.pid !== shellPid ||
       snapshot.processes[1]!.pid !== agentPid ||
+      (claudePid !== undefined &&
+        (snapshot.processes[2]!.pid !== claudePid ||
+          snapshot.processes[2]!.ppid !== agentPid ||
+          snapshot.processes[1]!.ppid !== shellPid)) ||
       snapshot.processes.some((processIdentity) => processIdentity.uid !== process.getuid?.())
     )
       return undefined;

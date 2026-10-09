@@ -1,0 +1,142 @@
+{
+  "runtime": "e00005da57284499e3f53a4e14e30216a5fbf83a",
+  "first": "2026-10-09T04:50:35.089Z",
+  "last": "2026-10-09T06:03:59.796Z",
+  "refusalContexts": 913,
+  "joinedProjectReasons": [
+    {
+      "terminal": "observation_failed",
+      "project": "launcher_mismatch",
+      "checkpoint": "initial_process",
+      "count": 828
+    },
+    {
+      "terminal": "observation_failed",
+      "project": "launcher_unavailable",
+      "checkpoint": "launcher",
+      "count": 44
+    },
+    {
+      "terminal": "native_initial_unavailable",
+      "project": null,
+      "checkpoint": null,
+      "count": 28
+    },
+    {
+      "terminal": "not_member",
+      "project": null,
+      "checkpoint": null,
+      "count": 7
+    },
+    {
+      "terminal": "native_final_unavailable",
+      "project": null,
+      "checkpoint": null,
+      "count": 5
+    },
+    {
+      "terminal": "pane_changed",
+      "project": "session_changed",
+      "checkpoint": "final_native",
+      "count": 1
+    }
+  ],
+  "native": [
+    {
+      "reason": "process_unavailable",
+      "errno": 3,
+      "retry": true,
+      "count": 5599
+    },
+    {
+      "reason": "socket_unavailable",
+      "errno": 9,
+      "retry": true,
+      "count": 1166
+    },
+    {
+      "reason": "process_census_changed",
+      "errno": 0,
+      "retry": false,
+      "count": 1046
+    },
+    {
+      "reason": "ancestry_unavailable",
+      "errno": 3,
+      "retry": false,
+      "count": 21
+    },
+    {
+      "reason": "budget_exhausted",
+      "errno": 0,
+      "retry": true,
+      "count": 12
+    },
+    {
+      "reason": "socket_unavailable",
+      "errno": 3,
+      "retry": true,
+      "count": 11
+    },
+    {
+      "reason": "socket_unavailable",
+      "errno": 0,
+      "retry": false,
+      "count": 6
+    },
+    {
+      "reason": "attempts_exhausted",
+      "errno": 0,
+      "retry": false,
+      "count": 5
+    },
+    {
+      "reason": "process_changed",
+      "errno": 3,
+      "retry": true,
+      "count": 4
+    },
+    {
+      "reason": "process_unavailable",
+      "errno": 22,
+      "retry": false,
+      "count": 2
+    },
+    {
+      "reason": "ancestry_unavailable",
+      "errno": 22,
+      "retry": true,
+      "count": 2
+    },
+    {
+      "reason": "budget_exhausted",
+      "errno": 0,
+      "retry": false,
+      "count": 2
+    },
+    {
+      "reason": "process_census_unavailable",
+      "errno": 0,
+      "retry": true,
+      "count": 1
+    },
+    {
+      "reason": "process_changed",
+      "errno": 22,
+      "retry": true,
+      "count": 1
+    },
+    {
+      "reason": "socket_unavailable",
+      "errno": 38,
+      "retry": true,
+      "count": 1
+    },
+    {
+      "reason": "ancestry_unavailable",
+      "errno": 0,
+      "retry": false,
+      "count": 1
+    }
+  ]
+}

@@ -135,3 +135,23 @@ This meets the tool-access objective previously assigned to VUH-1558 and VUH-157
 Their other native delivery, membership, project or live verification scope remains
 in their issue records. Fixtures establish deterministic bridge behavior; the
 lead owns landing, re-pin and live PC native acceptance.
+
+## Amendment: the exact Clankie Claude launcher (2026-10-09)
+
+VUH-1922 found that `clankie claude` remains the pane's foreground process group
+leader while the real Claude executable is its direct child. Treating that Node
+launcher as Claude produced repeated `launcher_mismatch` refusals on healthy
+operator requests. Generic wrapper admission remains forbidden.
+
+For this one launch route, project proof verifies the service's installed Node
+executable and canonical Clankie script, the kernel-observed `claude` subcommand,
+and the shell → wrapper → Claude direct-parent chain in the same foreground
+group. It brackets all three process lifetimes, executables and retained argv.
+Claude must match the installed harness or its already-supported adjacent
+release. The proof names Claude as the agent, preserving the socket ancestry
+check; metadata supplies candidate hints only. A mismatched command, generic
+wrapper, non-child, ambiguous candidate or changed observation still refuses.
+
+Retryable process/FD census observations remain diagnostic counters, never
+terminal refusal counts on their own. Failures after retries remain loud; no
+load, caller or startup exemptions are introduced.

@@ -3792,7 +3792,11 @@ unconfirmed alert stays held across inactivity without replay; later proof
 observations read only
 its original acknowledgment before starting that cooldown. Unavailable delivery
 may retry after one minute. Native retries are counted separately from terminal
-refusals. Metrics restart with the service and state their coverage start.
+refusals. In particular, `process_unavailable` with ESRCH and `socket_unavailable`
+with EBADF can be retryable census churn; their presence does not establish a
+failed proof. Only the terminal proof result increments attempts/refusals. An
+exhausted retry, timeout, identity mismatch or failed observation still refuses
+and counts. Metrics restart with the service and state their coverage start.
 
 Private service logs explain local proof refusals without expanding metric labels.
 Join `fleet.local_proof.refusal_context` to project-stage

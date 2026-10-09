@@ -1,0 +1,90 @@
+{
+  "ok": true,
+  "fleet": {
+    "schemaVersion": 1,
+    "startedAt": "2026-10-09T04:50:31.472Z",
+    "observedAt": "2026-10-09T06:00:24.690Z",
+    "totals": {
+      "proof": {
+        "attempts": 30181,
+        "refusals": 857,
+        "byReason": {
+          "observation_failed": 821,
+          "native_initial_unavailable": 24,
+          "not_member": 7,
+          "native_final_unavailable": 4,
+          "pane_changed": 1
+        }
+      },
+      "reports": { "attempts": 15, "failures": 1, "byReason": { "binding_unavailable": 1 } },
+      "nativeDiagnostics": {
+        "process_census_changed": 1006,
+        "process_unavailable": 5396,
+        "socket_unavailable": 1121,
+        "budget_exhausted": 9,
+        "process_census_unavailable": 1,
+        "process_changed": 4,
+        "attempts_exhausted": 5,
+        "ancestry_unavailable": 19
+      },
+      "transportDiagnostics": { "cancelled": 30, "timeout": 4 }
+    },
+    "windows": [
+      {
+        "minutes": 5,
+        "proof": {
+          "attempts": 2131,
+          "refusals": 89,
+          "byReason": {
+            "observation_failed": 86,
+            "native_initial_unavailable": 2,
+            "native_final_unavailable": 1
+          }
+        },
+        "reports": { "attempts": 0, "failures": 0, "byReason": {} },
+        "nativeDiagnostics": {
+          "socket_unavailable": 87,
+          "process_unavailable": 433,
+          "process_census_changed": 115,
+          "process_changed": 1,
+          "ancestry_unavailable": 3,
+          "budget_exhausted": 4
+        },
+        "transportDiagnostics": { "cancelled": 4 },
+        "proofRefusalRate": 0.04176442984514313,
+        "proofRefusalsPerMinute": 17.8,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      },
+      {
+        "minutes": 60,
+        "proof": {
+          "attempts": 26018,
+          "refusals": 775,
+          "byReason": {
+            "native_initial_unavailable": 24,
+            "not_member": 7,
+            "observation_failed": 739,
+            "native_final_unavailable": 4,
+            "pane_changed": 1
+          }
+        },
+        "reports": { "attempts": 8, "failures": 0, "byReason": {} },
+        "nativeDiagnostics": {
+          "process_unavailable": 5020,
+          "socket_unavailable": 1004,
+          "process_census_changed": 935,
+          "attempts_exhausted": 5,
+          "ancestry_unavailable": 19,
+          "process_changed": 2,
+          "budget_exhausted": 7
+        },
+        "transportDiagnostics": { "cancelled": 25, "timeout": 4 },
+        "proofRefusalRate": 0.029787070489661005,
+        "proofRefusalsPerMinute": 12.916666666666666,
+        "reportFailureRate": 0,
+        "reportFailuresPerMinute": 0
+      }
+    ]
+  }
+}

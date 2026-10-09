@@ -48,6 +48,24 @@ accepts a caller-supplied PID. A missing helper or unsupported platform refuses
 admission; there is no legacy socket-scan fallback. Project identity separately
 checks the shell and foreground harness through the process mode below.
 
+## Clankie's Claude foreground launcher
+
+`native-process-proof --claude-processes SHELL_PID WRAPPER_PID CLAUDE_PID`
+returns three records in that order. It additionally requires the wrapper to
+be the shell's direct child and foreground group leader, Claude to be its direct
+child in the same group, and the wrapper's kernel argv[2] to be exactly `claude`.
+All lifetimes, executables and retained argv are bracketed as in process mode.
+The fixed subcommand is checked without returning later arguments or environment.
+
+The service accepts this mode only for a Herdr Claude observation when the
+wrapper's kernel executable and canonical argv[1] match the service's installed
+Node + `clankie` launcher. Claude must match the installed Claude executable (or
+the existing supported adjacent release). Herdr's foreground list supplies only
+bounded candidate hints, never authority. Generic wrappers, other subcommands,
+non-child processes, changed lifetimes and ambiguous matches refuse. The admitted
+process is Claude, so subsequent socket ancestry checks still require the real
+harness or the existing separately proven private-seat path.
+
 ## Shell and foreground process observations
 
 ```sh

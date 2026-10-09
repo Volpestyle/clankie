@@ -1,0 +1,2 @@
+Native process proof diagnostic: {"schemaVersion":1,"stage":"process","reason":"process_changed","errno":0,"attempt":1,"retry":false}
+Native process proof unavailable
