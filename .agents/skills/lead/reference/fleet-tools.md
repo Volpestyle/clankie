@@ -46,8 +46,8 @@ hires.
 Placement: one workspace per repository in the selected fleet (linked worktrees
 share it). Omit placement to fill named 2x2 worker tabs, at most four per tab,
 before opening the next numbered tab. Positions are top-left, top-right,
-bottom-left, bottom-right. The group defaults to the project or deliverable
-(and the repository when neither is supplied). `pipeline` overrides its name,
+bottom-left, bottom-right. The group defaults to the project's display name or deliverable
+(and the repository when neither is supplied; unnamed non-Git directories use `Workers`). `pipeline` overrides its name,
 for example `VUH-1869 authors`. Explicit `new-tab` keeps a solo `Name · role`
 tab; explicit `split` requires a pipeline. Verified repo/group/grid metadata
 keeps hires out of unmarked or older lanes. Prepared native hires move only

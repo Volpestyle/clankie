@@ -105,7 +105,7 @@ changing the key. `panes` permits independent slices in separate authorized hire
 New hires target the repo's Herdr workspace in the selected fleet. Linked Git
 worktrees share it. Omitted placement fills named 2x2 worker tabs, at most four
 per tab before opening the next numbered tab. Group names come from the
-project or deliverable (otherwise the repo); `pipeline` overrides the group
+project's display name or deliverable (otherwise the repo, or `Workers` outside Git); `pipeline` overrides the group
 name. Explicit `new-tab` keeps a solo `Name · role` tab. Explicit `split` still
 requires a pipeline. Owner/role/fleet placement preferences win. Matching
 repo/group/grid tokens keep new hires out of unmarked and older lanes.

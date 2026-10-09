@@ -3096,8 +3096,8 @@ Non-Git directories use their exact working directory instead.
 
 Omitted placement fills named 2x2 worker tabs, with at most four panes before
 opening the next numbered tab. Positions fill top-left, top-right, bottom-left,
-bottom-right. The name defaults to the project or deliverable (otherwise the
-repository); a per-hire `pipeline`, such as `"VUH-1869 authors"`, overrides it.
+bottom-right. The name defaults to the project's display name or deliverable (otherwise the
+repository, or `Workers` outside Git); a per-hire `pipeline`, such as `"VUH-1869 authors"`, overrides it.
 Explicit `new-tab` requests a solo `Name · role` tab. Explicit `split` requires
 a pipeline and fills its grid. Existing unmarked pipeline tabs refuse instead
 of appending to an unrelated lane. Existing owner placement preferences still

@@ -68,6 +68,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       );
     const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
     let repo: { key: string; cwd: string; label: string };
+    let defaultGroup: string;
     try {
       const source = z
         .object({
@@ -77,6 +78,7 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
         })
         .parse(JSON.parse(await run(["worktree", "list", "--cwd", input.cwd]))).result.source;
       repo = { key: source.repo_key, cwd: source.repo_root, label: source.repo_name };
+      defaultGroup = `${source.repo_name} workers`;
     } catch (error) {
       if (!(error instanceof Error) || !/not_git_worktree/u.test(error.message)) throw error;
       // Non-Git directories have no repo identity. Exact host cwd is the key;
@@ -84,15 +86,13 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       repo = {
         key: `directory:${input.cwd}`,
         cwd: input.cwd,
-        label:
-          input.cwd
-            .replace(/[\\/]+$/u, "")
-            .split(/[\\/]/u)
-            .at(-1) || input.cwd,
+        label: "Workers",
       };
+      // An approved directory is an identity, not a human-facing group name.
+      defaultGroup = "Workers";
     }
     const repoToken = createHash("sha256").update(repo.key).digest("hex");
-    const group = input.pipeline ?? input.group ?? `${repo.label} workers`;
+    const group = input.pipeline ?? input.group ?? defaultGroup;
     const pipelineToken = createHash("sha256").update(group).digest("hex");
     let current = await snapshot();
     const candidates = current.workspaces.filter(

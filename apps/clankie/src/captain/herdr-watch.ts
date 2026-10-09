@@ -792,7 +792,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly projectLiveReuse = new WeakSet<SpawnOperatorSeat>();
   private readonly projectContexts = new WeakMap<
     SpawnOperatorSeat,
-    { projectId: string; authority?: ConversationAuthority }
+    { projectId: string; projectName: string; authority?: ConversationAuthority }
   >();
   private readonly piSeatModel: (() => Promise<PiSeatModel | undefined>) | undefined;
   private readonly hireCapacity:
@@ -2028,7 +2028,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const seat: SpawnOperatorSeat = { ...reserved.request, harness };
       this.hireDefaultPolicies.set(seat, JSON.stringify(defaults));
       this.projectAllocations.set(seat, allocation);
-      this.projectContexts.set(seat, { projectId, ...(authority === undefined ? {} : { authority }) });
+      this.projectContexts.set(seat, {
+        projectId,
+        projectName: settings.projects.find((project) => project.id === projectId)!.name,
+        ...(authority === undefined ? {} : { authority }),
+      });
       if (reused) this.projectLiveReuse.add(seat);
       if (reserved.reused) this.projectRecoveryOnly.add(seat);
       this.activeProjectHires.add(allocation);
@@ -2142,6 +2146,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           "The project's settings or workspace changed. Check the project before hiring again.",
         );
       this.projectHires.launch(id, latest, dispatched);
+      context.projectName = latest.projects.find((entry) => entry.id === context.projectId)!.name;
     });
   }
 
@@ -3361,7 +3366,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // command can create its native process.
       if (this.fleetResources) await this.admitResourceMutation(input, authority);
       await this.admitProjectLaunch(input, true);
-      const group = this.projectContexts.get(input)?.projectId ?? input.projectId ?? input.deliverable;
+      const group = this.projectContexts.get(input)?.projectName ?? input.deliverable;
       paneId = await createTab({
         ...(group === undefined ? {} : { group }),
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),

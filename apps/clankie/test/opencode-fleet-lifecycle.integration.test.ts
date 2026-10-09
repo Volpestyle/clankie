@@ -47,8 +47,15 @@ async function fixture(
     assignRole = true,
     operatorSeat = false,
   } = options;
-  const tabLabel = assignRole ? "Oriana Vale · tester" : "Oriana Vale";
   const root = await realpath(await mkdtemp(join(tmpdir(), "opencode-fleet-integration-")));
+  const projectName = "OpenCode lifecycle";
+  const tabLabel = preferencesOnly
+    ? projectName
+    : remote
+      ? operatorSeat
+        ? "Remote app"
+        : "Fixture project"
+      : "Workers";
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const state = join(root, "captain");
   const sessionId = "ses_nativeWorker123";
@@ -60,6 +67,7 @@ async function fixture(
     cwd: root,
     terminal_title: "OC | native-integration",
     label: "Native command",
+    tokens: {} as Record<string, string>,
     name: undefined as string | undefined,
     agent_session: undefined as { source: string; kind: string; value: string } | undefined,
   };
@@ -267,6 +275,17 @@ async function fixture(
       pane.label = args[3]!;
       return JSON.stringify({ result: { pane: { ...pane } } });
     }
+    if (args[0] === "pane" && args[1] === "report-metadata") {
+      expect(present).toBe(true);
+      expect(args[2]).toBe(pane.pane_id);
+      expect(args[args.indexOf("--source") + 1]).toBe("clankie-hire-layout");
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] !== "--token") continue;
+        const [name, value] = args[i + 1]!.split("=");
+        pane.tokens[name!] = value!;
+      }
+      return "";
+    }
     if (args[0] === "pane" && args[1] === "close") {
       physicalCloses++;
       throw new Error("Unconditional pane close forbidden");
@@ -313,7 +332,7 @@ async function fixture(
         projects: [
           {
             id: "native",
-            name: "Native",
+            name: projectName,
             workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: root }],
             autonomy: {
               fleet: {

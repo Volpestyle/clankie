@@ -30,8 +30,8 @@ workspace once, with its initial root tab reserved separately as `Clankie`.
 Updated 2026-10-08 for [VUH-1869](https://linear.app/vuhlp/issue/VUH-1869):
 omitted placement fills named 2x2 worker tabs, at most four per tab, before
 opening the next numbered tab. Positions fill top-left, top-right, bottom-left,
-bottom-right. A project or deliverable names the group; without either, use
-`repository workers`. Per-hire `pipeline` overrides that group name. Explicit
+bottom-right. The verified project's display name or a deliverable names the group; without either, use
+`repository workers` in Git or `Workers` for an unnamed non-Git directory. Per-hire `pipeline` overrides that group name. Explicit
 `new-tab` retains a solo `Name · role` tab; explicit `split` requires a pipeline.
 Owner/role/fleet placement overrides keep their precedence.
 

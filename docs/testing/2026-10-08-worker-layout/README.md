@@ -85,3 +85,27 @@ briefs or turns. This is not a deployed-service `hire_agent` dispatch; the
 prepared-launch journey and covering hire tests verify forwarding and native
 launch boundaries. No deploy, live settings write or existing-pane
 rearrangement occurred.
+
+## Project display-name correction
+
+Teo's broader gate exposed that the default group was receiving a project ID
+(`native`) rather than its human name. The admitted project context now carries
+and refreshes the configured display name through the existing validated
+settings reads. Layout receives that name, never a raw request/project ID;
+explicit pipeline group names still win, and pane labels keep the worker's
+human name and role.
+
+The OpenCode lifecycle fixture retains internal ID `native` but names its
+project `OpenCode lifecycle`; that exact display name is its expected group
+tab. Its pane still expects `Oriana Vale · tester`. Remote variants expect
+`Fixture project` or `Remote app`; outside a project a Git repository uses its repository worker group, while
+an unnamed non-Git directory uses `Workers`, never a filesystem basename. The fixture also records the allocator's display metadata
+without changing its native-controller proof or lifecycle expectations.
+
+[Checks](project-name-checks.json): the full OpenCode fleet-lifecycle file passed
+20/20 cases, and project hires passed 46/46, in one heavy permit (70.64 s total).
+Clankie typecheck and targeted formatting/lint also passed. The earlier native
+4+1 geometry/move proof is reusable: this correction changes display-name
+selection, not grid geometry or existing panes. Moss owns an additional,
+unlanded 21st lifecycle case for a pending Herdr reply; it is not included
+in this main-file result and will be rebased onto this correction.

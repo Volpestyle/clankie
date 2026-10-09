@@ -219,7 +219,7 @@ describe("project hiring", () => {
       expect(f.runner.createTab).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: await realpath(f.root),
-          group: "game",
+          group: "Game",
           env: expect.objectContaining({ CODEX_HOME: f.root }),
         }),
       );
@@ -325,7 +325,7 @@ describe("project hiring", () => {
       ).toMatchObject({ outcome: "spawned", profile: { account: "second", placement: "split" } });
       expect(f.runner.createTab).toHaveBeenCalledWith(
         expect.objectContaining({
-          group: "game",
+          group: "Game",
           pipeline: "Release pipeline",
           placement: "split",
           env: expect.objectContaining({ CLAUDE_CONFIG_DIR: await realpath(f.root) }),

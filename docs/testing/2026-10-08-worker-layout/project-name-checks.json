@@ -1,0 +1,287 @@
+{
+  "success": true,
+  "tests": 66,
+  "passed": 66,
+  "failed": 0,
+  "startTime": 1791515675690,
+  "files": [
+    {
+      "file": "apps/clankie/test/opencode-fleet-lifecycle.integration.test.ts",
+      "status": "passed",
+      "durationMs": 66284.861328125,
+      "tests": [
+        {
+          "name": "a hire without an explicit brief delivers resolved working preferences through the real native channel once",
+          "status": "passed"
+        },
+        {
+          "name": "native prepared hire survives real census/roster reconciliation and exits only its original TUI",
+          "status": "passed"
+        },
+        {
+          "name": "a switched native session cannot exit through the previously hired seat",
+          "status": "passed"
+        },
+        {
+          "name": "SSH native hire, API history and follow-up reuse the original controller without local allocation",
+          "status": "passed"
+        },
+        {
+          "name": "remote birth change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote uid change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote socket-owner change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote disconnect change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote retarget change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote during-probe change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote windows change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote link-loss change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "remote session change refuses follow-up/reuse without another writer or local fallback",
+          "status": "passed"
+        },
+        {
+          "name": "the global operator seat hires on a linked machine only into a registered project workspace",
+          "status": "passed"
+        },
+        {
+          "name": "conflicting host and fleet SSH identities refuse every native history API before transport",
+          "status": "passed"
+        },
+        {
+          "name": "lost native send receipt over SSH is not replayed by a repeated live-session follow-up",
+          "status": "passed"
+        },
+        {
+          "name": "stored remote history grants no cold controller adoption, and unknown hosts do not read local history",
+          "status": "passed"
+        },
+        {
+          "name": "history-first native hire keeps Captain admission during a prepare drop and return",
+          "status": "passed"
+        },
+        {
+          "name": "Captain-first history works after a reconnect without adopting its old controller",
+          "status": "passed"
+        },
+        {
+          "name": "advancing a fleet revision closes and evicts the old helper and SSH forward",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "apps/clankie/test/project-hires.test.ts",
+      "status": "passed",
+      "durationMs": 8259.316162109375,
+      "tests": [
+        {
+          "name": "project hiring applies every role field, with explicit fields above role above fleet and nested inheritance",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring requires a deliverable key and blocks another native-first pane across fleet/workspace and ledger instances",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring passes the complete inherited Codex profile to a new tab and its first native brief",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring refuses unknown models and unsupported split placement before native effects",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring launches an explicit Opus override above a Codex role and fleet profile",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring uses an explicit pipeline for split placement and the registered Claude account home",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring refuses a registered Claude profile whose directory disappeared without an account fallback",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring hires into an existing workspace despite a missing same project approval",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring hires into an existing workspace despite a missing other project approval",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring still refuses a missing hire destination and a changed approved path",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring inherits host launch choices for the built-in planner role when project roles are unset",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring inherits host launch choices for the built-in designer role when project roles are unset",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring inherits host launch choices for the built-in builder role when project roles are unset",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring inherits host launch choices for the built-in tester role when project roles are unset",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring inherits host launch choices for the built-in reviewer role when project roles are unset",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring inherits host launch choices for the built-in researcher role when project roles are unset",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring does not inherit custom roles or bypass an explicitly configured role list",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: bound",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: wrong-pane",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: wrong-harness",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: wrong-session",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: replacement",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: retarget",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: missing-proof",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: readiness-retarget",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: readiness-role",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: binding-grants",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: readiness-grants",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring records project assignment before the first brief only for a current bound native seat: readiness-account",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring inherits role harness, model and effort at the actual native launch",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring reserves atomically while native startup is awaiting, and zero caps block before a pane",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring refuses a zero project cap before native effects",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring refuses a reduced role cap at the last native launch boundary",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring retains uncertain startup across restart and changed harness settings without starting a duplicate",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring rechecks caps and launch settings after asynchronous preparation",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring never derives live capacity from persona done state and releases only a confirmed absent pane",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring denies stale PID, shell, socket and absent process proof, including after reload",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring separate ledger instances cannot reserve past a cap; prelaunch failure releases without erasing history",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring reuses an exact running hire at capacity but never replaces it when it vanishes during resume",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring refuses resumed sessions whose project role has changed without adopting new launch settings",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring cannot replace an assignment's original process proof during uncertain recovery",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring uses the verified native workspace fallback only when the current source has no hire assignment",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring cannot repair an invalid native source role by requesting a different hire role",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring keeps deleted native projects invalid even after all projects are removed",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring does not release an allocation created after an empty inventory began",
+          "status": "passed"
+        },
+        {
+          "name": "project hiring cannot select another project bucket from a project conversation",
+          "status": "passed"
+        }
+      ]
+    }
+  ]
+}
