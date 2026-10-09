@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { Server as HttpServer } from "node:http";
@@ -499,11 +500,14 @@ async function fixture(
   };
 }
 
-const text = (result: Awaited<ReturnType<Client["callTool"]>>) =>
-  CallToolResultSchema.parse(result)
-    .content.filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
+const decoded = (result: Awaited<ReturnType<Client["callTool"]>>) =>
+  decodeMcpResult(CallToolResultSchema.parse(result)) as Record<string, unknown> & {
+    receiptId: string;
+    content: unknown;
+    seats: { seatId: string }[];
+  };
+const serialized = (result: Awaited<ReturnType<Client["callTool"]>>) =>
+  JSON.stringify(CallToolResultSchema.parse(result));
 
 it("reads through the native worker bridge without optional native publishing proof", async () => {
   let authorRequests = 0;
@@ -524,7 +528,7 @@ it("reads through the native worker bridge without optional native publishing pr
       name: "clankie_call",
       arguments: { name: "linear_get_issue", arguments: { id: "VUH-independent-read" } },
     });
-    expect(JSON.parse(text(read))).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
+    expect(decoded(read)).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
     expect(f.calls).toEqual([{ provider: "original", id: "VUH-independent-read" }]);
     expect(authorRequests).toBe(0);
     expect(f.projectProofSignals).toEqual([]);
@@ -575,7 +579,7 @@ it.each(["capture", "revalidation"] as const)(
         name: "clankie_call",
         arguments: { name: "linear_save_project_update", arguments: { id: `VUH-write-${stage}` } },
       });
-      expect(JSON.parse(text(write))).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
+      expect(decoded(write)).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
       expect(performance.now() - started).toBeLessThan(1_500);
       expect(authorRequests).toBe(1);
       expect(f.projectProofSignals).toHaveLength(1);
@@ -594,14 +598,14 @@ it("verifies only the exact tool account on invocation and receipt lookup while 
     expect((await f.hire(1))[0]?.outcome).toBe("spawned");
     const worker = [...f.bridges.values()][0]!;
     const search = await worker.client.callTool({ name: "clankie_tools", arguments: { query: "issue" } });
-    expect(text(search)).toContain("linear_get_issue");
+    expect(serialized(search)).toContain("linear_get_issue");
     expect(f.bindings).toContain("unverified");
     f.bindings.length = 0;
     const read = await worker.client.callTool({
       name: "clankie_call",
       arguments: { name: "linear_get_issue", arguments: { id: "VUH-exact-account" } },
     });
-    const receipt = JSON.parse(text(read));
+    const receipt = decoded(read);
     expect(receipt).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
     expect(f.bindings.length).toBeGreaterThan(0);
     expect(new Set(f.bindings)).toEqual(new Set(["linear"]));
@@ -610,7 +614,7 @@ it("verifies only the exact tool account on invocation and receipt lookup while 
       name: "clankie_call",
       arguments: { receiptId: receipt.receiptId },
     });
-    expect(JSON.parse(text(reconciled))).toMatchObject({ outcome: "ok", receiptId: receipt.receiptId });
+    expect(decoded(reconciled)).toMatchObject({ outcome: "ok", receiptId: receipt.receiptId });
     expect(new Set(f.bindings)).toEqual(new Set(["linear"]));
     expect(f.calls).toEqual([{ provider: "original", id: "VUH-exact-account" }]);
   } finally {
@@ -651,29 +655,29 @@ it("keeps six native-first hires' tools and admitted tracker reads through share
           bridge.client.callTool({ name: "clankie_tools", arguments: { query: "linear get issue" } }),
         ),
       );
-      for (const result of searched) expect(text(result)).toContain("linear_get_issue");
+      for (const result of searched) expect(serialized(result)).toContain("linear_get_issue");
     }
     const replacementRead = await workers[0]!.client.callTool({
       name: "clankie_call",
       arguments: { name: "linear_get_issue", arguments: { id: "VUH-after-replacement" } },
     });
     expect(replacementRead.isError).not.toBe(true);
-    const replacementReceipt = JSON.parse(text(replacementRead));
+    const replacementReceipt = decoded(replacementRead);
     expect(replacementReceipt).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
-    expect(JSON.parse(replacementReceipt.content)).toMatchObject({ provider: "replacement" });
+    expect(replacementReceipt.content).toMatchObject({ provider: "replacement" });
     f.response.release();
     const completed = await Promise.all(reads);
     for (const [i, result] of completed.entries()) {
-      expect(result.isError, `VUH-read-${i}: ${text(result)}`).not.toBe(true);
-      const receipt = JSON.parse(text(result));
+      expect(result.isError, `VUH-read-${i}: ${serialized(result)}`).not.toBe(true);
+      const receipt = decoded(result);
       expect(receipt).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
-      expect(JSON.parse(receipt.content)).toMatchObject({ id: `VUH-read-${i}`, provider: "original" });
+      expect(receipt.content).toMatchObject({ id: `VUH-read-${i}`, provider: "original" });
     }
     expect(f.calls.filter((call) => call.id.startsWith("VUH-read-"))).toHaveLength(6);
     expect(f.providerSessions()).toBe(2);
     const roster = await workers[0]!.client.callTool({ name: "list_fleet_seats", arguments: {} });
     expect(roster.isError).not.toBe(true);
-    const peer = JSON.parse(text(roster)).seats[0];
+    const peer = decoded(roster).seats[0];
     const delivered = await workers[0]!.client.callTool({
       name: "message_peer",
       arguments: { seat: peer.seatId, text: "Fixture peer interface is ready." },
@@ -698,18 +702,18 @@ it("returns a specific stalled tracker error within the worker request budget an
     await Promise.race([
       f.stalledReadAdmitted.promise,
       pending.then((result) => {
-        throw new Error(`Stalled tracker read returned before admission: ${text(result)}`);
+        throw new Error(`Stalled tracker read returned before admission: ${serialized(result)}`);
       }),
     ]);
     const result = await pending;
     expect(result.isError).toBe(false);
-    expect(JSON.parse(text(result))).toMatchObject({
+    expect(decoded(result)).toMatchObject({
       outcome: "uncertain",
       receiptId: expect.any(String),
       detail: "may have applied; reconcile, don’t retry",
     });
-    expect(text(result)).toMatch(/timed out|timeout|deadline/iu);
-    expect(text(result)).not.toContain("inspect the current grant and account");
+    expect(serialized(result)).toMatch(/timed out|timeout|deadline/iu);
+    expect(serialized(result)).not.toContain("inspect the current grant and account");
     expect(performance.now() - started).toBeLessThan(1_500);
     expect(f.calls.filter((call) => call.id === "VUH-stall")).toHaveLength(1);
     expect(f.bridgeStatus("w1:p1")).toMatchObject({
@@ -737,7 +741,7 @@ it.each(["once", "held", "nonmember"] as const)(
         name: "clankie_call",
         arguments: { name: "linear_save_project_update", arguments: { id: "VUH-admission" } },
       });
-      const receipt = JSON.parse(text(result));
+      const receipt = decoded(result);
       if (mode === "once") {
         expect(receipt.outcome).toBe("ok");
         expect(f.calls).toEqual([{ provider: "original", id: "VUH-admission" }]);
@@ -767,13 +771,11 @@ it.each(["held", "nonmember"] as const)(
     try {
       expect((await f.hire(1))[0]?.outcome).toBe("spawned");
       const worker = [...f.bridges.values()][0]!;
-      const original = JSON.parse(
-        text(
-          await worker.client.callTool({
-            name: "clankie_call",
-            arguments: { name: "linear_save_project_update", arguments: { id: "VUH-original" } },
-          }),
-        ),
+      const original = decoded(
+        await worker.client.callTool({
+          name: "clankie_call",
+          arguments: { name: "linear_save_project_update", arguments: { id: "VUH-original" } },
+        }),
       );
       expect(original.outcome).toBe("ok");
       f.refuseAdmission(mode);
@@ -781,7 +783,7 @@ it.each(["held", "nonmember"] as const)(
         name: "clankie_call",
         arguments: { receiptId: original.receiptId },
       });
-      expect(JSON.parse(text(reconciled))).toMatchObject({
+      expect(decoded(reconciled)).toMatchObject({
         outcome: "uncertain",
         receiptId: original.receiptId,
       });
