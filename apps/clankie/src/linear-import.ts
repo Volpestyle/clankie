@@ -129,7 +129,7 @@ export async function importConnectedLinear(projectId: string, options: LinearIm
 }
 
 /** Never send the app bearer to arbitrary attachment URLs or follow redirects. */
-export function linearUploadUrl(value: string): boolean {
+function linearUploadUrl(value: string): boolean {
   try {
     const url = new URL(value);
     return (
