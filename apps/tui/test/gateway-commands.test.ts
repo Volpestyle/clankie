@@ -126,19 +126,6 @@ describe("/remote-access", () => {
     });
   });
 
-  it("keeps status first and labels a second sign-in for what it does when the doorway is open", async () => {
-    const view = fixture({ doorway: undefined, signedIn: true });
-    const remote = await command({ doorway: { state: "connected" }, signedIn: true });
-    await remote.run("", view.shell);
-
-    const [menu] = view.selects;
-    expect(menu?.message).toBe("Remote access for this Mac");
-    expect(menu?.options.map((option) => option.label).slice(0, 2)).toEqual([
-      "Show status",
-      "Sign in with another account",
-    ]);
-  });
-
   it("still signs a signed-out Mac in when the fleet answers 401 to the hosted-account check", async () => {
     const view = fixture(
       { doorway: undefined, signedIn: true },

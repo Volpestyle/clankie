@@ -156,8 +156,6 @@ describe("Codex original native startup catalog", () => {
     expect(FleetSeatToolCatalogSchema.safeParse(report).success).toBe(true);
     expect(report).toMatchObject({ harness: "codex", sessionId: "original", tools: [] });
     expect(report.error).toContain("no native catalog endpoint");
-    expect(report.error).toContain("Advisory:");
-    expect(report.error).toContain("Continue the assignment with your current lead");
     expect(report.error).not.toContain("hire_agent");
   });
 

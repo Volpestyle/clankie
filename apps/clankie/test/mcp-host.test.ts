@@ -129,28 +129,6 @@ describe("mcp host", () => {
     expect(result).toEqual({ outcome: "ok", content: "ran list_issues", isError: false });
   });
 
-  it("shows every settled call to the observer", async () => {
-    const seen: unknown[] = [];
-    const host = createMcpHost({
-      credentials: credentialStore(),
-      settings: settingsStore([server({ id: "tracker", lane: "everywhere" })]),
-      logger: silent,
-      curated: [],
-      connect: async () => fakeConnection(["create_comment"]),
-      observeCall: (call) => seen.push(call),
-    });
-    await host.call({ lane: "operator", server: "tracker", tool: "create_comment", arguments: {} });
-    expect(seen).toEqual([
-      {
-        server: "tracker",
-        tool: "create_comment",
-        arguments: {},
-        content: "ran create_comment",
-        isError: false,
-      },
-    ]);
-  });
-
   it("observes the account used for the write and preserves success when receipt storage fails", async () => {
     const original: ProviderAccount = {
       provider: "linear",

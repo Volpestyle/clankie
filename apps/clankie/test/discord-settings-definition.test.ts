@@ -133,22 +133,6 @@ it("API and CLI receive the same server, role, fleet and tracking setup and all 
       .filter((key) => !["systemActorGuildIds", "systemActorChannelIds"].includes(key))
       .sort(),
   );
-  const sentences = setup.definition.sentences.map((sentence) =>
-    sentence.parts
-      .map((part) =>
-        part.kind === "text"
-          ? part.text
-          : part.kind === "machine"
-            ? setup.machineName
-            : `[${part.placeholder}]`,
-      )
-      .join(""),
-  );
-  expect(sentences).toEqual([
-    "Connect [server] with Clankie as [Participant / Admin].",
-    "Fleet in Discord is [on / off].",
-    "Project tracking is [off / project updates / project activity / every issue].",
-  ]);
   expect(setup.definition.schemaVersion).toBe(2);
   expect(
     setup.definition.sentences

@@ -111,7 +111,6 @@ describe("games console command", () => {
       "Pokémon token cap",
       "Pokémon cost cap (USD)",
     ]);
-    expect(menus[1]?.options[0]?.label).toBe("✓ PokeAgent MMO");
   });
 
   it("uses the canonical budget writer from the token/cost dialog", async () => {

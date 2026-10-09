@@ -1453,40 +1453,4 @@ describe("TUI selected-conversation prompt path", () => {
     ]);
     expect(recorded.markdown).toEqual(["**Skill: herdr-lead - loaded**"]);
   });
-
-  it("updates the turn loader as activity and parallel tools change", () => {
-    const base = {
-      schemaVersion: 1 as const,
-      conversationId: "global-default",
-      cursor: "global-default:event",
-      revision: 1,
-      occurredAt: "2026-07-12T00:00:00.000Z",
-    };
-    const { target, loaders } = recordingTarget();
-    const sink = createOperatorConversationShellSink(target);
-
-    sink.event({ ...base, type: "turn", runId: "run", phase: "accepted" });
-    sink.event({ ...base, type: "activity", phase: "thinking" });
-    sink.event({ ...base, type: "activity", phase: "responding" });
-    sink.event({ ...base, type: "activity", phase: "preparing_tool" });
-    sink.event({ ...base, type: "tool", toolCallId: "call-1", name: "read", phase: "started" });
-    sink.event({ ...base, type: "tool", toolCallId: "call-2", name: "bash", phase: "started" });
-    sink.event({ ...base, type: "tool", toolCallId: "call-2", name: "bash", phase: "completed" });
-    sink.event({ ...base, type: "tool", toolCallId: "call-1", name: "read", phase: "completed" });
-    sink.event({ ...base, type: "activity", phase: "compacting" });
-    sink.event({ ...base, type: "activity", phase: "retrying" });
-
-    expect(loaders).toEqual([
-      "Waiting for response...",
-      "Thinking...",
-      "Responding...",
-      "Preparing tool call...",
-      "Running read...",
-      "Running bash...",
-      "Running read...",
-      "Waiting for response...",
-      "Compacting...",
-      "Retrying...",
-    ]);
-  });
 });

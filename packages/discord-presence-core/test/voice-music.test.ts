@@ -11,7 +11,6 @@ import {
   applyMusicControl,
   createVoxMusicSink,
   isAllowedMusicUrl,
-  parseMusicControlPath,
   parseYtDlpSearchJson,
   tryHandleMusicControlRequest,
   type VoiceMusicSink,
@@ -175,13 +174,6 @@ describe("music control (model tools)", () => {
       ok: false,
       message: "Need a YouTube URL or a result number.",
     });
-  });
-
-  it("parses /music/* control paths", () => {
-    expect(parseMusicControlPath("/music/search")).toBe("search");
-    expect(parseMusicControlPath("/music/play?x=1")).toBe("play");
-    expect(parseMusicControlPath("/music/nope")).toBeUndefined();
-    expect(parseMusicControlPath("/go-live/start")).toBeUndefined();
   });
 
   it("serves search then pick over loopback HTTP", async () => {

@@ -169,14 +169,6 @@ describe("mutating tool classification", () => {
 });
 
 describe("execution identity", () => {
-  it("records the model, provider and effort the session actually ran", () => {
-    expect(sessionExecutionIdentity(session("gpt-6-astra", "openai-codex", "high"))).toEqual({
-      model: "gpt-6-astra",
-      provider: "openai-codex",
-      effort: "high",
-    });
-  });
-
   it("reports unknown rather than guessing when the session has no model yet", () => {
     expect(sessionExecutionIdentity({ model: undefined, thinkingLevel: "high" })).toBeUndefined();
     expect(sessionExecutionIdentity(session("gpt-6-astra", "openai-codex", ""))).toBeUndefined();

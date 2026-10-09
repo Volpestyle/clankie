@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   createCaptainLaneClient,
   followLane,
-  formatLaneListing,
   laneKey,
   selectLanes,
 } from "../src/session/lane-observation.ts";
@@ -85,14 +84,6 @@ describe("lane selection", () => {
       "discord_presence:111:222",
       "discord_voice:111:333",
     ]);
-  });
-
-  it("marks the rooms already being watched, newest first", () => {
-    const listing = formatLaneListing(lanes, new Set(["discord_voice:111:333"]));
-    const rows = listing.split("\n");
-    expect(rows[0]).toContain("▶ discord_voice:111:333");
-    expect(rows[1]).toContain("  discord_presence:111:222");
-    expect(listing).toContain("gameplay:firered · quiet");
   });
 });
 

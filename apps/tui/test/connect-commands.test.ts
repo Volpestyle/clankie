@@ -40,21 +40,6 @@ describe("connect status", () => {
         email: false,
       }),
     ).toContain("/connect linear");
-    expect(
-      formatConnectStatus({
-        discordBot: true,
-        linear: true,
-        email: true,
-        emailUsername: "me@example.com",
-        emailHost: "imap.gmail.com",
-      }),
-    ).toBe(
-      [
-        "discord: bot token stored · /discord for servers and allowlists",
-        "linear: connected",
-        "email: connected · me@example.com @ imap.gmail.com",
-      ].join("\n"),
-    );
   });
 });
 

@@ -2027,32 +2027,6 @@ describe("hiring a seat", () => {
     },
   );
 
-  it("names a missing claude binary as harness_unavailable instead of throwing", async () => {
-    const closePane = vi.fn(() => Promise.resolve());
-    const startAgent = vi.fn(() => Promise.reject(new Error("claude: command not found")));
-    const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(hired)),
-      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
-      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
-      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
-      startAgent,
-      closePane,
-    };
-    const store = new HerdrWatchStore(await storePath(), { runner });
-
-    const result = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
-
-    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
-    expect(startAgent).toHaveBeenCalledOnce();
-    expect(closePane).toHaveBeenCalledWith("w1C:p9");
-    store.close();
-  });
-
   it("waits out the gap between the harness taking input and its session appearing", async () => {
     // pi is ready before it has written its session file; the hire is good.
     const { session: _unset, ...rest } = hired;

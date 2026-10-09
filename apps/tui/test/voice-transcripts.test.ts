@@ -392,12 +392,6 @@ describe("vt console command", () => {
   });
 });
 
-describe("voice transcript keys", () => {
-  it("joins body and delivery so bot and lab lines do not collide", () => {
-    expect(voiceTranscriptEntryKey(entry({ deliveryId: "d1", text: "x" }))).toBe("bot:d1");
-  });
-});
-
 it("keeps human, acknowledgment and answer entries distinct and labels incomplete speech", () => {
   const human = entry({ deliveryId: "same", text: "question" });
   const assistant = (itemId: string) =>

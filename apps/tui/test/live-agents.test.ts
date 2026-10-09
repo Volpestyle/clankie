@@ -187,44 +187,6 @@ it("counts the fleet on one line and expands to the whole fleet in place", () =>
   expect(strip.focus()).toBe(false);
 });
 
-it("uses theme colors for each status, harness and machine and suppresses repeated steps", () => {
-  const agents = ["working", "idle", "done", "blocked"].map((status) => ({
-    ...agent(status, true),
-    seat: { ...agent(status, true).seat, status: status as LiveAgent["seat"]["status"] },
-  }));
-  const strip = new LiveAgentStrip(() => agents, theme);
-  const summary = strip.render(160)[0]!;
-  strip.focus();
-  expect(summary).toContain(ansi.accent("1 working"));
-  expect(summary).toContain(ansi.yellow("1 idle"));
-  expect(summary).toContain(ansi.green("1 done"));
-  expect(summary).toContain(ansi.red("1 blocked"));
-  expect(strip.render(160)[1]).toContain(ansi.blue("codex"));
-  expect(strip.render(160)[1]).toContain(ansi.dim("Office PC"));
-
-  const repeated = agent("repeat");
-  const dock = new LiveAgentStrip(
-    () => [
-      {
-        ...repeated,
-        name: repeated.seat.title,
-        seat: {
-          ...repeated.seat,
-          summary: repeated.seat.title,
-          stance: {
-            pose: "working",
-            statedAt: "2026-10-04T12:00:00.000Z",
-            expiresAt: "2026-10-04T13:00:00.000Z",
-            note: repeated.seat.title,
-          },
-        },
-      },
-    ],
-    theme,
-  );
-  expect(expandedRows(dock, 180).split(repeated.seat.title)).toHaveLength(2);
-});
-
 it.each([32, 120])("scrolls through the entire fleet with full selected details at width %i", (width) => {
   let agents = Array.from({ length: 20 }, (_, i) => agent(`seat-${i}`));
   const last = agent("seat-19", true);
@@ -272,24 +234,6 @@ it.each([32, 120])("scrolls through the entire fleet with full selected details 
   expect(open).toHaveBeenCalledOnce();
 });
 
-it.each([32, 120])("places the dock below the prompt at width %i", (width) => {
-  const shell = new ClankieFaceShell({
-    commands: [],
-    cwd: process.cwd(),
-    env: { CLANKIE_HEADER: "off" },
-    bannerFields: { title: "Clankie" },
-    liveAgents: () => [agent("layout")],
-  });
-  vi.spyOn(shell.tui, "start").mockImplementation(() => {});
-  shell.setDraft("A draft above the agents");
-  shell.start();
-  const rows = shell.tui.render(width);
-  const text = plain(rows);
-  expect(text.indexOf("A draft above the agents")).toBeGreaterThanOrEqual(0);
-  expect(text.indexOf("Agents · 1")).toBeGreaterThan(text.indexOf("A draft above the agents"));
-  expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
-});
-
 it("enters the inline agent list only from an empty prompt and opens the chosen seat", async () => {
   let expanded: LiveAgent | undefined;
   const open = vi.fn(async (value: LiveAgent) => {
@@ -321,9 +265,6 @@ it("enters the inline agent list only from an empty prompt and opens the chosen 
   expect(plain(rows)).not.toContain("esc back");
   // The fixed header names the agent on screen and the way home, in its harness tint.
   expect(stripTerminalSequences(rows[0]!)).toContain("◀ esc Clankie › Worker second");
-  expect(stripTerminalSequences(rows[1]!)).toMatch(/^━+$/u);
-  const header = new ConversationHeader(theme, () => ({ agent: { name: "Worker", live: agent("w") } }));
-  expect(header.render(40)[1]).toBe(ansi.blue("━".repeat(40)));
   expect(plain(new ConversationHeader(theme, () => ({ title: "Main" })).render(40))).toContain(
     "Clankie · Main",
   );

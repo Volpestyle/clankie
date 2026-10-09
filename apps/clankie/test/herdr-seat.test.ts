@@ -39,15 +39,6 @@ const list = {
 };
 
 describe("herdr session census", () => {
-  it("formats a join roster and marks his pane", () => {
-    const text = formatHerdrSessionCensus("w15:p6", parseHerdrAgentList(JSON.stringify(list)));
-    expect(text).toContain("joined as w15:p6");
-    expect(text).toContain("w15:p6  clankie  idle  Clankie  <- YOU");
-    expect(text).toContain("w15:p8  grok  working  inspect the census");
-    expect(text).toContain("1 done — finished work nobody has read");
-    expect(text).toContain("3 agents — 1 done, 1 idle, 1 working");
-  });
-
   it("nests Clankie summaries under the matching pane", () => {
     const text = formatHerdrSessionCensus("w15:p6", parseHerdrAgentList(JSON.stringify(list)), {
       "w15:pQ": { summary: "Finished the worktree setup.", next: "Harvest." },

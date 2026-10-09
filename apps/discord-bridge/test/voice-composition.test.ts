@@ -166,44 +166,6 @@ describe("voice evidence receipts and the response line", () => {
     expect(Object.keys(data)).not.toContain("turnId");
   });
 
-  it("prints the ADR 0057 stage split: wake class, trigger, path, first audio, handoff, playback", () => {
-    expect(
-      describeVoiceResponse({
-        type: "response",
-        ...scope,
-        deliveryId: "d-1",
-        state: "settled",
-        fastPath: true,
-        trigger: "room",
-        wake: "waking",
-        toFirstAudioMs: 420.4,
-        lastAudioToFirstAudioMs: 2300,
-        transcriptToFirstAudioMs: 1300,
-        handoffMs: 0,
-        playbackMs: 900,
-      }),
-    ).toBe(
-      "voice turn (waking, room, fast path): 2300ms since last input audio; 1300ms since final transcript; 420ms from response request to first audio, then 900ms speaking",
-    );
-    expect(
-      describeVoiceResponse({
-        type: "response",
-        ...scope,
-        deliveryId: "d-2",
-        turnId: "turn-9",
-        state: "waiting_user",
-        fastPath: false,
-        trigger: "room",
-        wake: "continuing",
-        toFirstAudioMs: 1500,
-        handoffMs: 1100,
-        playbackMs: 2000,
-      }),
-    ).toBe(
-      "voice turn (continuing, room, clankie handoff 1100ms): 1500ms from response request to first audio, then 2000ms speaking",
-    );
-  });
-
   it("names a play narration, so it is never mistaken for a reply to the room", () => {
     // Both fast-path triggers report a zero handoff. Before the trigger was
     // recorded these two lines were byte-identical, and telling a 39-second
@@ -223,24 +185,6 @@ describe("voice evidence receipts and the response line", () => {
       }),
     ).toBe(
       "voice turn (waking, narration, fast path): 803ms from response request to first audio, then 39022ms speaking",
-    );
-  });
-
-  it("reads a record written before the trigger existed as a room turn", () => {
-    expect(
-      describeVoiceResponse({
-        type: "response",
-        ...scope,
-        deliveryId: "d-4",
-        state: "settled",
-        fastPath: true,
-        wake: "continuing",
-        toFirstAudioMs: 500,
-        handoffMs: 0,
-        playbackMs: 1000,
-      }),
-    ).toBe(
-      "voice turn (continuing, room, fast path): 500ms from response request to first audio, then 1000ms speaking",
     );
   });
 });

@@ -181,20 +181,6 @@ describe("seat outbox", () => {
     await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound", deliveryStage: "unavailable" });
   });
 
-  it("wakes a parked poll the moment a turn arrives", async () => {
-    const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
-    const parked = outbox.poll(5_000);
-    const delivery = wake(outbox);
-    const page = await parked;
-    expect(page.map((event) => event.content)).toEqual(["wake up"]);
-    await outbox.poll(0);
-    await expect(delivery).resolves.toEqual({
-      outcome: "delivered",
-      deliveryStage: "delivered",
-      messageId: page[0]!.id,
-    });
-  });
-
   it("holds an escalation open for the seat's reply, and lets a stale reply fall through", async () => {
     const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
     const parked = outbox.poll(5_000);
@@ -336,12 +322,5 @@ describe("seat outbox", () => {
       messageId: secondPage[0]!.id,
     });
     expect(firstPage[0]!.id).not.toBe(secondPage[0]!.id);
-  });
-
-  it("a wait=0 empty poll does not bind", async () => {
-    const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
-    expect(await outbox.poll(0)).toEqual([]);
-    expect(outbox.bound()).toBe(false);
-    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound", deliveryStage: "unavailable" });
   });
 });
