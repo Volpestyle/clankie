@@ -1,17 +1,21 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { expect, it } from "vitest";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { createConnectedLinearFixture, heldProviderWrite } from "./fixtures/linear-connected-mcp.ts";
 
 function result(result: Awaited<ReturnType<Client["callTool"]>>) {
   expect(result.isError).not.toBe(true);
-  const host = JSON.parse((result.content as { text: string }[])[0]!.text) as {
+  const host = decodeMcpResult(result) as {
     outcome: string;
-    content: string;
+    content: unknown;
     isError: boolean;
   };
   expect(host.outcome).toBe("ok");
   expect(host.isError).toBe(false);
-  return JSON.parse(host.content) as Record<string, unknown>;
+  return (typeof host.content === "string" ? JSON.parse(host.content) : host.content) as Record<
+    string,
+    unknown
+  >;
 }
 
 it("six serial connected Linear state writes retain receipts and attribution without induced transport faults", async () => {
