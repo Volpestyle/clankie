@@ -147,7 +147,10 @@ async function fixture() {
           } catch (error) {
             const state = await new ResourceStore(directory).read();
             throw new Error(
-              `${(error as Error).message}; private queue=${state.queue.length}, heavy phases=${state.leases.filter((lease) => lease.kind === "heavy").map((lease) => lease.state).join(",")}`,
+              `${(error as Error).message}; private queue=${state.queue.length}, heavy phases=${state.leases
+                .filter((lease) => lease.kind === "heavy")
+                .map((lease) => lease.state)
+                .join(",")}`,
               { cause: error },
             );
           }
