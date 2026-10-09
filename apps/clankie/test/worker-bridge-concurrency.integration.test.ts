@@ -642,7 +642,7 @@ it("keeps six native-first hires' tools and admitted tracker reads through share
     await Promise.race([
       f.allReadsAdmitted.promise,
       Promise.all(reads).then((results) => {
-        throw new Error(`Tracker reads returned before admission: ${results.map(text).join("; ")}`);
+        throw new Error(`Tracker reads returned before admission: ${results.map(serialized).join("; ")}`);
       }),
     ]);
     await f.replaceProvider();
@@ -677,7 +677,7 @@ it("keeps six native-first hires' tools and admitted tracker reads through share
     expect(f.providerSessions()).toBe(2);
     const roster = await workers[0]!.client.callTool({ name: "list_fleet_seats", arguments: {} });
     expect(roster.isError).not.toBe(true);
-    const peer = decoded(roster).seats[0];
+    const peer = decoded(roster).seats[0]!;
     const delivered = await workers[0]!.client.callTool({
       name: "message_peer",
       arguments: { seat: peer.seatId, text: "Fixture peer interface is ready." },
