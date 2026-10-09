@@ -7,6 +7,14 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 export const leadPlugin = "clankie-remote-lead@clankie-remote-leads";
+const parse = (text, detail) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Node's SyntaxError may quote private configuration fragments.
+    throw new Error(detail);
+  }
+};
 
 export async function prepareClaude(executable, plugin, options = {}) {
   const env = options.env ?? process.env;
@@ -55,7 +63,7 @@ export async function prepareClaude(executable, plugin, options = {}) {
     if (error.code === "ENOENT") return "{}";
     throw new Error(`Cannot read channel policy at ${policyPath}`);
   });
-  const policy = JSON.parse(text);
+  const policy = parse(text, `Invalid channel policy at ${policyPath}; leaving it untouched`);
   if (
     !policy ||
     typeof policy !== "object" ||
@@ -85,7 +93,10 @@ export async function prepareClaude(executable, plugin, options = {}) {
     }
   }
   const knownPath = join(profile, "plugins", "known_marketplaces.json");
-  const known = JSON.parse(await readFile(knownPath, "utf8").catch(() => "{}"));
+  const known = parse(
+    await readFile(knownPath, "utf8").catch(() => "{}"),
+    "Invalid native marketplace registry; inspect that profile on the PC",
+  );
   const source = known["clankie-remote-leads"]?.source;
   if (source) {
     const fromRoot =
@@ -101,7 +112,12 @@ export async function prepareClaude(executable, plugin, options = {}) {
   if (!source || (await realpath(source.path)) !== (await realpath(plugin)))
     await invoke(["plugin", "marketplace", "add", plugin], profile);
   else await invoke(["plugin", "marketplace", "update", "clankie-remote-leads"], profile);
-  const installed = JSON.parse(await invoke(["plugin", "list", "--json"], profile));
+  const installed = parse(
+    await invoke(["plugin", "list", "--json"], profile),
+    "Invalid native plugin list; inspect that profile on the PC",
+  );
+  if (!Array.isArray(installed))
+    throw new Error("Invalid native plugin list; inspect that profile on the PC");
   const exists = installed.some((value) => value.id === leadPlugin);
   await invoke(["plugin", exists ? "update" : "install", leadPlugin, "--scope", "user"], profile);
   // Install records are required for channel registration. Keep activation

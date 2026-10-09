@@ -13,6 +13,7 @@
         "scripts/build-remote-lead.mjs",
         "integrations/remote-lead/bootstrap.mjs",
         "integrations/remote-lead/claude-setup.mjs",
+        "integrations/remote-lead/claude-setup.d.mts",
         "scripts/profile-clankie.mjs",
         "scripts/proof-linux-pi-process.mjs",
         ".agents/skills/shared-checkout/scripts/land.mjs",

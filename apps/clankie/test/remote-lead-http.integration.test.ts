@@ -120,6 +120,11 @@ describe("remote lead HTTP/MCP trust boundary", () => {
           { marketplace: "clankie-remote-leads", plugin: "clankie-remote-lead" },
         ]),
       );
+      await writeFile(policyPath, '{"private": "fixture-secret" BROKEN');
+      await expect(prepareClaude(executable, plugin, { env, home: root, policyPath })).rejects.toThrow(
+        "Invalid channel policy",
+      );
+      await writeFile(policyPath, JSON.stringify(policy));
       await expect(
         prepareClaude(executable, plugin, {
           env: { ...env, CLAUDE_CONFIG_DIR: join(root, ".claude") },
