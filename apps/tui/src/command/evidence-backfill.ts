@@ -3,8 +3,12 @@ import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
-import { evidenceIssueKeys, splitEvidenceIssueKeys } from "@clankie/protocol/evidence";
-import { evidenceRoots } from "./evidence.ts";
+import {
+  evidenceIssueKeys,
+  evidenceReadmeIssueKeys,
+  splitEvidenceIssueKeys,
+} from "@clankie/protocol/evidence";
+import { evidenceKeyTeams, evidenceRoots } from "./evidence.ts";
 
 const exec = promisify(execFile);
 
@@ -16,6 +20,8 @@ export async function evidenceBackfill(input: { database: string; repo: string; 
   if ((await realpath(await git(["rev-parse", "--show-toplevel"]))) !== repo)
     throw new Error("--repo must name the repository root");
   const roots = (await evidenceRoots(repo)).map((root) => resolve(repo, root));
+  // Push and backfill infer keys by one rule: built-in LOCAL keys and this repo's tracker team (VUH-1997).
+  const teams = await evidenceKeyTeams(repo);
   const remote = await git(["remote", "get-url", "origin"]).catch(() => "");
   const database = await realpath(input.database);
   const db = new DatabaseSync(database, { readOnly: !input.apply });
@@ -64,7 +70,7 @@ export async function evidenceBackfill(input: { database: string; repo: string; 
           const resolved = await realpath(readme).catch(() => undefined);
           if (resolved && !relative(repo, resolved).startsWith("..")) {
             historyReadme = readme;
-            after = evidenceIssueKeys(await readFile(resolved, "utf8"));
+            after = evidenceReadmeIssueKeys(await readFile(resolved, "utf8"), teams);
             if (after.length) source = relative(repo, readme);
             break;
           }
@@ -83,7 +89,7 @@ export async function evidenceBackfill(input: { database: string; repo: string; 
           ]);
           for (const entry of history.split("\0")) {
             const [commit, ...message] = entry.trim().split("\n");
-            after = evidenceIssueKeys(message.join("\n"));
+            after = evidenceIssueKeys(message.join("\n"), teams);
             if (after.length) {
               source = `git history ${commit}`;
               break;

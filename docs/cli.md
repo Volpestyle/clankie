@@ -2071,8 +2071,12 @@ prints one JSON document; push and fetch also print a plain summary on stderr.
   its entry; removing one is an explicit manifest edit. Commit only the README
   and `evidence.json`, and cite the printed links in tracker comments.
   When `--issue` is omitted, push infers keys from the branch, then the worktree
-  directory name, then the folder's README, and reports the source. If none is
-  found, the record stays unkeyed. Multiple keys are stored separately in
+  directory name, then the folder's README, and reports the source. An inferred
+  key is a built-in key (`LOCAL-n`, or `LOCAL-VUH-n` once the store holds an
+  imported team; one key, never its `VUH-n` tail) or carries the team key from
+  `.clankie/tracking.json`; `SHA-256`, `UTF-8` or `GPT-6` never count. In a
+  README, Linear issue URLs, headings and `Tracks:`/`Issue:` lines win over
+  keys elsewhere in the text. If none is found, the record stays unkeyed. Multiple keys are stored separately in
   record metadata; the wire `issueKey` retains the first for existing clients. Issue lookups and
   recent filters match any key, including historical multi-key strings.
 - `clankie evidence backfill --database SQLITE [--repo PATH] [--apply]` repairs
@@ -2080,7 +2084,7 @@ prints one JSON document; push and fetch also print a plain summary on stderr.
   prints proposed changes and before/after counts. `--repo` defaults to the
   current directory and must name a git repository root. Unkeyed records use
   the nearest folder README, then the most recent path-specific git commit
-  naming an issue (up to 50 commits). Records explicitly naming another repo
+  naming an issue (up to 50 commits), by push's key rule. Records explicitly naming another repo
   are skipped; records without repo metadata are assumed to belong to this
   checkout. Review those proposals before applying. Existing multi-key strings
   become separate keys. `--apply` commits only record metadata in a transaction

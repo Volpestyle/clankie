@@ -46,7 +46,9 @@ large JSON and logs) under `docs/testing/<folder>` and run `clankie evidence pus
 <folder> --issue <KEY>` (or `evidence_push`): commit only the README and
 `evidence.json`, and cite the printed `clankie://evidence` links.
 Push without `--issue` infers keys from the branch, worktree directory, then
-folder README, and reports the source. Supply `--issue` to override it. Multiple
+folder README, and reports the source. It accepts only built-in keys (`LOCAL-…`,
+one key) and the repo tracker's team key, preferring a README's issue URL,
+heading or `Tracks:` line. Supply `--issue` to override it. Multiple
 keys are separate record associations and each matches list/recent/device reads.
 For existing SQLite records, `clankie evidence backfill --database PATH --repo REPO`
 is a records-only, read-only dry run. Review its proposed keys and counts; records

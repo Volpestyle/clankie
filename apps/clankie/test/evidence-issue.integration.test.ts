@@ -12,12 +12,22 @@ import { runEvidenceCommand, callEvidenceTool } from "../../tui/src/command/evid
 import { evidenceBackfill } from "../../tui/src/command/evidence-backfill.ts";
 
 const exec = promisify(execFile);
+// Inferred keys carry this repo's tracker team or the built-in LOCAL prefix (VUH-1997).
+const CONVENTION = JSON.stringify({
+  schemaVersion: 1,
+  backend: "linear",
+  linear: { team: "VUH" },
+  decidedBy: "owner",
+  decidedAt: "2026-10-09T00:00:00Z",
+});
 const actor = { kind: "operator" as const, id: "integration", onBehalfOf: [] };
 
 it("infers push keys in precedence order across real git, HTTP, SQLite and disk blobs", async () => {
   const root = await mkdtemp(join(tmpdir(), "evidence-issue-"));
   const repo = join(root, "vuh-1952");
   await mkdir(join(repo, "docs/testing/proof"), { recursive: true });
+  await mkdir(join(repo, ".clankie"));
+  await writeFile(join(repo, ".clankie/tracking.json"), CONVENTION);
   const git = async (...args: string[]) => exec("git", ["-C", repo, ...args]);
   await git("init", "-b", "clankie2/vuh-1951-proof");
   await git(
@@ -99,6 +109,8 @@ it("backfills README/history keys and splits legacy strings without changing blo
   await git("init", "-b", "main");
   await mkdir(join(root, "docs/testing/readme"), { recursive: true });
   await mkdir(join(root, "docs/testing/history"), { recursive: true });
+  await mkdir(join(root, ".clankie"));
+  await writeFile(join(root, ".clankie/tracking.json"), CONVENTION);
   await writeFile(join(root, "docs/testing/readme/README.md"), "VUH-1951\n");
   await writeFile(join(root, "docs/testing/history/README.md"), "A proof\n");
   await git("add", ".");
@@ -151,4 +163,68 @@ it("backfills README/history keys and splits legacy strings without changing blo
   expect((await evidenceBackfill({ database, repo: root, apply: true })).changed).toBe(0);
   db.close();
   store.close();
+});
+
+it("infers no key from README noise, prefers explicit references, and backfills by the same rule (VUH-1997)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "evidence-noise-"));
+  const repo = join(root, "checkout");
+  const git = async (...args: string[]) => exec("git", ["-C", repo, ...args]);
+  await mkdir(join(repo, "docs/testing/noise"), { recursive: true });
+  await mkdir(join(repo, "docs/testing/explicit"), { recursive: true });
+  await mkdir(join(repo, ".clankie"));
+  await writeFile(join(repo, ".clankie/tracking.json"), CONVENTION);
+  const noise =
+    "Hashes are SHA-256, text is UTF-8, judged by GPT-6 and SONNET-5; see POST-0145 and RFC-9110.\n";
+  await writeFile(join(repo, "docs/testing/noise/README.md"), `# Round trip\n\n${noise}`);
+  await writeFile(
+    join(repo, "docs/testing/explicit/README.md"),
+    `# Proof\n\nTracks: https://linear.app/vuhlp/issue/VUH-1997/readme-keys\n\n${noise}Builds on VUH-1951.\n`,
+  );
+  await git("init", "-b", "main");
+  await git("add", ".");
+  await git(
+    "-c",
+    "user.name=Integration",
+    "-c",
+    "user.email=integration@example.invalid",
+    "commit",
+    "-m",
+    "Hash with SHA-256 over UTF-8",
+  );
+  const store = EvidenceStore.local(join(root, "store"));
+  const app = createEvidenceRoutes(store, async (request) =>
+    request.headers.get("authorization") === "Bearer integration" ? actor : undefined,
+  );
+  const server = serve({ fetch: app.fetch, port: 0 });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const options = {
+    cwd: repo,
+    host: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+    env: { CLANKIE_OPERATOR_TOKEN: "integration" },
+    stderr: { write() {} },
+  };
+  try {
+    await writeFile(join(repo, "docs/testing/noise/run.txt"), "noise".repeat(4000));
+    const unkeyed = await runEvidenceCommand(["push", "docs/testing/noise"], options);
+    expect(unkeyed.ok, JSON.stringify(unkeyed.body)).toBe(true);
+    expect(unkeyed.body).not.toHaveProperty("issueKey");
+    expect(unkeyed.body).toMatchObject({ summary: expect.stringContaining("No issue key found") });
+    await writeFile(join(repo, "docs/testing/explicit/run.txt"), "explicit".repeat(4000));
+    const explicit = await runEvidenceCommand(["push", "docs/testing/explicit"], options);
+    expect(explicit.body).toMatchObject({ issueKey: "VUH-1997", issueSource: "folder README" });
+
+    // Backfill: the unkeyed record stays unkeyed through README and history noise.
+    const database = join(root, "store/evidence.sqlite");
+    const db = new DatabaseSync(database);
+    db.prepare("UPDATE records SET issue_key=NULL, details='{}'").run();
+    db.close();
+    const dry = await evidenceBackfill({ database, repo });
+    expect(dry.changes).toEqual([
+      expect.objectContaining({ fileName: "docs/testing/explicit/run.txt", after: ["VUH-1997"] }),
+    ]);
+    expect(dry).toMatchObject({ dryRun: true, filled: 1, after: { unkeyed: 1 } });
+  } finally {
+    server.close();
+    store.close();
+  }
 });

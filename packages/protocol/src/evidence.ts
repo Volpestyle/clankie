@@ -197,11 +197,49 @@ export const EvidencePreviewResponseSchema = z
   })
   .strict();
 
-/** Extract tracker identifiers from branch names, READMEs and historical strings. */
-export function evidenceIssueKeys(text: string): string[] {
+/**
+ * Extract tracker identifiers from branch names, READMEs and historical strings.
+ * A built-in item's key (`LOCAL-n`, or `LOCAL-VUH-n` once its store holds an
+ * imported team) is one key, never its `VUH-n` tail: that is a different item
+ * (VUH-1991). Imported items keep their tracker's own `VUH-n`.
+ *
+ * With `teams`, only the built-in tracker's `LOCAL-…` keys and keys whose prefix
+ * is one of those tracker team keys count; `SHA-256`, `UTF-8` or `GPT-6` are not
+ * work (VUH-1997). Without it, every key-shaped token counts, which only an
+ * explicit `--issue` string should rely on.
+ */
+export function evidenceIssueKeys(text: string, teams?: readonly string[]): string[] {
+  const allowed = teams?.map((team) => team.toUpperCase());
   return [
-    ...new Set(Array.from(text.matchAll(/\b([a-z][a-z0-9]*-\d+)\b/giu), (match) => match[1]!.toUpperCase())),
+    ...new Set(
+      Array.from(text.matchAll(/\b(local-[a-z0-9]+-\d+|[a-z][a-z0-9]*-\d+)\b/giu), (match) =>
+        match[1]!.toUpperCase(),
+      ).filter(
+        (key) =>
+          allowed === undefined ||
+          key.startsWith("LOCAL-") ||
+          allowed.includes(key.slice(0, key.lastIndexOf("-"))),
+      ),
+    ),
   ];
+}
+
+/** Lines that name the work a folder tracks: a heading, or a `Tracks:`/`Issue:` line. */
+const EXPLICIT_LINE = /^\s*(?:#{1,6}\s|(?:[-*]\s+)?(?:\*\*|__)?(?:tracks|tracking|issues?)\b)/iu;
+const ISSUE_URL = /https?:\/\/linear\.app\/[^/\s]+\/issue\/([a-z][a-z0-9]*-\d+)/giu;
+
+/**
+ * A README's issue keys under the same team rule, preferring explicit references:
+ * Linear issue URLs, headings and `Tracks:`/`Issue:` lines. Only when none of
+ * those names a key does a team key anywhere in the text count (VUH-1997).
+ */
+export function evidenceReadmeIssueKeys(text: string, teams: readonly string[]): string[] {
+  const explicit = [
+    ...Array.from(text.matchAll(ISSUE_URL), (match) => match[1]!),
+    ...text.split("\n").filter((line) => EXPLICIT_LINE.test(line)),
+  ].join("\n");
+  const keys = evidenceIssueKeys(explicit, teams);
+  return keys.length ? keys : evidenceIssueKeys(text, teams);
 }
 
 /** Preserve explicit non-tracker keys accepted by the original wire contract. */

@@ -21,7 +21,9 @@ per-project cycles with automatic rollover, and a fifth
 [amendment](#amendment-runs-leases-the-ready-queue-and-drift-2026-10-09-vuh-1918)
 (VUH-1918) adds runs, leases, the ready queue and drift. A sixth
 [amendment](#amendment-evidence-bundles-owner-asks-and-run-gates-2026-10-09-vuh-1919)
-(VUH-1919) adds evidence bundles, linked owner asks and run gates.
+(VUH-1919) adds evidence bundles, linked owner asks and run gates. An
+[amendment](#amendment-evidence-keys-are-the-trackers-own-identifiers-2026-10-09-vuh-1991-vuh-1997)
+(VUH-1991, VUH-1997) keys evidence by the tracker's own identifiers.
 
 ## Context
 
@@ -631,3 +633,26 @@ connected account with the import's field selections (at most five issues per
 event, read-only, shared background budget), applies them with the import mapper,
 then applies the event. Records found outside the project are not imported. Each
 repair is reported with its references, outcome and request count.
+
+## Amendment: evidence keys are the tracker's own identifiers (2026-10-09, VUH-1991, VUH-1997)
+
+Status: accepted for the Clankie Work pilot cutover (VUH-1987).
+
+Evidence records are keyed by the identifier the tracker gives an item, and the
+device reads (`evidence_records`, the issue sheet's tiles, "Proven recently")
+look them up by that same identifier. No alias or mapping table joins them.
+An imported item keeps its Linear `VUH-n`, so records keyed `VUH-n` match it.
+A natively created built-in item keeps its `LOCAL-n` key, or `LOCAL-VUH-n` once
+its store holds an imported team. That whole string is one key. Its `VUH-n`
+tail names a different item, so key extraction never shortens it. The
+`LOCAL-` prefix stays: it keeps native numbering apart from a team whose
+numbers Linear still assigns during the mirror.
+
+Inferred keys (push without `--issue`, and backfill) follow the release rule
+above. They are built-in `LOCAL-…` keys, or keys whose prefix is the team key
+in the repo's `.clankie/tracking.json`. Other key-shaped text (`SHA-256`,
+`UTF-8`, `GPT-6`) is not work. In a README, Linear issue URLs, headings and
+`Tracks:`/`Issue:` lines win over keys found elsewhere in the text. When
+nothing qualifies, the record stays unkeyed. An explicit `--issue` is taken as
+written. Records pushed before this rule under the shortened `VUH-n` keep that
+key; nothing rewrites them.

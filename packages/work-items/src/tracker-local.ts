@@ -1721,8 +1721,17 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
   const project =
     issue.projectId === null ? undefined : store.projects.find((entry) => entry.id === issue.projectId);
   const assignee = issue.assigneeId === null ? null : findUser(store, issue.assigneeId);
+  // An imported issue's provider reference is `{id}` alone; readers get the milestone's name (VUH-1991).
+  const milestone =
+    issue.milestoneId == null ? undefined : store.milestones?.find((entry) => entry.id === issue.milestoneId);
   const view: Record<string, unknown> = {
     ...issue,
+    ...(issue.milestoneId == null
+      ? {}
+      : {
+          projectMilestone:
+            milestone === undefined ? null : { id: milestone.id, name: String(milestone.name) },
+        }),
     uuid: issue.id,
     state: status.name,
     status: status.name,

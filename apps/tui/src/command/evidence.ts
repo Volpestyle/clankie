@@ -32,11 +32,13 @@ import {
   EvidenceRecordListSchema,
   evidenceLink,
   evidenceIssueKeys,
+  evidenceReadmeIssueKeys,
   type EvidenceManifest,
   type EvidenceManifestObject,
   type EvidenceReceipt,
   type EvidenceRecord,
 } from "@clankie/protocol/evidence";
+import { WorkConventionSchema } from "@clankie/protocol/work-items";
 import { commandHost } from "./io.ts";
 
 /**
@@ -211,6 +213,25 @@ async function repoRootOf(cwd: string) {
   }
 }
 
+/**
+ * The tracker team keys an inferred evidence key may carry: the convention's
+ * Linear team, beside the built-in tracker's own `LOCAL-…` keys that every repo
+ * accepts. No convention, or one without a team, infers only built-in keys (VUH-1997).
+ */
+export async function evidenceKeyTeams(repo: string): Promise<string[]> {
+  const text = await readFile(join(repo, ".clankie", "tracking.json"), "utf8").catch(() => undefined);
+  if (text === undefined) return [];
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const parsed = WorkConventionSchema.safeParse(value);
+  const team = parsed.success && parsed.data.backend === "linear" ? parsed.data.linear?.team : undefined;
+  return team ? [team.replace(/[^A-Za-z0-9]/gu, "").toUpperCase()] : [];
+}
+
 export async function evidenceRoots(repo: string): Promise<readonly string[]> {
   try {
     const parsed: unknown = JSON.parse(await readFile(join(repo, EVIDENCE_CONFIG), "utf8"));
@@ -354,12 +375,15 @@ async function evidencePush(
   let issueKey = input.issueKey;
   let issueSource = issueKey === undefined ? undefined : "--issue";
   if (issueKey === undefined) {
-    for (const [source, value] of [
-      ["branch", await git(repo, ["branch", "--show-current"]).catch(() => "")],
-      ["worktree directory", repo.split(sep).at(-1) ?? ""],
-      ["folder README", await readFile(join(folder, "README.md"), "utf8").catch(() => "")],
-    ]) {
-      const keys = evidenceIssueKeys(value!);
+    const teams = await evidenceKeyTeams(repo);
+    for (const [source, keys] of [
+      ["branch", evidenceIssueKeys(await git(repo, ["branch", "--show-current"]).catch(() => ""), teams)],
+      ["worktree directory", evidenceIssueKeys(repo.split(sep).at(-1) ?? "", teams)],
+      [
+        "folder README",
+        evidenceReadmeIssueKeys(await readFile(join(folder, "README.md"), "utf8").catch(() => ""), teams),
+      ],
+    ] as const) {
       if (keys.length) {
         issueKey = keys.join(" ");
         issueSource = source;
