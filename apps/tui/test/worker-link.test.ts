@@ -31,6 +31,7 @@ afterEach(() => {
 async function fakeService(
   dropAck = false,
   mcpReply?: (method: string) => "deny" | "empty" | "stall" | "off" | undefined,
+  ackEventId: string | null = "event-1",
 ) {
   const seen: Seen[] = [];
   let delivered = false;
@@ -104,7 +105,14 @@ async function fakeService(
       if (path.endsWith("/ack")) {
         if (dropAck) response.destroy();
         else
-          response.end(JSON.stringify({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" }));
+          response.end(
+            JSON.stringify({
+              schemaVersion: 1,
+              eventId: ackEventId ?? undefined,
+              acknowledged: true,
+              deliveryStage: "delivered",
+            }),
+          );
         return;
       }
       if (path.endsWith("/events")) {
@@ -1085,15 +1093,22 @@ it("two raw bridges sharing a pane claim at most one original POST", async () =>
   expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
   expect(service.runner).not.toHaveBeenCalled();
 });
-it.each([false, true])(
-  "installed linked channel acknowledges its exact written event and stops on lost ack=%s",
-  async (dropAck) => {
-    const service = await fakeService(dropAck);
+it.each([
+  { label: "exact", dropAck: false, eventId: "event-1" },
+  { label: "lost", dropAck: true, eventId: "event-1" },
+  { label: "missing ID", dropAck: false, eventId: null },
+  { label: "wrong ID", dropAck: false, eventId: "different-event" },
+])(
+  "installed linked channel acknowledges its exact written event and stops on $label ack",
+  async ({ dropAck, eventId }) => {
+    const service = await fakeService(dropAck, undefined, eventId);
     const home = await linkedHome(service.url, true);
     const bridge = rawReceiptBridge("fleet", home, service.url, true);
     await bridge.init();
     bridge.initialized();
-    await expect.poll(() => service.seen.filter((r) => r.path.endsWith("/ack")).length).toBe(1);
+    await expect
+      .poll(() => service.seen.filter((r) => r.path.endsWith("/ack")).length, { timeout: 5000 })
+      .toBe(1);
     expect(bridge.notifications).toMatchObject([
       { params: { meta: { event_id: "event-1" }, content: "Hello from Clankie" } },
     ]);
@@ -1103,13 +1118,13 @@ it.each([false, true])(
       pane: "w8:p3",
       authorization: undefined,
     });
-    if (dropAck) {
-      await expect.poll(() => bridge.stderr()).toContain("stopped polling without replay");
+    if (dropAck || eventId !== "event-1") {
+      await expect.poll(() => bridge.stderr(), { timeout: 5000 }).toContain("stopped polling without replay");
       expect(service.seen.filter((r) => r.path.endsWith("/events"))).toHaveLength(1);
       expect(bridge.notifications).toHaveLength(1);
     } else
       await expect
-        .poll(() => service.seen.filter((r) => r.path.endsWith("/events")).length)
+        .poll(() => service.seen.filter((r) => r.path.endsWith("/events")).length, { timeout: 5000 })
         .toBeGreaterThan(1);
   },
 );

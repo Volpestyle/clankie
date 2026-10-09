@@ -67,3 +67,18 @@ The test Claude process was stopped after proof, releasing its heavy permit.
 Final additional checks: the seven real mailbox/native/MCP reconciliation cases
 passed; protocol transport-stage checks passed (three tests); peer route/message
 and service fallback checks passed (three files, 60 tests).
+
+## ACK fixture correction (2026-10-09)
+
+James reported the main `052bb7661` broad-run failure in
+`apps/tui/test/worker-link.test.ts`: the success case saw only one poll. The
+recorded log is `.local/vuh-1885/broad-original.log` in the VUH-1885 worktree.
+The fixture returned `acknowledged: true` without an `eventId`; the exact-ACK
+bridge correctly stopped. This was a contract mismatch, not evidence that
+production should keep polling after an incomplete ACK.
+
+The fixture now returns the exact event ID. The subprocess cases separately
+check exact, lost, missing-ID and wrong-ID ACKs: only the exact ACK permits
+another poll. Assertions wait on the observed HTTP request or bridge stop
+signal with a bounded five-second integration deadline, without fixed sleeps.
+The four focused subprocess cases passed on current main.
