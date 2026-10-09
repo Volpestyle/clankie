@@ -107,6 +107,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0255 — A lent screen keeps consent and stops on its host](0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md)
 - [0256 — Lent input needs native drain proof](0256-lent-input-needs-native-drain-proof.md)
 - [0257 — A lowered local runtime keeps an OS boundary](0257-a-lowered-local-runtime-keeps-an-os-boundary.md)
+- [0258 — Evidence lives in the evidence store (proposed)](0258-evidence-lives-in-the-evidence-store.md)
 
 ## Archived decisions
 
