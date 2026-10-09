@@ -111,6 +111,12 @@ Give each shared dependency one producer and one integration boundary. Search
 real callers before an interface changes and coordinate their owners. Workers
 never stub or edit another owner's files to get past a dependency.
 
+Acceptance is proven by the real thing (an end-to-end run, live capture or
+inspected output), not by tests the worker wrote for its own change. Name in the
+brief any test that must exist, from acceptance, a trust boundary or a published
+contract; otherwise workers add none, and a snapshot of incidental detail is a
+review finding, not coverage.
+
 Ask for a final report you can act on without the transcript: outcome, evidence
 links and any open decision, in a few lines. A worker that answers with a plan
 still owns the work; acknowledgment or a settled turn is not completion.

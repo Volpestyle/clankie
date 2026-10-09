@@ -70,6 +70,9 @@ This repository is public. Both neighbors are private and consume
   full E2E with real dependencies and nothing mocked, then integration across
   data/API/schema boundaries, then goldens grounded in real examples. Do not add
   unit tests by default; existing unit tests stay until separately reviewed pruning.
+  Add no test nobody asked for: only from acceptance criteria, a trust boundary
+  or a published contract, asserting behaviour, never incidental detail. Prove
+  the change with the real thing (ADR 0221 amendment, 2026-10-09).
   On a shared machine, run builds, typechecks, test suites and installs through
   `clankie heavy --` (the `fleet-resources` skill); CI runs them directly.
 - Read resolved owner working preferences through `clankie fleet status` or

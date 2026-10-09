@@ -37,3 +37,21 @@ This changes what new work adds. Existing unit tests are not mass-deleted;
 pruning is a separate reviewed effort. Scale checks to the change and reuse
 valid evidence. This creates no new CI or per-commit full-suite requirement.
 Evals remain manual-only.
+
+## Amendment: agents don't add tests nobody asked for (James, 2026-10-09)
+
+The order above still holds, but workers add a new test only when it comes from
+the assignment's acceptance criteria, a trust boundary (authority, permissions,
+credentials, money, data loss) or a published contract (protocol, CLI, API). The
+lead names such tests in the brief. A test an agent writes for its own change
+restates its own reading of the intent; when it later fails, nothing says
+whether the code or the test is wrong. On 2026-10-08/09, three landings broke
+other owners' agent-written tests that pinned incidental detail (an exact hooks
+array, exact receipt fields, exact tab labels), and each cost a routing round to
+decide which side was wrong (VUH-1896). External evidence points the same way:
+on the DeepSWE eval, banning a frontier agent from writing tests did not lower
+success and cut time and tokens.
+
+Tests assert behaviour, never incidental detail such as exact arrays, labels,
+field order or copy. A change itself is proven by the real thing: an end-to-end
+run, live capture or inspected output, recorded as evidence.

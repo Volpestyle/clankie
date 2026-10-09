@@ -17,6 +17,15 @@ Native hire briefs include its command contract. `clankie heavy -- COMMAND` shar
 machine capacity across worktrees; `clankie fleet resources` names current holders
 and waits. Preserve task-specific permission and verification requirements.
 
+Don't add tests nobody asked for. A test you write is your own reading of the
+intent written a second time; when it later fails, nobody can tell whether the
+code or the test is wrong. Add or change a test only when it comes from the
+assignment's acceptance criteria, a trust boundary (authority, permissions,
+credentials, money, data loss) or a published contract (protocol, CLI, API), and
+assert that behaviour, never incidental detail such as exact arrays, labels, field
+order or copy. Prove the change itself with the real thing: an end-to-end run,
+live capture or inspected output, recorded as evidence.
+
 ## Find the usable route
 
 Start with the route your session actually exposes. Native `clankie` MCP tools
