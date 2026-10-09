@@ -47,8 +47,10 @@ The exact timed-out Discord setup case passed alone in 18.46s on unchanged
 product/test inputs (one passed, nine unselected). This is diagnostic evidence,
 not a replacement for the root gate. The case imports affected TUI modules, so
 this batch does not invoke the exception for timing failures outside affected
-imports. Final root-gate and full-package results are recorded below after
-verification.
+imports. The full-package acceptance result is recorded below. The final committed root
+landing-gate receipt, checked SHA, fixed base and after wall time are attached to
+[VUH-1925](https://linear.app/vuhlp/issue/VUH-1925); its raw report is retained in
+`.local/vuh-1925/tui-final-gate.json`.
 
 ## Retained additional attempt
 
@@ -60,3 +62,17 @@ current main (`68f1bde84`, `7168a385f`). One unchanged Discord CLI revision-fenc
 case timed out at 30,000ms. This attempt is retained and is not acceptance evidence.
 The retry uses the repository root and rebased main. A preceding queued attempt
 never started because the heavy lock helper returned `OSError (errno 9)`.
+
+## Rebased full-package acceptance
+
+On `e7ecba8fd` rebased onto `c2dd9b67f`, the root-CWD full TUI run passed:
+151 passing files, one existing skipped file; 1,226 passing tests, two existing
+skips; 113.56s Vitest wall time. All reviewed files, native tool-render goldens,
+restored-history frames and the retained integration coverage passed.
+No assertions, timeouts or product defaults were weakened to obtain this result.
+
+[Measurements](measurement.json) preserve the baseline and failed root attempts,
+plus the successful full-package result. The initial line-count comparison uses
+the same `6691c907c` baseline; subsequent unrelated main changes are not attributed
+to this pruning. Gate wall time excludes heavy admission wait and is not a
+matched performance experiment because export cleanup changes native selection.

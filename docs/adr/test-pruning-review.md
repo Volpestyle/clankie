@@ -104,6 +104,19 @@ Further reviewed files retained:
 | `media-connector`: `media-connector.test.ts`                                                                                                                                                                        | Provider schemas and credential transport, exact persisted/hash artifacts, edit/generation routing, video-origin/status refusal and reference preservation.                                                                          |
 | `model-provider`: `subscription-policy.test.ts`, `readiness.test.ts`, `routing.test.ts`, `local-endpoint.test.ts`, `anthropic-configured-model.test.ts`, `xai-configured-model.test.ts`, `configured-model.test.ts` | Hosted subscription approval and credential boundaries, routing money/escalation policy and VUH-1391 regression; persisted endpoint configuration, SDK credential separation and actual Astra reasoning-effort transport regression. |
 
+All 28 files in `packages/protocol/test/*.test.ts` were reviewed and retained.
+They prove published producer/consumer schemas, old-client response compatibility,
+immutable owner/occupant/incarnation correlation, delivery uncertainty, private
+push and voice data boundaries, gateway route/header allowlists, real ingress/wake
+cryptographic binding, bounded terminal bytes and lossless replay/recovery. Actual
+`pmset` input goldens and the node-free React Native import contract stay.
+
+Three mixed protocol files have later incidental-assertion candidates, without
+any changes in this batch: `app-telemetry.test.ts` pins the exact `["zod"]` import
+array; `host-power.test.ts` pins advice-copy fragments; `protocol.test.ts` pins role
+array order and helper-generated appearance diversity. Their privacy, wire,
+cryptographic, compatibility and data-preservation coverage stays.
+
 The lifecycle tab-name and SSH settings-race regressions named by the assignment
 remain protected. No evaluator, tldraw, skin-manifest, Swift-deduplication or ops
 mockup cleanup is included here; those VUH-1897 items remain unassigned.

@@ -1,0 +1,267 @@
+{
+  "files": [
+    {
+      "path": "apps/tui/test/banner.test.ts",
+      "beforeLines": 140,
+      "afterLines": 80
+    },
+    {
+      "path": "apps/tui/test/footer.test.ts",
+      "beforeLines": 92,
+      "afterLines": 34
+    },
+    {
+      "path": "apps/tui/test/connections-menu.test.ts",
+      "beforeLines": 221,
+      "afterLines": 185
+    },
+    {
+      "path": "apps/tui/test/herdr-menu.test.ts",
+      "beforeLines": 78,
+      "afterLines": 62
+    },
+    {
+      "path": "apps/tui/test/tool-render.test.ts",
+      "beforeLines": 95,
+      "afterLines": 58
+    }
+  ],
+  "totalBeforeLines": 626,
+  "totalAfterLines": 419,
+  "tuiTestLinesAfter": 35783,
+  "clankieTestLinesAfter": 244955,
+  "beforeGateSeconds": 39.229163792,
+  "firstAfterGateSeconds": 139.982053125,
+  "firstAfterExit": 1,
+  "comparison": "Different native dependency selection after export-only cleanup; not a matched speedup.",
+  "lineCountBaseline": "6691c907ccdcaeed4abbcd093da6971a22f68162",
+  "fullTui": {
+    "head": "e7ecba8fd974e7a9082674b44df6f3d4bf6978f0",
+    "base": "c2dd9b67fa597e2b42b6bb7b2ba0e3e663d59075",
+    "exitCode": 0,
+    "durationSeconds": 113.56,
+    "passedFiles": 151,
+    "skippedFiles": 1,
+    "passedTests": 1226,
+    "skippedTests": 2,
+    "cwd": "repository root",
+    "command": ["pnpm", "exec", "vitest", "run", "apps/tui/test", "--config", "vitest.config.ts"]
+  },
+  "finalRootGate": "Attached to VUH-1925 after verification; local raw receipt .local/vuh-1925/tui-final-gate.json.",
+  "beforeGate": {
+    "head": "6691c907ccdcaeed4abbcd093da6971a22f68162",
+    "base": "6691c907ccdcaeed4abbcd093da6971a22f68162",
+    "exitCode": 0,
+    "elapsedSeconds": 39.229163792,
+    "sourceStable": true,
+    "phases": [
+      {
+        "name": "skills",
+        "command": ["pnpm", "herdr:skill:check"],
+        "elapsedSeconds": 0.405504083,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "format",
+        "command": ["pnpm", "fmt:check"],
+        "elapsedSeconds": 3.31354275,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "lint",
+        "command": ["pnpm", "lint"],
+        "elapsedSeconds": 1.322075667,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "deadcode",
+        "command": ["pnpm", "deadcode"],
+        "elapsedSeconds": 2.862966292,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "doc-links",
+        "command": ["node", "scripts/check-doc-links.mjs"],
+        "elapsedSeconds": 0.21429941700000107,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "retired-claims",
+        "command": ["node", "scripts/check-retired-claims.mjs"],
+        "elapsedSeconds": 0.39546754200000034,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "typecheck",
+        "command": [
+          "pnpm",
+          "exec",
+          "turbo",
+          "run",
+          "typecheck",
+          "--only",
+          "--concurrency=1",
+          "--filter=@clankie/tui"
+        ],
+        "elapsedSeconds": 16.229777459,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "tests",
+        "command": [
+          "pnpm",
+          "exec",
+          "vitest",
+          "run",
+          "--config",
+          "vitest.config.ts",
+          "--changed",
+          "6691c907ccdcaeed4abbcd093da6971a22f68162",
+          "--bail",
+          "1",
+          "--passWithNoTests",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.local/vuh-1925/tui-before-vitest.json"
+        ],
+        "elapsedSeconds": 12.346325957999998,
+        "exitCode": 0,
+        "signal": null
+      }
+    ]
+  },
+  "knipBlockedGate": {
+    "head": "6691c907ccdcaeed4abbcd093da6971a22f68162",
+    "base": "6691c907ccdcaeed4abbcd093da6971a22f68162",
+    "exitCode": 1,
+    "elapsedSeconds": 12.414890290999999,
+    "sourceStable": true,
+    "phases": [
+      {
+        "name": "skills",
+        "command": ["pnpm", "herdr:skill:check"],
+        "elapsedSeconds": 0.513624458,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "format",
+        "command": ["pnpm", "fmt:check"],
+        "elapsedSeconds": 5.3162579999999995,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "lint",
+        "command": ["pnpm", "lint"],
+        "elapsedSeconds": 2.8261057920000003,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "deadcode",
+        "command": ["pnpm", "deadcode"],
+        "elapsedSeconds": 3.635406459,
+        "exitCode": 1,
+        "signal": null
+      }
+    ]
+  },
+  "firstAfterGate": {
+    "head": "6691c907ccdcaeed4abbcd093da6971a22f68162",
+    "base": "6691c907ccdcaeed4abbcd093da6971a22f68162",
+    "exitCode": 1,
+    "elapsedSeconds": 139.982053125,
+    "sourceStable": true,
+    "phases": [
+      {
+        "name": "skills",
+        "command": ["pnpm", "herdr:skill:check"],
+        "elapsedSeconds": 0.34223975,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "format",
+        "command": ["pnpm", "fmt:check"],
+        "elapsedSeconds": 2.5282992089999996,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "lint",
+        "command": ["pnpm", "lint"],
+        "elapsedSeconds": 1.3721962910000003,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "deadcode",
+        "command": ["pnpm", "deadcode"],
+        "elapsedSeconds": 2.9519515410000006,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "doc-links",
+        "command": ["node", "scripts/check-doc-links.mjs"],
+        "elapsedSeconds": 0.3231391249999997,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "retired-claims",
+        "command": ["node", "scripts/check-retired-claims.mjs"],
+        "elapsedSeconds": 0.46183091599999987,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "typecheck",
+        "command": [
+          "pnpm",
+          "exec",
+          "turbo",
+          "run",
+          "typecheck",
+          "--only",
+          "--concurrency=1",
+          "--filter=@clankie/clankie",
+          "--filter=@clankie/tui"
+        ],
+        "elapsedSeconds": 43.018146333,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "tests",
+        "command": [
+          "pnpm",
+          "exec",
+          "vitest",
+          "run",
+          "--config",
+          "vitest.config.ts",
+          "--changed",
+          "6691c907ccdcaeed4abbcd093da6971a22f68162",
+          "--bail",
+          "1",
+          "--passWithNoTests",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.local/vuh-1925/tui-after-vitest.json"
+        ],
+        "elapsedSeconds": 86.51134579200001,
+        "exitCode": 1,
+        "signal": null
+      }
+    ]
+  }
+}
