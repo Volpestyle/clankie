@@ -143,7 +143,9 @@ async function fixture() {
     read: async (conversationId = "global-default") => {
       const authority = { owner: { conversationId }, current: () => true, authorize: async () => true };
       const page = await reports.workerReportActions.read(authority);
-      expect(await reports.workerReportActions.acknowledge(authority, page.ackDeliveryIds)).toBe(true);
+      expect(await reports.workerReportActions.acknowledge(authority, page.ackDeliveryIds)).toMatchObject({
+        acknowledged: true,
+      });
     },
     reload: async () => {
       await store.close();

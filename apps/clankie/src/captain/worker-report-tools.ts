@@ -8,13 +8,19 @@ import {
 } from "./conversation-owner.ts";
 import { toolJson, type TurnContext } from "./tools.ts";
 
+export interface WorkerReportAcknowledgment {
+  acknowledged: boolean;
+  appliedDeliveryIds: string[];
+  refused: { deliveryId: string; reason: "not_offered" | "unknown" | "already_acknowledged" }[];
+}
+
 export interface WorkerReportActions {
   read(authority: ConversationAuthority, limit?: number): Promise<WorkerReportPage>;
   acknowledge(
     authority: ConversationAuthority,
     ids: readonly string[],
     receipt?: { summary?: string | undefined; links?: string[] | undefined },
-  ): Promise<boolean>;
+  ): Promise<WorkerReportAcknowledgment>;
 }
 
 export function workerReportTools(actions: WorkerReportActions, turn: TurnContext): ToolDefinition[] {
@@ -35,7 +41,7 @@ export function workerReportTools(actions: WorkerReportActions, turn: TurnContex
       name: "acknowledge_worker_reports",
       label: "Acknowledge reviewed worker reports",
       description:
-        "Mark only fully reviewed reports offered by worker_reports as read. Supply their exact deliveryIds. This automatically sends the original sender a short acknowledgment receipt. Include a summary and any resulting chat or issue URLs in receipt. This clears their unread roster warning; receiving a native message alone does not.",
+        "Mark only fully reviewed reports offered by worker_reports as read. Supply their exact deliveryIds. This automatically sends the original sender a short acknowledgment receipt. Include a summary and any resulting chat or issue URLs in receipt. The result lists applied IDs and refusals; call worker_reports first for IDs not yet offered. This clears their unread roster warning; receiving a native message alone does not.",
       parameters: Type.Object({
         deliveryIds: Type.Array(Type.String({ format: "uuid" }), { minItems: 1, maxItems: 100 }),
         receipt: Type.Optional(
@@ -57,8 +63,15 @@ export function workerReportTools(actions: WorkerReportActions, turn: TurnContex
       ) => {
         const authority = captureConversationAuthority(turn.conversationAuthority);
         await assertConversationAuthority(authority);
+        const result = await actions.acknowledge(authority, input.deliveryIds, input.receipt);
         return toolJson({
-          acknowledged: await actions.acknowledge(authority, input.deliveryIds, input.receipt),
+          ...result,
+          ...(result.refused.length === 0
+            ? {}
+            : {
+                instruction:
+                  "Call worker_reports first, review the reports, then acknowledge only its offered deliveryIds.",
+              }),
         });
       },
     },

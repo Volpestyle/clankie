@@ -10,6 +10,7 @@ import { type FleetSeatDelivery, type FleetSeatMessageContext } from "./fleet-se
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
+import type { WorkerReportAcknowledgment } from "./worker-report-tools.ts";
 export interface WorkerReportsContext {
   readonly conversations: ConversationStore;
   readonly seatOutboxes: Map<string, SeatOutbox>;
@@ -42,7 +43,34 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       receipt?: { summary?: string | undefined; links?: string[] | undefined },
     ) {
       await assertConversationAuthority(authority);
-      return ctx.conversations.acknowledgeInboundReports(authority.owner.conversationId, ids, receipt);
+      const conversationId = authority.owner.conversationId;
+      const reports = new Map(
+        ctx.conversations
+          .inboundReports(conversationId, { includeRead: true })
+          .map((report) => [report.deliveryId, report]),
+      );
+      const result: WorkerReportAcknowledgment = { acknowledged: false, appliedDeliveryIds: [], refused: [] };
+      for (const deliveryId of new Set(ids)) {
+        const report = reports.get(deliveryId);
+        const reason = !report
+          ? "unknown"
+          : report.reportDelivery.state === "read"
+            ? "already_acknowledged"
+            : !report.reportDelivery.offeredAt
+              ? "not_offered"
+              : undefined;
+        if (reason) result.refused.push({ deliveryId, reason });
+        else result.appliedDeliveryIds.push(deliveryId);
+      }
+      // Classify and persist in one synchronous step after checking authority.
+      // The store still enforces offered-only acknowledgment and rolls back failed writes.
+      if (
+        result.appliedDeliveryIds.length > 0 &&
+        !ctx.conversations.acknowledgeInboundReports(conversationId, result.appliedDeliveryIds, receipt)
+      )
+        throw new Error("Worker reports could not be acknowledged; call worker_reports first.");
+      result.acknowledged = result.appliedDeliveryIds.length > 0 && result.refused.length === 0;
+      return result;
     },
   };
 

@@ -1341,6 +1341,81 @@ it("offers retained results through authenticated operator dispatch and only ack
   attached.stop.abort();
 });
 
+it("reports applied IDs and every refusal reason in a mixed MCP acknowledgment", async () => {
+  const f = await fixture({ parent: false });
+  const attached = await poll(f.service, "global-default");
+  let sessionId: string | undefined;
+  let requestId = 0;
+  const rpc = async (method: string, params: unknown) => {
+    const response = await f.service.app.app.request("/v1/mcp", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer operator",
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        ...(method === "notifications/initialized" ? {} : { id: ++requestId }),
+        method,
+        params,
+      }),
+    });
+    if (method === "notifications/initialized") {
+      expect(response.status).toBe(202);
+      return;
+    }
+    expect(response.status).toBe(200);
+    sessionId ??= response.headers.get("mcp-session-id") ?? undefined;
+    return (await response.json()).result;
+  };
+  const callTool = (name: string, args: unknown = {}) => rpc("tools/call", { name, arguments: args });
+  try {
+    await rpc("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "worker-report-contract", version: "1" },
+    });
+    await rpc("notifications/initialized", {});
+    const already = await delivery(f.service);
+    await report(f.service, "Previously reviewed report", already);
+    await callTool("worker_reports");
+    await callTool("acknowledge_worker_reports", { deliveryIds: [already.id] });
+
+    const offered = await delivery(f.service);
+    await report(f.service, "Offered report", offered);
+    await callTool("worker_reports");
+    const unoffered = await delivery(f.service);
+    await report(f.service, "Arrived after the last read", unoffered);
+    const unknown = randomUUID();
+    const result = await callTool("acknowledge_worker_reports", {
+      deliveryIds: [offered.id, unoffered.id, unknown, already.id],
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      acknowledged: false,
+      appliedDeliveryIds: [offered.id],
+      refused: [
+        { deliveryId: unoffered.id, reason: "not_offered" },
+        { deliveryId: unknown, reason: "unknown" },
+        { deliveryId: already.id, reason: "already_acknowledged" },
+      ],
+      instruction:
+        "Call worker_reports first, review the reports, then acknowledge only its offered deliveryIds.",
+    });
+    expect(accepted(f.root, offered.id)[0].inboundAcceptances[offered.id].reportDelivery.state).toBe("read");
+    expect(accepted(f.root, unoffered.id)[0].inboundAcceptances[unoffered.id].reportDelivery.state).not.toBe(
+      "read",
+    );
+    console.log("VUH-1940 MCP result text:\n" + result.content[0].text);
+  } finally {
+    attached.stop.abort();
+  }
+});
+
 it.each([
   { op: "readopt_seat", seatId: "term_aaa" },
   { op: "worker_reports" },
