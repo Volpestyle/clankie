@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { serve } from "@hono/node-server";
 import { SettingsStore } from "@clankie/settings";
 import {
@@ -121,8 +122,7 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
     client.callTool({ name: "mail_owner_update", arguments: args, ...(meta ? { _meta: meta } : {}) });
   const update = (result: Awaited<ReturnType<typeof mail>>) => {
     expect(result.isError).not.toBe(true);
-    const content = result.content as { type: string; text: string }[];
-    return OwnerUpdateSchema.parse(JSON.parse(content.find((item) => item.type === "text")!.text));
+    return OwnerUpdateSchema.parse(decodeMcpResult(result));
   };
   const list = async () => {
     const response = await fetch(`${host}/operator/v1/dispatch`, {

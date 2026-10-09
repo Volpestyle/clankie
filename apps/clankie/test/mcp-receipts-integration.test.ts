@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, appendFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -213,16 +214,11 @@ it.each([
       const receipt = await pending;
       expect(receipt).toHaveProperty("result");
       if (!("result" in receipt)) throw receipt.error;
-      expect(receipt.result.content).toEqual([
-        {
-          type: "text",
-          text: JSON.stringify({
-            outcome: name === "message_seat" ? "delivered" : "started",
-            ...(name === "message_seat" ? { deliveryId: admitted.id } : { hireId: admitted.id }),
-            seatId: "fixture-seat",
-          }),
-        },
-      ]);
+      expect(decodeMcpResult(receipt.result)).toEqual({
+        outcome: name === "message_seat" ? "delivered" : "started",
+        ...(name === "message_seat" ? { deliveryId: admitted.id } : { hireId: admitted.id }),
+        seatId: "fixture-seat",
+      });
       const meta = receipt.result._meta?.["clankie/seat-call"] as Record<string, unknown>;
       expect(meta).toMatchObject({ tool: name, state: "settled", id: expect.any(String) });
       expect(meta[name === "message_seat" ? "deliveryId" : "hireId"]).toBe(meta.id);
@@ -257,10 +253,7 @@ it.each([
       expect(lost).toHaveProperty("result");
       if (!("result" in lost)) throw lost.error;
       expect(lost.result.isError).toBe(true);
-      const receipt = JSON.parse((lost.result.content as { text: string }[])[0]!.text) as Record<
-        string,
-        unknown
-      >;
+      const receipt = decodeMcpResult(lost.result) as Record<string, unknown>;
       const idKey = name === "message_seat" ? "deliveryId" : "hireId";
       const callId = receipt[idKey];
       expect(receipt).toMatchObject({
@@ -284,7 +277,7 @@ it.each([
         arguments: { [idKey]: callId },
       });
       expect(readPending.isError).toBe(true);
-      expect(JSON.parse((readPending.content as { text: string }[])[0]!.text)).toMatchObject({
+      expect(decodeMcpResult(readPending)).toMatchObject({
         outcome: "uncertain",
         [idKey]: callId,
       });
@@ -298,16 +291,11 @@ it.each([
       for (let reads = 0; reconciled.isError === true && reads < 20; reads++)
         reconciled = await f.client.callTool({ name: "reconcile_seat_call", arguments: { [idKey]: callId } });
       expect(reconciled.isError).not.toBe(true);
-      expect(reconciled.content).toEqual([
-        {
-          type: "text",
-          text: JSON.stringify({
-            outcome: name === "message_seat" ? "delivered" : "started",
-            ...(name === "message_seat" ? { deliveryId: admitted.id } : { hireId: admitted.id }),
-            seatId: "fixture-seat",
-          }),
-        },
-      ]);
+      expect(decodeMcpResult(reconciled)).toEqual({
+        outcome: name === "message_seat" ? "delivered" : "started",
+        ...(name === "message_seat" ? { deliveryId: admitted.id } : { hireId: admitted.id }),
+        seatId: "fixture-seat",
+      });
       expect(reconciled._meta?.["clankie/seat-call"]).toMatchObject({
         id: callId,
         tool: name,
@@ -351,7 +339,7 @@ it("an older SDK client reuses the exact protected ID after restart without disp
     await f.restart(false);
     const restarted = await connect();
     const repeated = await restarted.callTool(call);
-    expect(repeated.content).toEqual(original.content);
+    expect(decodeMcpResult(repeated)).toEqual(decodeMcpResult(original));
     expect(repeated._meta?.["clankie/seat-call"]).toMatchObject({
       id,
       tool: "message_seat",
@@ -363,15 +351,15 @@ it("an older SDK client reuses the exact protected ID after restart without disp
     const foreign = await connect("another-conversation");
     const refused = await foreign.callTool({ name: "reconcile_seat_call", arguments: { deliveryId: id } });
     expect(refused.isError).toBe(true);
-    expect(refused.content).not.toEqual(original.content);
+    expect(decodeMcpResult(refused)).not.toEqual(decodeMcpResult(original));
     const foreignRepeat = await foreign.callTool(call);
     expect(foreignRepeat.isError).toBe(true);
-    expect(foreignRepeat.content).not.toEqual(original.content);
+    expect(decodeMcpResult(foreignRepeat)).not.toEqual(decodeMcpResult(original));
     const social = await connect(undefined, true);
     expect((await social.listTools()).tools.map((tool) => tool.name)).not.toContain("reconcile_seat_call");
     const wrongLane = await social.callTool({ name: "reconcile_seat_call", arguments: { deliveryId: id } });
     expect(wrongLane.isError).toBe(true);
-    expect(wrongLane.content).not.toEqual(original.content);
+    expect(decodeMcpResult(wrongLane)).not.toEqual(decodeMcpResult(original));
     expect(await f.effects()).toHaveLength(1);
     const legacy = await restarted.callTool({
       name: "message_seat",
@@ -383,12 +371,11 @@ it("an older SDK client reuses the exact protected ID after restart without disp
     expect(legacyMeta.deliveryId).toBe(legacyMeta.id);
     const effects = await f.effects();
     expect(effects).toHaveLength(2);
-    expect(legacy.content).toEqual([
-      {
-        type: "text",
-        text: JSON.stringify({ outcome: "delivered", deliveryId: effects[1]!.id, seatId: "fixture-seat" }),
-      },
-    ]);
+    expect(decodeMcpResult(legacy)).toEqual({
+      outcome: "delivered",
+      deliveryId: effects[1]!.id,
+      seatId: "fixture-seat",
+    });
     expect(f.closed()).toBe(false);
   } finally {
     for (const client of clients) await client.close();
@@ -423,32 +410,22 @@ it.each(["message_seat", "hire_agent"])(
       const first = await f.client.callTool({ name, arguments: { text: "before restart" } });
       const before = await f.effects();
       expect(before).toHaveLength(1);
-      expect(first.content).toEqual([
-        {
-          type: "text",
-          text: JSON.stringify({
-            outcome: name === "message_seat" ? "delivered" : "started",
-            ...(name === "message_seat" ? { deliveryId: before[0]!.id } : { hireId: before[0]!.id }),
-            seatId: "fixture-seat",
-          }),
-        },
-      ]);
+      expect(decodeMcpResult(first)).toEqual({
+        outcome: name === "message_seat" ? "delivered" : "started",
+        ...(name === "message_seat" ? { deliveryId: before[0]!.id } : { hireId: before[0]!.id }),
+        seatId: "fixture-seat",
+      });
       await f.restart();
       expect((await f.client.listTools()).tools.map((tool) => tool.name)).toContain(name);
       await f.secondBank;
       const second = await f.client.callTool({ name, arguments: { text: "after restart" } });
       const after = await f.effects();
       expect(after).toHaveLength(2);
-      expect(second.content).toEqual([
-        {
-          type: "text",
-          text: JSON.stringify({
-            outcome: name === "message_seat" ? "delivered" : "started",
-            ...(name === "message_seat" ? { deliveryId: after[1]!.id } : { hireId: after[1]!.id }),
-            seatId: "fixture-seat",
-          }),
-        },
-      ]);
+      expect(decodeMcpResult(second)).toEqual({
+        outcome: name === "message_seat" ? "delivered" : "started",
+        ...(name === "message_seat" ? { deliveryId: after[1]!.id } : { hireId: after[1]!.id }),
+        seatId: "fixture-seat",
+      });
       expect(after[0]).toEqual(before[0]);
       expect(after[1]!.id).not.toBe(after[0]!.id);
       expect(f.banks()).toBe(2);
