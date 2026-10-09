@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "first-landing-gate.json",
+      "size": 108972,
+      "sha256": "b60cf9f4ee5473ec97eb5fd191fa23b5254cc597de3141233dc218642abedd42",
+      "url": "clankie://evidence/sha256/b60cf9f4ee5473ec97eb5fd191fa23b5254cc597de3141233dc218642abedd42"
+    },
+    {
+      "path": "first-landing-gate.log",
+      "size": 503722,
+      "sha256": "5996ebb29c6bb0f4ffbfaf4ca3336770755f2355398eaa071e5f3a87f25986e7",
+      "url": "clankie://evidence/sha256/5996ebb29c6bb0f4ffbfaf4ca3336770755f2355398eaa071e5f3a87f25986e7"
+    },
+    {
+      "path": "first-landing-tests.json",
+      "size": 2208514,
+      "sha256": "b6cddfca9294101957594ad39c8a94f34bc8a78c793de3df2b461fe6bd7ba861",
+      "url": "clankie://evidence/sha256/b6cddfca9294101957594ad39c8a94f34bc8a78c793de3df2b461fe6bd7ba861"
+    }
+  ]
+}

@@ -52,6 +52,7 @@ it("launches an approved Windows workspace through the real conversation store w
   );
   let approved = false;
   let transportCalls = 0;
+  let malformedReply = false;
   const remoteWorkspace = vi.fn(async (id: string, path: string) => approved && id === "pc" && path === cwd);
   const leads = new RemoteProjectLeads({
     repoRoot: root,
@@ -83,7 +84,7 @@ it("launches an approved Windows workspace through the real conversation store w
               console.log(JSON.stringify({stage:'allocated',pane:'w1:p1',shell:{pid:123,startTime:'2026-10-09T00:00:00Z'}}));
             } else {
               if(typeof input.token!=='string'||!input.conversationId) process.exit(3);
-              console.log(JSON.stringify({stage:'dispatched',pane:'w1:p1'}));
+              console.log(${malformedReply} ? 'echo:' + input.token.slice(0,10) : JSON.stringify({stage:'dispatched',pane:'w1:p1'}));
             }
           });
         `,
@@ -176,6 +177,24 @@ it("launches an approved Windows workspace through the real conversation store w
       const events = await readFile(join(root, "conversations", conversationId, "events.jsonl"), "utf8");
       expect(events).toContain("local captain fallback is forbidden");
     });
+    malformedReply = true;
+    const malformedInput = { ...input, requestId: randomUUID() };
+    const malformed = await leads.launch(malformedInput, async () => {});
+    expect(malformed).toMatchObject({
+      stage: "unconfirmed",
+      failedStage: "dispatching",
+      error: "Remote lead reply is not valid JSON",
+    });
+    const failedGrant = await issue.mock.results[1]!.value;
+    expect(leads.delegations.revoke(failedGrant.id)).toBe(false); // Failure already revoked it.
+    expect(await readFile(join(root, "launches", `${malformedInput.requestId}.json`), "utf8")).not.toContain(
+      failedGrant.token,
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ failedStage: "dispatching", error: "Remote lead reply is not valid JSON" }),
+      "Remote lead launch unconfirmed",
+    );
+
     const failedInput = { ...input, requestId: randomUUID() };
     // Fail inside the journaled launch after reservation, not the initial approval.
     let guards = 0;

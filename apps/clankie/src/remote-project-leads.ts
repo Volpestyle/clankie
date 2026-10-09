@@ -167,7 +167,7 @@ process.stdin.on('end', () => {
       powershellScriptCommand(`& node -e ${powershellLiteral(evaluate)}`),
     );
     const result = await collect(child, JSON.stringify(files));
-    const prepared = JSON.parse(result) as { directory: string; hash: string };
+    const prepared = remoteLeadFrame(result) as { directory: string; hash: string };
     if (typeof prepared.directory !== "string" || prepared.hash !== hash)
       throw new Error("Remote lead preparation unconfirmed");
     return { fleet: id, ...prepared };
@@ -354,6 +354,15 @@ process.stdin.on('end', () => {
   }
 }
 
+/** Parser errors may echo private response fragments; only retain the framing failure. */
+function remoteLeadFrame(value: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error("Remote lead reply is not valid JSON");
+  }
+}
+
 async function nextFrame(lines: AsyncIterator<string>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -364,7 +373,7 @@ async function nextFrame(lines: AsyncIterator<string>) {
       }),
     ]);
     if (next.done) throw new Error("Remote lead transport closed");
-    return JSON.parse(next.value);
+    return remoteLeadFrame(next.value);
   } finally {
     clearTimeout(timer);
   }
