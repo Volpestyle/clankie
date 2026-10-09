@@ -2,7 +2,7 @@
 
 `fleet-health-metrics-native.integration.test.ts` runs the real macOS helper,
 live loopback TCP sockets, an isolated Herdr daemon and a service-owned private
-registry. It asserts all thirteen terminal refusal counters independently of
+registry. It asserts thirteen existing terminal refusal cases independently of
 native retry diagnostics: seventeen attempts, fifteen refusals and two admissions.
 It also checks a real provider method refusal and an actual reply corrupted by
 an owned Unix relay. No kernel observations or successful provider responses
@@ -31,6 +31,14 @@ failures remain generic failures. An initial missing pane maps to
 admission. A project socket that closes during asynchronous observation maps to
 `closed_socket`, separately from changes in binding or native observations.
 
+`native-ancestry-exit.integration.test.ts` adds real scheduled claimant and
+intermediate exits: `caller_exited` is terminal and never replayed;
+`ancestor_exited` permits one re-walk only with the same live claimant. A second
+intermediate exit is terminal. The fixture controls owned exit timing while
+returning only real libproc/sysctl/socket observations. It also checks stale
+PID/birth/socket pins and HTTP non-member refusal after real reparenting.
+PID/birth facts remain private; public metrics retain the fixed reasons.
+
 ## Native diagnostic evidence
 
 The manual native churn test asserts real `multiple_owners`, `owner_mismatch`,
@@ -55,7 +63,7 @@ also observed `socket_unavailable`, `process_unavailable` and
 `process_census_changed`. The captures prove these OS branches occurred; a
 golden replay does not claim to force their occurrence on every machine.
 
-`fleet-health-metrics.integration.test.ts` derives the complete 27-reason native
+`fleet-health-metrics.integration.test.ts` derives the complete fixed native
 vocabulary from the helper's diagnostic declarations, compares it to the protocol
 enum, and checks every token through the collector and authenticated HTTP schema.
 It also counts the captured exhaustion events and rejects an unknown diagnostic

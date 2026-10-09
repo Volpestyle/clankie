@@ -58,8 +58,17 @@ static int diagnostics;
 static int current_attempt;
 static int budget_reported;
 static int budget_expired;
+static int ancestry_rewalk_used;
 static FILE *proof_output;
 static FILE *proof_error;
+struct ancestry_failure_observation {
+  const struct owner *owner;
+  pid_t failed_pid;
+  int index;
+  const char *phase;
+  const char *claimant_status;
+};
+static const struct ancestry_failure_observation *failure_observation;
 
 /* Fixed vocabulary only: this observation is never an admission input. */
 static void diagnostic(const char *stage, const char *reason, int error, int retry) {
@@ -67,8 +76,17 @@ static void diagnostic(const char *stage, const char *reason, int error, int ret
   int saved_error = errno;
   fprintf(proof_error, "Native process proof diagnostic: {\"schemaVersion\":1,"
           "\"stage\":\"%s\",\"reason\":\"%s\",\"errno\":%d,"
-          "\"attempt\":%d,\"retry\":%s}\n", stage, reason, error < 0 ? 0 : error,
+          "\"attempt\":%d,\"retry\":%s", stage, reason, error < 0 ? 0 : error,
           current_attempt, retry ? "true" : "false");
+  if (failure_observation) {
+    const struct ancestry_failure_observation *f = failure_observation;
+    fprintf(proof_error, ",\"ancestryFailure\":{\"phase\":\"%s\",\"chainIndex\":%d,"
+            "\"failedPid\":%d,\"claimantStatus\":\"%s\",\"claimantPid\":%d,"
+            "\"claimantBirth\":[\"%" PRIu64 "\",\"%" PRIu64 "\"]}",
+            f->phase, f->index, f->failed_pid, f->claimant_status, f->owner->process.pid,
+            f->owner->process.sec, f->owner->process.usec);
+  }
+  fputs("}\n", proof_error);
   errno = saved_error;
 }
 
@@ -214,6 +232,42 @@ static int same_process(const struct identity *a, const struct identity *b) {
          a->ruid == b->ruid && a->sec == b->sec && a->usec == b->usec;
 }
 
+/* Reparenting changes ancestry, not the socket claimant's lifetime. */
+static int same_lifetime(const struct identity *a, const struct identity *b) {
+  return a->pid == b->pid && a->uid == b->uid && a->ruid == b->ruid &&
+         a->sec == b->sec && a->usec == b->usec;
+}
+
+/* Private failure-time facts. Never substitute them for a complete proof. */
+static int ancestry_failure(const struct owner *owner, pid_t failed_pid, int index,
+                            const char *phase, int observed, int error,
+                            const char *fallback) {
+  struct identity claimant;
+  int live = observe(owner->process.pid, &claimant);
+  const char *status = live == 0 ? "exited" : live < 0 ? "unavailable" :
+                       same_lifetime(&owner->process, &claimant) ? "same" : "changed";
+  int ancestor_dead = index > 0 && (observed == 0 ||
+                      (error == ESRCH && exited(failed_pid)));
+  /* This only requests a new proof. Independent claimant/socket reads and a
+   * complete new ancestry walk below still decide whether facts can be emitted. */
+  int rewalk = live == 1 && same_lifetime(&owner->process, &claimant) && ancestor_dead &&
+               !ancestry_rewalk_used && !budget_expired;
+  struct ancestry_failure_observation failure = {owner, failed_pid, index, phase, status};
+  failure_observation = &failure;
+  if (live == 0) diagnostic("ancestry", "caller_exited", error, 0);
+  else if (live == 1 && !same_lifetime(&owner->process, &claimant))
+    diagnostic("ancestry", "ancestry_changed", error, budget_expired);
+  else if (live == 1 && ancestor_dead)
+    diagnostic("ancestry", "ancestor_exited", error, rewalk);
+  else if (strcmp(fallback, "ancestry_changed") == 0)
+    diagnostic("ancestry", "ancestry_changed", error, budget_expired);
+  else diagnostic("ancestry", "ancestry_unavailable", error, budget_expired);
+  failure_observation = NULL;
+  if (live == 0) return 1; /* Never replay a confirmed dead claimant. */
+  if (rewalk) return 3;
+  return refuse();
+}
+
 /* Parentage and birth are exported across users by the same kernel interface
  * used by ps. This never supplies the socket owner's admission identity. */
 static int observe_ancestor(pid_t pid, struct identity *out) {
@@ -222,7 +276,8 @@ static int observe_ancestor(pid_t pid, struct identity *out) {
   struct kinfo_proc k;
   size_t bytes = sizeof(k);
   errno = 0;
-  if (sysctl(mib, 4, &k, &bytes, NULL, 0) != 0 || bytes != sizeof(k)) return -1;
+  if (sysctl(mib, 4, &k, &bytes, NULL, 0) != 0) return -1;
+  if (bytes != sizeof(k)) { errno = bytes == 0 ? ESRCH : EPROTO; return -1; }
   if (k.kp_proc.p_pid != pid || k.kp_eproc.e_ppid < 0 ||
       k.kp_proc.p_starttime.tv_sec <= 0 || k.kp_proc.p_starttime.tv_usec < 0 ||
       k.kp_proc.p_starttime.tv_usec >= 1000000) { errno = EPROTO; return -1; }
@@ -850,6 +905,7 @@ static int prove(int argc, char **argv) {
       (argc == 7 && strcmp(socket_id, argv[6]) != 0))
     return refuse_at("owner_pin", "socket_mismatch", 0);
 
+walk_ancestry:;
   struct identity chain[MAX_CHAIN];
   int chain_count = 0;
   pid_t current = owner.process.pid;
@@ -857,18 +913,30 @@ static int prove(int argc, char **argv) {
     if (chain_count >= MAX_CHAIN) return refuse_at("ancestry", "ancestry_bounds", 0);
     for (int i = 0; i < chain_count; ++i)
       if (chain[i].pid == current) return refuse_at("ancestry", "ancestry_cycle", 0);
-    if ((chain_count == 0 ? observe(current, &chain[chain_count]) :
-                           observe_ancestor(current, &chain[chain_count])) != 1)
-      return refuse_at("ancestry", "ancestry_unavailable", errno);
+    int observed = chain_count == 0 ? observe(current, &chain[chain_count]) :
+                                     observe_ancestor(current, &chain[chain_count]);
+    if (observed != 1) {
+      int failure = ancestry_failure(&owner, current, chain_count, "walk", observed, errno,
+                                     "ancestry_unavailable");
+      if (failure == 3) goto rewalk_ancestry;
+      return failure;
+    }
     if (chain_count == 0 && !same_process(&owner.process, &chain[0]))
-      return refuse_at("ancestry", "ancestry_changed", 0);
+      return ancestry_failure(&owner, current, 0, "walk", 1, 0, "ancestry_changed");
     current = chain[chain_count++].ppid;
   }
   for (int i = 0; i < chain_count; ++i) {
     struct identity after;
-    if ((i == 0 ? observe(chain[i].pid, &after) : observe_ancestor(chain[i].pid, &after)) != 1 ||
-        !same_process(&chain[i], &after))
-      return refuse_at("ancestry", "ancestry_changed", errno);
+    int observed = i == 0 ? observe(chain[i].pid, &after) : observe_ancestor(chain[i].pid, &after);
+    if (observed != 1) {
+      int failure = ancestry_failure(&owner, chain[i].pid, i, "recheck", observed, errno,
+                                     "ancestry_unavailable");
+      if (failure == 3) goto rewalk_ancestry;
+      return failure;
+    }
+    if (!same_process(&chain[i], &after))
+      return ancestry_failure(&owner, chain[i].pid, i, "recheck", observed, 0,
+                              "ancestry_changed");
   }
   struct socket_fdinfo final_socket;
   struct identity final_owner;
@@ -891,6 +959,31 @@ static int prove(int argc, char **argv) {
   }
   fputs("]}\n", proof_output);
   return 0;
+
+rewalk_ancestry:;
+  /* Spend the same 200 ms scan / 600 ms job budget, at most once per job.
+   * Discard the vanished chain. Reparenting may change PPID, but neither birth,
+   * user nor the original socket may change. Bracket the socket read afresh. */
+  ancestry_rewalk_used = 1;
+  struct identity before, after;
+  int observed = observe(owner.process.pid, &before);
+  if (observed != 1)
+    return ancestry_failure(&owner, owner.process.pid, 0, "walk", observed, errno,
+                            "ancestry_unavailable");
+  if (!same_lifetime(&owner.process, &before))
+    return ancestry_failure(&owner, owner.process.pid, 0, "walk", 1, 0, "ancestry_changed");
+  struct socket_fdinfo socket;
+  if (!socket_info(owner.process.pid, owner.fd, &socket) ||
+      !matches(&socket, (uint16_t)client, (uint16_t)server) || !same_socket(&owner, &socket))
+    return refuse_at("final_socket", "socket_mismatch", errno);
+  observed = observe(owner.process.pid, &after);
+  if (observed != 1)
+    return ancestry_failure(&owner, owner.process.pid, 0, "walk", observed, errno,
+                            "ancestry_unavailable");
+  if (!same_process(&before, &after))
+    return ancestry_failure(&owner, owner.process.pid, 0, "walk", 1, 0, "ancestry_changed");
+  owner.process = after;
+  goto walk_ancestry;
 }
 
 static int execute_proof(int argc, char **argv) {
@@ -898,6 +991,8 @@ static int execute_proof(int argc, char **argv) {
   current_attempt = 0;
   budget_reported = 0;
   budget_expired = 0;
+  ancestry_rewalk_used = 0;
+  failure_observation = NULL;
   memset(&began, 0, sizeof(began));
   memset(&overall_began, 0, sizeof(overall_began));
   if (argc > 1 && strcmp(argv[argc - 1], "--diagnostics") == 0) {

@@ -21,7 +21,9 @@ user identity. Other ancestors use `sysctl(KERN_PROC_PID)` for exact PID, parent
 PID, seconds and microseconds of birth across users. This preserves lifetime
 checks through Terminal's setuid-root `/usr/bin/login` ancestor without granting
 that ancestor ownership or using a weaker owner observation. Unknown, malformed,
-changed or exited ancestors still refuse admission.
+changed or unknown ancestry still refuses admission. A confirmed intermediate
+exit may trigger one complete re-walk from the same live socket claimant, as
+described below.
 
 The helper inspects the bounded union of its all-process, effective-user and
 real-user PID lists. A process born between list calls is inspected, including
@@ -38,8 +40,8 @@ of other processes survive this local retry, while the chosen owner, socket and
 ancestry retain their final rechecks. There are at most 32 local attempts per
 PID, within the unchanged 200 ms scan and 600 ms job caps; a scan whose budget
 expires can restart within the existing 32-scan ceiling. Retries wait 1–8 ms,
-clipped to the total budget. Hard identity, ancestry and shared-owner refusals
-remain unchanged. Persistent uncertainty or exceeded bounds refuses access.
+clipped to the total budget. Hard identity, unavailable/changed ancestry and shared-owner refusals
+remain fail-closed. Persistent uncertainty or exceeded bounds refuses access.
 
 The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
@@ -205,7 +207,8 @@ Each completed job returns exactly one JSON line:
 A successful `result` is the existing complete socket, process-batch or
 birth-only JSON object.
 A refused proof has `ok:false` and `result:null`. The `stderr` string contains
-only the same generic failure and requested fixed diagnostics as the CLI.
+only the same generic failure and requested diagnostics as the CLI (including
+private failure-time ancestry facts).
 Malformed framing, non-monotonic IDs, stream errors or exceeded output bounds
 close the channel with generic stderr; no partial proof grants access. Valid
 framing with invalid proof arguments returns a refusal and permits the next job.
@@ -268,8 +271,30 @@ birth and socket. This tests the reuse guard without forcing numeric PID recycli
 Server-owned opt-in diagnostics report fixed proof stages and native reason
 codes, errno, attempt and retry status. The helper's `--diagnostics` writes these
 to stderr; its successful stdout schema and generic failure stderr remain the
-default contract. No PID, endpoint, command, path, environment or credentials
-enter diagnostic events. Diagnostic callbacks cannot change admission.
+default contract. An ancestry failure additionally records private `ancestryFailure` facts:
+walk/recheck phase, zero-based chain position, failed PID, claimant PID/birth pin
+and its freshly checked status (`same`, `exited`, `changed`, `unavailable`).
+An empty `KERN_PROC_PID` result is classified as ESRCH; a separate native exit
+check confirms absence before it can trigger the re-walk.
+`caller_exited` confirms the claimant exited; `ancestor_exited` confirms an
+intermediate exited while the same claimant lifetime remains live. Unknown and
+changed identities remain distinct fail-closed observations. The body joins
+these facts to the existing private request ID. Only fixed reason labels enter
+metrics or alert text; no PID/birth, endpoint, command, path, environment or
+credentials enter public counters. Diagnostic callbacks cannot change admission.
+
+Real native scheduled-exit evidence supports one ancestry re-walk per job when
+an intermediate is confirmed exited and the original claimant lifetime is still
+live. It spends the existing scan/job budgets, revalidates PID/birth/user and
+socket identity with bracketed full owner reads, and discards the failed chain.
+It then walks and rechecks the current claimant's entire ancestry independently.
+A second intermediate exit refuses with `ancestor_exited`; confirmed caller exit
+refuses with `caller_exited` without replay. Unknown or changed lifetimes do not
+trigger this re-walk. The body still proves current membership from the new
+facts, takes its second snapshot, and rejects non-members. The old ancestry
+never grants authority. `native-ancestry-exit.integration.test.ts` covers the
+live claimant, real exits/reparenting, unchanged stale-pin fences and real HTTP
+non-member refusal.
 
 The body also forwards opt-in shell/foreground process diagnostics into its
 fleet counters. Missing panes retain Herdr's fixed `pane_not_found` classification

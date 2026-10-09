@@ -67,12 +67,23 @@ export function localProofDiagnostics(
   operation: "fleet" | "project",
   metrics?: Pick<FleetHealthMetrics, "observeProof">,
 ) {
+  const failures = new Map<
+    string,
+    { event: Extract<LocalFleetProofDiagnostic, { source: "native" }>["event"]; observedAt: string }
+  >();
   return (observation: LocalFleetProofDiagnostic, pane?: string, context?: LocalFleetProofRequestContext) => {
     if (observation.source === "socket_owner") {
       if (context)
         callers.set(context.socket, { owner: observation.owner, observedAt: new Date().toISOString() });
       return;
     }
+    if (observation.source === "native" && context) {
+      if (observation.event.ancestryFailure && !observation.event.retry)
+        failures.set(context.requestId, { event: observation.event, observedAt: new Date().toISOString() });
+      // Bound diagnostic history; a reused connection does not reuse a failure.
+      while (failures.size > 512) failures.delete(failures.keys().next().value!);
+    }
+    if (observation.source === "proof_success" && context) failures.delete(context.requestId);
     metrics?.observeProof(operation, observation, pane);
     if (observation.source === "proof_success") return;
     logger.warn(
@@ -106,11 +117,30 @@ export function localProofDiagnostics(
       ...(context.socket.remotePort ? { clientPort: context.socket.remotePort } : {}),
       ...(context.socket.localPort ? { serverPort: context.socket.localPort } : {}),
     };
-    return refusalCaller(context.socket).then((caller) => {
+    const failure = failures.get(context.requestId);
+    failures.delete(context.requestId);
+    const ancestry = failure?.event.ancestryFailure;
+    const callerRead = ancestry
+      ? Promise.resolve({
+          owner: { pid: ancestry.claimantPid, birth: ancestry.claimantBirth },
+          observedAt: failure!.observedAt,
+          attribution: "failure_time_kernel_observation" as const,
+        })
+      : refusalCaller(context.socket);
+    return callerRead.then((caller) => {
       logger.warn(
         {
           ...fields,
           callerAttribution: caller?.attribution ?? "unknown",
+          ...(ancestry
+            ? {
+                claimantStatus: ancestry.claimantStatus,
+                failedChainIndex: ancestry.chainIndex,
+                failedPid: ancestry.failedPid,
+                ancestryPhase: ancestry.phase,
+                ancestryErrno: failure!.event.errno,
+              }
+            : {}),
           ...(caller
             ? {
                 callerPid: caller.owner.pid,

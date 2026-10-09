@@ -204,6 +204,17 @@ export const NativeProcessDiagnosticSchema = z
     errno: z.number().int().min(0),
     attempt: z.number().int().min(0).max(32),
     retry: z.boolean(),
+    // Private request logs only; metrics retain the fixed reason, never these identities.
+    ancestryFailure: z
+      .strictObject({
+        phase: z.enum(["walk", "recheck"]),
+        chainIndex: z.number().int().min(0).max(63),
+        failedPid: pid,
+        claimantStatus: z.enum(["same", "exited", "changed", "unavailable"]),
+        claimantPid: pid,
+        claimantBirth: birth,
+      })
+      .optional(),
   })
   .strict();
 

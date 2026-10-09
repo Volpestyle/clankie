@@ -136,7 +136,16 @@ membership. A pre-dispatch `fleet_admission_unavailable` 503 means proof is
 temporarily unavailable; Claude and Codex bridges retry once, then explain how
 to retry or ask the lead to inspect persistent uncertainty. A definite
 `local_process_membership_required` 403 asks for admission and is not retried.
-An earlier uncertain call still requires its original receipt.
+`caller_exited` confirms that the socket claimant exited. `ancestor_exited`
+confirms an intermediate exited while the same claimant lifetime was checked
+live; it does not establish membership. The native helper can re-walk once
+within the same budgets, revalidating that claimant and socket and discarding
+the old chain. A second exit or changed/unavailable identity refuses; a
+non-member is always refused from its current ancestry. Join private native `ancestryFailure`
+facts and `fleet.local_proof.refusal_context` by the existing `requestId` for
+failure-time liveness and the zero-based failed chain position. Keep PID/birth
+private when publishing evidence; previous caller observations do not prove
+current liveness. An earlier uncertain call still requires its original receipt.
 Proof-refusal floods also alert the owner's default conversation, even when the
 caller has no identifiable or currently owned pane. The aggregate notice names
 counts and reasons; it does not attribute the requests to a seat. Logs omit pane

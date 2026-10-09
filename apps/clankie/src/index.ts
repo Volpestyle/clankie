@@ -1227,7 +1227,16 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     const reasons = Object.entries(window.proof.byReason)
       .sort(([, left], [, right]) => (right ?? 0) - (left ?? 0))
       .slice(0, 3)
-      .map(([reason, count]) => `${reason}: ${count}`)
+      .map(
+        ([reason, count]) =>
+          `${
+            reason === "caller_exited"
+              ? "caller_exited (socket claimant exited)"
+              : reason === "ancestor_exited"
+                ? "ancestor_exited (intermediate exited; current ancestry not proven)"
+                : reason
+          }: ${count}`,
+      )
       .join(", ");
     await captain
       .notifyFleetHealthAlert(
@@ -1242,10 +1251,11 @@ const fleetHealthMetrics = new FleetHealthMetrics({
   },
   onProofAlert: async (pane, window) => {
     let delivery: import("./captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
+    const exits = `caller_exited (socket claimant exited): ${window.proof.byReason.caller_exited ?? 0}; ancestor_exited (intermediate exited; current ancestry not proven): ${window.proof.byReason.ancestor_exited ?? 0}`;
     await captain
       .notifyFleetHealthAlert(
         pane,
-        `Fleet proof refusals stayed above 1% for a minute. Caller 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). clankie metrics --fleet includes this caller pane and the aggregate; doctor shows the aggregate across all callers.`,
+        `Fleet proof refusals stayed above 1% for a minute. Caller 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). ${exits}. clankie metrics --fleet includes this claimed caller pane and the aggregate; doctor shows the aggregate across all callers.`,
         (result) => {
           delivery = result;
         },

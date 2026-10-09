@@ -156,6 +156,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
         throw new FleetAdmissionUnavailableError("Local fleet observations are unavailable");
       return false;
     };
+    let nativeReason: FleetProofRefusalReason | undefined;
     const snapshot = (checkpoint: "initial" | "final", expected?: NativeSocketOwner) =>
       observe !== undefined
         ? observe(socket, expected, signal)
@@ -163,9 +164,13 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
             socket,
             options.processHelper ?? fleetProcessHelper(),
             expected,
-            options.diagnostics === undefined
-              ? undefined
-              : (event) => emit({ source: "native", checkpoint, event }),
+            (event) => {
+              nativeReason =
+                !event.retry && (event.reason === "caller_exited" || event.reason === "ancestor_exited")
+                  ? event.reason
+                  : undefined;
+              emit({ source: "native", checkpoint, event });
+            },
             (reason) => emit({ source: "transport", reason }),
             signal,
           );
@@ -188,7 +193,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       if (!binding) return refuse("missing_binding");
       const initial = await snapshot("initial", options.expectedOwner?.(socket) ?? owners.get(socket));
       signal?.throwIfAborted();
-      if (!initial) return refuse("native_initial_unavailable");
+      if (!initial) return refuse(nativeReason ?? "native_initial_unavailable");
       emit({ source: "socket_owner", owner: initial.owner });
       if (!alive()) return refuse("closed_socket");
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
@@ -238,7 +243,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
         return refuse("observation_failed");
       const final = finalRead.value,
         latest = latestRead.value;
-      if (!final) return refuse("native_final_unavailable");
+      if (!final) return refuse(nativeReason ?? "native_final_unavailable");
       if (JSON.stringify(final) !== JSON.stringify(initial)) return refuse("snapshot_changed");
       if (latest?.pane_id !== pane || latest?.shell_pid !== shell) return refuse("pane_changed");
       if (!alive()) return refuse("closed_socket");
@@ -274,6 +279,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     expected?: NativeSocketOwner,
     signal?: AbortSignal,
     context?: LocalFleetProofRequestContext,
+    report?: (event: NativeProcessDiagnostic) => void,
   ) =>
     options.observeSocket !== undefined
       ? options.observeSocket(socket, expected, signal)
@@ -281,9 +287,10 @@ export function localProjectProof(options: LocalFleetProofOptions) {
           socket,
           options.processHelper ?? fleetProcessHelper(),
           expected,
-          options.diagnostics === undefined
-            ? undefined
-            : (event) => diagnostic(options, { source: "native", checkpoint, event }, pane, context),
+          (event) => {
+            report?.(event);
+            diagnostic(options, { source: "native", checkpoint, event }, pane, context);
+          },
           (reason) => diagnostic(options, { source: "transport", reason }, pane, context),
           signal,
         );
@@ -296,6 +303,13 @@ export function localProjectProof(options: LocalFleetProofOptions) {
   ): Promise<ProjectProcessProof | undefined> => {
     const emit = (event: LocalFleetProofDiagnostic) => diagnostic(options, event, pane, context);
     let projectRefusal: ProjectProcessRefusal | undefined;
+    let nativeReason: FleetProofRefusalReason | undefined;
+    const report = (event: NativeProcessDiagnostic) => {
+      nativeReason =
+        !event.retry && (event.reason === "caller_exited" || event.reason === "ancestor_exited")
+          ? event.reason
+          : undefined;
+    };
     signal?.throwIfAborted();
     const observe = createProjectProcessObserver({
       ...options,
@@ -350,9 +364,10 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         options.expectedOwner?.(socket) ?? owners.get(socket),
         signal,
         context,
+        report,
       );
       signal?.throwIfAborted();
-      if (!initial) return refuse("native_initial_unavailable");
+      if (!initial) return refuse(nativeReason ?? "native_initial_unavailable");
       emit({ source: "socket_owner", owner: initial.owner });
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
       if (!alive()) return refuse("closed_socket");
@@ -389,9 +404,9 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         (await options.privateProjectSeat?.(chain, pane, binding, proof, signal)) === true;
       signal?.throwIfAborted();
       if (!direct && !privateSeat) return refuse("not_member");
-      const final = await observeSocket(socket, "final", pane, initial.owner, signal, context);
+      const final = await observeSocket(socket, "final", pane, initial.owner, signal, context, report);
       signal?.throwIfAborted();
-      if (!final) return refuse("native_final_unavailable");
+      if (!final) return refuse(nativeReason ?? "native_final_unavailable");
       const finalProof = await observe("default", pane);
       signal?.throwIfAborted();
       const finalChain = final?.ancestors.map((ancestor) => ancestor.pid) ?? [];

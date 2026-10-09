@@ -278,7 +278,7 @@ it.skipIf(!manual)(
 );
 
 it.skipIf(!manual)(
-  "counts real unavailable and changing ancestry during owned root exits",
+  "counts real exited and changing ancestry during owned root exits",
   async () => {
     const directory = resolve(".local/1704", `ancestry-race-${Date.now()}`);
     await mkdir(directory, { recursive: true });
@@ -335,7 +335,7 @@ it.skipIf(!manual)(
               metrics.observeProof("fleet", { source: "native", checkpoint: "initial", event });
             evidence.push({ attempt, observation, delayUs, refused: reply.stdout === "", events });
             const counts = metrics.snapshot().totals.nativeDiagnostics;
-            if ((counts.ancestry_unavailable && counts.ancestry_changed) || child.exitCode !== null) break;
+            if ((counts.ancestor_exited && counts.ancestry_changed) || child.exitCode !== null) break;
             reply = await nativeProcessRequest(helper, [
               String(peer.remotePort),
               String(address.port),
@@ -348,13 +348,13 @@ it.skipIf(!manual)(
           peer?.destroy();
         }
         const counts = metrics.snapshot().totals.nativeDiagnostics;
-        if (counts.ancestry_unavailable && counts.ancestry_changed) break;
+        if (counts.ancestor_exited && counts.ancestry_changed) break;
       }
       await writeFile(
         resolve(directory, "evidence.json"),
         JSON.stringify({ evidence, metrics: metrics.snapshot() }, null, 2),
       );
-      expect(metrics.snapshot().totals.nativeDiagnostics.ancestry_unavailable).toBeGreaterThan(0);
+      expect(metrics.snapshot().totals.nativeDiagnostics.ancestor_exited).toBeGreaterThan(0);
       expect(metrics.snapshot().totals.nativeDiagnostics.ancestry_changed).toBeGreaterThan(0);
     } finally {
       await closeNativeProcessObservers();

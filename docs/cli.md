@@ -4032,7 +4032,11 @@ refusals. In particular, `process_unavailable` with ESRCH and `socket_unavailabl
 with EBADF can be retryable census churn; their presence does not establish a
 failed proof. Only the terminal proof result increments attempts/refusals. An
 exhausted retry, timeout, identity mismatch or failed observation still refuses
-and counts. Metrics restart with the service and state their coverage start.
+and counts. `caller_exited` means the socket claimant's exit was confirmed at the
+failed ancestry read. `ancestor_exited` means an intermediate exited while the
+same claimant lifetime was freshly proven live. These fixed reasons appear in
+native counters and, for a terminal refusal, proof counters; an intermediate
+exit never proves current membership. Metrics restart with the service and state their coverage start.
 
 Private service logs explain local proof refusals beyond the bounded caller labels.
 Join `fleet.local_proof.refusal_context` to project-stage
@@ -4041,7 +4045,12 @@ The context includes `operation` (fleet or project), a fixed route and method,
 `connectionId`, and validated pane/bridge claims. Caller PID and process birth
 come from kernel observations: `kernel_observed` is a refusal-time sample;
 `previous_kernel_observation` includes its earlier observation time;
-`unknown` means attribution was unavailable. Claims and previous observations
+`unknown` means attribution was unavailable. An ancestry refusal uses
+`failure_time_kernel_observation` with `claimantStatus` (`same`, `exited`,
+`changed`, or `unavailable`), `failedChainIndex` (zero is the claimant),
+`failedPid`, `ancestryPhase` and `ancestryErrno`. PID/birth identify the original
+kernel claimant pin; only `same` confirms that lifetime is currently live.
+The matching native event holds these facts in `ancestryFailure`. Claims and previous observations
 never grant admission. Cold caller sampling is limited to one per connection,
 12 new connections per minute and two concurrent reads. Healthy requests add
 no attribution reads. Paths, argv, request bodies and credentials are excluded.
