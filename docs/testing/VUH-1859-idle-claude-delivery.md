@@ -1,5 +1,42 @@
 # VUH-1859: idle remote Claude delivery
 
+## Follow-up after 12c0fa70
+
+Read-only checks of the original KH2 lead after the deployed canary passed:
+
+- The pane is still idle/done and retains its native Claude session and cwd.
+- Its native Claude process and launcher ancestry have neither `--channels` nor
+  the development-channel flag. Managed policy enables channels and explicitly
+  allows `clankie-worker@clankie`.
+- Plugin installation is now 0.6.10; the original pane's startup observation
+  still names 0.6.9. Replacing installed files does not change its launch flags.
+- The Mac operator launcher supplies
+  `--dangerously-load-development-channels plugin:clankie@inline`. The worker
+  bridge uses `approvesWorkerChannel(parentArgv)` to start live polling only
+  when the worker channel was selected at launch. Tools and outbound reporting
+  can work without that inbound poll. The latest issue reproduction establishes
+  stored inbound mail and a working outbound report, not an SSH link failure.
+
+The roster now names Claude's current receiver as `live`, `next-turn-only`, or
+`unverified`, using existing exact-occupant native polls and authenticated hook
+observations. A next-turn-only warning appears after SessionStart without an
+adoption or queued message, and remains after queue acknowledgment. A disconnected
+channel can have the same observed limitation; the roster does not claim to know
+launch arguments or declare a permanent harness limitation. Stored adoption
+receipts warn too. The detail gives the exact native session's command:
+`claude --resume SESSION_ID --channels plugin:clankie-worker@clankie`.
+Recovery retains the original cwd and account/config home and needs coordinated
+owner action between rig runs. The issue contains the private PC-specific command.
+
+Integration coverage exercises real captain, fleet-link admission, disk journals,
+HTTP and protocol parsing with native census/process observations supplied by the
+fixture. It covers idle manual SessionStart before adoption, stored adoption,
+service restart, take/acknowledgment, live polling and occupant replacement for
+local and remote seats. The TUI test covers an idle next-turn-only lead with an
+empty queue and bounded narrow rows. No native Claude model wake is asserted.
+No PC input, restart, reconnect, config change or message replay was performed.
+Live wake proof remains a separate check after an authorized channel-enabled resume.
+
 PC observation, 2026-10-08 about 22:38Z. No PC pane input, configuration write, restart or plugin refresh.
 
 - Claude 2.1.294; worker plugin 0.6.9 present.

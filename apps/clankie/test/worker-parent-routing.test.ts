@@ -8,6 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import {
   FleetSeatMessageReceiptSchema,
+  FleetSeatMessageReceiverSchema,
   LEGACY_OPERATOR_SEAT_EVENT_KINDS,
   OPERATOR_SEAT_CAPABILITIES_HEADER,
   type OperatorSeatCapabilities,
@@ -84,6 +85,7 @@ async function fixture(
     parent?: boolean;
     parentAdapter?: boolean;
     nonApiCaptain?: boolean;
+    captainApi?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-parent-routing-"));
@@ -273,7 +275,14 @@ async function fixture(
                 ? { captainId: "fixture-captain", steerSourceLane: "discord_text" as const }
                 : undefined,
           }
-        : {}),
+        : options.captainApi
+          ? {
+              authenticateCaptain: async (request: Request) =>
+                request.headers.get("authorization") === "Bearer operator"
+                  ? { captainId: "fixture-owner", steerSourceLane: "api" as const }
+                  : undefined,
+            }
+          : {}),
     });
     const socket = { destroyed: false } as Socket;
     const localFetch = link.fetch((request) => app.app.fetch(request));
@@ -523,6 +532,79 @@ async function adopt(service: Service, conversationId: string, seat: string) {
     outcome: "delivered",
   });
 }
+
+it.each([false, true])(
+  "warns before adopting an idle %s remote Claude lead with only a next-turn receiver",
+  async (remote) => {
+    const f = await fixture({ remote, captainApi: true });
+    const parent = f.rows[1]!;
+    parent.agent_status = "done";
+    const seatId = f.pane(parent.terminal_id);
+    const current = async (service = f.service) => {
+      const response = await service.operatorRequest("/operator/v1/dispatch", {
+        schemaVersion: 1,
+        op: "roster",
+      });
+      expect(response.status).toBe(200);
+      const result = OperatorConversationServiceResultSchema.parse(await response.json());
+      if (result.op !== "roster") throw new Error("Wrong roster result");
+      return result.seats.find((seat) => seat.seatId === seatId)!;
+    };
+    expect((await current()).messageReceiver?.state).toBe("unverified");
+    // SessionStart is sufficient: no adoption or queued message is necessary.
+    await hook(f.service, parent);
+    const resume = `claude --resume ${parent.agent_session.value} --channels plugin:clankie-worker@clankie`;
+    const receiver = FleetSeatMessageReceiverSchema.parse((await current()).messageReceiver);
+    expect(receiver.state).toBe("next-turn-only");
+    expect(receiver.detail).toContain(resume);
+    expect((await current()).waitingMessages).toBeUndefined();
+    const target = await conversation(f.service);
+    const tool = (await f.service.captain.laneToolBank("operator", target)).tools.find(
+      (candidate) => candidate.name === "message_seat",
+    )!;
+    const result = await tool.call({ seat: seatId, message: "PRIVATE assignment to the idle lead" });
+    const content = result.content.find((part) => part.type === "text");
+    const receipt = JSON.parse(content?.type === "text" ? content.text : "null");
+    expect(receipt).toMatchObject({ outcome: "delivered", deliveryStage: "stored" });
+    expect(receipt.detail).toContain("Idle wake is unavailable");
+    expect(receipt.detail).toContain(resume);
+    expect(await current()).toMatchObject({ waitingMessages: { stored: 1, unconfirmed: 0 } });
+    expect(JSON.stringify(await current())).not.toContain("PRIVATE assignment");
+    expect(f.nativeSends).toEqual([]);
+
+    await f.service.close();
+    const restarted = await f.open();
+    expect(await current(restarted)).toMatchObject({
+      messageReceiver: { state: "next-turn-only" },
+      waitingMessages: { stored: 1, unconfirmed: 0 },
+    });
+    const taken = await hook(restarted, parent, "UserPromptSubmit");
+    expect(taken.additionalContext).toContain("PRIVATE assignment");
+    await restarted.nativeRequest(PARENT, fleetSeatHookPath(PARENT), {
+      schemaVersion: 1,
+      event: "UserPromptSubmit",
+      sessionId: parent.agent_session.value,
+      deliveredMessageIds: taken.messageIds,
+    });
+    expect((await current(restarted)).waitingMessages).toBeUndefined();
+    // Consuming the queue does not turn an unchannelled session into a live receiver.
+    expect((await current(restarted)).messageReceiver?.state).toBe("next-turn-only");
+    await expect
+      .poll(async () => {
+        await restarted.nativeRequest(PARENT, `${fleetSeatEventsPath(PARENT)}?wait=1`);
+        return (await current(restarted)).messageReceiver?.state;
+      })
+      .toBe("live");
+    const originalSession = parent.agent_session.value;
+    parent.agent_session.value = randomUUID();
+    // The service's census cache is bounded; replacement must not inherit either receiver.
+    await expect
+      .poll(async () => (await current(restarted)).messageReceiver?.state, { timeout: 5000 })
+      .toBe("unverified");
+    expect(JSON.stringify(await current(restarted))).not.toContain(originalSession);
+    expect(f.nativeSends).toEqual([]);
+  },
+);
 
 it.each([false, true])(
   "raw %s remote parent edge delivers to the linked native parent once without a bridge",

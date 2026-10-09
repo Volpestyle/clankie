@@ -1,4 +1,4 @@
-import type { FleetSeatWaitingMessages, OwnerUpdateDraft } from "@clankie/protocol";
+import type { FleetSeatMessageReceiver, FleetSeatWaitingMessages, OwnerUpdateDraft } from "@clankie/protocol";
 import { z } from "zod";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { randomUUID, createHash } from "node:crypto";
@@ -66,6 +66,35 @@ export class NextTurnMailbox {
   observed(seat: string, binding: string): boolean {
     const inbox = this.inboxes[seat];
     return !this.unreadable && inbox?.binding === binding && inbox.expiresAt > this.now();
+  }
+
+  /** Read-only receiver status; the caller proves live polling for this exact binding. */
+  messageReceiver(
+    seat: string,
+    binding: string | undefined,
+    live: boolean,
+    sessionId?: string,
+  ): FleetSeatMessageReceiver {
+    if (binding && live)
+      return {
+        state: "live",
+        detail:
+          "A live native event poll is observed for this session. This does not prove model consumption.",
+      };
+    if (binding && this.observed(seat, binding))
+      return {
+        state: "next-turn-only",
+        detail:
+          "Idle wake is unavailable: only this session's next UserPromptSubmit receiver is observed. Messages stay in the next-turn mailbox. Check the channel launch flag and bridge connection; plugin installation alone cannot enable a channel in a running Claude session. Coordinate any reconnect or relaunch with the owner; do not type into the pane or replay mail." +
+          (z.string().uuid().safeParse(sessionId).success
+            ? ` When authorized, resume in the original cwd and account/config home: claude --resume ${sessionId} --channels plugin:clankie-worker@clankie`
+            : ""),
+      };
+    return {
+      state: "unverified",
+      detail:
+        "No live native poll or recent next-turn receiver is observed for this session. Installed tools and a healthy fleet link do not prove idle wake support.",
+    };
   }
 
   observe(seat: string, binding: string, receiver = binding): void {

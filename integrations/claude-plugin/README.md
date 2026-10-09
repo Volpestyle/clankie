@@ -176,6 +176,18 @@ to the hook once. A replacement occupant cannot take the old mail. An uncertain
 HTTP or output-pipe handoff is retained as a receipt, never replayed. A successful
 hook output acknowledgment means `delivered`, not model consumption.
 
+The fleet roster's `messageReceiver` separates inbound delivery from installed
+tools and outbound reports. `next-turn-only` means a prompt hook is observed for
+this exact session but no live channel poll is bound; `live` means a native poll
+is bound, and `unverified` means neither receiver is observed. These are current
+observations, not model consumption or a permanent capability verdict. The TUI
+flags next-turn-only leads even before mail is queued, and a stored adoption or
+message receipt also warns. Its detail includes
+`claude --resume SESSION_ID --channels plugin:clankie-worker@clankie` for the
+original session. Coordinate any stop/reconnect/resume with the owner, preserve
+its original cwd and account/config home, and never start a duplicate session.
+Installing a new plugin cannot enable channels in an already-running process.
+
 Clankie’s Claude hire enables the plugin for that session (`enabledPlugins`) and
 starts Claude Code with `--channels plugin:clankie-worker@clankie` for immediate
 delivery. An owner-enabled worker plugin also serves a hand-started session in

@@ -222,6 +222,8 @@ export {
   type WorkerBridgeStatus,
   FleetSeatWaitingMessagesSchema,
   type FleetSeatWaitingMessages,
+  FleetSeatMessageReceiverSchema,
+  type FleetSeatMessageReceiver,
   OperatorFleetSeatSchema,
   type OperatorFleetSeat,
   OperatorSeatDayTallySchema,

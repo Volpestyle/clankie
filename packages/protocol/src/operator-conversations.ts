@@ -839,6 +839,15 @@ export const FleetSeatWaitingMessagesSchema = z
   .strict();
 export type FleetSeatWaitingMessages = z.infer<typeof FleetSeatWaitingMessagesSchema>;
 
+/** Exact-occupant receiver observations; live polling is not model consumption. */
+export const FleetSeatMessageReceiverSchema = z
+  .object({
+    state: z.enum(["live", "next-turn-only", "unverified"]),
+    detail: z.string().min(1).max(1024),
+  })
+  .strict();
+export type FleetSeatMessageReceiver = z.infer<typeof FleetSeatMessageReceiverSchema>;
+
 export const OperatorFleetSeatSchema = z
   .object({
     /** Cached owner repository observation; not freshness admission proof. */
@@ -851,6 +860,8 @@ export const OperatorFleetSeatSchema = z
     workerTools: WorkerBridgeStatusSchema.optional(),
     /** Original next-turn mail awaiting a hook or its native output acknowledgment. */
     waitingMessages: FleetSeatWaitingMessagesSchema.optional(),
+    /** Claude's current inbound receiver, independent of tools and queued mail. */
+    messageReceiver: FleetSeatMessageReceiverSchema.optional(),
     /** Sender receipt health is independent of the served tool catalog. */
     workerReportBridge: WorkerReportBridgeStatusSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),

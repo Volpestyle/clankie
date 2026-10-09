@@ -347,7 +347,16 @@ receive held replies once at the next `UserPromptSubmit` without `--channels`.
 A live channel can deliver immediately only when Claude was launched with
 `--channels plugin:clankie-worker@clankie` and the policy allows it; installing
 or reconnecting the plugin alone does not enable a channel in an original
-process. Queued originals carry `waitingMessages` on the owner roster and a
+process. The roster's `messageReceiver` names `live` (an exact-session native
+poll, not model awareness), `next-turn-only` (an observed prompt hook without
+a live poll), or `unverified`. Next-turn-only is an idle-wake limitation even
+with no queued mail; it stays visible in the TUI and in the adoption/message
+receipt. Its detail gives the original session's channel-enabled resume command:
+`claude --resume SESSION_ID --channels plugin:clankie-worker@clankie`.
+Coordinate stopping/resuming that session with the owner, retaining its original
+cwd and account/config home; never launch a duplicate of a still-running session.
+An absent live poll can also mean a disconnected bridge, so inspect before
+choosing recovery. Queued originals carry `waitingMessages` on the owner roster and a
 body-free owner update naming the pane. `stored` awaits the next prompt;
 `unconfirmed` awaits hook output acknowledgment and must not be replayed.
 The TUI keeps an idle lead with either state visible. Never type a fallback draft

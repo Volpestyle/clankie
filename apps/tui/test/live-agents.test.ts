@@ -729,3 +729,24 @@ it("makes an idle remote lead with queued mail visible and keeps narrow rows bou
     expect(strip.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
   }
 });
+
+it("flags next-turn-only Claude leads even before mail is queued", () => {
+  const lead = agent("lead", true);
+  lead.seat.status = "idle";
+  lead.seat.harness = "claude";
+  lead.seat.messageReceiver = {
+    state: "next-turn-only",
+    detail: "Resume with claude --resume SESSION --channels plugin:clankie-worker@clankie",
+  };
+  const strip = new LiveAgentStrip(() => [lead], theme);
+  expect(expandedRows(strip, 240)).toContain("messages next-turn-only");
+  const picker = new LiveAgentPicker(() => [lead], strip, theme, {
+    maxHeight: () => 40,
+    onOpen: () => {},
+    onClose: () => {},
+    onRender: () => {},
+  });
+  expect(plain(picker.render(240))).toContain(lead.seat.messageReceiver.detail);
+  for (const width of [24, 40, 100])
+    expect(strip.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
+});

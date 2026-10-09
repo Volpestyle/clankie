@@ -2442,7 +2442,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           deliveryStage: "rejected",
           detail: "Peer authority changed before mailbox storage; nothing was sent.",
         };
-      const receipt = nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
+      let receipt = nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
+      if (receipt.deliveryStage === "stored" && agent?.agent === "claude")
+        receipt = {
+          ...receipt,
+          detail: `${receipt.detail ?? ""} ${
+            nextTurnMailboxes.messageReceiver(
+              seatId,
+              inboundBinding(agent),
+              false,
+              agent.session?.kind === "id" ? agent.session.value : undefined,
+            ).detail
+          }`.trim(),
+        };
       fleetChanges.touch();
       if (agent)
         await publishWaitingNotice(seatId, inboundBinding(agent), agent.paneId).catch(() => undefined);
@@ -2975,6 +2987,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const fleetId = qualified?.fleet ?? "default";
       const pane = qualified?.id ?? observed.paneId;
       if (options.workerBridgeStatus) seat.workerTools = options.workerBridgeStatus(fleetId, pane);
+      const native = observedAgent(observed);
+      const binding = inboundBinding(native);
+      if (seat.harness === "claude") {
+        const attached = conversations.attachedConversationForNative(native);
+        const live =
+          !!binding &&
+          (fleetMailboxes.get(observed.seatId)?.boundTo(binding) === true ||
+            (attached !== undefined && seatOutboxes.get(attached)?.boundTo(binding) === true));
+        seat.messageReceiver = nextTurnMailboxes.messageReceiver(
+          observed.seatId,
+          binding,
+          live,
+          native.session?.kind === "id" ? native.session.value : undefined,
+        );
+      }
       seat.waitingMessages = nextTurnMailboxes.waiting(
         observed.seatId,
         inboundBinding(observedAgent(observed)),
@@ -3010,6 +3037,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seat.workerTools,
         seat.workerReportBridge,
         seat.waitingMessages,
+        seat.messageReceiver,
         seat.status,
         seat.summary,
       ]),
@@ -5167,7 +5195,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           nativeOccupantId: occupantIdForHerdrSession(session),
         });
       if (binding && receiver) {
+        const observed = nextTurnMailboxes.observed(agent.terminalId, binding);
         nextTurnMailboxes.observe(agent.terminalId, binding, receiver);
+        if (!observed) fleetChanges.touch();
         if (hook.deliveredMessageIds) {
           nextTurnMailboxes.acknowledge(agent.terminalId, binding, hook.deliveredMessageIds);
           fleetChanges.touch();
@@ -5472,11 +5502,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const seatId = await herdrWatches.seatIdForPane(paneId);
       if (seatId === undefined) return undefined;
       const native = await herdrRunner.get(paneId).catch(() => undefined);
-      return fleetSeatMailbox(
+      const mailbox = fleetSeatMailbox(
         fleetMailboxes,
         seatId,
         join(options.stateDir, "delivery-receipts", "fleet"),
-      ).poll(waitMs, signal, native?.terminalId === seatId ? inboundBinding(native) : undefined);
+      );
+      const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
+      const live = binding !== undefined && mailbox.boundTo(binding);
+      const pending = mailbox.poll(waitMs, signal, binding);
+      if (binding && !live) fleetChanges.touch();
+      return pending;
     },
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {

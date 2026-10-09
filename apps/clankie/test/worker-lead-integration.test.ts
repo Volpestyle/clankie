@@ -632,6 +632,8 @@ it("a room-owned report reaches its attached room and posts its answer through t
 
 it("projects persisted original waiting-mail metadata into the owner roster without draining it", async () => {
   const f = await fixture({ remote: true });
+  // Complete startup migration before simulating a restart on the same journals.
+  await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
   const binding = await f.captain.fleetSeatMessageBinding(f.agent.paneId);
   expect(binding).toBeTruthy();
   await f.captain.close();

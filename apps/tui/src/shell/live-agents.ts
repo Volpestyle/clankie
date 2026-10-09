@@ -109,6 +109,11 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, detail = false): str
   const paintHarness = harness === "claude" ? theme.ansi.yellow : theme.ansi.blue;
   return [
     paintHarness(harness),
+    seat.messageReceiver && (detail || seat.messageReceiver.state === "next-turn-only")
+      ? (seat.messageReceiver.state === "next-turn-only" ? theme.ansi.red : theme.ansi.dim)(
+          `messages ${seat.messageReceiver.state}${detail ? ` · ${clean(seat.messageReceiver.detail)}` : ""}`,
+        )
+      : undefined,
     seat.waitingMessages
       ? theme.ansi.red(
           `${seat.waitingMessages.stored} message(s) waiting for next prompt · ${seat.waitingMessages.unconfirmed} handoff(s) unconfirmed${detail ? ` · ${clean(seat.waitingMessages.detail)}` : ""}`,
@@ -149,6 +154,7 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, detail = false): str
 function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
   if (
     agent.seat.waitingMessages ||
+    agent.seat.messageReceiver?.state === "next-turn-only" ||
     agent.seat.efficiency?.flags.length ||
     agent.seat.status === "blocked" ||
     bridgeWarning(agent, theme) !== undefined ||

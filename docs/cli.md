@@ -5185,6 +5185,17 @@ A channel can wake an idle Claude session only when Claude was started with
 plugin or enabling policy alone does not enable channels in an existing process.
 The service never repairs an unavailable channel by typing a draft into a pane.
 
+The roster also exposes Claude's `messageReceiver`: `live` for an exact-session
+native event poll, `next-turn-only` for an observed prompt hook without a live
+poll, and `unverified` when neither is observed. Live polling does not prove
+model consumption. Next-turn-only stays highlighted even before mail is queued
+or after its queue is acknowledged, and stored adoption/message receipts warn
+about the idle-wake limitation. The detail supplies the original session's
+command: `claude --resume SESSION_ID --channels plugin:clankie-worker@clankie`.
+Use the original cwd and account/config home after coordinating any stop or
+resume with the owner. Do not run a duplicate of an existing session. A missing
+poll may also mean a disconnected bridge; inspect before choosing recovery.
+
 ### Native seat transcript sync
 
 `clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The
