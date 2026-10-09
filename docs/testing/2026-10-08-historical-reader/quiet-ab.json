@@ -1,0 +1,122 @@
+[
+  {
+    "reader": "original",
+    "sourceSha256": "7c594256912bbbf0dbe147bb84608f3e3fcd264c791481236f8fe595de2e08e7",
+    "case": "actual gradeHistorical settlement never yields a passing result when its exact verifier stop is unknown",
+    "status": "passed",
+    "durationMs": 7286.25875,
+    "nativeCommands": 291,
+    "nativeCommandMs": 5996.395041000009,
+    "phases": [
+      {
+        "phase": "fixture",
+        "ms": 974.828209
+      },
+      {
+        "phase": "build",
+        "ms": 1191.7915
+      },
+      {
+        "phase": "calibration",
+        "ms": 3985.6315839999997
+      },
+      {
+        "phase": "grade",
+        "ms": 6712.702125
+      }
+    ],
+    "loadRatioBefore": 1.0297309027777777,
+    "loadRatioAfter": 0.9352756076388888,
+    "quiet": true
+  },
+  {
+    "reader": "candidate",
+    "sourceSha256": "68683ac729f0b22adc8e6c8d4bd96eaaf3e0947ab0c379bb830572f5e855bb01",
+    "case": "actual gradeHistorical settlement never yields a passing result when its exact verifier stop is unknown",
+    "status": "passed",
+    "durationMs": 4394.884666,
+    "nativeCommands": 79,
+    "nativeCommandMs": 3268.3552480000003,
+    "phases": [
+      {
+        "phase": "fixture",
+        "ms": 85.815
+      },
+      {
+        "phase": "build",
+        "ms": 154.494542
+      },
+      {
+        "phase": "calibration",
+        "ms": 1803.829792
+      },
+      {
+        "phase": "grade",
+        "ms": 3872.930084
+      }
+    ],
+    "loadRatioBefore": 0.9352756076388888,
+    "loadRatioAfter": 0.9137641059027778,
+    "quiet": true
+  },
+  {
+    "reader": "candidate",
+    "sourceSha256": "68683ac729f0b22adc8e6c8d4bd96eaaf3e0947ab0c379bb830572f5e855bb01",
+    "case": "actual gradeHistorical settlement never yields a passing result when its exact verifier stop is unknown",
+    "status": "passed",
+    "durationMs": 4143.7765,
+    "nativeCommands": 79,
+    "nativeCommandMs": 3049.5027850000006,
+    "phases": [
+      {
+        "phase": "fixture",
+        "ms": 80.02758299999999
+      },
+      {
+        "phase": "build",
+        "ms": 143.19870799999998
+      },
+      {
+        "phase": "calibration",
+        "ms": 1623.046583
+      },
+      {
+        "phase": "grade",
+        "ms": 3619.148
+      }
+    ],
+    "loadRatioBefore": 0.9137641059027778,
+    "loadRatioAfter": 0.8672688802083334,
+    "quiet": true
+  },
+  {
+    "reader": "original",
+    "sourceSha256": "7c594256912bbbf0dbe147bb84608f3e3fcd264c791481236f8fe595de2e08e7",
+    "case": "actual gradeHistorical settlement never yields a passing result when its exact verifier stop is unknown",
+    "status": "passed",
+    "durationMs": 6960.458041,
+    "nativeCommands": 291,
+    "nativeCommandMs": 5780.280203000011,
+    "phases": [
+      {
+        "phase": "fixture",
+        "ms": 877.981708
+      },
+      {
+        "phase": "build",
+        "ms": 1098.89075
+      },
+      {
+        "phase": "calibration",
+        "ms": 3702.474583
+      },
+      {
+        "phase": "grade",
+        "ms": 6447.343875
+      }
+    ],
+    "loadRatioBefore": 0.8672688802083334,
+    "loadRatioAfter": 0.8107638888888888,
+    "quiet": true
+  }
+]

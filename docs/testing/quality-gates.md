@@ -8,6 +8,13 @@ complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,
 live gateway or running operator service is required.
 
+`pnpm check:landing` runs static checks, typechecks and the affected Vitest
+selection against `CLANKIE_LANDING_BASE` (default: `origin/main`). For repeated
+reliability checks on unchanged main, keep a fixed baseline that selects the
+regression and retain its individual result with `--reporter=json
+--outputFile=PATH`. A clean comparison against `origin/main` may select zero
+tests and still exit successfully; that is not regression evidence.
+
 Evaluations are always explicit manual runs, including the frozen offline
 calibration corpus. `pnpm check`, ordinary `pnpm test`, builds and releases do
 not select that corpus. `pnpm test:eval` uses `vitest.eval.config.ts` to run it.

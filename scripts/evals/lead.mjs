@@ -75,6 +75,28 @@ const gitText = (...args) =>
     .toString()
     .trim();
 
+/** Read pinned objects together, without caching or skipping any provenance check. */
+function gitObjects(specs) {
+  if (specs.some((spec) => /[\r\n]/u.test(spec))) throw Error("Invalid Git object request");
+  const output = command("/usr/bin/git", ["cat-file", "--batch"], repo, `${specs.join("\n")}\n`);
+  let offset = 0;
+  const objects = specs.map((spec) => {
+    const newline = output.indexOf(10, offset);
+    const header = output.subarray(offset, newline).toString();
+    const match = /^([a-f0-9]{40}) (blob|tree|commit|tag) (\d+)$/u.exec(header);
+    if (newline < offset || !match) throw Error(`Unavailable pinned Git object: ${spec}`);
+    const size = Number(match[3]);
+    const start = newline + 1;
+    const end = start + size;
+    if (!Number.isSafeInteger(size) || end >= output.length || output[end] !== 10)
+      throw Error("Incomplete pinned Git object");
+    offset = end + 1;
+    return { oid: match[1], type: match[2], bytes: output.subarray(start, end) };
+  });
+  if (offset !== output.length) throw Error("Unexpected pinned Git object output");
+  return objects;
+}
+
 export function loadTasks() {
   return JSON.parse(readFileSync(manifestPath, "utf8"));
 }
@@ -84,27 +106,33 @@ export function verifyTask(task) {
   if (!/^[a-z0-9-]+$/.test(task.id) || task.kind !== "historical") throw Error("Unsupported task");
   for (const key of ["sourceCommit", "baseCommit", "baseTree", "sourceTree"])
     if (!/^[a-f0-9]{40}$/.test(task[key])) throw Error(`Unpinned ${key}`);
-  if (gitText("rev-parse", `${task.sourceCommit}^`) !== task.baseCommit)
-    throw Error("Base is not pre-fix parent");
-  for (const [commit, tree] of [
-    [task.baseCommit, task.baseTree],
-    [task.sourceCommit, task.sourceTree],
-  ])
-    if (gitText("rev-parse", `${commit}^{tree}`) !== tree) throw Error("Source tree mismatch");
   if (sha(task.prompt) !== task.promptSha256) throw Error("Task text mismatch");
-  const changed = gitText("diff", "--name-only", task.baseCommit, task.sourceCommit).split("\n");
   if (task.parallelWork.length < 2 || !task.graders.length)
     throw Error("Task lacks cross-package work or graders");
-  for (const grader of task.graders) {
-    if (
-      !/^(apps|packages)\/[^/]+\/test\/[a-zA-Z0-9/-]+\.test\.ts$/.test(grader.path) ||
-      !changed.includes(grader.path)
-    )
+  for (const grader of task.graders)
+    if (!/^(apps|packages)\/[^/]+\/test\/[a-zA-Z0-9/-]+\.test\.ts$/.test(grader.path))
       throw Error("Invalid held-out test path");
-    const spec = `${task.sourceCommit}:${grader.path}`;
-    if (gitText("rev-parse", spec) !== grader.blob || sha(git("show", spec)) !== grader.sha256)
+  const [parent, before, after, ...graders] = gitObjects([
+    `${task.sourceCommit}^`,
+    `${task.baseCommit}^{tree}`,
+    `${task.sourceCommit}^{tree}`,
+    ...task.graders.map((grader) => `${task.sourceCommit}:${grader.path}`),
+  ]);
+  if (parent.type !== "commit" || parent.oid !== task.baseCommit) throw Error("Base is not pre-fix parent");
+  if (
+    before.type !== "tree" ||
+    before.oid !== task.baseTree ||
+    after.type !== "tree" ||
+    after.oid !== task.sourceTree
+  )
+    throw Error("Source tree mismatch");
+  const changed = gitText("diff", "--name-only", task.baseCommit, task.sourceCommit).split("\n");
+  task.graders.forEach((grader, index) => {
+    if (!changed.includes(grader.path)) throw Error("Invalid held-out test path");
+    const object = graders[index];
+    if (object.type !== "blob" || object.oid !== grader.blob || sha(object.bytes) !== grader.sha256)
       throw Error("Held-out test mismatch");
-  }
+  });
   return task;
 }
 
@@ -192,7 +220,11 @@ export function historicalDependencyInputs(task) {
         path.startsWith("patches/") ||
         path.startsWith("vendor/"),
     );
-  return paths.map((path) => ({ path, bytes: git("show", `${task.baseCommit}:${path}`) }));
+  const objects = gitObjects(paths.map((path) => `${task.baseCommit}:${path}`));
+  return paths.map((path, index) => {
+    if (objects[index].type !== "blob") throw Error("Historical dependency input is not a blob");
+    return { path, bytes: objects[index].bytes };
+  });
 }
 
 /** A standalone pre-fix repository, with no future objects or held-out tests. */
