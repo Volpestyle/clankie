@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -101,8 +102,8 @@ it("bridges only the manual grant's tools and refuses retired command modes", as
     await client.connect(clientTransport);
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["linear_comment"]);
     expect(
-      (await client.callTool({ name: "linear_comment", arguments: { issueId: "issue" } })).content,
-    ).toEqual([{ type: "text", text: '{"issueId":"issue"}' }]);
+      decodeMcpResult(await client.callTool({ name: "linear_comment", arguments: { issueId: "issue" } })),
+    ).toEqual({ issueId: "issue" });
     await client.close();
     expect(await running).toBe(0);
   } finally {
