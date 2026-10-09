@@ -36,22 +36,16 @@ it("changes desktop quiet hours and browser recording from their bare menus", as
 
     const desktop = scriptedShell(["set", undefined], ["23:00", "07:30", "Europe/London"]);
     await run("desktop", desktop.shell);
-    expect(desktop.readSelect.mock.calls[0]![0].message).toBe("Desktop · no quiet hours");
     expect((await settings.load()).desktop.quietHours).toEqual({
       start: "23:00",
       end: "07:30",
       timeZone: "Europe/London",
     });
-    expect(desktop.readSelect.mock.calls[1]![0].message).toBe("Desktop · quiet 23:00–07:30 (Europe/London)");
 
     const before = (await settings.load()).browser.recordSessions;
     const browser = scriptedShell(["record", undefined]);
     await run("browser", browser.shell);
     expect((await settings.load()).browser.recordSessions).toBe(!before);
-    const hint = (call: number) =>
-      browser.readSelect.mock.calls[call]![0].options.find((row) => row.value === "record")?.hint;
-    expect(hint(0)).toMatch(before ? /^on/u : /^off/u);
-    expect(hint(1)).toMatch(before ? /^off/u : /^on/u);
     expect(
       [...desktop.renderLine.mock.calls, ...browser.renderLine.mock.calls].some(
         ([, tone]) => tone === "error",

@@ -86,6 +86,28 @@ and guided-setup integration tests stay unchanged.
 [Batch evidence](../testing/2026-10-09-command-picker-test-pruning/README.md)
 records LOC, before/after gate wall time, selection and their comparison limits.
 
+## Menu presentation and duplicate-helper batch
+
+Eight mixed TUI files keep their behavior and boundary coverage while shedding
+menu titles, status/hint copy, presentation order and duplicate helper assertions.
+The [batch review](../testing/2026-10-09-menu-test-pruning/README.md) records each
+cut and keep reason. No integration, golden or contract case is removed.
+
+`external-activity.test.ts` retains expanded payload content;
+`machines-menu.test.ts` retains discovered transport and command dispatch,
+default-session protection, grants, reconnect and refusal;
+`product-navigation.test.ts` retains exact membership and selected identity,
+without asserting picker order; `settings-menus.test.ts` retains real persistence;
+`setup-commands.test.ts` retains readiness, cancellation, draft and command routing;
+`voice-commands.test.ts` retains actual wizard/API/broker integration and marker
+redaction; `persona-commands.test.ts` retains defaults, alias recovery and stale
+write refusal; `project-menu.test.ts` retains its revision-bearing API integration.
+
+The deleted `describeVoice` helper case asserted labels without supplying a secret
+marker; actual wizard redaction remains covered at the API/settings boundary.
+Its sole test-consumer export becomes private with its body and runtime caller
+unchanged: **export-only, no behaviour change**, under the existing lead ruling.
+
 ## Other reviewed files retained
 
 These reviews authorize no deletion in the listed files. Mixed files can receive
@@ -168,6 +190,50 @@ Further full-file reviews in this batch retain these files unchanged:
   secret redaction, bounded native detail and exact-only invocable skills.
   `packages/discord-presence-core/test/voice-tone-text.test.ts` keeps arbitrary
   stream-split behavior and withholding of malformed or partial voice directions.
+
+Further read-only reviews retain these files unchanged:
+
+- `interactive-environment`: `interactive-environment.test.ts`, `emulator.test.ts`:
+  published Discord/GBA/environment schemas, frozen fixtures, credential/telemetry
+  refusal, transport authority and bounded/versioned leases.
+- `play`: `free-play-mind-prompt.test.ts`, `free-play-character.test.ts`,
+  `play-story.test.ts`, `free-play-mind-timeout.test.ts`, `free-play-voice.test.ts`:
+  real AI SDK prompt validation, live invalid-prompt and drained-stream wedge
+  regressions, cold-start/decoder evidence, bounded structured output and
+  journal/story identity without inner-monologue disclosure.
+- `apps/clankie`: `captain-room-guidance.test.ts`, `persona-caption.test.ts`,
+  `captain-loadout-tools.test.ts`: async one-use private guidance, separate room
+  captures, real art-file captions, role separation and body-specific tool exposure.
+- `apps/tui`: `services.test.ts`, `claude-plugin.test.ts`, `codex-plugin.test.ts`,
+  `discord-room-view.test.ts`, `status-connection.test.ts`,
+  `linear-follow-status.test.ts`, `herdr-roster.test.ts`, `next-step.test.ts`:
+  real owned-process lifecycle, native hook trust and CLI consumer wiring, honest
+  pending deliveries, redacted read-only wake state, native fleet cursors/identity
+  and canonical recovery commands. These arrays describe consumer wiring.
+- `discord-presence-core`: `addresses-character.test.ts`,
+  `body-voice-lease.test.ts`, `body-voice-reconcile.test.ts`,
+  `presence-grant.test.ts`, `voice-consent.test.ts`, `voice-control.test.ts`,
+  `voice-address.test.ts`, `voice-audio.test.ts`, `voice-room-evidence.test.ts`,
+  `shutdown.test.ts`, `discord-rest.test.ts`, `minecraft-login-code.test.ts`,
+  `transcript-store.test.ts`, `room-text.test.ts`, `receipt-store.test.ts`,
+  `presence-session.test.ts`: consent/account/guild and lease fences, exact native
+  termination, HTTP/URL/mention contracts, guarded secret-bearing DM delivery,
+  PCM/WAV boundaries and real room-tone regression, private append/tail/symlink
+  modes, content-free receipts and synchronous publication-loss fencing.
+- Mixed later candidates stay unchanged: `check-report.test.ts` under
+  `discord-presence-core` keeps the JSON CLI output contract; its human table
+  alignment is a future presentation cut. `captain-model-card.test.ts` under
+  `apps/clankie` keeps per-run refresh and unresolved-model behavior; its exact
+  sentence-formatting case is a future incidental cut.
+
+Further retained consumer contracts: `elevenlabs-tts.test.ts`,
+`voice-ingress.test.ts` and `voice-floor.test.ts` under `discord-presence-core`
+keep provider WebSocket/PCM transport, bounded secret-safe failures, public
+speech-rate caps, speaker attribution and withholding ambient approval payloads.
+`play-voice/test/listener.test.ts` keeps real WebSocket bearer/route/size behavior,
+Unicode-safe attributed words, no absent-client replay and EADDRINUSE recovery.
+`model-provider/test/openai-codex.test.ts` keeps the real local OAuth callback,
+state/PKCE binding, device polling, broker refresh races and revoked credentials.
 
 ## Remaining inventory
 

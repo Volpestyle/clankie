@@ -47,9 +47,6 @@ it("lists discovered candidates before typing and adds their actual transport wi
   const f = fixture(["machine:pc", undefined, undefined]);
   await runMachinesMenu(f.shell, f);
   expect(f.machines).toHaveBeenCalledWith(["add", "pc", "--ssh", "my-pc", "--shell", "powershell"]);
-  const menu = f.readSelect.mock.calls[0]![0] as unknown as { options: { value: string; hint: string }[] };
-  expect(menu.options.map((row) => row.value)).toEqual(["machine:local", "machine:pc", "add"]);
-  expect(menu.options[1]?.hint).toContain("3 agents");
   expect(f.readText).not.toHaveBeenCalled();
 });
 it("connects a selected session through the machines command without asking its name", async () => {

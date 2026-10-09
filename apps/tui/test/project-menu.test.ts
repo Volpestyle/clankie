@@ -70,8 +70,6 @@ it("edits and creates projects from the modal through the revision-bearing proje
     });
 
     expect(renderLine.mock.calls.filter(([, tone]) => tone === "error")).toEqual([]);
-    const top = readSelect.mock.calls[0]![0] as { options: { value: string; hint?: string }[] };
-    expect(top.options[0]).toMatchObject({ value: "project:garden", hint: "garden · 1 role" });
     const saved = (await settings.load()).projects.projects;
     expect(saved.find((p) => p.id === "garden")).toMatchObject({ name: "Garden Path", workerCap: 3 });
     expect(saved.find((p) => p.id === "orchard")).toMatchObject({

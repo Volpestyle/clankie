@@ -11,7 +11,7 @@ import {
   WALKTHROUGH_DRAFT,
   type SetupCommandServices,
 } from "../src/setup-commands.ts";
-import type { MenuOption, SetupFlow } from "../src/shell/setup-flow.ts";
+import type { SetupFlow } from "../src/shell/setup-flow.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "../src/shell/shell.ts";
 
 const tempDirs: string[] = [];
@@ -184,22 +184,13 @@ async function fixture(options: {
 
 function testShell(selections: Array<string | undefined>): {
   readonly shell: ClankieFaceShell;
-  readonly selects: Array<{ message: string; options: readonly MenuOption[] }>;
-  readonly markdown: string[];
-  readonly results: string[];
   readonly drafts: string[];
 } {
-  const selects: Array<{ message: string; options: readonly MenuOption[] }> = [];
-  const markdown: string[] = [];
-  const results: string[] = [];
   const drafts: string[] = [];
   const flow: SetupFlow = {
     begin: () => {},
     end: () => {},
-    readSelect: async (options) => {
-      selects.push(options);
-      return selections.shift();
-    },
+    readSelect: async () => selections.shift(),
     readSecret: async () => undefined,
     readText: async () => undefined,
     renderLine: () => {},
@@ -208,17 +199,13 @@ function testShell(selections: Array<string | undefined>): {
   };
   const shell = {
     setupFlow: flow,
-    insertMarkdown(text: string) {
-      markdown.push(text);
-    },
-    insertCommandResult(_command: string, text: string) {
-      results.push(text);
-    },
+    insertMarkdown() {},
+    insertCommandResult() {},
     setDraft(text: string) {
       drafts.push(text);
     },
   } as unknown as ClankieFaceShell;
-  return { shell, selects, markdown, results, drafts };
+  return { shell, drafts };
 }
 
 function setup(services: SetupCommandServices): FaceShellCommand {
@@ -228,14 +215,12 @@ function setup(services: SetupCommandServices): FaceShellCommand {
 }
 
 describe("/setup", () => {
-  it("asks only how he thinks when he cannot take a turn, and says so when abandoned", async () => {
+  it("leaves no walkthrough draft when missing-credential setup is abandoned", async () => {
     const { services } = await fixture({ model: "openai/gpt-5.5" });
     const view = testShell([undefined]);
 
     await setup(services).run("rooms", view.shell);
 
-    expect(view.selects.map((select) => select.message)).toEqual(["How should Clankie think?"]);
-    expect(view.markdown.join("\n")).toContain("nothing signs in to openai");
     expect(view.drafts).toEqual([]);
   });
 
@@ -245,10 +230,6 @@ describe("/setup", () => {
 
     await setup(services).run("rooms", view.shell);
 
-    const options = view.selects[0]?.options ?? [];
-    expect(options.find((option) => option.value === "think")?.hint).toBe("✓ openai/gpt-5.5");
-    expect(options.find((option) => option.value === "autostart")?.hint).toBe("off");
-    expect(options.find((option) => option.value === "workers")).toBeUndefined();
     expect(opened).toEqual(["persona"]);
   });
 
@@ -257,7 +238,6 @@ describe("/setup", () => {
     const autostart = testShell(["autostart"]);
     await setup(services).run("rooms", autostart.shell);
     expect(autostartCalls).toEqual(["status", "enable"]);
-    expect(autostart.results.join("\n")).toContain("starts when you log in");
 
     const ask = testShell(["ask"]);
     await setup(services).run("rooms", ask.shell);
@@ -273,7 +253,6 @@ describe("/setup", () => {
     expect(phone({ state: "connected" })?.command).toBe("pair");
     expect(phone({ state: "sign_in_required", since: "2026-09-01" })).toMatchObject({
       command: "remote-access",
-      hint: "signed out",
     });
   });
 
@@ -288,7 +267,6 @@ describe("/setup", () => {
     await setup(services).run("rooms", view.shell);
 
     expect(view.drafts).toEqual([]);
-    expect(view.results.join("\n")).toContain("can't reach Clankie's service");
   });
 });
 
@@ -307,6 +285,5 @@ it("offers the owner workspace choice only for running sessions found by doctor"
     ),
   ).toMatchObject({
     command: "herdr",
-    description: "Leading your session lets him see and message every pane in it.",
   });
 });

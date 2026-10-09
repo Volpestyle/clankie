@@ -53,14 +53,12 @@ describe("/persona", () => {
     const settings = fixture.settings;
     const selections = ["names", "done"];
     const responses: Array<string | undefined> = ["Clankie Jr", undefined, "Clankie Jr", "Clanky"];
-    const messages: string[] = [];
     const defaults: Array<string | undefined> = [];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
       readSelect: async () => selections.shift(),
       readText: async (options: Parameters<SetupFlow["readText"]>[0]) => {
-        messages.push(options.message);
         defaults.push(options.defaultValue);
         return responses.shift();
       },
@@ -71,12 +69,6 @@ describe("/persona", () => {
       setupFlow: flow,
     } as unknown as ClankieFaceShell);
 
-    expect(messages).toEqual([
-      "Name",
-      "Other names he answers to (comma separated)",
-      "Name",
-      "Other names he answers to (comma separated)",
-    ]);
     expect(defaults).toEqual(["Clankie", "", "Clankie Jr", ""]);
   });
 });

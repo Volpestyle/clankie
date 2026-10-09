@@ -67,7 +67,7 @@ export function validateVendorIdentifier(value: string): string | undefined {
   return undefined;
 }
 
-export function describeVoice(
+function describeVoice(
   settings: VoiceSettings,
   realtimeKeyStored: boolean,
   elevenLabsKeyStored: boolean,

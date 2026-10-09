@@ -8,7 +8,6 @@ import type { SetupFlow } from "../src/shell/setup-flow.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "../src/shell/shell.ts";
 import {
   buildVoiceCommands,
-  describeVoice,
   validateVendorIdentifier,
   type VoiceCommandServices,
 } from "../src/voice-commands.ts";
@@ -130,7 +129,6 @@ describe("/voice", () => {
     expect(credentials.get("elevenlabs")).toEqual({ type: "api", key: "xi-secret-key" });
     expect(credentials.get("openai")).toEqual({ type: "api", key: "sk-openai" });
     expect(JSON.stringify(stored)).not.toContain("xi-secret-key");
-    expect(view.lines.join("\n")).toContain("Restart the bridge to apply");
   });
 
   it("configures OpenAI models, voice, and broker-owned key", async () => {
@@ -205,8 +203,6 @@ describe("/voice", () => {
     const status = testShell([]);
     await voice.run("status", status.shell);
     const rendered = status.results.map((result) => result.text).join("\n");
-    expect(rendered).toContain("Anthropic claude-sonnet-5-5");
-    expect(rendered).toContain("transcription: OpenAI gpt-realtime-whisper");
     expect(rendered).not.toContain("MISSING");
     for (const key of ["anthropic-api-secret", "openai-transcription-secret", "elevenlabs-secret"])
       expect(rendered).not.toContain(key);
@@ -279,33 +275,6 @@ describe("voice command helpers", () => {
     expect(validateVendorIdentifier("")).toBe("Required.");
     expect(validateVendorIdentifier("../../etc")).toContain("letters, digits");
     expect(validateVendorIdentifier("x".repeat(129))).toContain("letters, digits");
-  });
-
-  it("describes both providers without leaking anything secret-shaped", () => {
-    expect(
-      describeVoice(
-        {
-          realtimeProvider: "openai",
-          ttsProvider: "openai",
-          xAiReasoningEffort: "high",
-          openAiVoice: "marin",
-        },
-        false,
-        false,
-      ).join("\n"),
-    ).toContain("realtime: OpenAI");
-    const elevenLabs = describeVoice(
-      {
-        realtimeProvider: "openai",
-        ttsProvider: "elevenlabs",
-        xAiReasoningEffort: "high",
-        elevenLabsVoiceId: "voice_abc123",
-      },
-      true,
-      true,
-    ).join("\n");
-    expect(elevenLabs).toContain("voice_abc123");
-    expect(elevenLabs).toContain("redacted");
   });
 });
 
