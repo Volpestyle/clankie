@@ -125,6 +125,7 @@ import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-h
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
+import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
 import { parseHerdrPaneList } from "./captain/herdr-watch.ts";
 import { linearFollowStatus } from "@clankie/settings";
@@ -983,6 +984,13 @@ const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
   warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
 });
 const workerRuntimeRevision = randomUUID();
+const harnessProcesses = new FleetHarnessProcesses({
+  stateRoot,
+  binding: herdr.binding,
+  report: (result) =>
+    logger.info({ event: "fleet.harness_retirement", result }, "Closed-hire harness recovery"),
+});
+harnessProcesses.start();
 const grokNative = createGrokNativeHost({
   binding: localFleetBinding,
   processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
@@ -1222,6 +1230,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
 });
 const captain = createCaptain(
   {
+    harnessProcesses,
     refreshWorkerCatalogs: (input, authority) => workerToolRefresh.refresh(input, authority),
     activitySharing,
     discordTracking,
@@ -2104,6 +2113,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   linearRequestBudget.close();
 
   workerToolRefresh.close();
+  harnessProcesses.close();
   const exitCode = signal === "SIGINT" ? 130 : 143;
   process.exitCode = exitCode;
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");

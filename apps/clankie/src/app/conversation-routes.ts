@@ -54,6 +54,22 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  for (const retire of [false, true]) {
+    ctx.app.on(retire ? "POST" : "GET", `/v1/fleet/processes${retire ? "/retire" : ""}`, async (context) => {
+      const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+      if (!identity || identity === "unavailable")
+        return context.json({ error: "operator_authentication_required" }, 401);
+      if (retire && !z.strictObject({}).safeParse(await readJson(context.req.raw)).success)
+        return context.json({ error: "invalid_request" }, 400);
+      if (!ctx.dependencies.captain.harnessProcesses)
+        return context.json({ error: "harness_processes_unavailable" }, 503);
+      try {
+        return context.json(await ctx.dependencies.captain.harnessProcesses(retire));
+      } catch {
+        return context.json({ error: "harness_process_observation_unavailable" }, 503);
+      }
+    });
+  }
   ctx.app.post("/v1/fleet/efficiency", async (context) => {
     const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
     if (!identity || identity === "unavailable")

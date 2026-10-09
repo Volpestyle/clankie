@@ -24,6 +24,7 @@ import { text } from "node:stream/consumers";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
+  "       clankie agents processes [retire] (local host; own confirmed closed hires only)\n" +
   "       clankie agents message-status DELIVERY_ID (current native seat)\n" +
   "       clankie agents readopt SEAT --conversation ID\n" +
   "       clankie agents reports --conversation ID [--limit N]\n" +
@@ -91,6 +92,30 @@ export async function runAgentsCommand(
     stdin?: Parameters<typeof text>[0];
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "processes") {
+    if (args.length > 2 || (args.length === 2 && args[1] !== "retire")) throw new Error(AGENTS_USAGE);
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+    });
+    if (!credential) throw new Error("Harness processes need the operator credential. Run clankie doctor.");
+    const retire = args[1] === "retire";
+    const response = await (options.fetchImpl ?? fetch)(
+      `${commandHost(options)}/v1/fleet/processes${retire ? "/retire" : ""}`,
+      {
+        method: retire ? "POST" : "GET",
+        headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+        ...(retire ? { body: "{}" } : {}),
+        signal: AbortSignal.timeout(120_000),
+        redirect: "error",
+      },
+    );
+    if (!response.ok)
+      throw new Error(
+        `Harness process observation failed: ${response.status}; no retry of uncertain retirement`,
+      );
+    return response.json();
+  }
   if (args[0] === "message-status") {
     if (args.length !== 2) throw new Error(AGENTS_USAGE);
     const env = options.env ?? process.env;

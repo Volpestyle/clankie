@@ -38,6 +38,7 @@ const FLEET_USAGE = [
   `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--harness NAME|auto] [--model NAME|auto] [--effort LEVEL|auto] [--account LABEL|auto] [--hire-profile FILE.json]`,
   "       clankie fleet set [--heavy-slots auto|N] [--simulator-slots N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N]",
   "       clankie fleet resources",
+  "       clankie fleet processes [retire]",
   "       clankie fleet clear",
 ].join("\n");
 

@@ -424,6 +424,10 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "fleet") {
+      if (rest[0] === "processes") {
+        outputJson(stdout, await runAgentsCommand(rest, options));
+        return 0;
+      }
       if (rest[0] === "simulator") {
         outputJson(
           stdout,

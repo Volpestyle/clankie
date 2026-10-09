@@ -240,6 +240,132 @@ def group_occupied(pgid):
                for pid, group, status in census)
 
 
+def harness_processes():
+    """Same-user harness census. Arguments stay here; only remote endpoints escape.
+
+    Endpoint equality protects a reattached client even outside Herdr. A failed
+    complete argument census refuses retirement, rather than implying no client.
+    """
+    rows = subprocess.run(["/bin/ps", "-axww", "-o", "pid=,uid=,comm="],
+                          capture_output=True, timeout=3, check=True)
+    args = subprocess.run(["/bin/ps", "-axww", "-o", "pid=,args="],
+                          capture_output=True, timeout=3, check=True)
+    if max(len(rows.stdout), len(args.stdout)) > 16 * 1024 * 1024:
+        raise RuntimeError("Harness census too large")
+    arguments = {}
+    for line in args.stdout.decode("utf-8", "replace").splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) == 2:
+            arguments[int(fields[0])] = fields[1].split()
+    processes = []
+    for line in rows.stdout.decode("utf-8", "replace").splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) != 3 or int(fields[1]) != os.getuid():
+            continue
+        executable = fields[2]
+        name = os.path.basename(executable)
+        if name not in ("codex", "claude", "codex-code-mode-host"):
+            continue
+        pid = int(fields[0])
+        current = identity(pid)
+        if current is None:
+            continue
+        executable_verified = False
+        if sys.platform == "darwin":
+            library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+            library.proc_pidpath.restype = ctypes.c_int
+            path = ctypes.create_string_buffer(4096)
+            if library.proc_pidpath(pid, path, len(path)) <= 0:
+                # A disappearing member is irrelevant; a denied live read is
+                # not an empty complete census.
+                if identity(pid) is None:
+                    continue
+            else:
+                executable = path.value.decode("utf-8", "strict")
+                executable_verified = True
+        elif sys.platform.startswith("linux"):
+            try:
+                executable = os.readlink("/proc/%s/exe" % pid)
+                executable_verified = True
+            except OSError:
+                pass
+        argv = arguments.get(pid)
+        if argv is None:
+            raise RuntimeError("Harness arguments unavailable")
+        endpoints = [value for value in argv if value.startswith("unix:///")]
+        processes.append({**current, "executable": executable, "cwd": None,
+                          "executableVerified": executable_verified,
+                          "kind": "helper" if name == "codex-code-mode-host" else name,
+                          "server": "app-server" in argv,
+                          "endpoint": endpoints[0] if len(endpoints) == 1 else None})
+    if len(processes) > 1024:
+        raise RuntimeError("Harness census too large")
+    if processes and sys.platform == "darwin":
+        result = subprocess.run(["/usr/sbin/lsof", "-nP", "-a", "-p",
+                                 ",".join(str(row["pid"]) for row in processes), "-d", "cwd", "-Fpn"],
+                                capture_output=True, timeout=5)
+        # Missing cwd is an honest diagnostic gap, never retirement authority.
+        if len(result.stdout) > 4 * 1024 * 1024:
+            raise RuntimeError("Harness cwd census too large")
+        current_pid = None
+        paths = {}
+        for line in result.stdout.decode("utf-8", "replace").splitlines():
+            if line.startswith("p"):
+                current_pid = int(line[1:])
+            elif line.startswith("n"):
+                paths[current_pid] = line[1:]
+        for row in processes:
+            row["cwd"] = paths.get(row["pid"])
+    elif sys.platform.startswith("linux"):
+        for row in processes:
+            try:
+                row["cwd"] = os.readlink("/proc/%s/cwd" % row["pid"])
+            except OSError:
+                pass
+    return {"schemaVersion": 1, "processes": processes}
+
+
+def terminate_harness():
+    """TERM one exact registered server lifetime, never a PID/group sweep.
+
+    The caller supplies proven closed-pane provenance. Re-observe native birth,
+    executable and all harness clients here immediately before the signal. Old
+    second-resolution receipts are deliberately insufficient for this effect.
+    """
+    request = json.loads(sys.stdin.read(16385))
+    if not isinstance(request, dict) or set(request) != {"pid", "startTime", "endpoint", "executable"}:
+        raise RuntimeError("Harness termination request unavailable")
+    pid = request["pid"]
+    if type(pid) is not int or pid <= 1 or pid == os.getppid():
+        raise RuntimeError("Harness termination PID unavailable")
+    rows = harness_processes()["processes"]
+    row = next((row for row in rows if row["pid"] == pid), None)
+    if row is None:
+        return {"outcome": "exited"}
+    if row["kind"] != "codex" or not row["executableVerified"] or not row["server"] or not request["endpoint"] or \
+            any(row[key] != request[key] for key in request) or \
+            any(other["pid"] != pid and other["endpoint"] == request["endpoint"] for other in rows):
+        return {"outcome": "refused"}
+    current = identity(pid)
+    if current is None:
+        return {"outcome": "exited"}
+    if current["startTime"] != request["startTime"]:
+        return {"outcome": "refused"}
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return {"outcome": "exited"}
+    # Signal delivery is not exit evidence. Never escalate to KILL or repeat an
+    # uncertain signal; report a survivor for inspection instead.
+    for _ in range(40):
+        current = identity(pid)
+        if current is None or current["startTime"] != request["startTime"]:
+            return {"outcome": "retired"}
+        time.sleep(0.05)
+    return {"outcome": "exit_unconfirmed"}
+
+
 def lock(directory):
     os.makedirs(directory, mode=0o700, exist_ok=True)
     file = open(os.path.join(directory, "state.lock"), "a+")
@@ -351,6 +477,14 @@ if __name__ == "__main__":
             print(json.dumps(darwin_memory(), separators=(",", ":")))
         elif mode == "snapshot":
             print(json.dumps(snapshot()))
+        elif mode == "harness-processes":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Harness census request unavailable")
+            print(json.dumps(harness_processes(), separators=(",", ":")))
+        elif mode == "terminate-harness":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Harness termination request unavailable")
+            print(json.dumps(terminate_harness(), separators=(",", ":")))
         elif mode == "observe":
             if len(sys.argv) != 2:
                 raise RuntimeError("Process identity request unavailable")

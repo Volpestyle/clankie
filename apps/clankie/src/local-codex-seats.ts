@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { occupantIdForHerdrSession, parseHerdrAgentList } from "./captain/herdr-census.ts";
@@ -238,6 +247,41 @@ export class LocalCodexSeats {
     this.save();
     const release = () => {
       if (this.seats.get(pid) !== entry) return;
+      // Detaching the controller is not an exit receipt. Preserve its exact
+      // launch provenance for guarded recovery of a subsequently closed pane.
+      const record = this.catalogCandidates(pane).find((record) => record.pid === pid);
+      if (this.durable && record) {
+        try {
+          const path = `${this.durable.path}.released.json`;
+          const previous = existsSync(path)
+            ? StateSchema.parse(JSON.parse(readFileSync(path, "utf8"))).seats
+            : [];
+          const seats = [
+            ...previous.filter((row) => row.pid !== pid || row.start !== record.start),
+            record,
+          ].slice(-1024);
+          const temporary = `${path}.${randomUUID()}.tmp`;
+          const file = openSync(temporary, "wx", 0o600);
+          try {
+            writeFileSync(file, JSON.stringify(StateSchema.parse({ version: 1, seats })));
+            fsyncSync(file);
+          } finally {
+            closeSync(file);
+          }
+          renameSync(temporary, path);
+          const directory = openSync(dirname(path), "r");
+          try {
+            fsyncSync(directory);
+          } finally {
+            closeSync(directory);
+          }
+        } catch {
+          this.durable.warn?.(
+            "Private Codex release archive unavailable; retained original launch for inspection",
+          );
+          return;
+        }
+      }
       this.seats.delete(pid);
       this.save();
     };

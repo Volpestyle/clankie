@@ -253,3 +253,20 @@ verbatim bounded excerpts. `leadVisits` records confirmed captain deliveries and
 pane closure separately. Uncertain, refused and merely stored peer attempts earn
 no exchange; read the original receipt to reconcile, never resend for a visual.
 These bounded five-minute facts describe delivery, not work completion.
+
+## Local harness process recovery
+
+`clankie fleet processes` is the read-only operator census (API:
+`GET /v1/fleet/processes`): parent, cwd, kernel start, activity proxy and live
+pane/seat ownership. A thread log mtime is only a proxy; unknown activity stays
+unknown. Detached Codex app servers intentionally survive service replacement.
+Age, PPID 1, an absent pane or a recorded pane name alone never authorizes killing.
+
+`clankie fleet processes retire` (empty-body
+`POST /v1/fleet/processes/retire`) shares the service's five-minute automatic
+closed-hire recovery. It can TERM only a controller-created server with matching
+lossless birth and original socket, original hire ownership, confirmed same-thread
+closure, complete live-pane absence, no reattached client and every loaded native
+thread idle. An empty inventory needs the original thread to read `notLoaded`
+with no in-progress turn; independent roots refuse retirement. Others remain report-only. Read the before/after outcomes; never
+retry an uncertain retirement or fall back to `kill`, group signals or KILL.

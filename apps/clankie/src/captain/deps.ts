@@ -43,6 +43,7 @@ import type { DiscordTracking } from "../discord-tracking.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly harnessProcesses?: import("../fleet-harness-processes.ts").FleetHarnessProcesses;
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
   readonly activitySharing?: import("../activity-sharing.ts").ActivitySharing;

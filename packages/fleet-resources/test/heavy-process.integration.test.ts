@@ -302,7 +302,9 @@ describe("machine shared heavy permits with actual OS children", () => {
     const f = await fixture();
     try {
       const first = f.start("first");
-      await eventually(() => exists(first.receipt), Boolean);
+      await eventually(() => exists(first.receipt), Boolean).catch((error) => {
+        throw new Error(`${String(error)}\nOwned child output:\n${first.output.join("")}`, { cause: error });
+      });
       const second = f.start("second");
       await eventually(
         () => f.governor.snapshot(),

@@ -5041,6 +5041,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     syncCheckouts,
     pruneWorktree,
     tidyWorktrees: (repository, mergedInto) => paneTidy.worktreeReport(repository, mergedInto),
+    ...(deps.harnessProcesses
+      ? {
+          harnessProcesses: (retire = false) =>
+            retire ? deps.harnessProcesses!.retire() : deps.harnessProcesses!.list(),
+        }
+      : {}),
     decideWorktree: async (input) => {
       if (!(await checkoutRepositories()).includes(input.repository))
         throw Error("Select a registered owner checkout");

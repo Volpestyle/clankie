@@ -6088,3 +6088,39 @@ success. Revoke alone is not proof that an outstanding screen effect stopped.
 with the machine, selected and required levels, observation time and owner fix.
 Doctor includes unresolved observations; an owner's sufficient access grant
 removes them from the view. This read never raises machine authority.
+
+### `fleet processes` / `fleet processes retire`
+
+`clankie fleet processes` reads the local host's Codex, Claude and Codex helper
+processes through the operator-authenticated `GET /v1/fleet/processes` API. Each
+row includes PID, parent, kernel start receipt, executable, cwd, live pane/seat
+owners and any original controller-created launch. `lastActivity` is the exact
+native thread log's mtime where found, explicitly a proxy; otherwise it is null.
+Neither that timestamp nor PPID 1 proves an orphan: dedicated Codex servers
+intentionally survive service replacement.
+
+`verified-closed-hire` requires the original native hire/owner, confirmed closure
+of that same thread and pane, a complete current pane census, matching lossless
+PID birth and original listener/socket proof, no reattached native client, and
+fresh native idle status for every loaded thread. An empty loaded inventory is
+accepted only when the original thread independently reads `notLoaded` with no
+in-progress turn. Loaded descendants must trace back to that original thread;
+an independent root refuses retirement. Unattributed processes, live
+owners, old second-resolution receipts, uncertain closures and unavailable proof
+remain `report-only`. No caller may pass a PID, broaden the scope or use age as
+retirement authority.
+
+`clankie fleet processes retire` calls `POST /v1/fleet/processes/retire` with an
+empty object and returns the before report, individual outcomes and after report.
+It rechecks those proofs and sends TERM to only each exact eligible server
+lifetime. It never signals groups or escalates to KILL. A durable intent/exit
+journal prevents replay after uncertain delivery, including service replacement.
+An `exit_unconfirmed` outcome needs inspection rather than another signal.
+Normal service recovery performs the same guarded sweep every five minutes.
+Released controller launch records are retained separately for this check;
+retained records alone confer no control or retirement authority.
+
+This is local-host recovery. Remote/Windows harnesses and third-party processes
+stay outside this command's termination scope. Inspect and report the list before
+an initial live cleanup; retain processes whose ownership or inactivity cannot
+be proved.

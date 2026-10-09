@@ -204,6 +204,7 @@ export interface CaptainPort {
     repository: string,
     mergedInto?: string,
   ): ReturnType<import("./pane-tidy.ts").PaneTidy["worktrees"]>;
+  harnessProcesses?(retire?: boolean): Promise<unknown>;
   /** A live native operator bridge can answer independently of the fallback model (default: the global chat). */
   operatorSeatReady?(conversationId?: string): boolean;
   /** Current host-bound persona for the exact native seat and occupant. */
