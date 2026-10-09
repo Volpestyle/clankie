@@ -3963,9 +3963,14 @@ reconciled using the same request ID; repeating it reads the original journal an
 never launches again. Do not substitute a fresh ID for uncertain intent.
 
 `revoke ID` invalidates the delegation immediately. Subsequent tool calls and
-channel access fail; an already dispatched effect cannot be undone. A service
-restart also revokes all remote heads. The token is delivered in memory, never in
-plugin files, arguments or receipts; OS paging and administrator memory access
+channel access fail; an already dispatched effect cannot be undone. Explicit
+revocation survives restart. Temporary bridge, relay or native-observation loss
+is retried; a service restart re-arms only a previously proved launch with the
+same machine, pane, shell and harness process lifetimes, native session and chat.
+An exited or replaced head is never re-armed. The bridge keeps the native MCP
+connection open and refreshes its idle upstream without replaying tool effects.
+Private service records store only token hashes and host proof. The bearer token
+is delivered in memory, never in plugin files, arguments or receipts; OS paging and administrator memory access
 are outside this guarantee. The bridge delegates project lead tools and messaging
 with the selected chat's attribution, not general owner HTTP or settings access.
 It also exposes ordinary `linear_*` tracker reads/writes and tracker-only
@@ -3976,6 +3981,10 @@ writes require current delegation and proved chat attribution at dispatch.
 The owner routes the project's wakes with `linear routes set --json-stdin`,
 preserving other project routes. Verify an issue read and comment from the live
 head after redeploy/relaunch; a fixture pass does not prove that acceptance.
+`clankie status` reports a recently interrupted seat bridge as `reconnecting`,
+then `current` when the original head resumes its current-protocol polls. An
+unrecovered bridge eventually reports `disconnected` with an explicit recovery
+reason; status alone never proves that an exited head can attach again.
 
 Remote Codex heads and in-place worker conversion are not implemented. Preserve
 an existing worker's written handoff and original session reference, launch a new

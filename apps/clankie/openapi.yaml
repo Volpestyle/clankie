@@ -4202,7 +4202,9 @@ paths:
         Owner-only management. Launch uses a stable requestId; repeated requests
         return the original journal without redispatch. Dispatched is a transport
         handoff, not native readiness. Unconfirmed launches need reconciliation.
-        The separate in-memory delegation never authenticates owner routes.
+        The separate process-bound delegation never authenticates owner routes.
+        Restart recovery requires the original host-pinned process/session/chat.
+        Private records contain token hashes only; explicit revoke survives restart.
       security: [{ operatorBearer: [] }]
       parameters:
         - in: path
@@ -4460,6 +4462,8 @@ paths:
         a visible /mcp reconnect notice in the conversation, without replay.
         The operator seat_bridges dispatch read exposes the same loaded capabilities
         used by doctor and status; installed files are not proof of loaded code.
+        A recently interrupted bridge reports reconnecting, then current when its
+        original head resumes current-protocol polling; recovery never changes authority.
         Host-authenticated owner sends on capable bridges arrive as `kind: turn`, with `ownerOrigin`
         recording the verified device/operator principal and self-reported surface.
         The seat answers normally in the synced conversation; these events have

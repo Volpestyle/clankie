@@ -2,6 +2,7 @@
 // Initialize the shared Zod entry before SDK schemas. Otherwise esbuild's
 // wrapped protocol imports can leave ZodCustom uninitialized at SDK startup.
 import { z } from "zod";
+import { setTimeout as delay } from "node:timers/promises";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +55,23 @@ const request: typeof fetch = async (resource, init) => {
     ...(original.body ? { body: await original.arrayBuffer() } : {}),
     signal: AbortSignal.any([original.signal, closing.signal]),
   });
-  if (response.status === 403) closing.abort();
+  if (response.status === 403) {
+    const reason: unknown = await response
+      .clone()
+      .json()
+      .catch(() => undefined);
+    if (
+      typeof reason === "object" &&
+      reason !== null &&
+      "error" in reason &&
+      reason.error === "remote_lead_revoked"
+    ) {
+      closing.abort();
+      throw new Error("Remote lead delegation explicitly revoked");
+    }
+    // A native observation or policy read can be temporarily unavailable.
+    // Refusal still blocks this request; it does not end the native bridge.
+  }
   return response;
 };
 if (process.argv.includes("--sync")) {
@@ -68,16 +85,53 @@ if (process.argv.includes("--sync")) {
   if (!response.ok) throw new Error("Remote lead prompt unavailable");
   process.stdout.write(await response.text());
 } else {
-  const upstream = await connectLaneUpstream({
-    host: "http://127.0.0.1",
-    bearer: token,
-    conversationId,
-    fetchImpl: request,
-  });
+  let reconnectNeeded = false;
+  const connect = () =>
+    connectLaneUpstream({
+      host: "http://127.0.0.1",
+      bearer: token,
+      conversationId,
+      fetchImpl: request,
+      onTransportEvent: ({ event }) => {
+        if (event === "upstream_closed" || event === "upstream_error") reconnectNeeded = true;
+      },
+    });
+  let upstream: Awaited<ReturnType<typeof connectLaneUpstream>>;
+  for (;;) {
+    try {
+      upstream = await connect();
+      break;
+    } catch (error) {
+      if (closing.signal.aborted) throw error;
+      process.stderr.write("Remote lead bridge reconnecting\n");
+      await delay(5000, undefined, { signal: closing.signal });
+    }
+  }
   const server = createSeatBridge(upstream, "operator");
   server.onclose = () => closing.abort();
   await server.connect(new StdioServerTransport());
-  await pumpSeatEvents(server, upstream, closing.signal);
+  // Idle heads must recover tools too. Catalog reads reconnect the existing
+  // upstream generation without replaying any potentially admitted tool call.
+  const health = (async () => {
+    while (!closing.signal.aborted) {
+      try {
+        if (reconnectNeeded) {
+          await upstream.listTools();
+          reconnectNeeded = false;
+        }
+      } catch {
+        if (!closing.signal.aborted) process.stderr.write("Remote lead bridge reconnecting\n");
+      }
+      await delay(5000, undefined, { signal: closing.signal }).catch(() => undefined);
+    }
+  })();
+  await pumpSeatEvents(server, upstream, closing.signal, {
+    onError: () => {
+      reconnectNeeded = true;
+    },
+  });
+  closing.abort();
+  await health;
   await upstream.close();
   await server.close();
 }

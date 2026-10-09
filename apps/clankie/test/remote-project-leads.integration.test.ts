@@ -294,7 +294,10 @@ it("launches an approved Windows workspace through the real conversation store w
       current: () => true,
       validate: async () => true,
       projectProof: async () => ({
-        ...binding,
+        fleet: binding.fleet,
+        pane: binding.pane,
+        nativeOccupantId: binding.nativeOccupantId,
+        shell: binding.shell,
         binding: { socketPath: "fixture-pipe", session: fleet.session },
         workspace: { machineId: "pc", platform: "windows" as const, canonicalPath: cwd },
         processes: [{ pid: 456, startTime: "2026-10-09T00:00:01Z" }],
@@ -393,7 +396,10 @@ it("launches an approved Windows workspace through the real conversation store w
         current: () => true,
         validate: async () => true,
         projectProof: async () => ({
-          ...binding,
+          fleet: binding.fleet,
+          pane: binding.pane,
+          nativeOccupantId: binding.nativeOccupantId,
+          shell: binding.shell,
           binding: { socketPath: "fixture-pipe", session: fleet.session },
           workspace: { machineId: "pc", platform: "windows", canonicalPath: cwd },
           processes: [{ pid: 456, startTime: "2026-10-09T00:00:01Z" }],

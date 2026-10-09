@@ -111,6 +111,12 @@ maintenance lock with update admission; `retentionMaintenance: held` with empty
 `holds` can be an active scan. Read status and the retention journal before
 concluding that a lock leaked. Recovery in a new process inspects retention again.
 
+A remote project head reconnects after a temporary bridge loss or service restart
+only with its original proved pane, native process/session and chat. Read its
+seat bridge status (`reconnecting`, then `current`) and verify a tool call/channel;
+never allocate another pane to recover it. Explicit delegation revocation remains
+permanent. See [lead](../lead/SKILL.md) and the `conversations lead` CLI contract.
+
 A pending canary belongs to the candidate commit. Old/foreign observers of the
 shared update journal leave it alone while its armed process is alive or its
 exit is unproven. A confirmed exit followed by a different-commit boot serving verified

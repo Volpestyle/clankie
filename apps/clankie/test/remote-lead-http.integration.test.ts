@@ -1,7 +1,10 @@
+import { z } from "zod";
 import { describe, expect, test } from "vitest";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { createRemoteLeadBridge } from "../src/remote-lead-bridge.ts";
 import { RemoteLeadDelegations } from "../src/remote-lead-delegations.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
@@ -393,6 +396,245 @@ else console.log('{}');
       if ("closeAllConnections" in host) host.closeAllConnections();
       await new Promise<void>((r) => host.close(() => r()));
       await new Promise<void>((r) => handoff.close(() => r()));
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  test("the same native head reconnects after proof loss and restart, but replacement and revoke never rearm", async () => {
+    const root = await mkdtemp(join(tmpdir(), "remote-lead-reconnect-"));
+    const directory = join(root, "delegations");
+    let proofAvailable = true;
+    let exited = false;
+    const fixtureProof = async () => {
+      const { fleet, pane, nativeOccupantId, shell, binding, processes, workspace } =
+        await identity.projectProof();
+      return { fleet, pane, nativeOccupantId, shell, binding, processes, workspace };
+    };
+    let observed = await fixtureProof();
+    let effects = 0;
+    const presencePath = join(root, "presence.json");
+    let outbox = new SeatOutbox({ presencePath });
+    const captain = createStubCaptain({
+      pollSeatEvents: (waitMs, signal, _chat, capabilities) =>
+        outbox.poll(Math.min(waitMs, 25), signal, binding.nativeOccupantId, capabilities),
+      laneToolBank: async () => ({
+        lane: "operator",
+        tools: [
+          {
+            name: "worker_reports",
+            description: "Read reports",
+            inputSchema: { type: "object", properties: {} },
+            call: async () => {
+              effects++;
+              return { content: [{ type: "text", text: "reconnected" }] };
+            },
+          },
+        ],
+      }),
+    });
+    const nativeIdentity = {
+      ...identity,
+      projectProof: async () => {
+        if (!proofAvailable) throw Error("Native observation temporarily unavailable");
+        return exited ? undefined : observed;
+      },
+    };
+    let grants = new RemoteLeadDelegations(async () => {}, directory);
+    const issued = await grants.issue(binding);
+    const makeBridge = () =>
+      createRemoteLeadBridge({ delegations: grants, identity: () => nativeIdentity, captain });
+    let bridge = makeBridge();
+    const host = serve({ fetch: (request) => bridge.app.fetch(request), hostname: "127.0.0.1", port: 0 });
+    const client = new Client({ name: "reconnect-proof", version: "1" });
+    let catalogChanges = 0;
+    const channelMessages: string[] = [];
+    client.setNotificationHandler(
+      z.object({
+        method: z.literal("notifications/claude/channel"),
+        params: z.object({ content: z.string() }),
+      }),
+      ({ params }) => {
+        channelMessages.push(params.content);
+      },
+    );
+    client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+      catalogChanges++;
+    });
+    try {
+      const repo = resolve(import.meta.dirname, "../../..");
+      await execute(process.execPath, [join(repo, "scripts/build-remote-lead.mjs")], { cwd: repo });
+      const address = host.address();
+      if (!address || typeof address === "string") throw Error("Missing HTTP address");
+      await mkdir(join(root, ".clankie/links"), { recursive: true });
+      await writeFile(
+        join(root, ".clankie/links/pc.json"),
+        JSON.stringify({
+          schemaVersion: 2,
+          authentication: "local-process",
+          fleet: "pc",
+          url: `http://127.0.0.1:${address.port}`,
+        }),
+      );
+      const nativeEnv = {
+        PATH: process.env.PATH!,
+        HOME: root,
+        CLANKIE_REMOTE_LEAD_TOKEN: issued.token,
+        HERDR_PANE_ID: binding.pane,
+        CLANKIE_REMOTE_LEAD_FLEET: "pc",
+        CLANKIE_CONVERSATION_ID: binding.conversationId,
+        CLANKIE_SEAT_SESSION_ID: nativeSession,
+        CLANKIE_SEAT_HARNESS: "claude",
+      };
+      await client.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: [join(repo, ".local/remote-lead/remote-lead-mcp.mjs")],
+          env: nativeEnv,
+          stderr: "pipe",
+        }),
+      );
+      expect((await client.listTools()).tools.some((t) => t.name === "worker_reports")).toBe(true);
+      const beforeDrop = catalogChanges;
+      if (!("closeAllConnections" in host)) throw Error("Fixture TCP reset unavailable");
+      host.closeAllConnections();
+      await expect.poll(() => catalogChanges > beforeDrop, { timeout: 15000 }).toBe(true);
+      expect(effects).toBe(0);
+      const droppedChannel = outbox.deliver({
+        kind: "wake",
+        conversationId: binding.conversationId,
+        source: "service",
+        content: "channel after TCP loss",
+        wantsReply: false,
+      });
+      await expect
+        .poll(() => channelMessages.some((text) => text.includes("channel after TCP loss")), {
+          timeout: 15000,
+        })
+        .toBe(true);
+      await droppedChannel;
+      proofAvailable = false;
+      const sync = spawn(process.execPath, [join(repo, ".local/remote-lead/remote-lead-mcp.mjs"), "--sync"], {
+        env: nativeEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let syncError = "";
+      sync.stderr.on("data", (data: Buffer) => {
+        syncError += data.toString();
+      });
+      const synced = new Promise<number | null>((resolve, reject) => {
+        sync.once("error", reject);
+        sync.once("exit", resolve);
+      });
+      sync.stdin.end(
+        JSON.stringify({
+          hook_event_name: "SessionStart",
+          session_id: nativeSession,
+          transcript_path: join(root, `${nativeSession}.jsonl`),
+        }),
+      );
+      expect(await synced).toBe(1);
+      expect(syncError).toContain("Seat transcript sync failed (403)");
+      expect(syncError).not.toContain("AbortError");
+      await expect(client.listTools()).rejects.toThrow();
+      await expect
+        .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 8000 })
+        .toBe("reconnecting");
+      proofAvailable = true;
+      await expect
+        .poll(
+          async () => {
+            try {
+              return (await client.listTools()).tools.some((t) => t.name === "worker_reports");
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 15000 },
+        )
+        .toBe(true);
+      const beforeRestart = catalogChanges;
+      await bridge.close();
+      outbox.close();
+      outbox = new SeatOutbox({ presencePath });
+      expect(outbox.bridgeStatus(binding.conversationId).state).toBe("reconnecting");
+      grants = new RemoteLeadDelegations(async () => {}, directory);
+      bridge = makeBridge();
+      await expect.poll(() => catalogChanges > beforeRestart, { timeout: 15000 }).toBe(true);
+      await expect
+        .poll(
+          async () => {
+            try {
+              return (await client.listTools()).tools.some((t) => t.name === "worker_reports");
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 15000 },
+        )
+        .toBe(true);
+      await expect
+        .poll(() => outbox.bridgeStatus(binding.conversationId).state, { timeout: 15000 })
+        .toBe("current");
+      const restartedChannel = outbox.deliver({
+        kind: "wake",
+        conversationId: binding.conversationId,
+        source: "service",
+        content: "original chat after restart",
+        wantsReply: false,
+      });
+      await expect
+        .poll(() => channelMessages.some((text) => text.includes("original chat after restart")), {
+          timeout: 15000,
+        })
+        .toBe(true);
+      await restartedChannel;
+      expect((await client.callTool({ name: "worker_reports", arguments: {} })).content).toEqual([
+        { type: "text", text: "reconnected" },
+      ]);
+      expect(effects).toBe(1);
+      const authHeaders = { authorization: `Bearer ${issued.token}` };
+      expect(
+        (
+          await fetch(`http://127.0.0.1:${address.port}/v1/fleet/lead/prompt?conversationId=other`, {
+            headers: authHeaders,
+          })
+        ).status,
+      ).toBe(403);
+      for (const changed of [
+        { ...observed, pane: "w1:p2" },
+        { ...observed, nativeOccupantId: "different-session" },
+        { ...observed, shell: { ...observed.shell, startTime: "2026-10-09T00:00:05.0000000Z" } },
+      ]) {
+        observed = changed;
+        expect(
+          (await fetch(`http://127.0.0.1:${address.port}/v1/fleet/lead/prompt`, { headers: authHeaders }))
+            .status,
+        ).toBe(403);
+        observed = await fixtureProof();
+      }
+      observed = { ...observed, processes: [{ pid: 999, startTime: "2026-10-09T00:00:02.0000000Z" }] };
+      await expect(client.listTools()).rejects.toThrow();
+      expect(effects).toBe(1);
+      observed = await fixtureProof();
+      exited = true;
+      await expect(client.listTools()).rejects.toThrow();
+      expect(effects).toBe(1);
+      exited = false;
+      expect(grants.revoke(issued.id)).toBe(true);
+      await bridge.close();
+      grants = new RemoteLeadDelegations(async () => {}, directory);
+      bridge = makeBridge();
+      observed = await fixtureProof();
+      await expect(client.listTools()).rejects.toThrow();
+      expect(effects).toBe(1);
+      const records = (await readdir(directory)).filter((name) => name.endsWith(".json"));
+      for (const name of records)
+        expect(await readFile(join(directory, name), "utf8")).not.toContain(issued.token);
+    } finally {
+      outbox.close();
+      await client.close();
+      await bridge.close();
+      if ("closeAllConnections" in host) host.closeAllConnections();
+      await new Promise<void>((r) => host.close(() => r()));
       await rm(root, { recursive: true, force: true });
     }
   });

@@ -39,6 +39,13 @@ verified; never create a profile, copy credentials or substitute another account
 The refusal explains how the owner can sign in on the PC. Omit `account` to
 retain environment selection or the exactly-one-signed-in-profile behavior.
 
+Remote bridges retry temporary transport and native-proof loss. Restart recovery
+requires the original pane, shell/harness lifetime, native session and chat;
+explicit revocation is permanent. Never relaunch or choose another pane as
+reconnection. `clankie status` shows `reconnecting` then `current` when polling
+resumes. Verify live tool/channel recovery after a deploy; fixture proof alone
+cannot establish the PC outcome.
+
 Keep the original request ID after uncertain launch; rereading it never launches
 again. `dispatched` is not tool readiness. Prove the native lead toolkit and child
 report routing before treating a project as converted. Existing workers need a

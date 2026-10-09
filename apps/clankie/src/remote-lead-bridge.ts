@@ -42,6 +42,8 @@ export function createRemoteLeadBridge(input: {
     if (!authority.current() || !(await authority.authorize())) throw new Error("remote_lead_revoked");
   };
   app.all("/v1/fleet/lead/*", async (context) => {
+    if (input.delegations.isRevoked(context.req.raw))
+      return context.json({ error: "remote_lead_revoked" }, 403);
     let authority: Authority | undefined;
     try {
       authority = await input.delegations.authorize(context.req.raw, input.identity(context.req.raw));

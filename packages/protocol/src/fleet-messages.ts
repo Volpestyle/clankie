@@ -49,7 +49,7 @@ export type OperatorSeatCapabilities = z.infer<typeof OperatorSeatCapabilitiesSc
 export const OperatorSeatBridgeStatusSchema = z
   .object({
     conversationId: OperatorConversationIdSchema,
-    state: z.enum(["current", "stale", "disconnected"]),
+    state: z.enum(["current", "stale", "reconnecting", "disconnected"]),
     eventKinds: z.array(OperatorSeatEventKindSchema),
     ownerOrigin: z.boolean(),
     lastSeenAt: z.string().optional(),

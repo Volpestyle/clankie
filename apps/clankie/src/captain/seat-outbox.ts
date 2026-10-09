@@ -241,20 +241,30 @@ export class SeatOutbox {
       !!capabilities?.ownerOrigin &&
       capabilities.eventKinds.includes("turn") &&
       LEGACY_OPERATOR_SEAT_EVENT_KINDS.every((kind) => capabilities.eventKinds.includes(kind));
+    const bound = this.bound();
+    const reconnecting =
+      !this.closed &&
+      this.pollers.size === 0 &&
+      ((this.reconnectUntil ?? 0) > this.now() ||
+        (!bound &&
+          this.lastBridgePollAt !== undefined &&
+          this.now() - this.lastBridgePollAt <= RESTART_RECONNECT_GRACE_MS));
     return {
       conversationId,
-      state: !this.bound() ? "disconnected" : current ? "current" : "stale",
+      state: reconnecting ? "reconnecting" : !bound ? "disconnected" : current ? "current" : "stale",
       eventKinds: [...(capabilities?.eventKinds ?? LEGACY_OPERATOR_SEAT_EVENT_KINDS)],
       ownerOrigin: capabilities?.ownerOrigin ?? false,
       ...(capabilities?.sourceHash ? { sourceHash: capabilities.sourceHash } : {}),
       ...(this.lastBridgePollAt === undefined
         ? {}
         : { lastSeenAt: new Date(this.lastBridgePollAt).toISOString() }),
-      detail: !this.bound()
-        ? "Seat bridge is disconnected; reconnect with /mcp if this conversation uses a native head."
-        : current
-          ? "Seat bridge supports owner turns."
-          : "Clankie's seat needs a reconnect: /mcp. The bridge does not declare the current seat protocol; owner turns use a compatible wire format when supported.",
+      detail: reconnecting
+        ? "Seat bridge is reconnecting; only the original native session and chat may attach again."
+        : !bound
+          ? "Seat bridge is disconnected; reconnect with /mcp if this conversation uses a native head."
+          : current
+            ? "Seat bridge supports owner turns."
+            : "Clankie's seat needs a reconnect: /mcp. The bridge does not declare the current seat protocol; owner turns use a compatible wire format when supported.",
     };
   }
 

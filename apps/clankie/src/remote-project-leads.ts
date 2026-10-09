@@ -30,27 +30,30 @@ export class RemoteLeadBuildMissing extends Error {
   }
 }
 
-/** Owns launch intent and ephemeral authority, never owns existing remote panes. */
+/** Owns launch intent and process-bound authority, never owns existing remote panes. */
 export class RemoteProjectLeads {
   readonly delegations: RemoteLeadDelegations;
   private readonly options: RemoteProjectLeadOptions;
   constructor(options: RemoteProjectLeadOptions) {
     this.options = options;
-    this.delegations = new RemoteLeadDelegations(async (binding) => {
-      await options.runtimes.requireAccess(binding.fleet, "workers");
-      const settings = await options.settings.load();
-      const connection = settings.execution.connections.find((entry) => entry.id === binding.fleet);
-      if (
-        !connection?.enabled ||
-        connection.machine !== binding.machine ||
-        !connection.ssh ||
-        connectionKey(connection) !== binding.connectionKey ||
-        !(await options.runtimes.remoteWorkspace(binding.fleet, binding.workingDirectory)) ||
-        options.captain.seatContext(binding.conversationId)?.machineId !== binding.machine ||
-        options.captain.seatContext(binding.conversationId)?.cwd !== binding.workingDirectory
-      )
-        throw new Error("remote_lead_binding_unavailable");
-    });
+    this.delegations = new RemoteLeadDelegations(
+      async (binding) => {
+        await options.runtimes.requireAccess(binding.fleet, "workers");
+        const settings = await options.settings.load();
+        const connection = settings.execution.connections.find((entry) => entry.id === binding.fleet);
+        if (
+          !connection?.enabled ||
+          connection.machine !== binding.machine ||
+          !connection.ssh ||
+          connectionKey(connection) !== binding.connectionKey ||
+          !(await options.runtimes.remoteWorkspace(binding.fleet, binding.workingDirectory)) ||
+          options.captain.seatContext(binding.conversationId)?.machineId !== binding.machine ||
+          options.captain.seatContext(binding.conversationId)?.cwd !== binding.workingDirectory
+        )
+          throw new Error("remote_lead_binding_unavailable");
+      },
+      join(options.directory, "delegations"),
+    );
   }
 
   private async fleet(id: string) {

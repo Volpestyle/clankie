@@ -54,7 +54,8 @@ from the machine's administrator, memory inspection, paging or crash dumps.
 Revocation invalidates the grant before acknowledging success. Every tool call
 and channel poll checks current authority, including immediately before a
 queued effect. Revocation stops new effects and closes channel access; it cannot
-undo an already dispatched effect. Service restart invalidates ephemeral grants.
+undo an already dispatched effect. Restart recovery preserves only the original
+proved native lifetime, as amended below.
 An uncertain launch or tool effect is reconciled by its original receipt and is
 never automatically replayed.
 
@@ -111,6 +112,29 @@ The owner configures project-to-chat wake routes through `clankie linear routes
 set --json-stdin`, preserving other projects' routes. The delegated `linear_wake`
 accepts only `action: received` with the original host-issued `wakeId`, and only
 for that chat. It cannot change wake rules, owner identity or project routing.
-A removed/unavailable project chat retains the existing global fallback. Restart
-revokes the old head; relaunch and live tracker verification are separate from
-passing the HTTP/MCP acceptance fixture.
+A removed/unavailable project chat retains the existing global fallback. Live
+tracker and channel recovery verification remain separate from the HTTP/MCP fixture.
+
+## Reconnection amendment (VUH-1980, 2026-10-09)
+
+A service restart ends transport sessions, not the owner's original launch intent.
+Private, bounded service records retain the token hash, launch binding and first
+complete host-authored process proof. They never retain the bearer token. Recovery
+accepts only that exact pane, shell/harness process lifetime, native session and
+chat, after current fleet policy and proof checks. An unproved launch, unreadable
+record, missing process or replacement carries no recovery authority. Explicit
+revocation persists and fsyncs before success, and invalidates active grants at
+once; restart cannot resurrect it.
+
+A temporary relay, bridge or native-observation refusal still blocks that request.
+It no longer aborts the native stdio bridge permanently. The bridge retries channel
+polling and recovers its idle MCP generation after transport loss, notifying the
+harness that its catalog is available again. Potentially admitted tool effects
+are never replayed to reconnect. Status reports recent interruption as reconnecting,
+then current when original-head polling resumes.
+
+Legacy heads have neither this bridge artifact nor persisted hash/process proof.
+They cannot be safely migrated by trusting a new caller's identity claims. The
+owner loads the new artifact with an initial launch after deployment; subsequent
+loss/restart recovery needs no new pane. No live PC operation is part of fixture
+verification or code landing.
