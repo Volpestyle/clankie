@@ -140,9 +140,10 @@ else console.log('{}');
         null,
         1,
       ])
-        await expect(prepareClaude(executable, plugin, { ...options, account })).rejects.toThrow(
-          "Invalid Claude account label",
-        );
+        // Raw target frames can bypass the HTTP schema; deliberately cross the typed boundary.
+        await expect(
+          prepareClaude(executable, plugin, { ...options, account: account as string }),
+        ).rejects.toThrow("Invalid Claude account label");
       expect(await readFile(callsPath, "utf8")).toBe("");
       expect(await readFile(join(selected, ".credentials.json"), "utf8")).toBe(credential);
     } finally {
