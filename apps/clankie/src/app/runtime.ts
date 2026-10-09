@@ -1061,11 +1061,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   app.route(
     "/",
-    createProjectRoutes(
-      authorizeOwnerSecrets,
-      settingsSource,
-      dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {},
-    ),
+    createProjectRoutes(authorizeOwnerSecrets, settingsSource, {
+      ...(dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {}),
+      ...(dependencies.builtInTracker
+        ? {
+            // Exact UUID only: get_project also matches names, which never bind.
+            trackerProjectExists: async (id: string) => {
+              const project = (await dependencies.builtInTracker!.call("get_project", { query: id })) as {
+                id?: unknown;
+              };
+              return project.id === id;
+            },
+          }
+        : {}),
+    }),
   );
   app.route(
     "/",

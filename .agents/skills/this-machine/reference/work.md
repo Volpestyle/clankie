@@ -225,4 +225,7 @@ Always subscribe to `workspace` for project create/rename/archive and project-le
 metadata. Discover a new project from its delta, partially bootstrap exactly its
 UUID, preserve other cached groups and add that UUID to the subscription.
 Use explicit settings-to-tracker UUID bindings; unmatched projects stay unbound.
+Bind one with `clankie project update PROJECT --changes-json
+'{"trackerProjectId":"UUID"}' --revision REVISION` (`null` unbinds); `work_repos`
+then returns `trackerProjectId` on that project's repo.
 Never infer bindings from names or poll for discovery.

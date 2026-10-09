@@ -3002,7 +3002,14 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           const actor = callOptions?.actor ?? localActor(store);
           const key = command.idempotencyKey;
           const fingerprint = createHash("sha256")
-            .update(canonical(["sync_transaction", command.operations]))
+            .update(
+              canonical([
+                "sync_transaction",
+                command.operations,
+                // Unfenced transactions keep their original fingerprint.
+                ...(command.expectedStoreId === undefined ? [] : [command.expectedStoreId]),
+              ]),
+            )
             .digest("hex");
           const prior = store.receipts?.find(
             (entry) => entry.actorKey === actorKey(actor) && entry.idempotencyKey === key,
@@ -3022,12 +3029,21 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             store,
             clock,
             "sync_transaction",
-            { operations: command.operations },
+            {
+              operations: command.operations,
+              ...(command.expectedStoreId === undefined ? {} : { expectedStoreId: command.expectedStoreId }),
+            },
             { key, fingerprint },
             actor,
             callOptions,
             assertHeld,
             async (target, now, context) => {
+              // Checked under the journal lock, so a swap after the client's own check cannot slip a write through.
+              if (command.expectedStoreId !== undefined && command.expectedStoreId !== target.team.id)
+                throw new TrackerWriteRefused(
+                  "store_replaced",
+                  `transaction expected store ${command.expectedStoreId}; the tracker store is now ${target.team.id}`,
+                );
               const results = [];
               for (const [index, operation] of command.operations.entries()) {
                 // Distinct operation versions also preserve temporal independent-check fences.

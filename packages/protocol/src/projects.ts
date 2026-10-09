@@ -78,6 +78,11 @@ export const ProjectSchema = z
       .object({ workspaceId: ProjectIdSchema, path: z.literal(".clankie/tracking.json") })
       .strict()
       .optional(),
+    /**
+     * The built-in tracker project (UUID) this project is, set explicitly by the
+     * owner. Never inferred from names; the host checks it names a tracker project.
+     */
+    trackerProjectId: z.string().uuid().optional(),
     roles: z.array(ProjectRoleSchema).max(256).default([]),
     workerCap: z.number().int().min(0).max(1000).optional(),
     autonomy: ProjectAutonomySchema.optional(),
@@ -361,6 +366,8 @@ export const UpdateProjectSettingsSchema = z
           .strict()
           .nullable()
           .optional(),
+        /** A built-in tracker project UUID; null unbinds. */
+        trackerProjectId: z.string().uuid().nullable().optional(),
       })
       .strict()
       .refine(

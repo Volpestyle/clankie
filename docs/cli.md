@@ -1787,7 +1787,9 @@ operator dispatch API. Supply a `TrackerSyncCommand`: `bootstrap` (`type:
 full|partial`, `projects`, optional `lazy`), `batch` (`projects`, `models`),
 `subscribe` (`projects`, `storeId`, `lastSyncId`, optional `waitMs`/`limit`),
 or `transaction` (required `idempotencyKey`, `operations` of existing write
-tools and arguments). Output is the typed result; bootstrap contains JSON lines
+tools and arguments, optional `expectedStoreId` from the bootstrap metadata). A
+transaction whose `expectedStoreId` no longer names the store is `refused` with
+reason `store_replaced`, with no model write; its receipt records the refusal. Output is the typed result; bootstrap contains JSON lines
 in `ndjson`, ending with snapshot cursor and model count metadata. Subscribe
 waits on committed changes, for at most 20 seconds. A keyed transaction is
 atomic across 1–50 operations; receipt lookup uses `work owner get_write_receipt`.
@@ -5171,8 +5173,16 @@ belong to VUH-1710.
 reviewed changes for an existing project through the authenticated service API.
 The console exposes the same verbs through `/project`.
 
-The changes file may contain `name`, `roles`, `workerCap`, `trackerRef` and `autonomy`.
+The changes file may contain `name`, `roles`, `workerCap`, `trackerRef`,
+`trackerProjectId` and `autonomy`.
 Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
+`trackerProjectId` binds the project to one built-in tracker project by its UUID
+(from `work sync` bootstrap or `work owner get_project`); the service refuses a
+UUID the tracker does not hold (`tracker_project_not_found`) or one already bound
+to another project, and never matches by name. `clankie work repos` and the
+device `work_repos` read return it on that project's repo, so the app can mark the
+synced tracker project as bound. Snapshots for clients that do not opt into the
+current project shape (`?includeAutonomy=true`) omit it, like `autonomy`.
 An empty roles list inherits the six built-in roles; an explicit list defines
 the available roles and may set their whole hire profile (harness, model, effort,
 subagents, delegation, account, placement), naming rule and concurrency cap. Zero

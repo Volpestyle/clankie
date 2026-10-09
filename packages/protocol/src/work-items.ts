@@ -182,6 +182,11 @@ export const WorkRepoSchema = z
       .string()
       .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
       .optional(),
+    /**
+     * The built-in tracker project UUID the owner bound that project to. A synced
+     * tracker project is bound only through this; names never match.
+     */
+    trackerProjectId: z.string().uuid().optional(),
     /** Fixed owner-facing reason an explicitly bound repo cannot currently be read. */
     unavailable: z.string().min(1).max(240).optional(),
     /**

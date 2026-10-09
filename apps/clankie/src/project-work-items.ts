@@ -58,6 +58,7 @@ export function createProjectWorkReader(options: {
             id: projectWorkRepoId(project.id),
             projectId: project.id,
             name: project.name,
+            ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
             needsDecision: false,
           };
           try {
@@ -83,6 +84,7 @@ export function createProjectWorkReader(options: {
           id: ref,
           projectId: project.id,
           name: project.name,
+          ...(project.trackerProjectId === undefined ? {} : { trackerProjectId: project.trackerProjectId }),
           root: read.path,
           backend: read.convention.backend,
           needsDecision: false,

@@ -301,7 +301,9 @@ count and cursor metadata. Apply a whole commit before persisting the cursor;
 Hydrate comment bodies and run details in batches, retaining newer deltas.
 Use `get_write_receipt` for the original actor/key after uncertainty; replaying
 that same keyed transaction returns its original outcome. New arguments need a
-new key, and `ifUpdatedAt` conflicts need a fresh read. Device live subscriptions
+new key, and `ifUpdatedAt` conflicts need a fresh read. Send the bootstrapped
+`expectedStoreId` with queued replays; `store_replaced` means the store was
+swapped and the queued edit was not applied. Device live subscriptions
 ride the existing relay tail route. Contract and command shapes live in
 [docs/cli.md](../../../docs/cli.md#work-sync---json-command).
 

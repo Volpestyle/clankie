@@ -477,7 +477,12 @@ A full bootstrap with `projects: ["*"]` expands to every tracker project UUID
 the named groups. On a new project delta, the client partially bootstraps that
 UUID, preserves other groups, and adds the UUID to its subscription; it reconciles
 the snapshot cursor with buffered deltas before resuming. Settings-to-tracker
-bindings use explicit UUIDs only; unmatched projects stay unbound. Sync group
+bindings use explicit UUIDs only; unmatched projects stay unbound. The binding is
+an optional `trackerProjectId` on the host's project settings (VUH-1969), not in
+the committed `.clankie/tracking.json`, because tracker UUIDs belong to one store.
+`project update` sets or clears it; the host refuses a UUID the built-in tracker
+does not hold and a second project bound to the same UUID, and `work_repos`
+returns it on the project's repo. Sync group
 lookup accepts UUIDs and reserved groups, never names. Discovery uses deltas,
 never polling.
 
@@ -520,6 +525,15 @@ Omitted fields stay unchanged, so the latest committed write wins only fields
 it names. `ifUpdatedAt` refuses stale edits; a retry requires fresh state and
 new intent/key. Transactions retain all actor, bundle, completion and gate
 constraints of the underlying tools. They cannot resolve owner asks.
+
+**Store fence (VUH-1971).** A transaction may carry an optional
+`expectedStoreId`, the `storeId` from the client's bootstrap. The server compares
+it with the open store inside the same lock and atomic replacement as the write,
+so a store swapped after the client's own check cannot receive a queued edit. A
+mismatch is `refused` with reason `store_replaced`; no operation applies, and the
+keyed receipt, audit entry and model-free sync commit record the refusal like any
+other. A present `expectedStoreId` joins the receipt fingerprint, so an omitted
+one keeps existing fingerprints. Clients send it on every queued replay.
 
 **Interfaces and proof.** `clankie work sync --json COMMAND` reaches this same
 operator API. The app object pool and offline queue are Sync 2 (VUH-1964).

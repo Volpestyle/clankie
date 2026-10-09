@@ -37,7 +37,9 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
       ? current.projects
       : {
           ...current.projects,
-          projects: current.projects.projects.map(({ autonomy: _autonomy, ...project }) => project),
+          projects: current.projects.projects.map(
+            ({ autonomy: _autonomy, trackerProjectId: _trackerProjectId, ...project }) => project,
+          ),
         },
     ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
     ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
@@ -50,7 +52,11 @@ function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
 export function createProjectRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
-  options: { worktreeRoot?: ObserveProjectWorktreeRoot } = {},
+  options: {
+    worktreeRoot?: ObserveProjectWorktreeRoot;
+    /** True only when the built-in tracker holds a project with exactly this UUID. */
+    trackerProjectExists?: (id: string) => Promise<boolean>;
+  } = {},
 ): Hono {
   const app = new Hono();
   for (const path of [
@@ -123,6 +129,12 @@ export function createProjectRoutes(
     } catch (error) {
       return context.json({ error: "invalid_hire_model", detail: String(error) }, 400);
     }
+    const trackerProjectId = input.data.changes.trackerProjectId;
+    if (
+      typeof trackerProjectId === "string" &&
+      !(await options.trackerProjectExists?.(trackerProjectId).catch(() => false))
+    )
+      return context.json({ error: "tracker_project_not_found" }, 400);
     let before: string | undefined;
     try {
       const updated = await settings.update(

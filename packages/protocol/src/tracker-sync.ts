@@ -56,6 +56,8 @@ export const TrackerSyncCommandSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("transaction"),
       idempotencyKey: z.string().min(1).max(256),
+      /** The store the client bootstrapped; a replaced store refuses (`store_replaced`) in the same atomic write. */
+      expectedStoreId: id.optional(),
       operations: z
         .array(
           z

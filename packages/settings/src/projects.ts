@@ -39,6 +39,17 @@ export function updateProjectSettings(
   else if (input.changes.workerCap !== undefined) project.workerCap = input.changes.workerCap;
   if (input.changes.trackerRef === null) delete project.trackerRef;
   else if (input.changes.trackerRef !== undefined) project.trackerRef = input.changes.trackerRef;
+  if (input.changes.trackerProjectId === null) delete project.trackerProjectId;
+  else if (input.changes.trackerProjectId !== undefined) {
+    // One district per tracker project, so a synced project never resolves to two.
+    if (
+      settings.projects.some(
+        (saved) => saved.id !== project.id && saved.trackerProjectId === input.changes.trackerProjectId,
+      )
+    )
+      throw new Error("Tracker project is already bound to another project");
+    project.trackerProjectId = input.changes.trackerProjectId;
+  }
   if (input.changes.autonomy !== undefined) {
     const fleet = applyFleetAutonomyPatch(project.autonomy?.fleet, input.changes.autonomy.fleet);
     const autonomy = { ...project.autonomy };

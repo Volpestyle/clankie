@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -454,5 +454,75 @@ it("expands wildcard groups and discovers a new project through workspace before
     ).rejects.toThrow("Sync project UUID not found");
   } finally {
     await f.close();
+  }
+}, 30_000);
+
+it("refuses a queued transaction with no write when the store is replaced between bootstrap and replay", async () => {
+  const f = await syncFixture();
+  const replacementRoot = await mkdtemp(join(tmpdir(), "sync-replacement-"));
+  try {
+    const project = (await f.tracker.call("save_project", { name: "Fenced", addTeams: ["LOCAL"] })) as {
+      id: string;
+    };
+    const client = await f.pair("Offline client");
+    const metaOf = (ndjson: string) => JSON.parse(ndjson.trim().split("\n").at(-1)!);
+    const meta = metaOf(
+      (
+        await f.sync(client.deviceToken, {
+          action: "bootstrap",
+          type: "full",
+          projects: [project.id],
+          lazy: true,
+        })
+      ).ndjson,
+    );
+    // The service swaps in a different store after the client bootstrapped.
+    const replacement = createLocalTracker({ directory: replacementRoot });
+    await replacement.call("save_issue", { title: "Replacement only", team: "LOCAL" });
+    await copyFile(join(replacementRoot, "tracker.json"), join(f.root, "tracker.next.json"));
+    await rename(join(f.root, "tracker.next.json"), join(f.root, "tracker.json"));
+    const queued: TrackerSyncCommand = {
+      action: "transaction",
+      idempotencyKey: "queued-offline-edit",
+      expectedStoreId: meta.storeId,
+      operations: [{ name: "save_issue", arguments: { team: "LOCAL", title: "Queued while offline" } }],
+    };
+    expect(await f.sync(client.deviceToken, queued)).toMatchObject({
+      outcome: "refused",
+      reason: "store_replaced",
+    });
+    const listed = (await f.tracker.call("list_issues", {})) as { issues: { title: string }[] };
+    expect(listed.issues.map((issue) => issue.title)).toEqual(["Replacement only"]);
+    const deviceActor = { type: "app" as const, id: `device:${client.deviceId}`, onBehalfOf: [] };
+    expect(
+      await f.tracker.call(
+        "get_write_receipt",
+        { idempotencyKey: "queued-offline-edit" },
+        { actor: deviceActor },
+      ),
+    ).toMatchObject({ state: "refused", reason: "store_replaced" });
+    // A keyed replay answers from that receipt and still writes nothing.
+    const journal = await readFile(join(f.root, "tracker.json"), "utf8");
+    expect(await f.sync(client.deviceToken, queued)).toMatchObject({
+      outcome: "refused",
+      reason: "store_replaced",
+    });
+    expect(await readFile(join(f.root, "tracker.json"), "utf8")).toBe(journal);
+    // After rebootstrapping the replacement store, a fenced edit applies.
+    const current = metaOf(
+      (await f.sync(client.deviceToken, { action: "bootstrap", type: "full", projects: ["*"], lazy: true }))
+        .ndjson,
+    ).storeId;
+    expect(current).not.toBe(meta.storeId);
+    expect(
+      await f.sync(client.deviceToken, {
+        ...queued,
+        idempotencyKey: "rebootstrapped-edit",
+        expectedStoreId: current,
+      }),
+    ).toMatchObject({ outcome: "applied" });
+  } finally {
+    await f.close();
+    await rm(replacementRoot, { recursive: true, force: true });
   }
 }, 30_000);
