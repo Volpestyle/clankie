@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { runAgentsCommand } from "../../tui/src/command/agents.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -21,6 +22,9 @@ import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+
+const decoded = (result: unknown) =>
+  decodeMcpResult(result) as Record<string, unknown> & { deliveryId: string };
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -335,7 +339,7 @@ it("records a real subprocess binding timeout independently of its healthy tool 
     name: "message_clankie",
     arguments: { text: "private report body must remain local" },
   });
-  expect(JSON.parse(reply.result!.content![0]!.text)).toMatchObject({
+  expect(decoded(reply.result)).toMatchObject({
     received: false,
     deliveryStage: "uncertain",
   });
@@ -377,7 +381,7 @@ it("carries three real bridge binding timeouts through the inactivity flag, one 
       name: "message_clankie",
       arguments: { text: `private unsent report ${i}` },
     });
-    expect(JSON.parse(reply.result!.content![0]!.text)).toMatchObject({
+    expect(decoded(reply.result)).toMatchObject({
       received: false,
       deliveryStage: "uncertain",
     });
@@ -449,7 +453,7 @@ it("carries three real bridge binding timeouts through the inactivity flag, one 
       name: "message_clankie",
       arguments: { text: `new recovered report ${i}` },
     });
-    expect(JSON.parse(recovered.result!.content![0]!.text)).toMatchObject({
+    expect(decoded(recovered.result)).toMatchObject({
       received: true,
       deliveryStage: "stored",
     });
@@ -728,7 +732,7 @@ it.each([false, true])(
       name: "message_clankie",
       arguments: { text: "report after admission loss" },
     });
-    expect(result.result?.content?.[0]?.text).toContain("Ask Clankie");
+    expect(decoded(result.result).detail).toContain("Ask Clankie");
     expect(f.requests()).toBe(before);
   },
 );
@@ -772,11 +776,11 @@ it.each(["claude", "codex"])(
       name: "message_clankie",
       arguments: { text: "Original worker report" },
     });
-    const original = JSON.parse(sent.result!.content![0]!.text);
+    const original = decoded(sent.result);
     expect(original).toMatchObject({ received: true, deliveryStage: "stored" });
     const lookup = () =>
       call("tools/call", { name: "message_clankie_status", arguments: { deliveryId: original.deliveryId } });
-    expect(JSON.parse((await lookup()).result!.content![0]!.text).deliveryStage).toBe("stored");
+    expect(decoded((await lookup()).result).deliveryStage).toBe("stored");
     deliver.release();
     await expect
       .poll(() => f.receiver.status(f.pane, "a".repeat(64), original.deliveryId)?.deliveryStage)
@@ -786,7 +790,7 @@ it.each(["claude", "codex"])(
     const before = f.conversations.inboundAcceptance(original.deliveryId);
     const fenceBefore = await readFile(join(f.root, "inbound.json"), "utf8");
     const result = await lookup();
-    expect(JSON.parse(result.result!.content![0]!.text)).toEqual({
+    expect(decoded(result.result)).toEqual({
       schemaVersion: 1,
       deliveryId: original.deliveryId,
       deliveryStage: "consumed",
@@ -806,7 +810,7 @@ it.each(["claude", "codex"])(
     await expect
       .poll(() => f.receiver.status(f.pane, "a".repeat(64), original.deliveryId)?.deliveryStage)
       .toBe("responded");
-    expect(JSON.parse((await lookup()).result!.content![0]!.text).deliveryStage).toBe("responded");
+    expect(decoded((await lookup()).result).deliveryStage).toBe("responded");
     expect(f.messagePosts()).toBe(1);
     expect(f.receiver.status("another-pane", "a".repeat(64), original.deliveryId)).toBeUndefined();
     f.replaceBinding();
@@ -828,7 +832,7 @@ it("retains an expired stop stage and refuses unknown, malformed, other-pane and
     name: "message_clankie",
     arguments: { text: "Report with expired lead delivery" },
   });
-  const original = JSON.parse(reply.result!.content![0]!.text);
+  const original = decoded(reply.result);
   const url = `${new URL(f.url).origin}/v1/fleet/seats/${encodeURIComponent(f.pane)}/messages/`;
   await expect
     .poll(() => f.receiver.status(f.pane, "a".repeat(64), original.deliveryId)?.deliveryStage)
@@ -837,7 +841,7 @@ it("retains an expired stop stage and refuses unknown, malformed, other-pane and
     name: "message_clankie_status",
     arguments: { deliveryId: original.deliveryId },
   });
-  expect(JSON.parse(status.result!.content![0]!.text).deliveryStage).toBe("expired");
+  expect(decoded(status.result).deliveryStage).toBe("expired");
   expect((await fetch(`${url}${randomUUID()}/status`)).status).toBe(404);
   expect((await fetch(`${url}bad/status`)).status).toBe(400);
   expect(
