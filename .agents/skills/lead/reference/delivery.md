@@ -36,6 +36,14 @@ iteration; a hand-picked subset is not the landing gate. A source/base change
 after the gate requires another root gate. Require the checked HEAD, fixed base,
 exit status and evidence path in the worker's report; a clean-main zero-test run
 does not verify an earlier landing. Then `git push origin main`, reporting the SHA.
+If the root gate's only failures are unchanged timing-sensitive cases outside
+the change and its affected imports, the lead may accept the landing after
+every exact failing case passes in isolation on unchanged test/product inputs.
+Retain the gate's real nonzero exit, exact errors, load samples and isolated
+results, labelled **Full-gate result** and **Isolated passes**. This is a lead
+acceptance decision, not a green full gate. Failures in changed code or affected
+consumers still block; do not weaken assertions, timeouts or product defaults.
+
 The full `pnpm check` runs for releases and on request. The running service
 automatically syncs registered local owner checkouts when main advances,
 including direct pushes; blocked edits are preserved and reported.

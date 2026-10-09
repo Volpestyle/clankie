@@ -92,6 +92,13 @@ This repository is public. Both neighbors are private and consume
   checked source or base, run the root gate again. Resolve conflicts only in your
   own files. The full `pnpm check` runs for
   releases and on request; `clankie integrate` is optional, never required.
+- Under load, if the root gate's only failures are unchanged timing-sensitive
+  cases outside your change and its affected imports, the lead may accept the
+  landing after every exact failing case passes in isolation on unchanged inputs.
+  Retain the nonzero gate result, exact errors, load samples and isolated results,
+  labelled **Full-gate result** and **Isolated passes**. Do not report a green
+  full gate or weaken assertions, timeouts or product defaults. Failures in
+  changed code or affected consumers still block.
 - Build every feature API- and CLI-first, and update the relevant agent-facing
   skill and human-facing docs. A setting the owner cares about is settable from
   every UI (TUI, app on phone, web and desktop, and the hosted dashboard)

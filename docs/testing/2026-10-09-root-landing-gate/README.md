@@ -89,6 +89,37 @@ The earlier mixed-cache diagnostic runs are retained locally and are not used
 as performance evidence.
 
 Raw reports, benchmark controller and native cache-hash probe remain under
-`.local/vuh-1896/` in the owned worktree. The final pre-push gate's checked HEAD,
+`.local/vuh-1896/` in the owned worktree. The pre-push gate's checked HEAD,
 base, result and receipt path are attached to VUH-1896. No new test selector,
 timeout increase, deploy or eval is included.
+
+## Full-gate result
+
+Checked HEAD `270355afd6ff87d2367b412dc6ce52bdb57046fe`, fixed base
+`56f8b527fe1af6d8fbaa061e01c1dd4822916078` (includes knip repair `ac076524`).
+Root `check:landing` exited **1** after 802.23s; source stayed stable. All static
+checks and 31 serial compiler projects passed. Vitest selected 862 files and
+stopped after 2,960 passed, 1 failed and 15 skipped tests; 115 files passed,
+1 failed and 3 skipped before bail. This is **not a green full gate**.
+
+The only failure was the unchanged `fleet-ssh-recovery` case, “keeps the working
+link through a failed renewal, then recovers a real promoted-relay outage.” At
+`:433:73`, its 5-second fixture wait for ready on a different port reported
+`expected false to be true`. A post-failure sample read load 74.24/73.39/54.98
+on 18 cores. That sample alone does not establish the cause. This change touches
+neither the case nor its imported product modules.
+
+## Isolated passes
+
+On the same checked HEAD and unchanged fixture/product inputs, the exact failing
+case passed: **1 passed, 11 unselected, exit 0**, 9.53s command wall time. Before
+load was 26.70/59.37/52.67; after was 25.47/58.02/52.27 on 18 cores. The 1-minute
+load guard was healthy (ratio at most 1.5). Assertions, timeouts and product
+defaults were unchanged.
+
+The lead explicitly accepted this full-gate result plus isolated passes on
+2026-10-09 and authorized landing. Subsequent documentation edits record that
+rule; they do not change the checked runner, compiler graph or product/test
+inputs. [Acceptance JSON](landing-acceptance.json) retains commands, results,
+load samples, the exact failure and raw report hashes. Local receipts are
+`.local/vuh-1896/landing-main.json` and `renewal-isolated.json`.

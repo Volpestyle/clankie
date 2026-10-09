@@ -22,6 +22,14 @@ are saved to `.local/landing-gate.json`; source changes during the run fail it.
 Pass Vitest reporter options after `--`, for example `pnpm check:landing --
 --reporter=json --outputFile=.local/landing-tests.json`.
 
+If the root gate's only failures are unchanged timing-sensitive cases outside
+the change and its affected imports, the lead may accept the landing after
+every exact failing case passes in isolation on unchanged test/product inputs.
+Retain the gate's real nonzero exit, exact errors, load samples and isolated
+results, labelled **Full-gate result** and **Isolated passes**. This is a lead
+acceptance decision, not a green full gate. Failures in changed code or affected
+consumers still block; do not weaken assertions, timeouts or product defaults.
+
 For repeated
 reliability checks on unchanged main, keep a fixed baseline that selects the
 regression and retain its individual result with `--reporter=json

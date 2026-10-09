@@ -26,6 +26,14 @@ the check, run the root gate again. Report the checked HEAD, fixed base, exit
 status and gate evidence path to your lead. A zero-test check after pushing is
 not evidence for the landing.
 
+If the root gate's only failures are unchanged timing-sensitive cases outside
+the change and its affected imports, the lead may accept the landing after
+every exact failing case passes in isolation on unchanged test/product inputs.
+Retain the gate's real nonzero exit, exact errors, load samples and isolated
+results, labelled **Full-gate result** and **Isolated passes**. This is a lead
+acceptance decision, not a green full gate. Failures in changed code or affected
+consumers still block; do not weaken assertions, timeouts or product defaults.
+
 Don't add tests nobody asked for. A test you write is your own reading of the
 intent written a second time; when it later fails, nobody can tell whether the
 code or the test is wrong. Add or change a test only when it comes from the

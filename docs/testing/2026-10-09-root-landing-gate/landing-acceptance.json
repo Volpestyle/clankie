@@ -1,0 +1,174 @@
+{
+  "acceptance": "Lead-authorized full-gate result plus isolated passes; not a green full gate",
+  "fullGateResult": {
+    "head": "270355afd6ff87d2367b412dc6ce52bdb57046fe",
+    "base": "56f8b527fe1af6d8fbaa061e01c1dd4822916078",
+    "exitCode": 1,
+    "elapsedSeconds": 802.228170667,
+    "sourceStable": true,
+    "phases": [
+      {
+        "name": "skills",
+        "command": ["pnpm", "herdr:skill:check"],
+        "elapsedSeconds": 11.053245666999999,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "format",
+        "command": ["pnpm", "fmt:check"],
+        "elapsedSeconds": 4.035933874999999,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "lint",
+        "command": ["pnpm", "lint"],
+        "elapsedSeconds": 141.98511545800002,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "deadcode",
+        "command": ["pnpm", "deadcode"],
+        "elapsedSeconds": 7.240176500000001,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "doc-links",
+        "command": ["node", "scripts/check-doc-links.mjs"],
+        "elapsedSeconds": 0.7795885420000123,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "retired-claims",
+        "command": ["node", "scripts/check-retired-claims.mjs"],
+        "elapsedSeconds": 1.0470043749999896,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "typecheck",
+        "command": [
+          "pnpm",
+          "exec",
+          "turbo",
+          "run",
+          "typecheck",
+          "--only",
+          "--concurrency=1",
+          "--filter=@clankie/agent-hosts",
+          "--filter=@clankie/agent-transcript",
+          "--filter=@clankie/api-client",
+          "--filter=@clankie/clankie",
+          "--filter=@clankie/credential-broker",
+          "--filter=@clankie/discord-activity",
+          "--filter=@clankie/discord-bridge",
+          "--filter=@clankie/discord-presence-core",
+          "--filter=@clankie/discord-user-session",
+          "--filter=@clankie/fleet-resources",
+          "--filter=@clankie/game-extension",
+          "--filter=@clankie/interactive-environment",
+          "--filter=@clankie/media-connector",
+          "--filter=@clankie/minecraft",
+          "--filter=@clankie/minecraft-mcp",
+          "--filter=@clankie/model-provider",
+          "--filter=@clankie/model-registry",
+          "--filter=@clankie/observability",
+          "--filter=@clankie/persona-images",
+          "--filter=@clankie/play",
+          "--filter=@clankie/play-voice",
+          "--filter=@clankie/pokemon",
+          "--filter=@clankie/protocol",
+          "--filter=@clankie/relay",
+          "--filter=@clankie/rendered-surface-client",
+          "--filter=@clankie/rivals",
+          "--filter=@clankie/settings",
+          "--filter=@clankie/tui",
+          "--filter=@clankie/vox",
+          "--filter=@clankie/vox-client",
+          "--filter=@clankie/work-items"
+        ],
+        "elapsedSeconds": 179.38379654200003,
+        "exitCode": 0,
+        "signal": null
+      },
+      {
+        "name": "tests",
+        "command": [
+          "pnpm",
+          "exec",
+          "vitest",
+          "run",
+          "--config",
+          "vitest.config.ts",
+          "--changed",
+          "56f8b527fe1af6d8fbaa061e01c1dd4822916078",
+          "--bail",
+          "1",
+          "--passWithNoTests",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.local/vuh-1896/landing-main-vitest.json"
+        ],
+        "elapsedSeconds": 453.14977791699994,
+        "exitCode": 1,
+        "signal": null
+      }
+    ]
+  },
+  "vitest": {
+    "success": false,
+    "numTotalTests": 2981,
+    "numPassedTests": 2960,
+    "numFailedTests": 1,
+    "numPendingTests": 15,
+    "numTotalTestSuites": 1050,
+    "numPassedTestSuites": 1049,
+    "numFailedTestSuites": 1
+  },
+  "failures": [
+    {
+      "file": "apps/clankie/test/fleet-ssh-recovery.integration.test.ts",
+      "name": "keeps the working link through a failed renewal, then recovers a real promoted-relay outage",
+      "messages": [
+        "AssertionError: expected false to be true // Object.is equality\n    at __vite_ssr_import_7__.vi.waitFor.timeout (CHECKOUT/apps/clankie/test/fleet-ssh-recovery.integration.test.ts:433:73)\n    at Timeout.checkCallback (file://CHECKOUT/node_modules/.pnpm/vitest@4.1.10_@opentelemetry+api@1.9.1_@types+node@24.12.4_vite@8.1.3_@types+node@24.12_8f40efc7885c5563165902ad3bcdc1ca/node_modules/vitest/dist/chunks/test.DNmyFkvJ.js:3383:20)\n    at listOnTimeout (node:internal/timers:685:17)\n    at processTimers (node:internal/timers:618:7)"
+      ]
+    }
+  ],
+  "postFailureLoad": [74.24, 73.39, 54.98],
+  "loadProvenance": "uptime sample after failure; not a causal attribution",
+  "isolatedPasses": {
+    "head": "270355afd6ff87d2367b412dc6ce52bdb57046fe",
+    "loadBefore": [26.697265625, 59.3662109375, 52.669921875],
+    "cores": 18,
+    "healthyBefore": true,
+    "command": [
+      "pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "--config",
+      "vitest.config.ts",
+      "apps/clankie/test/fleet-ssh-recovery.integration.test.ts",
+      "-t",
+      "keeps the working link through a failed renewal, then recovers a real promoted-relay outage",
+      "--reporter=default",
+      "--reporter=json",
+      "--outputFile=.local/vuh-1896/renewal-isolated-vitest.json"
+    ],
+    "exitCode": 0,
+    "elapsedSeconds": 9.532705459,
+    "loadAfter": [25.46533203125, 58.021484375, 52.27001953125]
+  },
+  "rawReportHashes": {
+    "landing-main.json": "87652b0669bed59c9cb278ef18ff73fc52a9be14722f22ad1ab0108933c5f0a7",
+    "landing-main-vitest.json": "e2c3f3011bcfb62ed8ae9e228b6f77f756e18157184319265509782e61b07db5",
+    "landing-main.log": "cd6a6cb4f5bcbc7ce48c90bf2bdf72bbf442b8b52a59adcfee61e97a0eee94aa",
+    "renewal-isolated.json": "29ef683ff1c2c82a5cd03fffa1dc3dc3f46b7ef723b7947813fad858cf9882c8",
+    "renewal-isolated-vitest.json": "2ee0c1fa7b32164402e2ba888cfe721151df3cda4ad7f98b32d153d22298bbbb",
+    "renewal-isolated.log": "c40ec1dc28f8e5ee32445c7b07e1e9f89cf7ae3ef4feacb5fe7596d6211969dc"
+  }
+}

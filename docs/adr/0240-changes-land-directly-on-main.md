@@ -28,6 +28,14 @@ Agents and the owner commit to `main` and push it directly:
    Focused checks are for iteration, not a substitute for this gate. A source or
    base change after checking requires another root gate (ADR 0247).
 
+If the root gate's only failures are unchanged timing-sensitive cases outside
+the change and its affected imports, the lead may accept the landing after
+every exact failing case passes in isolation on unchanged test/product inputs.
+Retain the gate's real nonzero exit, exact errors, load samples and isolated
+results, labelled **Full-gate result** and **Isolated passes**. This is a lead
+acceptance decision, not a green full gate. Failures in changed code or affected
+consumers still block; do not weaken assertions, timeouts or product defaults.
+
 The full `pnpm check` runs for releases and on request. `clankie integrate`
 stays available for anyone who wants a composed, gated batch, but nothing
 requires the queue. The root landing gate is required for direct pushes.
