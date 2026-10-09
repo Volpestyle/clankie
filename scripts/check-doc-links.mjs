@@ -82,7 +82,14 @@ for (const path of markdown) {
     try {
       await access(resolve(dirname(path), decodeURIComponent(clean)));
     } catch {
-      if (await archivedEvidence(clean.replaceAll("\\", "/"))) continue;
+      if (
+        await archivedEvidence(
+          resolve(dirname(path), decodeURIComponent(clean))
+            .slice(root.length + 1)
+            .replaceAll("\\", "/"),
+        )
+      )
+        continue;
       failures.push(`${path.slice(root.length + 1)} → ${target}`);
     }
   }
