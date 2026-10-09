@@ -108,7 +108,11 @@ it.each([
   const host = await listener((_request, response) =>
     response.end(JSON.stringify({ ...health, runtime: other })),
   );
-  await expect(createRuntimeHealthSampler(host)(runtime)).rejects.toThrow(
-    "runtime-health-boot-identity-mismatch",
-  );
+  const field = (["root", "commit", "instanceId", "pid"] as const).find(
+    (key) => runtime[key] !== other[key],
+  )!;
+  await expect(createRuntimeHealthSampler(host)(runtime)).rejects.toMatchObject({
+    message: "runtime-health-boot-identity-mismatch",
+    diagnostic: `runtime-health-boot-identity-mismatch: ${field} expected=${JSON.stringify(runtime[field])} actual=${JSON.stringify(other[field])}`,
+  });
 });

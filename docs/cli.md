@@ -488,6 +488,15 @@ unavailability at the window's end, fails the canary. A recovery before that
 deadline clears the temporary error; failed samples never count as healthy
 samples. Pending and failed records name the failed check and underlying local
 transport error (including timeout causes), without retaining response bodies.
+Identity mismatches name the first differing field (`root`, `commit`,
+`instanceId` or `pid`) and its expected and actual values in the existing error
+string; unusually long path values are explicitly truncated to fit its bound.
+Only a runtime booted at the candidate commit resumes sampling a pending healthy update.
+An old or foreign observer of the shared latest journal leaves that observation
+alone while the armed process is alive or its exit is unproven. A confirmed
+armed-process exit followed by a different-commit boot serving verified healthy HTTP fails the
+interrupted window. The candidate still checks its complete boot identity over fresh HTTP;
+a persistent replacement fails within the existing availability budget.
 
 To clear a failed canary's hold after reviewing runtime health, read its full
 hold UUID with `clankie update status --json` or `clankie integrate holds`.

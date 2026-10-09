@@ -10,7 +10,12 @@ import {
 } from "../../tui/bin/runtime-update.ts";
 import { object, operationId, privateDirectory, readPrivateJson } from "../../tui/bin/update-files.ts";
 import { DeployHolds, durableJson, withDirectoryLock } from "./deploy-holds.ts";
-import { RuntimeHealthSampleSchema, type RuntimeHealthSample } from "./runtime-health-sample.ts";
+import {
+  RuntimeHealthSampleSchema,
+  RuntimeIdentityMismatch,
+  runtimeIdentityMismatch,
+  type RuntimeHealthSample,
+} from "./runtime-health-sample.ts";
 import { DeployHoldSchema, type DeployHold } from "@clankie/protocol/integrate";
 
 export const RuntimeCanaryPolicySchema = z
@@ -62,6 +67,7 @@ interface Session {
 
 // Persist local check names and transport codes, never response bodies or arbitrary error payloads.
 function sampleFailure(error: unknown): string {
+  if (error instanceof RuntimeIdentityMismatch) return error.diagnostic;
   if (error instanceof z.ZodError)
     return `invalid-health-sample (${error.issues.map((issue) => `${issue.path.join(".")}: ${issue.code}`).join(", ")})`.slice(
       0,
@@ -259,6 +265,43 @@ export class RuntimeCanary {
       await this.releasePassed(result);
       return;
     }
+    // latest.json is shared with old/foreign runtimes. Only the candidate commit
+    // can recover its observation; a different observer is not a replacement sample.
+    if (result.newCommit !== this.options.runtime.commit) {
+      // A live (or unproven) armed process may still be observing this candidate.
+      // Only a confirmed exit permits this boot to fail its interrupted window.
+      if (result.canary?.state !== "pending" || !this.candidateExited(result.canary.pid)) return;
+      // Startup recovery precedes HTTP admission. Defer until this boot really
+      // serves healthy HTTP; a stale observer cannot infer replacement from its
+      // own commit or a vanished PID alone.
+      try {
+        const sample = RuntimeHealthSampleSchema.parse(await this.options.sample(this.options.runtime));
+        if (runtimeIdentityMismatch("runtime-canary-runtime-changed", this.options.runtime, sample.runtime))
+          return;
+      } catch {
+        return;
+      }
+      if (this.closed) return;
+      const current = this.latest();
+      if (
+        current?.id !== result.id ||
+        current.phase !== "healthy" ||
+        current.newCommit !== result.newCommit ||
+        current.canary?.state !== "pending" ||
+        current.canary.pid !== result.canary.pid ||
+        current.canary.instanceId !== result.canary.instanceId
+      )
+        return;
+      const armed = await this.arm(result);
+      const mismatch = new RuntimeIdentityMismatch(
+        "runtime-canary-runtime-changed",
+        "commit",
+        result.newCommit,
+        this.options.runtime.commit,
+      );
+      await this.fail(result, { ...result.canary, ...armed }, mismatch.diagnostic);
+      return;
+    }
     if (result.canary?.state === "failed") {
       if (result.canary.holdEstablished !== true) {
         await this.ensureHold(result, this.previousHealthy(result));
@@ -267,14 +310,6 @@ export class RuntimeCanary {
       return;
     }
     const armed = await this.arm(result);
-    if (result.newCommit !== this.options.runtime.commit) {
-      await this.fail(
-        result,
-        { ...result.canary, state: "pending", ...armed },
-        "runtime-canary-runtime-changed",
-      );
-      return;
-    }
     this.session = {
       id: result.id,
       policy: armed.policy,
@@ -293,6 +328,17 @@ export class RuntimeCanary {
       startedAt: new Date().toISOString(),
       samples: 0,
     });
+  }
+
+  private candidateExited(pid: number | undefined): boolean {
+    if (pid === undefined) return false;
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      // Permission failures and PID reuse cannot prove a candidate's exit.
+      return (error as NodeJS.ErrnoException).code === "ESRCH";
+    }
   }
 
   private async arm(result: RuntimeUpdateResult): Promise<z.infer<typeof ArmSchema>> {
@@ -349,6 +395,10 @@ export class RuntimeCanary {
       return;
     }
     if (!result || result.phase !== "healthy") return;
+    if (result.newCommit !== this.options.runtime.commit) {
+      if (result.canary?.state === "pending") await this.recover();
+      return;
+    }
     if (result.canary?.state === "failed") {
       await this.notify(result);
       return;
@@ -367,13 +417,12 @@ export class RuntimeCanary {
     const attemptStartedAt = this.now();
     try {
       sample = RuntimeHealthSampleSchema.parse(await this.options.sample(this.options.runtime));
-      if (
-        sample.runtime.root !== this.options.runtime.root ||
-        sample.runtime.commit !== this.options.runtime.commit ||
-        sample.runtime.instanceId !== this.options.runtime.instanceId ||
-        sample.runtime.pid !== this.options.runtime.pid
-      )
-        throw Error("runtime-canary-runtime-changed");
+      const mismatch = runtimeIdentityMismatch(
+        "runtime-canary-runtime-changed",
+        this.options.runtime,
+        sample.runtime,
+      );
+      if (mismatch) throw mismatch;
       if (
         Math.abs(Date.now() - Date.parse(sample.observedAt)) >
         Math.max(5000, session.policy.sampleIntervalMs * 2)

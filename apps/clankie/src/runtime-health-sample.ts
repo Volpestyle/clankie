@@ -25,6 +25,36 @@ export const RuntimeHealthSampleSchema = z.strictObject({
   healthLatencyMs: z.number().finite().nonnegative(),
 });
 
+/** Local identity metadata only; never retain the rest of an HTTP response. */
+export class RuntimeIdentityMismatch extends Error {
+  constructor(
+    check: string,
+    field: keyof RuntimeBootIdentity,
+    expected: string | number,
+    actual: string | number,
+  ) {
+    super(check);
+    // Keep diagnostics compatible with the existing 1024-character durable error field.
+    const bounded = (value: string | number) => {
+      const json = JSON.stringify(value);
+      return json.length <= 350 ? json : `${json.slice(0, 330)}… (truncated)`;
+    };
+    this.diagnostic = `${check}: ${field} expected=${bounded(expected)} actual=${bounded(actual)}`;
+  }
+  readonly diagnostic: string;
+}
+
+export function runtimeIdentityMismatch(
+  check: string,
+  expected: RuntimeBootIdentity,
+  actual: RuntimeBootIdentity,
+): RuntimeIdentityMismatch | undefined {
+  for (const field of ["root", "commit", "instanceId", "pid"] as const)
+    if (expected[field] !== actual[field])
+      return new RuntimeIdentityMismatch(check, field, expected[field], actual[field]);
+  return undefined;
+}
+
 function healthEndpoint(healthUrl: string): URL {
   const url = new URL(healthUrl);
   if (
@@ -116,13 +146,8 @@ export function createRuntimeHealthSampler(input: {
         runtime: RuntimeHealthSampleSchema.shape.runtime,
       })
       .parse(JSON.parse(body.toString("utf8")));
-    if (
-      value.runtime.root !== runtime.root ||
-      value.runtime.commit !== runtime.commit ||
-      value.runtime.instanceId !== runtime.instanceId ||
-      value.runtime.pid !== runtime.pid
-    )
-      throw Error("runtime-health-boot-identity-mismatch");
+    const mismatch = runtimeIdentityMismatch("runtime-health-boot-identity-mismatch", runtime, value.runtime);
+    if (mismatch) throw mismatch;
     const at = performance.now();
     const cpu = process.cpuUsage();
     const intervalMs = at - previousAt;

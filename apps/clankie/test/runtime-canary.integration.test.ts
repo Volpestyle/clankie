@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, realpath, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,11 @@ import {
   type RuntimeBootIdentity,
   type RuntimeUpdateResult,
 } from "../../tui/bin/runtime-update.ts";
+
+async function recordEvidence(scenario: string, value: unknown) {
+  const path = process.env.VUH1953_EVIDENCE_FILE;
+  if (path) await appendFile(path, `${JSON.stringify({ scenario, value })}\n`, { mode: 0o600 });
+}
 
 interface Snapshot {
   result: RuntimeUpdateResult;
@@ -343,6 +348,81 @@ it("arms a restarting target before health admission, snapshots policy, and star
   expect(passed.policy.windowMs).toBe(2400);
   expect(passed.holds).toEqual([]);
   expect(await service.call("landing")).toEqual({ accepted: true });
+});
+
+it("leaves an unchanged candidate's observation to its own runtime when a foreign observer recovers", async () => {
+  const f = await fixture({ policy: { windowMs: 4000, sampleIntervalMs: 400 } });
+  const candidate = await start(f.root);
+  const before = await candidate.status();
+  expect(before.result.canary?.state).toBe("pending");
+  const foreign = await start(f.root, "idle", "a".repeat(40));
+  const during = await foreign.status();
+  await recordEvidence("VUH-1953 foreign recovery", {
+    candidate: candidate.runtime,
+    foreign: foreign.runtime,
+    before,
+    during,
+  });
+  expect(during.result.canary).toMatchObject({
+    state: "pending",
+    instanceId: candidate.runtime.instanceId,
+    pid: candidate.runtime.pid,
+    startedAt: before.result.canary!.startedAt,
+  });
+  expect(await candidate.call<RuntimeHealthSample>("sample")).toMatchObject({ runtime: candidate.runtime });
+  const passed = await waitFor(candidate, "passed");
+  await recordEvidence("VUH-1953 unchanged runtime passed", passed);
+  expect(passed.healthRequests).toBeGreaterThanOrEqual(2);
+  expect(passed.holds).toEqual([]);
+  expect(await alerts(f.root)).toEqual([]);
+});
+
+it.each(["same", "different"])(
+  "fails a genuine %s-commit HTTP runtime replacement and retains both identity values",
+  async (commitKind) => {
+    const f = await fixture({ policy: { windowMs: 4000, sampleIntervalMs: 400 } });
+    const candidate = await start(f.root);
+    expect(await candidate.call<RuntimeHealthSample>("sample")).toMatchObject({ runtime: candidate.runtime });
+    const replacement = await start(f.root, "body-only", (commitKind === "same" ? "b" : "c").repeat(40));
+    await candidate.call("health-target", replacement.port);
+    const failed = await waitFor(candidate, "failed");
+    await recordEvidence("VUH-1953 HTTP replacement", {
+      candidate: candidate.runtime,
+      replacement: replacement.runtime,
+      failed,
+    });
+    const field = commitKind === "same" ? "instanceId" : "commit";
+    expect(failed.result.canary!.error).toContain(field);
+    expect(failed.result.canary!.error).toContain(candidate.runtime[field]);
+    expect(failed.result.canary!.error).toContain(replacement.runtime[field]);
+    expect(failed.holds.map((hold) => hold.id)).toContain(f.id);
+    expect(failed.checkpoint?.commit).toBe("a".repeat(40));
+    expect(await alerts(f.root)).toHaveLength(1);
+  },
+);
+
+it("fails recovery after the armed candidate exits and a different commit replaces it", async () => {
+  const f = await fixture({ policy: { windowMs: 4000, sampleIntervalMs: 400 } });
+  const candidate = await start(f.root);
+  expect(await candidate.call<RuntimeHealthSample>("sample")).toMatchObject({ runtime: candidate.runtime });
+  await stop(candidate.child);
+  const replacement = await start(f.root, "idle", "c".repeat(40));
+  const failed = await waitFor(replacement, "failed");
+  expect(failed.healthRequests).toBeGreaterThanOrEqual(1);
+  await recordEvidence("VUH-1953 exited candidate replacement", {
+    candidate: candidate.runtime,
+    replacement: replacement.runtime,
+    failed,
+  });
+  expect(failed.result.canary).toMatchObject({
+    state: "failed",
+    pid: candidate.runtime.pid,
+    instanceId: candidate.runtime.instanceId,
+    error: `runtime-canary-runtime-changed: commit expected=${JSON.stringify(candidate.runtime.commit)} actual=${JSON.stringify(replacement.runtime.commit)}`,
+  });
+  expect(failed.holds.map((hold) => hold.id)).toContain(f.id);
+  expect(failed.checkpoint?.commit).toBe("a".repeat(40));
+  expect(await alerts(f.root)).toHaveLength(1);
 });
 
 it("restarts a pending observation from a fresh process and does not count downtime or old samples", async () => {

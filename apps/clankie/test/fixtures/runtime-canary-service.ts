@@ -77,7 +77,7 @@ const server = createServer((request, response) => {
   if (mode === "latency") setTimeout(answer, 60);
   else answer();
 });
-await canary.recover();
+if (mode !== "body-only") await canary.recover();
 const armPath = join(updatesDirectory, id, "canary-policy.json");
 const sampleIntervalMs = existsSync(armPath)
   ? (readPrivateJson(armPath) as { policy: { sampleIntervalMs: number } }).policy.sampleIntervalMs
@@ -96,7 +96,7 @@ const burn = setInterval(() => {
   }
 }, 50);
 burn.unref();
-canary.start();
+if (mode !== "body-only") canary.start();
 process.send?.({ ready: true, runtime, port });
 
 process.on("message", (message: unknown) => {
@@ -130,6 +130,12 @@ process.on("message", (message: unknown) => {
           phase: "healthy",
           healthy: true,
           canary: { state: "pending" },
+        });
+        value = { ok: true };
+      } else if (input.action === "health-target") {
+        sample = createRuntimeHealthSampler({
+          healthUrl: `http://127.0.0.1:${Number(input.value)}/health`,
+          timeoutMs: 1000,
         });
         value = { ok: true };
       } else if (input.action === "sample") value = await sample(runtime);

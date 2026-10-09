@@ -106,6 +106,14 @@ means pending: finish the turn, then read `clankie update status` and report the
 old/new commit and actual health, canary or rollback. Never repeat an uncertain
 update; inspect its existing operation.
 
+A pending canary belongs to the candidate commit. Old/foreign observers of the
+shared update journal leave it alone while its armed process is alive or its
+exit is unproven. A confirmed exit followed by a different-commit boot serving verified
+healthy HTTP fails the interrupted window; the candidate verifies its full boot
+identity over HTTP. Identity errors report the differing field and expected /
+actual values (long paths are explicitly truncated). Preserve these diagnostics
+when investigating a hold; an observer's own commit is not a replacement sample.
+
 For agents, add `--json` (piped output is also JSON). A terminal shows the
 live and target commits and groups deploy holds by cause. An authenticated
 owner may explicitly use `clankie update --override-holds --reason TEXT`;
