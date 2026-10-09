@@ -22,7 +22,7 @@ const reference = z
   .regex(/^[^\p{Cc}]+$/u);
 const timestamp = z.number().int().nonnegative();
 /** Host-observed simulator runtime charge; unavailable never means zero. */
-export const FleetSimulatorUsageSchema = z.strictObject({
+const FleetSimulatorUsageSchema = z.strictObject({
   sampledAtMs: timestamp,
   status: z.enum(["available", "partial", "unavailable"]),
   processCount: z.number().int().nonnegative().optional(),

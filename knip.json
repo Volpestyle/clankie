@@ -3,8 +3,7 @@
   "ignore": [
     "docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs",
     "docs/testing/2026-09-26-hosted-connections/flows/serve.mts",
-    "docs/testing/2026-09-26-work-items/flows/serve.mts",
-    "integrations/codex-plugin/skills/**"
+    "docs/testing/2026-09-26-work-items/flows/serve.mts"
   ],
   "workspaces": {
     ".": {
@@ -37,6 +36,7 @@
         "integrations/claude-plugin/worker/bin/admission.d.mts",
         "integrations/claude-plugin/worker/bin/codex-tool-catalog.d.mts",
         "integrations/codex-plugin/hooks/run.mjs",
+        "integrations/codex-plugin/skills/**/scripts/*.mjs",
         "integrations/opencode-plugin/plugin.mjs",
         "integrations/claude-plugin/worker/bin/seat-hook.mjs",
         "integrations/claude-plugin/worker/bin/resource-hook.mjs",
@@ -57,7 +57,10 @@
         "integrations/pi-plugin/worker.mjs",
         "scripts/release/pi-worker-fleet.d.mts",
         "integrations/pi-plugin/worker-runtime.d.mts",
-        "integrations/pi-plugin/worker-connection.d.mts"
+        "integrations/pi-plugin/worker-connection.d.mts",
+        "integrations/claude-plugin/hooks/mods/tool-catalog.mjs",
+        "integrations/claude-plugin/worker/hooks/mods/tool-catalog.mjs",
+        "integrations/claude-plugin/worker/bin/mcp-result.mjs"
       ],
       "paths": {
         "/clankie/*": ["./*"]
@@ -90,7 +93,7 @@
       ]
     },
     "packages/protocol": {
-      "entry": ["test/fixtures/*.ts"]
+      "entry": ["test/fixtures/*.ts", "src/mcp-result.d.mts"]
     },
     "packages/fleet-resources": {
       "entry": ["test/fixtures/*.mjs"]
