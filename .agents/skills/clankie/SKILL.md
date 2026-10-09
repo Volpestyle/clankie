@@ -45,6 +45,14 @@ live capture or inspected output, recorded as evidence. Put raw captures (media,
 large JSON and logs) under `docs/testing/<folder>` and run `clankie evidence push
 <folder> --issue <KEY>` (or `evidence_push`): commit only the README and
 `evidence.json`, and cite the printed `clankie://evidence` links.
+Push without `--issue` infers keys from the branch, worktree directory, then
+folder README, and reports the source. Supply `--issue` to override it. Multiple
+keys are separate record associations and each matches list/recent/device reads.
+For existing SQLite records, `clankie evidence backfill --database PATH --repo REPO`
+is a records-only, read-only dry run. Review its proposed keys and counts; records
+without repo metadata are assumed to belong to REPO. Report a live dry run and
+get owner approval before adding `--apply`; deploy the separate-key reader first.
+It never touches blobs or receipts.
 Evidence roots default to `docs/testing`; a repository may declare relative
 roots such as `docs/testing` and `artifacts` in `.clankie/evidence.json`.
 

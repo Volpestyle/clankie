@@ -21,7 +21,7 @@ async function record(store: EvidenceStore, bytes: Buffer, fileName: string, con
     size: bytes.length,
     contentType,
     fileName,
-    issueKey: "VUH-1936",
+    issueKey: "VUH-1936 VUH-1954",
     caption: `Proof: ${fileName}`,
   });
   await store.acceptBlob(
@@ -54,7 +54,7 @@ it("shows a paired device an issue's recorded evidence and small previews, never
     expect(response.status).toBe(200);
     return OperatorConversationServiceResultSchema.parse(await response.json());
   };
-  const listed = await dispatch({ op: "evidence_records", schemaVersion: 1, issueKey: "VUH-1936" });
+  const listed = await dispatch({ op: "evidence_records", schemaVersion: 1, issueKey: "VUH-1954" });
   expect(listed).toMatchObject({
     result: {
       outcome: "ready",

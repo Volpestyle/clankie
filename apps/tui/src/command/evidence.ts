@@ -31,6 +31,7 @@ import {
   EvidenceReceiptSchema,
   EvidenceRecordListSchema,
   evidenceLink,
+  evidenceIssueKeys,
   type EvidenceManifest,
   type EvidenceManifestObject,
   type EvidenceReceipt,
@@ -46,6 +47,7 @@ import { commandHost } from "./io.ts";
 const EVIDENCE_USAGE = [
   "Usage: clankie evidence push [PATH] [--issue KEY] [--caption TEXT]",
   "       clankie evidence fetch [PATH]",
+  "       clankie evidence backfill --database SQLITE [--repo PATH] [--apply]",
   "       clankie evidence list --issue KEY | --commit SHA",
   "       clankie evidence list --recent [--project NAME] [--repo REPO] [--issue KEY] [--actor-kind KIND] [--actor-name NAME] [--media-type TYPE] [--since ISO] [--until ISO] [--cursor CURSOR] [--limit N]",
   "       clankie evidence receipt RECEIPT_ID",
@@ -209,7 +211,7 @@ async function repoRootOf(cwd: string) {
   }
 }
 
-async function evidenceRoots(repo: string): Promise<readonly string[]> {
+export async function evidenceRoots(repo: string): Promise<readonly string[]> {
   try {
     const parsed: unknown = JSON.parse(await readFile(join(repo, EVIDENCE_CONFIG), "utf8"));
     if (
@@ -311,6 +313,8 @@ function refusal(repoRelative: string, roots: readonly string[]) {
 interface EvidencePushResult {
   readonly ok: boolean;
   readonly manifest?: string;
+  readonly issueKey?: string;
+  readonly issueSource?: string;
   readonly manifestChanged: boolean;
   readonly uploaded: number;
   readonly added: readonly { path: string; url: string }[];
@@ -347,6 +351,24 @@ async function evidencePush(
   const folderRelative = posix(relative(repo, folder));
   const manifestPath = join(folder, MANIFEST);
   const commit = await git(repo, ["rev-parse", "HEAD"]).catch(() => undefined);
+  let issueKey = input.issueKey;
+  let issueSource = issueKey === undefined ? undefined : "--issue";
+  if (issueKey === undefined) {
+    for (const [source, value] of [
+      ["branch", await git(repo, ["branch", "--show-current"]).catch(() => "")],
+      ["worktree directory", repo.split(sep).at(-1) ?? ""],
+      ["folder README", await readFile(join(folder, "README.md"), "utf8").catch(() => "")],
+    ]) {
+      const keys = evidenceIssueKeys(value!);
+      if (keys.length) {
+        issueKey = keys.join(" ");
+        issueSource = source;
+        break;
+      }
+    }
+  }
+  const issueSummary =
+    issueKey === undefined ? "No issue key found." : `Issue ${issueKey} from ${issueSource}.`;
 
   const candidates: { file: string; size: number; contentType: string }[] = [];
   for (const file of isFile ? [target] : await walk(target)) {
@@ -380,7 +402,7 @@ async function evidencePush(
               repoPath,
               sha256,
               commit ?? null,
-              input.issueKey ?? null,
+              issueKey ?? null,
               input.caption ?? null,
               repoName ?? null,
               input.project ?? null,
@@ -397,7 +419,7 @@ async function evidencePush(
         ...(input.project === undefined ? {} : { project: input.project }),
         ...(input.model === undefined ? {} : { model: input.model }),
         ...(input.outcome === undefined ? {} : { outcome: input.outcome }),
-        ...(input.issueKey === undefined ? {} : { issueKey: input.issueKey }),
+        ...(issueKey === undefined ? {} : { issueKey }),
         ...(commit === undefined ? {} : { commit }),
         ...(input.caption === undefined ? {} : { caption: input.caption }),
       };
@@ -503,7 +525,9 @@ async function evidencePush(
     moved,
     receipts,
     failures,
-    summary,
+    ...(issueKey === undefined ? {} : { issueKey }),
+    ...(issueSource === undefined ? {} : { issueSource }),
+    summary: `${issueSummary}\n${summary}`,
   };
 }
 
@@ -646,6 +670,23 @@ export async function runEvidenceCommand(
 ): Promise<{ readonly ok: boolean; readonly body: unknown }> {
   const [verb, ...rest] = args;
   const stderr = options.stderr ?? process.stderr;
+  if (verb === "backfill") {
+    const apply = rest.includes("--apply");
+    if (rest.filter((arg) => arg === "--apply").length > 1) throw new Error(EVIDENCE_USAGE);
+    const { positional, values } = flags(
+      rest.filter((arg) => arg !== "--apply"),
+      ["--database", "--repo"],
+    );
+    if (positional.length || !values.get("--database")) throw new Error(EVIDENCE_USAGE);
+    const { evidenceBackfill } = await import("./evidence-backfill.ts");
+    const result = await evidenceBackfill({
+      database: values.get("--database")!,
+      repo: values.get("--repo") ?? options.cwd ?? process.cwd(),
+      apply,
+    });
+    stderr.write(`${result.summary}\n`);
+    return { ok: true, body: result };
+  }
   if (verb === "push") {
     const { positional, values } = flags(rest, [
       "--issue",
@@ -732,7 +773,7 @@ export const EVIDENCE_TOOLS = [
     description:
       "Push a folder's evidence (media, and other non-Markdown files of 16 KiB or more) under an evidence root such as docs/testing to Clankie's evidence store. " +
       "Uploads only missing blobs, writes the folder's sorted evidence.json manifest of clankie://evidence links, and moves the raw files into .local/evidence/. " +
-      "Commit only the README and evidence.json. Refuses outside the evidence roots.",
+      "Commit only the README and evidence.json. Refuses outside the evidence roots. When issue is omitted, infer from branch, worktree directory, then folder README; reports the source.",
     inputSchema: {
       type: "object" as const,
       properties: {

@@ -196,3 +196,27 @@ export const EvidencePreviewResponseSchema = z
     reason: z.enum(["too_large", "not_image"]).optional(),
   })
   .strict();
+
+/** Extract tracker identifiers from branch names, READMEs and historical strings. */
+export function evidenceIssueKeys(text: string): string[] {
+  return [
+    ...new Set(Array.from(text.matchAll(/\b([a-z][a-z0-9]*-\d+)\b/giu), (match) => match[1]!.toUpperCase())),
+  ];
+}
+
+/** Preserve explicit non-tracker keys accepted by the original wire contract. */
+export function splitEvidenceIssueKeys(text: string | undefined): string[] {
+  if (text === undefined) return [];
+  const keys = evidenceIssueKeys(text);
+  return keys.length
+    ? keys
+    : [
+        ...new Set(
+          text
+            .trim()
+            .split(/[\s,;]+/u)
+            .filter(Boolean)
+            .map((key) => key.toUpperCase()),
+        ),
+      ];
+}

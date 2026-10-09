@@ -24,6 +24,7 @@ import {
   EvidenceSha256Schema,
   EvidenceUploadRequestSchema,
   evidenceLink,
+  splitEvidenceIssueKeys,
   type EvidenceActor,
   type EvidenceDevicePreview,
   type EvidenceFetchResponse,
@@ -189,6 +190,12 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
   constructor(path: string) {
     this.location = path;
     this.db = new DatabaseSync(path);
+    this.db.function("evidence_issue_matches", { deterministic: true }, (legacy, details, key) => {
+      const keys =
+        JSON.parse(String(details)).issueKeys ??
+        splitEvidenceIssueKeys(legacy === null ? undefined : String(legacy));
+      return keys.includes(String(key).toUpperCase()) ? 1 : 0;
+    });
     this.db.exec(`
       PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS uploads(
@@ -222,14 +229,19 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
   }
 
   private static record(row: RecordSqlRow): Omit<EvidenceRecord, "url"> {
+    const { issueKeys: _issueKeys, ...details } = JSON.parse(row.details);
     return {
-      ...JSON.parse(row.details),
+      ...details,
       id: row.id,
       fileName: row.file_name,
       sha256: row.sha256,
       size: row.size,
       contentType: row.content_type,
-      ...(row.issue_key === null ? {} : { issueKey: row.issue_key }),
+      ...(row.issue_key === null
+        ? {}
+        : {
+            issueKey: splitEvidenceIssueKeys(row.issue_key)[0],
+          }),
       ...(row.commit_sha === null ? {} : { commit: row.commit_sha }),
       actor: JSON.parse(row.actor) as EvidenceActor,
       ...(row.caption === null ? {} : { caption: row.caption }),
@@ -282,12 +294,13 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
               record.sha256,
               record.size,
               record.contentType,
-              record.issueKey ?? null,
+              splitEvidenceIssueKeys(record.issueKey)[0] ?? null,
               record.commit ?? null,
               JSON.stringify(record.actor),
               record.caption ?? null,
               record.createdAt,
               JSON.stringify({
+                issueKeys: splitEvidenceIssueKeys(record.issueKey),
                 project: record.project,
                 repo: record.repo,
                 model: record.model,
@@ -316,7 +329,9 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
   listRecords(filter: { issueKey: string } | { commit: string }) {
     const rows = ("issueKey" in filter
       ? this.db
-          .prepare("SELECT * FROM records WHERE issue_key=? ORDER BY created_at, id")
+          .prepare(
+            "SELECT * FROM records WHERE evidence_issue_matches(issue_key,details,?)=1 ORDER BY created_at, id",
+          )
           .all(filter.issueKey)
       : this.db
           .prepare("SELECT * FROM records WHERE commit_sha=? ORDER BY created_at, id")
@@ -330,7 +345,6 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
     const fields = {
       project: "json_extract(details,'$.project')",
       repo: "json_extract(details,'$.repo')",
-      issue: "issue_key",
       actorKind: "json_extract(actor,'$.kind')",
       actorName: "COALESCE(json_extract(actor,'$.name'),json_extract(actor,'$.id'))",
     };
@@ -340,6 +354,10 @@ class SqliteEvidenceMetadata implements EvidenceMetadataStore {
         clauses.push(`${column}=?`);
         args.push(value);
       }
+    }
+    if (query.issue !== undefined) {
+      clauses.push("evidence_issue_matches(issue_key,details,?)=1");
+      args.push(query.issue);
     }
     if (query.mediaType) {
       clauses.push("content_type LIKE ? ESCAPE '\\'");

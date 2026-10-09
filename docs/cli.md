@@ -1924,6 +1924,24 @@ prints one JSON document; push and fetch also print a plain summary on stderr.
   `Nothing uploaded; … unchanged`. A listed file that is missing locally keeps
   its entry; removing one is an explicit manifest edit. Commit only the README
   and `evidence.json`, and cite the printed links in tracker comments.
+  When `--issue` is omitted, push infers keys from the branch, then the worktree
+  directory name, then the folder's README, and reports the source. If none is
+  found, the record stays unkeyed. Multiple keys are stored separately in
+  record metadata; the wire `issueKey` retains the first for existing clients. Issue lookups and
+  recent filters match any key, including historical multi-key strings.
+- `clankie evidence backfill --database SQLITE [--repo PATH] [--apply]` repairs
+  local SQLite records only. It opens the database read-only by default and
+  prints proposed changes and before/after counts. `--repo` defaults to the
+  current directory and must name a git repository root. Unkeyed records use
+  the nearest folder README, then the most recent path-specific git commit
+  naming an issue (up to 50 commits). Records explicitly naming another repo
+  are skipped; records without repo metadata are assumed to belong to this
+  checkout. Review those proposals before applying. Existing multi-key strings
+  become separate keys. `--apply` commits only record metadata in a transaction
+  and refuses concurrent edits; blobs and upload receipts are untouched. Get
+  owner approval after reporting the live dry run before using `--apply` on a
+  live store. Apply only after deploying the service that reads separate keys.
+  Repeat for other repositories with their own checkout.
 - `clankie evidence fetch [PATH]` reads manifests at or above `PATH` within the
   declared roots, or
   every manifest below it. It downloads each listed object into
