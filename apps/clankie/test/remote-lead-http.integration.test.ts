@@ -75,7 +75,19 @@ describe("remote lead HTTP/MCP trust boundary", () => {
       `#!${process.execPath}
       const fs=require('node:fs'); const args=process.argv.slice(2);
       if(args[0]==='auth') console.log(JSON.stringify({loggedIn:process.env.CLAUDE_CONFIG_DIR.endsWith('.claude-james'),authMethod:'claude.ai'}));
-      else if(args[0]==='plugin') console.log(args[1]==='list'?'[]':'{}');
+      else if(args[0]==='plugin') {
+        const statePath=${JSON.stringify(join(root, "plugin-state.json"))};
+        const state=fs.existsSync(statePath)?JSON.parse(fs.readFileSync(statePath,'utf8')):[];
+        if(args[1]==='list') console.log(JSON.stringify(state));
+        else if(args[1]==='install') { fs.writeFileSync(statePath,JSON.stringify([{id:${JSON.stringify(leadPlugin)},scope:'user',enabled:true}])); console.log('{}'); }
+        else if(args[1]==='disable') {
+          if(state[0]?.failure) { console.log(JSON.stringify(state[0].failure)); process.exit(1); }
+          if(state[0]?.enabled===false) {
+            console.log(JSON.stringify({command:'disable',plugin:${JSON.stringify(leadPlugin)},scope:'user',failureCode:'already_in_goal_state',alreadyInGoalState:true})); process.exit(1);
+          }
+          state[0].enabled=false; fs.writeFileSync(statePath,JSON.stringify(state)); console.log('{}');
+        } else console.log('{}');
+      }
       else fs.writeFileSync(${JSON.stringify(join(root, "head.json"))}, JSON.stringify({args,profile:process.env.CLAUDE_CONFIG_DIR,hasToken:!!process.env.CLANKIE_REMOTE_LEAD_TOKEN}));
     `,
       { mode: 0o700 },
@@ -111,6 +123,49 @@ describe("remote lead HTTP/MCP trust boundary", () => {
     const client = new Client({ name: "bundle-acceptance", version: "1" });
     try {
       expect(await prepareClaude(executable, plugin, { env, home: root, policyPath })).toBe(profile);
+      // A relaunch updates the existing install, whose global activation is
+      // already off even while the previous session has its channel enabled.
+      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath })).toBe(profile);
+      const pluginState = join(root, "plugin-state.json");
+      const installedLead = { id: leadPlugin, scope: "user", enabled: true };
+      await writeFile(pluginState, JSON.stringify([installedLead]));
+      expect(await prepareClaude(executable, plugin, { env, home: root, policyPath })).toBe(profile);
+      expect(JSON.parse(await readFile(pluginState, "utf8"))[0].enabled).toBe(false);
+      // Goal-state handling must not swallow permission or wrong-scope errors.
+      for (const failure of [
+        { command: "disable", plugin: leadPlugin, scope: "user", failureCode: "permission_denied" },
+        {
+          command: "disable",
+          plugin: leadPlugin,
+          scope: "project",
+          failureCode: "already_in_goal_state",
+          alreadyInGoalState: true,
+        },
+      ]) {
+        await writeFile(pluginState, JSON.stringify([{ ...installedLead, failure }]));
+        await expect(prepareClaude(executable, plugin, { env, home: root, policyPath })).rejects.toThrow(
+          "Native Claude plugin disable",
+        );
+      }
+      await writeFile(
+        pluginState,
+        JSON.stringify([
+          {
+            ...installedLead,
+            failure: {
+              command: "disable",
+              plugin: leadPlugin,
+              scope: "user",
+              failureCode: "already_in_goal_state",
+              alreadyInGoalState: true,
+            },
+          },
+        ]),
+      );
+      await expect(prepareClaude(executable, plugin, { env, home: root, policyPath })).rejects.toThrow(
+        "not disabled at user scope",
+      );
+      await writeFile(pluginState, JSON.stringify([{ ...installedLead, enabled: false }]));
       expect(await readFile(join(profile, ".credentials.json"), "utf8")).toBe("private fixture credential");
       const policy = JSON.parse(await readFile(policyPath, "utf8"));
       expect(policy.permissions.deny).toContain("secret");

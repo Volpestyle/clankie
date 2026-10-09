@@ -57,3 +57,39 @@ The lead will redeploy/relaunch. The live KH2 head must then read an issue and
 post a comment through Clankie's tracker tools, and verify an owner-origin KH2
 wake reaches this chat. No deployed acceptance, restart, PC pane typing or
 existing worker takeover is claimed here.
+
+## Relaunch follow-up: already-disabled native plugin
+
+After deployment of `eae6d538`, native preparation failed at allocating. On the
+PC's existing `.claude-james` profile, Claude Code **2.1.295** listed the lead
+plugin installed at user scope with `enabled: false`. Running the exact disable
+command with `--scope user --json` returned **exit 1**:
+
+```json
+{
+  "command": "disable",
+  "outcome": "failed",
+  "plugin": "clankie-remote-lead@clankie-remote-leads",
+  "scope": "user",
+  "failureCode": "already_in_goal_state",
+  "alreadyInGoalState": true
+}
+```
+
+The message was “Plugin is already disabled at user scope”; the profile's
+settings hash was identical before and after. This proves an idempotency error
+in preparation, not a lock attributed to the still-running prior head. No pane
+was typed into or closed, and no authentication or plugin activation was changed.
+
+Preparation now accepts only that exact structured result at exit 1 and then
+requires a fresh user-scope disabled-state readback. Enabled installations still
+receive the normal disable command. Permission errors, wrong-scope results and
+missing/uncertain disabled state refuse with redacted diagnostics. Session-only
+activation and revoked delegation semantics remain intact.
+
+The existing native-preparation/standalone-bridge integration acceptance covers
+first install, repeated preparation while already disabled, an enabled install,
+and refusals for permission and wrong-scope errors. Its native executable is an
+explicit fixture; the command behavior above was observed on the real PC.
+Gate results will be attached to the issue after reading them. Deployment and
+the actual relaunched head's tracker call remain the lead's live acceptance.

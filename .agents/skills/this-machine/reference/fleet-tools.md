@@ -9,6 +9,11 @@ and approve its channel before allocating a pane. Profile ambiguity, missing
 sign-in or administrator policy access returns a setup refusal in the original
 launch journal. Never answer a development warning or substitute the worker
 channel. `dispatched` proves handoff only; verify a native tool call after deploy.
+Relaunch preparation keeps the user-scope lead plugin disabled for ordinary
+sessions. Native Claude's exact already-disabled result is accepted only with a
+disabled-state readback. A previous head may still have session-only activation;
+do not close its pane to repair an already-disabled setup result. Its revoked
+delegation remains revoked; any cleanup is a separate owner decision.
 Runtime updates build the standalone bridge before cutover; a source-only
 missing-bridge refusal names `clankie heavy -- node scripts/build-remote-lead.mjs`.
 

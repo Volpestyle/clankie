@@ -20,7 +20,11 @@ setup installs the versioned lead plugin into that profile and approves its
 own channel additively in managed policy before allocating a pane. Disabled
 channel policy, missing sign-in, ambiguity or an unwritable administrator
 policy refuses setup with a diagnostic. The native install remains disabled
-for ordinary sessions; launch activates only its lead channel and disables
+for ordinary sessions. Repeated preparation accepts only the native CLI's exact
+user-scope `already_in_goal_state` disable receipt and verifies the installed
+plugin is disabled afterward; other native failures still refuse. A previous
+head's session-only activation does not require closing its pane to prepare
+the profile. Launch activates only its lead channel and disables
 inherited worker/operator plugins through session settings. No development
 confirmation or worker-hook fallback is part of this operator head.
 

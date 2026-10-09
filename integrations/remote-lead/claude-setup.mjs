@@ -19,7 +19,7 @@ const parse = (text, detail) => {
 export async function prepareClaude(executable, plugin, options = {}) {
   const env = options.env ?? process.env;
   const home = options.home ?? homedir();
-  const invoke = async (args, profile) => {
+  const invoke = async (args, profile, allowAlreadyDisabled = false) => {
     try {
       return (
         await execute(executable, args, {
@@ -27,7 +27,24 @@ export async function prepareClaude(executable, plugin, options = {}) {
           timeout: 60000,
         })
       ).stdout;
-    } catch {
+    } catch (error) {
+      if (allowAlreadyDisabled && error.code === 1) {
+        // Native Claude treats an already-disabled plugin as a nonzero result.
+        // Accept only its structured, exact user-scope goal-state receipt.
+        try {
+          const result = JSON.parse(error.stdout);
+          if (
+            result.command === "disable" &&
+            result.plugin === leadPlugin &&
+            result.scope === "user" &&
+            result.failureCode === "already_in_goal_state" &&
+            result.alreadyInGoalState === true
+          )
+            return error.stdout;
+        } catch {
+          /* Other failures retain the redacted native error below. */
+        }
+      }
       // Native stderr may contain provider/configuration secrets.
       throw new Error(`Native Claude ${args.slice(0, 3).join(" ")} failed; inspect that profile on the PC`);
     }
@@ -122,6 +139,17 @@ export async function prepareClaude(executable, plugin, options = {}) {
   await invoke(["plugin", exists ? "update" : "install", leadPlugin, "--scope", "user"], profile);
   // Install records are required for channel registration. Keep activation
   // session-only so ordinary PC sessions never acquire lead hooks or authority.
-  await invoke(["plugin", "disable", leadPlugin, "--scope", "user"], profile);
+  await invoke(["plugin", "disable", leadPlugin, "--scope", "user", "--json"], profile, true);
+  const after = parse(
+    await invoke(["plugin", "list", "--json"], profile),
+    "Invalid native plugin list; inspect that profile on the PC",
+  );
+  if (
+    !Array.isArray(after) ||
+    !after.some((value) => value.id === leadPlugin && value.scope === "user" && value.enabled === false)
+  )
+    throw new Error(
+      "Native Claude lead plugin is not disabled at user scope; inspect that profile on the PC",
+    );
   return profile;
 }
