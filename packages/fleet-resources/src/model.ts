@@ -69,7 +69,7 @@ export interface HeavyLease {
   runner?: ProcessIdentity;
   descendants?: ProcessProof[];
 }
-export interface SimulatorTicketSelection {
+interface SimulatorTicketSelection {
   occupantId: string;
   fleet?: string;
   deviceId?: string;

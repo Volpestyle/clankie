@@ -279,7 +279,7 @@ export function createSimulatorManager(input: {
   };
   const waiters = new Set<() => void>();
   const wake = () => {
-    for (const resolve of [...waiters]) resolve();
+    for (const resolve of waiters) resolve();
   };
   const waitForChange = (ms: number, signal?: AbortSignal) =>
     new Promise<void>((resolve) => {

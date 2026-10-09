@@ -41,7 +41,13 @@ Initial queue cases passed. Intermediate runs caught a strict plan-schema bug
 expectations; these were corrected. A later focused run was 63/64, with a grant
 validation consumer returning stale_owner during high host load. That result is
 retained as a failure, not accepted as a timing exception for affected code.
-Final root-gate and rerun results must be recorded before landing.
+The unchanged rebased source then passed all 64 focused checks (36 simulator,
+18 service-route and 10 CLI integration cases). The first root gate could not
+load its newly added TypeScript dependency; a frozen-lockfile install corrected
+the dependency links. The next gate passed formatting and caught an unnecessary
+array copy in the waiter code. That lint finding was corrected, and the internal
+ticket-selection type was made private. Final root-gate results are attached to
+the issue before landing.
 
 Raw logs and pressure responses stay in ignored `.local/vuh-1923/` in the owned
 worktree. No live settings, fleet notes, capacity, harness sessions, simulator
