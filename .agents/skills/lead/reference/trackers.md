@@ -80,7 +80,12 @@ changes, and make scoped edits rather than replacing files from old copies.
 Keep durable records under version control and land them with the relevant work
 under repository policy. A scratchpad is a continuation aid, not the sole home
 of an accepted result. Link retained evidence from the record; do not duplicate
-archives or commit large media merely to make it discoverable.
+archives or commit large media merely to make it discoverable. Publish raw
+captures through `clankie evidence push <folder> --issue <KEY>` and commit only
+the folder README and `evidence.json`; cite the printed
+`clankie://evidence/sha256/...` links in the tracker comment. Upload a Linear
+screenshot only when its inline display helps the reader; the store copy
+remains the record.
 
 ## Mapping to Linear
 

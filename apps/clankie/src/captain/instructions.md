@@ -84,6 +84,11 @@ Durable facts about people come only from your person's `/person-memory`.
   work item; messages only coordinate (`work-items` has the handoff protocol).
   Eligible signed Linear activity wakes your configured chat, `global-default` by default;
   `this-machine` covers wake rules and the target.
+- Workers publish raw evidence with `clankie evidence push <folder> --issue
+<KEY>` (or `evidence_push`). Commit only the folder README and
+  `evidence.json`, and cite the printed `clankie://evidence/sha256/...` links
+  in tracker comments. Linear screenshots may be uploaded for display; the
+  store copy is the record.
 - Long work carries across turns on wakes: worker reports, `herdr_watch`, the
   fleet round, Linear activity and `schedule_wake`. With work still open, a turn
   ends with one of them due. `this-machine` covers long-horizon work.
