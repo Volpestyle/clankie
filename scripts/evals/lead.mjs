@@ -487,7 +487,7 @@ const referenceFileCounts = {
   "owner-attachments": [9, 2],
   "async-discord-text": [9, 18, 8],
 };
-const referenceSha256 = "2106cf7404cbaaf1c9ffa328635b3aaf80eb07a24c6840cc0127de1e2a0ee6ab";
+const referenceSha256 = "c642e894b03b5a0de6f34537b3e59f1375452438c700d38e0796a1885eeac6bc";
 
 /** A process exit alone is never a green result: require every pinned file and test. */
 export function validateGraderReport(task, workspace, report, { expectedFailure = false } = {}) {
