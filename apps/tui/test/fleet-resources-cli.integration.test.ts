@@ -24,6 +24,7 @@ import { doctorCommand } from "../src/command/doctor.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
+const calmPressure = async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 });
 async function exists(path: string) {
   try {
     await access(path);
@@ -61,7 +62,8 @@ async function fixture() {
   const credentials = new FileCredentialStore(join(directory, "credentials.json"));
   const token = mintOperatorToken();
   await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
-  const governor = createResourceGovernor({ directory: join(directory, "registry") });
+  // CLI and doctor boundaries, not machine pressure: a busy host must not queue them (VUH-1981).
+  const governor = createResourceGovernor({ directory: join(directory, "registry"), probe: calmPressure });
   const resources = await createFleetResourceRuntime({
     governor,
     policy: async () => (await settings.load()).fleet.resources,
@@ -140,7 +142,7 @@ async function fixture() {
       `import {createResourceGovernor} from ${JSON.stringify(pathToFileURL(join(repoRoot, "packages/fleet-resources/src/governor.ts")).href)};
 import {runHeadlessCaptainCommand} from ${JSON.stringify(pathToFileURL(join(repoRoot, "apps/tui/bin/headless-captain.ts")).href)};
 import {parseDirectConversation} from ${JSON.stringify(pathToFileURL(join(repoRoot, "apps/tui/src/session/operator-conversations.ts")).href)};
-const governor=createResourceGovernor({directory:${JSON.stringify(join(directory, "registry"))}});
+const governor=createResourceGovernor({directory:${JSON.stringify(join(directory, "registry"))},probe:async()=>({loadRatio:0,availableMemoryMb:1e6})});
 try {process.exitCode=await runHeadlessCaptainCommand(parseDirectConversation(process.argv.slice(2)).remaining,{repoRoot:${JSON.stringify(repoRoot)},env:process.env,resourceGovernor:governor});} finally {await governor.close();}
 `,
     );
@@ -292,7 +294,10 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
         maxLoadRatio: 2,
         minAvailableMemoryMb: 512,
       });
-      const independent = createResourceGovernor({ directory: join(f.directory, "registry") });
+      const independent = createResourceGovernor({
+        directory: join(f.directory, "registry"),
+        probe: calmPressure,
+      });
       try {
         expect((await independent.snapshot()).policy).toEqual(saved.fleet.resources);
       } finally {

@@ -27,6 +27,8 @@ afterEach(async () => {
 });
 
 const driver = join(import.meta.dirname, "fixtures/heavy-driver.mjs");
+/** Ownership tests must not wait on how busy the host is; pressure has its own suites. */
+const calmPressure = async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 });
 const command = join(import.meta.dirname, "fixtures/heavy-command.mjs");
 const registrationDriver = join(import.meta.dirname, "fixtures/registration-driver.mjs");
 async function eventually<T>(
@@ -63,7 +65,7 @@ async function fixture() {
   const lifetime = fixtureWork();
   return lifetime.run(async () => {
     const directory = await mkdtemp(join(tmpdir(), "clankie-heavy-integration-"));
-    const rawGovernor = createResourceGovernor({ directory });
+    const rawGovernor = createResourceGovernor({ directory, probe: calmPressure });
     const governor = lifetime.wrap(rawGovernor);
     await governor.configure({
       ...defaultResourcePolicy(),
@@ -126,7 +128,9 @@ async function fixture() {
       child.stderr?.on("data", (bytes) => output.push(String(bytes)));
       const done = completions.get(child)!;
       receipts.push(receipt);
-      const ready = (timeout = 8_000) =>
+      // Readiness ends on the receipt or the owned child exiting, never on a
+      // clock: a cold start on a busy host is slow, not wrong (VUH-1956).
+      const ready = (timeout = Number.POSITIVE_INFINITY) =>
         lifetime.run(async () => {
           try {
             await eventually(
@@ -345,7 +349,7 @@ describe("machine shared heavy permits with actual OS children", () => {
     let holderDone: Promise<number | null> | undefined;
     try {
       const active = f.start("lock-active");
-      await active.ready(30_000);
+      await active.ready();
       const queued = Array.from({ length: 11 }, (_, i) => f.start(`lock-waiter-${i}`, "exit"));
       const before = await eventually(
         () => new ResourceStore(f.directory).read(),
