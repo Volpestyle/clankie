@@ -189,6 +189,12 @@ Use only the parts that carry new information, in this order:
   approval requests.
 - **Evidence link:** the retained report and tested revision, without a log dump.
 
+Evidence folders follow the repository's store rule: write the folder README,
+run `clankie evidence push <folder> --issue <KEY>` (or `evidence_push`), and
+commit only `README.md` and `evidence.json`. Cite the printed
+`clankie://evidence/sha256/...` links in the comment. Linear screenshots may be
+uploaded for display, but the evidence-store copy is the record.
+
 Publish useful candidates and meaningful failures before final integration;
 label what is observed and what remains unproven. Reuse an existing attachment
 and update its caption or current-result pointer when appropriate. A new comment

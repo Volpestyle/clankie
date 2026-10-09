@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "worker-proof.json",
+      "size": 30478,
+      "sha256": "021adc68061e872adc72c9d76cceb6260f6f382ad03fd331c167cdca8801340f",
+      "url": "clankie://evidence/sha256/021adc68061e872adc72c9d76cceb6260f6f382ad03fd331c167cdca8801340f"
+    }
+  ]
+}
