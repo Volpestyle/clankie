@@ -370,14 +370,18 @@ it("TUI-started text can be answered by a paired device without interpreting sla
   expect(answer.question!.answer).toEqual({ kind: "text", text: "/reset is context" });
 });
 
-it("chat-only send keeps captain semantics while all question operations require current control", async () => {
+it("chat-only send keeps captain semantics while all question operations, listing included, require current control", async () => {
   const f = await fixture();
   await f.send(f.tokens.read!);
   expect(f.issuers).toEqual([undefined]);
   expect((await f.client().inputGet!(f.id)).question).toBeUndefined();
   await f.send();
   const target = await f.target();
+  // The control device reads the pending ask through its own owner route, never the captain hop.
+  const listed = await f.client().inputList!({ status: "pending" });
+  expect(listed.questions.map((entry) => entry.question?.requestId)).toEqual([target.requestId]);
   for (const request of [
+    { op: "input_list", schemaVersion: 1, status: "pending" },
     { op: "input_get", schemaVersion: 1, conversationId: f.id },
     { op: "input_answer", schemaVersion: 1, ...target },
     {
@@ -419,6 +423,7 @@ it.each(["captain", "wrong-signer", "expired", "revoked"])(
     expect((await f.raw({ op: "input_get", schemaVersion: 1, conversationId: f.id }, token)).status).toBe(
       401,
     );
+    expect((await f.raw({ op: "input_list", schemaVersion: 1, status: "pending" }, token)).status).toBe(401);
     expect(f.seen.every((r) => r.path === "/v1/devices/self")).toBe(true);
   },
 );
