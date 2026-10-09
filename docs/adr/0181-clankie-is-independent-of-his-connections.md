@@ -318,8 +318,8 @@ this decision.
   (managed Postgres/S3, tenancy, backups, deploy).
 - **Order.** Core before UI. The first slice is the evidence store
   ([VUH-1902](https://linear.app/vuhlp/issue/VUH-1902)).
-- **v1 scope.** Releases are in v1, because shipping versions is core to
-  Clankie. Cycles and initiatives are not.
+- **v1 scope.** Releases and cycles are in v1; shipping versions is core to
+  Clankie. Initiatives are not.
 
 App-only operation still needs no external account. The connection contract
 above is unchanged: a connected Linear keeps its broker-owned credentials,
