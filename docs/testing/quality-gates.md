@@ -124,3 +124,11 @@ focused command several times with unchanged inputs and retain every result;
 do not enable retries to hide the first failure. Native app evidence belongs in
 the private app repository. Gateway production and account evidence belongs in
 the private operations repository.
+
+For fixture requests whose callers wait at a native-operation barrier, observe
+rejection when the request is created and retain the original promise for the
+later assertion. Release the barrier and await the pending work in `finally`.
+Connection loss during that gap must fail an assertion without producing an
+unhandled rejection. A passing assertion and Vitest JSON `success: true` alone
+are insufficient: retain the command exit status too, since unhandled errors
+can make Vitest exit nonzero while its JSON still reports successful assertions.

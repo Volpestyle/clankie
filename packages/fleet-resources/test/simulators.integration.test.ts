@@ -128,14 +128,21 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Fixture HTTP socket missing");
-  const http = async (path: string, body: unknown = {}) => {
-    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-      headers: { "content-type": "application/json" },
-    });
-    if (!response.ok) throw new Error("Fixture HTTP boundary failed");
-    return (await response.json()) as SimulatorResult;
+  const http = (path: string, body: unknown = {}) => {
+    const pending = (async () => {
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+      });
+      if (!response.ok) throw new Error("Fixture HTTP boundary failed");
+      return (await response.json()) as SimulatorResult;
+    })();
+    // A caller may be awaiting a native barrier when its HTTP connection
+    // closes. Observe rejection now; return the original promise so its
+    // later assertion still fails with that same error.
+    void pending.catch(() => {});
+    return pending;
   };
   cleanup.push(async () => {
     manager.close();
@@ -151,6 +158,7 @@ async function fixture(settings: { respondWithinMs?: number } = {}) {
       loadRatio = value;
     },
     port: address.port,
+    disconnectHttp: () => server.closeAllConnections(),
     child,
     owner,
     adapter,
@@ -412,10 +420,16 @@ it("revoking HTTP authorization while native preflight is awaiting cannot create
   const f = await fixture();
   const barrier = f.pauseInventory();
   const acquiring = f.http("/acquire", f.request);
-  await barrier.waiting;
-  f.revoke();
-  barrier.resume();
-  expect(await acquiring).toMatchObject({ outcome: "rejected", reason: "authorization_revoked" });
+  try {
+    await barrier.waiting;
+    f.revoke();
+    barrier.resume();
+    expect(await acquiring).toMatchObject({ outcome: "rejected", reason: "authorization_revoked" });
+  } finally {
+    barrier.resume();
+    await acquiring.catch(() => undefined);
+    await f.manager.settled();
+  }
   expect(await f.governor.simulatorReservations()).toHaveLength(0);
   expect((await f.commands()).filter((args) => args[0] !== "list")).toHaveLength(0);
 });
@@ -424,10 +438,16 @@ it("revoking HTTP authorization after the exact Create receipt prevents boot and
   const f = await fixture();
   const barrier = f.pauseInventory(true);
   const acquiring = f.http("/acquire", f.request);
-  await barrier.waiting;
-  f.revoke();
-  barrier.resume();
-  expect(await acquiring).toMatchObject({ outcome: "rejected", reason: "authorization_revoked" });
+  try {
+    await barrier.waiting;
+    f.revoke();
+    barrier.resume();
+    expect(await acquiring).toMatchObject({ outcome: "rejected", reason: "authorization_revoked" });
+  } finally {
+    barrier.resume();
+    await acquiring.catch(() => undefined);
+    await f.manager.settled();
+  }
   const [acquired] = await f.governor.simulatorReservations();
   expect(acquired!.phase).toBe("created");
   expect(acquired!.deviceId).toBeDefined();
@@ -438,6 +458,29 @@ it("revoking HTTP authorization after the exact Create receipt prevents boot and
   expect((await f.commands()).filter((args) => args[0] !== "list").map((args) => args[0])).toEqual([
     "create",
   ]);
+});
+
+it("a held HTTP acquisition retains its rejection until awaited after the connection closes", async () => {
+  const f = await fixture();
+  const barrier = f.pauseInventory(true);
+  const acquiring = f.http("/acquire", f.request);
+  try {
+    await barrier.waiting;
+    f.disconnectHttp();
+    // Leave the caller at its native barrier through an event-loop turn after
+    // transport loss. The original rejection must remain awaitable, observed
+    // from creation rather than becoming an unhandled rejection in this gap.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    f.revoke();
+    barrier.resume();
+    await expect(acquiring).rejects.toThrow("fetch failed");
+    await f.manager.settled();
+    expect((await f.commands()).filter((args) => args[0] === "boot")).toHaveLength(0);
+  } finally {
+    barrier.resume();
+    await acquiring.catch(() => undefined);
+    await f.manager.settled();
+  }
 });
 
 it("revoked HTTP authority cannot renew activity or shut down an existing simulator", async () => {
