@@ -78,6 +78,7 @@ export async function windowsCodexBridge(): Promise<WindowsCodexBridge> {
     ".codex-plugin/plugin.json",
     "bin/fleet-mcp.mjs",
     "bin/seat-channel.mjs",
+    "bin/mcp-result.mjs",
     "bin/catalog-watch.mjs",
     "bin/link.mjs",
     "bin/inbound-receipt.mjs",
@@ -185,7 +186,7 @@ $environment['HERDR_SOCKET_PATH']=$bindings[0].socket_path
 ${input.catalogObserved ? "$environment['CLANKIE_CODEX_CATALOG_OBSERVED']='1'" : ""}
 ${input.codexHome === undefined ? "" : `$environment['CODEX_HOME']=${powershellLiteral(input.codexHome)}`}
 $block=(@($environment.Keys | Sort-Object | ForEach-Object {[string]$_ + '=' + [string]$environment[$_]}) -join [char]0) + [char]0 + [char]0
-$bridgeConfig=[string[]]@('-c','mcp_servers.clankie.enabled=true','-c','mcp_servers.clankie.env.NODE_OPTIONS=""','-c','mcp_servers.clankie.env.NODE_PATH=""','-c',('mcp_servers.clankie.command=' + (ConvertTo-Json -InputObject $bridgeNode -Compress)),'-c',('mcp_servers.clankie.args=' + (ConvertTo-Json -InputObject @($bridgeEntry) -Compress)),'-c',('mcp_servers.clankie.env.HERDR_PANE_ID=' + (ConvertTo-Json -InputObject $pane -Compress)),'-c',('mcp_servers.clankie.env.HERDR_SOCKET_PATH=' + (ConvertTo-Json -InputObject $bindings[0].socket_path -Compress)))
+$bridgeConfig=[string[]]@('-c','mcp_servers.clankie.enabled=false','-c','mcp_servers.worker.enabled=true','-c','mcp_servers.worker.env.NODE_OPTIONS=""','-c','mcp_servers.worker.env.NODE_PATH=""','-c',('mcp_servers.worker.command=' + (ConvertTo-Json -InputObject $bridgeNode -Compress)),'-c',('mcp_servers.worker.args=' + (ConvertTo-Json -InputObject @($bridgeEntry) -Compress)),'-c',('mcp_servers.worker.env.HERDR_PANE_ID=' + (ConvertTo-Json -InputObject $pane -Compress)),'-c',('mcp_servers.worker.env.HERDR_SOCKET_PATH=' + (ConvertTo-Json -InputObject $bindings[0].socket_path -Compress)))
 $serverArgs=@(${input.args.slice(0, -3).map(powershellLiteral).join(",")}) + $bridgeConfig + @(${input.args.slice(-3).map(powershellLiteral).join(",")})
 $created=[ClankieCodexLaunch]::Start($installed[0],[string[]]$serverArgs,$cwd,$block)
 [ordered]@{pid=$created.pid;log='';bridge=[ordered]@{root=$bridgeRoot;node=$bridgeNode;entry=$bridgeEntry};bridgeConfig=$bridgeConfig;binding=[ordered]@{session=$session;socketPath=$bindings[0].socket_path};shell=[ordered]@{pid=$shell.pid;startTime=$shell.startTime};server=[ordered]@{pid=$created.pid;startTime=$created.startTime;executable=$installed[0]}} | ConvertTo-Json -Compress -Depth 5

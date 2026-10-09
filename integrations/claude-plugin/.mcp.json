@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "clankie": {
+    "lead": {
       "command": "clankie",
       "args": ["mcp", "--lane", "operator"]
     }

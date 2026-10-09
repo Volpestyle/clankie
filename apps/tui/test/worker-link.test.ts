@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { fleetLinkFetch } from "../../clankie/src/fleet-link.ts";
 import { createHash } from "node:crypto";
 import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
@@ -263,7 +264,7 @@ describe("worker discovery in a private service's state root (VUH-1631)", () => 
 
   it("forwards the service state to the Codex MCP bridge", async () => {
     const config = JSON.parse(await readFile(join(bin, "..", "codex-mcp.json"), "utf8"));
-    expect(config.mcpServers.clankie.env_vars).toContain("CLANKIE_STATE");
+    expect(config.mcpServers.worker.env_vars).toContain("CLANKIE_STATE");
   });
 });
 
@@ -347,7 +348,7 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     });
     const receipt = await waitFor((line) => line.id === 3);
     expect(receipt).toMatchObject({ result: { isError: false } });
-    expect(JSON.parse((receipt.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({
+    expect(decodeMcpResult(receipt.result as { content: { type: string; text: string }[] })).toMatchObject({
       received: true,
       deliveryStage: "stored",
     });
@@ -704,7 +705,11 @@ function rawReceiptBridge(
     for (let i = 0; i < Math.ceil(timeoutMs / 25); i++) {
       if (replies.has(id))
         return replies.get(id) as {
-          result: { content: { text: string }[]; isError?: boolean };
+          result: {
+            content: { type: string; text: string }[];
+            structuredContent?: Record<string, unknown>;
+            isError?: boolean;
+          };
           error?: { code: number; message: string };
         };
       if (child.exitCode !== null) throw new Error(stderr);
@@ -737,8 +742,8 @@ function rawReceiptBridge(
     tool: (name: string, args: unknown = {}, meta?: unknown) =>
       call("tools/call", { name, arguments: args, ...(meta === undefined ? {} : { _meta: meta }) }),
     message: async (text = "original") =>
-      JSON.parse(
-        (await call("tools/call", { name: "message_clankie", arguments: { text } })).result.content[0]!.text,
+      decodeMcpResult(
+        (await call("tools/call", { name: "message_clankie", arguments: { text } })).result,
       ) as { received: boolean; deliveryStage: string; deliveryId: string },
   };
 }
@@ -1438,7 +1443,7 @@ it("preserves a connected-call uncertain receipt and advertises read-only receip
     arguments: { id: "VUH-1677" },
   });
   expect(original.result.isError).toBe(false);
-  const uncertain = JSON.parse(original.result.content[0]!.text);
+  const uncertain = decodeMcpResult(original.result) as { receiptId: string };
   expect(uncertain).toMatchObject({
     outcome: "uncertain",
     receiptId: expect.stringMatching(/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/u),
@@ -1448,7 +1453,7 @@ it("preserves a connected-call uncertain receipt and advertises read-only receip
   expect(service.connectedDispatches()).toBe(1);
   service.settleConnectedCall();
   const reconciled = await bridge.tool("clankie_call", { receiptId: uncertain.receiptId });
-  expect(JSON.parse(reconciled.result.content[0]!.text)).toEqual({
+  expect(decodeMcpResult(reconciled.result)).toEqual({
     outcome: "ok",
     receiptId: uncertain.receiptId,
     content: "update completed",
@@ -1479,7 +1484,7 @@ it.each(["lost", "body timeout", "redirect"] as const)(
       { clankieReceiptId: callerId },
     );
     expect(lost.result.isError).toBe(false);
-    const uncertain = JSON.parse(lost.result.content[0]!.text);
+    const uncertain = decodeMcpResult(lost.result) as { receiptId: string };
     expect(uncertain).toEqual({
       outcome: "uncertain",
       receiptId: expect.stringMatching(/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/u),
@@ -1495,7 +1500,7 @@ it.each(["lost", "body timeout", "redirect"] as const)(
     expect(service.calls).toEqual(["clankie_call"]);
     service.settleConnectedCall();
     const reconciled = await bridge.tool("clankie_call", { receiptId: uncertain.receiptId });
-    expect(JSON.parse(reconciled.result.content[0]!.text)).toEqual({
+    expect(decodeMcpResult(reconciled.result)).toEqual({
       outcome: "ok",
       receiptId: uncertain.receiptId,
       content: "update completed",
@@ -1521,7 +1526,7 @@ it("returns a connected-call auth refusal with its real reason and no replay", a
     name: "linear_update_issue",
     arguments: { id: "VUH-1677" },
   });
-  expect(JSON.parse(refused.result.content[0]!.text)).toEqual({
+  expect(decodeMcpResult(refused.result)).toEqual({
     outcome: "refused",
     reason:
       "Fleet tools answered 403: The admitted seat has no current native binding: worker_grant_unavailable. Ask Clankie to confirm admission for this native seat; repeated retries cannot grant access.",

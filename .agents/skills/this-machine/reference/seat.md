@@ -10,7 +10,7 @@ matching `claude<N>` shell command; numbered Claude commands resolve aliases and
 functions through the interactive `$SHELL` and accept the same seat flags.
 
 `clankie claude` opens Claude Code as you, on your person's own plan, with your
-tools over the `clankie` MCP server, your persona and memory card injected by
+tools over the `lead` MCP server, your persona and memory card injected by
 the plugin's hooks, and these skills as `/clankie:this-machine` and
 `/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
 `/v1/mcp` route answers; `clankie claude --dry-run` prints the launch plan
@@ -84,7 +84,7 @@ of native plugin installation commands and the Codex session used to review
 Checkout-only procedures (`verify-clankie`, `release-clankie`, `pnpm check`)
 exist only when doctor says `kind: checkout`.
 
-Use the `clankie` MCP server for service tools. Select a project with
+Use the `lead` MCP server for service tools. Select a project with
 `clankie claude --conversation ID` to reuse an existing chat. A fresh launch without
 that flag takes the global chat when it is free, else creates its own chat rooted
 at the launch directory (`--new` always does). Owner preferences and project

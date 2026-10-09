@@ -203,7 +203,7 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
                             const text = row.message.content;
                             const taggedId = /^<channel ([^>]+)>/u.exec(text)?.[1];
                             if (!taggedId || ![...taggedId.matchAll(/event_id="([^"<>]*)"/gu)].some(attr => attr[1] === recovery.message.receiptId)) continue;
-                            if (row.isSidechain !== false || row.isMeta !== true || row.promptSource !== "system" || row.origin?.kind !== "channel" || row.origin.server !== "plugin:clankie-worker:clankie")
+                            if (row.isSidechain !== false || row.isMeta !== true || row.promptSource !== "system" || row.origin?.kind !== "channel" || !["plugin:clankie-worker:worker", "plugin:clankie-worker:clankie"].includes(row.origin.server))
                                 throw new Error("Original event lacks native channel origin");
                             const outer = /^<channel ([^>]+)>\r?\n([\s\S]*)\r?\n<\/channel>$/u.exec(text);
                             if (!outer || /<\/?channel\b/u.test(outer[2])) throw new Error("Original event channel body is incomplete or ambiguous");
@@ -212,7 +212,7 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
                             const values = name => attrs.filter(attr => attr[1] === name).map(attr => attr[2]);
                             for (const name of ["event_id", "conversation", "kind", "created_at"])
                                 if (values(name).length !== 1) throw new Error("Ambiguous channel attributes");
-                            if (values("event_id")[0] !== recovery.message.receiptId || values("conversation")[0] !== recovery.message.seatId || values("kind")[0] !== "message" || !isDeepStrictEqual(values("source"),["plugin:clankie-worker:clankie","captain"]))
+                            if (values("event_id")[0] !== recovery.message.receiptId || values("conversation")[0] !== recovery.message.seatId || values("kind")[0] !== "message" || !isDeepStrictEqual(values("source"),[row.origin.server,"captain"]))
                                 throw new Error("Original channel recipient changed");
                             const fingerprint = crypto.createHash("sha256").update(outer[2].replace(/\r\n?/gu,"\n").trim()).digest("hex");
                             if (fingerprint !== claim.fingerprint || normalizeCwd(row.cwd) !== normalizeCwd(recovery.cwd) || row.sessionId + ".jsonl" !== entry.name || (recovery.beforeIds.includes(row.uuid) || recovery.beforeIds.includes("claude:" + row.uuid)) || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(row.uuid) || !Number.isFinite(Date.parse(row.timestamp)))

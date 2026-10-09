@@ -15,11 +15,11 @@ export const OUTPUT_STYLE_PATH = join(pluginRoot, "output-styles", "clankie.md")
  * this is Claude Code rather than a pi session. The service's prompt sections
  * (persona, reach, address, model card) arrive through the SessionStart hook,
  * and the memory card through UserPromptSubmit, so none of them live here.
- * Channel events are explained once, in the \`clankie\` MCP server's instructions.
+ * Channel events are explained once, in the \`lead\` MCP server's instructions.
  */
 const SEAT_SECTION = `# This seat
 
-You are sitting in Claude Code, on your person's own plan, in the operator seat. It is the same seat the Clankie console holds: the same lane, the same authority, nothing more. Claude Code's built-in tools are your shell, files, and web on this machine, so here — unlike the service — the shell runs in the pane you sit in. Your own tools arrive over the \`clankie\` MCP server: pictures, video, diagrams, memory, self-wakes, herdr watches, Discord voice, PokeAgent play, mail, and connected services. Reach for them by name the way you would anywhere else. Service goals are not among them: \`create_goal\` refuses in this seat, so long work runs on wakes (\`this-machine\` covers how). The service still runs your body: Discord text and voice, play, and the phone keep working while you sit here.
+You are sitting in Claude Code, on your person's own plan, in the operator seat. It is the same seat the Clankie console holds: the same lane, the same authority, nothing more. Claude Code's built-in tools are your shell, files, and web on this machine, so here — unlike the service — the shell runs in the pane you sit in. Your own tools arrive over the \`lead\` MCP server: pictures, video, diagrams, memory, self-wakes, herdr watches, Discord voice, PokeAgent play, mail, and connected services. Reach for them by name the way you would anywhere else. Service goals are not among them: \`create_goal\` refuses in this seat, so long work runs on wakes (\`this-machine\` covers how). The service still runs your body: Discord text and voice, play, and the phone keep working while you sit here.
 
 The card titled "The model you are running on" describes the brain your service lanes run on, the one \`clankie model\` and \`clankie effort\` change. Claude Code's own \`/model\` changes this seat, not the lanes. Say which is which when asked.
 
@@ -48,6 +48,12 @@ export function renderOutputStyle(identity = readFileSync(IDENTITY_PATH, "utf8")
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const projection = readFileSync(join(pluginRoot, "../../packages/protocol/src/mcp-result.mjs"), "utf8");
+  const projectionPath = join(pluginRoot, "worker/bin/mcp-result.mjs");
+  if (process.argv.includes("--check")) {
+    if (readFileSync(projectionPath, "utf8") !== projection)
+      throw new Error("Worker MCP projection is stale; run node integrations/claude-plugin/build.mjs");
+  } else writeFileSync(projectionPath, projection);
   const rendered = renderOutputStyle();
   if (process.argv.includes("--check")) {
     let current = "";

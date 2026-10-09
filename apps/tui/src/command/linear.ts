@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import type { CaptainRouteFetcher } from "../session/operator-conversations.ts";
 import { ownerSettingsApi } from "./owner-settings-api.ts";
 import {
@@ -34,11 +35,10 @@ const LINEAR_USAGE =
 function publishingResult(result: Awaited<ReturnType<LaneToolUpstream["callTool"]>>) {
   // Lane tools wrap the host result as JSON text. A refused host call is not
   // necessarily a protocol-level MCP error, so inspect both boundaries.
-  const content = result.content.find((block) => block.type === "text");
   try {
     const host = z
       .object({ outcome: z.literal("ok"), isError: z.boolean().optional() })
-      .safeParse(JSON.parse(content?.type === "text" ? content.text : "null"));
+      .safeParse(decodeMcpResult(result));
     return { ...result, ok: result.isError !== true && host.success && host.data.isError !== true };
   } catch {
     return { ...result, ok: false };

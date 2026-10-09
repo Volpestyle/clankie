@@ -31,8 +31,8 @@ it("registers a private hire before startup discovery, injects the worker bridge
     start: async (options) => {
       options.onServerStarted?.(42);
       expect(localProcess).toHaveBeenCalledWith(42, "w1:p1");
-      expect(options.config).toContain("mcp_servers.clankie.enabled=true");
-      expect(options.config).toContain('mcp_servers.clankie.args=["mcp","--fleet"]');
+      expect(options.config).toContain("mcp_servers.worker.enabled=true");
+      expect(options.config).toContain('mcp_servers.worker.args=["mcp","--fleet"]');
       expect(options.env).toEqual({
         CODEX_HOME: "/another-account",
         HERDR_PANE_ID: "w1:p1",

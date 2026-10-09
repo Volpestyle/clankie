@@ -1,3 +1,4 @@
+import { readableMcpResult } from "./mcp-result.mjs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -96,7 +97,11 @@ const PEER_TOOLS = [
   },
 ];
 
-const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+const send = (message) => {
+  if (Array.isArray(message.result?.content))
+    message = { ...message, result: readableMcpResult(message.result) };
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+};
 const log = (line) => process.stderr.write(`clankie-worker: ${line}\n`);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Nothing was sent: the endpoint refused the connection, so one retry cannot duplicate an effect. */

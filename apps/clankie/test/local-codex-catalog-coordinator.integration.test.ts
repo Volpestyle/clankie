@@ -29,7 +29,7 @@ async function until(predicate: () => boolean) {
 }
 
 /** Real Unix WebSocket RPC + private config/registry/journal files. Kernel observation is the sole fixture seam. */
-async function fixture(pid = 42, paneId = "w1:p1") {
+async function fixture(pid = 42, paneId = "w1:p1", serverName = "clankie") {
   const root = await realpath(await mkdtemp(join(tmpdir(), "codex-catalog-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "worker-codex", "seat-owned"),
@@ -123,7 +123,7 @@ async function fixture(pid = 42, paneId = "w1:p1") {
           const revision = await envRevision(),
             config = {
               mcp_servers: {
-                clankie: {
+                [serverName]: {
                   enabled: true,
                   command: "clankie",
                   args: ["mcp", "--fleet"],
@@ -153,7 +153,7 @@ async function fixture(pid = 42, paneId = "w1:p1") {
         if (method === "config/value/write") {
           expect(params.expectedVersion).toBe(await version());
           expect(params.filePath).toBe(configPath);
-          expect(params.keyPath).toBe("mcp_servers.clankie.env.CLANKIE_CATALOG_REVISION");
+          expect(params.keyPath).toBe(`mcp_servers.${serverName}.env.CLANKIE_CATALOG_REVISION`);
           await writeFile(
             configPath,
             `# owned copied worker config\nCLANKIE_CATALOG_REVISION="${String(params.value)}"\n`,
@@ -174,12 +174,12 @@ async function fixture(pid = 42, paneId = "w1:p1") {
         }
         if (method === "mcpServerStatus/list") {
           expect(["root", "child"]).toContain(params.threadId);
-          expect(params.serverName).toBe("clankie");
+          expect(params.serverName).toBeUndefined();
           expect(params.detail).toBe("toolsAndAuthOnly");
           return send(socket, message.id, {
             data: [
               {
-                name: "clankie",
+                name: serverName,
                 runtimeStatus,
                 toolsError: catalogReady ? null : "still reconnecting",
                 tools: params.threadId === "child" ? { ...tools, ...childExtraTools } : tools,
@@ -324,38 +324,41 @@ async function fixture(pid = 42, paneId = "w1:p1") {
   };
 }
 
-it("refreshes original root and descendants once, retains native config provenance, and survives service restart without schema signals", async () => {
-  const f = await fixture(),
-    first = f.coordinator();
-  expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([
-    { outcome: "catalog-refreshed", catalogs: [{ threadId: "child" }, { threadId: "root" }] },
-  ]);
-  expect(f.count("config/value/write")).toBe(1);
-  expect(f.count("config/mcpServer/reload")).toBe(1);
-  expect(readLocalCodexRecords(f.recordsPath)[0]!.catalogConfig?.filePath).toBe(f.configPath);
-  expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "catalog-refreshed" }]);
-  expect(f.count("config/value/write")).toBe(1);
-  first.close();
-  f.restartRegistry();
-  expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([
-    { outcome: "catalog-refreshed" },
-  ]);
-  expect(f.count("config/value/write")).toBe(2);
-  expect(f.count("config/mcpServer/reload")).toBe(2);
-  expect(
-    f.calls.every((call) =>
-      [
-        "initialize",
-        "thread/loaded/list",
-        "thread/read",
-        "config/read",
-        "config/value/write",
-        "config/mcpServer/reload",
-        "mcpServerStatus/list",
-      ].includes(call.method),
-    ),
-  ).toBe(true);
-});
+it.each(["clankie", "worker"])(
+  "refreshes %s at its original server key across service restart",
+  async (serverName) => {
+    const f = await fixture(42, "w1:p1", serverName),
+      first = f.coordinator();
+    expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([
+      { outcome: "catalog-refreshed", catalogs: [{ threadId: "child" }, { threadId: "root" }] },
+    ]);
+    expect(f.count("config/value/write")).toBe(1);
+    expect(f.count("config/mcpServer/reload")).toBe(1);
+    expect(readLocalCodexRecords(f.recordsPath)[0]!.catalogConfig?.filePath).toBe(f.configPath);
+    expect(await first.refresh({ revision: "deploy-one" })).toMatchObject([{ outcome: "catalog-refreshed" }]);
+    expect(f.count("config/value/write")).toBe(1);
+    first.close();
+    f.restartRegistry();
+    expect(await f.coordinator().refresh({ revision: "deploy-two" })).toMatchObject([
+      { outcome: "catalog-refreshed" },
+    ]);
+    expect(f.count("config/value/write")).toBe(2);
+    expect(f.count("config/mcpServer/reload")).toBe(2);
+    expect(
+      f.calls.every((call) =>
+        [
+          "initialize",
+          "thread/loaded/list",
+          "thread/read",
+          "config/read",
+          "config/value/write",
+          "config/mcpServer/reload",
+          "mcpServerStatus/list",
+        ].includes(call.method),
+      ),
+    ).toBe(true);
+  },
+);
 
 it("recovers a legacy registration only from the original native endpoint and loaded registered occupant digest", async () => {
   const f = await fixture();

@@ -28,7 +28,7 @@ live capture or inspected output, recorded as evidence.
 
 ## Find the usable route
 
-Start with the route your session actually exposes. Native `clankie` MCP tools
+Start with the route your session actually exposes. Native `worker` MCP tools (`clankie` on older installs)
 are the worker path: use their current schemas, not another account's similarly
 named connector. `message_clankie` reaches him as agent output. Send a concrete
 question or useful result when the assignment calls for it; it does not become

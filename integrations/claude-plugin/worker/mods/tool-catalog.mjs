@@ -142,13 +142,33 @@ async function observeCatalog($, deadline, sessionId, probe) {
       return;
     // The native client resolves this plugin's server, including a transport
     // deduplicated under another registration. Use that exact namespace.
-    const connection = await $.mcp.connect("clankie");
+    const preferred = bridge === "worker" ? "worker" : "lead";
+    let name = preferred;
+    let connection;
+    try {
+      connection = await $.mcp.connect(name);
+    } catch {
+      /* Legacy registration. */
+    }
+    if (!connection?.isConnected) {
+      let legacy;
+      try {
+        legacy = await $.mcp.connect("clankie");
+      } catch {
+        /* Absent legacy registration. */
+      }
+      if (legacy?.isConnected) {
+        name = "clankie";
+        connection = legacy;
+      }
+    }
+    if (!connection) throw new Error("Native MCP API unavailable");
     if (!(await current())) return;
     // Refused connections omit server in Claude's native API. Its own plugin
     // registration still has a known namespace; an available native catalog
     // with none of that server's tools proves a mismatch, including rejection
     // of the entire server's tools/list.
-    const server = connection.isConnected ? connection.server : `plugin:${$.plugin.name}:clankie`;
+    const server = connection?.isConnected ? connection.server : `plugin:${$.plugin.name}:${name}`;
     if (typeof server !== "string") throw new Error("Native MCP namespace is unavailable");
     const prefix = `mcp__${server.replace(/[^a-zA-Z0-9_-]/g, "_")}__`;
     // Keep only this server's exact namespace; another server with the same

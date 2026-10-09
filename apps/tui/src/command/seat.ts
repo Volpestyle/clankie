@@ -35,7 +35,7 @@ const SEAT_AGENT_NAME = "clankie";
 // Without the allow, auto mode's classifier can refuse his own tools mid-turn.
 const SEAT_PERMISSIONS = {
   permissions: {
-    allow: ["Bash(clankie)", "Bash(clankie *)", "mcp__plugin_clankie_clankie"],
+    allow: ["Bash(clankie)", "Bash(clankie *)", "mcp__plugin_clankie_lead", "mcp__plugin_clankie_clankie"],
     deny: ["mcp__linear-server"],
   },
 };

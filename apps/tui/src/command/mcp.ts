@@ -1,3 +1,4 @@
+import { readableMcpResult } from "@clankie/protocol/mcp-result";
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
@@ -368,15 +369,18 @@ export function createSeatBridge(
           content: [{ type: "text", text: "Invalid owner-update publication identity" }],
         };
       const publicationId = publication?.success ? publication.data.publicationId : undefined;
-      return upstream.callTool(
+      return readableMcpResult(
+        await upstream.callTool(
+          request.params.name,
+          request.params.arguments ?? {},
+          purpose === "background" || publicationId !== undefined
+            ? {
+                ...(purpose === "background" ? { background: true } : {}),
+                ...(publicationId === undefined ? {} : { publicationId }),
+              }
+            : undefined,
+        ),
         request.params.name,
-        request.params.arguments ?? {},
-        purpose === "background" || publicationId !== undefined
-          ? {
-              ...(purpose === "background" ? { background: true } : {}),
-              ...(publicationId === undefined ? {} : { publicationId }),
-            }
-          : undefined,
       );
     }
     const args = request.params.arguments ?? {};
@@ -856,10 +860,14 @@ export async function connectLaneUpstream(input: {
           ? OwnerUpdatePublicationSchema.parse({ publicationId: options?.publicationId ?? randomUUID() })
               .publicationId
           : undefined;
-      const preserveResult = (result: Awaited<ReturnType<Client["callTool"]>>): CallToolResult => ({
-        ...result,
-        content: Array.isArray(result.content) ? (result.content as CallToolResult["content"]) : [],
-      });
+      const preserveResult = (result: Awaited<ReturnType<Client["callTool"]>>): CallToolResult =>
+        readableMcpResult(
+          {
+            ...result,
+            content: Array.isArray(result.content) ? (result.content as CallToolResult["content"]) : [],
+          },
+          name,
+        );
       try {
         return preserveResult(
           await request((active) =>
@@ -1036,7 +1044,7 @@ export function createFleetSeatBridge(
       if (request.params.name === MESSAGE_CLANKIE_STATUS_TOOL.name && status) {
         try {
           const receipt = await status(request.params.arguments?.deliveryId);
-          return { content: [{ type: "text", text: JSON.stringify(receipt) }] };
+          return readableMcpResult({ content: [{ type: "text" as const, text: JSON.stringify(receipt) }] });
         } catch (error) {
           return {
             content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
@@ -1049,10 +1057,10 @@ export function createFleetSeatBridge(
       const text = String((request.params.arguments as { text?: unknown } | undefined)?.text ?? "").trim();
       if (text === "") return { content: [{ type: "text", text: "Say what to tell him." }], isError: true };
       if (uncertain && !durable)
-        return {
+        return readableMcpResult({
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: JSON.stringify({
                 received: false,
                 deliveryStage: "uncertain",
@@ -1061,7 +1069,7 @@ export function createFleetSeatBridge(
             },
           ],
           isError: true,
-        };
+        });
       const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX)).catch(() => {
         uncertain = true;
         return { received: false, deliveryStage: "uncertain" as const };
@@ -1069,10 +1077,10 @@ export function createFleetSeatBridge(
       const receipt =
         typeof sent === "boolean" ? { received: sent, deliveryStage: sent ? "stored" : "unavailable" } : sent;
       if (receipt.deliveryStage === "uncertain") uncertain = true;
-      return {
-        content: [{ type: "text", text: JSON.stringify(receipt) }],
+      return readableMcpResult({
+        content: [{ type: "text" as const, text: JSON.stringify(receipt) }],
         ...(receipt.received ? {} : { isError: true }),
-      };
+      });
     });
   return server;
 }

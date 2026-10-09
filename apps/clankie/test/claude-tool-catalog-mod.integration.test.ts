@@ -201,7 +201,7 @@ test("original Claude mod reports its exact native server catalog repeatedly thr
     expect.objectContaining({ sessionId: "original-session", tools: ["message_clankie"] }),
   ]);
   expect(f.api.mcp.connect).toHaveBeenCalledTimes(2);
-  expect(f.api.mcp.connect).toHaveBeenCalledWith("clankie");
+  expect(f.api.mcp.connect).toHaveBeenCalledWith("worker");
   expect(f.api.ui.log).not.toHaveBeenCalled();
 });
 
@@ -396,3 +396,20 @@ test("a downstream native completion error preserves its result and cannot wedge
   await f.drain();
   expect(f.reports).toHaveLength(2);
 });
+
+test.each(["worker", "clankie"])(
+  "resolves the %s native registration without accepting another namespace",
+  async (server) => {
+    const f = await fixture();
+    f.api.mcp.connect.mockImplementation(async (name?: string) => ({
+      isConnected: name === server,
+      server: `plugin:clankie-worker:${server}`,
+    }));
+    f.api.tool.list.mockResolvedValue([
+      { name: `mcp__plugin_clankie-worker_${server}__message_clankie`, mcp: true },
+      { name: "mcp__unrelated__clankie_call", mcp: true },
+    ]);
+    await f.start();
+    expect(f.reports[0]).toMatchObject({ tools: ["message_clankie"] });
+  },
+);

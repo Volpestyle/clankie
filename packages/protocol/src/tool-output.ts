@@ -33,9 +33,12 @@ function outputParts(value: unknown, depth: number): ToolOutputPart[] {
       return [{ kind: "text", text: value }];
     }
   }
+  if (record(value) && record(value.structuredContent)) {
+    return [...outputParts(value.content, depth + 1), ...outputParts(value.structuredContent, depth + 1)];
+  }
   // The authored MCP host uses a string content field; ordinary API objects
   // with a content string are retained, matching the original app contract.
-  if (record(value) && typeof value.outcome === "string" && typeof value.content === "string") {
+  if (record(value) && typeof value.outcome === "string" && "content" in value) {
     return outputParts(value.content, depth + 1);
   }
   const content = record(value) && Array.isArray(value.content) ? value.content : value;

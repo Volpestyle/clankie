@@ -42,13 +42,9 @@ export async function verifyNativeMcp(input: {
   // This first-turn check disables built-ins, including ToolSearch. Load the
   // test server eagerly rather than racing Claude's background/deferred catalog.
   // https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral
-  await writeFile(
-    claudeConfig,
-    JSON.stringify({ mcpServers: { clankie: { ...common, alwaysLoad: true } } }),
-    {
-      mode: 0o600,
-    },
-  );
+  await writeFile(claudeConfig, JSON.stringify({ mcpServers: { lead: { ...common, alwaysLoad: true } } }), {
+    mode: 0o600,
+  });
   // Equivalent to claude2: same existing alternate profile, no sign-in or account changes.
   const claudeProfile = join(ownerHome, ".claude-james");
   const claudeTranscript = () => {
@@ -70,7 +66,7 @@ export async function verifyNativeMcp(input: {
       "--setting-sources",
       "user",
       "--settings",
-      JSON.stringify({ permissions: { allow: ["mcp__clankie__memory", "mcp__clankie__get_goal"] } }),
+      JSON.stringify({ permissions: { allow: ["mcp__lead__memory", "mcp__lead__get_goal"] } }),
       "--tools",
       "",
       "--effort",
@@ -109,12 +105,12 @@ export async function verifyNativeMcp(input: {
       },
       env: { ...env, CODEX_HOME: codexHome } as Record<string, string>,
       config: [
-        `mcp_servers.clankie.command=${JSON.stringify(common.command)}`,
-        `mcp_servers.clankie.args=${JSON.stringify(common.args)}`,
-        `mcp_servers.clankie.env_vars=${JSON.stringify(Object.keys(common.env))}`,
+        `mcp_servers.lead.command=${JSON.stringify(common.command)}`,
+        `mcp_servers.lead.args=${JSON.stringify(common.args)}`,
+        `mcp_servers.lead.env_vars=${JSON.stringify(Object.keys(common.env))}`,
         // Only the two owner-requested reads, in this disposable profile.
-        'mcp_servers.clankie.tools.memory.approval_mode="approve"',
-        'mcp_servers.clankie.tools.get_goal.approval_mode="approve"',
+        'mcp_servers.lead.tools.memory.approval_mode="approve"',
+        'mcp_servers.lead.tools.get_goal.approval_mode="approve"',
       ],
       threadStartTimeoutMs: 30_000,
       startView: async (args) => {
@@ -156,7 +152,7 @@ export async function verifyNativeMcp(input: {
       if (
         catalog.data?.some(
           (row) =>
-            row.name === "clankie" &&
+            row.name === "lead" &&
             row.runtimeStatus === "connected" &&
             ["memory", "get_goal"].every((name) => Object.hasOwn(row.tools ?? {}, name)),
         )
@@ -205,7 +201,7 @@ export async function verifyNativeMcp(input: {
             return (
               params.threadId === codex!.threadId &&
               params.item?.type === "mcpToolCall" &&
-              params.item.server === "clankie" &&
+              params.item.server === "lead" &&
               params.item.tool === name &&
               params.item.status === "completed" &&
               params.item.error === null &&

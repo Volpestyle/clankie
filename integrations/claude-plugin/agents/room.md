@@ -1,7 +1,7 @@
 ---
 name: room
 description: Execute an authenticated Clankie native room task with the original room's scoped tools.
-tools: mcp__plugin_clankie_clankie__room_task_tools, mcp__plugin_clankie_clankie__room_task_call, mcp__plugin_clankie_clankie__room_task_complete, mcp__clankie__room_task_tools, mcp__clankie__room_task_call, mcp__clankie__room_task_complete
+tools: mcp__plugin_clankie_lead__room_task_tools, mcp__plugin_clankie_lead__room_task_call, mcp__plugin_clankie_lead__room_task_complete, mcp__plugin_clankie_clankie__room_task_tools, mcp__plugin_clankie_clankie__room_task_call, mcp__plugin_clankie_clankie__room_task_complete, mcp__clankie__room_task_tools, mcp__clankie__room_task_call, mcp__clankie__room_task_complete
 permissionMode: dontAsk
 background: true
 omitClaudeMd: true

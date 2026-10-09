@@ -503,10 +503,7 @@ const localCodexServer: CodexServerLauncher = async (input) => {
       [
         ...input.configArgs,
         ...(input.catalogRefresh
-          ? [
-              "-c",
-              `mcp_servers.clankie.env.CLANKIE_CODEX_CATALOG_SIGNAL=${JSON.stringify(catalogSignalPath)}`,
-            ]
+          ? ["-c", `mcp_servers.worker.env.CLANKIE_CODEX_CATALOG_SIGNAL=${JSON.stringify(catalogSignalPath)}`]
           : []),
         "app-server",
         "--listen",
@@ -1051,12 +1048,17 @@ export async function startCodexAppServerSeat(options: {
           const status = record(
             await client!.request(
               "mcpServerStatus/list",
-              { threadId, serverName: "clankie", detail: "toolsAndAuthOnly" },
+              { threadId, detail: "toolsAndAuthOnly" },
               Math.min(2_000, deadline - Date.now()),
             ),
           );
           const rows = Array.isArray(status.data) ? status.data.map(record) : [];
-          const matches = rows.filter((row) => row.name === "clankie");
+          const matches = rows.filter(
+            (row) =>
+              [options.catalogBridge === "operator" ? "lead" : "worker", "clankie"].includes(
+                String(row.name),
+              ) && row.runtimeStatus !== "disabled",
+          );
           if (
             status.nextCursor == null &&
             matches.length === 1 &&

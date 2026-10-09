@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "clankie": {
+    "worker": {
       "command": "node",
       "args": ["bin/fleet-mcp.mjs"],
       "env_vars": ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "CLANKIE_STATE"],

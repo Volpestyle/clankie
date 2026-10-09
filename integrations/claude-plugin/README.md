@@ -37,7 +37,7 @@ plugin can uniquely declare. Everything else lives in the service and the
 | Output style `Clankie`                                                                                                                                                     | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`.                                                                                                 |
 | `SessionStart` hook                                                                                                                                                        | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,address,model,conversation --harness claude`: the owner persona, reach, address, model card, the recent shared conversation log, and only the project instructions Claude Code does not load itself |
 | `UserPromptSubmit` hook                                                                                                                                                    | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card once per session, then only its new notes                                                                                                                                               |
-| MCP server `clankie`                                                                                                                                                       | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                                                                                                                               |
+| MCP server `lead`                                                                                                                                                          | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                                                                                                                               |
 | Skills `/clankie:clankie`, `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:desktop-control`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                                                                                                                            |
 
 The output style is generated: edit `apps/clankie/src/captain/instructions.md`
@@ -121,7 +121,7 @@ claude plugin disable clankie@clankie  # if previously installed
 clankie claude --dry-run                # projected plugin, selected skills, channel: true
 ```
 
-In the session, `/mcp` lists the `clankie` server, `/clankie:this-machine`
+In the session, `/mcp` lists the `lead` server, `/clankie:this-machine`
 loads his install skill, and `clankie model status` runs without a prompt.
 
 ## Worker channel plugin (`clankie-worker`)
@@ -234,7 +234,7 @@ bank, not the harness.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | He answers as Claude Code                  | The seat was not launched by `clankie claude`, which enables the plugin for its session    |
 | Every Claude Code session answers as him   | The plugin is enabled at user scope; `claude plugin disable clankie@clankie`               |
-| `/mcp` shows `clankie` failed              | The service is down or the operator credential is missing: `clankie status`                |
+| `/mcp` shows `lead` failed                 | The service is down or the operator credential is missing: `clankie status`                |
 | No persona or memory card at session start | `clankie` is not on the hook's `PATH`; `pnpm cli:install` symlinks it into `~/.local/bin`  |
 | Wakes never arrive                         | The seat was loaded with `--plugin-dir`; install from the marketplace for the channel flag |
 | `claude plugin validate --strict` warns    | The skills are symlinks by design; sessions follow them, validation does not               |
@@ -425,3 +425,20 @@ sending seat without resending or marking the report read. Check before retrying
 or doing dependent work; an unknown status is not proof that nothing was sent.
 `clankie agents message-status DELIVERY_ID` provides the same read in your native
 pane.
+
+### MCP name and result migration
+
+New sessions register the operator server as `lead` and the worker server as
+`worker` (also in Codex). Claude displays `plugin:clankie:lead` and
+`plugin:clankie-worker:worker`. Existing `clankie` registrations retain their
+permission rules and catalog/receipt support until those sessions restart.
+Managed new Codex launches disable the old registration to avoid two bridges;
+refreshing an existing session writes its original registration's revision.
+Owner-managed configuration remains owner-managed.
+
+MCP results put a readable summary in the first text block and decoded data in
+`structuredContent`. Read that object, or use `decodeMcpResult` from
+`@clankie/protocol/mcp-result` for both current and retained legacy results.
+Service HTTP results and receipt journals retain their original format so older
+installed CLI publishers keep working; the display projection runs in native bridges. Errors, media and receipt metadata
+remain part of the result; an uncertain outcome must be reconciled, never retried.

@@ -55,3 +55,17 @@ describe("clankie linear post", () => {
     expect(callTool).not.toHaveBeenCalled();
   });
 });
+
+it.each(["ok", "refused", "uncertain"])(
+  "decodes summary-first %s without treating the summary as data",
+  async (outcome) => {
+    const result = await runLinearCommand(["post", "comment", "--json-stdin"], {
+      stdin: Readable.from(['{"personaId":"worker","issueId":"VUH-1887","body":"Evidence"}']),
+      callTool: async () => ({
+        content: [{ type: "text", text: "Readable summary" }],
+        structuredContent: { outcome, content: { id: "comment" }, isError: false },
+      }),
+    });
+    expect(result).toMatchObject({ ok: outcome === "ok" });
+  },
+);

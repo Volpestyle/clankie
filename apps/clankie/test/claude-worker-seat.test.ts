@@ -99,7 +99,7 @@ it("a worker launch enables its plugin for this session only and asks for the ap
     }),
   ).toEqual([
     "--settings",
-    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto"}}',
+    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_worker","mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto"}}',
     "--channels",
     "plugin:clankie-worker@clankie",
     "--model",
@@ -115,7 +115,7 @@ it("a worker launch enables its plugin for this session only and asks for the ap
       "mcp__linear-server",
     ])[1],
   ).toBe(
-    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto","deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
+    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_worker","mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto","deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
   );
   expect(channelBody(channel("line one\nline two"))).toBe("line one\nline two");
   expect(channelBody("plain prompt")).toBeUndefined();
@@ -156,7 +156,7 @@ it.each([true, false])(
     const settings = JSON.parse(start.mock.calls[0]?.[1]?.[1] ?? "{}");
     expect(settings.permissions).toEqual({
       defaultMode: "auto",
-      allow: ["mcp__plugin_clankie-worker_clankie"],
+      allow: ["mcp__plugin_clankie-worker_worker", "mcp__plugin_clankie-worker_clankie"],
       deny: ["mcp__tracker_for_cwd"],
     });
     expect(settings.permissions.ask).toBeUndefined();

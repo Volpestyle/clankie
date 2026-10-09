@@ -74,7 +74,7 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
         version: manifest.version ?? null,
         expectedVersion: expectedVersion ?? null,
         versionMatches: expectedVersion ? manifest.version === expectedVersion : null,
-        bridge: Boolean(mcp.mcpServers?.clankie),
+        bridge: Boolean(mcp.mcpServers?.worker ?? mcp.mcpServers?.clankie),
         legacyServerName: Boolean(mcp.mcpServers?.swarm),
         hooks:
           ["SessionStart", "UserPromptSubmit", "Stop"].every(
@@ -118,7 +118,12 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
   let registration = "absent";
   let registrationIdentityForwarding = false;
   try {
-    const result = JSON.parse(await run("codex", ["mcp", "get", "clankie", "--json"]));
+    let result;
+    try {
+      result = JSON.parse(await run("codex", ["mcp", "get", "worker", "--json"]));
+    } catch {
+      result = JSON.parse(await run("codex", ["mcp", "get", "clankie", "--json"]));
+    }
     const transport = result.transport ?? result;
     observedTransport = transport;
     registrationIdentityForwarding = forwardsIdentity(transport);
@@ -168,7 +173,7 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
     : undefined;
   const codexManifest = root ? await json(join(root, ".codex-plugin", "plugin.json")).catch(() => ({})) : {};
   const codexMcp = root ? await json(join(root, "codex-mcp.json")).catch(() => ({})) : {};
-  const bridgeSpec = codexMcp.mcpServers?.clankie;
+  const bridgeSpec = codexMcp.mcpServers?.worker ?? codexMcp.mcpServers?.clankie;
   const identityForwarding = forwardsIdentity(bridgeSpec);
   const bridge =
     codexManifest.mcpServers === "./codex-mcp.json" &&

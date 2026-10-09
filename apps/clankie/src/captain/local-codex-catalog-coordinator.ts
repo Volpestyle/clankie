@@ -11,7 +11,7 @@ import { isolatedCodexConfig } from "./codex-catalog-refresh.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { codexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
 
-const KEY = "mcp_servers.clankie.env.CLANKIE_CATALOG_REVISION";
+const revisionKey = (server: string) => `mcp_servers.${server}.env.CLANKIE_CATALOG_REVISION`;
 const REQUIRED_TOOLS = ["message_clankie", "message_clankie_status", "clankie_tools", "clankie_call"];
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -50,6 +50,7 @@ interface ThreadScope {
   busy: boolean;
 }
 interface ConfigProvenance {
+  server: "worker" | "clankie";
   home: string;
   filePath: string;
   expectedVersion: string;
@@ -58,6 +59,8 @@ interface ConfigProvenance {
 }
 interface Attempt {
   version: 1;
+  /** Old journals predate the server rename. */
+  server?: "clankie" | "worker";
   originalProof: string;
   revision: string;
   envRevision: string;
@@ -104,9 +107,11 @@ export function verifyLocalCodexCatalogOverrides(argv: readonly string[]): Reado
     const key = expression.slice(0, separator).trim();
     requireProof(
       !overrides.has(key) &&
-        key !== KEY &&
+        ![revisionKey("worker"), revisionKey("clankie")].includes(
+          key.replace(/^mcp_servers\.worker\./u, "mcp_servers.clankie."),
+        ) &&
         !(
-          key.startsWith("mcp_servers.clankie") &&
+          /^mcp_servers\.(?:worker|clankie)(?:\.|$)/u.test(key) &&
           ![
             "mcp_servers.clankie.enabled",
             "mcp_servers.clankie.command",
@@ -115,25 +120,35 @@ export function verifyLocalCodexCatalogOverrides(argv: readonly string[]): Reado
             "mcp_servers.clankie.default_tools_approval_mode",
             "mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES",
             "mcp_servers.clankie.env.CLANKIE_EXPECTED_REQUIRED_TOOL_NAMES",
-          ].includes(key)
+          ].includes(key.replace(/^mcp_servers\.worker\./u, "mcp_servers.clankie."))
         ),
       "native_codex_bridge_override_unproven",
     );
     overrides.set(key, JSON.parse(expression.slice(separator + 1)));
   }
+  const server = overrides.get("mcp_servers.worker.enabled") === true ? "worker" : "clankie";
+  const other = server === "worker" ? "clankie" : "worker";
   requireProof(
-    overrides.get("mcp_servers.clankie.enabled") === true &&
-      overrides.get("mcp_servers.clankie.command") === "clankie" &&
-      same(overrides.get("mcp_servers.clankie.args"), ["mcp", "--fleet"]) &&
-      same(overrides.get("mcp_servers.clankie.env_vars"), [
+    ![...overrides.keys()].some(
+      (key) =>
+        key.startsWith(`mcp_servers.${other}.`) &&
+        !(key === `mcp_servers.${other}.enabled` && overrides.get(key) === false),
+    ),
+    "native_codex_bridge_ambiguous",
+  );
+  requireProof(
+    overrides.get(`mcp_servers.${server}.enabled`) === true &&
+      overrides.get(`mcp_servers.${server}.command`) === "clankie" &&
+      same(overrides.get(`mcp_servers.${server}.args`), ["mcp", "--fleet"]) &&
+      same(overrides.get(`mcp_servers.${server}.env_vars`), [
         "HERDR_PANE_ID",
         "HERDR_SOCKET_PATH",
         "CLANKIE_STATE",
       ]) &&
       // Current managed launches approve this bridge through Clankie's own
       // service gates. Earlier supported launches omitted the override.
-      (!overrides.has("mcp_servers.clankie.default_tools_approval_mode") ||
-        overrides.get("mcp_servers.clankie.default_tools_approval_mode") === "approve"),
+      (!overrides.has(`mcp_servers.${server}.default_tools_approval_mode`) ||
+        overrides.get(`mcp_servers.${server}.default_tools_approval_mode`) === "approve"),
     "original_codex_tui_bridge_not_managed_fleet",
   );
   return overrides;
@@ -330,12 +345,21 @@ async function configuration(
       !(
         layer.disabledReason == null &&
         precedence[type]! + (type === "user" && name.profile != null ? 1 : 0) > 20 &&
-        nested(layer.config, KEY.split(".")) !== undefined
+        ["worker", "clankie"].some(
+          (server) => nested(layer.config, revisionKey(server).split(".")) !== undefined,
+        )
       ),
       "codex_revision_masked_by_higher_layer",
     );
   }
-  const effective = object(nested(value.config, ["mcp_servers", "clankie"]));
+  const servers = object(nested(value.config, ["mcp_servers"]));
+  const candidates = (["worker", "clankie"] as const).filter((name) => {
+    const row = object(servers[name]);
+    return row.enabled !== false && row.command !== undefined;
+  });
+  requireProof(candidates.length === 1, "native_codex_bridge_ambiguous");
+  const server = candidates[0]!;
+  const effective = object(servers[server]);
   requireProof(
     effective.enabled !== false &&
       effective.command === "clankie" &&
@@ -351,6 +375,7 @@ async function configuration(
   const revision = env.CLANKIE_CATALOG_REVISION;
   requireProof(revision === undefined || revisionValid(revision), "native_codex_revision_invalid");
   return {
+    server,
     home,
     filePath,
     expectedVersion: String(users[0]!.version),
@@ -460,6 +485,7 @@ async function readAttempt(path: string): Promise<Attempt | undefined> {
     const value = object(JSON.parse(await readFile(path, "utf8")));
     requireProof(
       value.version === 1 &&
+        (value.server === undefined || ["clankie", "worker"].includes(String(value.server))) &&
         typeof value.originalProof === "string" &&
         /^[a-f0-9]{64}$/u.test(value.originalProof) &&
         revisionValid(value.revision) &&
@@ -622,7 +648,10 @@ export function createLocalCodexCatalogCoordinator(input: {
       const config = configs[0]!;
       requireProof(
         configs.every(
-          (row) => row.filePath === config.filePath && row.expectedVersion === config.expectedVersion,
+          (row) =>
+            row.server === config.server &&
+            row.filePath === config.filePath &&
+            row.expectedVersion === config.expectedVersion,
         ),
         "original_codex_user_versions_conflict",
       );
@@ -679,7 +708,7 @@ export function createLocalCodexCatalogCoordinator(input: {
       const prior = await readAttempt(path);
       if (prior)
         requireProof(
-          prior.originalProof === hash(identity.proof),
+          prior.originalProof === hash(identity.proof) && (prior.server ?? "clankie") === config.server,
           "original_codex_durable_controller_proof_changed",
         );
       const observeCatalogs = async () => {
@@ -846,6 +875,7 @@ export function createLocalCodexCatalogCoordinator(input: {
         ? prior!
         : {
             version: 1,
+            server: config.server,
             originalProof: hash(identity.proof),
             revision,
             envRevision: randomUUID(),
@@ -878,7 +908,9 @@ export function createLocalCodexCatalogCoordinator(input: {
         for (const cwd of new Set(threads.map((row) => row.cwd))) {
           const current = await configuration(request, cwd, config.home);
           requireProof(
-            current.filePath === config.filePath && current.expectedVersion === version,
+            current.server === config.server &&
+              current.filePath === config.filePath &&
+              current.expectedVersion === version,
             "original_codex_config_version_changed",
           );
           if (expectedRevision !== undefined)
@@ -911,7 +943,7 @@ export function createLocalCodexCatalogCoordinator(input: {
         requireProof(authority.current?.() !== false, "codex_refresh_operator_authority_changed");
         const written = object(
           await request("config/value/write", {
-            keyPath: KEY,
+            keyPath: revisionKey(config.server),
             value: attempt.envRevision,
             mergeStrategy: "upsert",
             filePath: config.filePath,

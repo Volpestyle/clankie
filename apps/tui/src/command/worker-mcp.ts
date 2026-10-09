@@ -1,3 +1,4 @@
+import { readableMcpResult } from "@clankie/protocol/mcp-result";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { CapabilityGrantSchema } from "@clankie/credential-broker";
 import { z } from "zod";
@@ -5,7 +6,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  type CallToolResult,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 function workerEndpoint(endpoint: string): URL {
@@ -56,7 +61,16 @@ export async function runWorkerMcp(path: string, transport?: Transport): Promise
       }) as unknown as Transport,
     );
     server.setRequestHandler(ListToolsRequestSchema, () => upstream.listTools());
-    server.setRequestHandler(CallToolRequestSchema, (request) => upstream.callTool(request.params));
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const result = await upstream.callTool(request.params);
+      return readableMcpResult(
+        {
+          ...result,
+          content: Array.isArray(result.content) ? (result.content as CallToolResult["content"]) : [],
+        },
+        request.params.name,
+      );
+    });
     await server.connect(transport ?? new StdioServerTransport());
     await closed;
     return 0;

@@ -170,12 +170,12 @@ describe("a remote Codex app-server (VUH-1527)", () => {
       env: { CLANKIE_EXPECTED_TOOL_NAMES: "[]" },
       configArgs: [
         "-c",
-        `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify('["linear_get_issue"]')}`,
+        `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify('["linear_get_issue"]')}`,
       ],
     },
     {
       env: { OPENAI_API_KEY: "x", CLANKIE_EXPECTED_TOOL_NAMES: "[]" },
-      configArgs: ["-c", 'mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"'],
+      configArgs: ["-c", 'mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"'],
     },
   ])("refuses a per-hire environment it cannot carry to the other machine: $env", async (input) => {
     const shell = vi.fn(async () => "");
@@ -488,9 +488,9 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
       "-c",
       "mcp_servers.other.required=true",
       "-c",
-      'mcp_servers.clankie.env.OWNER_KEEP="yes"',
+      'mcp_servers.worker.env.OWNER_KEEP="yes"',
       "-c",
-      `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(["linear_get_issue"]))}`,
+      `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(["linear_get_issue"]))}`,
     ],
     env: {
       HERDR_PANE_ID: "w1:p1",
@@ -505,8 +505,8 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
   );
   const script = decoded(commands[0]!);
   expect(script).toContain("mcp_servers.other.required=true");
-  expect(script).toContain('mcp_servers.clankie.env.OWNER_KEEP="yes"');
-  expect(script).toContain("mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES");
+  expect(script).toContain('mcp_servers.worker.env.OWNER_KEEP="yes"');
+  expect(script).toContain("mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES");
   expect(script).not.toContain("$environment['CLANKIE_EXPECTED_TOOL_NAMES']");
   expect(script).toContain("$environment['CLANKIE_CODEX_CATALOG_OBSERVED']='1'");
   expect(script).toContain("GetProcessTimes(created.process");
@@ -517,14 +517,14 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
   expect(script).toContain("[Environment]::GetEnvironmentVariables()");
   expect(script).toContain("Worker bridge is stale or redirected");
   expect(script).toContain("Get-Command node.exe -All");
-  expect(script).toContain("mcp_servers.clankie.env.HERDR_PANE_ID");
-  expect(script).not.toContain("mcp_servers.clankie.env_vars=");
-  expect(script).toContain('mcp_servers.clankie.env.NODE_OPTIONS=""');
-  expect(server.viewConfigArgs).toContain('mcp_servers.clankie.env.NODE_OPTIONS=""');
+  expect(script).toContain("mcp_servers.worker.env.HERDR_PANE_ID");
+  expect(script).not.toContain("mcp_servers.worker.env_vars=");
+  expect(script).toContain('mcp_servers.worker.env.NODE_OPTIONS=""');
+  expect(server.viewConfigArgs).toContain('mcp_servers.worker.env.NODE_OPTIONS=""');
   expect(script.indexOf("Worker bridge is stale or redirected")).toBeLessThan(
     script.indexOf("$created=[ClankieCodexLaunch]::Start"),
   );
-  expect(server.viewConfigArgs).toContain('mcp_servers.clankie.command="C:\\\\node.exe"');
+  expect(server.viewConfigArgs).toContain('mcp_servers.worker.command="C:\\\\node.exe"');
   await server.validateCatalog?.();
   expect(script).not.toContain("Invoke-CimMethod");
   expect(script).not.toContain("Get-Process -Id $created");
@@ -629,9 +629,9 @@ it("fits the approved 21-tool catalog and realistic Windows launch configuration
       "-c",
       "mcp_servers.other.required=true",
       "-c",
-      "mcp_servers.clankie.required=false",
+      "mcp_servers.worker.required=false",
       "-c",
-      `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_["linear_create_attachment", "linear_create_attachment_from_upload", "linear_extract_images", "linear_get_attachment", "linear_get_document", "linear_get_issue", "linear_get_project", "linear_get_status_updates", "linear_get_user", "linear_list_comments", "linear_list_documents", "linear_list_issue_labels", "linear_list_issue_statuses", "linear_list_issues", "linear_list_milestones", "linear_list_projects", "linear_list_teams", "linear_list_users", "linear_prepare_attachment_upload", "linear_save_comment", "linear_save_issue"]=${JSON.stringify(JSON.stringify(names))}`,
+      `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_["linear_create_attachment", "linear_create_attachment_from_upload", "linear_extract_images", "linear_get_attachment", "linear_get_document", "linear_get_issue", "linear_get_project", "linear_get_status_updates", "linear_get_user", "linear_list_comments", "linear_list_documents", "linear_list_issue_labels", "linear_list_issue_statuses", "linear_list_issues", "linear_list_milestones", "linear_list_projects", "linear_list_teams", "linear_list_users", "linear_prepare_attachment_upload", "linear_save_comment", "linear_save_issue"]=${JSON.stringify(JSON.stringify(names))}`,
       "app-server",
       "--listen",
       "ws://127.0.0.1:45000",

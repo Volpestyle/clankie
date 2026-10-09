@@ -304,10 +304,10 @@ export function createCodexSeatAdapter(
           // Only this dedicated remote launch must bootstrap before Clankie's
           // project assignment exists. Other servers retain their required flags.
           const expectedToolNames = [...new Set(view.expectedToolNames ?? [])].sort();
-          if (options.serverForView) trackerOverrides.push("mcp_servers.clankie.required=false");
+          if (options.serverForView) trackerOverrides.push("mcp_servers.worker.required=false");
           if (options.serverForView || options.localProcess)
             trackerOverrides.push(
-              `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(expectedToolNames))}`,
+              `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(expectedToolNames))}`,
             );
           // A private local app-server needs the same worker bridge even when its
           // selected account has no user-scoped MCP registration. This grants no tools.
@@ -316,11 +316,12 @@ export function createCodexSeatAdapter(
           // The approval applies to this one server, never to other MCP servers.
           if (options.localProcess)
             trackerOverrides.push(
-              "mcp_servers.clankie.enabled=true",
-              'mcp_servers.clankie.command="clankie"',
-              'mcp_servers.clankie.args=["mcp","--fleet"]',
-              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
-              'mcp_servers.clankie.default_tools_approval_mode="approve"',
+              "mcp_servers.clankie.enabled=false",
+              "mcp_servers.worker.enabled=true",
+              'mcp_servers.worker.command="clankie"',
+              'mcp_servers.worker.args=["mcp","--fleet"]',
+              'mcp_servers.worker.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
+              'mcp_servers.worker.default_tools_approval_mode="approve"',
             );
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({

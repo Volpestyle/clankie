@@ -111,7 +111,10 @@ const CLAUDE_MANAGED_SETTINGS =
  * tools the owner granted that fleet (Claude names a plugin's MCP server
  * `mcp__plugin_<plugin>_<server>`).
  */
-const WORKER_SERVER_RULE = `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`;
+const WORKER_SERVER_RULES = [
+  `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_worker`,
+  `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`,
+];
 
 function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
   // Hired workers use Claude's auto classifier for routine work (James,
@@ -121,7 +124,7 @@ function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
   return JSON.stringify({
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
     permissions: {
-      allow: [WORKER_SERVER_RULE],
+      allow: WORKER_SERVER_RULES,
       defaultMode: "auto",
       ...(trackerDeny.length === 0 ? {} : { deny: [...trackerDeny] }),
     },

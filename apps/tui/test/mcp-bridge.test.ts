@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -672,12 +673,12 @@ it.each(["stored", "lost"] as const)(
     await client.connect(clientTransport);
     try {
       const result = await client.callTool({ name: "message_clankie", arguments: { text: "progress" } });
-      const content = result.content as { type: string; text: string }[];
-      expect(JSON.parse(content[0]!.text)).toMatchObject({
+      const decoded = decodeMcpResult(result) as { deliveryStage: string };
+      expect(decoded).toMatchObject({
         received: mode === "stored",
         deliveryStage: mode === "stored" ? "stored" : "uncertain",
       });
-      expect(JSON.parse(content[0]!.text).deliveryStage).not.toBe("consumed");
+      expect(decoded.deliveryStage).not.toBe("consumed");
       if (mode === "lost") {
         const retry = await client.callTool({ name: "message_clankie", arguments: { text: "progress" } });
         expect(retry.isError).toBe(true);
@@ -761,7 +762,7 @@ it("keeps the same attached seat while reading a durable update result from a fr
     );
     generation++;
     const result = await client.callTool({ name: "runtime_update_status", arguments: {} });
-    expect((result.content as { text: string }[])[0]?.text).toContain('"phase":"healthy"');
+    expect(decodeMcpResult(result)).toMatchObject({ latest: { phase: "healthy" } });
     expect((await client.listTools()).tools[0]?.description).toBe("bank-2");
     expect(updates).toBe(1);
     expect(initializes).toBe(2);

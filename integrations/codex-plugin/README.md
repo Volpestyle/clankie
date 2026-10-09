@@ -75,7 +75,7 @@ and `--plugin-dir PATH`.
   commentary and tool progress, throttled to one attempt per two seconds;
   `Stop` flushes retained entries. This is hook-paced progress, not token streaming.
   Child session hooks are excluded.
-- `.mcp.json` starts `clankie mcp --lane operator`, forwarding the selected
+- `.mcp.json` registers `lead` and starts `clankie mcp --lane operator`, forwarding the selected
   conversation and service URL by environment name. Credentials stay in the
   broker; no bearer is embedded in this plugin.
 - `skills/` is an ignored installation snapshot of the shared product and optional
@@ -133,3 +133,6 @@ Worker threads use the shared native worker bridge, including `message_clankie`
 and `message_clankie_status`. Keep the original delivery ID and check its current
 stage before retrying or doing dependent work. The status read never resends or
 acknowledges the report and refuses receipts belonging to another native seat.
+
+Worker MCP uses `worker`; existing `clankie` registrations remain supported for
+original-session catalog observation and refresh. See the [MCP migration](../claude-plugin/README.md#mcp-name-and-result-migration) for result decoding and update behavior.

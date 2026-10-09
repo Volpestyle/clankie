@@ -70,7 +70,7 @@ describe("clankie claude plugin", () => {
     const mcp = JSON.parse(await readFile(join(pluginRoot, ".mcp.json"), "utf8")) as {
       mcpServers: Record<string, { command: string; args: string[]; env?: unknown }>;
     };
-    expect(mcp.mcpServers.clankie).toEqual({
+    expect(mcp.mcpServers.lead).toEqual({
       command: "clankie",
       args: ["mcp", "--lane", "operator"],
     });
@@ -124,7 +124,7 @@ describe("clankie-worker claude plugin", () => {
     const mcp = JSON.parse(await readFile(join(workerRoot, ".mcp.json"), "utf8")) as unknown;
     expect(mcp).toEqual({
       mcpServers: {
-        clankie: {
+        worker: {
           command: "node",
           args: ["${CLAUDE_PLUGIN_ROOT}/bin/swarm-mcp.mjs"],
         },

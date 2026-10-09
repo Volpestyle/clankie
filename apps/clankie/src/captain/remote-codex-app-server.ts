@@ -175,7 +175,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
         (arg, index) =>
           arg === "-c" &&
           input.configArgs[index + 1] ===
-            `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(catalog)}`,
+            `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(catalog)}`,
       )
     )
       delete launchEnv.CLANKIE_EXPECTED_TOOL_NAMES;
@@ -294,13 +294,14 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
             remoteRegistration: registration,
             waitForClankieCatalog: true as const,
             viewConfigArgs: [
-              "mcp_servers.clankie.enabled=true",
-              'mcp_servers.clankie.env.NODE_OPTIONS=""',
-              'mcp_servers.clankie.env.NODE_PATH=""',
-              `mcp_servers.clankie.command=${JSON.stringify(started.bridge!.node)}`,
-              `mcp_servers.clankie.args=${JSON.stringify([started.bridge!.entry])}`,
-              `mcp_servers.clankie.env.HERDR_PANE_ID=${JSON.stringify(options.privateSeat!.pane)}`,
-              `mcp_servers.clankie.env.HERDR_SOCKET_PATH=${JSON.stringify(started.binding!.socketPath)}`,
+              "mcp_servers.clankie.enabled=false",
+              "mcp_servers.worker.enabled=true",
+              'mcp_servers.worker.env.NODE_OPTIONS=""',
+              'mcp_servers.worker.env.NODE_PATH=""',
+              `mcp_servers.worker.command=${JSON.stringify(started.bridge!.node)}`,
+              `mcp_servers.worker.args=${JSON.stringify([started.bridge!.entry])}`,
+              `mcp_servers.worker.env.HERDR_PANE_ID=${JSON.stringify(options.privateSeat!.pane)}`,
+              `mcp_servers.worker.env.HERDR_SOCKET_PATH=${JSON.stringify(started.binding!.socketPath)}`,
             ].flatMap((value) => ["-c", value]),
             validateCatalog: async () => {
               if (closed || failure) throw new Error("Private remote bridge is unavailable");

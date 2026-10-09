@@ -179,11 +179,11 @@ describe("Codex original native startup catalog", () => {
       { method: "thread/loaded/list", params: {} },
       {
         method: "mcpServerStatus/list",
-        params: { threadId: "original", serverName: "clankie", detail: "toolsAndAuthOnly" },
+        params: { threadId: "original", detail: "toolsAndAuthOnly" },
       },
       {
         method: "mcpServerStatus/list",
-        params: { threadId: "original", serverName: "clankie", detail: "toolsAndAuthOnly", cursor: "next" },
+        params: { threadId: "original", detail: "toolsAndAuthOnly", cursor: "next" },
       },
     ]);
     expect(FleetSeatToolCatalogSchema.safeParse(report).success).toBe(true);
@@ -229,4 +229,16 @@ describe("Codex original native startup catalog", () => {
     expect(report.error).toBeTruthy();
     expect(report.tools).toEqual([]);
   });
+});
+
+it.each(["clankie", "worker"])("resolves the %s worker registration through the update", async (name) => {
+  const report = await codexToolCatalogReport({
+    sessionId: "original",
+    request: async (method: string) =>
+      method === "thread/loaded/list"
+        ? { data: ["original"] }
+        : { data: [{ ...connected, name }], nextCursor: null },
+  });
+  expect(report.error).toBeUndefined();
+  expect(report.tools).toContain("message_clankie");
 });

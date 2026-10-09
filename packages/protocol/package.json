@@ -36,6 +36,7 @@
     "./presence": "./src/presence.ts",
     "./tool-catalog": "./src/tool-catalog.ts",
     "./integrate": "./src/integrate.ts",
+    "./mcp-result": "./src/mcp-result.mjs",
     "./tool-output": "./src/tool-output.ts",
     "./fleet-gates": "./src/fleet-gates.ts",
     "./autonomy": "./src/autonomy.ts",

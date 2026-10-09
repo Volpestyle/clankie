@@ -123,7 +123,7 @@ describe("Codex harness seat adapter", () => {
 
   it("overrides only Clankie's required flag for a dedicated remote server and its view", async () => {
     const f = fixture();
-    const inherited = ["mcp_servers.clankie.required=true", "mcp_servers.other.required=true"];
+    const inherited = ["mcp_servers.worker.required=true", "mcp_servers.other.required=true"];
     const adapter = createCodexSeatAdapter({
       start: f.start,
       herdr: f.herdr,
@@ -136,8 +136,8 @@ describe("Codex harness seat adapter", () => {
     expect(started.outcome).toBe("started");
     expect(f.start.mock.calls[0]![0].config).toEqual([
       ...inherited,
-      "mcp_servers.clankie.required=false",
-      'mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
+      "mcp_servers.worker.required=false",
+      'mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
     ]);
     if (started.outcome === "started") await started.control.close();
     const ordinary = createCodexSeatAdapter({
@@ -165,10 +165,10 @@ describe("Codex harness seat adapter", () => {
     expect(result.outcome).toBe("started");
     expect(f.start.mock.calls[0]![0]).toMatchObject({ env: { CLANKIE_STATE: "/private/service" } });
     expect(f.start.mock.calls[0]![0].config).toContain(
-      'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
+      'mcp_servers.worker.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
     );
     expect(f.start.mock.calls[0]![0].config).toContain(
-      'mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
+      'mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
     );
     if (result.outcome === "started") await result.control.close();
   });
@@ -193,7 +193,7 @@ describe("Codex harness seat adapter", () => {
     expect(config).toContain('approval_policy="on-request"');
     // Only the clankie server is approved; other MCP servers keep Codex's prompts.
     expect(config.filter((entry) => entry.includes("approval_mode"))).toEqual([
-      'mcp_servers.clankie.default_tools_approval_mode="approve"',
+      'mcp_servers.worker.default_tools_approval_mode="approve"',
     ]);
     if (result.outcome === "started") await result.control.close();
   });
@@ -221,7 +221,7 @@ describe("Codex harness seat adapter", () => {
       detail: expect.stringContaining("granted tools changed"),
     });
     expect(f.start.mock.calls[0]![0].config).toContain(
-      `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(["linear_get_issue"]))}`,
+      `mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(["linear_get_issue"]))}`,
     );
     expect(f.send).not.toHaveBeenCalled();
     expect(f.close).toHaveBeenCalledOnce();

@@ -35,3 +35,21 @@ it("accepts the observed managed launch while refusing changed or unknown bridge
     verifyLocalCodexCatalogOverrides([...argv, "-c", 'mcp_servers.clankie.command="another-bridge"']),
   ).toThrow("native_codex_bridge_override_unproven");
 });
+
+// Both names are part of the update contract; never accept two active bridges.
+it("accepts worker launches and preserves legacy refresh provenance", () => {
+  const current = argv.map((arg) => arg.replaceAll("mcp_servers.clankie.", "mcp_servers.worker."));
+  expect(() =>
+    verifyLocalCodexCatalogOverrides([...current, "-c", "mcp_servers.clankie.enabled=false"]),
+  ).not.toThrow();
+  expect(() =>
+    verifyLocalCodexCatalogOverrides([...current, "-c", "mcp_servers.clankie.enabled=true"]),
+  ).toThrow();
+  expect(() =>
+    verifyLocalCodexCatalogOverrides([
+      ...current,
+      "-c",
+      'mcp_servers.worker.env.CLANKIE_CATALOG_REVISION="masked"',
+    ]),
+  ).toThrow();
+});

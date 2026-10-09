@@ -131,7 +131,7 @@ first brief. This assumes the same installed-code trust boundary as native
 executable discovery; it is not a defense against arbitrary same-user code tampering.
 
 Only the service-owned dedicated remote launch overrides
-`mcp_servers.clankie.required=false` in both server and view arguments. Other
+`mcp_servers.worker.required=false` in both server and view arguments. Other
 servers retain their required flags; owner configuration is unchanged. An
 optional asynchronous connection lets the native thread bind while its bridge
 still receives denied responses for native project/mailbox identity. Fleet tools

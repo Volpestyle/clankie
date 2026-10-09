@@ -36,12 +36,15 @@ export async function codexToolCatalogReport({
     for (;;) {
       const status = await request("mcpServerStatus/list", {
         threadId: sessionId,
-        serverName: "clankie",
         detail: "toolsAndAuthOnly",
         ...(cursor === undefined ? {} : { cursor }),
       });
       if (!object(status) || !Array.isArray(status.data)) throw new Error("Malformed native MCP status");
-      matches.push(...status.data.filter((row) => object(row) && row.name === "clankie"));
+      matches.push(
+        ...status.data.filter(
+          (row) => object(row) && [bridge === "operator" ? "lead" : "worker", "clankie"].includes(row.name),
+        ),
+      );
       if (status.nextCursor == null) break;
       if (typeof status.nextCursor !== "string" || cursors.has(status.nextCursor) || cursors.size >= 64)
         throw new Error("Incomplete native MCP status pagination");
@@ -50,12 +53,13 @@ export async function codexToolCatalogReport({
     }
     // A complete original-thread inventory proving the server absent/rejected
     // is a mismatch (accepted no tools), rather than an observation failure.
-    if (matches.length === 0) {
+    const active = matches.filter((row) => row.runtimeStatus !== "disabled");
+    if (active.length === 0) {
       if (requireConnected) throw new Error("Original Codex Clankie server is absent");
       return report;
     }
-    if (matches.length !== 1) throw new Error("Native Codex Clankie server is ambiguous");
-    const row = matches[0];
+    if (active.length !== 1) throw new Error("Native Codex Clankie server is ambiguous");
+    const row = active[0];
     // Only a complete, unambiguous original-thread response can prove a
     // terminal startup failure. Keep this native observation out of the
     // catalog report's public wire schema.

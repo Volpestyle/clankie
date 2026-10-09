@@ -213,7 +213,7 @@ async function installHarnessBridges(options) {
           join(codexProfile, "plugins", "cache", "clankie-fleet", "clankie-worker"),
         ).catch(() => []);
         if (
-          !/(?:clankie-worker@clankie-fleet|\[mcp_servers\.(?:"clankie"|'clankie'|clankie)\])/u.test(
+          !/(?:clankie-worker@clankie-fleet|\[mcp_servers\.(?:"(?:clankie|worker)"|'(?:clankie|worker)'|clankie|worker)\])/u.test(
             config,
           ) &&
           !cached.length &&
@@ -263,7 +263,7 @@ async function installHarnessBridges(options) {
       }
       const linked =
         plugins.some((entry) => [entry.id, entry.pluginId].includes("clankie-worker@clankie-fleet")) ||
-        /(?:clankie-worker@clankie-fleet|\[mcp_servers\.(?:"clankie"|'clankie'|clankie)\])/u.test(
+        /(?:clankie-worker@clankie-fleet|\[mcp_servers\.(?:"(?:clankie|worker)"|'(?:clankie|worker)'|clankie|worker)\])/u.test(
           configBefore ?? "",
         ) ||
         sourceSetup;
