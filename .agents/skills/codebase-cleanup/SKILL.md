@@ -2,8 +2,8 @@
 name: codebase-cleanup
 description: >-
   Lead an evidence-ranked cleanup of a codebase: map it, audit it through
-  parallel lenses, verify the findings, then propose reviewed deletions and
-  simplifications as small gated pull requests. Use when asked to clean up, audit,
+  parallel lenses, verify the findings, then land reviewed deletions and
+  simplifications in small gated batches. Use when asked to clean up, audit,
   prune or simplify a repo, its dead code or its tests. Not for ordinary
   feature work. Builds on `lead`.
 ---
@@ -12,8 +12,7 @@ description: >-
 
 You lead the cleanup: you map the system yourself, fan focused lenses out to
 agents, verify what they bring back, rank by ongoing cost, then turn the work
-into small batches that leave behavior unchanged, each proposed as a pull
-request for review. The audit exists to drive changes. A report nobody acts on
+into small batches that leave behavior unchanged and land fast. The audit exists to drive changes. A report nobody acts on
 is not the deliverable.
 
 Load `lead` for dispatch, `work-items` for the tracker, `fleet-resources` for
@@ -105,7 +104,7 @@ Publish the report as the owning issue's result (see `linear-issues`):
 Push the findings folder with `clankie evidence push` and cite the printed links;
 don't commit it. Create child items only for batches you'll actually run.
 
-## Phase 5: propose batches
+## Phase 5: land batches
 
 Each batch is one reviewed, independently landable change:
 
@@ -118,17 +117,11 @@ Each batch is one reviewed, independently landable change:
 3. **After:** run the narrow checks for what you touched, then the same gate.
    Behavior stays unchanged unless the batch says otherwise and the owner
    decided it.
-4. **Propose:** open one pull request per batch, even in a repo that otherwise
-   lands directly on `main`. Cleanup removes code, so a person reviews it
-   before it merges. Branch from fresh `origin/main`, push the branch, and open
-   the PR with `gh pr create` (or the repo host's equivalent). The PR body names:
-   - what was cut, and why it was safe;
-   - what was deliberately kept;
-   - the before and after gate results and the evidence links;
-   - the batch's lines and cases removed, and the running tally.
-     Link the PR from the owning item. Never merge it yourself. While it waits,
-     keep preparing the next batch on its own branch from `main`. Rebase open PRs
-     when `main` moves, and rerun the gate if the checked source changes.
+4. **Land:** follow the repo's landing rule; where it lands on `main`, push
+   straight there. Open a pull request only when the repo or the owner asks for
+   one. The diff is only the cut: evidence goes to `clankie evidence push`, and
+   the running tally of lines and cases removed lives on the owning item, never
+   in repo docs or ledgers.
 
 Decide reversible cuts yourself. Bring the owner only cuts that change what the
 product does: removing a feature, setting or public API, or changing a protocol
@@ -144,7 +137,7 @@ batches stop paying for their review.
 Long cleanups outlive a seat. Before a seat's context fills, it writes a
 handoff to `.local/HANDOFF-<item>.md` with:
 
-- open PRs, prepared branches and the gates they're queued on;
+- prepared commits and the gates they're queued on;
 - the running tally;
 - which inventory has been reviewed and which hasn't;
 - the next cut.
