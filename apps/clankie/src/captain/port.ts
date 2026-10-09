@@ -395,7 +395,11 @@ export interface CaptainPort {
    * (VUH-1085). Each call opens its own turn context, so one seat's attachments
    * and room never leak into another's.
    */
-  laneToolBank(lane: CaptainSessionLaneV2, conversationId?: string): Promise<LaneToolBank>;
+  laneToolBank(
+    lane: CaptainSessionLaneV2,
+    conversationId?: string,
+    delegation?: import("./conversation-owner.ts").ConversationAuthority,
+  ): Promise<LaneToolBank>;
   /** Read-only exact native delivery reconciliation; operator conversation only. */
   reconcileSeatDelivery?(id: string, conversationId?: string): Promise<FleetSeatDelivery | undefined>;
   /**

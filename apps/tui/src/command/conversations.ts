@@ -25,8 +25,10 @@ import {
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
 import { commandHost, outputJson, type Writable } from "./io.ts";
+import { runRemoteLeadCommand } from "./remote-leads.ts";
 
 const USAGE = [
+  "       clankie conversations lead prepare FLEET | launch --json-stdin | revoke DELEGATION_ID",
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
   "       clankie conversations pending ID [list|remove|send-now|edit] [MESSAGE_ID --version N] [--text TEXT]",
   "       clankie conversations stop-task ID",
@@ -64,6 +66,7 @@ export async function runConversationsCommand(
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (args[0] === "lead") return runRemoteLeadCommand(args.slice(1), options);
   if (["pending", "stop-task"].includes(args[0] ?? "")) return runNativeMessageAction(args, options);
   if (["updates", "read-update", "dismiss-update"].includes(args[0] ?? ""))
     return runOwnerUpdateAction(args, options);

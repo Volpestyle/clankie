@@ -2726,7 +2726,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
   }
 
-  async function laneToolBankFor(lane: CaptainSessionLaneV2, conversationId?: string) {
+  async function laneToolBankFor(
+    lane: CaptainSessionLaneV2,
+    conversationId?: string,
+    delegation?: ConversationAuthority,
+  ) {
+    if (delegation) {
+      if (lane !== "operator" || delegation.owner.conversationId !== conversationId)
+        throw new Error("remote_lead_conversation_mismatch");
+      await assertConversationAuthority(delegation);
+    }
     // One turn context per bank, so a seat's attachments and room stay its
     // own. The selected operator conversation is the room `memory`,
     // `schedule_wake`, and `herdr_watch` attribute to. A social lane gets none:
@@ -2752,13 +2761,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         capture.bodyIdentity = {
           conversationId: targetId,
           route: { owner: { conversationId: targetId }, mode: "machine" },
-          current: () => conversations.runsCaptainTurns(targetId),
-          authorize: async () => conversations.runsCaptainTurns(targetId),
+          current: () => conversations.runsCaptainTurns(targetId) && (delegation?.current() ?? true),
+          authorize: async () =>
+            conversations.runsCaptainTurns(targetId) && (await delegation?.authorize() ?? true),
         };
         capture.conversationAuthority = {
           owner: { conversationId: targetId },
-          current: () => conversations.runsCaptainTurns(targetId),
-          authorize: async () => conversations.runsCaptainTurns(targetId),
+          current: () => conversations.runsCaptainTurns(targetId) && (delegation?.current() ?? true),
+          authorize: async () =>
+            conversations.runsCaptainTurns(targetId) && (await delegation?.authorize() ?? true),
         };
         capture.shell = true;
         capture.room = roomKey("operator", targetId);

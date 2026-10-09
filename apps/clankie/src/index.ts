@@ -116,6 +116,7 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
+import { RemoteProjectLeads } from "./remote-project-leads.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
@@ -1712,6 +1713,9 @@ const runtimeHealth = new RuntimeHealthObserver({
 });
 const localCompanionBoundary = new LocalCompanionBoundary();
 const clankie = await createClankieApp({
+  remoteProjectLeads: new RemoteProjectLeads({
+    repoRoot, directory: join(stateRoot, "remote-project-leads"), settings: settingsStore, runtimes, captain,
+  }),
   fleetResources,
   runtimeHealth: () => runtimeHealth.snapshot(),
   fleetHealthMetrics,

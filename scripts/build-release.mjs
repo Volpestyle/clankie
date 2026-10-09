@@ -53,6 +53,7 @@ const entrypoints = [
   "apps/tui/bin/clankie.ts",
   "apps/tui/bin/release-update-helper.ts",
   "apps/tui/bin/mac-app-install.ts",
+  "apps/tui/bin/remote-lead-mcp.ts",
   "apps/clankie/src/index.ts",
   "apps/clankie/src/herdr-runtime.ts",
   "apps/clankie/src/captain/remote-opencode-helper.ts",
@@ -220,6 +221,7 @@ function gitRevision() {
 async function copyRuntimeAssets(targetRoot) {
   await copySkillAssets(repoRoot, targetRoot);
   const files = [
+    ["integrations/remote-lead/bootstrap.mjs", "integrations/remote-lead/bootstrap.mjs"],
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
     ["apps/tui/native/LentScreen.cs", "apps/tui/native/LentScreen.cs"],
     ["apps/tui/native/lent-screen.ps1", "apps/tui/native/lent-screen.ps1"],

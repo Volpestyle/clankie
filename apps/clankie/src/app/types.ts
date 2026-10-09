@@ -207,6 +207,7 @@ export interface ClankieAppDependencies {
   runtimeHealth?: () => import("@clankie/protocol").RuntimeHealthObservation;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
+  remoteProjectLeads?: import("../remote-project-leads.ts").RemoteProjectLeads;
   /**
    * Linked ssh fleets (VUH-1527): a link token's fleet. That token may use the
    * fleet seat routes for that fleet's panes and nothing else.

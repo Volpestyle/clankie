@@ -112,6 +112,7 @@ import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
+import { remoteLeadRoutes } from "./remote-lead-routes.ts";
 import { registerFleetHealthMetricsRoutes } from "./fleet-health-metrics-routes.ts";
 import {
   type ClankieApp,
@@ -1709,6 +1710,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       })(),
     });
   });
+  const remoteLeads = remoteLeadRoutes(dependencies);
+  app.route("/", remoteLeads.app);
   const { laneMcp } = registerSeatRoutes({
     get dependencies() {
       return dependencies;
@@ -2729,6 +2732,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: () => {
+      void remoteLeads.close();
       dependencies.modelKeys?.close?.();
       managedDiscordClosed = true;
       if (managedDiscordTimer !== undefined) clearInterval(managedDiscordTimer);
