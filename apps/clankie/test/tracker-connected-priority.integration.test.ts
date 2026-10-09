@@ -1,3 +1,4 @@
+import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { expect, it } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import {
@@ -11,12 +12,14 @@ type Listing = { issues: { id: string; status?: string }[]; cursor?: string; has
 
 async function hostResult(f: Fixture, name: string, args: Record<string, unknown> = {}) {
   const result = await f.client.callTool({ name: `linear_${name}`, arguments: args });
-  const content = (result.content as { text: string }[])[0]!.text;
-  if (result.isError) return { outcome: "tool_error", isError: true, content };
-  return JSON.parse(content) as {
+  if (result.isError) {
+    const content = (result.content as { text: string }[])[0]!.text;
+    return { outcome: "tool_error", isError: true, content };
+  }
+  return decodeMcpResult(result) as {
     outcome: string;
     isError?: boolean;
-    content?: string;
+    content?: unknown;
     detail?: string;
   };
 }
@@ -24,7 +27,7 @@ async function hostResult(f: Fixture, name: string, args: Record<string, unknown
 async function list(f: Fixture, args: Record<string, unknown> = {}): Promise<Listing> {
   const result = await hostResult(f, "list_issues", args);
   expect(result).toMatchObject({ outcome: "ok", isError: false });
-  return JSON.parse(result.content!);
+  return (typeof result.content === "string" ? JSON.parse(result.content) : result.content) as Listing;
 }
 
 function providerPages() {
@@ -54,9 +57,9 @@ it("sorts open connected work across provider pages before exposing canonical cu
     const call = async (args: Record<string, unknown>) => {
       const result = await f.client.callTool({ name: "linear_list_issues", arguments: args });
       expect(result.isError).not.toBe(true);
-      const host = JSON.parse((result.content as { text: string }[])[0]!.text);
+      const host = decodeMcpResult(result) as { outcome: string; isError: boolean; content: unknown };
       expect(host).toMatchObject({ outcome: "ok", isError: false });
-      return JSON.parse(host.content);
+      return typeof host.content === "string" ? JSON.parse(host.content) : host.content;
     };
     const first = await call({ state: "unstarted", limit: 2 });
     expect(first.issues.map((issue: { id: string }) => issue.id)).toEqual(["FIXTURE-URGENT", "FIXTURE-HIGH"]);
