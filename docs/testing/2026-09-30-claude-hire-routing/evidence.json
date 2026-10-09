@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "check.txt",
+      "size": 17009,
+      "sha256": "65e8df7d1c576526ff5069c00db31d0fcd3888b1b1555ec79f1ddbc618db84f9",
+      "url": "clankie://evidence/sha256/65e8df7d1c576526ff5069c00db31d0fcd3888b1b1555ec79f1ddbc618db84f9"
+    },
+    {
+      "path": "receipt-checks.txt",
+      "size": 17898,
+      "sha256": "95d3074e0cab2c8b1962fc61f5d8f2c0bd5d191ee634923d55172ff2fbcaff9d",
+      "url": "clankie://evidence/sha256/95d3074e0cab2c8b1962fc61f5d8f2c0bd5d191ee634923d55172ff2fbcaff9d"
+    }
+  ]
+}

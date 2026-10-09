@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "codex-bare-current-partial.json",
+      "size": 126356,
+      "sha256": "ba506a95af93af7c504e9e55615f23d025346bfaabd90d14978336fad70d2d43",
+      "url": "clankie://evidence/sha256/ba506a95af93af7c504e9e55615f23d025346bfaabd90d14978336fad70d2d43"
+    }
+  ]
+}

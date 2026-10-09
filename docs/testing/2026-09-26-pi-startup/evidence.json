@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "logs/native-herdr-server.txt",
+      "size": 69183,
+      "sha256": "78a07736fae9fc9e45cf792a41e69b8a8f3c2f5d0b3c4668dd77d4b091c25328",
+      "url": "clankie://evidence/sha256/78a07736fae9fc9e45cf792a41e69b8a8f3c2f5d0b3c4668dd77d4b091c25328"
+    }
+  ]
+}

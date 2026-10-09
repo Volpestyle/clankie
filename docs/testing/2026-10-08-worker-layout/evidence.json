@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "live.json",
+      "size": 41439,
+      "sha256": "a05e7cbdca6b13a8cde7b5e0c9f37de2fec1c600df9f06a0446966ceb1c2cee5",
+      "url": "clankie://evidence/sha256/a05e7cbdca6b13a8cde7b5e0c9f37de2fec1c600df9f06a0446966ceb1c2cee5"
+    },
+    {
+      "path": "native-live.json",
+      "size": 48060,
+      "sha256": "5ccbc4b2a6475dad7c776cdb69508f7d880fdbf72e16864ce7ab4c7f95fa53b7",
+      "url": "clankie://evidence/sha256/5ccbc4b2a6475dad7c776cdb69508f7d880fdbf72e16864ce7ab4c7f95fa53b7"
+    }
+  ]
+}

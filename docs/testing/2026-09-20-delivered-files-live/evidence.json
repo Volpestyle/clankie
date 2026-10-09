@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/deliverables/delivered-files-acceptance-report.docx",
+      "size": 38937,
+      "sha256": "d5ccf244c7615cd92975b63d6b7a9786c1c7d758cbbf216b5796116421260034",
+      "url": "clankie://evidence/sha256/d5ccf244c7615cd92975b63d6b7a9786c1c7d758cbbf216b5796116421260034"
+    },
+    {
+      "path": "evidence/deliverables/delivered-files-workflow.pptx",
+      "size": 21395,
+      "sha256": "b0c3e1989491670d2947daee60499f6bab506ba1db99287b2c13c3547d6d7afa",
+      "url": "clankie://evidence/sha256/b0c3e1989491670d2947daee60499f6bab506ba1db99287b2c13c3547d6d7afa"
+    },
+    {
+      "path": "evidence/mobile/ipad-file-replay.png",
+      "size": 257745,
+      "sha256": "37803b05ed2b08461720fb5be0b3075fabf09319c1234c1d1f3a01c1219dd389",
+      "url": "clankie://evidence/sha256/37803b05ed2b08461720fb5be0b3075fabf09319c1234c1d1f3a01c1219dd389"
+    },
+    {
+      "path": "evidence/mobile/ipad-report-open.png",
+      "size": 539191,
+      "sha256": "879a534041254867c6c8ac2dc2f61099bd0762fe7d25f87e0924f98eefeeb8ab",
+      "url": "clankie://evidence/sha256/879a534041254867c6c8ac2dc2f61099bd0762fe7d25f87e0924f98eefeeb8ab"
+    },
+    {
+      "path": "evidence/mobile/ipad-report-share.png",
+      "size": 724327,
+      "sha256": "88c228900c112d549d2d02f5a460978ba7011b191752427e2638d334e3ee6188",
+      "url": "clankie://evidence/sha256/88c228900c112d549d2d02f5a460978ba7011b191752427e2638d334e3ee6188"
+    },
+    {
+      "path": "evidence/mobile/iphone-file-replay.png",
+      "size": 229042,
+      "sha256": "ac160e741d547031efec9b6e9960374b73ada3d9ba9d9442dfb9f45682b5ef01",
+      "url": "clankie://evidence/sha256/ac160e741d547031efec9b6e9960374b73ada3d9ba9d9442dfb9f45682b5ef01"
+    },
+    {
+      "path": "evidence/mobile/iphone-report-open.png",
+      "size": 728719,
+      "sha256": "bc09e14045fd42afff57bae746227ec763aaf82561769980795cb9fad65c302a",
+      "url": "clankie://evidence/sha256/bc09e14045fd42afff57bae746227ec763aaf82561769980795cb9fad65c302a"
+    },
+    {
+      "path": "evidence/mobile/iphone-report-share.png",
+      "size": 865655,
+      "sha256": "dd3a0b974ccc4b434128227d3512d3558ba146cdf03777a423f0533013e7e82b",
+      "url": "clankie://evidence/sha256/dd3a0b974ccc4b434128227d3512d3558ba146cdf03777a423f0533013e7e82b"
+    },
+    {
+      "path": "evidence/renders/presentation-slide-1.png",
+      "size": 72023,
+      "sha256": "da68cd5d9ae4300f862bdb183e3e0f78b300e970a60b957b13f6a0d085f70610",
+      "url": "clankie://evidence/sha256/da68cd5d9ae4300f862bdb183e3e0f78b300e970a60b957b13f6a0d085f70610"
+    },
+    {
+      "path": "evidence/renders/presentation-slide-2.png",
+      "size": 40700,
+      "sha256": "bb3ab9d90370d577652392f7eb2440243bbac815816ebe72c949d2cd94b9b7eb",
+      "url": "clankie://evidence/sha256/bb3ab9d90370d577652392f7eb2440243bbac815816ebe72c949d2cd94b9b7eb"
+    },
+    {
+      "path": "evidence/renders/presentation-slide-3.png",
+      "size": 79743,
+      "sha256": "c8911ba916af2494ce122c0728d6ca30aedcb75d5e771f1e6183cb9a41f49429",
+      "url": "clankie://evidence/sha256/c8911ba916af2494ce122c0728d6ca30aedcb75d5e771f1e6183cb9a41f49429"
+    },
+    {
+      "path": "evidence/renders/report/page-1.png",
+      "size": 302056,
+      "sha256": "61cc3212d3f2b7c32f3b87a285589d8041e7586f0c0945c274ef8dd3b4313358",
+      "url": "clankie://evidence/sha256/61cc3212d3f2b7c32f3b87a285589d8041e7586f0c0945c274ef8dd3b4313358"
+    },
+    {
+      "path": "evidence/renders/report/page-2.png",
+      "size": 299418,
+      "sha256": "8908941b0f6bf1493f27677872989e08d1e3b734e22051b752dfd68a8f3d7aed",
+      "url": "clankie://evidence/sha256/8908941b0f6bf1493f27677872989e08d1e3b734e22051b752dfd68a8f3d7aed"
+    },
+    {
+      "path": "evidence/renders/workbook.png",
+      "size": 333769,
+      "sha256": "951380c8077b1b5999ed55b7f471027b2bef015230fc8bb81df80665a56e060b",
+      "url": "clankie://evidence/sha256/951380c8077b1b5999ed55b7f471027b2bef015230fc8bb81df80665a56e060b"
+    }
+  ]
+}

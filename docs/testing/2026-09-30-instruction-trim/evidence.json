@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "clankie-suite-claude.json",
+      "size": 162142,
+      "sha256": "70a0ad7e276b95ec04d9cb3d5d77aab19dc8ec78e6393f2238a38bc34fe7da86",
+      "url": "clankie://evidence/sha256/70a0ad7e276b95ec04d9cb3d5d77aab19dc8ec78e6393f2238a38bc34fe7da86"
+    },
+    {
+      "path": "clankie-suite-codex-3arm-stopped.json",
+      "size": 335511,
+      "sha256": "b12a8bc9850ec2cc2710e6e2395c7519dd1e019ad23706ad7c6d7461fc9a8dd3",
+      "url": "clankie://evidence/sha256/b12a8bc9850ec2cc2710e6e2395c7519dd1e019ad23706ad7c6d7461fc9a8dd3"
+    },
+    {
+      "path": "clankie-suite-codex-a.json",
+      "size": 376736,
+      "sha256": "5948494750d9a8a5791e0b8ce53f6d60c7b896def0f153fca2171e0609e20b5f",
+      "url": "clankie://evidence/sha256/5948494750d9a8a5791e0b8ce53f6d60c7b896def0f153fca2171e0609e20b5f"
+    },
+    {
+      "path": "clankie-suite-codex-b.json",
+      "size": 375888,
+      "sha256": "2ee32cf0230af18230a252affa19f1ea4fda70f00e2341e45393c65f0181c2c6",
+      "url": "clankie://evidence/sha256/2ee32cf0230af18230a252affa19f1ea4fda70f00e2341e45393c65f0181c2c6"
+    },
+    {
+      "path": "clankie-suite-codex-stopped.json",
+      "size": 31166,
+      "sha256": "e203978ede3d3f8dfdb9d0ad03506390f35822a03d7bb5346a773a0b7bb3213f",
+      "url": "clankie://evidence/sha256/e203978ede3d3f8dfdb9d0ad03506390f35822a03d7bb5346a773a0b7bb3213f"
+    }
+  ]
+}

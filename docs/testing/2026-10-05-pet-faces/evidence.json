@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "frame-strip.png",
+      "size": 75155,
+      "sha256": "83f3815ff2c0b16a757a29de5efb6f11dd92146741e8a33c5b5ce62d458629c8",
+      "url": "clankie://evidence/sha256/83f3815ff2c0b16a757a29de5efb6f11dd92146741e8a33c5b5ce62d458629c8"
+    }
+  ]
+}

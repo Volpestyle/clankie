@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "claude-current-evidence-research/events.jsonl",
+      "size": 80990,
+      "sha256": "0111c30d28a2e68a2dd44ecda6eba0200bf4b895da5601a2c1ca51ae35ff3f5b",
+      "url": "clankie://evidence/sha256/0111c30d28a2e68a2dd44ecda6eba0200bf4b895da5601a2c1ca51ae35ff3f5b"
+    },
+    {
+      "path": "claude-current.json",
+      "size": 16451,
+      "sha256": "dc97825d9ff433330b9d4d4d4fc5a11edf863a29ec24633ce1d85a8f3ebd2a92",
+      "url": "clankie://evidence/sha256/dc97825d9ff433330b9d4d4d4fc5a11edf863a29ec24633ce1d85a8f3ebd2a92"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/01-archive-sweep.json",
+      "size": 67204,
+      "sha256": "bf88a1c0a094f05fca4aa2817abddf213ee6e5fa63047f1eca161fa8fe9c2e7c",
+      "url": "clankie://evidence/sha256/bf88a1c0a094f05fca4aa2817abddf213ee6e5fa63047f1eca161fa8fe9c2e7c"
+    }
+  ]
+}

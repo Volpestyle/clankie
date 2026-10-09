@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "clankie-suite.json",
+      "size": 235587,
+      "sha256": "00af415b015be65ab48aec47dc9e115d96dfd484ab6fbc65f6cf65f6c98823cd",
+      "url": "clankie://evidence/sha256/00af415b015be65ab48aec47dc9e115d96dfd484ab6fbc65f6cf65f6c98823cd"
+    },
+    {
+      "path": "terminal-bench.json",
+      "size": 77841,
+      "sha256": "6685c6b6495183cbd663e776d522c3f08a52eea973d7e39ee4c4e3d39078d274",
+      "url": "clankie://evidence/sha256/6685c6b6495183cbd663e776d522c3f08a52eea973d7e39ee4c4e3d39078d274"
+    }
+  ]
+}

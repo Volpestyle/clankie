@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/astra-run.json",
+      "size": 145458,
+      "sha256": "cfbce0c4172ae8f648fe3fc43c5721fe4bc4ade6991319ae24154ad0caa419a6",
+      "url": "clankie://evidence/sha256/cfbce0c4172ae8f648fe3fc43c5721fe4bc4ade6991319ae24154ad0caa419a6"
+    },
+    {
+      "path": "evidence/terra-run.json",
+      "size": 234661,
+      "sha256": "ae0a755e040001b75f1de875c3a9c9d7b186d7c026e2a4c59a3b55c1168607e0",
+      "url": "clankie://evidence/sha256/ae0a755e040001b75f1de875c3a9c9d7b186d7c026e2a4c59a3b55c1168607e0"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "seat-harvest.json",
+      "size": 37271,
+      "sha256": "c9aa74515e6a6ee86b066008e04ad717ea372f621dba4da255eefa133e7d9f97",
+      "url": "clankie://evidence/sha256/c9aa74515e6a6ee86b066008e04ad717ea372f621dba4da255eefa133e7d9f97"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/01-play-journal.jsonl",
+      "size": 3079046,
+      "sha256": "9df58fd7613039acfe198367498229a9bfb3a4146701d3d75da6f6f3b26245ce",
+      "url": "clankie://evidence/sha256/9df58fd7613039acfe198367498229a9bfb3a4146701d3d75da6f6f3b26245ce"
+    },
+    {
+      "path": "evidence/03-voice-receipts.jsonl",
+      "size": 965555,
+      "sha256": "2b09af89d642213ab4b1eb48d951d577ca04717e20de12ff9abbc61ebb18658c",
+      "url": "clankie://evidence/sha256/2b09af89d642213ab4b1eb48d951d577ca04717e20de12ff9abbc61ebb18658c"
+    },
+    {
+      "path": "evidence/05-world-action-journal.jsonl",
+      "size": 70010,
+      "sha256": "01125128d4a14ed8d862fc2d566ebc1fccfdffd6ec1a3fbde722b5e8eda0389f",
+      "url": "clankie://evidence/sha256/01125128d4a14ed8d862fc2d566ebc1fccfdffd6ec1a3fbde722b5e8eda0389f"
+    },
+    {
+      "path": "evidence/09-turn-timeline.tsv",
+      "size": 66926,
+      "sha256": "28d950761af60930b96ab21fbd5d1e10385cc2891204ae7f9cc94248ef4b8a4b",
+      "url": "clankie://evidence/sha256/28d950761af60930b96ab21fbd5d1e10385cc2891204ae7f9cc94248ef4b8a4b"
+    }
+  ]
+}

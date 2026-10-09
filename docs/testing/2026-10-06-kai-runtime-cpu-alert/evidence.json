@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "latency-bisect.json",
+      "size": 45468,
+      "sha256": "1c55c5082bcdf3a1eb6fb3f8915f0f4dd8a84a930baf62042af639949b269c1c",
+      "url": "clankie://evidence/sha256/1c55c5082bcdf3a1eb6fb3f8915f0f4dd8a84a930baf62042af639949b269c1c"
+    },
+    {
+      "path": "native-health-pairs.json",
+      "size": 45904,
+      "sha256": "2abae9a862918570bf9c62ae2ede673b2ca981637c542f09e6d5b882ed899ef1",
+      "url": "clankie://evidence/sha256/2abae9a862918570bf9c62ae2ede673b2ca981637c542f09e6d5b882ed899ef1"
+    },
+    {
+      "path": "passive-client-delay.json",
+      "size": 24488,
+      "sha256": "9f24f1f0b25539702c83de76d79586b83969b691616b1a51f1c4e91dd8b9124f",
+      "url": "clankie://evidence/sha256/9f24f1f0b25539702c83de76d79586b83969b691616b1a51f1c4e91dd8b9124f"
+    }
+  ]
+}

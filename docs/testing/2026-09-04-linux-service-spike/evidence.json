@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/10-native-access-review.png",
+      "size": 266604,
+      "sha256": "133435faef3d26f51611eeddc8f23d3d88d4b96cf23fbe6c1a7c8059b206e965",
+      "url": "clankie://evidence/sha256/133435faef3d26f51611eeddc8f23d3d88d4b96cf23fbe6c1a7c8059b206e965"
+    },
+    {
+      "path": "evidence/11-native-conversation.png",
+      "size": 214256,
+      "sha256": "8de2b6f314ca54f97a7a38ffe82bf644792639f5cd2d5309661575fc8358389b",
+      "url": "clankie://evidence/sha256/8de2b6f314ca54f97a7a38ffe82bf644792639f5cd2d5309661575fc8358389b"
+    },
+    {
+      "path": "evidence/12-native-reply-delivered.png",
+      "size": 275533,
+      "sha256": "c288a159a620ef6a236f128a3212b7a8bc330760bf672ddb019473d3ad39e81a",
+      "url": "clankie://evidence/sha256/c288a159a620ef6a236f128a3212b7a8bc330760bf672ddb019473d3ad39e81a"
+    }
+  ]
+}

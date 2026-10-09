@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "comparison.json",
+      "size": 35030,
+      "sha256": "e24548e1c8fee287500db79aaa38f8ccb247be8736b814e3091311bc4f4755d6",
+      "url": "clankie://evidence/sha256/e24548e1c8fee287500db79aaa38f8ccb247be8736b814e3091311bc4f4755d6"
+    }
+  ]
+}

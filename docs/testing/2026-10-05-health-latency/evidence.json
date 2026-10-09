@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "before-fix-passive.json",
+      "size": 23718,
+      "sha256": "171ef22e795523979918fbe07f2fc22d7136df1c04db8a9e2debe9150fd16a61",
+      "url": "clankie://evidence/sha256/171ef22e795523979918fbe07f2fc22d7136df1c04db8a9e2debe9150fd16a61"
+    },
+    {
+      "path": "default-five-minute-pass.json",
+      "size": 31307,
+      "sha256": "e4a0685e598833fd43bbfa51d0da1ce8ece392c4a2de3b5e1f4c11e4e9b0e65f",
+      "url": "clankie://evidence/sha256/e4a0685e598833fd43bbfa51d0da1ce8ece392c4a2de3b5e1f4c11e4e9b0e65f"
+    },
+    {
+      "path": "default-observer-abort.json",
+      "size": 20838,
+      "sha256": "58198f44fc92867aef3d19621209ba8c0377974763048923a3468776a2da588d",
+      "url": "clankie://evidence/sha256/58198f44fc92867aef3d19621209ba8c0377974763048923a3468776a2da588d"
+    },
+    {
+      "path": "live-read-only.json",
+      "size": 24857,
+      "sha256": "327c6a0b8d9ce2f345f33c85b240421e2f1d9ee047e8f2205a736afe5412958d",
+      "url": "clankie://evidence/sha256/327c6a0b8d9ce2f345f33c85b240421e2f1d9ee047e8f2205a736afe5412958d"
+    }
+  ]
+}

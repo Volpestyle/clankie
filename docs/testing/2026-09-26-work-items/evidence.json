@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/d2-device-work-items-workspace.json",
+      "size": 150449,
+      "sha256": "703267ec1c47d7452b5cd7f0af6df943a25035eaaaefe2c0499cdd32a5965776",
+      "url": "clankie://evidence/sha256/703267ec1c47d7452b5cd7f0af6df943a25035eaaaefe2c0499cdd32a5965776"
+    }
+  ]
+}

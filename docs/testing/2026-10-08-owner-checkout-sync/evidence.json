@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "baseline-selection.txt",
+      "size": 22092,
+      "sha256": "8053dcf8cbcbeccde1c2678b757c1f2b2b6ac234fbf63a92b5c0c0b6371ea6f8",
+      "url": "clankie://evidence/sha256/8053dcf8cbcbeccde1c2678b757c1f2b2b6ac234fbf63a92b5c0c0b6371ea6f8"
+    }
+  ]
+}

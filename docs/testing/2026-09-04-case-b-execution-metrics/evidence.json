@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/2026-09-04-harness-fault/job-terra-destroyed-arm.json",
+      "size": 48827,
+      "sha256": "bcde90a9bd50abcbdb398259ba0c815bf7e6146c3b646a48d922f4d3f2029503",
+      "url": "clankie://evidence/sha256/bcde90a9bd50abcbdb398259ba0c815bf7e6146c3b646a48d922f4d3f2029503"
+    },
+    {
+      "path": "evidence/2026-09-04-harness-fault/run-terra-destroyed-arm.json",
+      "size": 69524,
+      "sha256": "63204b7e67df711a6c268601fe5f320787529837878ded975cc165cdb3cdfe5a",
+      "url": "clankie://evidence/sha256/63204b7e67df711a6c268601fe5f320787529837878ded975cc165cdb3cdfe5a"
+    },
+    {
+      "path": "evidence/run-astra.json",
+      "size": 71016,
+      "sha256": "1bb94e850f5a35644006a1d33de079356a9cf839c19280b18d831fc5cef53ec0",
+      "url": "clankie://evidence/sha256/1bb94e850f5a35644006a1d33de079356a9cf839c19280b18d831fc5cef53ec0"
+    },
+    {
+      "path": "evidence/run-terra.json",
+      "size": 67137,
+      "sha256": "09e32433941a698b071de1970392e6c60084be996b37bd3a15bc40c462f79746",
+      "url": "clankie://evidence/sha256/09e32433941a698b071de1970392e6c60084be996b37bd3a15bc40c462f79746"
+    },
+    {
+      "path": "flows/run-arm.sh",
+      "size": 17543,
+      "sha256": "be41b5b59917b64f4cb96ab28087f7db5eb12885595abd870f633089ce06a04b",
+      "url": "clankie://evidence/sha256/be41b5b59917b64f4cb96ab28087f7db5eb12885595abd870f633089ce06a04b"
+    }
+  ]
+}

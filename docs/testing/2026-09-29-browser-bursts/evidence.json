@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "evidence/01-headless.webm",
+      "size": 22573,
+      "sha256": "1e67ff98e0265ceae38620b1edaedf21f0add18826b5cc05226b8ea260061691",
+      "url": "clankie://evidence/sha256/1e67ff98e0265ceae38620b1edaedf21f0add18826b5cc05226b8ea260061691"
+    },
+    {
+      "path": "evidence/02-headless.webm",
+      "size": 21004,
+      "sha256": "1477ecf6f43af9b979ee58cdf7fdba6569ab1fc7770a6a5c3e4ffaef4ef74426",
+      "url": "clankie://evidence/sha256/1477ecf6f43af9b979ee58cdf7fdba6569ab1fc7770a6a5c3e4ffaef4ef74426"
+    }
+  ]
+}

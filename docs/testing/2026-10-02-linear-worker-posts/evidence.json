@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "live-worker-comment.png",
+      "size": 118679,
+      "sha256": "4b603906d6058e99dfbcd373153d774b13894d144c76107511cafc23e802d2b0",
+      "url": "clankie://evidence/sha256/4b603906d6058e99dfbcd373153d774b13894d144c76107511cafc23e802d2b0"
+    }
+  ]
+}
