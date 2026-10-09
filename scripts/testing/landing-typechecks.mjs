@@ -4,7 +4,8 @@ import { existsSync, readFileSync, realpathSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 
-const text = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+const text = (root, args) =>
+  execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const paths = (root, args) => text(root, args).split("\0").filter(Boolean);
 
 /** Compiler inputs, including type-only and relative imports across workspace boundaries. */
