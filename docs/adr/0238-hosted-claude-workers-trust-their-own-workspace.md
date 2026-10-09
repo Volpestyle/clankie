@@ -14,10 +14,20 @@ without an owner at its pane (VUH-1767):
    `/etc/claude-code/managed-settings.json`, enabling channels and allowing the
    `clankie-worker@clankie` channel plugin. The image builder is that machine's
    administrator.
-2. **Worker plugin and session hook.** Every body start registers Clankie's
+2. **Worker plugin and session hook.** A body start reconciles Clankie's
    marketplace from `/state/install/current/integrations/claude-plugin`,
    installs or updates `clankie-worker@clankie` (left disabled; each hire
-   enables it for its own session) and installs Herdr's Claude hook.
+   enables it for its own session) and installs Herdr's Claude hook. Successful
+   setup is cached locally: unchanged starts skip Claude CLI and Herdr setup.
+   The digest covers the setup script, resolved shipped worker contents and
+   marketplace, Claude and Herdr executable identities, installed worker
+   contents and registries,
+   settings, the installed Herdr hook (including its permissions), credentials,
+   workspace, and relevant first-run/auth state. No
+   credentials enter the stamp. Changes invalidate it; failed or interrupted
+   setup leaves no success stamp and retries on the next start. Setup stays
+   synchronous so hires cannot race provisioning. This adds no warm instances
+   or background polling.
 3. **First-run state.** Claude's cosmetic onboarding is marked done, and an
    `ANTHROPIC_API_KEY` the owner set on the body is recorded as approved (its
    last 20 characters, as Claude stores it).
