@@ -107,7 +107,7 @@ export const LINEAR_WORK_ITEM_FIELDS = [
   "updatedAt",
   "labels",
   "parentId",
-  "milestone",
+  "projectMilestone",
 ];
 const PAGE_SIZE = 50;
 
