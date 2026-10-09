@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import schemaSource from "./linear-api/schema.graphql?raw";
 import { buildSchema, getVariableValues, parse, validate, type OperationDefinitionNode } from "graphql";
 
 export const API_ACCESS = "lin_api_FIXTURE_secret_access_1383";
@@ -18,7 +18,7 @@ const timestamp = "2026-10-05T02:00:00.000Z";
 type Row = Record<string, unknown>;
 const connection = (nodes: Row[]) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
 
-/** Local HTTP OAuth/GraphQL provider validates real documents/input against the pinned SDK schema. */
+/** Local HTTP OAuth/GraphQL provider validates real documents/input against the provider-owned SDK schema fixture. */
 export async function createLinearApiProvider(
   options: {
     requestBudget?: { clock: () => number; limit: number; previousRequests?: readonly number[] };
@@ -26,7 +26,7 @@ export async function createLinearApiProvider(
     issueCount?: number;
   } = {},
 ) {
-  const schema = buildSchema(await readFile(new URL("./linear-api/schema.graphql", import.meta.url), "utf8"));
+  const schema = buildSchema(schemaSource);
   const team = { id: TEAM_ID, name: "Clankie", key: "VUH" };
   const user = { id: USER_ID, name: "Clankie", email: null, displayName: "Clankie", app: true };
   const label = {

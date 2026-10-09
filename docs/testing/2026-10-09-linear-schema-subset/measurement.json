@@ -1,0 +1,276 @@
+{
+  "baseline": "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+  "lineCounts": {
+    "clankie": {
+      "testTextBefore": 308814,
+      "testTextAfter": 258654,
+      "testCodeBefore": 245162,
+      "testCodeAfter": 245162
+    },
+    "apps/clankie": {
+      "testTextBefore": 215112,
+      "testTextAfter": 164952,
+      "testCodeBefore": 153709,
+      "testCodeAfter": 153709
+    }
+  },
+  "scope": "Tracked test-directory text includes fixture/helpers; test code counts tracked .test/.spec source files. No assertion file or product module changed.",
+  "timings": [
+    {
+      "arm": "before",
+      "command": [
+        "pnpm",
+        "check:landing",
+        "--base",
+        "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+        "--report",
+        ".local/vuh-1925/schema-before-matched-gate.json",
+        "--",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=.local/vuh-1925/schema-before-matched-vitest.json"
+      ],
+      "environment": {
+        "TURBO_FORCE": "true"
+      },
+      "loadBefore": [13.2802734375, 29.05126953125, 42.66064453125],
+      "loadAfter": [17.18359375, 27.35205078125, 40.97021484375],
+      "elapsedSeconds": 72.718296792,
+      "exitCode": 0
+    },
+    {
+      "arm": "after",
+      "command": [
+        "pnpm",
+        "check:landing",
+        "--base",
+        "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+        "--report",
+        ".local/vuh-1925/schema-after-matched-gate.json",
+        "--",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=.local/vuh-1925/schema-after-matched-vitest.json"
+      ],
+      "environment": {
+        "TURBO_FORCE": "true"
+      },
+      "loadBefore": [17.18359375, 27.35205078125, 40.97021484375],
+      "loadAfter": [16.0419921875, 24.9248046875, 38.97607421875],
+      "elapsedSeconds": 66.751428792,
+      "exitCode": 0
+    }
+  ],
+  "gates": {
+    "before": {
+      "head": "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+      "base": "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+      "source": "52e53acc935c6aaa8fb7f980714b55ff8139d89ac8eedcb28f547358da55e4b2",
+      "sourceStable": true,
+      "exitCode": 0,
+      "elapsedSeconds": 71.583779834,
+      "phases": [
+        {
+          "name": "skills",
+          "command": ["pnpm", "herdr:skill:check"],
+          "elapsedSeconds": 0.44231762499999994,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "format",
+          "command": ["pnpm", "fmt:check"],
+          "elapsedSeconds": 3.881946333,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "lint",
+          "command": ["pnpm", "lint"],
+          "elapsedSeconds": 1.2008574589999998,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "deadcode",
+          "command": ["pnpm", "deadcode"],
+          "elapsedSeconds": 1.9857837499999995,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "doc-links",
+          "command": ["node", "scripts/check-doc-links.mjs"],
+          "elapsedSeconds": 0.1825985410000003,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "retired-claims",
+          "command": ["node", "scripts/check-retired-claims.mjs"],
+          "elapsedSeconds": 0.3402667499999998,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "typecheck",
+          "command": [
+            "pnpm",
+            "exec",
+            "turbo",
+            "run",
+            "typecheck",
+            "--only",
+            "--concurrency=1",
+            "--filter=@clankie/clankie"
+          ],
+          "elapsedSeconds": 26.409791666999997,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "tests",
+          "command": [
+            "pnpm",
+            "exec",
+            "vitest",
+            "run",
+            "--config",
+            "vitest.config.ts",
+            "--changed",
+            "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+            "--bail",
+            "1",
+            "--passWithNoTests",
+            "--reporter=default",
+            "--reporter=json",
+            "--outputFile=.local/vuh-1925/schema-before-matched-vitest.json"
+          ],
+          "elapsedSeconds": 35.50216920900001,
+          "exitCode": 0,
+          "signal": null
+        }
+      ],
+      "typecheckProjects": ["@clankie/clankie"],
+      "testPassed": 60,
+      "testFailed": 0,
+      "testSkipped": 1,
+      "files": [
+        "apps/clankie/test/linear-api-tracker.test.ts",
+        "apps/clankie/test/linear-graphql.integration.test.ts",
+        "apps/clankie/test/linear-request-budget-autonomous.integration.test.ts",
+        "apps/clankie/test/linear-request-budget.integration.test.ts",
+        "apps/clankie/test/worker-call-receipts.integration.test.ts"
+      ]
+    },
+    "after": {
+      "head": "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+      "base": "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+      "source": "a18064e1bf60470025d788bb204c96f9d7622ee470c1b02743db8816c7013b35",
+      "sourceStable": true,
+      "exitCode": 0,
+      "elapsedSeconds": 65.772154292,
+      "phases": [
+        {
+          "name": "skills",
+          "command": ["pnpm", "herdr:skill:check"],
+          "elapsedSeconds": 0.3383914169999999,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "format",
+          "command": ["pnpm", "fmt:check"],
+          "elapsedSeconds": 3.419164833,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "lint",
+          "command": ["pnpm", "lint"],
+          "elapsedSeconds": 1.2824315409999996,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "deadcode",
+          "command": ["pnpm", "deadcode"],
+          "elapsedSeconds": 2.1025562089999994,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "doc-links",
+          "command": ["node", "scripts/check-doc-links.mjs"],
+          "elapsedSeconds": 0.2928207910000001,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "retired-claims",
+          "command": ["node", "scripts/check-retired-claims.mjs"],
+          "elapsedSeconds": 0.6353065000000006,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "typecheck",
+          "command": [
+            "pnpm",
+            "exec",
+            "turbo",
+            "run",
+            "typecheck",
+            "--only",
+            "--concurrency=1",
+            "--filter=@clankie/clankie"
+          ],
+          "elapsedSeconds": 25.277393333,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "name": "tests",
+          "command": [
+            "pnpm",
+            "exec",
+            "vitest",
+            "run",
+            "--config",
+            "vitest.config.ts",
+            "--changed",
+            "4114313be5284349f232ddb0a7729f1ab2e5ea11",
+            "--bail",
+            "1",
+            "--passWithNoTests",
+            "--reporter=default",
+            "--reporter=json",
+            "--outputFile=.local/vuh-1925/schema-after-matched-vitest.json"
+          ],
+          "elapsedSeconds": 30.475595499999997,
+          "exitCode": 0,
+          "signal": null
+        }
+      ],
+      "typecheckProjects": ["@clankie/clankie"],
+      "testPassed": 60,
+      "testFailed": 0,
+      "testSkipped": 1,
+      "files": [
+        "apps/clankie/test/linear-api-tracker.test.ts",
+        "apps/clankie/test/linear-graphql.integration.test.ts",
+        "apps/clankie/test/linear-request-budget-autonomous.integration.test.ts",
+        "apps/clankie/test/linear-request-budget.integration.test.ts",
+        "apps/clankie/test/worker-call-receipts.integration.test.ts"
+      ]
+    }
+  },
+  "rawHashes": {
+    "schema-before-matched-gate.log": "e32626f3574ed6444d1038828d3794eff3475995796f74d64e509369e81fcdc1",
+    "schema-before-matched-gate.json": "ba74c9aaf1dc5dcc74d72984d7d47cbc277e304de56d27122533bdef22d7e539",
+    "schema-before-matched-vitest.json": "575ce8f30118d2add3a4c8fff1cd410b42a30c36864127dfa2247c1c9eac5b69",
+    "schema-after-matched-gate.log": "22ae3e4a18271a7537a3b86d9239877db5c41527f2783b901e4564cdfbf69591",
+    "schema-after-matched-gate.json": "1fa8319d5a6d2777d3823e2726d97dd2d695f2a37378223a43924b9f524f99c2",
+    "schema-after-matched-vitest.json": "310b676d1f122e1c67f14e3fe2ededc7f0a1c38299ae003ff4b9be8c2c46f499"
+  }
+}
