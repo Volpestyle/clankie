@@ -29,6 +29,9 @@ ios/Pods/
 macos/Pods/
 .pnpm-store/
 /.local/
+# Local proof scratch space and DynamoDB Local's working-directory metadata.
+/.tmp/
+/dynamodb-local-metadata.json
 .codebase-index/
 build/
 .gradle/
