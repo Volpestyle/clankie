@@ -116,7 +116,7 @@ round; the scheduler stopped before round three, existing children finished
 and owned groups were cleaned up. That attempt is discarded evidence, never
 acceptance. The corrected three-round experiment above used a fixed base.
 
-The root landing gate result is attached to [VUH-1938](https://linear.app/vuhlp/issue/VUH-1938)
+The root landing gate result is cited on [VUH-1938](https://linear.app/vuhlp/issue/VUH-1938)
 with its actual exit, checked HEAD, fixed base and stable-source result.
 Earlier failed full/repeat runs remain failures in the evidence manifest.
 No timeout raises,
