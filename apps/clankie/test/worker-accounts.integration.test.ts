@@ -314,6 +314,15 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
           },
         });
       if (args[0] === "pane" && args[1] === "rename") return "{}";
+      if (args[0] === "pane" && args[1] === "report-metadata") {
+        expect(args[2]).toBe("w2:p9");
+        expect(args[args.indexOf("--source") + 1]).toBe("clankie-hire-layout");
+        const tokens = args.flatMap((arg, index) => (args[index - 1] === "--token" ? [arg] : []));
+        expect(tokens).toContain("clankie_grid=2x2");
+        expect(tokens.some((token) => /^clankie_repo=[a-f0-9]{64}$/u.test(token))).toBe(true);
+        expect(tokens.some((token) => /^clankie_pipeline=[a-f0-9]{64}$/u.test(token))).toBe(true);
+        return ""; // Real Herdr metadata success has no JSON payload.
+      }
       if (args[0] === "tab") return JSON.stringify({ result: { root_pane: { pane_id: "w2:p9" } } });
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({

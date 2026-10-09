@@ -109,3 +109,13 @@ Clankie typecheck and targeted formatting/lint also passed. The earlier native
 selection, not grid geometry or existing panes. Moss owns an additional,
 unlanded 21st lifecycle case for a pending Herdr reply; it is not included
 in this main-file result and will be rebased onto this correction.
+
+## Remote account fixture correction
+
+Teo's no-exclusion gate exposed one more stale remote runner fixture:
+`worker-accounts.integration.test.ts` did not accept the allocator's
+`pane report-metadata` command. The fixture now validates the owned pane,
+source, grid version and repo/group hashes, and returns Herdr's empty success
+receipt. Production already permits this command through its remote allowlist.
+The complete worker-accounts file (10/10) and remote Herdr fleet file (15/15)
+passed through one heavy permit (7.01 s), with targeted formatting and lint.
