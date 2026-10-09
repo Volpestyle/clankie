@@ -8,6 +8,11 @@ Turbo CLI flags can override its environment: avoid higher `--concurrency` or
 `--parallel`. Arbitrary tools and subprocesses need their own limits; this is
 not an OS CPU quota.
 
+Automatic capacity is `max(1, min(floor(cores/4), floor(RAM_GiB/24)))`, allocating
+one four-worker budget per slot. The [alternating benchmark](../../docs/testing/2026-10-08-heavy-parallelism/README.md)
+supports four capped jobs for throughput on the 18-core, 128 GiB Mac, while
+preserving pressure guards and explicit owner capacity overrides.
+
 The governor shares one OS-account registry in `~/.clankie/fleet-resources` across
 Clankie worktrees and native worker environments. Owner-authenticated control
 calls `configure`; command callers read that policy. `HOME`, `CLANKIE_STATE`,

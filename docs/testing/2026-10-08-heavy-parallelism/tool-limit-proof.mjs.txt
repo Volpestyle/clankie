@@ -1,0 +1,79 @@
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { heavyJobEnvironment } from "../../../packages/fleet-resources/src/parallelism.ts";
+const env = heavyJobEnvironment({ ...process.env, VITEST_MAX_WORKERS: "99", TURBO_CONCURRENCY: "99" });
+const vite = spawnSync(
+  process.execPath,
+  [
+    "--input-type=module",
+    "-e",
+    `import {createVitest} from 'vitest/node'; const v = await createVitest('test',{config:false,maxWorkers:99}); console.log('resolvedWorkers='+v.config.maxWorkers); await v.close();`,
+  ],
+  { env, encoding: "utf8" },
+);
+if (vite.status !== 0 || !vite.stdout.includes("resolvedWorkers=4"))
+  throw new Error(vite.stdout + vite.stderr);
+const root = resolve(".local/tool-limit-fixture");
+mkdirSync(root, { recursive: true });
+writeFileSync(
+  root + "/package.json",
+  JSON.stringify({ name: "heavy-limit-proof", private: true, packageManager: "pnpm@11.11.0" }),
+);
+writeFileSync(root + "/pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+writeFileSync(
+  root + "/pnpm-lock.yaml",
+  "lockfileVersion: '9.0'\nimporters:\n  .: {}\n" +
+    Array.from({ length: 6 }, (_, i) => `  packages/p${i}: {}\n`).join(""),
+);
+writeFileSync(
+  root + "/turbo.json",
+  JSON.stringify({
+    globalPassThroughEnv: ["VITEST_MAX_WORKERS", "TURBO_CONCURRENCY"],
+    tasks: { proof: { cache: false } },
+  }),
+);
+writeFileSync(
+  root + "/worker.mjs",
+  `import{appendFileSync}from'node:fs';const record=event=>appendFileSync(${JSON.stringify(root + "/events.jsonl")},JSON.stringify({event,id:process.argv[2],at:Date.now(),vitest:process.env.VITEST_MAX_WORKERS,turbo:process.env.TURBO_CONCURRENCY})+'\\n');record('start');setTimeout(()=>record('end'),1000);`,
+);
+writeFileSync(root + "/events.jsonl", "");
+for (let i = 0; i < 6; i++) {
+  mkdirSync(root + `/packages/p${i}`, { recursive: true });
+  writeFileSync(
+    root + `/packages/p${i}/package.json`,
+    JSON.stringify({ name: `p${i}`, scripts: { proof: `node ../../worker.mjs p${i}` } }),
+  );
+}
+const turbo = spawnSync(
+  resolve("node_modules/.bin/turbo"),
+  ["run", "proof", "--cwd", root, "--output-logs=errors-only"],
+  { env, encoding: "utf8" },
+);
+if (turbo.status !== 0) throw new Error(turbo.stdout + turbo.stderr);
+const events = readFileSync(root + "/events.jsonl", "utf8")
+  .trim()
+  .split("\n")
+  .map(JSON.parse)
+  .sort((a, b) => a.at - b.at);
+let active = 0,
+  peak = 0;
+for (const e of events) {
+  active += e.event === "start" ? 1 : -1;
+  peak = Math.max(peak, active);
+  if (e.vitest !== "4" || e.turbo !== "4") throw new Error("strict env dropped caps");
+}
+if (peak !== 4 || events.length !== 12) throw new Error("unexpected Turbo overlap " + peak);
+console.log(
+  JSON.stringify(
+    {
+      vitestResolvedMaxWorkers: 4,
+      turboPeakTasks: peak,
+      turboTasks: 6,
+      strictTaskEnvironment: "4/4",
+      events,
+    },
+    null,
+    2,
+  ),
+);

@@ -1,0 +1,92 @@
+{
+  "vitestResolvedMaxWorkers": 4,
+  "turboPeakTasks": 4,
+  "turboTasks": 6,
+  "strictTaskEnvironment": "4/4",
+  "events": [
+    {
+      "event": "start",
+      "id": "p0",
+      "at": 1791510763868,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "start",
+      "id": "p5",
+      "at": 1791510763906,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "start",
+      "id": "p4",
+      "at": 1791510763920,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "start",
+      "id": "p2",
+      "at": 1791510763947,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "end",
+      "id": "p0",
+      "at": 1791510764872,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "end",
+      "id": "p5",
+      "at": 1791510764909,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "end",
+      "id": "p4",
+      "at": 1791510764921,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "end",
+      "id": "p2",
+      "at": 1791510764950,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "start",
+      "id": "p1",
+      "at": 1791510765731,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "start",
+      "id": "p3",
+      "at": 1791510765767,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "end",
+      "id": "p1",
+      "at": 1791510766732,
+      "vitest": "4",
+      "turbo": "4"
+    },
+    {
+      "event": "end",
+      "id": "p3",
+      "at": 1791510766769,
+      "vitest": "4",
+      "turbo": "4"
+    }
+  ]
+}

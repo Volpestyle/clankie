@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "passedTests": 1,
+  "skippedTests": 18,
+  "cases": [
+    {
+      "name": "actual gradeHistorical settlement never yields a passing result when its exact verifier stop is unknown",
+      "durationMs": 7909.215374999999,
+      "status": "passed"
+    }
+  ],
+  "testTimeoutMs": 30000,
+  "fullHistoricalSuiteAlsoPassedInInitial31TestRun": true,
+  "broadLandingGate": "stopped on unchanged OpenCode SSH fixture; focused OpenCode rerun passed"
+}

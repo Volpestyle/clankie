@@ -2428,7 +2428,7 @@ The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 
 | Flag                                      | Default | Meaning                                                                            |
 | ----------------------------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy capacity, 1–64; auto is min(floor(cores/8), floor(RAM GiB/24)), at least one |
+| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy capacity, 1–64; auto is min(floor(cores/4), floor(RAM GiB/24)), at least one |
 | `--simulator-slots N`                     | `1`     | Independent simulator ceiling, 0–64                                                |
 | `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                           |
 | `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                    |

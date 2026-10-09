@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
 import type { FleetResourcePolicy, ResourcePressure, ResourcePressureInput } from "./model.ts";
 import { darwinAvailableMemoryMb, nativeBoundaryAvailable } from "./process.ts";
+import { heavyJobParallelism } from "./parallelism.ts";
 
 /** OS available-memory estimate in MiB, including reclaimable/compressible memory. */
 async function availableMemoryMb(): Promise<number> {
@@ -45,7 +46,10 @@ async function defaultProbe(): Promise<ResourcePressureInput> {
 export function automaticHeavySlots(): number {
   return Math.max(
     1,
-    Math.min(Math.floor(availableParallelism() / 8), Math.floor(totalmem() / 1024 ** 3 / 24)),
+    Math.min(
+      Math.floor(availableParallelism() / heavyJobParallelism),
+      Math.floor(totalmem() / 1024 ** 3 / 24),
+    ),
   );
 }
 export function resourceCapacity(policy: FleetResourcePolicy): number {

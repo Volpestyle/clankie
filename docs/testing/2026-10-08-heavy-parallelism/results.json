@@ -1,0 +1,730 @@
+{
+  "cores": 18,
+  "order": "2 uncapped, 4 capped, 2 uncapped, 4 capped",
+  "runs": [
+    {
+      "index": 0,
+      "jobs": 2,
+      "workers": 18,
+      "batch": ["packages/protocol/test", "packages/settings/test"],
+      "before": {
+        "at": "2026-10-09T01:48:35.338Z",
+        "load": [15.82958984375, 15.23974609375, 32.8486328125],
+        "top": "Processes: 1480 total, 6 running, 1 stuck, 1473 sleeping, 11937 threads \n2026/10/08 20:48:37\nLoad Avg: 16.00, 15.29, 32.76 \nCPU usage: 46.59% user, 27.77% sys, 25.62% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1664740 total, 42G resident, 633M private, 11G shared.\nPhysMem: 115G used (11G wired, 21G compressor), 13G unused.\nVM: 802T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056561853/2949G in, 4029078656/1640G out.\nDisks: 575687605/18T read, 1698741216/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  36M \n99617  pixel-mcp        0.0  10M \nProcesses: 1500 total, 15 running, 1485 sleeping, 12022 threads \n2026/10/08 20:48:38\nLoad Avg: 16.00, 15.29, 32.76 \nCPU usage: 42.54% user, 23.90% sys, 33.55% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 3009 total, 1046M resident, 633M private, 11G shared.\nPhysMem: 114G used (11G wired, 21G compressor), 14G unused.\nVM: 811T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056562613/2949G in, 4029079330/1640G out.\nDisks: 575693280/18T read, 1698746835/18T written.\n\nPID    COMMAND          %CPU  MEM  \n550    fseventsd        103.5 19G+ \n617    WindowServer     54.6  1777M\n575    mds              43.3  77M+ \n21321  mds_stores       40.9  130M+\n0      kernel_task      33.7  32M+ \n88479  Google Chrome He 29.8  973M \n43985  Google Chrome He 21.0  322M+\n22777  node             19.5  799M \n61093  com.apple.Virtua 18.2  8247M\n586    xprotectd        13.1  18M+ \n"
+      },
+      "samples": [
+        {
+          "elapsedSeconds": 1.0006926250000001,
+          "load": [16.0029296875, 15.28515625, 32.76123046875]
+        },
+        {
+          "elapsedSeconds": 2.001061792,
+          "load": [16.0029296875, 15.28515625, 32.76123046875]
+        },
+        {
+          "elapsedSeconds": 3.0022797079999997,
+          "load": [22.80908203125, 16.7080078125, 33.16064453125]
+        },
+        {
+          "elapsedSeconds": 4.003575917,
+          "load": [22.80908203125, 16.7080078125, 33.16064453125]
+        },
+        {
+          "elapsedSeconds": 5.004015125,
+          "load": [22.80908203125, 16.7080078125, 33.16064453125]
+        },
+        {
+          "elapsedSeconds": 6.006426167,
+          "load": [22.80908203125, 16.7080078125, 33.16064453125]
+        },
+        {
+          "elapsedSeconds": 7.008187916999999,
+          "load": [22.80908203125, 16.7080078125, 33.16064453125]
+        },
+        {
+          "elapsedSeconds": 8.009444875,
+          "load": [23.625, 16.97802734375, 33.15966796875]
+        },
+        {
+          "elapsedSeconds": 9.010599917,
+          "load": [23.625, 16.97802734375, 33.15966796875]
+        },
+        {
+          "elapsedSeconds": 10.010954791999998,
+          "load": [23.625, 16.97802734375, 33.15966796875]
+        },
+        {
+          "elapsedSeconds": 11.012476999999999,
+          "load": [23.625, 16.97802734375, 33.15966796875]
+        },
+        {
+          "elapsedSeconds": 12.013063707999999,
+          "load": [23.625, 16.97802734375, 33.15966796875]
+        },
+        {
+          "elapsedSeconds": 13.01387625,
+          "load": [26.53759765625, 17.69189453125, 33.31689453125]
+        },
+        {
+          "elapsedSeconds": 14.015715292,
+          "load": [26.53759765625, 17.69189453125, 33.31689453125]
+        },
+        {
+          "elapsedSeconds": 15.016368708,
+          "load": [26.53759765625, 17.69189453125, 33.31689453125]
+        },
+        {
+          "elapsedSeconds": 16.017309958,
+          "load": [26.53759765625, 17.69189453125, 33.31689453125]
+        },
+        {
+          "elapsedSeconds": 17.018333875,
+          "load": [26.53759765625, 17.69189453125, 33.31689453125]
+        },
+        {
+          "elapsedSeconds": 18.019567375,
+          "load": [28.81640625, 18.31103515625, 33.44384765625]
+        },
+        {
+          "elapsedSeconds": 19.019657667000004,
+          "load": [28.81640625, 18.31103515625, 33.44384765625]
+        },
+        {
+          "elapsedSeconds": 20.021329083,
+          "load": [28.81640625, 18.31103515625, 33.44384765625]
+        },
+        {
+          "elapsedSeconds": 21.021964042,
+          "load": [28.81640625, 18.31103515625, 33.44384765625]
+        },
+        {
+          "elapsedSeconds": 22.022767750000003,
+          "load": [28.81640625, 18.31103515625, 33.44384765625]
+        },
+        {
+          "elapsedSeconds": 23.023281208,
+          "load": [39.6416015625, 20.7294921875, 34.20849609375]
+        },
+        {
+          "elapsedSeconds": 24.02422275,
+          "load": [39.6416015625, 20.7294921875, 34.20849609375]
+        },
+        {
+          "elapsedSeconds": 25.027310292000003,
+          "load": [39.6416015625, 20.7294921875, 34.20849609375]
+        },
+        {
+          "elapsedSeconds": 26.028631208000004,
+          "load": [39.6416015625, 20.7294921875, 34.20849609375]
+        },
+        {
+          "elapsedSeconds": 27.029814042,
+          "load": [39.6416015625, 20.7294921875, 34.20849609375]
+        },
+        {
+          "elapsedSeconds": 28.031156042000003,
+          "load": [39.509765625, 21.01611328125, 34.23046875]
+        },
+        {
+          "elapsedSeconds": 29.032525792,
+          "load": [39.509765625, 21.01611328125, 34.23046875]
+        },
+        {
+          "elapsedSeconds": 30.032713625000003,
+          "load": [39.509765625, 21.01611328125, 34.23046875]
+        },
+        {
+          "elapsedSeconds": 31.033856042,
+          "load": [39.509765625, 21.01611328125, 34.23046875]
+        },
+        {
+          "elapsedSeconds": 32.035140708,
+          "load": [39.509765625, 21.01611328125, 34.23046875]
+        },
+        {
+          "elapsedSeconds": 33.03680225,
+          "load": [41.55078125, 21.74609375, 34.41064453125]
+        },
+        {
+          "elapsedSeconds": 34.037624375,
+          "load": [41.55078125, 21.74609375, 34.41064453125]
+        },
+        {
+          "elapsedSeconds": 35.038473833000005,
+          "load": [41.55078125, 21.74609375, 34.41064453125]
+        },
+        {
+          "elapsedSeconds": 36.039588167000005,
+          "load": [41.55078125, 21.74609375, 34.41064453125]
+        },
+        {
+          "elapsedSeconds": 37.041240333000005,
+          "load": [41.55078125, 21.74609375, 34.41064453125]
+        },
+        {
+          "elapsedSeconds": 38.041851417,
+          "load": [42.54736328125, 22.28125, 34.525390625]
+        }
+      ],
+      "results": [
+        {
+          "job": 1,
+          "code": 0,
+          "seconds": 19.365789708,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 0,
+          "code": 0,
+          "seconds": 19.377443208,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 3,
+          "code": 0,
+          "seconds": 18.767151833,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 2,
+          "code": 0,
+          "seconds": 18.816907833000002,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        }
+      ],
+      "seconds": 38.18503375,
+      "peakLoad1m": 42.54736328125,
+      "after": {
+        "at": "2026-10-09T01:49:17.087Z",
+        "load": [42.54736328125, 22.28125, 34.525390625],
+        "top": "Processes: 1500 total, 13 running, 1487 sleeping, 11987 threads \n2026/10/08 20:49:19\nLoad Avg: 42.55, 22.28, 34.53 \nCPU usage: 55.34% user, 42.73% sys, 1.92% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1682069 total, 43G resident, 671M private, 11G shared.\nPhysMem: 112G used (11G wired, 21G compressor), 16G unused.\nVM: 812T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056584052/2949G in, 4029099907/1640G out.\nDisks: 575795884/18T read, 1698962500/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  37M \n99617  pixel-mcp        0.0  10M \nProcesses: 1495 total, 17 running, 1478 sleeping, 11920 threads \n2026/10/08 20:49:21\nLoad Avg: 42.55, 22.28, 34.53 \nCPU usage: 50.88% user, 46.46% sys, 2.65% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 3575 total, 632M resident, 671M private, 11G shared.\nPhysMem: 112G used (11G wired, 21G compressor), 16G unused.\nVM: 810T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056584444/2949G in, 4029100272/1640G out.\nDisks: 575801893/18T read, 1698966928/18T written.\n\nPID    COMMAND          %CPU  MEM   \n550    fseventsd        104.1 19G+  \n0      kernel_task      60.3  32M+  \n617    WindowServer     52.0  1643M-\n88479  Google Chrome He 38.1  1067M+\n21321  mds_stores       35.6  192M+ \n575    mds              27.1  77M-  \n43985  Google Chrome He 26.7  326M- \n22777  node             26.7  764M- \n710    syspolicyd       20.0  47M   \n67395  node             17.5  232M  \n"
+      }
+    },
+    {
+      "index": 1,
+      "jobs": 4,
+      "workers": 4,
+      "batch": ["packages/protocol/test", "packages/settings/test"],
+      "before": {
+        "at": "2026-10-09T01:49:21.279Z",
+        "load": [42.54736328125, 22.28125, 34.525390625],
+        "top": "Processes: 1497 total, 11 running, 1486 sleeping, 11789 threads \n2026/10/08 20:49:23\nLoad Avg: 41.22, 22.34, 34.48 \nCPU usage: 48.55% user, 47.73% sys, 3.70% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1679154 total, 43G resident, 670M private, 11G shared.\nPhysMem: 110G used (11G wired, 21G compressor), 18G unused.\nVM: 811T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056585420/2949G in, 4029101116/1640G out.\nDisks: 575808824/18T read, 1698974925/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  36M \n99617  pixel-mcp        0.0  10M \nProcesses: 1484 total, 21 running, 1 stuck, 1462 sleeping, 11686 threads \n2026/10/08 20:49:25\nLoad Avg: 41.22, 22.34, 34.48 \nCPU usage: 54.8% user, 38.21% sys, 7.69% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 4504 total, 955M resident, 670M private, 11G shared.\nPhysMem: 111G used (11G wired, 21G compressor), 17G unused.\nVM: 804T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056585892/2949G in, 4029101555/1640G out.\nDisks: 575812363/18T read, 1698979407/18T written.\n\nPID    COMMAND          %CPU  MEM   \n550    fseventsd        104.6 19G+  \n0      kernel_task      59.2  32M+  \n617    WindowServer     49.2  1643M-\n21321  mds_stores       47.8  225M+ \n22777  node             43.4  787M+ \n575    mds              42.7  77M+  \n88479  Google Chrome He 38.5  1034M-\n43985  Google Chrome He 30.1  363M- \n710    syspolicyd       21.4  47M   \n61093  com.apple.Virtua 17.4  8247M \n"
+      },
+      "samples": [
+        {
+          "elapsedSeconds": 1.0011095419999982,
+          "load": [40.4033203125, 22.486328125, 34.45458984375]
+        },
+        {
+          "elapsedSeconds": 2.0022275420000004,
+          "load": [40.4033203125, 22.486328125, 34.45458984375]
+        },
+        {
+          "elapsedSeconds": 3.0033507919999973,
+          "load": [40.4033203125, 22.486328125, 34.45458984375]
+        },
+        {
+          "elapsedSeconds": 4.003625082999999,
+          "load": [40.4033203125, 22.486328125, 34.45458984375]
+        },
+        {
+          "elapsedSeconds": 5.004762292,
+          "load": [40.4033203125, 22.486328125, 34.45458984375]
+        },
+        {
+          "elapsedSeconds": 6.005957667000002,
+          "load": [39.64990234375, 22.62744140625, 34.43408203125]
+        },
+        {
+          "elapsedSeconds": 7.006363041999998,
+          "load": [39.64990234375, 22.62744140625, 34.43408203125]
+        },
+        {
+          "elapsedSeconds": 8.006495208,
+          "load": [39.64990234375, 22.62744140625, 34.43408203125]
+        },
+        {
+          "elapsedSeconds": 9.006574583,
+          "load": [39.64990234375, 22.62744140625, 34.43408203125]
+        },
+        {
+          "elapsedSeconds": 10.007669292,
+          "load": [39.64990234375, 22.62744140625, 34.43408203125]
+        },
+        {
+          "elapsedSeconds": 11.008316166999997,
+          "load": [41.759765625, 23.34716796875, 34.61865234375]
+        },
+        {
+          "elapsedSeconds": 12.008628083000003,
+          "load": [41.759765625, 23.34716796875, 34.61865234375]
+        },
+        {
+          "elapsedSeconds": 13.009200375,
+          "load": [41.759765625, 23.34716796875, 34.61865234375]
+        },
+        {
+          "elapsedSeconds": 14.009942917,
+          "load": [41.759765625, 23.34716796875, 34.61865234375]
+        },
+        {
+          "elapsedSeconds": 15.010713750000003,
+          "load": [41.759765625, 23.34716796875, 34.61865234375]
+        },
+        {
+          "elapsedSeconds": 16.011797542000007,
+          "load": [43.86083984375, 24.08837890625, 34.81396484375]
+        },
+        {
+          "elapsedSeconds": 17.012876750000004,
+          "load": [43.86083984375, 24.08837890625, 34.81396484375]
+        },
+        {
+          "elapsedSeconds": 18.013156332999998,
+          "load": [43.86083984375, 24.08837890625, 34.81396484375]
+        },
+        {
+          "elapsedSeconds": 19.014240291999997,
+          "load": [43.86083984375, 24.08837890625, 34.81396484375]
+        },
+        {
+          "elapsedSeconds": 20.015164458000008,
+          "load": [43.86083984375, 24.08837890625, 34.81396484375]
+        },
+        {
+          "elapsedSeconds": 21.016004083,
+          "load": [50.19775390625, 25.72998046875, 35.33056640625]
+        },
+        {
+          "elapsedSeconds": 22.017288458000003,
+          "load": [50.19775390625, 25.72998046875, 35.33056640625]
+        },
+        {
+          "elapsedSeconds": 23.019180833,
+          "load": [50.19775390625, 25.72998046875, 35.33056640625]
+        },
+        {
+          "elapsedSeconds": 24.020719292000003,
+          "load": [50.19775390625, 25.72998046875, 35.33056640625]
+        },
+        {
+          "elapsedSeconds": 25.023083791999998,
+          "load": [50.19775390625, 25.72998046875, 35.33056640625]
+        },
+        {
+          "elapsedSeconds": 26.025139208,
+          "load": [48.259765625, 25.734375, 35.27587890625]
+        }
+      ],
+      "results": [
+        {
+          "job": 0,
+          "code": 0,
+          "seconds": 25.92566687500001,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 3,
+          "code": 0,
+          "seconds": 25.913928582999993,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 1,
+          "code": 0,
+          "seconds": 25.922464124999998,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 2,
+          "code": 0,
+          "seconds": 26.277180416999997,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        }
+      ],
+      "seconds": 26.284298042000003,
+      "peakLoad1m": 50.19775390625,
+      "after": {
+        "at": "2026-10-09T01:49:51.845Z",
+        "load": [48.259765625, 25.734375, 35.27587890625],
+        "top": "Processes: 1503 total, 11 running, 2 stuck, 1490 sleeping, 11803 threads \n2026/10/08 20:49:54\nLoad Avg: 48.26, 25.73, 35.28 \nCPU usage: 57.1% user, 38.66% sys, 4.32% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1687415 total, 46G resident, 680M private, 11G shared.\nPhysMem: 114G used (12G wired, 21G compressor), 14G unused.\nVM: 814T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056595071/2949G in, 4029111157/1640G out.\nDisks: 575857318/18T read, 1699167001/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  36M \n99617  pixel-mcp        0.0  10M \nProcesses: 1500 total, 10 running, 2 stuck, 1488 sleeping, 11811 threads \n2026/10/08 20:49:56\nLoad Avg: 48.26, 25.73, 35.28 \nCPU usage: 53.58% user, 41.45% sys, 4.95% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 458 total, 24M resident, 680M private, 11G shared.\nPhysMem: 114G used (11G wired, 21G compressor), 14G unused.\nVM: 811T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056596163/2949G in, 4029112213/1640G out.\nDisks: 575864354/18T read, 1699177917/18T written.\n\nPID    COMMAND          %CPU  MEM   \n550    fseventsd        103.7 19G+  \n0      kernel_task      65.2  32M-  \n21321  mds_stores       59.1  283M+ \n617    WindowServer     52.4  1766M-\n88479  Google Chrome He 43.5  1012M+\n68365  node             36.8  1002M+\n575    mds              28.1  78M+  \n43985  Google Chrome He 25.3  364M+ \n22777  node             24.4  971M  \n72955  node             22.4  328M+ \n"
+      }
+    },
+    {
+      "index": 2,
+      "jobs": 2,
+      "workers": 18,
+      "batch": ["packages/protocol/test", "packages/settings/test"],
+      "before": {
+        "at": "2026-10-09T01:49:56.094Z",
+        "load": [48.259765625, 25.734375, 35.27587890625],
+        "top": "Processes: 1497 total, 9 running, 4 stuck, 1484 sleeping, 11788 threads \n2026/10/08 20:49:58\nLoad Avg: 46.16, 25.67, 35.20 \nCPU usage: 54.65% user, 39.61% sys, 5.73% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1686334 total, 45G resident, 675M private, 11G shared.\nPhysMem: 114G used (12G wired, 21G compressor), 14G unused.\nVM: 811T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056598976/2949G in, 4029114930/1640G out.\nDisks: 575879394/18T read, 1699194852/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  36M \n99617  pixel-mcp        0.0  10M \nProcesses: 1502 total, 8 running, 2 stuck, 1492 sleeping, 11826 threads \n2026/10/08 20:50:00\nLoad Avg: 46.16, 25.67, 35.20 \nCPU usage: 50.64% user, 39.66% sys, 9.68% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1536 total, 249M resident, 675M private, 11G shared.\nPhysMem: 113G used (12G wired, 21G compressor), 15G unused.\nVM: 813T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056600345/2949G in, 4029116678/1640G out.\nDisks: 575882034/18T read, 1699207983/18T written.\n\nPID    COMMAND          %CPU  MEM   \n550    fseventsd        102.2 19G+  \n21321  mds_stores       67.3  315M+ \n0      kernel_task      65.6  32M+  \n617    WindowServer     52.2  1767M \n22777  node             49.5  1104M+\n88479  Google Chrome He 46.7  1009M-\n68365  node             32.2  1098M+\n43985  Google Chrome He 26.1  363M+ \n66270  node             22.9  695M+ \n575    mds              20.3  77M-  \n"
+      },
+      "samples": [
+        {
+          "elapsedSeconds": 1.0012627499999944,
+          "load": [46.15673828125, 25.67236328125, 35.19775390625]
+        },
+        {
+          "elapsedSeconds": 2.0019514169999892,
+          "load": [44.06201171875, 25.578125, 35.1083984375]
+        },
+        {
+          "elapsedSeconds": 3.0032179999999933,
+          "load": [44.06201171875, 25.578125, 35.1083984375]
+        },
+        {
+          "elapsedSeconds": 4.004190541999996,
+          "load": [44.06201171875, 25.578125, 35.1083984375]
+        },
+        {
+          "elapsedSeconds": 5.003730332999999,
+          "load": [44.06201171875, 25.578125, 35.1083984375]
+        },
+        {
+          "elapsedSeconds": 6.004320041999992,
+          "load": [44.06201171875, 25.578125, 35.1083984375]
+        },
+        {
+          "elapsedSeconds": 7.005265541999994,
+          "load": [47.01953125, 26.498046875, 35.376953125]
+        },
+        {
+          "elapsedSeconds": 8.005605874999993,
+          "load": [47.01953125, 26.498046875, 35.376953125]
+        },
+        {
+          "elapsedSeconds": 9.007580583000003,
+          "load": [47.01953125, 26.498046875, 35.376953125]
+        },
+        {
+          "elapsedSeconds": 10.008014708000003,
+          "load": [47.01953125, 26.498046875, 35.376953125]
+        },
+        {
+          "elapsedSeconds": 11.008245832999993,
+          "load": [47.01953125, 26.498046875, 35.376953125]
+        },
+        {
+          "elapsedSeconds": 12.009198292,
+          "load": [45.17578125, 26.45654296875, 35.31005859375]
+        },
+        {
+          "elapsedSeconds": 13.010355041999995,
+          "load": [45.17578125, 26.45654296875, 35.31005859375]
+        },
+        {
+          "elapsedSeconds": 14.010596082999998,
+          "load": [45.17578125, 26.45654296875, 35.31005859375]
+        },
+        {
+          "elapsedSeconds": 15.01175,
+          "load": [45.17578125, 26.45654296875, 35.31005859375]
+        },
+        {
+          "elapsedSeconds": 16.012857666999988,
+          "load": [45.17578125, 26.45654296875, 35.31005859375]
+        },
+        {
+          "elapsedSeconds": 17.01276720799999,
+          "load": [43.15966796875, 26.34912109375, 35.22021484375]
+        },
+        {
+          "elapsedSeconds": 18.013843916999992,
+          "load": [43.15966796875, 26.34912109375, 35.22021484375]
+        },
+        {
+          "elapsedSeconds": 19.015211041999997,
+          "load": [43.15966796875, 26.34912109375, 35.22021484375]
+        },
+        {
+          "elapsedSeconds": 20.01663587499999,
+          "load": [43.15966796875, 26.34912109375, 35.22021484375]
+        },
+        {
+          "elapsedSeconds": 21.019168458,
+          "load": [43.15966796875, 26.34912109375, 35.22021484375]
+        },
+        {
+          "elapsedSeconds": 22.020636333000002,
+          "load": [46.75, 27.37255859375, 35.529296875]
+        },
+        {
+          "elapsedSeconds": 23.021709,
+          "load": [46.75, 27.37255859375, 35.529296875]
+        },
+        {
+          "elapsedSeconds": 24.023304917,
+          "load": [46.75, 27.37255859375, 35.529296875]
+        },
+        {
+          "elapsedSeconds": 25.023682207999997,
+          "load": [46.75, 27.37255859375, 35.529296875]
+        },
+        {
+          "elapsedSeconds": 26.02476358299999,
+          "load": [46.75, 27.37255859375, 35.529296875]
+        },
+        {
+          "elapsedSeconds": 27.026407249999988,
+          "load": [45.96923828125, 27.5322265625, 35.53759765625]
+        },
+        {
+          "elapsedSeconds": 28.02752208299999,
+          "load": [45.96923828125, 27.5322265625, 35.53759765625]
+        },
+        {
+          "elapsedSeconds": 29.028599707999994,
+          "load": [45.96923828125, 27.5322265625, 35.53759765625]
+        },
+        {
+          "elapsedSeconds": 30.028745792000002,
+          "load": [45.96923828125, 27.5322265625, 35.53759765625]
+        },
+        {
+          "elapsedSeconds": 31.02982424999999,
+          "load": [45.96923828125, 27.5322265625, 35.53759765625]
+        },
+        {
+          "elapsedSeconds": 32.031864875,
+          "load": [44.9306640625, 27.62255859375, 35.5224609375]
+        },
+        {
+          "elapsedSeconds": 33.033076707999996,
+          "load": [44.9306640625, 27.62255859375, 35.5224609375]
+        },
+        {
+          "elapsedSeconds": 34.034185375,
+          "load": [44.9306640625, 27.62255859375, 35.5224609375]
+        },
+        {
+          "elapsedSeconds": 35.035274791999996,
+          "load": [44.9306640625, 27.62255859375, 35.5224609375]
+        },
+        {
+          "elapsedSeconds": 36.034853458,
+          "load": [44.9306640625, 27.62255859375, 35.5224609375]
+        },
+        {
+          "elapsedSeconds": 37.034538042,
+          "load": [43.73486328125, 27.66162109375, 35.48974609375]
+        }
+      ],
+      "results": [
+        {
+          "job": 0,
+          "code": 0,
+          "seconds": 18.299924375000003,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 1,
+          "code": 0,
+          "seconds": 18.374624500000007,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 3,
+          "code": 0,
+          "seconds": 18.033677167,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 2,
+          "code": 0,
+          "seconds": 19.209529417,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        }
+      ],
+      "seconds": 37.509511208,
+      "peakLoad1m": 48.259765625,
+      "after": {
+        "at": "2026-10-09T01:50:37.735Z",
+        "load": [43.73486328125, 27.66162109375, 35.48974609375],
+        "top": "Processes: 1472 total, 7 running, 1465 sleeping, 11735 threads \n2026/10/08 20:50:40\nLoad Avg: 43.73, 27.66, 35.49 \nCPU usage: 53.38% user, 32.46% sys, 14.14% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1685307 total, 45G resident, 648M private, 11G shared.\nPhysMem: 114G used (11G wired, 21G compressor), 14G unused.\nVM: 800T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056642392/2949G in, 4029149047/1640G out.\nDisks: 575958227/18T read, 1699349502/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  36M \n99617  pixel-mcp        0.0  10M \nProcesses: 1480 total, 13 running, 1467 sleeping, 11790 threads \n2026/10/08 20:50:41\nLoad Avg: 41.91, 27.55, 35.40 \nCPU usage: 58.3% user, 28.64% sys, 13.32% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 5971 total, 1750M resident, 648M private, 11G shared.\nPhysMem: 115G used (11G wired, 21G compressor), 13G unused.\nVM: 803T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056643402/2949G in, 4029149927/1640G out.\nDisks: 575960029/18T read, 1699349705/18T written.\n\nPID    COMMAND          %CPU  MEM   \n550    fseventsd        101.7 19G+  \n21321  mds_stores       69.8  227M+ \n575    mds              64.1  75M   \n617    WindowServer     53.7  1910M-\n62206  PerfPowerService 52.0  19M+  \n88479  Google Chrome He 43.5  919M- \n0      kernel_task      35.0  32M-  \n43985  Google Chrome He 24.7  391M- \n22777  node             22.7  1023M+\n79248  top              13.0  12M+  \n"
+      }
+    },
+    {
+      "index": 3,
+      "jobs": 4,
+      "workers": 4,
+      "batch": ["packages/protocol/test", "packages/settings/test"],
+      "before": {
+        "at": "2026-10-09T01:50:41.590Z",
+        "load": [41.9140625, 27.55078125, 35.40478515625],
+        "top": "Processes: 1472 total, 7 running, 1465 sleeping, 11742 threads \n2026/10/08 20:50:44\nLoad Avg: 41.91, 27.55, 35.40 \nCPU usage: 54.92% user, 31.36% sys, 13.70% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1684677 total, 45G resident, 648M private, 11G shared.\nPhysMem: 114G used (11G wired, 21G compressor), 14G unused.\nVM: 800T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056646266/2949G in, 4029152441/1640G out.\nDisks: 575963252/18T read, 1699350555/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  36M \n99617  pixel-mcp        0.0  10M \nProcesses: 1475 total, 11 running, 1464 sleeping, 11770 threads \n2026/10/08 20:50:45\nLoad Avg: 41.91, 27.55, 35.40 \nCPU usage: 50.9% user, 31.9% sys, 18.81% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 3182 total, 657M resident, 648M private, 11G shared.\nPhysMem: 113G used (11G wired, 21G compressor), 15G unused.\nVM: 801T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056647208/2949G in, 4029153336/1640G out.\nDisks: 575966457/18T read, 1699351026/18T written.\n\nPID    COMMAND          %CPU  MEM   \n21321  mds_stores       116.8 280M+ \n550    fseventsd        105.0 19G+  \n575    mds              70.5  75M   \n617    WindowServer     54.6  1753M-\n88479  Google Chrome He 33.8  884M- \n0      kernel_task      31.7  33M+  \n43985  Google Chrome He 23.2  392M- \n22777  node             22.8  745M- \n622    runningboardd    15.5  17M-  \n83237  top              12.7  11M+  \n"
+      },
+      "samples": [
+        {
+          "elapsedSeconds": 1.0009832920000044,
+          "load": [40.9599609375, 27.59130859375, 35.373046875]
+        },
+        {
+          "elapsedSeconds": 2.002188666999995,
+          "load": [40.9599609375, 27.59130859375, 35.373046875]
+        },
+        {
+          "elapsedSeconds": 3.0027095420000114,
+          "load": [40.9599609375, 27.59130859375, 35.373046875]
+        },
+        {
+          "elapsedSeconds": 4.0056503339999905,
+          "load": [40.9599609375, 27.59130859375, 35.373046875]
+        },
+        {
+          "elapsedSeconds": 5.006304874999987,
+          "load": [40.9599609375, 27.59130859375, 35.373046875]
+        },
+        {
+          "elapsedSeconds": 6.007017791999984,
+          "load": [41.763671875, 27.9794921875, 35.46435546875]
+        },
+        {
+          "elapsedSeconds": 7.007110334000012,
+          "load": [41.763671875, 27.9794921875, 35.46435546875]
+        },
+        {
+          "elapsedSeconds": 8.008328083999993,
+          "load": [41.763671875, 27.9794921875, 35.46435546875]
+        },
+        {
+          "elapsedSeconds": 9.009133916999984,
+          "load": [41.763671875, 27.9794921875, 35.46435546875]
+        },
+        {
+          "elapsedSeconds": 10.010575834000003,
+          "load": [41.763671875, 27.9794921875, 35.46435546875]
+        },
+        {
+          "elapsedSeconds": 11.012323458999992,
+          "load": [42.0224609375, 28.26171875, 35.52001953125]
+        },
+        {
+          "elapsedSeconds": 12.013174374999988,
+          "load": [42.0224609375, 28.26171875, 35.52001953125]
+        },
+        {
+          "elapsedSeconds": 13.013525084000008,
+          "load": [42.0224609375, 28.26171875, 35.52001953125]
+        },
+        {
+          "elapsedSeconds": 14.01461120900001,
+          "load": [42.0224609375, 28.26171875, 35.52001953125]
+        },
+        {
+          "elapsedSeconds": 15.015491541999989,
+          "load": [42.0224609375, 28.26171875, 35.52001953125]
+        },
+        {
+          "elapsedSeconds": 16.016587584000007,
+          "load": [44.7431640625, 29.05419921875, 35.7568359375]
+        },
+        {
+          "elapsedSeconds": 17.019595209000006,
+          "load": [44.7431640625, 29.05419921875, 35.7568359375]
+        },
+        {
+          "elapsedSeconds": 18.0204525,
+          "load": [44.7431640625, 29.05419921875, 35.7568359375]
+        },
+        {
+          "elapsedSeconds": 19.020578458999996,
+          "load": [44.7431640625, 29.05419921875, 35.7568359375]
+        },
+        {
+          "elapsedSeconds": 20.021666542000006,
+          "load": [44.7431640625, 29.05419921875, 35.7568359375]
+        },
+        {
+          "elapsedSeconds": 21.024735624999987,
+          "load": [46.044921875, 29.58447265625, 35.904296875]
+        },
+        {
+          "elapsedSeconds": 22.025759417000007,
+          "load": [46.044921875, 29.58447265625, 35.904296875]
+        },
+        {
+          "elapsedSeconds": 23.027325541999993,
+          "load": [46.044921875, 29.58447265625, 35.904296875]
+        },
+        {
+          "elapsedSeconds": 24.029014584000006,
+          "load": [46.044921875, 29.58447265625, 35.904296875]
+        },
+        {
+          "elapsedSeconds": 25.029669666999993,
+          "load": [46.044921875, 29.58447265625, 35.904296875]
+        },
+        {
+          "elapsedSeconds": 26.030800084000003,
+          "load": [48.203125, 30.30517578125, 36.12158203125]
+        }
+      ],
+      "results": [
+        {
+          "job": 2,
+          "code": 0,
+          "seconds": 26.400247000000018,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 1,
+          "code": 0,
+          "seconds": 26.510180166999984,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 3,
+          "code": 0,
+          "seconds": 26.540032042000007,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        },
+        {
+          "job": 0,
+          "code": 0,
+          "seconds": 26.583643540999997,
+          "files": 48,
+          "tests": 325,
+          "passed": 325
+        }
+      ],
+      "seconds": 26.583715042000012,
+      "peakLoad1m": 48.203125,
+      "after": {
+        "at": "2026-10-09T01:51:12.121Z",
+        "load": [48.203125, 30.30517578125, 36.12158203125],
+        "top": "Processes: 1479 total, 10 running, 1 stuck, 1468 sleeping, 11746 threads \n2026/10/08 20:51:14\nLoad Avg: 48.20, 30.31, 36.12 \nCPU usage: 51.87% user, 46.16% sys, 1.96% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 1688113 total, 45G resident, 653M private, 11G shared.\nPhysMem: 114G used (11G wired, 21G compressor), 14G unused.\nVM: 803T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056659672/2949G in, 4029165414/1640G out.\nDisks: 575998879/18T read, 1699416519/18T written.\n\nPID    COMMAND          %CPU MEM \n99925  codex            0.0  147M\n99887  steam_osx        0.0  182M\n99857  Python           0.0  178M\n99817  node             0.0  17M \n99737  node             0.0  258M\n99656  node             0.0  39M \n99646  codex-code-mode- 0.0  18M \n99642  node             0.0  55M \n99618  node             0.0  36M \n99617  pixel-mcp        0.0  10M \nProcesses: 1487 total, 16 running, 2 stuck, 1469 sleeping, 11896 threads \n2026/10/08 20:51:16\nLoad Avg: 48.20, 30.31, 36.12 \nCPU usage: 53.35% user, 42.70% sys, 3.93% idle \nSharedLibs: 1184M resident, 187M data, 780M linkedit.\nMemRegions: 4227 total, 1107M resident, 653M private, 11G shared.\nPhysMem: 114G used (12G wired, 21G compressor), 14G unused.\nVM: 806T vsize, 57G framework vsize, 11305939(0) swapins, 26691503(0) swapouts.\nNetworks: packets: 5056660435/2949G in, 4029166082/1640G out.\nDisks: 576004778/18T read, 1699419251/18T written.\n\nPID    COMMAND          %CPU  MEM   \n550    fseventsd        103.0 19G+  \n21321  mds_stores       74.0  270M- \n0      kernel_task      56.0  32M+  \n617    WindowServer     54.3  1777M-\n88479  Google Chrome He 37.3  883M- \n22777  node             29.5  777M+ \n575    mds              27.5  75M-  \n43985  Google Chrome He 24.6  368M+ \n710    syspolicyd       24.6  47M+  \n586    xprotectd        17.3  18M   \n"
+      }
+    }
+  ]
+}

@@ -100,7 +100,7 @@ try{
 darwinIt("does not reuse an expired healthy value when the native reply becomes invalid", async () => {
   const directory = await mkdtemp(join(tmpdir(), "clankie-memory-reply-"));
   try {
-    for (const file of ["process.ts", "pressure.ts"])
+    for (const file of ["process.ts", "pressure.ts", "parallelism.ts"])
       await copyFile(join(import.meta.dirname, "../src", file), join(directory, file));
     const fault = join(directory, "corrupt-reply");
     // Corrupt only the actual native reply. All valid values and availability

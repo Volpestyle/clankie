@@ -47,7 +47,13 @@ resubmitting a healthy queued request.
 
 The owner sets capacity through `clankie fleet set --heavy-slots auto|N` and
 `--simulator-slots N`, or `/fleet resources`. Automatic capacity is the smaller
-of one slot per eight cores and one per 24 GiB RAM, with a minimum of one.
+of one slot per four cores and one per 24 GiB RAM, with a minimum of one.
+The 18-core, 128 GiB Mac therefore defaults to four permits when this version
+is installed. The [alternating benchmark](../../../docs/testing/2026-10-08-heavy-parallelism/README.md)
+finished its four-job batch about 30% sooner with four capped jobs. Its busy-machine
+load peaks did not fall, so keep the load and available-memory guards and use
+the governor's observed capacity. Task-specific owner budgets still bind;
+a source/default change does not authorize increasing live capacity.
 Heavy and simulator leases have independent budgets; the default simulator limit is one. Load and available-memory guards gate both.
 The registry belongs to the OS account and is shared across worktrees. Worker
 `HOME`, state-path or `HEAVY_SLOTS` overrides cannot increase capacity.

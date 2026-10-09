@@ -1,0 +1,70 @@
+import { spawn, execFileSync } from "node:child_process";
+import { loadavg, availableParallelism } from "node:os";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { performance } from "node:perf_hooks";
+
+const out = ".local/benchmark";
+mkdirSync(out, { recursive: true });
+const batch = ["packages/protocol/test", "packages/settings/test"];
+const runs = [];
+const snapshot = () => ({
+  at: new Date().toISOString(),
+  load: loadavg(),
+  top: execFileSync("top", ["-l", "2", "-s", "1", "-n", "10", "-o", "cpu", "-stats", "pid,command,cpu,mem"], {
+    encoding: "utf8",
+  }),
+});
+for (const [index, jobs] of [2, 4, 2, 4].entries()) {
+  const workers = jobs === 2 ? availableParallelism() : 4;
+  const run = { index, jobs, workers, batch, before: snapshot(), samples: [], results: [] };
+  const started = performance.now();
+  let next = 0;
+  const timer = setInterval(
+    () => run.samples.push({ elapsedSeconds: (performance.now() - started) / 1000, load: loadavg() }),
+    1000,
+  );
+  await Promise.all(
+    Array.from({ length: jobs }, async () => {
+      for (;;) {
+        const job = next++;
+        if (job >= 4) return;
+        const jobStarted = performance.now();
+        const child = spawn(
+          "pnpm",
+          ["exec", "vitest", "run", ...batch, "--reporter=json", `--outputFile=${out}/${index}-${job}.json`],
+          {
+            env: { ...process.env, VITEST_MAX_WORKERS: String(workers), TURBO_CONCURRENCY: String(workers) },
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        );
+        let output = "";
+        child.stdout.on("data", (data) => {
+          output += data;
+        });
+        child.stderr.on("data", (data) => {
+          output += data;
+        });
+        const code = await new Promise((resolve, reject) => {
+          child.once("error", reject);
+          child.once("exit", resolve);
+        });
+        writeFileSync(`${out}/${index}-${job}.log`, output);
+        run.results.push({ job, code, seconds: (performance.now() - jobStarted) / 1000 });
+        if (code !== 0) throw new Error(`Benchmark job ${index}/${job} failed: ${output.slice(-1000)}`);
+      }
+    }),
+  ).finally(() => clearInterval(timer));
+  run.seconds = (performance.now() - started) / 1000;
+  run.peakLoad1m = Math.max(run.before.load[0], ...run.samples.map((s) => s.load[0]));
+  run.after = snapshot();
+  runs.push(run);
+  writeFileSync(
+    `${out}/results.json`,
+    JSON.stringify(
+      { cores: availableParallelism(), order: "2 uncapped, 4 capped, 2 uncapped, 4 capped", runs },
+      null,
+      2,
+    ),
+  );
+  console.log(JSON.stringify({ index, jobs, workers, seconds: run.seconds, peakLoad1m: run.peakLoad1m }));
+}
