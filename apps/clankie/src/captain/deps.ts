@@ -110,7 +110,7 @@ export interface CaptainDeps {
   /** Work items in each repo's own tracking convention (ADR 0191). */
   readonly workItems?: Pick<WorkItemsService, "handle">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
-  readonly mcp: Pick<McpHost, "catalog" | "call">;
+  readonly mcp: Pick<McpHost, "catalog" | "catalogStatus" | "call">;
   /** The mail tools only; the account catalog owns status and disconnect. */
   readonly email: Pick<EmailPort, "list" | "read" | "search" | "send">;
   readonly browser: Pick<BrowserHost, "catalog" | "call">;

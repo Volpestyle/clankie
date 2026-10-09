@@ -232,7 +232,8 @@ describe("service-only Minecraft MCP transport", () => {
     if (typeof extension === "function") throw new Error("Expected inline extension");
     await extension.factory({
       registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
+      on: () => undefined,
     } as unknown as ExtensionAPI);
-    expect(tools.size).toBe(0);
+    expect([...tools.keys()]).toEqual(["mcp_tool_search"]);
   });
 });

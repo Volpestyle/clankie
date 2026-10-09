@@ -204,13 +204,23 @@ export interface McpHost {
   /** A verified provider change retires cached lists, including self-echo webhooks. */
   invalidateTrackerReads?(): void;
   /**
-   * Connects every active server up front, so no conversational turn pays for
-   * it. Failures are logged, never thrown: a server that is down costs him that
-   * server's tools, not his ability to answer.
+   * Discovers active servers in the background; service boot must not await it.
+   * Explicit tool searches can wait for discovery. Individual failures are isolated:
+   * a server that is down costs him its tools, not his ability to answer.
    */
   warm(): Promise<void>;
-  /** Every tool reachable from `lane`, across every enabled server. */
-  catalog(lane: CaptainSessionLaneV2): Promise<readonly McpToolDescriptor[]>;
+  /** Every reachable tool; readyOnly takes a validated snapshot and starts pending discovery. */
+  catalog(
+    lane: CaptainSessionLaneV2,
+    options?: { readonly readyOnly?: boolean },
+  ): Promise<readonly McpToolDescriptor[]>;
+  /** Readiness of configured, lane-admitted servers; absence of tools is not proof of absence. */
+  catalogStatus?(lane: CaptainSessionLaneV2): Promise<
+    readonly {
+      server: string;
+      status: "ready" | "connecting" | "unavailable";
+    }[]
+  >;
   call(input: {
     readonly lane: CaptainSessionLaneV2;
     readonly server: string;
@@ -373,6 +383,7 @@ interface ServerState {
   connection?: McpConnection;
   connecting?: Promise<McpConnection>;
   tools?: readonly McpToolDescriptor[];
+  listing?: Promise<readonly McpToolDescriptor[]>;
   nativeToolNames?: ReadonlySet<string>;
   failure?: { reason: string; at: number };
 }
@@ -398,6 +409,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   const states = new Map<string, ServerState>();
   const retired = new Set<ServerState>();
   const missingCredentials = new Set<string>();
+  const failedDiscovery = new Map<string, string>();
   const opening = new Set<Promise<McpConnection>>();
   const trackerReads = createPrioritySortedLinearIssueReader(
     options.trackerReadClock === undefined ? {} : { clock: options.trackerReadClock },
@@ -704,11 +716,44 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   }
 
   async function toolsFor(server: McpServerSettings, now: number): Promise<readonly McpToolDescriptor[]> {
+    const key = JSON.stringify(server);
+    try {
+      const tools = await loadTools(server, now);
+      if (failedDiscovery.get(server.id) === key) failedDiscovery.delete(server.id);
+      return tools;
+    } catch (error) {
+      failedDiscovery.set(server.id, key);
+      throw error;
+    }
+  }
+
+  async function loadTools(server: McpServerSettings, now: number): Promise<readonly McpToolDescriptor[]> {
     const state = await stateFor(server);
     if (state.tools !== undefined) {
       await assertCurrent(server, state);
       return state.tools;
     }
+    if (state.listing !== undefined) return state.listing;
+    if (state.failure !== undefined && now - state.failure.at < FAILURE_COOLDOWN_MS)
+      throw new Error(state.failure.reason);
+    const listing = discoverTools(server, state, now)
+      .catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : "mcp_discovery_failed";
+        state.failure = { reason, at: Date.now() };
+        options.logger.warn(
+          { event: "mcp.host.discovery_failed", server: server.id, reason },
+          "mcp catalog unavailable",
+        );
+        throw error;
+      })
+      .finally(() => {
+        delete state.listing;
+      });
+    state.listing = listing;
+    return listing;
+  }
+
+  async function discoverTools(server: McpServerSettings, state: ServerState, now: number) {
     const client = await connection(server, state, now);
     const pickedFiles =
       googleProvider(server) === "google-drive"
@@ -820,6 +865,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     )
       projected.push(graphqlDescriptor());
     state.tools = projected;
+    delete state.failure;
     return projected;
   }
 
@@ -898,14 +944,27 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       );
     },
 
-    async catalog(lane) {
+    async catalog(lane, catalogOptions) {
       const now = Date.now();
       const collected: McpToolDescriptor[] = [];
       for (const server of await activeServers()) {
         if (server.id === "minecraft") continue;
         if (!laneAllows(server, lane)) continue;
         try {
-          collected.push(...(await toolsFor(server, now)));
+          if (catalogOptions?.readyOnly) {
+            // Start discovery without putting remote initialization, OAuth refresh,
+            // or tools/list on the first conversational turn's critical path.
+            void toolsFor(server, now).catch(() => undefined);
+            const state = states.get(server.id);
+            if (state?.tools !== undefined) {
+              await assertCurrent(server, state);
+              collected.push(...state.tools);
+            } else if (server.id === "linear" && (options.localTracker || options.linearApiTracker)) {
+              collected.push(...canonicalTrackerCatalog());
+            }
+          } else {
+            collected.push(...(await toolsFor(server, now)));
+          }
         } catch {
           // One unreachable server must not cost him the others. The failure is
           // already logged; the tools simply are not offered this session.
@@ -914,6 +973,23 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         }
       }
       return collected;
+    },
+
+    async catalogStatus(lane) {
+      return (await activeServers())
+        .filter((server) => server.id !== "minecraft" && laneAllows(server, lane))
+        .map((server) => {
+          const state = states.get(server.id);
+          return {
+            server: server.id,
+            status:
+              state?.tools !== undefined
+                ? ("ready" as const)
+                : state?.failure !== undefined || failedDiscovery.get(server.id) === JSON.stringify(server)
+                  ? ("unavailable" as const)
+                  : ("connecting" as const),
+          };
+        });
     },
 
     async call(input) {

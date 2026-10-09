@@ -521,6 +521,25 @@ session, because `/model` and `/effort` swap the model under a live conversation
 Asked what he runs on, he answers from the prompt like he answers with his own
 address — no tool call, no guess, and silence if the selection cannot be resolved.
 
+### Optional connected-service discovery at startup
+
+The service starts MCP discovery in the background. Required host identity,
+pairing and revocation setup still completes before the corresponding endpoints
+serve. A remote MCP initialize or `tools/list` timeout does not hold the API or
+the first chat's tool bank open. Initial banks use validated ready catalogs and
+the service-owned canonical tracker schemas; pending remote schemas are never
+invented. This changes no instance sizes, minimum capacity or AWS resources.
+
+Both pi and native lane banks always retain `mcp_tool_search`. An explicit search
+waits for current discovery and refreshes its catalog, so tools that finish
+connecting after the bank was created remain searchable and callable in that
+same session. Search results include each admitted server's discovery status:
+`ready`, `connecting` or `unavailable`; an unavailable catalog does not establish
+that the server lacks a capability. Concurrent warm, bank and search requests
+share the same per-generation `tools/list` operation, and failed discovery uses
+the existing one-minute retry cooldown. Lane, configuration, credential and
+call-time revocation checks still apply.
+
 ## Where things run
 
 - **Machine access.** Owners choose cumulative portal, workers, shell or screen

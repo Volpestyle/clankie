@@ -7,6 +7,17 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+  type AgentSession,
+} from "@earendil-works/pi-coding-agent";
+import { mcpExtension } from "../src/captain/tools.ts";
 import { join } from "node:path";
 import { SettingsStore } from "@clankie/settings";
 import { FileCredentialStore } from "@clankie/credential-broker";
@@ -647,7 +658,7 @@ it("lists a connected service's initial tools and defers the rest behind search 
   expect((await invoke.call({ name: "linear_nope" })).isError).toBe(true);
 });
 
-it("keeps a fully listed service free of the search tools", async () => {
+it("keeps discovery available when the initial service is fully listed", async () => {
   const mcp = {
     catalog: async () => [
       {
@@ -666,7 +677,7 @@ it("keeps a fully listed service free of the search tools", async () => {
     {} as LaneLog,
     "operator",
   );
-  expect(bank.tools.some((entry) => entry.name === "mcp_tool_search")).toBe(false);
+  expect(bank.tools.some((entry) => entry.name === "mcp_tool_search")).toBe(true);
 });
 
 it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP calls", async () => {
@@ -939,5 +950,188 @@ it("serves realtime voice its own recall_episodes, get_self_state and remember_e
     app.close();
     await captain.close();
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+it("serves an operator API and its first tool bank while a real remote MCP catalog is still pending", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-slow-catalog-"));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let listed!: () => void;
+  const started = new Promise<void>((resolve) => {
+    listed = resolve;
+  });
+  let listings = 0;
+  const remote = createServer(async (request, response) => {
+    if (request.method !== "POST") {
+      response.writeHead(405).end();
+      return;
+    }
+    let body = "";
+    for await (const part of request) body += part;
+    const rpc = JSON.parse(body);
+    if (rpc.method.startsWith("notifications/")) {
+      response.writeHead(202).end();
+      return;
+    }
+    let result: unknown;
+    if (rpc.method === "initialize")
+      result = {
+        protocolVersion: "2025-03-26",
+        capabilities: { tools: {} },
+        serverInfo: { name: "slow", version: "1" },
+      };
+    else if (rpc.method === "tools/list") {
+      listings += 1;
+      listed();
+      await gate;
+      result = {
+        tools: [
+          {
+            name: "echo",
+            description: "Echo input",
+            inputSchema: {
+              type: "object",
+              properties: { text: { type: "string" } },
+              required: ["text"],
+            },
+          },
+          {
+            name: "unrelated",
+            description: "Different capability",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+      };
+    } else result = { content: [{ type: "text", text: rpc.params.arguments.text }] };
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }));
+  });
+  await new Promise<void>((resolve) => remote.listen(0, "127.0.0.1", resolve));
+  const address = remote.address();
+  if (!address || typeof address === "string") throw new Error("missing fixture port");
+  const settings = new SettingsStore(join(root, "settings.json"));
+  await settings.update((current) => ({
+    ...current,
+    mcp: {
+      servers: [
+        {
+          id: "slow",
+          transport: "http",
+          url: `http://127.0.0.1:${address.port}/mcp`,
+          args: [],
+          lane: "operator",
+          enabled: true,
+          initialTools: [],
+        },
+      ],
+    },
+  }));
+  const mcp = createMcpHost({
+    settings,
+    credentials: new FileCredentialStore(join(root, "credentials.json")),
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
+  const deps = { ...bankDeps(), mcp };
+  const captain = createCaptain(deps, { repoRoot: root, stateDir: root, workingDirectory: root, settings });
+  let piSession: AgentSession | undefined;
+  const warm = mcp.warm();
+  const app = await createClankieApp({
+    captain,
+    authenticateOperator: async () => ({ operatorId: "operator-james" }),
+  });
+  try {
+    await started;
+    // Neither readiness nor the first lane catalog is allowed to await gate.
+    const first = await Promise.race([
+      (async () => {
+        const sessionId = await connect(app, "operator");
+        return await toolNames(app, "operator", sessionId);
+      })(),
+      new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error("first tool bank blocked on optional MCP")), 1500);
+        timer.unref();
+      }),
+    ]);
+    expect(first).toContain("mcp_tool_search");
+    expect(first).not.toContain("slow_echo");
+    const extension = mcpExtension(deps, "operator");
+    if (typeof extension === "function") throw new Error("Expected inline extension");
+    const piSettings = SettingsManager.inMemory({});
+    const loader = new DefaultResourceLoader({
+      cwd: root,
+      agentDir: root,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      settingsManager: piSettings,
+      extensionFactories: [extension.factory],
+    });
+    const runtime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
+      refreshOnCreate: false,
+    });
+    await loader.reload();
+    const created = await createAgentSession({
+      cwd: root,
+      agentDir: root,
+      resourceLoader: loader,
+      settingsManager: piSettings,
+      sessionManager: SessionManager.inMemory(root),
+      modelRuntime: runtime,
+      model: runtime.getModel("openai", "gpt-4o")!,
+      noTools: "builtin",
+    });
+    piSession = created.session;
+    await piSession.bindExtensions({ mode: "print" });
+    expect(piSession.getActiveToolNames()).toContain("mcp_tool_search");
+    expect(piSession.getActiveToolNames()).not.toContain("slow_echo");
+    const executePi = async (name: string, args: unknown) => {
+      const tool = piSession!.agent.state.tools.find((item) => item.name === name);
+      if (!tool) throw new Error(`Pi tool ${name} is not active`);
+      return tool.execute("fixture-call", args);
+    };
+    const piSearching = executePi("mcp_tool_search", { query: "echo" });
+
+    expect(await mcp.catalogStatus?.("operator")).toEqual([{ server: "slow", status: "connecting" }]);
+    const bank = await buildLaneToolBank(deps, {}, {} as LaneLog, "operator");
+    const searching = bank.tools.find((tool) => tool.name === "mcp_tool_search")!.call({ query: "echo" });
+    release();
+    await warm;
+    expect(JSON.stringify(await searching)).toContain("slow_echo");
+    const piSearch = await piSearching;
+    const piSearchResult = JSON.stringify(piSearch);
+    const searchText = piSearch.content.find((item) => item.type === "text");
+    if (searchText?.type !== "text") throw new Error("missing Pi search result");
+    expect(JSON.parse(searchText.text)).toMatchObject({ matches: ["slow_echo"], added: ["slow_echo"] });
+    expect(piSearchResult).toContain("slow_echo");
+    expect(piSearchResult).toContain("ready");
+    expect(piSession.getActiveToolNames()).toContain("slow_echo");
+    expect(piSession.getActiveToolNames()).not.toContain("slow_unrelated");
+    expect(JSON.stringify(await executePi("slow_echo", { text: "Pi after discovery" }))).toContain(
+      "Pi after discovery",
+    );
+
+    const called = await bank.tools
+      .find((tool) => tool.name === "mcp_tool_call")!
+      .call({ name: "slow_echo", arguments: { text: "ready after discovery" } });
+    expect(JSON.stringify(called)).toContain("ready after discovery");
+    expect(listings).toBe(1);
+    expect(await mcp.catalog("discord_presence")).toEqual([]);
+  } finally {
+    release();
+    await warm;
+    piSession?.dispose();
+    await captain.close();
+    await mcp.close();
+    remote.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      remote.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(root, { recursive: true, force: true });
   }
 });

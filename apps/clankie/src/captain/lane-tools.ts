@@ -90,10 +90,11 @@ export async function buildLaneToolBank(
     if (tool.requiresShell && lane !== "operator" && turn.shell !== true) continue;
     tools.push(browserLaneTool(deps, turn, tool, lane === "operator" || turn.shell === true));
   }
-  const services = (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
+  const services = (await deps.mcp.catalog(lane, { readyOnly: true })).filter(
+    (tool) => tool.server !== "minecraft",
+  );
   for (const tool of services) if (tool.initial) tools.push(mcpLaneTool(deps, lane, tool, turn));
-  if (services.some((tool) => !tool.initial))
-    tools.push(...serviceDirectoryTools(deps, lane, services, turn));
+  tools.push(...serviceDirectoryTools(deps, lane, turn));
   return { lane, tools };
 }
 
@@ -121,23 +122,17 @@ const MAX_SCHEMA_NAMES = 10;
 /**
  * The deferred half of a connected service: one tool to find a name and its
  * schema, one to call it. Search covers the whole catalog, listed ones included,
- * so a miss means the service really lacks it.
+ * with readiness statuses so an unavailable catalog is never a capability verdict.
  */
-function serviceDirectoryTools(
-  deps: CaptainDeps,
-  lane: CaptainSessionLaneV2,
-  catalog: readonly McpToolDescriptor[],
-  turn: TurnContext,
-): LaneTool[] {
-  const byName = new Map(catalog.map((tool) => [tool.qualifiedName, tool]));
-  const servers = [...new Set(catalog.map((tool) => tool.server))].join(", ");
+function serviceDirectoryTools(deps: CaptainDeps, lane: CaptainSessionLaneV2, turn: TurnContext): LaneTool[] {
+  const refresh = async () => (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
   return [
     {
       name: "mcp_tool_search",
       description:
-        `Find tools on his connected services (${servers}) beyond the ones listed. ` +
+        "Find tools on his configured services beyond the ones listed. Discovery may still be connecting; search waits for it. " +
         "Search with query for names and one-line summaries, then pass names for full input schemas. " +
-        "Use this before saying a service cannot do something. " +
+        "Use this before saying a service cannot do something; an unavailable service catalog cannot prove a tool is absent. " +
         "It never searches the web: web, image and listing searches go through his browser.",
       inputSchema: {
         type: "object",
@@ -157,6 +152,8 @@ function serviceDirectoryTools(
         additionalProperties: false,
       },
       async call(args) {
+        const catalog = await refresh();
+        const byName = new Map(catalog.map((tool) => [tool.qualifiedName, tool]));
         const names = Array.isArray(args.names) ? args.names.filter((name) => typeof name === "string") : [];
         if (names.length > 0) {
           const found = names.slice(0, MAX_SCHEMA_NAMES).flatMap((name) => {
@@ -175,13 +172,17 @@ function serviceDirectoryTools(
           return {
             content: toolJson({
               tools: found,
+              services: await deps.mcp.catalogStatus?.(lane),
               ...(missing.length > 0 ? { missing } : {}),
             }).content,
           };
         }
         const query = typeof args.query === "string" ? args.query : "";
         return {
-          content: toolJson({ tools: searchCatalog(catalog, query) }).content,
+          content: toolJson({
+            tools: searchCatalog(catalog, query),
+            services: await deps.mcp.catalogStatus?.(lane),
+          }).content,
         };
       },
     },
@@ -199,6 +200,7 @@ function serviceDirectoryTools(
         additionalProperties: false,
       },
       async call(args) {
+        const byName = new Map((await refresh()).map((tool) => [tool.qualifiedName, tool]));
         const tool = typeof args.name === "string" ? byName.get(args.name) : undefined;
         if (tool === undefined) {
           return {

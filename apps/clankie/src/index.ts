@@ -715,7 +715,10 @@ const mcpHost = createMcpHost({
     return persona === undefined ? undefined : linearWorkerAuthor(persona);
   },
 });
-await mcpHost.warm();
+// Optional remote catalogs must not delay the API, gateway, or first chat.
+void mcpHost.warm().catch((error: unknown) => {
+  logger.warn({ event: "mcp.host.warm_failed", error }, "MCP discovery could not start");
+});
 
 const discordTracking = new DiscordTracking({
   path: join(stateRoot, "discord-tracking.json"),

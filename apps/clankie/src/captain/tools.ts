@@ -1992,14 +1992,17 @@ export function mcpExtension(
     name: "captain-mcp",
     hidden: true,
     async factory(pi) {
-      const catalog = (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
-      if (catalog.length === 0) return;
+      let catalog = (await deps.mcp.catalog(lane, { readyOnly: true })).filter(
+        (tool) => tool.server !== "minecraft",
+      );
 
       const registeredNames = new Set<string>();
-      for (const tool of catalog) {
+      const register = (tool: (typeof catalog)[number]) => {
+        if (registeredNames.has(tool.qualifiedName)) return;
         registeredNames.add(tool.qualifiedName);
         pi.registerTool({
           name: tool.qualifiedName,
+          defaultActive: false,
           label: `${tool.server}: ${tool.name}`,
           description: tool.description,
           parameters: tool.inputSchema as TSchema,
@@ -2020,20 +2023,25 @@ export function mcpExtension(
             return json(result);
           },
         });
-      }
+      };
+
+      for (const tool of catalog) register(tool);
 
       pi.registerTool({
         name: MCP_TOOL_SEARCH,
         label: "Find connected-service tools",
         description:
           "Find and enable tools on his connected services that are not already active. Search by task, " +
-          "such as projects, cycles, documents, or labels. Use this before saying a service cannot do something.",
+          "such as projects, cycles, documents, or labels. Search waits for pending discovery and returns service readiness; " +
+          "an unavailable catalog cannot prove a tool is absent. Use this before saying a service cannot do something.",
         parameters: Type.Object({
           query: Type.String({ minLength: 1, maxLength: 200 }),
           limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
         }),
         executionMode: "sequential",
         execute: async (_id, params) => {
+          catalog = (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
+          for (const tool of catalog) register(tool);
           const terms = params.query
             .toLowerCase()
             .split(/[^a-z0-9]+/u)
@@ -2048,7 +2056,7 @@ export function mcpExtension(
           const active = pi.getActiveTools();
           const added = matches.filter((name) => !active.includes(name));
           if (added.length > 0) pi.setActiveTools([...active, ...added]);
-          return json({ matches, added });
+          return json({ matches, added, services: await deps.mcp.catalogStatus?.(lane) });
         },
       });
 
