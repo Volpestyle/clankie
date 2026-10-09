@@ -22,9 +22,16 @@ The positions fill right, down, then right. Herdr splits individual leaves:
 the fourth position uses `down` on the top-right pane, rather than `right` on
 the bottom-left (which would make two narrow panes in the left column).
 Never add a fifth pane to the full tab. Give each new pane a human worker name
-with `herdr pane rename PANE "Name · role"`. Start its visible native harness
-through the supported launch route; dispatch briefs through native channels,
-never terminal typing. Native harness subagents stay inside their harness.
+with `herdr pane rename PANE "Name · role"`. For a plain Herdr native launch:
+
+```sh
+herdr agent start ada --kind codex --pane P1 --timeout 30000
+```
+
+Choose an unused native slug: lowercase letter first, then lowercase letters,
+digits, `-` or `_`, at most 32 characters. Its display label may stay human.
+Success confirms the visible TUI is ready; no brief was sent. Dispatch briefs
+through native channels, never terminal typing. Native harness subagents stay inside their harness.
 
 For initial-command launches, create only the new worker's temporary tab, then
 move that new pane into the group with the target/direction from above:

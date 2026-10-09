@@ -62,7 +62,26 @@ needed. The initial source journey also exposed the remote transport's missing
 `pane move` allowlist entry; the completed tests cover its admission while
 server-control verbs remain blocked.
 
-Scope: five live allocations through the actual hire-layout path, not five
-authenticated `hire_agent` model turns. The prepared-launch journey and covering
-hire tests verify forwarding and native launch boundaries. No deploy, live
-settings write, existing-pane rearrangement or model dispatch occurred.
+The follow-up [native live check](native-live.json) started five visible Codex
+TUIs through the same new-hire allocator, at 2026-10-09 02:59:22 UTC. Four landed
+in `w47:tQ` and the fifth in `w47:tR`, both named. They kept the same 272 × 71
+2x2 geometry. All ten pre-existing panes and global focus were preserved.
+The moved TUI retained foreground process group 59440 and shell PID 59332;
+cleanup left zero owned panes and tabs. The initial native attempt was refused
+for an invalid human-style agent name; the corrected check uses unique
+lowercase native slugs. No credentials or account settings changed.
+
+The [native runner](native-live-runner.ts.txt) is archived too. To reproduce,
+copy either runner to `.local/vuh-1869/live.ts` in this checkout, then run
+`clankie heavy -- pnpm --filter @clankie/clankie exec tsx ../../.local/vuh-1869/live.ts`
+from the repo root inside Herdr. It allocates and closes only its own panes.
+
+After rebasing onto current main, all 179 tests passed again in 12.53 s;
+targeted formatting/lint, Clankie/protocol typechecks and doc checks also passed.
+The source landed on main as `29d4139435ce46cc94afe790e74808332b489f5b`.
+
+Scope: live source allocator plus five real native TUI starts, without model
+briefs or turns. This is not a deployed-service `hire_agent` dispatch; the
+prepared-launch journey and covering hire tests verify forwarding and native
+launch boundaries. No deploy, live settings write or existing-pane
+rearrangement occurred.

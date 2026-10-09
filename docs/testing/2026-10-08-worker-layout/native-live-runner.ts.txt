@@ -1,0 +1,56 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { writeFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { createHireLayout } from '../../apps/clankie/src/captain/hire-layout.ts';
+const exec = promisify(execFile);
+process.chdir(fileURLToPath(new URL("../../", import.meta.url)));
+if(process.env.HERDR_ENV !== '1') throw new Error('Not in Herdr');
+const calls:any[]=[];
+const run=async(args: readonly string[])=>{try{const {stdout}=await exec('herdr',[...args],{maxBuffer:4*1024*1024,timeout:15000});const parsed=stdout.trim()?JSON.parse(stdout):null;calls.push({args,result:parsed});return stdout;}catch(error){calls.push({args,error:String(error)});throw error;}};
+const snap=async()=>JSON.parse(await run(['api','snapshot'])).result.snapshot;
+const before=await snap();
+const group=`VUH-1869 native live ${Date.now()}`;
+const ids:string[]=[];
+const report:any={group,startedAt:new Date().toISOString(),scope:'Five live hire-layout allocations with visible native Codex TUIs; no model brief or turn.'};
+try{
+ const allocate=createHireLayout(run);
+ for(let i=0;i<5;i++) {
+  const id = await allocate({cwd:process.cwd(),label:`Layout native check ${i+1}`,group});
+  ids.push(id);
+  await run(['agent','start',`vuh1869-check-${Date.now().toString().slice(-6)}-${i+1}`,'--kind','codex','--pane',id,'--timeout','30000']);
+ }
+ report.nativeAgentsStarted = ids.length;
+ const current=await snap();const panes=ids.map(id=>current.panes.find((p:any)=>p.pane_id===id));
+ assert.equal(new Set(panes.slice(0,4).map((p:any)=>p.tab_id)).size,1);assert.notEqual(panes[0].tab_id,panes[4].tab_id);
+ const layout=JSON.parse(await run(['pane','layout','--pane',ids[0]!])).result.layout;
+ const rect=ids.slice(0,4).map(id=>layout.panes.find((p:any)=>p.pane_id===id).rect);
+ assert.equal(rect[0].x,rect[2].x);assert.equal(rect[1].x,rect[3].x);assert.equal(rect[0].y,rect[1].y);assert.equal(rect[2].y,rect[3].y);assert(rect[1].x>rect[0].x);assert(rect[2].y>rect[0].y);
+ const ownedTabs=current.tabs.filter((t:any)=>panes.some((p:any)=>p.tab_id===t.tab_id));
+ assert.equal(ownedTabs[0].label,group);assert.equal(ownedTabs[1].label,`${group} · 2`);
+ for(const old of before.panes){const p=current.panes.find((p:any)=>p.pane_id===old.pane_id);assert(p);for(const k of ['tab_id','workspace_id','terminal_id'])assert.equal(p[k],old[k]);}
+ assert.equal(current.focused_pane_id,before.focused_pane_id);
+ const processBefore=JSON.parse(await run(['pane','process-info','--pane',ids[3]!])).result.process_info;
+ const noop=JSON.parse(await run(['pane','move',ids[3]!, '--tab',panes[0].tab_id,'--split','right','--target-pane',ids[2]!,'--ratio','0.5','--no-focus']));
+ const sameLayout=JSON.parse(await run(['pane','layout','--pane',ids[0]!])).result.layout;
+ assert.deepEqual(sameLayout.panes.map((p:any)=>({id:p.pane_id,rect:p.rect})),layout.panes.map((p:any)=>({id:p.pane_id,rect:p.rect})));
+ const moved=JSON.parse(await run(['pane','move',ids[3]!,'--new-tab','--label',`${group} temporary`,'--no-focus'])).result.move_result.pane.pane_id;
+ const returned=JSON.parse(await run(['pane','move',moved,'--tab',panes[0].tab_id,'--split','down','--target-pane',ids[1]!,'--ratio','0.5','--no-focus'])).result.move_result.pane.pane_id;
+ ids[3]=returned;
+ const processAfter=JSON.parse(await run(['pane','process-info','--pane',returned])).result.process_info;
+ assert.equal(processAfter.shell_pid,processBefore.shell_pid);
+ assert.equal(processAfter.foreground_process_group_id,processBefore.foreground_process_group_id);
+ report.panes=panes.map((p:any)=>({paneId:p.pane_id,tabId:p.tab_id,terminalId:p.terminal_id}));report.tabs=ownedTabs;report.layout=layout;report.sameTabNoopVerified=true;report.shellPidPreserved=processBefore.shell_pid;report.foregroundProcessGroupPreserved=processBefore.foreground_process_group_id;report.existingPaneCountPreserved=before.panes.length;report.focusPreserved=true;report.result='passed';
+}catch(e){report.result='failed';report.error=String(e);throw e;}finally{
+ const cleanupIds = new Set(ids);
+ for (const c of calls.filter(c=>c.result)) {
+  if ((c.args[0] === 'tab' || c.args[0] === 'workspace') && c.args[1] === 'create') cleanupIds.add(c.result.result.root_pane.pane_id);
+  if (c.args[0] === 'pane' && c.args[1] === 'split') cleanupIds.add(c.result.result.pane.pane_id);
+ }
+ for(const id of [...cleanupIds].reverse())await run(['pane','close',id]);
+ const after=await snap();report.cleanup={ownedPanesRemaining:after.panes.filter((p:any)=>cleanupIds.has(p.pane_id)).length,ownedTabsRemaining:after.tabs.filter((t:any)=>t.label.startsWith(group)).length};
+ report.calls=calls.filter(c=>!(c.args[0]==='api' || c.args[0]==='worktree')).map(c=>({args:c.args,result:c.result}));
+ await writeFile('docs/testing/2026-10-08-worker-layout/native-live.json',JSON.stringify(report,null,2)+'\n');
+ console.log(JSON.stringify({...report,calls:undefined},null,2));
+}
