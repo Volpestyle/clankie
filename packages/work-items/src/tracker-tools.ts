@@ -51,6 +51,11 @@ export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   "list_issue_events",
   "save_issue_status",
   "get_cycle",
+  "save_run",
+  "list_runs",
+  "save_lease",
+  "list_ready_issues",
+  "list_drift",
 ]);
 
 /** What a worker reports about an item; the tracker derives the item's state from these. */
@@ -70,7 +75,8 @@ export interface TrackerItemEvent {
   readonly identifier: string;
   /**
    * Worker-reported types, or what the tracker recorded: created, comment, state, priority,
-   * stage, verified, reopened, and cycle (from/to are cycle ids; via rollover when automatic).
+   * stage, verified, reopened, cycle (from/to are cycle ids; via rollover when automatic),
+   * run (from/to are run statuses) and lease.
    */
   readonly type:
     | IssueEventType
@@ -81,7 +87,9 @@ export interface TrackerItemEvent {
     | "stage"
     | "verified"
     | "reopened"
-    | "cycle";
+    | "cycle"
+    | "run"
+    | "lease";
   readonly actor: TrackerActor;
   /** True when Clankie or his workers wrote it; owner activity (human or the owner's app) is false. */
   readonly selfEcho: boolean;
@@ -513,6 +521,53 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     "Built-in tracker only. One cycle by ID, or by number with project, with its summary from the event stream.",
     { id: { ...string, minLength: 1 }, project: string },
     ["id"],
+  ),
+  tool(
+    "save_run",
+    "Built-in tracker only. Start a run on an issue (issueId; one attempt of the work, optionally a child of parentRunId) or update yours (id): finish it with status succeeded, failed or canceled, and report tokens and costUsd. Your seat, pane and hire are linked from your identity; give the worktree and branch you work in. A run cannot start on an issue someone else holds the lease on.",
+    {
+      id: string,
+      issueId: string,
+      parentRunId: string,
+      worktree: { ...string, maxLength: 4096 },
+      branch: { ...string, maxLength: 256 },
+      status: { type: "string", enum: ["succeeded", "failed", "canceled"] },
+      tokens: { type: "integer", minimum: 0 },
+      costUsd: { type: "number", minimum: 0 },
+      summary: { ...string, maxLength: 4000 },
+      idempotencyKey,
+    },
+  ),
+  tool(
+    "list_runs",
+    "Built-in tracker only. Runs, newest first, for one issue or all: attempt number, parent run, status, worktree and branch, duration, tokens and cost, and the live link to the seat, pane and hire that runs it.",
+    {
+      issueId: string,
+      status: { type: "string", enum: ["active", "succeeded", "failed", "canceled"] },
+      limit: pagination.limit,
+      cursor: string,
+    },
+  ),
+  tool(
+    "save_lease",
+    "Built-in tracker only. Take or renew the lease on an issue while you work on it (default 30 minutes), or release it. A lease expires on its own; while it is live nobody else can lease the issue or start a run on it, and the issue leaves the ready queue.",
+    {
+      issueId: { ...string, minLength: 1 },
+      ttlMinutes: { type: "integer", minimum: 1, maximum: 1440 },
+      release: boolean,
+      idempotencyKey,
+    },
+    ["issueId"],
+  ),
+  tool(
+    "list_ready_issues",
+    "Built-in tracker only. The ready queue: open issues not yet landed, unblocked, with no live lease and no active run. The project's current cycle comes first, then priority (urgent to low, none last), then oldest.",
+    { project: string, limit: pagination.limit, cursor: string },
+  ),
+  tool(
+    "list_drift",
+    "Built-in tracker only. Work that has drifted: leases that expired without a release, runs still active on closed issues, and open issues with no update in idleDays (default 30).",
+    { project: string, idleDays: { type: "integer", minimum: 1, maximum: 365 } },
   ),
   tool(
     "list_milestones",

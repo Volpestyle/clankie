@@ -17,7 +17,9 @@ the built-in tracker. A second proposed
 wakes. A third proposed [amendment](#amendment-releases-2026-10-09-vuh-1930)
 (VUH-1930) makes releases records whose items come from landed commits, and a
 fourth [amendment](#amendment-cycles-2026-10-09-vuh-1931) (VUH-1931) adds
-per-project cycles with automatic rollover.
+per-project cycles with automatic rollover, and a fifth
+[amendment](#amendment-runs-leases-the-ready-queue-and-drift-2026-10-09-vuh-1918)
+(VUH-1918) adds runs, leases, the ready queue and drift.
 
 ## Context
 
@@ -303,3 +305,43 @@ what the ready queue (VUH-1918) will prefer.
 
 Other backends refuse `cycle` and the cycle tools explicitly. Connected Linear
 keeps its own team cycles, and the Linear import (VUH-1907) will map them.
+
+## Amendment: runs, leases, the ready queue and drift (2026-10-09, VUH-1918)
+
+Status: proposed. Tracks [VUH-1918](https://linear.app/vuhlp/issue/VUH-1918).
+Built-in tracker only. Linear has no equivalent, so these are built-in tools
+(`save_run`, `list_runs`, `save_lease`, `list_ready_issues`, `list_drift`), and
+other backends refuse them.
+
+**Runs** are attempts at an issue's work. Each has an attempt number per issue,
+an optional parent run (a retry or sub-run), its status (active, then
+succeeded, failed or canceled), worktree, branch, and reported tokens and
+dollars. The tracker stores only the run's host-stamped actor, never a copy of
+seat state. On every read the host resolves the live link from its own hire
+records (ADR 0207): a fleet worker's principal names its fleet and pane, and
+the hire record names its seat, harness and hire revision. A pane the host
+could not verify links to its fleet only. Only the run's own runner, the owner
+or the lead update a run. Starting and finishing write `run` events. An item's
+`get_issue` carries `work`, the rollup of its runs: attempts, active runs,
+time, tokens and cost.
+
+**Leases** default to 30 minutes and expire on their own, with no timer. While a
+lease is live, nobody else can lease the item or start a run on it. A holder
+renews its own lease quietly. Taking or releasing a lease, and taking over an
+expired one, writes `lease` events. The owner and the lead may release anyone's
+lease.
+
+**The ready queue** lists open items not yet landed that are unblocked (no open
+blocker and no `blocked` flag), unleased and not being run. The project's
+current cycle comes first, then priority (urgent to low, none last), then the
+oldest.
+
+**Drift** is read, not stored. It lists:
+
+- leases that expired without a release;
+- runs still active on closed items (the builders who keep working on closed
+  issues);
+- open items with no update in N days (default 30).
+
+Cycle rollover is bookkeeping and does not count as an update, so an item that
+only rolls over still reads as idle.

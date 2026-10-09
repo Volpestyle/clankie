@@ -115,6 +115,8 @@ interface Issue extends Entity {
   stage?: DeliveryStage;
   /** The project cycle it is in (VUH-1931); set by the owner or lead, moved by rollover. */
   cycleId?: string | null;
+  /** Who is working on it until when (VUH-1918). Kept after expiry until released or taken. */
+  lease?: Lease | null;
   blocked?: boolean;
   asking?: boolean;
   errored?: boolean;
@@ -140,6 +142,29 @@ interface Project extends Entity {
   links: Link[];
   /** Cycle length in days (VUH-1931); absent means one week. */
   cycleDays?: number;
+}
+interface Lease {
+  holder: string;
+  actor: TrackerActor;
+  acquiredAt: string;
+  expiresAt: string;
+}
+/** One attempt at an issue's work (VUH-1918). Seat, pane and hire come from its actor, live. */
+interface Run {
+  id: string;
+  issueId: string;
+  /** Attempt number on its issue: 2 is the first retry. */
+  number: number;
+  parentRunId: string | null;
+  status: "active" | "succeeded" | "failed" | "canceled";
+  actor: TrackerActor;
+  worktree: string | null;
+  branch: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  tokens: number | null;
+  costUsd: number | null;
+  summary: string | null;
 }
 /** A time box of one project. Consecutive: each starts where the previous one ended. */
 interface Cycle {
@@ -206,6 +231,8 @@ interface Store {
   releases?: Release[];
   /** Project cycles (VUH-1931), created as they are first needed. */
   cycles?: Cycle[];
+  /** Runs of issue work (VUH-1918). */
+  runs?: Run[];
 }
 
 /** Who and why for one write, threaded into item events. */
@@ -248,6 +275,11 @@ export interface LocalTrackerOptions {
   readonly issueResolver?: (reference: string) => Promise<{ id: string; identifier: string } | undefined>;
   /** Repo membership is checked under the store lock, including comment edits and replies. */
   readonly assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void;
+  /**
+   * The live seat, pane and hire behind a run's actor, from the host's own hire records
+   * (VUH-1918). Read on every view; the tracker keeps no copy of seat state.
+   */
+  readonly runner?: (actor: TrackerActor) => Record<string, unknown> | undefined;
 }
 
 const norm = (value: string) => value.trim().toLowerCase();
@@ -390,6 +422,11 @@ function parseStore(content: string): Store {
     });
   }
   bindStageStatuses(store);
+  if (
+    store.runs !== undefined &&
+    (!Array.isArray(store.runs) || store.runs.some((entry) => typeof entry?.id !== "string"))
+  )
+    throw new Error("Invalid local tracker runs");
   if (
     store.cycles !== undefined &&
     (!Array.isArray(store.cycles) ||
@@ -807,8 +844,8 @@ const projectCycles = (store: Store, projectId: string) =>
   (store.cycles ?? []).filter((cycle) => cycle.projectId === projectId).sort((a, b) => a.number - b.number);
 const isOpen = (store: Store, issue: Issue) =>
   !["completed", "canceled", "duplicate"].includes(categoryOf(store, issue.statusId) ?? "");
-/** The owner (directly or through the owner's app) and Clankie as lead plan cycles; workers do not. */
-const plansCycles = (actor: TrackerActor) =>
+/** The owner (directly or through the owner's app) and Clankie as lead: they plan cycles and override runs and leases. */
+const ownerOrLead = (actor: TrackerActor) =>
   isOwnerActivity(actor) || (actor.type === "agent-worker" && actor.id === TRACKER_LEAD.id);
 
 function addCycle(store: Store, project: Project, startsAt: string, now: string): Cycle {
@@ -852,7 +889,8 @@ function moveCycle(
   const current = (store.cycles ?? []).find((cycle) => cycle.id === issue.cycleId);
   if (current?.id === target?.id) return;
   issue.cycleId = target?.id ?? null;
-  issue.updatedAt = now;
+  // Rollover is bookkeeping, not work: an item that only rolls over still reads as idle.
+  if (context.via !== ROLLOVER) issue.updatedAt = now;
   appendEvent(store, context, now, issue, {
     type: "cycle",
     ...(current === undefined ? {} : { from: current.id }),
@@ -945,7 +983,7 @@ function setIssueCycle(
   context: WriteContext,
   now: string,
 ): void {
-  if (!plansCycles(context.actor))
+  if (!ownerOrLead(context.actor))
     throw new TrackerWriteRefused(
       "cycle_planning_reserved",
       "only the owner or the lead adds items to cycles or removes them",
@@ -1011,6 +1049,246 @@ function cycleView(store: Store, cycle: Cycle, now: string): Record<string, unkn
     isFuture: now < cycle.startsAt,
     issues: store.issues.filter((issue) => issue.cycleId === cycle.id).map((issue) => issue.identifier),
     summary: Object.fromEntries(Object.entries(summary).map(([key, value]) => [key, [...value]])),
+  };
+}
+
+const DEFAULT_LEASE_MINUTES = 30;
+const DEFAULT_IDLE_DAYS = 30;
+const leaseLive = (issue: Issue, now: string) => issue.lease != null && issue.lease.expiresAt > now;
+const runsOf = (store: Store, issueId: string) => (store.runs ?? []).filter((run) => run.issueId === issueId);
+const actorName = (actor: TrackerActor) => actor.name ?? actor.id;
+
+function runView(store: Store, run: Run, now: string, options: LocalTrackerOptions): Record<string, unknown> {
+  const issue = store.issues.find((entry) => entry.id === run.issueId);
+  return {
+    ...run,
+    identifier: issue?.identifier ?? null,
+    durationMs: Date.parse(run.endedAt ?? now) - Date.parse(run.startedAt),
+    link: options.runner?.(run.actor) ?? null,
+  };
+}
+
+/** Start a run (issueId) or update or finish one (id). Only its runner, the owner or the lead touch it. */
+function saveRun(
+  store: Store,
+  args: Record<string, unknown>,
+  context: WriteContext,
+  now: string,
+  options: LocalTrackerOptions,
+): Record<string, unknown> {
+  if ((args.id === undefined) === (args.issueId === undefined))
+    throw new Error("save_run takes issueId to start a run or id to update one");
+  let run: Run;
+  let issue: Issue;
+  if (args.id === undefined) {
+    issue = findIssue(store, args.issueId as string);
+    options.assertIssueWrite?.(issueView(store, issue));
+    if (leaseLive(issue, now) && issue.lease!.holder !== actorKey(context.actor))
+      throw new TrackerWriteRefused(
+        "lease_held",
+        `${issue.identifier} is leased by ${actorName(issue.lease!.actor)} until ${issue.lease!.expiresAt}`,
+      );
+    if (args.status !== undefined) throw new Error("A run starts active; finish it with its id");
+    const parent =
+      args.parentRunId === undefined
+        ? undefined
+        : (store.runs ?? []).find((entry) => entry.id === args.parentRunId);
+    if (args.parentRunId !== undefined && parent === undefined)
+      throw new Error(`Run not found: ${String(args.parentRunId)}`);
+    run = {
+      id: randomUUID(),
+      issueId: issue.id,
+      number: runsOf(store, issue.id).length + 1,
+      parentRunId: parent?.id ?? null,
+      status: "active",
+      actor: context.actor,
+      worktree: (args.worktree as string | undefined) ?? null,
+      branch: (args.branch as string | undefined) ?? null,
+      startedAt: now,
+      endedAt: null,
+      tokens: null,
+      costUsd: null,
+      summary: null,
+    };
+    (store.runs ??= []).push(run);
+    appendEvent(store, context, now, issue, {
+      type: "run",
+      to: "active",
+      body: `Run ${String(run.number)} started${run.worktree === null ? "" : ` in ${run.worktree}`}`,
+    });
+  } else {
+    const found = (store.runs ?? []).find((entry) => entry.id === args.id);
+    if (found === undefined) throw new Error(`Run not found: ${String(args.id)}`);
+    run = found;
+    issue = findIssue(store, run.issueId);
+    if (actorKey(run.actor) !== actorKey(context.actor) && !ownerOrLead(context.actor))
+      throw new TrackerWriteRefused(
+        "run_owner_required",
+        "only the run's own runner, the owner or the lead updates it",
+      );
+    if (args.parentRunId !== undefined) throw new Error("A run's parent is set when it starts");
+    if (run.status !== "active") throw new Error(`Run ${String(run.number)} already ${run.status}`);
+  }
+  for (const key of ["worktree", "branch", "tokens", "costUsd", "summary"] as const)
+    if (args[key] !== undefined && args.id !== undefined)
+      (run as unknown as Record<string, unknown>)[key] = args[key];
+  if (args.status !== undefined) {
+    run.status = args.status as Run["status"];
+    run.endedAt = now;
+    appendEvent(store, context, now, issue, {
+      type: "run",
+      from: "active",
+      to: run.status,
+      body: `Run ${String(run.number)} ${run.status}${run.summary === null ? "" : `: ${run.summary}`}`,
+    });
+  }
+  issue.updatedAt = now;
+  return runView(store, run, now, options);
+}
+
+/** Take, renew or release an issue's lease. An expired lease is anyone's to take. */
+function saveLease(
+  store: Store,
+  args: Record<string, unknown>,
+  context: WriteContext,
+  now: string,
+  options: LocalTrackerOptions,
+): Record<string, unknown> {
+  const issue = findIssue(store, args.issueId as string);
+  options.assertIssueWrite?.(issueView(store, issue));
+  const held = issue.lease ?? undefined;
+  const mine = held !== undefined && held.holder === actorKey(context.actor);
+  if (args.release === true) {
+    if (held === undefined) return issueView(store, issue);
+    if (!mine && !ownerOrLead(context.actor))
+      throw new TrackerWriteRefused(
+        "lease_held",
+        `${issue.identifier} is leased by ${actorName(held.actor)}`,
+      );
+    issue.lease = null;
+    appendEvent(store, context, now, issue, {
+      type: "lease",
+      body: `Lease released (${actorName(held.actor)})`,
+    });
+  } else {
+    if (args.ttlMinutes !== undefined && typeof args.ttlMinutes !== "number")
+      throw new Error("ttlMinutes must be a number");
+    if (held !== undefined && !mine && leaseLive(issue, now))
+      throw new TrackerWriteRefused(
+        "lease_held",
+        `${issue.identifier} is leased by ${actorName(held.actor)} until ${held.expiresAt}`,
+      );
+    const expiresAt = new Date(
+      Date.parse(now) + ((args.ttlMinutes as number | undefined) ?? DEFAULT_LEASE_MINUTES) * 60_000,
+    ).toISOString();
+    if (!mine)
+      appendEvent(store, context, now, issue, {
+        type: "lease",
+        body:
+          held === undefined
+            ? `Leased until ${expiresAt}`
+            : `Leased until ${expiresAt}; ${actorName(held.actor)}'s lease expired at ${held.expiresAt}`,
+      });
+    issue.lease = {
+      holder: actorKey(context.actor),
+      actor: context.actor,
+      acquiredAt: mine ? held.acquiredAt : now,
+      expiresAt,
+    };
+  }
+  issue.updatedAt = now;
+  return issueView(store, issue);
+}
+
+/** Rolled up from the issue's runs: attempts, what is still active, time, tokens and cost. */
+function workSummary(store: Store, issue: Issue, now: string): Record<string, unknown> {
+  const runs = runsOf(store, issue.id);
+  const sum = (values: (number | null)[]) =>
+    values.some((value) => value !== null)
+      ? values.reduce<number>((total, value) => total + (value ?? 0), 0)
+      : null;
+  return {
+    runs: runs.length,
+    activeRuns: runs.filter((run) => run.status === "active").length,
+    durationMs: runs.reduce(
+      (total, run) => total + Date.parse(run.endedAt ?? now) - Date.parse(run.startedAt),
+      0,
+    ),
+    tokens: sum(runs.map((run) => run.tokens)),
+    costUsd: sum(runs.map((run) => run.costUsd)),
+    leased: leaseLive(issue, now),
+  };
+}
+
+function inCurrentCycle(store: Store, issue: Issue, now: string): boolean {
+  const cycle = (store.cycles ?? []).find((entry) => entry.id === issue.cycleId);
+  return cycle !== undefined && cycle.startsAt <= now && now < cycle.endsAt;
+}
+
+/** Open, not yet landed, unblocked, unleased and not being run: what a worker can pick up now. */
+function readyIssues(store: Store, project: Project | undefined, now: string): Issue[] {
+  const landed = DELIVERY_STAGES.indexOf("landed");
+  const open = (id: string) => {
+    const target = store.issues.find((entry) => entry.id === id);
+    return target !== undefined && isOpen(store, target);
+  };
+  return store.issues
+    .filter(
+      (issue) =>
+        (project === undefined || issue.projectId === project.id) &&
+        isOpen(store, issue) &&
+        DELIVERY_STAGES.indexOf(stageOf(issue)) < landed &&
+        issue.blocked !== true &&
+        !issue.blockedBy.some(open) &&
+        !leaseLive(issue, now) &&
+        !runsOf(store, issue.id).some((run) => run.status === "active"),
+    )
+    .sort(
+      (a, b) =>
+        Number(inCurrentCycle(store, b, now)) - Number(inCurrentCycle(store, a, now)) ||
+        priorityRank(a.priority) - priorityRank(b.priority) ||
+        a.createdAt.localeCompare(b.createdAt) ||
+        a.id.localeCompare(b.id),
+    );
+}
+
+function drift(
+  store: Store,
+  project: Project | undefined,
+  idleDays: number,
+  now: string,
+): Record<string, unknown> {
+  const scoped = store.issues.filter((issue) => project === undefined || issue.projectId === project.id);
+  const idleBefore = new Date(Date.parse(now) - idleDays * DAY).toISOString();
+  return {
+    staleLeases: scoped
+      .filter((issue) => issue.lease != null && issue.lease.expiresAt <= now)
+      .map((issue) => ({
+        identifier: issue.identifier,
+        holder: actorName(issue.lease!.actor),
+        expiresAt: issue.lease!.expiresAt,
+      })),
+    activeRunsOnClosedIssues: (store.runs ?? [])
+      .filter((run) => run.status === "active")
+      .flatMap((run) => {
+        const issue = scoped.find((entry) => entry.id === run.issueId);
+        return issue === undefined || isOpen(store, issue)
+          ? []
+          : [
+              {
+                identifier: issue.identifier,
+                state: store.issueStatuses.find((status) => status.id === issue.statusId)!.name,
+                runId: run.id,
+                runner: actorName(run.actor),
+                worktree: run.worktree,
+                startedAt: run.startedAt,
+              },
+            ];
+      }),
+    idleIssues: scoped
+      .filter((issue) => isOpen(store, issue) && issue.updatedAt < idleBefore)
+      .map((issue) => ({ identifier: issue.identifier, title: issue.title, updatedAt: issue.updatedAt })),
+    idleDays,
   };
 }
 
@@ -1559,7 +1837,10 @@ async function dispatch(
       return saveIssueStatus(store, args);
     case "get_issue": {
       const issue = findIssue(store, args.id as string);
-      const view = issueView(store, issue, args.includeRelations === true);
+      const view = {
+        ...issueView(store, issue, args.includeRelations === true),
+        work: workSummary(store, issue, now),
+      };
       if (args.includeReleases !== true) return view;
       return {
         ...view,
@@ -1631,6 +1912,42 @@ async function dispatch(
       return cycle === undefined && inCycle?.projectId === issue.projectId
         ? saved
         : issueView(store, issue, true);
+    }
+    case "save_run":
+      return saveRun(store, args, context, now, options);
+    case "save_lease":
+      return saveLease(store, args, context, now, options);
+    case "list_runs": {
+      const issue = args.issueId === undefined ? undefined : findIssue(store, args.issueId as string);
+      const runs = (store.runs ?? [])
+        .filter(
+          (run) =>
+            (issue === undefined || run.issueId === issue.id) &&
+            (args.status === undefined || run.status === args.status),
+        )
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.number - a.number);
+      return page(
+        runs.map((run) => runView(store, run, now, options)),
+        args,
+        "runs",
+        name,
+      );
+    }
+    case "list_ready_issues": {
+      const project = args.project === undefined ? undefined : findProject(store, args.project as string);
+      return page(
+        readyIssues(store, project, now).map((issue) => ({
+          ...issueView(store, issue),
+          inCurrentCycle: inCurrentCycle(store, issue, now),
+        })),
+        args,
+        "issues",
+        name,
+      );
+    }
+    case "list_drift": {
+      const project = args.project === undefined ? undefined : findProject(store, args.project as string);
+      return drift(store, project, (args.idleDays as number | undefined) ?? DEFAULT_IDLE_DAYS, now);
     }
     case "list_cycles": {
       if (args.teamId !== undefined) findTeam(store, args.teamId as string);

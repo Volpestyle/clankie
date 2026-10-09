@@ -252,3 +252,14 @@ roll over into the next cycle on the first access after a cycle ends.
 `clankie work cycle` show each cycle's summary from the event stream: planned,
 added, rolled in, removed, finished, rolled over, in flight.
 `linear_list_issues {project, cycle: "current"}` lists the current cycle's items.
+
+Pick work from `linear_list_ready_issues {project}`. These are open, unblocked,
+unleased items with no active run, current cycle first, then by priority.
+Take `linear_save_lease {issueId}` while you work: it lasts 30 minutes by
+default, renew it before it expires, and release it with `release: true` when
+done. Record each attempt with
+`linear_save_run {issueId, worktree, branch}`. Finish the run with
+`{id, status, tokens, costUsd, summary}`, and start a retry with
+`parentRunId`. Your seat and hire are linked from your identity. Owner and lead
+see `linear_list_drift` (stale leases, runs on closed items, idle items) and
+`clankie work ready|drift|runs|lease`.

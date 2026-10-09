@@ -203,6 +203,7 @@ import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { EvidenceStore } from "./evidence-store.ts";
 import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
+import { trackerRunner } from "./tracker-runner.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
@@ -665,7 +666,12 @@ const boundApp = (): ClankieApp => {
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 // The built-in tracker; its event stream drives the in-process owner loop (VUH-1917).
-const builtInTracker = createLocalTracker({ directory: join(stateRoot, "tracker") });
+// A run's seat, pane and hire are read live from the hire records (VUH-1918).
+const builtInTracker = createLocalTracker({
+  directory: join(stateRoot, "tracker"),
+  runner: (actor) =>
+    trackerRunner(actor.id, (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane)),
+});
 let bindLinearBudgetWarning!: (notify: (text: string) => Promise<boolean>) => void;
 const linearBudgetWarningReady = new Promise<(text: string) => Promise<boolean>>((resolve) => {
   bindLinearBudgetWarning = resolve;

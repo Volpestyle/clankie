@@ -21,6 +21,8 @@ const WORK_USAGE = [
   "  | releases [--lane L] [--item KEY] [--limit N] | releases sync | release ID|VERSION",
   "  | cycle [--project P] [--type current|previous|next|all] | cycle show ID [--project P]",
   "  | cycle add ITEM [--to current|next|NUMBER] | cycle remove ITEM | cycle length PROJECT DAYS",
+  "  | ready [--project P] [--limit N] | drift [--project P] [--idle-days N] | runs [ITEM] [--status S]",
+  "  | lease ITEM [--minutes N] [--release]",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
@@ -40,7 +42,7 @@ interface Parsed {
   readonly flags: Map<string, string[]>;
 }
 
-const BOOLEAN_FLAGS = new Set(["--no-owner", "--canceled"]);
+const BOOLEAN_FLAGS = new Set(["--no-owner", "--canceled", "--release"]);
 
 export function parseWorkArgs(args: readonly string[]): Parsed {
   const positional: string[] = [];
@@ -291,6 +293,35 @@ function trackerRequest(
       if (action === "length" && targets.length === 2 && /^\d+$/u.test(targets[1]!))
         return owner("save_project", { id: targets[0], cycleDays: Number(targets[1]) });
       throw new Error(WORK_USAGE);
+    }
+    case "ready": {
+      const limit = one(parsed, "--limit");
+      return owner("list_ready_issues", {
+        ...(one(parsed, "--project") === undefined ? {} : { project: one(parsed, "--project") }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+      });
+    }
+    case "drift": {
+      const days = one(parsed, "--idle-days");
+      return owner("list_drift", {
+        ...(one(parsed, "--project") === undefined ? {} : { project: one(parsed, "--project") }),
+        ...(days === undefined ? {} : { idleDays: Number(days) }),
+      });
+    }
+    case "runs":
+      if (rest.length > 1) throw new Error(WORK_USAGE);
+      return owner("list_runs", {
+        ...(rest[0] === undefined ? {} : { issueId: rest[0] }),
+        ...(one(parsed, "--status") === undefined ? {} : { status: one(parsed, "--status") }),
+      });
+    case "lease": {
+      if (rest.length !== 1) throw new Error(WORK_USAGE);
+      const minutes = one(parsed, "--minutes");
+      return owner("save_lease", {
+        issueId: rest[0],
+        ...(one(parsed, "--release") === "true" ? { release: true } : {}),
+        ...(minutes === undefined ? {} : { ttlMinutes: Number(minutes) }),
+      });
     }
     case "owner": {
       if (rest.length !== 1) throw new Error(WORK_USAGE);

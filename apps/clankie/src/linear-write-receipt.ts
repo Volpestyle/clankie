@@ -22,6 +22,13 @@ const ISSUE_FIELDS = [
   "stage",
   "completedAt",
   "canceledAt",
+  // Built-in tracker writes: cycle membership, the lease taken, and a run's place (VUH-1918).
+  "cycleId",
+  "lease",
+  "issueId",
+  "number",
+  "parentRunId",
+  "link",
 ] as const;
 const PREVIEW = 160;
 

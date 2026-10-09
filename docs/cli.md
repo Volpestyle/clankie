@@ -1798,6 +1798,15 @@ PROJECT DAYS` sets the project's cycle length (default 7), starting with its
   next cycle. Unfinished items roll into the next cycle on the first access after
   one ends
   ([ADR 0226 amendment, VUH-1931](adr/0226-one-tracker-tool-surface.md#amendment-cycles-2026-10-09-vuh-1931)).
+- `clankie work ready [--project P] [--limit N]` lists the ready queue. These are
+  open, unblocked, unleased items with no active run, current cycle first, then
+  priority, then oldest. `work lease ITEM [--minutes N] [--release]` takes,
+  renews or releases an item's lease (30 minutes by default; it expires on its
+  own). `work runs [ITEM] [--status S]` lists runs with their attempt, parent,
+  worktree, cost and live seat/hire link. `work drift [--project P]
+[--idle-days N]` lists stale leases, runs still active on closed items, and
+  items idle for N days
+  ([ADR 0226 amendment, VUH-1918](adr/0226-one-tracker-tool-surface.md#amendment-runs-leases-the-ready-queue-and-drift-2026-10-09-vuh-1918)).
 - `clankie work owner TOOL [--json ARGS]` makes the owner's own call to the
   built-in tracker (`POST /v1/tracker/owner/call`) with a `linear_*` tool name
   (prefix optional), for example `work owner get_issue --json
