@@ -14,6 +14,7 @@ import {
   FLEET_SEAT_MESSAGES_PATH,
   FleetPeerMessageSchema,
   FleetSeatHookSchema,
+  ClaudeChannelPermissionRequestSchema,
   FleetSeatMessageDeliverySchema,
   FleetSeatMessageReceiptSchema,
   FleetSeatMessageStatusSchema,
@@ -505,6 +506,26 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
 
   // A hired seat's worker plugin reports each settled turn (VUH-1458), from
   // inside the pane it names. Same door as its mailbox.
+  ctx.app.post("/v1/fleet/seats/:paneId/permission", bodyLimit({ maxSize: 64 * 1024 }), async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const request = ClaudeChannelPermissionRequestSchema.safeParse(
+      await context.req.json().catch(() => undefined),
+    );
+    const bridge = z.string().uuid().safeParse(context.req.header("x-clankie-bridge-id"));
+    if (!request.success || !bridge.success)
+      return context.json({ error: "invalid_native_permission_request" }, 400);
+    const result = await ctx.dependencies.captain.recordSeatPermission(
+      pane.paneId,
+      request.data,
+      bridge.data,
+      context.req.raw.signal,
+    );
+    return result
+      ? context.json({ schemaVersion: 1, requestId: request.data.request_id, ...result })
+      : context.json({ error: "native_permission_unavailable" }, 404);
+  });
+
   ctx.app.post(FLEET_SEAT_HOOK_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
     const pane = await fleetSeatPane(context);
     if ("denial" in pane) return pane.denial;

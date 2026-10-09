@@ -141,8 +141,17 @@ export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
 
 export type SeatStatus = "working" | "idle" | "blocked" | "released" | "offline";
 
+/** Attribution stamped by the authenticated host; never part of a model answer. */
+export type SeatQuestionDecider =
+  | { readonly kind: "lead"; readonly conversationId: string }
+  | {
+      readonly kind: "owner";
+      readonly principal: { readonly kind: "operator" | "device"; readonly id: string };
+    };
+
 export interface SeatQuestion {
   readonly requestId: string | number;
+  readonly permission?: { readonly transport: "hook" | "channel"; readonly toolName: string };
   /** Host-owned category for a native permission; never supplied by tool text. */
   readonly gate?: "everydayWork" | "leavesMac" | "hardToUndo" | "moneyAndAccounts";
   /** Async Codex message-item questions use attributed native user input, not a server response. */
@@ -237,6 +246,7 @@ export interface SeatControl {
   answerQuestion?(
     answer: SeatQuestionAnswer,
     beforeDispatch?: () => Promise<void>,
+    decider?: SeatQuestionDecider,
   ): Promise<SeatQuestionResult>;
   /**
    * The next settlement at or after now: `turn_completed`, `blocked`,

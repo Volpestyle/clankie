@@ -2589,11 +2589,24 @@ The existing owner API accepts category leaves in the revision-fenced
 `changes.autonomy.fleet` in project updates. Current snapshots advertise
 `fleetGates:true`; clients must not invent support on older hosts.
 
-New local Claude hires preserve inherited tracker denies and ask for file
-edits, writes, shell and network operations. The hook routes questions through
-the effective gates; unclassified permissions stay owner-only. Shell tools ask:
-a tool name cannot reliably distinguish ordinary work from purchases or
-irreversible effects. New local Codex hires retain their sandbox and use
+New hired Claude workers launch in `auto` mode, preserving managed and tracker
+denies and the permission hook, with no blanket `ask` rules or Bash allow.
+For a pending permission, `message_seat` accepts `questionAnswer` with its exact
+request and question IDs through the worker's existing private authenticated
+lead lane. Scoped ordinary file calls and literal `pwd`/`git status` can follow
+the effective routine-work gate; web tools follow the leaves-Mac gate.
+Ambiguous shell/MCP calls, protected or outside files, recursive searches and
+unverified remote workspaces remain owner-only. Peers, rooms and Discord
+cannot answer permissions. Owner decisions use the authenticated question inbox.
+The opted-in Claude channel also declares its native permission relay. Its
+sanitized preview cannot establish routine authority, so those requests stay
+owner-only. Each decision records its authenticated lead conversation, owner
+principal or system-denial reason in the captain's
+`claude-worker-question-claims.json.decisions.json`, with input hashes and separate
+`decided`, `hook-written` or `channel-written` delivery stages. A channel write
+has no native application receipt and stays unconfirmed; never retry it.
+
+New local Codex hires retain their sandbox and use
 `approval_policy="on-request"`; a trusted native containment policy keeps final
 precedence. Their `clankie` worker bridge alone is configured with
 `default_tools_approval_mode="approve"`, because the service already decides

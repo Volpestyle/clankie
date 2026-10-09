@@ -30,6 +30,7 @@ import type {
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
   FleetSeatHook,
+  ClaudeChannelPermissionRequest,
   FleetSeatMessageDelivery,
   FleetSeatMessageReceipt,
   FleetSeatMessageStatus,
@@ -343,6 +344,13 @@ export interface CaptainPort {
    * One lifecycle hook from a hired seat's worker plugin (VUH-1458). False
    * when the pane holds no seat with that session.
    */
+  /** Typed native channel prompt; the host observes its session and never accepts a verdict here. */
+  recordSeatPermission(
+    paneId: string,
+    request: ClaudeChannelPermissionRequest,
+    bridgeId: string,
+    signal?: AbortSignal,
+  ): Promise<false | { readonly sessionId: string; readonly hookOutput: Record<string, unknown> }>;
   recordSeatHook(
     paneId: string,
     hook: FleetSeatHook,
@@ -493,6 +501,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     recordSeatToolCatalog: async () => undefined,
     toolCatalogHealth: async () => ({ schemaVersion: 1, seats: [] }),
     recordSeatHook: async () => false,
+    recordSeatPermission: async () => false,
     fleetSeatMessageBinding: async () => undefined,
     fleetSeatMessageStatus: async () => undefined,
     reconcileFleetSeatMessage: async (_pane, delivery, fingerprint) => ({

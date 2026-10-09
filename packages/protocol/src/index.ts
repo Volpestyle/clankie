@@ -389,6 +389,8 @@ export {
   CLAUDE_WORKER_PLUGIN,
   CLAUDE_WORKER_PLUGIN_ID,
   FleetSeatHookSchema,
+  ClaudeChannelPermissionRequestSchema,
+  type ClaudeChannelPermissionRequest,
   type FleetSeatHook,
   FLEET_SEAT_HOOK_PATH,
   fleetSeatHookPath,

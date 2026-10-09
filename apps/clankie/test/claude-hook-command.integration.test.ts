@@ -92,7 +92,12 @@ async function commandRoundTrip(input: Record<string, unknown>, selections: read
     const answers = Object.fromEntries(
       question.questions.map((q, index) => [q.id, { answers: [selections[index]!] }]),
     );
-    expect(await registry.answer(ref, { requestId: question.requestId, answers })).toEqual({
+    expect(
+      await registry.answer(ref, { requestId: question.requestId, answers }, undefined, {
+        kind: "owner",
+        principal: { kind: "operator", id: "test-owner" },
+      }),
+    ).toEqual({
       outcome: "answered",
       deliveryStage: "responded",
     });

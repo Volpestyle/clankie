@@ -119,6 +119,7 @@ export const FleetSeatHookSchema = z
       "SessionEnd",
     ]),
     toolName: z.string().min(1).max(200).optional(),
+    permissionTransport: z.literal("channel").optional(),
     toolUseId: z.string().min(1).max(256).optional(),
     toolInput: z.record(z.string(), z.unknown()).optional(),
     notificationType: z.string().max(100).optional(),
@@ -269,3 +270,14 @@ export const OperatorSeatReplySchema = z
   .object({ schemaVersion: z.literal(1), text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX) })
   .strict();
 export type OperatorSeatReply = z.infer<typeof OperatorSeatReplySchema>;
+
+/** Claude Code's documented native relay notification, not a chat message. */
+export const ClaudeChannelPermissionRequestSchema = z
+  .object({
+    request_id: z.string().regex(/^[a-km-z]{5}$/u),
+    tool_name: z.string().min(1).max(200),
+    description: z.string().max(16000),
+    input_preview: z.string().max(32000),
+  })
+  .strict();
+export type ClaudeChannelPermissionRequest = z.infer<typeof ClaudeChannelPermissionRequestSchema>;

@@ -837,6 +837,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
   /** Host policy resolution and escalation reuse the owner's ask store. */
+  public permissionLeadAllowed: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   public questionGate:
     | ((agent: HerdrAgentSnapshot, question: SeatQuestion) => Promise<"allow" | "lead" | "owner">)
     | undefined;
@@ -1359,6 +1360,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     answer: SeatQuestionAnswer,
     source: ConversationAuthority,
     expectedSessionId?: string,
+    ownerPrincipal?: import("./conversation-questions.ts").QuestionAuthority["principal"],
   ): Promise<FleetSeatDelivery> {
     if (this.closed) return { outcome: "offline", detail: "Native hire service is closed." };
     const authority = captureConversationAuthority(source);
@@ -1392,8 +1394,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: `Original native question unavailable; no answer was sent: ${String(error)}`,
       };
     }
+    const permissionAuthority = async () => {
+      if (!pending?.permission) return;
+      if (expectedSessionId !== undefined) {
+        if (!ownerPrincipal || authority.owner.discord)
+          throw new Error("Authenticated private owner principal is required");
+        return;
+      }
+      if (authority.owner.discord || owner?.discord || !(await this.permissionLeadAllowed?.(authority.owner)))
+        throw new Error("Claude permissions require an authenticated private Clankie route");
+      if (authority.owner.conversationId !== owner?.conversationId)
+        throw new Error("Only this worker's exact lead may answer its permission question");
+    };
+    try {
+      await permissionAuthority();
+    } catch (error) {
+      return { outcome: "undelivered", detail: String(error) };
+    }
     const guard = async () => {
       await assertConversationAuthority(authority);
+      await permissionAuthority();
       await this.requireWorkerAccess?.(splitFleetQualified(agent.paneId)?.fleet);
       const current = await this.runner.resolveTerminal(seatId);
       if (
@@ -1409,16 +1429,29 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (
         pending &&
         expectedSessionId === undefined &&
-        (await this.questionGate?.(current, pending)) === "owner"
+        (pending.permission?.transport === "channel" ||
+          (await this.questionGate?.(current, pending)) === "owner")
       )
         throw new Error("This native question is reserved for the owner");
     };
-    if (pending && expectedSessionId === undefined && (await this.questionGate?.(agent, pending)) === "owner")
+    if (
+      pending &&
+      expectedSessionId === undefined &&
+      (pending.permission?.transport === "channel" || (await this.questionGate?.(agent, pending)) === "owner")
+    )
       return {
         outcome: "undelivered",
         detail: "This question requires the owner; answer the escalated ask by ID.",
       };
-    const result = await control.answerQuestion(answer, guard);
+    const result = await control.answerQuestion(
+      answer,
+      guard,
+      expectedSessionId === undefined
+        ? { kind: "lead", conversationId: authority.owner.conversationId }
+        : ownerPrincipal
+          ? { kind: "owner", principal: ownerPrincipal }
+          : undefined,
+    );
     if (result.outcome === "answered") {
       this.watchHiredSeat(seatId, occupantIdForHerdrSession(agent.session), owner!);
       return {
@@ -1453,7 +1486,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       )
         throw new Error("The question's native occupant or leading conversation changed");
     };
-    if ((await this.questionGate?.(agent, question)) === "owner") {
+    if (
+      (question.permission &&
+        (question.permission.transport === "channel" ||
+          owner.discord ||
+          !(await this.permissionLeadAllowed?.(owner)))) ||
+      (await this.questionGate?.(agent, question)) === "owner"
+    ) {
       if (!this.escalateQuestion) throw new Error("Owner question escalation unavailable");
       await guard();
       await this.escalateQuestion(owner, agent, question, guard);

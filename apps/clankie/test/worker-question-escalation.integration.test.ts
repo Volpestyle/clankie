@@ -45,6 +45,7 @@ it("escalates a real pending Claude permission through the owner ask store and r
       async () => {
         if (!authority.current() || !(await authority.authorize())) throw new Error("Owner unavailable");
       },
+      { kind: "owner", principal: authority.principal },
     );
     if (result.outcome !== "answered") throw new Error("Native answer unconfirmed");
   };

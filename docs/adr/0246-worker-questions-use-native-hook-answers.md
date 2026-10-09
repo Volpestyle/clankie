@@ -1,7 +1,6 @@
 # ADR 0246: Worker questions use native hook answers
 
-Status: accepted for VUH-1782 (2026-10-07); live Claude TUI acceptance remains
-unverified. Extends [fleet owner settings](0230-fleet-responsibility-is-owner-settings.md)
+Status: accepted for VUH-1782 (2026-10-07); extended for VUH-1868 (2026-10-09). Extends [fleet owner settings](0230-fleet-responsibility-is-owner-settings.md)
 and [native delivery](0207-work-records-and-native-agent-delivery.md).
 
 ## Decision
@@ -64,8 +63,7 @@ account, workspace or machine access. Harness permission settings can project
 the policy conservatively where supported; they cannot authorize an action
 outside those boundaries. Ambiguous shell/MCP permissions are owner-only; a
 category preference cannot safely grant broad native shell permission. Remote
-questions with no verified workspace policy also stay owner-only. The new
-categories do not parse shell commands or replace native custom rules.
+questions with no verified workspace policy also stay owner-only. The categories do not replace native custom rules.
 
 ## Hired Claude auto mode (2026-10-09)
 
@@ -77,6 +75,36 @@ worker MCP server, never all Bash. Inherited managed denies, session tracker
 denies and the plugin's permission hook remain in force. Calls that still
 require permission follow the existing question and owner escalation path;
 this changes neither account authority nor the fleet's decision gates.
+
+## Lead permission answers and native relay (2026-10-09)
+
+James assigned routine, in-scope, non-gated permission decisions to the lead;
+owner-only decisions stay with James. The implementing lead chose the full
+`PermissionRequest` hook as the primary transport because it supplies the full
+`tool_input`. Only the worker's exact private authenticated lead may answer,
+with current ownership, occupant and policy checked again before dispatch.
+Peers, rooms and Discord cannot answer. Scoped non-sensitive file operations,
+`pwd` and literal `git status` are routine candidates; web tools follow the
+leaves-Mac gate. Ambiguous shell/MCP calls, recursive searches, sensitive files,
+symlink escapes and unverified remote workspaces require the owner.
+
+The implementing lead also chose to support Claude's native channel permission
+relay as an owner-only fallback. Its documented `description` and `input_preview`
+are display data: the latter is sanitized, folded and truncated. They cannot
+prove a full command safe for the lead. The bridge declares
+`experimental["claude/channel/permission"] = {}` only on an opted-in linked
+channel; exact four-string permission requests become typed native questions.
+Only an authenticated owner verdict returns the exact request ID and behavior.
+Ordinary chat answers never become verdicts. Native first-answer arbitration
+has no application receipt, so a channel stdout write stays unconfirmed and is
+never retried. See the [official channel contract](https://code.claude.com/docs/en/channels-reference).
+
+Every valid permission decision records request, pane/session, input hash,
+allow/deny and who decided (lead conversation, authenticated owner principal,
+or system denial reason) before delivery. The atomic owner-private journal
+records pipe delivery separately. Audit failure refuses approval. No new
+credential or account authority is granted. Focused boundary and live evidence
+is recorded in [VUH-1868 verification](../verification/vuh-1868-claude-workers.md).
 
 ## Consequences
 

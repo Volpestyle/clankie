@@ -256,3 +256,14 @@ fences retained after a mailbox ACK. Never resend to test receipt. The owner
 can settle an unknowable original with `seat-delivery settle ID
 abandoned-unknown --conversation ID`; it retains unknown evidence and frees
 new intent without replaying the original.
+
+## Claude permission questions
+
+Use `message_seat` with the pending `questionAnswer` IDs from your existing
+private authenticated lane. Only this worker's exact lead can answer routine,
+scoped permissions within its current gates. Peers, rooms and Discord cannot
+answer them. Owner-only calls go through the owner question inbox. Native channel
+previews are sanitized and never establish routine authority: they stay owner-only.
+Every permission decision has an audit actor and input hash; hook/channel pipe
+writes are separate delivery evidence. Native channel application is unconfirmed,
+so never retry a verdict or substitute an ordinary chat answer.

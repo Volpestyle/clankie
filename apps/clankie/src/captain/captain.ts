@@ -1854,7 +1854,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (selected !== null && typeof selected === "object" && "mode" in selected && selected.mode === "owner")
     );
   };
+  herdrWatches.permissionLeadAllowed = async (owner) => {
+    const conversation = conversations.conversation(owner.conversationId);
+    return (
+      conversation !== undefined &&
+      conversation.scope.kind !== "room" &&
+      conversation.scope.kind !== "channel" &&
+      owner.discord === undefined
+    );
+  };
   herdrWatches.questionGate = async (agent, question) => {
+    if (
+      question.permission &&
+      ["hardToUndo", "moneyAndAccounts"].includes(question.gate ?? "moneyAndAccounts")
+    )
+      return "owner";
     // Do not interpret a remote cwd using this Mac's filesystem.
     if (splitFleetQualified(agent.paneId) || !agent.workingDirectory) return "owner";
     const policy = await localFleetGates(agent.workingDirectory);
@@ -1910,6 +1924,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           conversations.conversation(question.conversationId) !== undefined,
       },
       worker.sessionId,
+      authority.principal,
     );
     if (delivery.outcome !== "delivered")
       throw new Error(
@@ -5176,6 +5191,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return { schemaVersion: 1, seats: seats.flat() };
     },
 
+    async recordSeatPermission(paneId, request, bridgeId, signal) {
+      const agent = await herdrRunner.get(paneId).catch(() => undefined);
+      const sessionId = agent ? nativeSessionId(agent) : undefined;
+      if (agent?.agent !== "claude" || !sessionId) return false;
+      const result = await this.recordSeatHook(
+        paneId,
+        {
+          schemaVersion: 1,
+          event: "PermissionRequest",
+          sessionId,
+          permissionTransport: "channel",
+          toolName: request.tool_name,
+          toolUseId: `channel:${bridgeId}:${request.request_id}`,
+          toolInput: { description: request.description, input_preview: request.input_preview },
+        },
+        undefined,
+        signal,
+      );
+      return typeof result === "object" && "hookOutput" in result
+        ? { sessionId, hookOutput: result.hookOutput }
+        : false;
+    },
+
     async recordSeatHook(paneId, hook, proof, signal) {
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return false;
       // Only the Claude session herdr says sits in that pane may report for it.
@@ -5199,6 +5237,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           hook,
           (question) => herdrWatches.forwardNativeQuestion(ref, question),
           signal,
+          splitFleetQualified(paneId) === undefined ? agent.workingDirectory : undefined,
         );
         return { recorded: true as const, hookOutput: { ...hookOutput } };
       }

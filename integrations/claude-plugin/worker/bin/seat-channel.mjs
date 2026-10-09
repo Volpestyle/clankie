@@ -881,14 +881,96 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     return { isError: !receipt.received, text: JSON.stringify(receipt) };
   }
 
+  const seenPermissions = new Set();
+  async function relayPermission(params) {
+    if (!initialized || !polling || membershipStopped || closed || !link) return;
+    if (
+      !params ||
+      Object.keys(params).length !== 4 ||
+      typeof params.request_id !== "string" ||
+      !/^[a-km-z]{5}$/u.test(params.request_id) ||
+      typeof params.tool_name !== "string" ||
+      !params.tool_name ||
+      params.tool_name.length > 200 ||
+      typeof params.description !== "string" ||
+      params.description.length > 16000 ||
+      typeof params.input_preview !== "string" ||
+      params.input_preview.length > 32000
+    ) {
+      log("Invalid native permission request; no verdict emitted");
+      return;
+    }
+    if (seenPermissions.has(params.request_id)) return;
+    seenPermissions.add(params.request_id);
+    refresh();
+    const originalLink = JSON.stringify(link);
+    const response = await fetch(seatRoute(link, paneId, "permission"), {
+      method: "POST",
+      headers: { ...linkHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(570000),
+      redirect: "error",
+    });
+    await checkFleetMembership(response);
+    const receipt = response.ok ? await response.json() : undefined;
+    const behavior = receipt?.hookOutput?.hookSpecificOutput?.decision?.behavior;
+    refresh();
+    if (
+      closed ||
+      membershipStopped ||
+      JSON.stringify(link) !== originalLink ||
+      receipt?.schemaVersion !== 1 ||
+      receipt?.requestId !== params.request_id ||
+      !["allow", "deny"].includes(behavior) ||
+      typeof receipt.sessionId !== "string" ||
+      typeof receipt.hookOutput?.requestId !== "string"
+    ) {
+      log("Native permission verdict is unresolved; no retry or verdict emitted");
+      return;
+    }
+    await new Promise((resolve, reject) =>
+      process.stdout.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "notifications/claude/channel/permission",
+          params: { request_id: params.request_id, behavior },
+        }) + "\n",
+        (error) => (error ? reject(error) : resolve()),
+      ),
+    );
+    // This proves only the verdict pipe write. Native first-answer arbitration
+    // may discard it; the service does not claim the verdict was applied.
+    const ack = await fetch(seatRoute(link, paneId, "hook"), {
+      method: "POST",
+      headers: { ...linkHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        event: "PermissionRequest",
+        sessionId: receipt.sessionId,
+        deliveredQuestionId: receipt.hookOutput.requestId,
+      }),
+      signal: AbortSignal.timeout(10000),
+      redirect: "error",
+    });
+    await checkFleetMembership(ack);
+    if (!ack.ok) log("Native permission verdict write acknowledgment is unresolved; never resend");
+  }
+
   async function handle(message) {
     const { id, method, params } = message;
+    if (method === "notifications/claude/channel/permission_request") {
+      await relayPermission(params);
+      return;
+    }
     if (method === "initialize")
       return send({
         id,
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
-          capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
+          capabilities: {
+            tools: { listChanged: true },
+            experimental: { "claude/channel": {}, ...(polling ? { "claude/channel/permission": {} } : {}) },
+          },
           serverInfo: { name: "clankie-worker", version: PLUGIN_VERSION },
           instructions: sharedDaemon ? `${INSTRUCTIONS} ${SHARED_DAEMON_NOTE}` : INSTRUCTIONS,
         },

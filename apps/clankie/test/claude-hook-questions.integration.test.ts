@@ -102,7 +102,12 @@ it("consumes permission denials and refuses freeform approval labels", async () 
   expect(
     await registry.answer(ref, { requestId: q.requestId, answers: { q0: { answers: ["Sure"] } } }),
   ).toMatchObject({ outcome: "refused" });
-  const delivered = registry.answer(ref, { requestId: q.requestId, answers: { q0: { answers: ["Deny"] } } });
+  const delivered = registry.answer(
+    ref,
+    { requestId: q.requestId, answers: { q0: { answers: ["Deny"] } } },
+    undefined,
+    { kind: "owner", principal: { kind: "operator", id: "test-owner" } },
+  );
   expect(await result).toMatchObject({
     hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } },
   });
