@@ -264,6 +264,8 @@ it("projects the remote Herdr-observed session through fleet and roster without 
       return JSON.stringify({ result: { agents: structuredClone(agents) } });
     if (args.join(" ") === "api snapshot")
       return JSON.stringify({ result: { snapshot: { agents: structuredClone(agents) } } });
+    // Capability projection rechecks the terminal occupant through the read-only pane inventory.
+    if (args.join(" ") === "pane list") return JSON.stringify({ result: { panes: structuredClone(agents) } });
     throw new Error(`Unexpected remote census command: ${args.join(" ")}`);
   });
   const captain = createCaptain(
@@ -297,12 +299,15 @@ it("projects the remote Herdr-observed session through fleet and roster without 
       includeWork: true,
     });
     expect(roster.op === "roster" && roster.seats[0]?.goal).toEqual(response.snapshot.seats[0]?.goal);
-    expect(shell).toHaveBeenCalledTimes(1);
     const legacy = await captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 });
     expect(legacy.op === "fleet" && legacy.snapshot.seats[0]?.goal).toBeUndefined();
-    expect(herdr.mock.calls.every(([args]) => ["agent list", "api snapshot"].includes(args.join(" ")))).toBe(
-      true,
-    );
+    expect(shell).toHaveBeenCalledTimes(1);
+    expect(herdr.mock.calls.map(([args]) => args)).toContainEqual(["pane", "list"]);
+    expect(
+      herdr.mock.calls.every(([args]) =>
+        ["agent list", "api snapshot", "pane list"].includes(args.join(" ")),
+      ),
+    ).toBe(true);
   } finally {
     await captain.close();
   }
