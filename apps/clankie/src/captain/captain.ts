@@ -564,7 +564,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
     } else if (origin !== undefined) {
       const context = seatContext(origin);
-      if (context !== undefined) source = await localProject(context.cwd);
+      if (context !== undefined)
+        source =
+          context.machineId === undefined
+            ? await localProject(context.cwd)
+            : remoteWorkspaceProject(await settings(), projects, context.machineId, context.cwd);
     }
     // Remote paths cannot be canonicalized by this host. A proven source project remains
     // pinned; without one, only an owner-registered workspace on the fleet's machine counts.
@@ -1107,12 +1111,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const conversation = conversations.conversation(conversationId);
     if (
       conversation === undefined ||
-      (!conversations.runsCaptainTurns(conversationId) && conversation.scope.kind !== "room")
+      (!conversations.runsCaptainTurns(conversationId) &&
+        conversation.scope.kind !== "room" &&
+        conversation.scope.kind !== "workspace")
     )
       return undefined;
     return {
       conversationId,
       cwd: conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
+      ...(conversation.scope.kind === "workspace" && conversation.scope.machineId !== undefined
+        ? { machineId: conversation.scope.machineId }
+        : {}),
     };
   }
   // Fleet seats (ADR 0161): one mailbox per herdr terminal id, created when
@@ -1849,16 +1858,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         options.projectHireWorkspace,
       );
     } else if (conversation.scope.kind === "workspace") {
-      projectId = (
-        await resolveFleetSettingsContext(
-          current,
-          {
-            workingDirectory: conversation.scope.workspaceId,
-            machine: "local",
-          },
-          {},
-        )
-      ).projectId;
+      projectId =
+        conversation.scope.machineId === undefined
+          ? (
+              await resolveFleetSettingsContext(
+                current,
+                { workingDirectory: conversation.scope.workspaceId, machine: "local" },
+                {},
+              )
+            ).projectId
+          : remoteWorkspaceProject(
+              current,
+              current.projects,
+              conversation.scope.machineId,
+              conversation.scope.workspaceId,
+            );
     }
     const project = current.projects.projects.find((entry) => entry.id === projectId);
     const policy = effectiveFleetAutonomy(current.autonomy, project?.autonomy);
@@ -2748,6 +2762,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (lane === "operator") {
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
+      if (binding.machineId !== undefined && delegation === undefined)
+        throw new Error("Remote conversation tools require seat-bound delegation");
       const targetId = binding.conversationId;
       const scope = conversations.conversation(targetId)?.scope;
       if (scope?.kind === "room") {
@@ -2767,11 +2783,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
         capture.conversationAuthority = {
           owner: { conversationId: targetId },
-          current: () => conversations.runsCaptainTurns(targetId) && (delegation?.current() ?? true),
+          current: () =>
+            (conversations.runsCaptainTurns(targetId) || binding.machineId !== undefined) &&
+            (delegation?.current() ?? true),
           authorize: async () =>
-            conversations.runsCaptainTurns(targetId) && ((await delegation?.authorize()) ?? true),
+            (conversations.runsCaptainTurns(targetId) || binding.machineId !== undefined) &&
+            ((await delegation?.authorize()) ?? true),
         };
-        capture.shell = true;
+        capture.shell = binding.machineId === undefined;
         capture.room = roomKey("operator", targetId);
         capture.targetId = targetId;
       }
@@ -4967,6 +4986,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return tool.call(memoryCall ?? args);
     },
 
+    createRemoteWorkspaceConversation: (input) => conversations.createRemoteWorkspaceConversation(input),
     seatContext,
     conversationTurnIdle: (conversationId) => conversations.turnIdle(conversationId),
     conversationHasNativeSeat: (conversationId) => conversations.hasNativeSeat(conversationId),
@@ -4988,7 +5008,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         throw new Error("Unknown captain conversation");
       const stored = await settings();
       const currentSettings =
-        laneHoldsSystemTools(lane) && sections.includes("fleet")
+        laneHoldsSystemTools(lane) && sections.includes("fleet") && binding?.machineId === undefined
           ? await settingsForFleetContext(stored, binding?.cwd ?? workingDirectory)
           : stored;
       // The model card is per run in pi, so it is only assembled when asked for;
@@ -5019,7 +5039,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (sections.includes("persona")) prompt += "\n\n" + personaImageBriefing(await personaImages());
       if (conversationId === undefined) return prompt;
       if (binding === undefined) throw new Error("Unknown captain conversation");
-      const files = instructionsForHarness(await projectInstructions(binding.cwd), harness);
+      const files =
+        binding.machineId === undefined
+          ? instructionsForHarness(await projectInstructions(binding.cwd), harness)
+          : [];
       return [
         prompt,
         `# Selected conversation\n${binding.conversationId}\nWorkspace: ${binding.cwd}`,

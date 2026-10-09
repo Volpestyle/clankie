@@ -7,20 +7,25 @@ import {
   type OperatorConversationScope,
 } from "@clankie/protocol";
 import { readdirSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, win32 } from "node:path";
 import type { HerdrTranscriptEntry } from "../herdr-transcript.ts";
 import { type ConversationMeta } from "./types.ts";
 
 /**
  * A workspace scope names the directory the conversation's session works in.
  * That directory becomes the cwd of an unsandboxed shell, so the registry
- * refuses anything but an absolute path that already resolves to a directory —
- * a conversation is never created pointing at a path the caller invented.
+ * refuses anything but an absolute path that already resolves to a directory.
+ * Remote Windows scopes are service-authored only after approval on that linked
+ * machine; their directory is validated there, never on this host.
  */
 export function workspaceOf(scope: OperatorConversationScope): string | undefined {
   if (scope.kind !== "workspace") return undefined;
   const workspace = scope.workspaceId;
-  if (!isAbsolute(workspace)) {
+  if (
+    !(scope.machineId === undefined
+      ? isAbsolute(workspace)
+      : win32.isAbsolute(workspace) && win32.parse(workspace).root.length > 1)
+  ) {
     throw new Error(`Workspace ${workspace} is not an absolute path`);
   }
   return workspace;
@@ -87,7 +92,8 @@ export function directoryBytes(path: string): number {
 export function sameScope(a: OperatorConversationScope, b: OperatorConversationScope): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "room" && b.kind === "room") return a.lane === b.lane && a.targetId === b.targetId;
-  if (a.kind === "workspace" && b.kind === "workspace") return a.workspaceId === b.workspaceId;
+  if (a.kind === "workspace" && b.kind === "workspace")
+    return a.workspaceId === b.workspaceId && a.machineId === b.machineId;
   if (a.kind === "persona" && b.kind === "persona") return a.personaId === b.personaId;
   if (a.kind === "seat" && b.kind === "seat") return a.seatId === b.seatId;
   if (a.kind === "channel" && b.kind === "channel") return a.channelId === b.channelId;

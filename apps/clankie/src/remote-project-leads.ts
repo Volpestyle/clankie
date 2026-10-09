@@ -7,6 +7,8 @@ import type { RemoteLeadLaunch } from "@clankie/protocol/remote-leads";
 import type { SettingsStore } from "@clankie/settings";
 import type { ExecutionConnections } from "./herdr-session.ts";
 import type { CaptainPort } from "./captain/port.ts";
+import { redactSensitiveText } from "@clankie/observability";
+import { logger } from "./app/log.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import { powershellScriptCommand, powershellLiteral } from "./herdr-fleet.ts";
 import { RemoteLeadDelegations, type RemoteLeadBinding } from "./remote-lead-delegations.ts";
@@ -36,7 +38,8 @@ export class RemoteProjectLeads {
         !connection.ssh ||
         connectionKey(connection) !== binding.connectionKey ||
         !(await options.runtimes.remoteWorkspace(binding.fleet, binding.workingDirectory)) ||
-        !options.captain.seatContext(binding.conversationId)
+        options.captain.seatContext(binding.conversationId)?.machineId !== binding.machine ||
+        options.captain.seatContext(binding.conversationId)?.cwd !== binding.workingDirectory
       )
         throw new Error("remote_lead_binding_unavailable");
     });
@@ -207,22 +210,25 @@ process.stdin.on('end', () => {
       return original;
     }
     let grantId: string | undefined;
+    let grantToken: string | undefined;
     let child: ChildProcess | undefined;
     try {
       await guard();
+      if (initialConnection.machine !== input.fleet)
+        throw new Error("Remote lead requires an exact fleet/machine binding");
       const prepared = await this.prepare(input.fleet, guard);
       await guard();
       let conversationId = input.conversationId;
       if (conversationId === undefined) {
         await guard();
-        const result = await this.options.captain.serveOperatorConversation({
-          op: "create",
-          schemaVersion: 1,
+        if (!(await this.options.runtimes.remoteWorkspace(input.fleet, input.workingDirectory)))
+          throw new Error("Remote lead workspace approval changed");
+        const conversation = this.options.captain.createRemoteWorkspaceConversation({
           title: input.title,
-          scope: { kind: "workspace", workspaceId: input.workingDirectory },
+          workspaceId: input.workingDirectory,
+          machineId: initialConnection.machine,
         });
-        if (result.op !== "create") throw new Error("Project conversation creation failed");
-        conversationId = result.conversation.conversationId;
+        conversationId = conversation.conversationId;
       }
       const selected = await this.options.captain.serveOperatorConversation({
         op: "get",
@@ -232,13 +238,15 @@ process.stdin.on('end', () => {
       if (
         selected.op !== "get" ||
         selected.conversation?.scope.kind !== "workspace" ||
-        selected.conversation.scope.workspaceId !== input.workingDirectory
+        selected.conversation.scope.workspaceId !== input.workingDirectory ||
+        selected.conversation.scope.machineId !== initialConnection.machine
       )
         throw new Error("Remote lead requires a workspace conversation");
       const context = this.options.captain.seatContext(conversationId);
       if (
         !context ||
         context.cwd !== input.workingDirectory ||
+        context.machineId !== initialConnection.machine ||
         this.options.captain.operatorSeatReady?.(conversationId)
       )
         throw new Error("Choose an unoccupied project conversation in this working directory");
@@ -302,6 +310,7 @@ process.stdin.on('end', () => {
       await guard();
       const grant = await this.delegations.issue(binding);
       grantId = grant.id;
+      grantToken = grant.token;
       Object.assign(record, { delegationId: grant.id, stage: "dispatching" });
       await writeFile(path, JSON.stringify(record));
       await guard();
@@ -315,10 +324,24 @@ process.stdin.on('end', () => {
       });
       await writeFile(path, JSON.stringify(record));
       return record;
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const redactedError = redactSensitiveText(
+        grantToken ? message.replaceAll(grantToken, "[REDACTED]") : message,
+      ).slice(0, 1024);
+      logger.warn(
+        {
+          event: "remote_lead.launch_failed",
+          requestId: input.requestId,
+          failedStage: record.stage,
+          error: redactedError,
+        },
+        "Remote lead launch unconfirmed",
+      );
       if (grantId) this.delegations.revoke(grantId);
       Object.assign(record, {
         failedStage: record.stage,
+        error: redactedError,
         stage: "unconfirmed",
         detail: "Launch did not confirm. Inspect this original receipt and owned pane; do not replay.",
       });

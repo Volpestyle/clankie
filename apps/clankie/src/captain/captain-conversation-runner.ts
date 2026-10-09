@@ -188,6 +188,13 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             const preparation = new ConversationServiceRun(signal);
             let attached: Awaited<ReturnType<typeof materializeOwnerAttachments>> | undefined;
             try {
+              const scope = ctx.conversations.conversation(conversationId)?.scope;
+              if (
+                context.attachments !== undefined &&
+                scope?.kind === "workspace" &&
+                scope.machineId !== undefined
+              )
+                throw new Error("Remote seat attachments need a linked-machine transfer");
               attached =
                 context.attachments === undefined
                   ? undefined
@@ -301,6 +308,8 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         // ran is caught up by a fresh session seeded from the log, and the turn
         // opens the handoff span the returning harness receives.
         const sourceScope = ctx.conversations.conversation(conversationId)?.scope;
+        if (sourceScope?.kind === "workspace" && sourceScope.machineId !== undefined)
+          throw new Error("Remote workspace needs its native seat; local captain fallback is forbidden");
         const socialContinuation = sourceScope?.kind === "room" || sourceScope?.kind === "channel";
         // Owner answers carry authentication, never a new room machine grant.
         // A room continuation has no original transport actor proof: run its mind

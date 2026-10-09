@@ -269,6 +269,12 @@ export interface CaptainPort {
     authority?: QuestionAuthority,
     readSignal?: AbortSignal,
   ): Promise<OperatorConversationServiceResult>;
+  /** Service-only, after remote lead launch approves the exact linked-machine directory. */
+  createRemoteWorkspaceConversation(input: {
+    title: string;
+    workspaceId: string;
+    machineId: string;
+  }): OperatorConversation;
   invalidateQuestionPrincipal?(deviceId: string): void;
   /** Lane transcript snapshots for the TUI lanes view. */
   observeLanes(): Promise<readonly ObservableCaptainLane[]>;
@@ -296,7 +302,9 @@ export interface CaptainPort {
    * harness. Sections default to what the session itself is built with.
    */
   syncSeatTranscript(conversationId: string, transcript: SeatTranscriptUpload): boolean;
-  seatContext(conversationId?: string): { conversationId: string; cwd: string } | undefined;
+  seatContext(
+    conversationId?: string,
+  ): { conversationId: string; cwd: string; machineId?: string } | undefined;
   /** Service-observed turn/driver completion; unavailable evidence must not authorize automatic body stop. */
   conversationTurnIdle(conversationId: string): boolean;
   /** A native seat's turn end is never service-observed, so its expired bodies wait for its own recovery. */
@@ -494,6 +502,9 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       throw new Error("stub captain: voiceSelfTool not overridden");
     },
     syncSeatTranscript: () => true,
+    createRemoteWorkspaceConversation: () => {
+      throw new Error("stub captain: remote workspace creation not overridden");
+    },
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
     conversationTurnIdle: () => false,
     conversationHasNativeSeat: () => false,

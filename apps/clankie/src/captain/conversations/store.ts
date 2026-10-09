@@ -752,6 +752,8 @@ export class ConversationStore {
         };
       }
       case "create":
+        if (request.scope.kind === "workspace" && request.scope.machineId !== undefined)
+          throw new Error("Remote workspace conversations are created by approved lead launch");
         if (request.scope.kind === "room")
           throw new Error("Room conversations are discovered from their transport");
         // A channel is created with its membership or not at all — an empty
@@ -1003,6 +1005,8 @@ export class ConversationStore {
   }): Promise<OperatorDeliveredFile> {
     const meta = this.metas.get(input.conversationId);
     if (meta === undefined) throw new Error("Unknown conversation");
+    if (meta.scope.kind === "workspace" && meta.scope.machineId !== undefined)
+      throw new Error("Remote workspace files cannot be published from the local filesystem");
     if (this.publishDeliveredFile === undefined) throw new Error("Delivered files are unavailable");
     const published = await this.publishDeliveredFile({
       conversationId: input.conversationId,
@@ -1222,9 +1226,23 @@ export class ConversationStore {
     return publicConversation(meta);
   }
 
+  /** Internal launch boundary: callers must first approve this exact remote directory. */
+  public createRemoteWorkspaceConversation(input: {
+    title: string;
+    workspaceId: string;
+    machineId: string;
+  }): OperatorConversation {
+    return publicConversation(
+      this.create(
+        { kind: "workspace", workspaceId: input.workspaceId, machineId: input.machineId },
+        input.title,
+      ),
+    );
+  }
+
   public runsCaptainTurns(conversationId: string): boolean {
-    const kind = this.metas.get(conversationId)?.scope.kind;
-    return kind === "global" || kind === "workspace";
+    const scope = this.metas.get(conversationId)?.scope;
+    return scope?.kind === "global" || (scope?.kind === "workspace" && scope.machineId === undefined);
   }
 
   /**
@@ -1743,7 +1761,10 @@ export class ConversationStore {
   ): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
-    if (!this.runsCaptainTurns(conversationId)) {
+    if (
+      !this.runsCaptainTurns(conversationId) &&
+      !(meta.scope.kind === "workspace" && meta.scope.machineId !== undefined)
+    ) {
       throw new Error(`Conversation ${conversationId} does not run captain turns`);
     }
     return this.enqueue(meta, message, undefined, false, this.runner, {
@@ -1845,7 +1866,10 @@ export class ConversationStore {
     const runner = admittedRunner ?? (meta.scope.kind === "room" || native ? undefined : this.runner);
     if (
       runner === undefined ||
-      (!this.runsCaptainTurns(conversationId) && meta.scope.kind !== "room" && !native)
+      (!this.runsCaptainTurns(conversationId) &&
+        meta.scope.kind !== "room" &&
+        meta.scope.kind !== "workspace" &&
+        !native)
     )
       throw new ConversationRefusedError("This conversation cannot accept inbound worker messages.");
     return this.enqueue(meta, message, undefined, false, runner, {
@@ -1885,7 +1909,12 @@ export class ConversationStore {
       if (existing !== undefined) return existing;
     }
     const workspace = workspaceOf(scope);
-    if (workspace !== undefined && !statSync(workspace, { throwIfNoEntry: false })?.isDirectory()) {
+    if (
+      workspace !== undefined &&
+      scope.kind === "workspace" &&
+      scope.machineId === undefined &&
+      !statSync(workspace, { throwIfNoEntry: false })?.isDirectory()
+    ) {
       throw new Error(`Workspace ${workspace} is not a directory on this machine`);
     }
     const now = new Date().toISOString();

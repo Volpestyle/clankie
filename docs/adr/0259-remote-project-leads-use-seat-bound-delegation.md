@@ -43,6 +43,24 @@ undo an already dispatched effect. Service restart invalidates ephemeral grants.
 An uncertain launch or tool effect is reconciled by its original receipt and is
 never automatically replayed.
 
+## Remote workspace conversations
+
+A workspace scope may carry an additive `machineId`. Lead launch alone creates
+that scope, after `remoteWorkspace` approves the exact directory on the pinned
+connection. Ordinary conversation creation refuses client-supplied remote
+scopes. Current launches target Windows fleets: validate their fully qualified
+paths with `path.win32`, and do not stat them on the service's Mac.
+
+The seat context retains the machine identity. A remote workspace does not run
+local captain turns or fall back to a local Pi session when its native receiver
+is unavailable. Its reports and wakes still use the native conversation driver;
+lead tools require the seat-bound delegation. The remote harness reads its own
+project instructions; the service cannot read that workspace locally.
+
+An unconfirmed launch retains its original receipt, `failedStage` and a bounded,
+redacted error, and logs that same diagnostic. Delegation secrets are redacted
+before either durable boundary. Reconciliation never launches a replacement.
+
 ## Verification and rollout
 
 Trust-boundary checks cover wrong machine, seat and chat; worker-token rejection;

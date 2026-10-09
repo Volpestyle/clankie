@@ -372,7 +372,17 @@ export const OperatorConversationScopeSchema = z.discriminatedUnion("kind", [
       targetId: z.string().trim().min(1).max(512),
     })
     .strict(),
-  z.object({ kind: z.literal("workspace"), workspaceId: z.string().trim().min(1).max(512) }).strict(),
+  z
+    .object({
+      kind: z.literal("workspace"),
+      workspaceId: z.string().trim().min(1).max(512),
+      /** Service-approved linked-machine workspace; never a local captain cwd. */
+      machineId: z
+        .string()
+        .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+        .optional(),
+    })
+    .strict(),
   /** One DM thread per durable fleet character (ADR 0147). */
   z.object({ kind: z.literal("persona"), personaId: OperatorAgentPersonaIdSchema }).strict(),
   /** Legacy persisted scope. New surfaces create persona scopes. */
