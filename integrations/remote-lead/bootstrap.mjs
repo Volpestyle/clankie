@@ -99,7 +99,11 @@ if (process.argv[2] === "--head") {
   const matches = sessions.filter((entry) => entry.name === spec.session && entry.running);
   if (matches.length !== 1) throw new Error("Registered Herdr session unavailable");
   const env = { ...process.env, HERDR_SOCKET_PATH: matches[0].socket_path };
-  const herdr = async (args) => JSON.parse((await execute("herdr", args, { env, timeout: 15000 })).stdout);
+  // `herdr pane run` and other send-only commands succeed with no output.
+  const herdr = async (args) => {
+    const stdout = (await execute("herdr", args, { env, timeout: 15000 })).stdout;
+    return stdout.trim() ? JSON.parse(stdout) : undefined;
+  };
   const executable = await ps(
     "$ErrorActionPreference='Stop'; $a=@(Get-Command claude.exe -All -CommandType Application | Select-Object -ExpandProperty Source -Unique); if($a.Count -ne 1){throw 'Native Claude unavailable'}; $a[0]",
   );
