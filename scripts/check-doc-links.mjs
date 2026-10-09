@@ -20,6 +20,19 @@ for await (const path of glob("**/*.md", {
   markdown.push(resolve(root, path));
 }
 const failures = [];
+const archivedEvidence = async (target) => {
+  const normalized = target.replaceAll("\\", "/");
+  const match = /^docs\/testing\/([^/]+)(?:\/(.*))?$/u.exec(normalized);
+  if (!match) return false;
+  const folder = resolve(root, "docs/testing", match[1]);
+  try {
+    const manifest = JSON.parse(await readFile(resolve(folder, "evidence.json"), "utf8"));
+    const relative = match[2] ?? "";
+    return manifest.objects.some(({ path }) => path === relative || path.startsWith(`${relative}/`));
+  } catch {
+    return false;
+  }
+};
 // Stable historical aliases documented in docs/adr/README.md. Match exact
 // filenames so another collision under an old number cannot inherit an exemption.
 const legacyAdrPairs = new Map([
@@ -69,6 +82,7 @@ for (const path of markdown) {
     try {
       await access(resolve(dirname(path), decodeURIComponent(clean)));
     } catch {
+      if (await archivedEvidence(clean.replaceAll("\\", "/"))) continue;
       failures.push(`${path.slice(root.length + 1)} → ${target}`);
     }
   }
