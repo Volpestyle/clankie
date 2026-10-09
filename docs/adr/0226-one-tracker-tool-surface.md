@@ -592,3 +592,42 @@ Imported links become `clankie://evidence`; original links remain in source
 metadata. A durable scratch cache avoids downloading unchanged URLs again.
 The response reports counts, created/updated/unchanged records, skipped download
 reasons, request count and five issue keys for inspection.
+
+## Proposed amendment: Linear webhooks keep the mirror current (2026-10-09, VUH-1965)
+
+Status: proposed. Linear stays authoritative until the explicit ADR 0181 cutover.
+
+The owner enables a webhook mirror per scratch import with `clankie work mirror
+linear --scratch NAME --project UUID enable|disable|status`; nothing mirrors by
+default, and only a store imported from that project can be bound. Bindings and
+their counters live in `tracker-imports/mirrors.json`.
+
+**One mapper.** The webhook route hands every authenticated data-change event,
+including his own writes' echoes, to the mirror after the wake decision; mirror
+work runs in order per store and its failures never change the response or a
+wake. Each event becomes a partial import snapshot, merged onto the stored
+provider record, and `importLinear` applies it. Issue create/update/remove
+(state, priority, labels, milestone, assignee, parent, cycle), comments, labels,
+the project, project updates, documents, cycles and issue attachments are
+covered. Linear's webhook models have no relation or milestone resources: a
+project event refreshes milestones, and relations update when an issue is next
+re-read. Removed comments leave the native list; other removals keep the record
+with an archive marker.
+
+**Exactly once and attributed.** The Linear event id is the hash of the signed
+body without its send timestamp, so a redelivery or replay is recognized; the
+store keeps the last 5,000 applied ids and a replay writes nothing. Item events
+(`created`, `state`, `priority`, `comment`) and record events carry the original
+Linear actor, mapped as the import maps authors, with `via: linear_mirror`; the
+sync journal and audit record `mirror_linear`, and subscribers receive the
+change as it commits.
+
+**Read-only copy.** A store holding Linear mirror records refuses every built-in
+tool and sync write with `mirror_read_only`; changes are made in Linear.
+
+**Drift.** An event that names an unknown issue, label, workflow state, milestone
+or comment parent is drift. The service re-reads only those records through the
+connected account with the import's field selections (at most five issues per
+event, read-only, shared background budget), applies them with the import mapper,
+then applies the event. Records found outside the project are not imported. Each
+repair is reported with its references, outcome and request count.

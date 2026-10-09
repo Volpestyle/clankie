@@ -844,6 +844,10 @@ The [Linear importer](../apps/clankie/src/linear-import.ts) mirrors a single-tea
 project into a named scratch store through the same broker and request budget.
 Provider IDs, history and graph references survive; uploads enter the evidence
 store. It leaves Linear authoritative and never selects the live tracker.
+An owner-enabled [mirror](../apps/clankie/src/linear-mirror.ts) then applies
+signed Linear webhooks to that scratch store through the same mapper, once per
+event id and attributed to the Linear actor, repairs drift with scoped re-reads,
+and refuses built-in writes until cutover. Wakes are decided independently.
 Built-in items and runs carry evidence-store reference bundles. Completion past
 landed requires an independent bundle check. Item questions and run gates reuse
 ADR 0245 owner asks; gates block tracked execution until owner approval. The

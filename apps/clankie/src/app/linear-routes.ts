@@ -9,7 +9,9 @@ import {
   linearReplyTo,
   linearActivityWakeTypes,
   linearActivityProject,
+  type LinearActivityEvent,
 } from "../linear-webhook.ts";
+import { linearMirrorEvent } from "../linear-mirror.ts";
 import { authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import type { ClankieAppDependencies } from "./types.ts";
@@ -234,7 +236,17 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
         outcome.reason === "malformed" ? 400 : 401,
       );
     }
+    // Mirrors see every accepted change, including his own writes' echoes, but never steer wakes.
+    const mirror = (activity: LinearActivityEvent) => {
+      try {
+        const event = linearMirrorEvent({ ...activity, projectId: linearActivityProject(activity)?.id });
+        if (event) hook.mirror?.(event);
+      } catch (error) {
+        logger.warn({ error: String(error) }, "linear mirror hand-off failed");
+      }
+    };
     if (outcome.kind === "ignored") {
+      if (outcome.reason === "self_echo" && outcome.activity) mirror(outcome.activity);
       const current = await ctx.settingsSource.load();
       logger.info(
         {
@@ -360,6 +372,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       matches;
     const ingested =
       targetAllowed && ctx.dependencies.captain.receiveLinearActivity(activity, following, target);
+    mirror(activity);
     logger.info(
       {
         event: "linear.webhook",

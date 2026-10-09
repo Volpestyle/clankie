@@ -9,6 +9,7 @@ import {
   TRACKER_OWNER,
   type TrackerActor,
   type LinearImportSnapshot,
+  type LinearRecord,
 } from "@clankie/work-items";
 import { executeLinearGraphql, linearGraphqlCredential, planLinearGraphql } from "./linear-graphql.ts";
 import { withLinearRequestInvocation, type LinearRequestBudget } from "./linear-request-budget.ts";
@@ -24,8 +25,72 @@ export interface LinearImportOptions {
   assertCurrent: () => Promise<void>;
 }
 
+/** Owner IDs/emails from wake settings, the connected app as Clankie, bot personas as workers. */
+export function linearActorMap(
+  users: readonly LinearRecord[],
+  options: { ownerIds: readonly string[]; ownerEmails: readonly string[]; appUserId: string | undefined },
+): Record<string, TrackerActor> {
+  const actorMap: Record<string, TrackerActor> = {};
+  for (const user of users) {
+    const owner =
+      options.ownerIds.includes(user.id) ||
+      options.ownerEmails.some((email) => email.toLowerCase() === String(user.email).toLowerCase());
+    actorMap[user.id] = owner
+      ? { ...TRACKER_OWNER, name: String(user.name), onBehalfOf: [] }
+      : user.id === options.appUserId
+        ? { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] }
+        : user.isBotActor === true
+          ? {
+              type: "agent-worker",
+              id: `linear:${user.id}`,
+              name: String(user.name),
+              onBehalfOf: [TRACKER_OWNER, TRACKER_LEAD],
+            }
+          : { type: "app", id: `linear:${user.id}`, name: String(user.name), onBehalfOf: [] };
+  }
+  return actorMap;
+}
+
 /** Connected account only, shared service budget, read-only provider operations. */
 export async function importConnectedLinear(projectId: string, options: LinearImportOptions) {
+  const session = await connectedLinearSession(options);
+  const snapshot = await collectLinearImport({ projectId, query: session.query });
+  if (snapshot.workspaceId !== session.binding.workspaceId)
+    throw new Error("Linear workspace did not match connected account");
+  const actorMap = linearActorMap(snapshot.actors, { ...options, appUserId: session.binding.userId });
+  const media = await importLinearMedia(snapshot, {
+    ...options,
+    access: session.access,
+    dispatch: session.dispatch,
+  });
+  const tracker = createLocalTracker({ directory: options.directory });
+  const report = await tracker.importLinear(snapshot, actorMap, {
+    actor: { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] },
+    beforeWrite: async () => {
+      await session.access();
+    },
+  });
+  report.skipped.push(...media.skipped);
+  const result = {
+    ...report,
+    requests: session.requests(),
+    attachments: media.count,
+    actorMappings: actorMap,
+    directory: options.directory,
+  };
+  await writeFile(join(options.directory, "import-report.json"), `${JSON.stringify(result, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  return result;
+}
+
+/**
+ * The broker-connected Clankie app, verified before and during use. Queries only:
+ * a mutation document is refused before it reaches Linear.
+ */
+export async function connectedLinearSession(
+  options: Pick<LinearImportOptions, "credentials" | "budget" | "assertCurrent">,
+) {
   let requests = 0;
   let expected: { workspaceId: string; userId: string } | undefined;
   const access = async () => {
@@ -79,53 +144,15 @@ export async function importConnectedLinear(projectId: string, options: LinearIm
       throw new Error(`Linear import query refused: ${JSON.stringify(body.errors)}`);
     return body.data;
   };
-  const snapshot = await collectLinearImport({ projectId, query });
-  if (snapshot.workspaceId !== binding?.workspaceId)
-    throw new Error("Linear workspace did not match connected account");
-  const actorMap: Record<string, TrackerActor> = {};
-  for (const user of snapshot.actors) {
-    const owner =
-      options.ownerIds.includes(user.id) ||
-      options.ownerEmails.some((email) => email.toLowerCase() === String(user.email).toLowerCase());
-    actorMap[user.id] = owner
-      ? { ...TRACKER_OWNER, name: String(user.name), onBehalfOf: [] }
-      : user.id === binding?.userId
-        ? { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] }
-        : user.isBotActor === true
-          ? {
-              type: "agent-worker",
-              id: `linear:${user.id}`,
-              name: String(user.name),
-              onBehalfOf: [TRACKER_OWNER, TRACKER_LEAD],
-            }
-          : { type: "app", id: `linear:${user.id}`, name: String(user.name), onBehalfOf: [] };
-  }
-  const media = await importLinearMedia(snapshot, {
-    ...options,
+  return {
+    binding: expected,
     access,
+    query,
     dispatch: () => {
       requests++;
     },
-  });
-  const tracker = createLocalTracker({ directory: options.directory });
-  const report = await tracker.importLinear(snapshot, actorMap, {
-    actor: { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] },
-    beforeWrite: async () => {
-      await access();
-    },
-  });
-  report.skipped.push(...media.skipped);
-  const result = {
-    ...report,
-    requests,
-    attachments: media.count,
-    actorMappings: actorMap,
-    directory: options.directory,
+    requests: () => requests,
   };
-  await writeFile(join(options.directory, "import-report.json"), `${JSON.stringify(result, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  return result;
 }
 
 /** Never send the app bearer to arbitrary attachment URLs or follow redirects. */
@@ -144,7 +171,7 @@ function linearUploadUrl(value: string): boolean {
   }
 }
 
-async function importLinearMedia(
+export async function importLinearMedia(
   snapshot: LinearImportSnapshot,
   options: LinearImportOptions & {
     access: () => Promise<{ bearer: string; credential: Parameters<LinearRequestBudget["fetch"]>[0] }>;

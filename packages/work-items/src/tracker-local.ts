@@ -17,6 +17,7 @@ import {
   type LinearImportReport,
   type LinearRecord,
 } from "./linear-import.ts";
+import type { LinearMirrorRemoval, LinearMirrorView } from "./linear-mirror.ts";
 import {
   applyTrackerDescriptionPatch,
   DELIVERY_STAGES,
@@ -260,7 +261,12 @@ interface Store {
   projects: Project[];
   comments: Comment[];
   /** Mirror records, keyed by provider id; Linear remains authoritative until cutover. */
-  linearMirror?: { workspaceId: string; records: Record<string, LinearRecord[]> };
+  linearMirror?: {
+    workspaceId: string;
+    records: Record<string, LinearRecord[]>;
+    /** Linear webhook events already applied by the mirror (VUH-1965), newest last. */
+    events?: { id: string; deliveryId?: string; at: string; type: string; action: string }[];
+  };
   actors?: (User & { actor: TrackerActor })[];
   milestones?: LinearRecord[];
   documents?: LinearRecord[];
@@ -284,6 +290,19 @@ interface Store {
   ownerAsks?: { eventId: string; issueId: string; runId?: string; requestId: string }[];
 }
 
+/** One accepted Linear webhook event applied through the import mapper (VUH-1965). */
+export interface LinearMirrorChange {
+  readonly eventId: string;
+  readonly deliveryId?: string | undefined;
+  readonly type: string;
+  readonly action: string;
+  /** The original Linear actor, mapped the way the import maps authors. */
+  readonly actor: TrackerActor;
+  readonly removed?: readonly LinearMirrorRemoval[];
+}
+
+const MIRROR_EVENTS_RETAINED = 5_000;
+
 /** Who and why for one write, threaded into item events. */
 interface WriteContext {
   readonly actor: TrackerActor;
@@ -302,8 +321,10 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
   importLinear(
     snapshot: LinearImportSnapshot,
     actorMap: Readonly<Record<string, TrackerActor>>,
-    options?: TrackerToolCallOptions,
+    options?: TrackerToolCallOptions & { readonly mirrorEvent?: LinearMirrorChange },
   ): Promise<LinearImportReport>;
+  /** Host-only: what a webhook mirror plans against; undefined when this is not a mirror store. */
+  linearMirrorView(projectId: string): Promise<LinearMirrorView | undefined>;
   /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   /** Host-only: link the existing mailbox record to its requesting item event. */
   linkOwnerAsk(eventId: string, requestId: string): Promise<void>;
@@ -2870,6 +2891,12 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     };
     const firstEvent = (store.events?.length ?? 0) + 1;
     try {
+      // Linear stays authoritative until cutover (ADR 0181): a mirror changes only from Linear.
+      if (store.linearMirror)
+        throw new TrackerWriteRefused(
+          "mirror_read_only",
+          "This store mirrors Linear; make the change in Linear until cutover",
+        );
       result = await apply(store, now, context);
       recordIssueChanges(before, store, name, context, now);
     } catch (error) {
@@ -3201,6 +3228,10 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           throw new Error("Scratch store has another Linear team; no team mapping was selected");
         if (!store.linearMirror && store.issues.length > 0)
           throw new Error("Import requires an empty scratch store or its existing mirror");
+        const mirrorEvent = callOptions?.mirrorEvent;
+        if (mirrorEvent && !store.linearMirror) throw new Error("Webhook mirror requires an imported store");
+        const duplicate =
+          mirrorEvent && store.linearMirror?.events?.some((e) => e.id === mirrorEvent.eventId);
         const report: LinearImportReport = {
           workspaceId: snapshot.workspaceId,
           counts: {},
@@ -3216,6 +3247,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             name: String(project.name),
           })),
         };
+        if (duplicate) return { ...report, duplicate: true };
         report.counts.archivedIssues = snapshot.issues.filter((issue) => issue.archivedAt != null).length;
         report.counts.stateHistory = snapshot.issues.reduce(
           (count, issue) => count + ((issue.stateHistory ?? []) as unknown[]).length,
@@ -3245,6 +3277,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         );
         if (report.created + report.updated === 0 && !actorMappingsChanged) return report;
         const actor = callOptions?.actor ?? { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+        const via = mirrorEvent ? "linear_mirror" : "linear_import";
+        // A webhook change is attributed to whoever made it in Linear, not the record author.
+        const eventActor = (record: LinearRecord): TrackerActor => mirrorEvent?.actor ?? sourceActor(record);
         const sourceActor = (record: LinearRecord): TrackerActor => {
           const id = linearId(record.botActor ?? record.actor ?? record.creator ?? record.user);
           return (id && actorMap[id]) || actor;
@@ -3254,7 +3289,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           createdAt: String(record.createdAt ?? clock),
           updatedAt: String(record.updatedAt ?? record.createdAt ?? clock),
           createdByActor: sourceActor(record),
-          updatedByActor: sourceActor(record),
+          updatedByActor: eventActor(record),
         });
         const id = (record: LinearRecord, key: string) => linearId(record[key]);
         const upsert = <T extends { id: string }>(target: T[], incoming: T[]) => {
@@ -3373,10 +3408,16 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             quotedText: (record.quotedText as string | null) ?? null,
           })),
         );
+        // A partial (webhook or drift) snapshot keeps the relations the mirror already holds.
+        const currentRelations = [
+          ...new Map(
+            [...(store.linearMirror?.records.relations ?? []), ...snapshot.relations].map((r) => [r.id, r]),
+          ).values(),
+        ].filter((relation) => relation.archivedAt == null);
         upsert(
           store.issues,
           snapshot.issues.map((record) => {
-            const relations = snapshot.relations;
+            const relations = currentRelations;
             const forward = (type: string) =>
               relations
                 .filter((r) => r.type === type && id(r, "issue") === record.id)
@@ -3413,6 +3454,10 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             };
           }),
         );
+        // Removed provider records leave the native lists; their mirror record keeps the archive marker.
+        for (const removal of mirrorEvent?.removed ?? [])
+          if (removal.kind === "comments") store.comments = store.comments.filter((c) => c.id !== removal.id);
+        const firstEvent = (store.events?.length ?? 0) + 1;
         // Historical records stay historical: no invented owner verification, asks or lease effects.
         for (const [kind, incoming] of Object.entries(records))
           for (const record of incoming) {
@@ -3422,32 +3467,25 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               type: kind,
               id: record.id,
               at: clock,
-              actor: sourceActor(record),
-              via: "linear_import",
+              actor: eventActor(record),
+              via,
             });
             if (kind === "issues") {
               const issue = findIssue(store, record.id);
               if (!prior)
-                appendEvent(
-                  store,
-                  { actor: sourceActor(record), via: "linear_import" },
-                  String(record.createdAt),
-                  issue,
-                  { type: "created" },
-                );
+                appendEvent(store, { actor: eventActor(record), via }, String(record.createdAt), issue, {
+                  type: "created",
+                });
               const oldSpans = (prior?.stateHistory ?? []) as LinearRecord[];
               const stateChanges = ((record.history ?? []) as LinearRecord[]).filter((history) =>
                 linearId(history.toState),
               );
               for (const span of stateChanges.length ? [] : ((record.stateHistory ?? []) as LinearRecord[]))
                 if (!oldSpans.some((s) => s.id === span.id))
-                  appendEvent(
-                    store,
-                    { actor: sourceActor(record), via: "linear_import" },
-                    String(span.startedAt),
-                    issue,
-                    { type: "state", to: String(linearRow(span.state).name) },
-                  );
+                  appendEvent(store, { actor: sourceActor(record), via }, String(span.startedAt), issue, {
+                    type: "state",
+                    to: String(linearRow(span.state).name),
+                  });
               for (const history of stateChanges)
                 if (
                   linearId(history.toState) &&
@@ -3455,7 +3493,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
                 )
                   appendEvent(
                     store,
-                    { actor: sourceActor(history), via: "linear_import" },
+                    { actor: mirrorEvent?.actor ?? sourceActor(history), via },
                     String(history.createdAt),
                     issue,
                     {
@@ -3465,12 +3503,25 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
                       body: `Linear history ${history.id}`,
                     },
                   );
+              if (prior && prior.priority !== record.priority)
+                appendEvent(
+                  store,
+                  { actor: eventActor(record), via },
+                  String(record.updatedAt ?? clock),
+                  issue,
+                  {
+                    type: "priority",
+                    from: String(prior.priority),
+                    to: String(record.priority),
+                  },
+                );
             }
-            if (kind === "comments" && typeof record.issueId === "string")
+            const removed = mirrorEvent?.removed?.some((r) => r.kind === kind && r.id === record.id);
+            if (kind === "comments" && typeof record.issueId === "string" && !removed)
               appendEvent(
                 store,
-                { actor: sourceActor(record), via: "linear_import" },
-                String(record.createdAt),
+                { actor: eventActor(record), via },
+                String(prior ? (record.updatedAt ?? record.createdAt) : record.createdAt),
                 findIssue(store, record.issueId),
                 { type: "comment", body: String(record.body), commentId: record.id },
               );
@@ -3480,12 +3531,31 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           merged[kind] = [
             ...new Map([...(merged[kind] ?? []), ...incoming].map((record) => [record.id, record])).values(),
           ];
-        store.linearMirror = { workspaceId: snapshot.workspaceId, records: merged };
+        const events = [
+          ...(store.linearMirror?.events ?? []),
+          ...(mirrorEvent
+            ? [
+                {
+                  id: mirrorEvent.eventId,
+                  ...(mirrorEvent.deliveryId ? { deliveryId: mirrorEvent.deliveryId } : {}),
+                  at: clock,
+                  type: mirrorEvent.type,
+                  action: mirrorEvent.action,
+                },
+              ]
+            : []),
+        ].slice(-MIRROR_EVENTS_RETAINED);
+        store.linearMirror = {
+          workspaceId: snapshot.workspaceId,
+          records: merged,
+          ...(events.length ? { events } : {}),
+        };
+        const tool = mirrorEvent ? "mirror_linear" : "import_linear";
         appendAudit(store, {
           at: clock,
-          tool: "import_linear",
+          tool,
           outcome: "applied",
-          actor,
+          actor: mirrorEvent?.actor ?? actor,
           fields: Object.keys(records),
           entities: Object.entries(records).flatMap(([type, entries]) =>
             entries.map((record) => ({
@@ -3494,13 +3564,28 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               ...(typeof record.identifier === "string" ? { identifier: record.identifier } : {}),
             })),
           ),
+          ...(mirrorEvent ? { target: `linear-event:${mirrorEvent.eventId}` } : {}),
         });
         parseStore(JSON.stringify(store));
-        appendSync(before, store, actor, "import_linear", clock);
+        appendSync(before, store, mirrorEvent?.actor ?? actor, tool, clock);
         await persist(path, store, assertHeld, callOptions);
         for (const listener of syncListeners.get(path) ?? []) listener();
+        publish(store.events?.slice(firstEvent - 1) ?? []);
         return report;
       });
+    },
+    async linearMirrorView(projectId) {
+      const { store } = await load();
+      if (!store.linearMirror) return undefined;
+      return {
+        workspaceId: store.linearMirror.workspaceId,
+        team: store.team as unknown as LinearRecord,
+        projectId,
+        records: store.linearMirror.records,
+        issueStatuses: store.issueStatuses,
+        projectStatuses: store.projectStatuses,
+        appliedEvents: new Set((store.linearMirror.events ?? []).map((event) => event.id)),
+      };
     },
     async linkOwnerAsk(eventId, requestId) {
       await withTrackerStoreLock(path, async (assertHeld) => {
