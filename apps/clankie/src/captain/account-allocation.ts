@@ -43,9 +43,7 @@ const PLAN_NAMES: Record<string, string> = {
 };
 
 /** The plan tier an account reports, normalised to a `PLAN_WEIGHTS` key when known. */
-export function accountTier(
-  account: Pick<WorkerAccountStatus, "harness" | "plan" | "tier">,
-): string | undefined {
+function accountTier(account: Pick<WorkerAccountStatus, "harness" | "plan" | "tier">): string | undefined {
   if (account.harness === "claude") {
     const reported = account.tier ?? "";
     const match =
