@@ -76,7 +76,9 @@ async function fixture() {
       completions = new Map<ChildProcess, Promise<number>>(),
       drained = new Map<ChildProcess, Promise<void>>(),
       receipts: string[] = [];
-    function own(child: ChildProcess) {
+    function own(create: () => ChildProcess) {
+      lifetime.signal.throwIfAborted();
+      const child = create();
       children.push(child);
       const birth = child.pid ? confirmedIdentity(child.pid) : Promise.resolve(undefined);
       void birth.catch(() => undefined);
@@ -95,7 +97,7 @@ async function fixture() {
       lifetime.signal.throwIfAborted();
       const receipt = join(directory, `${seat}.receipt`),
         release = join(directory, `${seat}.release`);
-      const child = own(
+      const child = own(() =>
         spawn(
           process.execPath,
           [
@@ -127,7 +129,7 @@ async function fixture() {
       return { child, done, receipt, release, output };
     }
     async function release(path: string) {
-      await writeFile(path, "release");
+      await lifetime.run(() => writeFile(path, "release"));
     }
     function killGroup(pgid: number, signal: NodeJS.Signals) {
       try {
@@ -222,7 +224,7 @@ describe("machine shared heavy permits with actual OS children", () => {
         ["2", "1", ["2", "1"]],
       ] as const) {
         const receipt = join(f.directory, "parallelism.json");
-        const child = f.own(
+        const child = f.own(() =>
           spawn(
             process.execPath,
             [
@@ -267,7 +269,7 @@ describe("machine shared heavy permits with actual OS children", () => {
         (state) => state.queue.length === queued.length,
         30_000,
       );
-      holder = f.own(
+      holder = f.own(() =>
         spawn(resourcePython, ["-I", resourceNativeHelperPath(), "lock", f.directory], {
           detached: true,
           stdio: ["pipe", "pipe", "pipe"],
@@ -370,7 +372,7 @@ describe("machine shared heavy permits with actual OS children", () => {
       const claim = join(f.directory, "claim.receipt"),
         ready = join(f.directory, "ready.receipt"),
         submitted = join(f.directory, "submitted.receipt");
-      const wrapper = f.own(
+      const wrapper = f.own(() =>
         spawn(process.execPath, [registrationDriver, f.directory, mode, claim, ready, submitted], {
           detached: true,
           stdio: "ignore",
@@ -387,7 +389,7 @@ describe("machine shared heavy permits with actual OS children", () => {
         );
         if (mode === "unregistered") {
           const ref = JSON.parse(await readFile(claim, "utf8")) as { id: string; token: string };
-          const late = f.own(
+          const late = f.own(() =>
             spawn(resourcePython, ["-I", resourceNativeHelperPath(), "run", f.directory, ref.id, ref.token], {
               detached: true,
               stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
