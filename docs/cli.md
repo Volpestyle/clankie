@@ -1738,6 +1738,26 @@ Environment overrides still win: check `effectiveVoice` before restarting.
 This command is local-only; hosted mode refuses it. See the
 [voice operating guide](../apps/discord-bridge/README.md) for verification limits.
 
+### `work sync --json COMMAND`
+
+Reads and writes the built-in tracker sync protocol through the existing
+operator dispatch API. Supply a `TrackerSyncCommand`: `bootstrap` (`type:
+full|partial`, `projects`, optional `lazy`), `batch` (`projects`, `models`),
+`subscribe` (`projects`, `storeId`, `lastSyncId`, optional `waitMs`/`limit`),
+or `transaction` (required `idempotencyKey`, `operations` of existing write
+tools and arguments). Output is the typed result; bootstrap contains JSON lines
+in `ndjson`, ending with snapshot cursor and model count metadata. Subscribe
+waits on committed changes, for at most 20 seconds. A keyed transaction is
+atomic across 1–50 operations; receipt lookup uses `work owner get_write_receipt`.
+
+Devices use op `tracker_sync` on `POST /operator/v1/dispatch`. The relay emits
+bootstrap directly as NDJSON; `POST /operator/v1/tail` with a subscribe command
+streams `kind:tracker_sync` pages. Chat grants authorize reads; terminalControl
+authorizes writes as the authenticated app actor. A `rebootstrap` result means
+replace the named groups with a partial bootstrap before resuming. Apply whole
+commits before saving `lastSyncId`, and never let lazy hydration overwrite a
+newer delta. See the [sync contract](adr/0226-one-tracker-tool-surface.md#amendment-built-in-tracker-sync-journal-2026-10-09-vuh-1962).
+
 ### `work [status]` / `work init` / `work list|show|create|update|close|attach|write|receipt`
 
 Tracks work where the repo already does ([ADR 0191](adr/0191-work-is-tracked-where-the-repo-tracks-it.md)):

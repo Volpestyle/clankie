@@ -1,3 +1,4 @@
+import { TrackerSyncCommandSchema, TrackerSyncResultSchema } from "./tracker-sync.ts";
 import {
   EvidenceDevicePreviewSchema,
   EvidenceRecordSchema,
@@ -424,6 +425,9 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({ op: z.literal("work_project"), schemaVersion: z.literal(1), repoId: WorkRepoSchema.shape.id })
+    .strict(),
+  z
+    .object({ op: z.literal("tracker_sync"), schemaVersion: z.literal(1), command: TrackerSyncCommandSchema })
     .strict(),
   /** An issue's recorded evidence and a small preview of one blob, read-only (VUH-1936). */
   z
@@ -971,6 +975,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
         z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
       ]),
     })
+    .strict(),
+  z
+    .object({ op: z.literal("tracker_sync"), schemaVersion: z.literal(1), result: TrackerSyncResultSchema })
     .strict(),
   z
     .object({

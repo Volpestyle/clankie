@@ -52,7 +52,8 @@ export type DeviceConversationRequest = Extract<
       | "project_proposal_confirm"
       | "project_proposal_tweak"
       | "work_item_write"
-      | "work_item_write_receipt";
+      | "work_item_write_receipt"
+      | "tracker_sync";
   }
 >;
 export type DeviceConversationDispatch = (
@@ -93,6 +94,7 @@ export function createDeviceConversationDispatch(options: {
         "project_proposal_tweak",
         "work_item_write",
         "work_item_write_receipt",
+        "tracker_sync",
       ].includes(request.op)
     )
       throw new Error("Unsupported device conversation operation");

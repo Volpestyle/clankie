@@ -1,3 +1,4 @@
+import { TrackerSyncCommandSchema, OperatorConversationServiceResultSchema } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
 import {
   WorkItemWriteRequestSchema,
@@ -26,6 +27,7 @@ const WORK_USAGE = [
   "  | gate ask ITEM --run ID --kind plan|spend|destructive_action|merge|external_write --body TEXT",
   "  | run steer|pause|resume|stop ID [--body TEXT] | ask ITEM --body TEXT",
   "  | lease ITEM [--minutes N] [--release]",
+  "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
@@ -261,6 +263,11 @@ function trackerRequest(
     body: { name, arguments: toolArgs },
   });
   switch (verb) {
+    case "sync": {
+      if (rest.length || one(parsed, "--json") === undefined) throw new Error(WORK_USAGE);
+      const command = TrackerSyncCommandSchema.parse(JSON.parse(one(parsed, "--json")!));
+      return { path: "/operator/v1/dispatch", body: { op: "tracker_sync", schemaVersion: 1, command } };
+    }
     case "releases": {
       if (rest[0] === "sync" && rest.length === 1)
         return { path: "/v1/tracker/releases/sync", body: { repo } };
@@ -420,7 +427,13 @@ export async function runWorkCommand(
       body: JSON.stringify(tracker.body),
       signal: AbortSignal.timeout(60_000),
     });
-    return { ok: response.ok, body: (await response.json()) as unknown };
+    const body: unknown = await response.json();
+    if (tracker.body.op === "tracker_sync" && response.ok) {
+      const result = OperatorConversationServiceResultSchema.parse(body);
+      if (result.op !== "tracker_sync") throw new Error("Unexpected tracker sync result");
+      return { ok: result.result.outcome !== "refused", body: result.result };
+    }
+    return { ok: response.ok, body };
   }
   const endpoint = `${commandHost({ env })}/v1/work`;
   const writing = request.action === "write";

@@ -1,3 +1,10 @@
+import {
+  TrackerSyncCommandSchema,
+  type TrackerSyncCommand,
+  type TrackerSyncModel,
+  type TrackerSyncCommit,
+  type TrackerSyncResult,
+} from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { open, readFile, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -229,6 +236,8 @@ interface Release {
 }
 interface Store {
   version: 1;
+  syncId?: number;
+  syncLog?: (TrackerSyncCommit & { prevHash: string; hash: string })[];
   nextIssue: number;
   nextProject: number;
   team: Team;
@@ -267,6 +276,11 @@ interface WriteContext {
 /** Live delivery of newly committed item events, after their write is durable. */
 export type TrackerEventListener = (event: TrackerItemEvent) => void;
 export interface LocalTrackerBackend extends TrackerToolBackend {
+  sync(
+    command: TrackerSyncCommand,
+    options?: TrackerToolCallOptions,
+    signal?: AbortSignal,
+  ): Promise<TrackerSyncResult>;
   /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   /** Host-only: link the existing mailbox record to its requesting item event. */
   linkOwnerAsk(eventId: string, requestId: string): Promise<void>;
@@ -465,6 +479,17 @@ function parseStore(content: string): Store {
       store.ownerAsks.some((ref) => typeof ref?.eventId !== "string" || typeof ref.requestId !== "string"))
   )
     throw new Error("Invalid local tracker owner ask references");
+  if (store.syncLog !== undefined) {
+    if (!Array.isArray(store.syncLog) || store.syncId !== store.syncLog.length)
+      throw new Error("Invalid local tracker sync log");
+    let previous = "";
+    store.syncLog.forEach((commit, index) => {
+      if (commit.syncId !== index + 1 || commit.prevHash !== previous || auditHash(commit) !== commit.hash)
+        throw new Error("Local tracker sync log is not intact");
+      previous = commit.hash;
+    });
+  } else if (store.syncId !== undefined && store.syncId !== 0)
+    throw new Error("Missing local tracker sync log");
   bindStageStatuses(store);
   if (
     store.runs !== undefined &&
@@ -548,13 +573,13 @@ const ENTITY_TYPES = [
   ["labels", "label"],
 ] as const;
 
-/** The write's unique timestamp identifies exactly the records it created or changed. */
+/** The write time (or its transaction operation times) identifies touched records. */
 function stampActor(store: Store, actor: TrackerActor, now: string): AuditEvent["entities"] {
   const touched: AuditEvent["entities"] = [];
   for (const [collection, type] of ENTITY_TYPES)
     for (const entry of store[collection] as (Entity & { identifier?: string })[]) {
-      if (entry.updatedAt !== now) continue;
-      if (entry.createdAt === now) entry.createdByActor = actor;
+      if (entry.updatedAt < now) continue;
+      if (entry.createdAt >= now) entry.createdByActor = actor;
       entry.updatedByActor = actor;
       touched.push({
         type,
@@ -723,7 +748,13 @@ function recordIssueChanges(
   now: string,
 ): void {
   // These record their own stage events.
-  if (name === "post_issue_event" || name === "sync_releases" || name === "rollover_cycles") return;
+  if (
+    name === "post_issue_event" ||
+    name === "sync_releases" ||
+    name === "rollover_cycles" ||
+    name === "sync_transaction"
+  )
+    return;
   for (const issue of store.issues) {
     if (issue.updatedAt !== now) continue;
     const previous = before.issues.find((entry) => entry.id === issue.id);
@@ -781,7 +812,12 @@ function recordIssueChanges(
       });
   }
   for (const comment of store.comments) {
-    if (comment.createdAt !== now || comment.issueId === null) continue;
+    if (
+      comment.createdAt !== now ||
+      comment.issueId === null ||
+      before.comments.some((entry) => entry.id === comment.id)
+    )
+      continue;
     const issue = store.issues.find((entry) => entry.id === comment.issueId);
     if (issue === undefined) continue;
     appendEvent(store, context, now, issue, { type: "comment", body: comment.body, commentId: comment.id });
@@ -2542,6 +2578,138 @@ async function read(
   return dispatch(store, name, args, options, now, { actor });
 }
 
+/** Shared by backend instances pointing at the same journal; publication follows rename. */
+const syncListeners = new Map<string, Set<() => void>>();
+
+/** Stable normalized objects: the app owns projections, the server owns fields and references. */
+function syncModels(store: Store): TrackerSyncModel[] {
+  const models: TrackerSyncModel[] = [];
+  const projectOfIssue = (id: string | null | undefined): string[] => {
+    const project = store.issues.find((issue) => issue.id === id)?.projectId;
+    // Unprojected items have an explicit group; empty is reserved for shared metadata.
+    return [project ?? "unprojected"];
+  };
+  const add = (
+    modelName: TrackerSyncModel["modelName"],
+    entries: readonly object[],
+    groups: (data: Record<string, unknown>) => string[],
+  ) => {
+    for (const entry of entries) {
+      const data = structuredClone(entry) as Record<string, unknown>;
+      models.push({ modelName, modelId: data.id as string, projectIds: groups(data), data });
+    }
+  };
+  add(
+    "issue",
+    store.issues.map((issue) => ({
+      ...issue,
+      ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.issueId === issue.id),
+    })),
+    (data) => [(data.projectId as string) ?? "unprojected"],
+  );
+  add("project", store.projects, (data) => [data.id as string]);
+  add("comment", store.comments, (data) =>
+    data.projectId
+      ? [data.projectId as string]
+      : data.statusUpdateId
+        ? [store.statusUpdates.find((update) => update.id === data.statusUpdateId)!.projectId]
+        : projectOfIssue(data.issueId as string),
+  );
+  add("cycle", store.cycles ?? [], (data) => [data.projectId as string]);
+  add("status_update", store.statusUpdates, (data) => [data.projectId as string]);
+  for (const [modelName, entries] of [
+    ["run", store.runs ?? []],
+    ["bundle", store.bundles ?? []],
+    ["event", store.events ?? []],
+  ] as const)
+    add(modelName, entries, (data) => projectOfIssue(data.issueId as string));
+  add(
+    "lease",
+    store.issues
+      .filter((issue) => issue.lease)
+      .map((issue) => ({ id: issue.id, issueId: issue.id, ...issue.lease })),
+    (data) => projectOfIssue(data.issueId as string),
+  );
+  add("release", store.releases ?? [], (data) => {
+    const groups = (data.items as Release["items"]).flatMap((item) => projectOfIssue(item.issueId));
+    return [...new Set(groups.length ? groups : ["unprojected"])];
+  });
+  add("label", store.labels, () => []);
+  add("issue_status", store.issueStatuses, () => []);
+  add("project_status", store.projectStatuses, () => []);
+  add("team", [store.team], () => []);
+  add("user", [store.user], () => []);
+  return models;
+}
+const syncModelKey = (model: Pick<TrackerSyncModel, "modelName" | "modelId">) =>
+  `${model.modelName}:${model.modelId}`;
+const inSyncGroups = (groups: readonly string[], wanted: readonly string[]) =>
+  groups.length === 0 || groups.some((id) => wanted.includes(id));
+function lazySyncModel(model: TrackerSyncModel): TrackerSyncModel {
+  const data = { ...model.data };
+  const omitted =
+    model.modelName === "comment"
+      ? ["body", "quotedText"]
+      : model.modelName === "run"
+        ? ["summary", "worktree", "branch"]
+        : model.modelName === "event"
+          ? ["body"]
+          : [];
+  for (const field of omitted) delete data[field];
+  if (omitted.length) data.unhydratedFields = omitted;
+  return { ...model, data };
+}
+function appendSync(
+  before: Store,
+  store: Store,
+  actor: TrackerActor,
+  tool: string,
+  at: string,
+  key?: string,
+): void {
+  const prior = new Map(syncModels(before).map((model) => [syncModelKey(model), model]));
+  const deltas: TrackerSyncCommit["deltas"] = [];
+  for (const model of syncModels(store)) {
+    const previous = prior.get(syncModelKey(model));
+    prior.delete(syncModelKey(model));
+    if (previous && canonical(previous) === canonical(model)) continue;
+    const data =
+      previous && canonical(previous.projectIds) === canonical(model.projectIds)
+        ? Object.fromEntries(
+            Object.entries(model.data).filter(
+              ([field, value]) => canonical(value) !== canonical(previous.data[field]),
+            ),
+          )
+        : model.data;
+    deltas.push({
+      ...model,
+      data,
+      action: previous ? "update" : "insert",
+      previousProjectIds: previous?.projectIds ?? [],
+      removedFields: previous ? Object.keys(previous.data).filter((field) => !(field in model.data)) : [],
+    });
+  }
+  for (const model of prior.values())
+    deltas.push({
+      ...model,
+      action: "delete",
+      data: {},
+      previousProjectIds: model.projectIds,
+      removedFields: [],
+    });
+  const body = {
+    syncId: (store.syncId ?? 0) + 1,
+    actor: { ...actor },
+    tool,
+    at,
+    ...(key === undefined ? {} : { idempotencyKey: key }),
+    deltas,
+    prevHash: store.syncLog?.at(-1)?.hash ?? "",
+  };
+  store.syncId = body.syncId;
+  (store.syncLog ??= []).push({ ...body, hash: auditHash(body) });
+}
+
 /** Durable local Linear-shaped tracker, also used as ancillary storage for repo backends. */
 export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBackend {
   const directory = resolve(options.directory);
@@ -2622,20 +2790,27 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           detail,
         });
       // Bookkeeping only: no tracker record changed, so no publication callbacks.
+      appendSync(before, store, actor, name, now, key);
       await persist(path, store, assertHeld);
+      for (const listener of syncListeners.get(path) ?? []) listener();
       throw refusal;
     }
     const entities = stampActor(store, actor, now);
     // Views were built before stamping; the receipt keeps exactly what the caller sees.
-    const view = result as Record<string, unknown>;
-    if (view.updatedAt === now) {
-      view.updatedByActor = actor;
-      if (view.createdAt === now) view.createdByActor = actor;
-    }
-    const derived = store.issues.find((issue) => issue.id === view.id);
-    if (derived !== undefined) {
-      view.stage = stageOf(derived);
-      view.state = view.status = store.issueStatuses.find((status) => status.id === derived.statusId)!.name;
+    const views =
+      name === "sync_transaction"
+        ? (result as { results: Record<string, unknown>[] }).results
+        : [result as Record<string, unknown>];
+    for (const view of views) {
+      if (typeof view.updatedAt === "string" && view.updatedAt >= now) {
+        view.updatedByActor = actor;
+        if (typeof view.createdAt === "string" && view.createdAt >= now) view.createdByActor = actor;
+      }
+      const derived = store.issues.find((issue) => issue.id === view.id);
+      if (derived !== undefined) {
+        view.stage = stageOf(derived);
+        view.state = view.status = store.issueStatuses.find((status) => status.id === derived.statusId)!.name;
+      }
     }
     const settled = structuredClone(result);
     appendAudit(store, {
@@ -2657,7 +2832,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         at: now,
         result: settled,
       });
+    appendSync(before, store, actor, name, now, key);
     await persist(path, store, assertHeld, callOptions);
+    for (const listener of syncListeners.get(path) ?? []) listener();
     publish(store.events?.slice(firstEvent - 1) ?? []);
     return settled;
   };
@@ -2672,6 +2849,180 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   };
   return {
     catalog: () => TRACKER_TOOLS,
+    async sync(input, callOptions, signal) {
+      const command = TrackerSyncCommandSchema.parse(input);
+      signal?.throwIfAborted();
+      const roll = async (store: Store, clock: string, assertHeld: () => void) => {
+        if (cyclesDue(store, clock))
+          await write(
+            store,
+            clock,
+            "rollover_cycles",
+            {},
+            undefined,
+            { ...TRACKER_LEAD, onBehalfOf: [] },
+            { via: ROLLOVER },
+            assertHeld,
+            (target, now, context) => rolloverCycles(target, clock, context, now),
+          );
+      };
+      if (command.action === "transaction") {
+        // Validate every operation before dispatch; one receipt owns the whole transaction.
+        for (const operation of command.operations) {
+          validateTrackerToolArgs(operation.name, operation.arguments);
+          if (
+            !/^(?:save|create|post)_/u.test(operation.name) ||
+            operation.arguments.idempotencyKey !== undefined
+          )
+            throw new Error("Transactions contain write tools without nested idempotency keys");
+        }
+        return withTrackerStoreLock(path, async (assertHeld) => {
+          const { store, clock } = await load();
+          await roll(store, clock, assertHeld);
+          const actor = callOptions?.actor ?? localActor(store);
+          const key = command.idempotencyKey;
+          const fingerprint = createHash("sha256")
+            .update(canonical(["sync_transaction", command.operations]))
+            .digest("hex");
+          const prior = store.receipts?.find(
+            (entry) => entry.actorKey === actorKey(actor) && entry.idempotencyKey === key,
+          );
+          if (prior) {
+            if (prior.fingerprint !== fingerprint)
+              throw new TrackerWriteRefused(
+                "idempotency_conflict",
+                "Key already used for a different transaction",
+              );
+            await callOptions?.beforeWrite?.();
+            assertHeld();
+            if (prior.state === "refused") throw new TrackerWriteRefused(prior.reason!, prior.detail!);
+            return { outcome: "applied" as const, result: structuredClone(prior.result) };
+          }
+          const result = await write(
+            store,
+            clock,
+            "sync_transaction",
+            { operations: command.operations },
+            { key, fingerprint },
+            actor,
+            callOptions,
+            assertHeld,
+            async (target, now, context) => {
+              const results = [];
+              for (const [index, operation] of command.operations.entries()) {
+                // Distinct operation versions also preserve temporal independent-check fences.
+                const operationNow = index === 0 ? now : nextWriteTime(target, now);
+                const beforeOperation = structuredClone(target);
+                const result = await dispatch(
+                  target,
+                  operation.name,
+                  operation.arguments,
+                  options,
+                  operationNow,
+                  context,
+                );
+                // Preserve every tool's stage, completion and evidence fences, including intermediate effects.
+                recordIssueChanges(beforeOperation, target, operation.name, context, operationNow);
+                results.push(result);
+              }
+              return { results };
+            },
+          );
+          return { outcome: "applied" as const, result };
+        });
+      }
+      let wake: (() => void) | undefined;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const awakened = new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      const listeners = syncListeners.get(path) ?? new Set<() => void>();
+      syncListeners.set(path, listeners);
+      const listener = () => wake?.();
+      listeners.add(listener);
+      try {
+        const readSync = () =>
+          withTrackerStoreLock(path, async (assertHeld): Promise<TrackerSyncResult> => {
+            signal?.throwIfAborted();
+            const { store, clock, initialized } = await load();
+            await roll(store, clock, assertHeld);
+            if (initialized) await persist(path, store, assertHeld);
+            const storeId = store.team.id;
+            const lastSyncId = store.syncId ?? 0;
+            const groupIds = command.projects.map((id) =>
+              id === "unprojected" ? id : findProject(store, id).id,
+            );
+            if (command.action === "bootstrap" || command.action === "batch") {
+              let models = syncModels(store).filter((model) => inSyncGroups(model.projectIds, groupIds));
+              if (command.action === "batch") {
+                const wanted = new Set(command.models.map(syncModelKey));
+                models = models.filter((model) => wanted.has(syncModelKey(model)));
+                return { outcome: "batch", storeId, lastSyncId, models };
+              }
+              if (command.lazy) models = models.map(lazySyncModel);
+              const metadata = {
+                kind: "metadata",
+                schemaVersion: 1,
+                type: command.type,
+                storeId,
+                lastSyncId,
+                syncGroups: groupIds,
+                modelCount: models.length,
+              };
+              return {
+                outcome: "bootstrap",
+                ndjson: [...models, metadata].map((line) => JSON.stringify(line)).join("\n") + "\n",
+              };
+            }
+            if (command.storeId !== storeId || command.lastSyncId > lastSyncId)
+              return {
+                outcome: "rebootstrap",
+                storeId,
+                lastSyncId,
+                projects: groupIds,
+                reason: command.storeId !== storeId ? "store_changed" : "cursor_gap",
+              };
+            const available = (store.syncLog ?? []).filter((commit) => commit.syncId > command.lastSyncId);
+            const commits = available
+              .slice(0, command.limit)
+              .map(({ prevHash: _prev, hash: _hash, ...commit }) => ({
+                ...commit,
+                deltas: commit.deltas.filter(
+                  (delta) =>
+                    inSyncGroups(delta.projectIds, groupIds) ||
+                    (delta.previousProjectIds.length > 0 && inSyncGroups(delta.previousProjectIds, groupIds)),
+                ),
+              }));
+            // Register under the same lock as the replay snapshot, closing the bootstrap/live race.
+            listeners.add(listener);
+            return {
+              outcome: "deltas",
+              storeId,
+              lastSyncId: commits.at(-1)?.syncId ?? command.lastSyncId,
+              commits,
+              hasMore: available.length > commits.length,
+            };
+          });
+        const first = await readSync();
+        if (
+          command.action !== "subscribe" ||
+          first.outcome !== "deltas" ||
+          first.commits.length ||
+          !command.waitMs
+        )
+          return first;
+        timer = setTimeout(listener, command.waitMs);
+        signal?.addEventListener("abort", listener, { once: true });
+        if (signal?.aborted) listener();
+        await awakened;
+        return await readSync();
+      } finally {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener("abort", listener);
+        listeners.delete(listener);
+        if (!listeners.size) syncListeners.delete(path);
+      }
+    },
     async linkOwnerAsk(eventId, requestId) {
       await withTrackerStoreLock(path, async (assertHeld) => {
         const { store, clock } = await load();

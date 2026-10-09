@@ -114,3 +114,14 @@ The service requests MCP `resultMode: "data"`: complete text up to 8 MiB in
 UTF-8, with typed `result_too_large` failure above that ceiling. The default
 model-facing 50,000-character cap is unchanged. The data limit is checked on
 the decoded tool result; it is not a network transport streaming limit.
+
+## Built-in sync
+
+`LocalTrackerBackend.sync` adds project-scoped full/partial bootstrap, lazy
+batch hydration, resumable pushed commits and keyed atomic transactions.
+Its journal shares `tracker.json` and the existing write/receipt boundary.
+Each `syncId` identifies an entire commit; updates carry field deltas and
+project membership before/after a move. Existing stores bootstrap at cursor zero.
+See the [ADR 0226 sync amendment](../../docs/adr/0226-one-tracker-tool-surface.md#amendment-built-in-tracker-sync-journal-2026-10-09-vuh-1962)
+for model fields, groups, hydration ordering and cursor recovery. This changes
+neither connected Linear nor repository adapters.

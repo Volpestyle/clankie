@@ -433,3 +433,80 @@ sequenceDiagram
     H->>T: Append owner gate event and clear this blocker
     W->>T: Continue run
 ```
+
+## Amendment: built-in tracker sync journal (2026-10-09, VUH-1962)
+
+Status: proposed. Tracks [VUH-1962](https://linear.app/vuhlp/issue/VUH-1962),
+under [VUH-1920](https://linear.app/vuhlp/issue/VUH-1920). Built-in tracker only.
+The research baseline supplies the bootstrap/delta shape, not provider internals.
+
+**One ordering.** Each committed write appends a hash-linked sync commit with
+one increasing safe-integer `syncId`. Its model deltas, item events, effects,
+audit and VUH-1916 receipt share the existing atomic file replacement. Clients
+apply a whole commit before saving its cursor: a transaction's side effects
+cannot be split by a resume. Refused writes advance the cursor with no model
+effects; receipt replays advance nothing. Each commit carries the authenticated
+actor, tool and optional idempotency key; `(actor.type, actor.id, key)` is the
+existing receipt identity. The log is retained without pruning, like the item
+and audit streams. Broken, missing or reordered sync entries refuse store open.
+Pre-sync stores start at zero; existing objects enter through bootstrap.
+
+**Models and groups.** Wire objects are normalized stored fields and UUID
+references, rather than expanded Linear-shaped views. Supported models are
+issues, comments, projects, cycles, releases, runs, leases and bundles, plus
+item events, status updates and shared team/user/status/label metadata.
+Milestone is reserved in the model vocabulary but has no records until the
+built-in tracker supports milestones. An issue's project is its sync group;
+`unprojected` is the explicit group for items without a project. Associated
+comments, events, runs, leases, bundles and release membership follow the issue.
+A move includes previous and current groups and complete data, so clients can
+remove a departing object and populate an arriving one. Ordinary updates carry
+changed fields and `removedFields`; inserts are complete. Group filtering keeps
+every commit, even with empty deltas, preserving the global cursor.
+
+**Bootstrap and hydration.** Full bootstrap replaces the selected project's
+local pool; partial bootstrap replaces only named groups. Both snapshot under
+the journal lock and return JSON lines, one model per line, ending in metadata:
+`schemaVersion`, `storeId` (persisted team UUID), `lastSyncId`, `syncGroups`,
+`type` and `modelCount`. Shared metadata accompanies both. Default lazy bootstrap
+omits comment body/quoted text, event bodies and run summary/worktree/branch, listing
+`unhydratedFields`; `lazy:false` returns everything. Batch reads return complete
+selected objects and their snapshot `lastSyncId`. Clients merge a batch only if
+no newer delta for that object has arrived; hydration never rolls back newer
+server data. Both bootstrap types are per-project snapshots, not pagination.
+
+**Live path.** `tracker_sync` is an additive op on the existing authenticated
+`POST /operator/v1/dispatch`. Reads need the device's current chat grant;
+transactions need current terminalControl/owner authority. The relay forwards
+the original signed device identity for both, including hosted devices, and
+rechecks identity, scope and grants before emitting. Bootstrap at the relay
+returns raw `application/x-ndjson`; the service/CLI envelope holds those lines
+in `ndjson`. `subscribe` resumes from `(storeId,lastSyncId)` and waits on
+in-process commit publication for up to 20 seconds, rather than repeatedly
+reading the tracker. Replay snapshot and listener registration close the
+read/subscribe race. Disconnect cancels the wait. The existing relay
+`POST /operator/v1/tail` streams `kind:tracker_sync` pages continuously; empty
+pages are heartbeat checkpoints. No new inbound port or gateway route is needed.
+A changed store or cursor ahead of the journal returns `rebootstrap` with the
+requested groups. The client replaces those groups with a partial bootstrap.
+The retained log otherwise has no cursor expiry. Sync payloads retain exact
+model fields; transcript redaction must not alter object identities or content.
+
+**Transactions.** A transaction contains 1–50 existing write tool invocations
+and one required idempotency key. All operations validate before dispatch and
+run under one lock and one atomic replacement, reusing the VUH-1916 receipt.
+Operations retain distinct increasing write times so version preconditions and
+independent checks see earlier operations in the same transaction.
+A failure rolls back every operation and retains the original refusal. Nested
+keys and read tools are refused. Receipt lookup remains `get_write_receipt`.
+Omitted fields stay unchanged, so the latest committed write wins only fields
+it names. `ifUpdatedAt` refuses stale edits; a retry requires fresh state and
+new intent/key. Transactions retain all actor, bundle, completion and gate
+constraints of the underlying tools. They cannot resolve owner asks.
+
+**Interfaces and proof.** `clankie work sync --json COMMAND` reaches this same
+operator API. The app object pool and offline queue are Sync 2 (VUH-1964).
+Integration proof exercises real pairing, signed sessions, host and relay HTTP,
+bootstrap/lazy hydration, atomic refusal, keyed replay and disconnect/resume.
+`apps/clankie/scripts/tracker-sync-roundtrip.ts` is a separate disposable scratch
+round trip with two paired clients observing each other's writes in order.

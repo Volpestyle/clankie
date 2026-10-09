@@ -550,7 +550,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "input_answer" ||
       serviceRequest.op === "input_cancel";
     const workWriteOp =
-      serviceRequest.op === "work_item_write" || serviceRequest.op === "work_item_write_receipt";
+      serviceRequest.op === "work_item_write" ||
+      serviceRequest.op === "work_item_write_receipt" ||
+      (serviceRequest.op === "tracker_sync" && serviceRequest.command.action === "transaction");
     const grant =
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
@@ -587,6 +589,14 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // before that await is not authority to dispatch after it.
     const currentAuthorization = await authorizeGrant(options, token, response, grant, serviceRequest.op);
     if (currentAuthorization === undefined) return true;
+    if (path === OPERATOR_CONVERSATION_TAIL_PATH && serviceRequest.op === "tracker_sync") {
+      if (serviceRequest.command.action !== "subscribe") {
+        writeJson(response, 400, { error: "subscription_required" });
+        return true;
+      }
+      await streamTrackerSync(response, serviceRequest, token, currentAuthorization, options);
+      return true;
+    }
     if (path === OPERATOR_CONVERSATION_TAIL_PATH) {
       if (serviceRequest.op !== "tail") {
         writeJson(response, 400, { error: "tail_request_required" });
@@ -633,6 +643,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       nativeMessageOp ||
       questionOp ||
       workWriteOp ||
+      serviceRequest.op === "tracker_sync" ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
       if (abort.signal.aborted) return true;
@@ -653,6 +664,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "stop_task" ||
           serviceRequest.op === "work_item_write" ||
           serviceRequest.op === "work_item_write_receipt" ||
+          serviceRequest.op === "tracker_sync" ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "project_proposal_tweak" ||
@@ -691,12 +703,17 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         writeAuthDenial(response, "invalid");
         return true;
       }
-      if (ownerRoute && !fresh.device.grants.terminalControl) {
+      if (ownerRoute && serviceRequest.op !== "tracker_sync" && !fresh.device.grants.terminalControl) {
         writeGrantDenial(response, "terminalControl");
         return true;
       }
       const publicResult = publicServiceResult(result);
-      writeJson(response, 200, publicResult);
+      if (publicResult.op === "tracker_sync" && publicResult.result.outcome === "bootstrap") {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+        response.setHeader("cache-control", "no-store");
+        response.end(publicResult.result.ndjson);
+      } else writeJson(response, 200, publicResult);
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
     } catch (error) {
       if (abort.signal.aborted) return true;
@@ -762,6 +779,80 @@ async function readTail(
     return await subscription.read(request);
   } finally {
     subscription.close();
+  }
+}
+
+/** The existing tail route also carries tracker commits; waits are awakened by atomic writes. */
+async function streamTrackerSync(
+  response: import("node:http").ServerResponse,
+  request: Extract<OperatorConversationServiceRequest, { op: "tracker_sync" }>,
+  token: string,
+  initial: Extract<RelayDeviceAuthorization, { authorized: true }>,
+  options: OperatorConversationRelayOptions,
+): Promise<void> {
+  if (request.command.action !== "subscribe" || !options.deviceDispatch) {
+    writeJson(response, 503, { error: "tracker_subscription_unavailable" });
+    return;
+  }
+  const abort = new AbortController();
+  const disconnected = () => abort.abort();
+  response.once("close", disconnected);
+  response.statusCode = 200;
+  response.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+  response.setHeader("cache-control", "no-store");
+  response.flushHeaders();
+  let lastSyncId = request.command.lastSyncId;
+  let pages = 0;
+  try {
+    while (!response.destroyed && !abort.signal.aborted) {
+      const current = await options.authorizeDevice.authorize(token);
+      if (
+        !current.authorized ||
+        !current.device.grants.chat ||
+        current.device.deviceId !== initial.device.deviceId ||
+        current.device.controlScope !== initial.device.controlScope
+      ) {
+        await writeTailAuthFailure(response, "chat_grant_required");
+        return;
+      }
+      const result = await options.deviceDispatch(
+        { ...request, command: { ...request.command, lastSyncId, waitMs: 20_000 } },
+        {
+          deviceToken: token,
+          ...(current.device.controlScope ? { controlScope: current.device.controlScope } : {}),
+        },
+        abort.signal,
+      );
+      if (abort.signal.aborted) return;
+      const fresh = await options.authorizeDevice.authorize(token);
+      if (
+        !fresh.authorized ||
+        !fresh.device.grants.chat ||
+        fresh.device.deviceId !== initial.device.deviceId ||
+        fresh.device.controlScope !== initial.device.controlScope
+      ) {
+        await writeTailAuthFailure(response, "chat_grant_required");
+        return;
+      }
+      if (result.op !== "tracker_sync") throw new Error("Unexpected tracker subscription result");
+      // Sync fields must round-trip unchanged; transcript redaction cannot rewrite object IDs or bodies.
+      await writeNdjson(response, { kind: "tracker_sync", result: result.result });
+      if (result.result.outcome !== "deltas") {
+        response.end();
+        return;
+      }
+      lastSyncId = result.result.lastSyncId;
+      pages++;
+      if (options.tailMaxPages && pages >= options.tailMaxPages) {
+        response.end();
+        return;
+      }
+    }
+  } catch {
+    if (!abort.signal.aborted) response.destroy();
+  } finally {
+    abort.abort();
+    response.off("close", disconnected);
   }
 }
 
@@ -1126,6 +1217,7 @@ async function writeTailAuthFailure(response: ServerResponse, reason: string): P
 
 function publicServiceResult(value: unknown): OperatorConversationServiceResult {
   const parsed = OperatorConversationServiceResultSchema.parse(value);
+  if (parsed.op === "tracker_sync") return parsed;
   return OperatorConversationServiceResultSchema.parse(redactPublicValue(parsed));
 }
 

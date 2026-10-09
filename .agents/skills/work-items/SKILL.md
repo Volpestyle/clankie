@@ -289,3 +289,18 @@ These are tracker events, not proof of native delivery or process termination.
 Owner CLI equivalents are `clankie work bundle set|show|check`, `work ask`,
 `work gate ask` and `work run steer|pause|resume|stop`; answer through the
 existing `clankie conversations questions|answer` mailbox. Other tracker backends refuse these additions.
+
+## Built-in tracker sync
+
+`clankie work sync --json COMMAND` reads project-scoped bootstrap/batch data,
+waits for deltas from `(storeId,lastSyncId)`, or sends one keyed atomic
+transaction of existing write tools. It uses the existing authenticated service
+route, never a connected Linear sync. Bootstrap is JSON lines ending with model
+count and cursor metadata. Apply a whole commit before persisting the cursor;
+`rebootstrap` requires replacing the named groups from partial bootstrap.
+Hydrate comment bodies and run details in batches, retaining newer deltas.
+Use `get_write_receipt` for the original actor/key after uncertainty; replaying
+that same keyed transaction returns its original outcome. New arguments need a
+new key, and `ifUpdatedAt` conflicts need a fresh read. Device live subscriptions
+ride the existing relay tail route. Contract and command shapes live in
+[docs/cli.md](../../../docs/cli.md#work-sync---json-command).

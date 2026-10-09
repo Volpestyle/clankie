@@ -31,7 +31,7 @@ import { WorkRequestError } from "../work-items.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
 import { z } from "zod";
-import { TRACKER_LEAD, TRACKER_OWNER, type TrackerActor } from "@clankie/work-items";
+import { TRACKER_LEAD, TRACKER_OWNER, TrackerWriteRefused, type TrackerActor } from "@clankie/work-items";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceIdentity } from "./types.ts";
@@ -361,6 +361,61 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         outcome: "accepted",
         receipt: await serveWorkWrite(request, authority, parsed.data.op === "work_item_write"),
       });
+    }
+    if (parsed.success && parsed.data.op === "tracker_sync") {
+      const tracker = ctx.dependencies.builtInTracker;
+      const reply = (result: import("@clankie/protocol").TrackerSyncResult) =>
+        context.json({ op: "tracker_sync" as const, schemaVersion: 1 as const, result });
+      if (!tracker)
+        return reply({
+          outcome: "refused",
+          reason: "tracker_unavailable",
+          message: "Built-in tracker unavailable",
+        });
+      const command = parsed.data.command;
+      const writing = command.action === "transaction";
+      const authority = writing ? await workOwnerAuthority(context.req.raw) : undefined;
+      const original = ctx.hostedOriginalRequests.get(context.req.raw);
+      const deviceRequest = original ?? context.req.raw;
+      const allowed = async () => {
+        if (writing) return Boolean(authority && (await authority.authorize()));
+        const device = await ctx.authenticateDevice(deviceRequest);
+        if (device !== "unavailable" && !("denied" in device)) return device.grants.chat;
+        if (original || ctx.hostedRequests.has(context.req.raw)) return false;
+        const freshOwner = await authenticateOperator(context.req.raw, ctx.dependencies);
+        if (freshOwner && freshOwner !== "unavailable") return true;
+        const freshCaptain = await authenticateCaptain(context.req.raw, ctx.dependencies);
+        return Boolean(
+          freshCaptain && freshCaptain !== "unavailable" && freshCaptain.steerSourceLane === "api",
+        );
+      };
+      if (!(await allowed()))
+        return context.json({ error: writing ? "owner_required" : "authentication_required" }, 401);
+      try {
+        const actor: TrackerActor | undefined = authority
+          ? authority.principal.kind === "device"
+            ? { type: "app", id: `device:${authority.principal.id}`, onBehalfOf: [TRACKER_OWNER] }
+            : { ...TRACKER_OWNER, onBehalfOf: [] }
+          : undefined;
+        const result = await tracker.sync(
+          command,
+          {
+            ...(actor ? { actor } : {}),
+            beforeWrite: async () => {
+              if (!(await allowed())) throw new Error("Owner authority expired");
+            },
+          },
+          context.req.raw.signal,
+        );
+        if (!(await allowed())) return context.json({ error: "authentication_required" }, 401);
+        return reply(result);
+      } catch (error) {
+        return reply({
+          outcome: "refused",
+          reason: error instanceof TrackerWriteRefused ? error.reason : "invalid_request",
+          message: error instanceof Error ? error.message : "Tracker sync refused",
+        });
+      }
     }
     if (!owner && (!captain || captain === "unavailable"))
       return context.json(

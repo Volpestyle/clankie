@@ -64,6 +64,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "work_items",
         "work_project",
         "work_item_activity",
+        "tracker_sync",
         "evidence_records",
         "evidence_preview",
         "work_item_write",

@@ -3634,6 +3634,15 @@ paths:
         only fully offered IDs may be marked read. Roster/fleet report summaries
         survive disappeared panes, and delivery receipts never establish reading.
         The TUI and relay both speak this.
+        Built-in tracker sync uses additive op `tracker_sync`: bootstrap, batch,
+        subscribe and keyed atomic transaction commands. Reads require current
+        device chat or operator authority; writes require terminalControl/owner
+        authority and stamp the authenticated actor. Bootstrap returns JSON lines
+        in `result.ndjson` ending in cursor/count metadata; the relay emits them
+        as NDJSON. Subscribe returns ordered commits after `(storeId,lastSyncId)`
+        and waits on publication for at most 20 seconds. The existing relay tail
+        route streams these pages. A cursor/store gap requires partial bootstrap.
+        Each commit and its receipt share the existing atomic tracker write.
         Owner asks use `input_list` (optional status and conversationId) to return
         `{questions: [ConversationQuestionResult, ...]}`, `input_get` to read an
         immutable target, and `input_answer` or `input_cancel` to resolve it.
