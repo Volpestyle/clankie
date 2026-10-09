@@ -161,7 +161,7 @@ export function createProviderServices(options: {
 }
 
 /** Pickers promise newest first; models.dev dates the release, and undated ids keep their catalog order after. */
-export function newestFirst(models: readonly ModelEntry[]): ModelEntry[] {
+function newestFirst(models: readonly ModelEntry[]): ModelEntry[] {
   const dated = models.filter((model) => model.release_date !== undefined);
   const undated = models.filter((model) => model.release_date === undefined);
   return [

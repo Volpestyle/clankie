@@ -1,0 +1,9 @@
+{
+  "path": "apps/tui/src/provider-commands.ts",
+  "change": "export-only, no behaviour change",
+  "removedExports": ["newestFirst"],
+  "normalizedWholeFileEqual": true,
+  "internalRuntimeCaller": "createProviderServices captainModels.models",
+  "retainedExport": "readinessFooter: apps/tui/src/index.ts runtime consumer",
+  "consumerSearch": "Tracked apps, packages, integrations and scripts in public repo; apps/packages in clankie-app and clankie-ops. No other newestFirst import consumer found."
+}

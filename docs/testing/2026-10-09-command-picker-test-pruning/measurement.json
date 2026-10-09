@@ -1,0 +1,179 @@
+{
+  "issue": "VUH-1925",
+  "scope": "TUI command-picker presentation",
+  "lineCounts": [
+    {
+      "path": "apps/tui/test/autocomplete.test.ts",
+      "beforeLines": 454,
+      "afterLines": 427,
+      "beforeSha256": "ed9b626162e712fc8ae2c911bf2426a2b85c3aabaebfd8f624519ea40e08a020",
+      "afterSha256": "12f9af91ee1b71f12e8b847b6c570263123f979cff93609a12d493dbc0ab69c9"
+    },
+    {
+      "path": "apps/tui/test/interactive-flow.test.ts",
+      "beforeLines": 295,
+      "afterLines": 230,
+      "beforeSha256": "22f9cf088550158c5bc04e83b53681330d0c73527bfc4e4f7ee94e7e8a8d36ac",
+      "afterSha256": "56b768ef14c5dd6b208c53cb7cfc45c0637635db4adaae84acba5521c3269c2b"
+    },
+    {
+      "path": "apps/tui/test/provider-commands.test.ts",
+      "beforeLines": 868,
+      "afterLines": 799,
+      "beforeSha256": "72a34d216fc5e5b6a7557b5b01a707bcc01237871d625d68fa905ecbbd0f9401",
+      "afterSha256": "6a6684edd57076b9908de74cf2932a6f51653f3f0e7a5720acde9f782a46643c"
+    },
+    {
+      "path": "apps/tui/test/shell-assembly.test.ts",
+      "beforeLines": 715,
+      "afterLines": 667,
+      "beforeSha256": "a4d2d792894039dffc57f40217801a74c94f77967b8f4640086ec8f0094dcec9",
+      "afterSha256": "8a54c19773667cb482e54a383aeb46f7eb68e38219cef42b93d70d220e84a3fc"
+    }
+  ],
+  "atBatchBase": "289bd0d9ba18415006e6e2e34eac689d70bef656",
+  "testSourceLines": {
+    "definition": "Tracked conventional test/spec .js/.ts/.mjs/.cjs/.jsx/.tsx source; fixtures excluded. Same pattern for both totals.",
+    "tuiBefore": 35785,
+    "tuiAfter": 35576,
+    "repoBeforeAtBatchBase": 245166,
+    "repoAfter": 244957
+  },
+  "before": {
+    "head": "536263c92b9fb4477d7990a722442cadc88bb257",
+    "base": "289bd0d9ba18415006e6e2e34eac689d70bef656",
+    "source": "a911ae147d5da1c97947db380b21f05f364adecbe547fc59fd4a742250b042ce",
+    "sourceStable": true,
+    "exitCode": 0,
+    "gateWallSeconds": 116.38970083299999,
+    "phases": [
+      {
+        "name": "skills",
+        "elapsedSeconds": 0.342800791,
+        "exitCode": 0
+      },
+      {
+        "name": "format",
+        "elapsedSeconds": 3.7468708339999997,
+        "exitCode": 0
+      },
+      {
+        "name": "lint",
+        "elapsedSeconds": 1.5365878750000002,
+        "exitCode": 0
+      },
+      {
+        "name": "deadcode",
+        "elapsedSeconds": 2.353490708000001,
+        "exitCode": 0
+      },
+      {
+        "name": "doc-links",
+        "elapsedSeconds": 0.21687854200000037,
+        "exitCode": 0
+      },
+      {
+        "name": "retired-claims",
+        "elapsedSeconds": 0.3443473329999997,
+        "exitCode": 0
+      },
+      {
+        "name": "typecheck",
+        "elapsedSeconds": 86.47017208300001,
+        "exitCode": 0
+      },
+      {
+        "name": "tests",
+        "elapsedSeconds": 18.770712541,
+        "exitCode": 0
+      }
+    ],
+    "typecheckPackages": ["@clankie/clankie", "@clankie/tui"],
+    "testFiles": [
+      "apps/tui/test/autocomplete.test.ts",
+      "apps/tui/test/interactive-flow.test.ts",
+      "apps/tui/test/provider-commands.test.ts",
+      "apps/tui/test/shell-assembly.test.ts"
+    ],
+    "testsPassed": 85,
+    "testsFailed": 0,
+    "testsSkipped": 0,
+    "load1m": {
+      "start": 25.6044921875,
+      "end": 194.28662109375,
+      "peak": 239.31396484375,
+      "cores": 18,
+      "sampleCount": 59
+    }
+  },
+  "after": {
+    "head": "289bd0d9ba18415006e6e2e34eac689d70bef656",
+    "base": "289bd0d9ba18415006e6e2e34eac689d70bef656",
+    "source": "d4ac1c409c8b9713b282a8568a91780539dd775293fd35f0b1fc5fe2d5e73085",
+    "sourceStable": true,
+    "exitCode": 0,
+    "gateWallSeconds": 41.181702791999996,
+    "phases": [
+      {
+        "name": "skills",
+        "elapsedSeconds": 0.360413042,
+        "exitCode": 0
+      },
+      {
+        "name": "format",
+        "elapsedSeconds": 3.8752650830000004,
+        "exitCode": 0
+      },
+      {
+        "name": "lint",
+        "elapsedSeconds": 1.195307167,
+        "exitCode": 0
+      },
+      {
+        "name": "deadcode",
+        "elapsedSeconds": 2.4193522499999998,
+        "exitCode": 0
+      },
+      {
+        "name": "doc-links",
+        "elapsedSeconds": 0.24955400000000008,
+        "exitCode": 0
+      },
+      {
+        "name": "retired-claims",
+        "elapsedSeconds": 0.382912875,
+        "exitCode": 0
+      },
+      {
+        "name": "typecheck",
+        "elapsedSeconds": 16.333818584,
+        "exitCode": 0
+      },
+      {
+        "name": "tests",
+        "elapsedSeconds": 13.841334874999998,
+        "exitCode": 0
+      }
+    ],
+    "typecheckPackages": ["@clankie/tui"],
+    "testFiles": [
+      "apps/tui/test/autocomplete.test.ts",
+      "apps/tui/test/interactive-flow.test.ts",
+      "apps/tui/test/provider-commands.test.ts",
+      "apps/tui/test/setup-commands.test.ts",
+      "apps/tui/test/setup-flow-integration.test.ts",
+      "apps/tui/test/shell-assembly.test.ts"
+    ],
+    "testsPassed": 88,
+    "testsFailed": 0,
+    "testsSkipped": 0,
+    "load1m": {
+      "start": 26.6455078125,
+      "end": 23.78369140625,
+      "peak": 29.236328125,
+      "cores": 18,
+      "sampleCount": 22
+    }
+  },
+  "comparison": "Not a matched speedup: baseline HEAD was behind newly fetched base 289bd0d9b, including its source changes in compiler scope; before 2 uncached compilers versus after 1. Native Vitest selection 4 versus 6 files. Queued admission time excluded; no causal attribution to load."
+}

@@ -60,9 +60,6 @@ describe("shell assembly", () => {
       { message: "first\nsecond", delivery: "steer" },
       ...Array.from({ length: 4 }, () => ({ message: "next task".repeat(40), delivery: "queue" as const })),
     ]);
-    expect(pending.render(80).join("\n")).toContain("Steer: first second");
-    expect(pending.render(80).join("\n")).toContain("Follow-up:");
-    expect(pending.render(80).join("\n")).toContain("+2 more");
     expect(pending.render(20)).toHaveLength(5);
     shell.clearTranscript();
     expect(pending.render(80)).toEqual([]);
@@ -176,18 +173,6 @@ describe("shell assembly", () => {
       finish();
       await running;
     }
-  });
-
-  it("wires the face shell without starting it", () => {
-    const commands = buildConsoleCommands({});
-    const shell = new ClankieFaceShell({
-      commands,
-      cwd: process.cwd(),
-      env: {},
-      bannerFields: { title: "Clankie" },
-    });
-    expect(shell.setupFlow.isWaitingForInput()).toBe(false);
-    expect(shell.headerVisible).toBe(true);
   });
 
   it("resolves /cancel whether or not a flow is waiting", async () => {
@@ -394,11 +379,6 @@ describe("shell assembly", () => {
     shell.insertUserMessage("hello there");
     shell.insertAssistantMarkdown("a **bold** reply");
     shell.insertReasoning("thinking out loud");
-    shell.beginToolCall("call-1", "get_self_state", '{"includePresence":true}');
-    shell.completeToolCall("call-1", "get_self_state", {
-      failed: false,
-      detail: Array.from({ length: 12 }, (_, index) => `state-${index + 1}`).join("\n"),
-    });
     shell.insertMarkdown("**Notice**\n\na markdown notice");
 
     const chat = (shell as unknown as { chat: { render(width: number): string[] } }).chat;
@@ -408,17 +388,7 @@ describe("shell assembly", () => {
     expect(text).toContain("hello there");
     expect(text).toContain("bold");
     expect(text).toContain("thinking out loud");
-    expect(text).toContain("get_self_state");
-    expect(text).toContain("state-10");
-    expect(text).not.toContain("state-11");
     expect(text).toContain("a markdown notice");
-
-    const routeInput = (
-      shell as unknown as { routeInput(data: string): { consume?: boolean } | undefined }
-    ).routeInput.bind(shell);
-    expect(routeInput("\x0f")).toEqual({ consume: true });
-    const expandedText = chat.render(80).join("\n").replace(ansiPattern, "");
-    expect(expandedText).toContain("state-12");
   });
 
   it("maps a transcript click row to the block under it", () => {
@@ -439,7 +409,6 @@ describe("shell assembly", () => {
   });
 
   it("opens a readable conversation picker", async () => {
-    const results: Array<{ invocation: string; text: string }> = [];
     const selected: string[] = [];
     let menu: Parameters<ClankieFaceShell["setupFlow"]["readSelect"]>[0] | undefined;
     const command = buildConsoleCommands({
@@ -481,27 +450,14 @@ describe("shell assembly", () => {
           return Promise.resolve("global-default");
         },
       },
-      insertCommandResult(invocation: string, text: string) {
-        results.push({ invocation, text });
-      },
+      insertCommandResult() {},
     } as unknown as ClankieFaceShell;
 
     await command.run("", shell);
     await command.run("dev", shell);
 
-    expect(menu).toMatchObject({
-      currentValue: "conv-dev",
-      initialValue: "conv-dev",
-      options: [
-        { label: "dev", hint: "workspace", description: "/Users/james/dev" },
-        { label: "Clankie", hint: "Clankie" },
-      ],
-    });
+    expect(menu).toMatchObject({ currentValue: "conv-dev", initialValue: "conv-dev" });
     expect(selected).toEqual(["global-default", "conv-dev"]);
-    expect(results).toEqual([
-      { invocation: "/chats", text: "Switched to Clankie." },
-      { invocation: "/chats dev", text: "Switched to dev." },
-    ]);
   });
 
   it("closes the hovered conversation and selects a fallback when it was current", async () => {
@@ -569,7 +525,6 @@ describe("shell assembly", () => {
   });
 
   it("starts a fresh conversation in the current scope", async () => {
-    const results: Array<{ invocation: string; text: string }> = [];
     const created: Array<string | undefined> = [];
     let cleared = false;
     const command = buildConsoleCommands({
@@ -589,16 +544,13 @@ describe("shell assembly", () => {
       clearTranscript() {
         cleared = true;
       },
-      insertCommandResult(invocation: string, text: string) {
-        results.push({ invocation, text });
-      },
+      insertCommandResult() {},
     } as unknown as ClankieFaceShell;
 
     await command.run("", shell);
 
     expect(created).toEqual([undefined]);
     expect(cleared).toBe(true);
-    expect(results).toEqual([{ invocation: "/new", text: "Started New chat with fresh context." }]);
   });
 
   it("routes goal budgets and the autonomy kill switch through the selected conversation", async () => {

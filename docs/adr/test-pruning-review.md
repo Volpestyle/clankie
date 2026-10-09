@@ -64,6 +64,28 @@ and startup ordering. Neither file is replaced by helper snapshots.
 The [batch evidence](../testing/2026-10-09-tui-test-pruning/README.md) records
 line counts, gate selection and retained failed runs.
 
+## Command-picker presentation batch
+
+This is the next clear landable cut among the reviewed candidates, not a claim
+that the remaining inventory has been exhausted. Four files lose 209 test lines.
+
+| File under `apps/tui/test/` | Cut                                                                                                                      | Keep reason                                                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `autocomplete.test.ts`      | Preview colors, spacer/description copy, outline glyph and full ranked-match arrays.                                     | Actual canonical selection, alias collision and Kitty release regressions; argument/skill completion boundaries, width, row budgets, dismissal and keyboard submit/cancel.                     |
+| `interactive-flow.test.ts`  | Outline and hint copy, status-row alignment/color and current-value labels.                                              | Secret masking, multiline input, width, filtering, selected/current value submission, duplicate-title regression, right/left arrow and close behavior.                                         |
+| `provider-commands.test.ts` | Fixed auth-status table, default slot labels, model-order helper snapshot, setup labels/order and readiness-footer copy. | Credential redaction/broker storage, hosted approval refusal, real provider/model/effort persistence, endpoint fallback, restart intent and authoritative cross-face config changes.           |
+| `shell-assembly.test.ts`    | Default-state constructor snapshot, pending/picker/result copy and duplicated ten-line tool collapse assertions.         | Prompt preservation and uncertain delivery, steer/queue and pasted input, streamed words, scoped conversation/fresh-context/close handling, side transcript restoration and server interrupts. |
+
+The one source edit is **export-only, no behaviour change**: `newestFirst` loses
+an export used only by the deleted ordering snapshot. The implementation body
+and its internal model-picker caller stay identical. `readinessFooter` remains
+exported for its real entrypoint consumer. No exemptions or replacement
+implementation snapshots are added. Native render goldens, actual startup frames
+and guided-setup integration tests stay unchanged.
+
+[Batch evidence](../testing/2026-10-09-command-picker-test-pruning/README.md)
+records LOC, before/after gate wall time, selection and their comparison limits.
+
 ## Other reviewed files retained
 
 These reviews authorize no deletion in the listed files. Mixed files can receive
@@ -120,6 +142,32 @@ cryptographic, compatibility and data-preservation coverage stays.
 The lifecycle tab-name and SSH settings-race regressions named by the assignment
 remain protected. No evaluator, tldraw, skin-manifest, Swift-deduplication or ops
 mockup cleanup is included here; those VUH-1897 items remain unassigned.
+
+Further full-file reviews in this batch retain these files unchanged:
+
+- `packages/settings/test/settings.test.ts`: secret/input/HTTPS/consent boundaries,
+  execution-grant migration, private file mode, concurrent-write preservation,
+  explicit environment precedence and MCP deny-by-default.
+- Under `apps/tui/test/`, `voice-commands.test.ts`, `desktop.test.ts`,
+  `settings-menus.test.ts`, `project-menu.test.ts`, `owner-command-layer.test.ts`
+  and `host-power-surfaces.test.ts`: real settings/API writes, preserved owner
+  state, credential separation, stale-draft refusal and honest native failures.
+- Under `apps/tui/test/`, `seat-context-selection.test.ts`,
+  `linear-follow-status.test.ts`, `stance-command.test.ts`, `file-command.test.ts`
+  and `agents-command.test.ts`: exact conversation/native identity, scoped
+  bearers, read-only/redacted status, bounded claims, named artifact publication
+  and request refusal before external calls. Their request arrays are contracts.
+- Under `apps/tui/test/`, `catalog-watch.test.ts`, `skill-catalog.test.ts`,
+  `skills-command.test.ts`, `claude-tool-catalog.test.ts` and
+  `setup-flow-integration.test.ts`: native discovery, consumer agreement,
+  preserved failed-read state, real subprocess/HTTP catalog evidence and guided
+  setup integration. `face-bash.test.ts` keeps real subprocess output, bounds,
+  cancellation and failure propagation.
+- Under `apps/clankie/test/`, `captain-render-notice.test.ts` and
+  `operator-tool-detail.test.ts`: room/private-memory scope, honest render failure,
+  secret redaction, bounded native detail and exact-only invocable skills.
+  `packages/discord-presence-core/test/voice-tone-text.test.ts` keeps arbitrary
+  stream-split behavior and withholding of malformed or partial voice directions.
 
 ## Remaining inventory
 
