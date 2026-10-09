@@ -126,7 +126,7 @@ async function fixture() {
       child.stderr?.on("data", (bytes) => output.push(String(bytes)));
       const done = completions.get(child)!;
       receipts.push(receipt);
-      return { child, done, receipt, release, output };
+      return { child, done, closed: drained.get(child)!, receipt, release, output };
     }
     async function release(path: string) {
       await lifetime.run(() => writeFile(path, "release"));
@@ -569,7 +569,8 @@ describe("machine shared heavy permits with actual OS children", () => {
       expect((await f.governor.snapshot()).capacity.used).toBe(0);
       expect((await processIdentity())?.startTime).toBe(live.startTime);
       const run = f.start("after-stale", "exit", "23");
-      expect(await run.done).toBe(23);
+      await run.closed;
+      expect(await run.done, run.output.join("")).toBe(23);
     } finally {
       await f.close();
     }

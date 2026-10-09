@@ -26,7 +26,7 @@ then the root `check:landing`. The native EBADF cause remains unresolved.
   isolation passed in 10.67 seconds. Independent app conflict preparation was
   serialized before the first core-only gate could start. That preparation now
   overlaps the core gate startup, with the gate still parked at its actual
-  barrier. Repeated full-run results are needed to assess this change.
+  barrier. The complete no-bail root run passed this case in 9.89 seconds.
 - **Real fleet permit leak:** Ash 2 found four orphaned fixture drivers in the
   enclosing heavy runner's process group, retaining a real fleet slot. Their
   governor journals were private, but their process groups were inherited.
@@ -40,6 +40,8 @@ then the root `check:landing`. The native EBADF cause remains unresolved.
   `--`, and waits for child-origin IPC readiness before the process census.
 
 ## Native lock error remains unresolved
+
+The remaining native investigation is tracked as [VUH-1946](https://linear.app/vuhlp/issue/VUH-1946).
 
 Moss observed two live admission failures with `OSError (errno 9)`, at about
 08:06:21 UTC and exactly 09:09:24.225 UTC. Neither requested child started.
@@ -80,7 +82,18 @@ original named cases passed; contention took 40.90 seconds. Failures were:
 - Unchanged cancellation/inherited-permit and managed-runtime-provider startup
   cases hit their 30-second test deadlines. They are retained as failures.
 
-The three concurrent affected-file repeats and mandatory root `check:landing`
-are pending. No timeout raises,
+The first concurrent affected-file attempt retained 102/102, 102/102 and
+101/102 results. Its inherited `VITEST_MAX_WORKERS=4` overrode CLI
+`--maxWorkers 1`, allowing four workers per invocation. This was a runner
+concurrency mistake, corrected by setting each child's `VITEST_MAX_WORKERS=1`.
+The third invocation's stale-incarnation command exited 1 instead of 23,
+without its captured stderr in the assertion. The cause is unproven; three
+focused repeats passed with the corrected environment limit. The assertion now
+awaits stderr drainage and includes that output on failure. These isolates do
+not establish a fix for the earlier exit. All original named cases and new
+cancellation cases passed in each first attempt.
+
+Three complete affected-file repeats with the corrected bound and mandatory
+root `check:landing` remain pending. No timeout raises,
 new skips, manual evals, live capacity edits or simulator boots are part of this
 work.
