@@ -20,3 +20,4 @@ export {
 } from "./backends/linear.ts";
 
 export { readProjectWork } from "./project-read.ts";
+export * from "./releases.ts";

@@ -18,6 +18,8 @@ const WORK_USAGE = [
   "  | update ID [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
+  "  | releases [--lane L] [--item KEY] [--limit N] | releases sync | release ID|VERSION",
+  "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
 
@@ -237,6 +239,48 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
   }
 }
 
+/**
+ * Built-in tracker calls (VUH-1917, VUH-1930): the owner's own tool calls and the
+ * release sync. Undefined for every other verb, which goes to /v1/work.
+ */
+function trackerRequest(
+  args: readonly string[],
+  repo: string,
+): { readonly path: string; readonly body: Record<string, unknown> } | undefined {
+  const parsed = parseWorkArgs(args);
+  const [verb, ...rest] = parsed.positional;
+  const owner = (name: string, toolArgs: Record<string, unknown>) => ({
+    path: "/v1/tracker/owner/call",
+    body: { name, arguments: toolArgs },
+  });
+  switch (verb) {
+    case "releases": {
+      if (rest[0] === "sync" && rest.length === 1)
+        return { path: "/v1/tracker/releases/sync", body: { repo } };
+      if (rest.length > 0) throw new Error(WORK_USAGE);
+      const limit = one(parsed, "--limit");
+      return owner("list_releases", {
+        ...(one(parsed, "--lane") === undefined ? {} : { pipeline: one(parsed, "--lane") }),
+        ...(one(parsed, "--item") === undefined ? {} : { query: one(parsed, "--item") }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+      });
+    }
+    case "release":
+      if (rest.length !== 1) throw new Error(WORK_USAGE);
+      return owner("get_release", { id: rest[0] });
+    case "owner": {
+      if (rest.length !== 1) throw new Error(WORK_USAGE);
+      const json = one(parsed, "--json");
+      const toolArgs = json === undefined ? {} : (JSON.parse(json) as unknown);
+      if (toolArgs === null || typeof toolArgs !== "object" || Array.isArray(toolArgs))
+        throw new Error("--json takes a JSON object of tool arguments");
+      return owner(rest[0]!.replace(/^linear_/u, ""), toolArgs as Record<string, unknown>);
+    }
+    default:
+      return undefined;
+  }
+}
+
 async function repoRoot(explicit: string | undefined, cwd: string): Promise<string> {
   if (explicit !== undefined && !explicit.startsWith("/")) return explicit; // a registered repo id
   const start = resolve(cwd, explicit ?? ".");
@@ -265,12 +309,22 @@ export async function runWorkCommand(
   const parsed = parseWorkArgs(args);
   const repo = await repoRoot(one(parsed, "--repo"), options.cwd ?? process.cwd());
   const withoutRepo = args.filter((arg, index) => arg !== "--repo" && args[index - 1] !== "--repo");
-  const request = workRequest(withoutRepo, repo);
+  const tracker = trackerRequest(withoutRepo, repo);
+  const request = tracker === undefined ? workRequest(withoutRepo, repo) : tracker.body;
   const credential = await resolveOperatorCredential({ env });
   if (!credential) throw new Error("Work tracking needs the operator credential. Run clankie doctor.");
   const fetcher = options.fetchImpl ?? fetch;
-  const endpoint = `${commandHost({ env })}/v1/work`;
   const headers = { authorization: `Bearer ${credential.token}`, "content-type": "application/json" };
+  if (tracker !== undefined) {
+    const response = await fetcher(`${commandHost({ env })}${tracker.path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(tracker.body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    return { ok: response.ok, body: (await response.json()) as unknown };
+  }
+  const endpoint = `${commandHost({ env })}/v1/work`;
   const writing = request.action === "write";
   const journaled = writing || request.action === "write_receipt";
   const input = journaled

@@ -31,7 +31,7 @@ import { WorkRequestError } from "../work-items.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
 import { z } from "zod";
-import { TRACKER_OWNER, type TrackerActor } from "@clankie/work-items";
+import { TRACKER_LEAD, TRACKER_OWNER, type TrackerActor } from "@clankie/work-items";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceIdentity } from "./types.ts";
@@ -749,9 +749,51 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       );
     }
   });
+  // Releases (VUH-1930): git decides what shipped; the owner only says which repository
+  // to read. Clankie records the derived versions and the stage events they cause.
+  ctx.app.post(TRACKER_RELEASE_SYNC_PATH, async (context) => {
+    const tracker = ctx.dependencies.builtInTracker;
+    const workItems = ctx.dependencies.workItems;
+    if (tracker === undefined || workItems === undefined)
+      return context.json({ error: "tracker_unavailable" }, 503);
+    const authority = await questionOwnerAuthority(context.req.raw);
+    if (authority === undefined) return context.json({ error: "owner_required" }, 401);
+    const parsed = TrackerReleaseSyncSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!(await authority.authorize()) || !authority.current())
+      return context.json({ error: "owner_required" }, 401);
+    let history;
+    try {
+      // A device names a registered repository; the operator on this machine may name a path.
+      history = await workItems.releaseHistory(parsed.data.repo, authority.principal.kind !== "device");
+    } catch (error) {
+      return context.json(
+        { error: "releases_unavailable", detail: error instanceof Error ? error.message : String(error) },
+        422,
+      );
+    }
+    try {
+      const result = await tracker.syncReleases(history, {
+        actor: { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] },
+        via: "release",
+        beforeWrite: async () => {
+          if (!(await authority.authorize()) || !authority.current())
+            throw new Error("Owner authority expired");
+        },
+      });
+      return context.json({ result });
+    } catch (error) {
+      return context.json(
+        { error: "tracker_refused", detail: error instanceof Error ? error.message : String(error) },
+        422,
+      );
+    }
+  });
   return { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite };
 }
 
+const TRACKER_RELEASE_SYNC_PATH = "/v1/tracker/releases/sync";
+const TrackerReleaseSyncSchema = z.object({ repo: z.string().min(1).max(4096) }).strict();
 const TRACKER_OWNER_CALL_PATH = "/v1/tracker/owner/call";
 const TrackerOwnerCallSchema = z
   .object({

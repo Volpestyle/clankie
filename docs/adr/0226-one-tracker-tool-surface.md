@@ -14,7 +14,8 @@ A proposed [amendment](#amendment-actors-receipts-and-audit-2026-10-09-vuh-1916)
 the built-in tracker. A second proposed
 [amendment](#amendment-typed-events-delivery-stages-and-owner-wakes-2026-10-09-vuh-1917)
 (VUH-1917) adds the item event stream, derived state, delivery stages and owner
-wakes.
+wakes. A third proposed [amendment](#amendment-releases-2026-10-09-vuh-1930)
+(VUH-1930) makes releases records whose items come from landed commits.
 
 ## Context
 
@@ -206,3 +207,47 @@ owner) or a terminalControl device (`app`).
 
 Optional outbound webhooks and feeding Linear's webhooks into this stream
 during the mirror are not part of this change.
+
+## Amendment: releases (2026-10-09, VUH-1930)
+
+Status: proposed. Tracks [VUH-1930](https://linear.app/vuhlp/issue/VUH-1930).
+Built-in tracker only, on top of the VUH-1917 event stream and stages. James,
+2026-10-09: releases are in v1 because they are core to Clankie. Cycles and
+initiatives stay out.
+
+**Record.** A release is a shipped version of one repository lane: version,
+tag, commit, lane, date with its date kind (annotated tag, lightweight tag's
+commit, or publication), and its items. Its id is `repository:lane:version`, with
+the repository named by its origin remote (`github.com/owner/name`). Clones
+and worktrees therefore record one release. Releases live in `tracker.json`
+beside the items they ship.
+
+**Membership is derived, never typed.** A sync reads the repository's `v*`
+versions through the same tag source as `clankie work project`. It then reads
+the commits between each version and the previous one in version order. The
+first version takes its whole history. The items are the keys those commit
+messages name: built-in keys (`LOCAL-…`) and the connected tracker's team key
+from the repository's convention (`VUH-…`). Other key-shaped text (`UTF-8`,
+`SHA-256`) is not work. No tool writes a release or its items. The sync is a
+host operation that the owner starts with `clankie work releases sync`
+(`POST /v1/tracker/releases/sync`), and the release skill runs it after
+pushing a tag.
+
+**Delivered on ship.** A built-in item reaches `delivered` on the first release
+that contains it, on any lane. That move is a `stage` event written as Clankie
+(`agent-worker clankie` for the owner), `via: release`, with the version in its
+body. It is self-echo, so it never wakes anyone. Items already at `delivered` or
+`owner-verified` stay put, and canceled or duplicate items are not delivered.
+Keys from a connected tracker are listed by key only and have no stage effects
+until the mirror (VUH-1907). The sync is deterministic: run again, it upserts
+the same releases and moves nothing.
+
+**Reads.** `list_releases` and `get_release` follow Linear's tool names and
+input shapes. When Linear is connected, they reach Linear's own releases. On
+the built-in tracker, the pipeline is the repository lane, the stage is
+`Shipped`, `query` also matches an item key, and release notes fail explicitly.
+`get_issue` with `includeReleases` lists the releases that shipped an item,
+oldest first. GitHub and Markdown repository trackers refuse release tools.
+
+Release notes, planned releases and lanes beyond one per repository convention
+are outside this change. So is a release that does not ship as a `v*` tag.

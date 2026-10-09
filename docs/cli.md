@@ -1777,6 +1777,23 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   store builds and release membership are not inferred. Markdown has no planned
   milestone collection; GitHub and Markdown return no initiative goals.
   Failed/unsupported sections carry explicit `unavailable` entries.
+- `clankie work releases sync [--repo PATH]` records the repo's shipped `v*`
+  versions as releases in the built-in tracker
+  ([ADR 0226 amendment, VUH-1930](adr/0226-one-tracker-tool-surface.md#amendment-releases-2026-10-09-vuh-1930)).
+  It uses the same tag source as `work project`. Each release's items are the
+  keys named by commits since the previous version, in version order:
+  `LOCAL-…` plus the convention's Linear team. Built-in items move to
+  `delivered` on the first release that ships them. Syncing again is a no-op
+  for items that are already delivered. `clankie work releases [--lane L]
+[--item KEY] [--limit N]` lists releases newest first. `clankie work release
+ID|VERSION` shows one release, with each item's commits and, for built-in
+  items, their stage. These run as the owner through
+  `POST /v1/tracker/releases/sync` and `POST /v1/tracker/owner/call`.
+- `clankie work owner TOOL [--json ARGS]` makes the owner's own call to the
+  built-in tracker (`POST /v1/tracker/owner/call`) with a `linear_*` tool name
+  (prefix optional), for example `work owner get_issue --json
+'{"id":"LOCAL-1","includeReleases":true}'`. Owner writes there are owner
+  activity: they can verify, reopen and wake the routed chat.
 - Work statuses are `backlog`, `todo`, `in_progress`, `in_review`, `done`, and
   `canceled`. Linear backlog/triage, GitHub `status: backlog`, and Markdown
   `status: backlog` stay distinct from todo. Items may carry a native milestone

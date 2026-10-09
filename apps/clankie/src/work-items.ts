@@ -24,6 +24,8 @@ import {
   readConvention,
   resolveTracker,
   readProjectWork,
+  readReleaseHistory,
+  type ReleaseHistory,
   backendFor,
   trackerToolsFor,
   type WorkItemPatch,
@@ -800,6 +802,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           "The local tracker reference is ambiguous. Pass the saved repo ID explicitly.",
         );
       return matches.size === 1 ? [...matches][0] : undefined;
+    },
+    /**
+     * A repository's shipped versions and the item keys each one's commits name
+     * (VUH-1930), for the built-in tracker's release sync. Read-only: git only.
+     */
+    async releaseHistory(ref: string, local: boolean): Promise<ReleaseHistory> {
+      const entry = await locate(ref, local);
+      const { convention } = await tracker(entry.path, false, false, local);
+      return readReleaseHistory(entry.path, convention, run);
     },
     /** Canonical tool requests select the repo's backend without introducing another vocabulary. */
     async callTracker(

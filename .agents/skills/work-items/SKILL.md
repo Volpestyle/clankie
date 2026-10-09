@@ -230,3 +230,14 @@ raises a "check it works" ask in the owner's mailbox, and the answer verifies
 the item or sends it back to accepted. Read `linear_list_issue_events` (resume
 with its cursor) for the item's history; `selfEcho` marks Clankie's and workers'
 own events.
+
+Releases are records on the built-in tracker. `clankie work releases sync`
+reads the repository's `v*` tags and assigns each release the item keys named
+in its commits since the previous version: built-in keys (`LOCAL-…`) and the
+convention's Linear team (`VUH-…`). Built-in items move to `delivered` on the
+first release that ships them, as a `stage` event `via: release`. Linear keys
+are listed by key only. Nobody types a release's items, so name the item key in
+the commit message. Read releases with `linear_list_releases` (`query` also
+matches an item key), `linear_get_release` and
+`linear_get_issue {includeReleases: true}`, or `clankie work releases`,
+`work release ID|VERSION` and `work releases --item KEY`.

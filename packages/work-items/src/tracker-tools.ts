@@ -216,7 +216,7 @@ function tool(
 export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   tool(
     "get_issue",
-    "Read an issue by UUID or identifier. Read immediately before an update; includeRelations reveals parents, children and blocking/related issues.",
+    "Read an issue by UUID or identifier. Read immediately before an update; includeRelations reveals parents, children and blocking/related issues; includeReleases lists the releases that shipped it, oldest (the one that delivered it) first.",
     { id: string, includeRelations: boolean, includeCustomerNeeds: boolean, includeReleases: boolean },
     ["id"],
   ),
@@ -454,6 +454,29 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       type: { type: "string", enum: [...STATUS_CATEGORIES] },
       stage: { type: "string", enum: DELIVERY_STAGES.filter((stage) => stage !== "reported") },
     },
+  ),
+  tool(
+    "list_releases",
+    "List releases, newest first. On the built-in tracker these are shipped version tags; each lists the item keys its commits name since the previous version (nobody types them), pipeline is the repository lane, and query also matches an item key such as LOCAL-12 or VUH-1930.",
+    {
+      ...pagination,
+      query: string,
+      pipeline: string,
+      stage: string,
+      stageType: { type: "string", enum: ["planned", "started", "completed", "canceled"] },
+      version: string,
+      hasReleaseNotes: boolean,
+      includeReleaseNotes: boolean,
+      createdAt: string,
+      updatedAt: string,
+      includeArchived: boolean,
+    },
+  ),
+  tool(
+    "get_release",
+    "Retrieve a release by ID or slug, with its items. On the built-in tracker the id may also be an unambiguous version; built-in items carry their title and delivery stage, and every item lists the commits that name it.",
+    { id: { ...string, minLength: 1 }, includeReleaseNotes: boolean },
+    ["id"],
   ),
   tool(
     "list_milestones",

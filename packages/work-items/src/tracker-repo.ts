@@ -172,6 +172,8 @@ export function createRepoTracker(
   ): Promise<unknown> => {
     validateTrackerToolArgs(name, args);
     refuseBuiltInTrackerFeatures(name, args);
+    if (name === "list_releases" || name === "get_release")
+      throw new Error("Releases live in Clankie's built-in tracker; read them with clankie work releases");
     switch (name) {
       case "list_issue_statuses":
         return Object.entries(STATES).map(([id, state]) => ({ id, ...state }));

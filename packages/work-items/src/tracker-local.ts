@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { open, readFile, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { compareVersions, type ReleaseHistory } from "./releases.ts";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 import {
   applyTrackerDescriptionPatch,
@@ -151,6 +152,22 @@ interface StatusUpdate extends Entity {
   health: string;
   userId: string;
 }
+/** A shipped version (VUH-1930). Its items come from landed commits; no tool sets them. */
+interface Release {
+  /** Stable across syncs: repository, lane and version. */
+  id: string;
+  repository: string;
+  lane: string;
+  version: string;
+  tag: string;
+  commit: string;
+  date: string;
+  dateKind: "tag" | "commit" | "published";
+  /** issueId is set when the key is a built-in item; other keys (VUH-…) are listed by key only. */
+  items: { key: string; issueId?: string; commits: string[] }[];
+  firstSyncedAt: string;
+  syncedAt: string;
+}
 interface Store {
   version: 1;
   nextIssue: number;
@@ -171,6 +188,8 @@ interface Store {
   lastWriteAt?: string;
   /** Hash-linked item event stream (VUH-1917); its seq is the resumable cursor. */
   events?: TrackerItemEvent[];
+  /** Shipped versions, derived from repository tags and commits (VUH-1930). */
+  releases?: Release[];
 }
 
 /** Who and why for one write, threaded into item events. */
@@ -184,6 +203,20 @@ export type TrackerEventListener = (event: TrackerItemEvent) => void;
 export interface LocalTrackerBackend extends TrackerToolBackend {
   /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
   subscribe(listener: TrackerEventListener, after?: number): Promise<() => void>;
+  /**
+   * Upserts a repository's shipped versions and moves each built-in item a version
+   * contains to delivered, as stage events. The history is what git records; this is
+   * a host operation, not a tool, so no caller can type a release's items.
+   */
+  syncReleases(history: ReleaseHistory, options?: TrackerToolCallOptions): Promise<ReleaseSyncResult>;
+}
+
+export interface ReleaseSyncResult {
+  readonly repository: string;
+  readonly lane: string;
+  readonly releases: readonly { id: string; version: string; items: number; builtIn: number }[];
+  /** Items this sync moved to delivered, with the version that shipped them. */
+  readonly delivered: readonly { identifier: string; version: string }[];
 }
 
 export interface LocalTrackerOptions {
@@ -341,6 +374,12 @@ function parseStore(content: string): Store {
     });
   }
   bindStageStatuses(store);
+  if (
+    store.releases !== undefined &&
+    (!Array.isArray(store.releases) ||
+      store.releases.some((entry) => typeof entry?.id !== "string" || !Array.isArray(entry.items)))
+  )
+    throw new Error("Invalid local tracker releases");
   if (store.receipts !== undefined && !Array.isArray(store.receipts))
     throw new Error("Invalid local tracker write receipts");
   if (store.audit !== undefined) {
@@ -496,6 +535,7 @@ function moveStage(
   target: DeliveryStage,
   context: WriteContext,
   now: string,
+  body?: string,
 ): void {
   const current = stageOf(issue);
   if (target === current) return;
@@ -513,6 +553,7 @@ function moveStage(
     type: target === "owner-verified" ? "verified" : back ? "reopened" : "stage",
     from: current,
     to: target,
+    ...(body === undefined ? {} : { body }),
   });
 }
 
@@ -558,7 +599,8 @@ function recordIssueChanges(
   context: WriteContext,
   now: string,
 ): void {
-  if (name === "post_issue_event") return;
+  // These record their own stage events.
+  if (name === "post_issue_event" || name === "sync_releases") return;
   for (const issue of store.issues) {
     if (issue.updatedAt !== now) continue;
     const previous = before.issues.find((entry) => entry.id === issue.id);
@@ -631,6 +673,107 @@ function saveIssueStatus(store: Store, args: Record<string, unknown>): Status {
   }
   if (existing === undefined) store.issueStatuses.push(status);
   return status;
+}
+
+const DELIVERED = DELIVERY_STAGES.indexOf("delivered");
+
+/**
+ * Upsert each shipped version, then deliver its built-in items oldest version
+ * first: an item is delivered by the first release that ships it, on any lane.
+ */
+function syncReleases(
+  store: Store,
+  history: ReleaseHistory,
+  context: WriteContext,
+  now: string,
+): ReleaseSyncResult {
+  const releases = (store.releases ??= []);
+  const synced: Release[] = [];
+  for (const snapshot of history.releases) {
+    const id = `${history.repository}:${history.lane}:${snapshot.version}`;
+    const existing = releases.find((entry) => entry.id === id);
+    const release: Release = {
+      id,
+      repository: history.repository,
+      lane: history.lane,
+      version: snapshot.version,
+      tag: snapshot.tag,
+      commit: snapshot.commit,
+      date: snapshot.date,
+      dateKind: snapshot.dateKind,
+      items: snapshot.items.map((item) => {
+        const issue = store.issues.find((entry) => norm(entry.identifier) === norm(item.key));
+        return {
+          key: item.key,
+          ...(issue === undefined ? {} : { issueId: issue.id }),
+          commits: [...item.commits],
+        };
+      }),
+      firstSyncedAt: existing?.firstSyncedAt ?? now,
+      syncedAt: now,
+    };
+    if (existing === undefined) releases.push(release);
+    else releases[releases.indexOf(existing)] = release;
+    synced.push(release);
+  }
+  const delivered: { identifier: string; version: string }[] = [];
+  // The history is oldest version first.
+  for (const release of synced)
+    for (const item of release.items) {
+      const issue = store.issues.find((entry) => entry.id === item.issueId);
+      if (issue === undefined || DELIVERY_STAGES.indexOf(stageOf(issue)) >= DELIVERED) continue;
+      if (["canceled", "duplicate"].includes(categoryOf(store, issue.statusId) ?? "")) continue;
+      moveStage(store, issue, "delivered", context, now, `Shipped in ${release.version} (${release.lane})`);
+      issue.updatedAt = now;
+      delivered.push({ identifier: issue.identifier, version: release.version });
+    }
+  return {
+    repository: history.repository,
+    lane: history.lane,
+    releases: synced.map((release) => ({
+      id: release.id,
+      version: release.version,
+      items: release.items.length,
+      builtIn: release.items.filter((item) => item.issueId !== undefined).length,
+    })),
+    delivered,
+  };
+}
+/** Oldest first by ship date, then by version. */
+const releaseOrder = (a: Release, b: Release) =>
+  Date.parse(a.date) - Date.parse(b.date) ||
+  compareVersions(a.version, b.version) ||
+  a.id.localeCompare(b.id);
+const releaseContains = (release: Release, issue: Issue) =>
+  release.items.some((item) => item.issueId === issue.id || norm(item.key) === norm(issue.identifier));
+/** Linear's release shape where it has one; with a store, items carry their built-in issue. */
+function releaseView(release: Release, store?: Store): Record<string, unknown> {
+  return {
+    ...release,
+    name: release.version,
+    slugId: release.id,
+    pipeline: { name: `${release.repository}:${release.lane}`, lane: release.lane },
+    stage: { name: "Shipped", type: "completed" },
+    items: release.items.map((item) => {
+      const issue = store?.issues.find((entry) => entry.id === item.issueId);
+      if (store === undefined)
+        return { key: item.key, ...(item.issueId === undefined ? {} : { issueId: item.issueId }) };
+      return issue === undefined
+        ? item
+        : {
+            ...item,
+            identifier: issue.identifier,
+            title: issue.title,
+            stage: stageOf(issue),
+            url: localUrl("issue", issue.id),
+          };
+    }),
+  };
+}
+/** Shipped tags carry no release notes; asking for them fails rather than returning none. */
+function unsupportedReleaseNotes(args: Record<string, unknown>): void {
+  if (args.includeReleaseNotes === true)
+    throw new Error("Release notes are not available on the built-in tracker");
 }
 
 /** Precondition on the record as currently stored; checked before any field changes. */
@@ -1174,8 +1317,65 @@ async function dispatch(
       return postIssueEvent(store, args, context, now, options);
     case "save_issue_status":
       return saveIssueStatus(store, args);
-    case "get_issue":
-      return issueView(store, findIssue(store, args.id as string), args.includeRelations === true);
+    case "get_issue": {
+      const issue = findIssue(store, args.id as string);
+      const view = issueView(store, issue, args.includeRelations === true);
+      if (args.includeReleases !== true) return view;
+      return {
+        ...view,
+        releases: (store.releases ?? [])
+          .filter((release) => releaseContains(release, issue))
+          .sort(releaseOrder)
+          .map((release) => releaseView(release)),
+      };
+    }
+    case "list_releases": {
+      unsupportedReleaseNotes(args);
+      if (args.hasReleaseNotes === true) return page([], args, "releases", name);
+      const query = norm(text(args, "query") ?? "");
+      const stage = args.stage === undefined ? undefined : norm(args.stage as string);
+      const result = (store.releases ?? []).filter(
+        (release) =>
+          (args.pipeline === undefined ||
+            [release.lane, release.repository, `${release.repository}:${release.lane}`].some(
+              (value) => norm(value) === norm(args.pipeline as string),
+            )) &&
+          (args.version === undefined || release.version === args.version) &&
+          (args.stageType === undefined || args.stageType === "completed") &&
+          (stage === undefined || stage === "shipped" || stage === "completed") &&
+          (query === "" ||
+            release.version.toLowerCase().includes(query) ||
+            release.items.some((item) => norm(item.key) === query)) &&
+          ["createdAt", "updatedAt"].every(
+            (key) =>
+              args[key] === undefined ||
+              (key === "createdAt" ? release.firstSyncedAt : release.syncedAt) >=
+                dateBoundary(args[key] as string, now),
+          ),
+      );
+      // Newest shipped first: a release's order is its ship date, not when it was recorded.
+      result.sort((a, b) => releaseOrder(b, a));
+      return page(
+        result.map((release) => releaseView(release)),
+        args,
+        "releases",
+        name,
+      );
+    }
+    case "get_release": {
+      unsupportedReleaseNotes(args);
+      const reference = norm(args.id as string);
+      const matches = (store.releases ?? []).filter(
+        (entry) => norm(entry.id) === reference || norm(entry.version) === reference,
+      );
+      if (matches.length !== 1)
+        throw new Error(
+          matches.length === 0
+            ? `Release not found: ${String(args.id)}`
+            : `Version ${String(args.id)} shipped in several repositories or lanes; pass the release id`,
+        );
+      return releaseView(matches[0]!, store);
+    }
     case "save_issue": {
       if (typeof args.id === "string")
         options.assertIssueWrite?.(issueView(store, findIssue(store, args.id)));
@@ -1500,6 +1700,119 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         }
       }
   };
+  /** One applied or refused write: effect, receipt, audit and events in one atomic replacement. */
+  const write = async (
+    initial: Store,
+    clock: string,
+    name: string,
+    request: Record<string, unknown>,
+    keyed: { key: string; fingerprint: string } | undefined,
+    actor: TrackerActor,
+    callOptions: TrackerToolCallOptions | undefined,
+    assertHeld: () => void,
+    apply: (store: Store, now: string, context: WriteContext) => unknown,
+  ): Promise<unknown> => {
+    let store = initial;
+    const key = keyed?.key;
+    const fingerprint = keyed?.fingerprint ?? "";
+    const before = structuredClone(store);
+    const now = nextWriteTime(store, clock);
+    const fields = Object.keys(request).sort();
+    let result: unknown;
+    const context: WriteContext = {
+      actor,
+      ...(callOptions?.via === undefined ? {} : { via: callOptions.via }),
+    };
+    const firstEvent = (store.events?.length ?? 0) + 1;
+    try {
+      result = await apply(store, now, context);
+      recordIssueChanges(before, store, name, context, now);
+    } catch (error) {
+      // Nothing the write changed survives. The refusal itself is recorded,
+      // so a keyed retry answers the same and the audit log shows the attempt.
+      const refusal =
+        error instanceof TrackerWriteRefused
+          ? error
+          : new TrackerWriteRefused(
+              "invalid_request",
+              error instanceof Error ? error.message : String(error),
+            );
+      const detail = refusal.message.replace(/^Write refused \([^)]*\): /u, "");
+      store = before;
+      store.lastWriteAt = now;
+      const target = auditTarget(request);
+      appendAudit(store, {
+        at: now,
+        tool: name,
+        outcome: "refused",
+        actor,
+        ...(key === undefined ? {} : { idempotencyKey: key }),
+        fields,
+        entities: [],
+        ...(target === undefined ? {} : { target }),
+        reason: refusal.reason,
+        detail,
+      });
+      if (key !== undefined)
+        (store.receipts ??= []).push({
+          actorKey: actorKey(actor),
+          idempotencyKey: key,
+          tool: name,
+          fingerprint,
+          state: "refused",
+          at: now,
+          reason: refusal.reason,
+          detail,
+        });
+      // Bookkeeping only: no tracker record changed, so no publication callbacks.
+      await persist(path, store, assertHeld);
+      throw refusal;
+    }
+    const entities = stampActor(store, actor, now);
+    // Views were built before stamping; the receipt keeps exactly what the caller sees.
+    const view = result as Record<string, unknown>;
+    if (view.updatedAt === now) {
+      view.updatedByActor = actor;
+      if (view.createdAt === now) view.createdByActor = actor;
+    }
+    const derived = store.issues.find((issue) => issue.id === view.id);
+    if (derived !== undefined) {
+      view.stage = stageOf(derived);
+      view.state = view.status = store.issueStatuses.find((status) => status.id === derived.statusId)!.name;
+    }
+    const settled = structuredClone(result);
+    appendAudit(store, {
+      at: now,
+      tool: name,
+      outcome: "applied",
+      actor,
+      ...(key === undefined ? {} : { idempotencyKey: key }),
+      fields,
+      entities,
+    });
+    if (key !== undefined)
+      (store.receipts ??= []).push({
+        actorKey: actorKey(actor),
+        idempotencyKey: key,
+        tool: name,
+        fingerprint,
+        state: "applied",
+        at: now,
+        result: settled,
+      });
+    await persist(path, store, assertHeld, callOptions);
+    publish(store.events?.slice(firstEvent - 1) ?? []);
+    return settled;
+  };
+  const load = async () => {
+    const clock = (options.clock ?? (() => new Date()))().toISOString();
+    try {
+      return { store: parseStore(await readFile(path, "utf8")), clock, initialized: false };
+    } catch (error) {
+      if (codeOf(error) !== "ENOENT") throw error;
+      return { store: seed(options, clock), clock, initialized: true };
+    }
+  };
   return {
     catalog: () => TRACKER_TOOLS,
     async subscribe(listener, after = 0) {
@@ -1518,19 +1831,29 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         listeners.delete(listener);
       };
     },
+    async syncReleases(history, callOptions) {
+      return withTrackerStoreLock(path, async (assertHeld) => {
+        const { store, clock } = await load();
+        const actor = callOptions?.actor ?? localActor(store);
+        // Audit names the sync's scope, not its derived contents.
+        const request = { repository: history.repository, lane: history.lane };
+        return (await write(
+          store,
+          clock,
+          "sync_releases",
+          request,
+          undefined,
+          actor,
+          callOptions,
+          assertHeld,
+          (target, now, context) => syncReleases(target, history, context, now),
+        )) as ReleaseSyncResult;
+      });
+    },
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
       return withTrackerStoreLock(path, async (assertHeld) => {
-        const clock = (options.clock ?? (() => new Date()))().toISOString();
-        let store: Store;
-        let initialized = false;
-        try {
-          store = parseStore(await readFile(path, "utf8"));
-        } catch (error) {
-          if (codeOf(error) !== "ENOENT") throw error;
-          store = seed(options, clock);
-          initialized = true;
-        }
+        const { store, clock, initialized } = await load();
         const actor = callOptions?.actor ?? localActor(store);
         const writing = /^(?:save|create|post)_/u.test(name);
         if (!writing) {
@@ -1567,96 +1890,17 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           callOptions?.effectConfirmed?.();
           return structuredClone(prior.result);
         }
-        const before = structuredClone(store);
-        const now = nextWriteTime(store, clock);
-        const fields = Object.keys(request).sort();
-        let result: unknown;
-        const context: WriteContext = {
+        return write(
+          store,
+          clock,
+          name,
+          request,
+          key === undefined ? undefined : { key, fingerprint },
           actor,
-          ...(callOptions?.via === undefined ? {} : { via: callOptions.via }),
-        };
-        const firstEvent = (store.events?.length ?? 0) + 1;
-        try {
-          result = await dispatch(store, name, request, options, now, context);
-          recordIssueChanges(before, store, name, context, now);
-        } catch (error) {
-          // Nothing the write changed survives. The refusal itself is recorded,
-          // so a keyed retry answers the same and the audit log shows the attempt.
-          const refusal =
-            error instanceof TrackerWriteRefused
-              ? error
-              : new TrackerWriteRefused(
-                  "invalid_request",
-                  error instanceof Error ? error.message : String(error),
-                );
-          const detail = refusal.message.replace(/^Write refused \([^)]*\): /u, "");
-          store = before;
-          store.lastWriteAt = now;
-          const target = auditTarget(request);
-          appendAudit(store, {
-            at: now,
-            tool: name,
-            outcome: "refused",
-            actor,
-            ...(key === undefined ? {} : { idempotencyKey: key }),
-            fields,
-            entities: [],
-            ...(target === undefined ? {} : { target }),
-            reason: refusal.reason,
-            detail,
-          });
-          if (key !== undefined)
-            (store.receipts ??= []).push({
-              actorKey: actorKey(actor),
-              idempotencyKey: key,
-              tool: name,
-              fingerprint,
-              state: "refused",
-              at: now,
-              reason: refusal.reason,
-              detail,
-            });
-          // Bookkeeping only: no tracker record changed, so no publication callbacks.
-          await persist(path, store, assertHeld);
-          throw refusal;
-        }
-        const entities = stampActor(store, actor, now);
-        // Views were built before stamping; the receipt keeps exactly what the caller sees.
-        const view = result as Record<string, unknown>;
-        if (view.updatedAt === now) {
-          view.updatedByActor = actor;
-          if (view.createdAt === now) view.createdByActor = actor;
-        }
-        const derived = store.issues.find((issue) => issue.id === view.id);
-        if (derived !== undefined) {
-          view.stage = stageOf(derived);
-          view.state = view.status = store.issueStatuses.find(
-            (status) => status.id === derived.statusId,
-          )!.name;
-        }
-        const settled = structuredClone(result);
-        appendAudit(store, {
-          at: now,
-          tool: name,
-          outcome: "applied",
-          actor,
-          ...(key === undefined ? {} : { idempotencyKey: key }),
-          fields,
-          entities,
-        });
-        if (key !== undefined)
-          (store.receipts ??= []).push({
-            actorKey: actorKey(actor),
-            idempotencyKey: key,
-            tool: name,
-            fingerprint,
-            state: "applied",
-            at: now,
-            result: settled,
-          });
-        await persist(path, store, assertHeld, callOptions);
-        publish(store.events?.slice(firstEvent - 1) ?? []);
-        return settled;
+          callOptions,
+          assertHeld,
+          (target, now, context) => dispatch(target, name, request, options, now, context),
+        );
       });
     },
   };
