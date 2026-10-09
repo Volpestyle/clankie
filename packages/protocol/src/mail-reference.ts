@@ -14,11 +14,25 @@ export const MailUrlSchema = z
     }
   }, "Expected an HTTP or HTTPS URL");
 
+/** An issue link: a public tracker page, or a built-in tracker record (`clankie-work://`, VUH-1917). */
+export const MailIssueUrlSchema = z
+  .string()
+  .url()
+  .max(4096)
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === "https:" || protocol === "http:" || protocol === "clankie-work:";
+    } catch {
+      return false;
+    }
+  }, "Expected an HTTP, HTTPS or clankie-work URL");
+
 export const MailIssueReferenceSchema = z
   .object({
     tracker: z.string().trim().min(1).max(100),
     key: z.string().trim().min(1).max(256),
-    url: MailUrlSchema,
+    url: MailIssueUrlSchema,
   })
   .strict();
 export type MailIssueReference = z.infer<typeof MailIssueReferenceSchema>;

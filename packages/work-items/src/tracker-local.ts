@@ -4,9 +4,13 @@ import { join, resolve } from "node:path";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 import {
   applyTrackerDescriptionPatch,
+  DELIVERY_STAGES,
   TRACKER_TOOLS,
   validateTrackerToolArgs,
+  type DeliveryStage,
+  type IssueEventType,
   type TrackerActor,
+  type TrackerItemEvent,
   type TrackerToolBackend,
   type TrackerToolCallOptions,
 } from "./tracker-tools.ts";
@@ -75,6 +79,8 @@ interface Status {
   id: string;
   name: string;
   type: string;
+  /** The delivery stage whose derived state uses this status name. */
+  stage?: DeliveryStage;
 }
 interface Label extends Entity {
   name: string;
@@ -103,6 +109,11 @@ interface Issue extends Entity {
   dueDate: string | null;
   estimate: number | null;
   links: Link[];
+  /** Derived from the event stream; absent on items written before VUH-1917 (reported). */
+  stage?: DeliveryStage;
+  blocked?: boolean;
+  asking?: boolean;
+  errored?: boolean;
 }
 interface Link {
   url: string;
@@ -158,6 +169,21 @@ interface Store {
   audit?: AuditEvent[];
   /** Strictly increasing write time, so updatedAt is a usable precondition. */
   lastWriteAt?: string;
+  /** Hash-linked item event stream (VUH-1917); its seq is the resumable cursor. */
+  events?: TrackerItemEvent[];
+}
+
+/** Who and why for one write, threaded into item events. */
+interface WriteContext {
+  readonly actor: TrackerActor;
+  readonly via?: string;
+}
+
+/** Live delivery of newly committed item events, after their write is durable. */
+export type TrackerEventListener = (event: TrackerItemEvent) => void;
+export interface LocalTrackerBackend extends TrackerToolBackend {
+  /** Replays events after the cursor (seq), then pushes new ones. Returns an unsubscribe. */
+  subscribe(listener: TrackerEventListener, after?: number): Promise<() => void>;
 }
 
 export interface LocalTrackerOptions {
@@ -209,6 +235,7 @@ function seed(options: LocalTrackerOptions, now: string): Store {
       ["Todo", "unstarted"],
       ["In Progress", "started"],
       ["In Review", "started"],
+      ["Delivered", "started"],
       ["Done", "completed"],
       ["Canceled", "canceled"],
       ["Duplicate", "duplicate"],
@@ -304,6 +331,16 @@ function parseStore(content: string): Store {
   }
   if (store.issueStatuses.length === 0 || store.projectStatuses.length === 0)
     throw new Error("Local tracker statuses are missing");
+  if (store.events !== undefined) {
+    if (!Array.isArray(store.events)) throw new Error("Invalid local tracker event stream");
+    let previous = "";
+    store.events.forEach((event, index) => {
+      if (event?.seq !== index + 1 || event.prevHash !== previous || auditHash(event) !== event.hash)
+        throw new Error(`Local tracker event stream is not intact at event ${String(index + 1)}`);
+      previous = event.hash;
+    });
+  }
+  bindStageStatuses(store);
   if (store.receipts !== undefined && !Array.isArray(store.receipts))
     throw new Error("Invalid local tracker write receipts");
   if (store.audit !== undefined) {
@@ -329,7 +366,8 @@ function canonical(value: unknown): string {
       .join(",")}}`;
   return JSON.stringify(value);
 }
-function auditHash(event: Omit<AuditEvent, "hash"> & { hash?: string }): string {
+/** Chain hash over everything but the hash itself; shared by the audit log and the event stream. */
+function auditHash(event: object): string {
   return createHash("sha256")
     .update(canonical({ ...event, hash: undefined }))
     .digest("hex");
@@ -400,6 +438,199 @@ function auditTarget(args: Record<string, unknown>): string | undefined {
   for (const key of ["id", "issueId", "parentId", "projectId", "statusUpdateId", "project"])
     if (typeof args[key] === "string") return args[key] as string;
   return undefined;
+}
+
+/** Statuses named for stages keep their names; deterministic, so reads need not persist it. */
+function bindStageStatuses(store: Store): void {
+  if (store.issueStatuses.some((status) => status.stage !== undefined)) return;
+  for (const [name, type, stage] of [
+    ["In Progress", "started", "accepted"],
+    ["In Review", "started", "landed"],
+    ["Delivered", "started", "delivered"],
+    ["Done", "completed", "owner-verified"],
+  ] as const) {
+    const status = store.issueStatuses.find((entry) => entry.name === name && entry.type === type);
+    if (status !== undefined) status.stage = stage;
+  }
+}
+const stageOf = (issue: Issue): DeliveryStage => issue.stage ?? "reported";
+const isOwner = (actor: TrackerActor) => actor.type === "human";
+/** Owner activity: the owner directly or through the owner's app. Everything else echoes Clankie. */
+const isOwnerActivity = (actor: TrackerActor) => actor.type === "human" || actor.type === "app";
+
+function statusForStage(store: Store, stage: DeliveryStage): Status {
+  const bound = store.issueStatuses.find((status) => status.stage === stage);
+  if (bound !== undefined) return bound;
+  const category = stage === "reported" ? "unstarted" : stage === "owner-verified" ? "completed" : "started";
+  return store.issueStatuses.find((status) => status.type === category) ?? store.issueStatuses[0]!;
+}
+
+function appendEvent(
+  store: Store,
+  context: WriteContext,
+  now: string,
+  issue: Issue,
+  event: Pick<TrackerItemEvent, "type"> &
+    Partial<Pick<TrackerItemEvent, "body" | "from" | "to" | "commentId">>,
+): void {
+  store.events ??= [];
+  const body = {
+    id: randomUUID(),
+    seq: store.events.length + 1,
+    at: now,
+    issueId: issue.id,
+    identifier: issue.identifier,
+    ...event,
+    actor: context.actor,
+    selfEcho: !isOwnerActivity(context.actor),
+    ...(context.via === undefined ? {} : { via: context.via }),
+    prevHash: store.events.at(-1)?.hash ?? "",
+  };
+  store.events.push({ ...body, hash: auditHash(body) });
+}
+
+/** Forward for anyone; owner-verified and any move back belong to the owner alone. */
+function moveStage(
+  store: Store,
+  issue: Issue,
+  target: DeliveryStage,
+  context: WriteContext,
+  now: string,
+): void {
+  const current = stageOf(issue);
+  if (target === current) return;
+  const back = DELIVERY_STAGES.indexOf(target) < DELIVERY_STAGES.indexOf(current);
+  if ((target === "owner-verified" || back) && !isOwner(context.actor))
+    throw new TrackerWriteRefused(
+      "owner_verification_required",
+      target === "owner-verified"
+        ? "only the owner verifies an item; report landed or delivered and the owner checks it"
+        : `only the owner moves an item back (from ${current} to ${target})`,
+    );
+  issue.stage = target;
+  issue.statusId = statusForStage(store, target).id;
+  appendEvent(store, context, now, issue, {
+    type: target === "owner-verified" ? "verified" : back ? "reopened" : "stage",
+    from: current,
+    to: target,
+  });
+}
+
+const PROGRESS: readonly IssueEventType[] = ["ack", "plan", "action", "result"];
+
+function postIssueEvent(
+  store: Store,
+  args: Record<string, unknown>,
+  context: WriteContext,
+  now: string,
+  options: LocalTrackerOptions,
+): Record<string, unknown> {
+  const issue = findIssue(store, args.issueId as string);
+  options.assertIssueWrite?.(issueView(store, issue));
+  const type = args.type as IssueEventType;
+  const progress = PROGRESS.includes(type);
+  issue.blocked = type === "blocked" || (!progress && issue.blocked === true);
+  issue.asking = type === "ask" || (!progress && issue.asking === true);
+  issue.errored = type === "error" || (!progress && issue.errored === true);
+  appendEvent(store, context, now, issue, {
+    type,
+    ...(typeof args.body === "string" ? { body: args.body } : {}),
+  });
+  const target =
+    (args.stage as DeliveryStage | undefined) ??
+    (type === "ack" && stageOf(issue) === "reported" ? "accepted" : undefined);
+  if (target !== undefined) moveStage(store, issue, target, context, now);
+  issue.updatedAt = now;
+  return issueView(store, issue);
+}
+
+const categoryOf = (store: Store, statusId: string) =>
+  store.issueStatuses.find((status) => status.id === statusId)?.type;
+
+/**
+ * Hand-set changes become events too. Completing an item is owner verification,
+ * and reopening a completed one sends it back; both are the owner's alone.
+ */
+function recordIssueChanges(
+  before: Store,
+  store: Store,
+  name: string,
+  context: WriteContext,
+  now: string,
+): void {
+  if (name === "post_issue_event") return;
+  for (const issue of store.issues) {
+    if (issue.updatedAt !== now) continue;
+    const previous = before.issues.find((entry) => entry.id === issue.id);
+    const was = previous === undefined ? undefined : categoryOf(store, previous.statusId);
+    const is = categoryOf(store, issue.statusId);
+    if (previous === undefined) {
+      if (is === "completed" && !isOwner(context.actor))
+        throw new TrackerWriteRefused(
+          "owner_verification_required",
+          "only the owner creates an item as completed",
+        );
+      issue.stage = is === "completed" ? "owner-verified" : "reported";
+      appendEvent(store, context, now, issue, { type: "created", to: stageOf(issue) });
+    } else if (previous.statusId !== issue.statusId) {
+      const from = before.issueStatuses.find((status) => status.id === previous.statusId)?.name;
+      const to = store.issueStatuses.find((status) => status.id === issue.statusId)!.name;
+      if (is === "completed" || was === "completed") {
+        if (!isOwner(context.actor))
+          throw new TrackerWriteRefused(
+            "owner_verification_required",
+            is === "completed"
+              ? `only the owner completes an item; report it with post_issue_event (stage landed or delivered) and the owner verifies it`
+              : "only the owner reopens a completed item",
+          );
+        issue.stage = is === "completed" ? "owner-verified" : "accepted";
+        appendEvent(store, context, now, issue, {
+          type: is === "completed" ? "verified" : "reopened",
+          ...(from === undefined ? {} : { from }),
+          to,
+        });
+      } else
+        appendEvent(store, context, now, issue, {
+          type: "state",
+          ...(from === undefined ? {} : { from }),
+          to,
+        });
+    }
+    if (previous !== undefined && previous.priority !== issue.priority)
+      appendEvent(store, context, now, issue, {
+        type: "priority",
+        from: String(previous.priority),
+        to: String(issue.priority),
+      });
+  }
+  for (const comment of store.comments) {
+    if (comment.createdAt !== now || comment.issueId === null) continue;
+    const issue = store.issues.find((entry) => entry.id === comment.issueId);
+    if (issue === undefined) continue;
+    appendEvent(store, context, now, issue, { type: "comment", body: comment.body, commentId: comment.id });
+  }
+}
+
+function saveIssueStatus(store: Store, args: Record<string, unknown>): Status {
+  const existing =
+    args.id === undefined ? undefined : store.issueStatuses.find((status) => status.id === args.id);
+  if (args.id !== undefined && existing === undefined)
+    throw new Error(`Status not found: ${String(args.id)}`);
+  if (existing === undefined && (args.name === undefined || args.type === undefined))
+    throw new Error("Creating a status requires name and type");
+  const name = ((args.name as string | undefined) ?? existing!.name).trim();
+  if (name === "") throw new Error("Status name cannot be blank");
+  if (store.issueStatuses.some((status) => status !== existing && norm(status.name) === norm(name)))
+    throw new Error(`Status already exists: ${name}`);
+  const status: Status = existing ?? { id: randomUUID(), name, type: args.type as string };
+  status.name = name;
+  if (args.type !== undefined) status.type = args.type as string;
+  if (args.stage !== undefined) {
+    for (const entry of store.issueStatuses) if (entry.stage === args.stage) delete entry.stage;
+    status.stage = args.stage as DeliveryStage;
+  }
+  if (existing === undefined) store.issueStatuses.push(status);
+  return status;
 }
 
 /** Precondition on the record as currently stored; checked before any field changes. */
@@ -515,6 +746,7 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
     createdBy: store.user.name,
     createdById: issue.creatorId,
     url: localUrl("issue", issue.id),
+    stage: stageOf(issue),
   };
   if (relations) {
     const summary = (id: string) => {
@@ -935,8 +1167,13 @@ async function dispatch(
   args: Record<string, unknown>,
   options: LocalTrackerOptions,
   now: string,
+  context: WriteContext,
 ): Promise<unknown> {
   switch (name) {
+    case "post_issue_event":
+      return postIssueEvent(store, args, context, now, options);
+    case "save_issue_status":
+      return saveIssueStatus(store, args);
     case "get_issue":
       return issueView(store, findIssue(store, args.id as string), args.includeRelations === true);
     case "save_issue": {
@@ -1229,15 +1466,58 @@ async function read(
       );
     return page(events as unknown as Record<string, unknown>[], args, "events", name);
   }
-  return dispatch(store, name, args, options, now);
+  if (name === "list_issue_events") {
+    const issue = args.issueId === undefined ? undefined : findIssue(store, args.issueId as string);
+    const after = args.after === undefined ? 0 : Number(args.after);
+    if (!Number.isInteger(after) || after < 0) throw new Error("Invalid event cursor");
+    const limit = typeof args.limit === "number" ? args.limit : 100;
+    const matching = (store.events ?? []).filter(
+      (event) => event.seq > after && (issue === undefined || event.issueId === issue.id),
+    );
+    const events = matching.slice(0, limit);
+    return {
+      events,
+      // Resume from here; an empty page keeps the caller's cursor.
+      cursor: String(events.at(-1)?.seq ?? after),
+      hasNextPage: matching.length > events.length,
+    };
+  }
+  return dispatch(store, name, args, options, now, { actor });
 }
 
 /** Durable local Linear-shaped tracker, also used as ancillary storage for repo backends. */
-export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBackend {
+export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBackend {
   const directory = resolve(options.directory);
   const path = join(directory, "tracker.json");
+  const listeners = new Set<TrackerEventListener>();
+  const publish = (events: readonly TrackerItemEvent[]) => {
+    for (const event of events)
+      for (const listener of listeners) {
+        try {
+          listener(structuredClone(event));
+        } catch {
+          // A subscriber's failure never undoes or blocks a committed write.
+        }
+      }
+  };
   return {
     catalog: () => TRACKER_TOOLS,
+    async subscribe(listener, after = 0) {
+      // Replay and registration share the store lock, so no event falls between them.
+      await withTrackerStoreLock(path, async () => {
+        let events: TrackerItemEvent[] = [];
+        try {
+          events = parseStore(await readFile(path, "utf8")).events ?? [];
+        } catch (error) {
+          if (codeOf(error) !== "ENOENT") throw error;
+        }
+        for (const event of events.filter((entry) => entry.seq > after)) listener(structuredClone(event));
+        listeners.add(listener);
+      });
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
       return withTrackerStoreLock(path, async (assertHeld) => {
@@ -1252,7 +1532,7 @@ export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBac
           initialized = true;
         }
         const actor = callOptions?.actor ?? localActor(store);
-        const writing = /^(?:save|create)_/u.test(name);
+        const writing = /^(?:save|create|post)_/u.test(name);
         if (!writing) {
           const result = await read(store, name, args, options, actor, clock);
           if (initialized) await persist(path, store, assertHeld);
@@ -1291,8 +1571,14 @@ export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBac
         const now = nextWriteTime(store, clock);
         const fields = Object.keys(request).sort();
         let result: unknown;
+        const context: WriteContext = {
+          actor,
+          ...(callOptions?.via === undefined ? {} : { via: callOptions.via }),
+        };
+        const firstEvent = (store.events?.length ?? 0) + 1;
         try {
-          result = await dispatch(store, name, request, options, now);
+          result = await dispatch(store, name, request, options, now, context);
+          recordIssueChanges(before, store, name, context, now);
         } catch (error) {
           // Nothing the write changed survives. The refusal itself is recorded,
           // so a keyed retry answers the same and the audit log shows the attempt.
@@ -1341,6 +1627,13 @@ export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBac
           view.updatedByActor = actor;
           if (view.createdAt === now) view.createdByActor = actor;
         }
+        const derived = store.issues.find((issue) => issue.id === view.id);
+        if (derived !== undefined) {
+          view.stage = stageOf(derived);
+          view.state = view.status = store.issueStatuses.find(
+            (status) => status.id === derived.statusId,
+          )!.name;
+        }
         const settled = structuredClone(result);
         appendAudit(store, {
           at: now,
@@ -1362,6 +1655,7 @@ export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBac
             result: settled,
           });
         await persist(path, store, assertHeld, callOptions);
+        publish(store.events?.slice(firstEvent - 1) ?? []);
         return settled;
       });
     },

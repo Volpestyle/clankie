@@ -31,6 +31,7 @@ import { WorkRequestError } from "../work-items.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
 import { z } from "zod";
+import { TRACKER_OWNER, type TrackerActor } from "@clankie/work-items";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceIdentity } from "./types.ts";
@@ -716,5 +717,45 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     });
     return context.json({ schemaVersion: 1 as const, items });
   });
+  // The owner's own writes to the built-in tracker (VUH-1917). The actor comes from
+  // authentication: the operator is the human owner, a terminalControl device is the
+  // owner's app. These are owner activity, so they can wake the item's routed chat.
+  ctx.app.post(TRACKER_OWNER_CALL_PATH, async (context) => {
+    const tracker = ctx.dependencies.builtInTracker;
+    if (tracker === undefined) return context.json({ error: "tracker_unavailable" }, 503);
+    const authority = await questionOwnerAuthority(context.req.raw);
+    if (authority === undefined) return context.json({ error: "owner_required" }, 401);
+    const parsed = TrackerOwnerCallSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!(await authority.authorize()) || !authority.current())
+      return context.json({ error: "owner_required" }, 401);
+    const actor: TrackerActor =
+      authority.principal.kind === "device"
+        ? { type: "app", id: `device:${authority.principal.id}`, onBehalfOf: [TRACKER_OWNER] }
+        : { ...TRACKER_OWNER, onBehalfOf: [] };
+    try {
+      const result = await tracker.call(parsed.data.name, parsed.data.arguments, {
+        actor,
+        beforeWrite: async () => {
+          if (!(await authority.authorize()) || !authority.current())
+            throw new Error("Owner authority expired");
+        },
+      });
+      return context.json({ result });
+    } catch (error) {
+      return context.json(
+        { error: "tracker_refused", detail: error instanceof Error ? error.message : String(error) },
+        422,
+      );
+    }
+  });
   return { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite };
 }
+
+const TRACKER_OWNER_CALL_PATH = "/v1/tracker/owner/call";
+const TrackerOwnerCallSchema = z
+  .object({
+    name: z.string().min(1).max(128),
+    arguments: z.record(z.string(), z.unknown()).default({}),
+  })
+  .strict();

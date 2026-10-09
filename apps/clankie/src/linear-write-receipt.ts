@@ -19,13 +19,14 @@ const ISSUE_FIELDS = [
   "project",
   "parentId",
   "updatedAt",
+  "stage",
   "completedAt",
   "canceledAt",
 ] as const;
 const PREVIEW = 160;
 
 export function compactLinearWrite(tool: string, content: string): string {
-  if (!/^(save|create)_/u.test(tool)) return content;
+  if (!/^(save|create|post)_/u.test(tool)) return content;
   let record: unknown;
   try {
     record = JSON.parse(content);

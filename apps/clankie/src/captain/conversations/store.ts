@@ -253,6 +253,7 @@ export class ConversationStore {
    * caused would name a conversation this one's devices cannot open.
    */
   private readonly durableMessageListeners = new Set<(notice: DurableMessageNotice) => void>();
+  private readonly questionResolutionListeners = new Set<(question: ConversationQuestion) => void>();
   /** Live owner-facing activity only; never rebuilt by scanning retained transcripts. */
   private recentPresenceMessage: number | undefined;
   private recentPresenceError: { conversationId: string; at: number } | undefined;
@@ -3327,7 +3328,22 @@ export class ConversationStore {
   }
 
   private publishQuestionResolution(meta: ConversationMeta, record: QuestionRecord): void {
-    return publishQuestionResolution(this, meta, record);
+    publishQuestionResolution(this, meta, record);
+    for (const listener of this.questionResolutionListeners) {
+      try {
+        listener(structuredClone(record.question));
+      } catch {
+        // An observer cannot fail the resolution it observes.
+      }
+    }
+  }
+
+  /** Subscribe to settled asks after they are durable (VUH-1917 owner verification). */
+  public observeQuestionResolutions(listener: (question: ConversationQuestion) => void): () => void {
+    this.questionResolutionListeners.add(listener);
+    return () => {
+      this.questionResolutionListeners.delete(listener);
+    };
   }
 
   private async questionOperation(

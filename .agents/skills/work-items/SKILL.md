@@ -220,3 +220,13 @@ overwritten. Records show who wrote them (`createdByActor`, `updatedByActor`,
 with the on-behalf-of chain); `linear_list_audit_events` reads the append-only
 history. You never name yourself: the host stamps your identity. Other backends
 refuse these arguments explicitly.
+
+On the built-in tracker, report progress with `linear_post_issue_event`
+(`ack`, `plan`, `action`, `blocked`, `ask`, `result`, `error`) instead of setting
+state by hand; the item's state is derived from it. Advance delivery with
+`stage`: `ack` accepts, then `landed` when merged and `delivered` when released.
+Never mark an item Done or owner-verified: only the owner verifies. Landing
+raises a "check it works" ask in the owner's mailbox, and the answer verifies
+the item or sends it back to accepted. Read `linear_list_issue_events` (resume
+with its cursor) for the item's history; `selfEcho` marks Clankie's and workers'
+own events.

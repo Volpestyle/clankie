@@ -31,7 +31,7 @@ export async function authorizeQuestion(authority: QuestionAuthority | undefined
 export const QuestionDraftSchema = z
   .object({
     kind: z.enum(["text", "choice"]),
-    purpose: z.enum(["preference", "decision", "approval", "owner_action"]).default("preference"),
+    purpose: z.enum(["preference", "decision", "approval", "owner_action", "verify"]).default("preference"),
     issue: MailIssueReferenceSchema.optional(),
     recommendation: z.string().trim().min(1).max(2000).optional(),
     waitingOn: z.string().trim().min(1).max(2000).optional(),
@@ -65,6 +65,9 @@ export const QuestionDraftSchema = z
       ctx.addIssue({ code: "custom", message: "A decision needs options and a recommendation" });
     if (v.purpose === "approval" && !v.gate)
       ctx.addIssue({ code: "custom", message: "Approval requires an owner-reserved gate" });
+    // "Check it works" for a landed tracker item (VUH-1917): the answer verifies it or sends it back.
+    if (v.purpose === "verify" && (v.kind !== "choice" || !v.issue))
+      ctx.addIssue({ code: "custom", message: "A verify ask names its issue and offers choices" });
     if (v.purpose === "owner_action" && !v.steps?.length)
       ctx.addIssue({ code: "custom", message: "Owner action requires exact steps" });
     if (new Set(v.options.map((o) => o.label)).size !== v.options.length)

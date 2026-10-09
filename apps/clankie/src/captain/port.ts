@@ -411,6 +411,15 @@ export interface CaptainPort {
    * unsubscribe.
    */
   observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
+  /** Settled owner asks, after they are durable. Returns an unsubscribe. */
+  observeQuestionResolutions(
+    listener: (question: import("@clankie/protocol").ConversationQuestion) => void,
+  ): () => void;
+  /** Raise an owner ask from the host in an existing chat (ADR 0245 surface ask). */
+  requestOwnerAsk(
+    conversationId: string,
+    draft: import("./conversation-questions.ts").QuestionDraft,
+  ): Promise<import("@clankie/protocol").ConversationQuestionResult>;
   fleetConversationAuthority(principalId: string): Promise<ConversationAuthority | undefined>;
   fleetWriteAuthority(
     principalId: string,
@@ -525,6 +534,12 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // A stub writes no transcripts, so it has nothing to announce. A test that
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
+    observeQuestionResolutions: () => () => {},
+    requestOwnerAsk: async (conversationId) => ({
+      status: "refused",
+      conversationId,
+      reason: "owner_asks_unavailable",
+    }),
     linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
     linearWakeDeliveries: () => [],
     receiveLinearActivity: () => true,

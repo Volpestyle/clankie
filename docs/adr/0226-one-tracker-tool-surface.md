@@ -11,7 +11,10 @@ A proposed
 makes Linear an optional connection; these tools stay the agent vocabulary.
 A proposed [amendment](#amendment-actors-receipts-and-audit-2026-10-09-vuh-1916)
 (VUH-1916) adds actors, exactly-once writes, preconditions and an audit log to
-the built-in tracker.
+the built-in tracker. A second proposed
+[amendment](#amendment-typed-events-delivery-stages-and-owner-wakes-2026-10-09-vuh-1917)
+(VUH-1917) adds the item event stream, derived state, delivery stages and owner
+wakes.
 
 ## Context
 
@@ -153,3 +156,53 @@ tools.
 dropped. `linear-writes.json` and `linear-attribution.json` already record only
 connected-Linear activity; the built-in tracker never needed them, and they stay
 unchanged for connected Linear.
+
+## Amendment: typed events, delivery stages and owner wakes (2026-10-09, VUH-1917)
+
+Status: proposed. Tracks [VUH-1917](https://linear.app/vuhlp/issue/VUH-1917).
+Built-in tracker only, on top of the VUH-1916 actors, receipts and audit log.
+
+**Event stream.** Each item has typed events in one store-wide stream.
+Workers report `ack`, `plan`, `action`, `blocked`, `ask`, `result` and `error`
+with `post_issue_event`. The tracker records `created`, `comment`, `state`,
+`priority`, `stage`, `verified` and `reopened` from writes, including hand-set
+ones. Every event carries its actor and a `selfEcho` flag. Owner activity (a
+`human` actor, or an `app` acting for the owner) is not self-echo; everything
+Clankie and his workers write is. Events are hash-linked like the audit log,
+committed in the same atomic replacement as their write, and the store refuses
+to open a broken chain. `list_issue_events` reads them oldest first and resumes
+from the returned cursor (the event `seq`). In process, the store pushes newly
+committed events to subscribers and replays from a cursor on subscribe.
+
+**Derived state.** `ack` moves a reported item to accepted. `blocked`, `ask` and
+`error` set flags that the next `ack`, `plan`, `action` or `result` clears.
+A `stage` on the event advances delivery: reported → accepted → landed →
+delivered → owner-verified. Each stage maps to a status: the one bound to it, or
+otherwise the first status of its category. Status categories stay backlog,
+unstarted, started, completed and canceled. `save_issue_status` creates or
+renames statuses and binds them to stages, so custom names map onto Linear's
+categories during the mirror. New stores add a Delivered status.
+
+**Owner-only verification.** Only a `human` actor sets owner-verified, completes
+an item by hand, or moves an item back. Agents report landed or delivered and
+the owner checks it. Reaching landed raises a "check it works" owner ask: the
+existing ADR 0245 ask with a new purpose, `verify`, so it appears in
+`input_list` and the World mailbox. Answering "It works" records owner-verified
+as the owner. Any other answer sends the item back to accepted with the
+owner's text. These events are marked `via: owner_ask`. An ask's issue
+reference may now use the built-in `clankie-work://` record URL.
+
+**Owner wakes.** An in-process loop reads the stream from a durable cursor. It
+needs no port, tunnel or webhook secret. Owner comments, verifications,
+reopens, state and priority changes wake the item's project lead chat (the
+VUH-1927 `projectChats` routes), otherwise `global-default`; nonproject items
+wake the default chat. The same wake-target rules as Linear activity apply,
+but not its follow switch: `linearWebhook.following` can only be turned on with
+a configured Linear webhook, and the built-in tracker has none. Self-echo never
+wakes. Answers to asks don't wake a second time, because ADR 0245 already
+wakes the source chat. The owner's own writes reach the built-in tracker
+through `POST /v1/tracker/owner/call`, authenticated as the operator (a `human`
+owner) or a terminalControl device (`app`).
+
+Optional outbound webhooks and feeding Linear's webhooks into this stream
+during the mirror are not part of this change.

@@ -175,6 +175,8 @@ export interface ClankieAppDependencies {
   composerTranscriptions?: ComposerTranscriptions;
   /** Evidence blobs and records (ADR 0258). */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
+  /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */
+  builtInTracker?: import("@clankie/work-items").TrackerToolBackend;
   /** Optional host policy; ordinary installations do not supply a provider. */
   runtimeProvider?: RuntimeProvider;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;

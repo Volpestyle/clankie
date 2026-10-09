@@ -5663,6 +5663,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return conversations.observeDurableMessages(listener);
     },
 
+    observeQuestionResolutions(listener) {
+      return conversations.observeQuestionResolutions(listener);
+    },
+
+    // A host-raised owner ask (ADR 0245), bound to an existing chat; no model turn issues it.
+    requestOwnerAsk(conversationId, draft) {
+      return conversations.requestSurfaceQuestion(conversationId, draft, {
+        current: () => !shutdown.signal.aborted && conversations.conversation(conversationId) !== undefined,
+      });
+    },
+
     async fleetConversationAuthority(principalId) {
       const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
       if (!match || match[2] === "unverified") return undefined;

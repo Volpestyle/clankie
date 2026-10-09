@@ -21,6 +21,8 @@ export interface TrackerToolCallOptions {
    * write; other backends ignore it (ADR 0226 amendment, VUH-1916).
    */
   readonly actor?: TrackerActor;
+  /** Host-stamped origin recorded on resulting item events (e.g. owner_ask); never a tool argument. */
+  readonly via?: string;
 }
 
 /** human: the owner; agent-worker: Clankie or a hired worker; app: an enrolled device. */
@@ -41,11 +43,52 @@ export interface TrackerActor extends TrackerActorRef {
 export const TRACKER_OWNER: TrackerActorRef = { type: "human", id: "owner", name: "Owner" };
 export const TRACKER_LEAD: TrackerActorRef = { type: "agent-worker", id: "clankie", name: "Clankie" };
 
-/** Built-in tracker only: write receipts, the audit log and preconditions. */
+/** Built-in tracker only: write receipts, the audit log, preconditions and the item event stream. */
 export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   "get_write_receipt",
   "list_audit_events",
+  "post_issue_event",
+  "list_issue_events",
+  "save_issue_status",
 ]);
+
+/** What a worker reports about an item; the tracker derives the item's state from these. */
+export const ISSUE_EVENT_TYPES = ["ack", "plan", "action", "blocked", "ask", "result", "error"] as const;
+export type IssueEventType = (typeof ISSUE_EVENT_TYPES)[number];
+/** Delivery stages in order. Only a human owner sets owner-verified or moves an item back. */
+export const DELIVERY_STAGES = ["reported", "accepted", "landed", "delivered", "owner-verified"] as const;
+export type DeliveryStage = (typeof DELIVERY_STAGES)[number];
+export const STATUS_CATEGORIES = ["backlog", "unstarted", "started", "completed", "canceled"] as const;
+
+/** One entry in an item's hash-linked event stream (VUH-1917). */
+export interface TrackerItemEvent {
+  readonly id: string;
+  readonly seq: number;
+  readonly at: string;
+  readonly issueId: string;
+  readonly identifier: string;
+  /** Worker-reported types, or what the tracker recorded: created, comment, state, priority, stage, verified, reopened. */
+  readonly type:
+    | IssueEventType
+    | "created"
+    | "comment"
+    | "state"
+    | "priority"
+    | "stage"
+    | "verified"
+    | "reopened";
+  readonly actor: TrackerActor;
+  /** True when Clankie or his workers wrote it; owner activity (human or the owner's app) is false. */
+  readonly selfEcho: boolean;
+  readonly body?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly commentId?: string;
+  /** Host-stamped origin, e.g. owner_ask when an owner answer caused it. */
+  readonly via?: string;
+  readonly prevHash: string;
+  readonly hash: string;
+}
 const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt"] as const;
 
 /** Other backends fail explicitly instead of silently dropping exactly-once or precondition input. */
@@ -380,6 +423,37 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     "list_audit_events",
     "Built-in tracker only. The append-only audit log, newest first: every applied or refused write with its actor, on-behalf-of chain, model and the records it touched.",
     { limit: pagination.limit, cursor: string, entityId: string },
+  ),
+  tool(
+    "post_issue_event",
+    'Built-in tracker only. Report progress on an issue as a typed event; its state is derived from these rather than set by hand. ack accepts the work; blocked, ask and error flag it until the next ack/plan/action/result. stage advances delivery: accepted, landed (merged), delivered (released). Only the owner verifies (owner-verified) or sends an item back; landing raises a "check it works" ask for the owner.',
+    {
+      issueId: { ...string, minLength: 1 },
+      type: { type: "string", enum: [...ISSUE_EVENT_TYPES] },
+      body: { ...string, maxLength: 4000 },
+      stage: { type: "string", enum: [...DELIVERY_STAGES] },
+      idempotencyKey,
+    },
+    ["issueId", "type"],
+  ),
+  tool(
+    "list_issue_events",
+    "Built-in tracker only. The hash-linked event stream, oldest first, for one issue or all. Pass the returned cursor as after to resume; selfEcho marks Clankie's and his workers' own events.",
+    {
+      issueId: string,
+      after: { ...string, description: "Cursor from a previous page; omit to start at the beginning." },
+      limit: { type: "integer", minimum: 1, maximum: 250, default: 100 },
+    },
+  ),
+  tool(
+    "save_issue_status",
+    "Built-in tracker only. Create (name and type) or rename (id) an issue status. type is its category (backlog, unstarted, started, completed, canceled); stage binds it to a delivery stage so derived state uses this name.",
+    {
+      id: string,
+      name: { ...string, minLength: 1, maxLength: 64 },
+      type: { type: "string", enum: [...STATUS_CATEGORIES] },
+      stage: { type: "string", enum: DELIVERY_STAGES.filter((stage) => stage !== "reported") },
+    },
   ),
   tool(
     "list_milestones",

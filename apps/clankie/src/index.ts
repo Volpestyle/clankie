@@ -201,6 +201,7 @@ import { HarnessSignIns } from "./harness-logins.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { EvidenceStore } from "./evidence-store.ts";
+import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
@@ -662,6 +663,8 @@ const boundApp = (): ClankieApp => {
 // Durable revision receipts distinguish captain echoes from delegated worker
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
+// The built-in tracker; its event stream drives the in-process owner loop (VUH-1917).
+const builtInTracker = createLocalTracker({ directory: join(stateRoot, "tracker") });
 let bindLinearBudgetWarning!: (notify: (text: string) => Promise<boolean>) => void;
 const linearBudgetWarningReady = new Promise<(text: string) => Promise<boolean>>((resolve) => {
   bindLinearBudgetWarning = resolve;
@@ -683,7 +686,7 @@ const mcpHost = createMcpHost({
   }),
   linearRequestBudget,
 
-  localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
+  localTracker: builtInTracker,
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
   trackerForRepo: ({ name, args, repo, local, actor, beforeWrite, onDispatch, effectConfirmed }) =>
@@ -1491,6 +1494,23 @@ const linearWakeReads = new LinearWakeReadReceipts({
   ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
 });
 retireLinearNotifications(join(stateRoot, "linear-notifications.json"), (message) => logger.info(message));
+// Built-in tracker owner loop: landed items ask the owner to check them, the answer
+// verifies or sends back, and owner activity wakes the routed chat. In-process only.
+void startTrackerOwnerLoop({
+  tracker: builtInTracker,
+  captain,
+  settings: settingsStore,
+  statePath: join(stateRoot, "tracker", "owner-loop.json"),
+  logger,
+}).catch((error: unknown) =>
+  logger.warn(
+    {
+      event: "tracker.owner_loop.unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    },
+    "built-in tracker owner loop did not start",
+  ),
+);
 // VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
 fleetProjectMembership = new FleetProjectMembership({
   settings: async () => (await settingsStore.load()).projects,
@@ -1793,6 +1813,7 @@ const clankie = await createClankieApp({
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   evidenceStore: EvidenceStore.local(join(stateRoot, "evidence")),
+  builtInTracker,
   localFleet,
   runtimeProvider,
   ...(runtimeProvider.quota?.composer === undefined
