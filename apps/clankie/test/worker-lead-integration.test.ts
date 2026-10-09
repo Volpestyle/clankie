@@ -346,19 +346,23 @@ it.each([false, true])(
     if (remote) expect(f.remoteRun).toHaveBeenCalledWith(["api", "snapshot"]);
     else expect(f.censusRun).toHaveBeenCalledWith("herdr", ["agent", "list"]);
 
-    // A known pre-send refusal does not poison the delivery ID. Exact matching
-    // external proof can accept it once without replaying it into another lead.
+    // A definitive pre-send refusal seals the original ID so status remains
+    // resolvable. Restored authority permits a new report, never replays that ID.
     f.censusAgent.agent_session.value = f.agent.session!.value;
-    const poll = f.captain.pollSeatEvents(2000, undefined, f.leads[0]);
     expect(
       await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Replaced reporter", receipt),
-    ).toMatchObject({ received: true, deliveryStage: "stored" });
+    ).toMatchObject({ received: false, deliveryStage: "unavailable", definitive: "not_sent" });
+    const fresh = await delivery(f.captain, f.agent.paneId);
+    const poll = f.captain.pollSeatEvents(2000, undefined, f.leads[0]);
+    expect(await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Replaced reporter", fresh)).toMatchObject(
+      { received: true, deliveryStage: "stored" },
+    );
     const [event] = await poll;
     expect(event).toMatchObject({ conversationId: f.leads[0], kind: "message" });
     await f.captain.acknowledgeSeatEvent(event!.id, f.leads[0]);
-    expect(
-      await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Replaced reporter", receipt),
-    ).toMatchObject({ received: true, deliveryStage: "stored" });
+    expect(await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Replaced reporter", fresh)).toMatchObject(
+      { received: true, deliveryStage: "stored" },
+    );
     expect(await f.captain.pollSeatEvents(0, undefined, f.leads[0])).toEqual([]);
     expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
   },
