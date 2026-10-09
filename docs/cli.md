@@ -1613,10 +1613,24 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
-### `usage [--refresh]` / `usage overlay [on|off]` / `usage warning [on|off|HOURS]`
+### `usage [--refresh] [--json]` / `usage overlay [on|off]` / `usage warning [on|off|HOURS]`
 
-`usage` lists this Mac's registered Claude profiles and Codex accounts with
-identity, plan, `headroom`, and each usage window: its harness label (Claude's
+`usage` prints one row per registered Claude profile and Codex account: harness,
+account, plan (Claude's tier as the profile last fetched it, e.g. "Max 20x"; else
+the harness plan, e.g. "Pro"), and the five-hour and weekly windows as percent used
+with a small bar and the reset in local time ("3pm", "Wed 6am"). Model-scoped
+limits in use follow on an indented line, as does "held: …", "not signed in — …"
+or why usage is unknown.
+
+```text
+HARNESS  ACCOUNT      PLAN     5H                      WEEK
+Claude   jamescvolpe  Max 20x    5% █░░░░░░░░░ 3pm      84% ████████░░ Wed 6am
+Codex    volpestyle   Pro      —                        19% ██░░░░░░░░ Oct 16 7:04am
+         gpt-reserve week 94% used, resets Oct 16 5:05am
+```
+
+`--json` prints the raw report: identity, plan, `tier`, `headroom`, and each
+usage window: its harness label (Claude's
 "Current session", "Current week (all models)", model-scoped weeks; Codex's
 weekly and model-scoped limits), `usedPercent`, `windowMinutes` and `resetsAt`.
 `usage.source` names the reading (`claude-usage` or `codex-rate-limits`),
@@ -1644,7 +1658,7 @@ overlay; the app's Usage screen does both.
 
 ```sh
 clankie usage
-clankie usage --refresh
+clankie usage --refresh --json
 clankie usage overlay off
 clankie usage warning 24
 ```

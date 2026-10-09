@@ -91,7 +91,7 @@ import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
 import type { AwakeCommandResult } from "./command/awake.ts";
-import { formatUsage, runOutWarningText, type runUsageCommand } from "./command/usage.ts";
+import { formatUsageTable, runOutWarningText, type runUsageCommand } from "./command/usage.ts";
 import {
   USAGE_WORDING,
   type UsageReport,
@@ -2018,7 +2018,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           const report = (await usage(words[0] === "refresh" ? ["--refresh"] : [])) as UsageReport;
           const overlay = report.settings.display.overlay;
           return {
-            title: formatUsage(report),
+            title: formatUsageTable(report),
             actions: [
               {
                 value: "overlay",

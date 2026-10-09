@@ -218,6 +218,8 @@ export const UsageAccountSchema = z.object({
   label: z.string(),
   identity: z.string().optional(),
   plan: z.string().optional(),
+  /** Claude's rate-limit tier as the profile itself last fetched it (e.g. `default_claude_max_20x`); absent when unknown. */
+  tier: z.string().max(96).optional(),
   signedIn: z.boolean().nullable(),
   /** Same meaning as the worker-account field. */
   headroom: z.number().min(0).max(1).nullable(),
@@ -280,7 +282,7 @@ export const USAGE_WORDING = {
   summary: "How much each Claude and Codex account has left, as each harness reports it.",
   overlay: {
     label: "Show usage beside Clankie",
-    description: "Compact meters under the desktop pet. Click them for detail.",
+    description: "Compact meters above the desktop pet. Click them for detail.",
   },
   left: "left",
   resets: "resets",
@@ -293,3 +295,18 @@ export const USAGE_WORDING = {
       "Clankie tells his lead once when an account's weekly limit is on pace to run out this many hours or more before it resets.",
   },
 } as const;
+
+/**
+ * The plan as the owner names it: Claude's tier when the profile reported one
+ * (`default_claude_max_20x` → "Max 20x"), otherwise the harness's plan
+ * ("max" → "Max", "pro" → "Pro"). Unknown stays unknown.
+ */
+export function usagePlanLabel(account: {
+  plan?: string | undefined;
+  tier?: string | undefined;
+}): string | undefined {
+  const tier = /^(?:default_)?claude_(max|pro|team|enterprise)(?:_(\d+x))?$/u.exec(account.tier ?? "");
+  if (tier) return `${tier[1]![0]!.toUpperCase()}${tier[1]!.slice(1)}${tier[2] ? ` ${tier[2]}` : ""}`;
+  const plan = account.plan?.trim();
+  return plan ? `${plan[0]!.toUpperCase()}${plan.slice(1)}` : undefined;
+}

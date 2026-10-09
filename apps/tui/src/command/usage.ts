@@ -4,14 +4,15 @@ import {
   UsageReportSchema,
   UsageSettingsSnapshotSchema,
   USAGE_WORDING,
-  type UsageAccount,
   type UsageReport,
   type UsageSettingsSnapshot,
+  type UsageWindow,
+  usagePlanLabel,
 } from "@clankie/protocol/worker-accounts";
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 
 const USAGE_COMMAND_USAGE =
-  "Usage: clankie usage [--refresh] | usage overlay [on|off] [--expected-revision REV] | usage warning [on|off|HOURS] [--expected-revision REV]";
+  "Usage: clankie usage [--refresh] [--json] | usage overlay [on|off] [--expected-revision REV] | usage warning [on|off|HOURS] [--expected-revision REV]";
 
 /**
  * `clankie usage` (VUH-1961): this Mac's Claude and Codex accounts with each
@@ -25,6 +26,7 @@ export async function runUsageCommand(
   options: OwnerSettingsApiOptions,
 ): Promise<UsageReport | UsageSettingsSnapshot> {
   const api = await ownerSettingsApi(options);
+  args = args.filter((arg) => arg !== "--json");
   if (args.length === 0 || (args.length === 1 && args[0] === "--refresh"))
     return api.get(`${USAGE_PATH}${args[0] === "--refresh" ? "?refresh=1" : ""}`, UsageReportSchema);
   if (args[0] !== "overlay" && args[0] !== "warning") throw new Error(USAGE_COMMAND_USAGE);
@@ -63,40 +65,101 @@ export function runOutWarningText(settings: UsageSettingsSnapshot): string {
     : "Run-out warning off.";
 }
 
-function until(iso: string | undefined, now: number): string {
-  if (iso === undefined) return "reset unknown";
-  const minutes = Math.max(0, Math.round((Date.parse(iso) - now) / 60_000));
-  if (minutes < 60) return `resets in ${minutes}m`;
-  if (minutes < 48 * 60) return `resets in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-  return `resets in ${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`;
+const BAR = 10;
+function bar(usedPercent: number): string {
+  const filled = Math.max(0, Math.min(BAR, Math.round(usedPercent / (100 / BAR))));
+  return `${"█".repeat(filled)}${"░".repeat(BAR - filled)}`;
 }
 
-/** One line per account and one per window, for the console. */
-export function formatUsage(report: UsageReport, now = Date.now()): string {
-  const lines = report.accounts.map((account: UsageAccount) => {
-    const head = `${account.harness} ${account.label}${account.identity ? ` (${account.identity}${account.plan ? `, ${account.plan}` : ""})` : ""}${account.held ? " · set aside" : ""}`;
-    if (!account.usage) return `${head}\n  ${account.reason ?? "usage not reported"}`;
-    const age = account.ageSeconds === undefined ? "" : ` · read ${Math.round(account.ageSeconds / 60)}m ago`;
-    return [
-      `${head}${age}`,
-      ...account.usage.windows.map(
-        (window) =>
-          `  ${window.label}: ${Math.round(100 - window.usedPercent)}% left · ${until(window.resetsAt, now)}`,
-      ),
-    ].join("\n");
+/** `3pm` today, `Sat 2am` later, `Oct 14 6am` past a week; in the reader's local time. */
+function usageResetLocal(iso: string | undefined, now: number, timeZone?: string): string {
+  if (iso === undefined) return "reset unknown";
+  const at = new Date(iso);
+  const zone = timeZone === undefined ? {} : { timeZone };
+  const day = (value: Date) =>
+    new Intl.DateTimeFormat("en-CA", { ...zone, dateStyle: "short" }).format(value);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { ...zone, hour: "numeric", minute: "2-digit", hour12: true })
+      .formatToParts(at)
+      .map((part) => [part.type, part.value]),
+  );
+  const time = `${parts.hour}${parts.minute === "00" ? "" : `:${parts.minute}`}${String(parts.dayPeriod).toLowerCase()}`;
+  if (day(at) === day(new Date(now))) return time;
+  if (at.getTime() - now < 6 * 86_400_000)
+    return `${new Intl.DateTimeFormat("en-US", { ...zone, weekday: "short" }).format(at)} ${time}`;
+  return `${new Intl.DateTimeFormat("en-US", { ...zone, month: "short", day: "numeric" }).format(at)} ${time}`;
+}
+
+/**
+ * The default `clankie usage` view: one row per account with its plan, the
+ * five-hour and weekly windows as percent used with a bar and local reset
+ * time, then model-scoped limits and anything unknown, held or unsigned.
+ */
+export function formatUsageTable(report: UsageReport, now = Date.now(), timeZone?: string): string {
+  const cell = (window: UsageWindow | undefined) =>
+    window === undefined
+      ? "—"
+      : `${String(Math.round(window.usedPercent)).padStart(3)}% ${bar(window.usedPercent)} ${usageResetLocal(window.resetsAt, now, timeZone)}`;
+  const rows = report.accounts.map((account) => {
+    const windows = account.usage?.windows ?? [];
+    const name = account.identity?.split("@")[0] ?? account.label;
+    const note = account.held
+      ? `held${account.held.reason ? `: ${account.held.reason}` : ""}`
+      : account.signedIn === false
+        ? `not signed in — ${(account.reason ?? "").replace(/^not signed in\.\s*/u, "")}`
+        : account.usage === undefined
+          ? (account.reason ?? "usage not reported")
+          : account.ageSeconds !== undefined && account.ageSeconds >= 600
+            ? `read ${Math.round(account.ageSeconds / 60)}m ago`
+            : "";
+    return {
+      cells: [
+        account.harness === "claude" ? "Claude" : "Codex",
+        name,
+        usagePlanLabel(account) ?? "—",
+        cell(windows.find((window) => window.id === "session")),
+        cell(windows.find((window) => window.id === "week")),
+      ],
+      // Model-scoped limits, each with its own bar and reset, even at 0% used.
+      scoped: windows
+        .filter((window) => window.id.includes(":"))
+        .map((window) => ({
+          label: window.label
+            .replace(/^Current week \((.+)\)$/u, "$1 week")
+            .replace(/^Weekly limit \((.+)\)$/u, "$1 week"),
+          cell: cell(window),
+        })),
+      note,
+    };
   });
+  const header = ["HARNESS", "ACCOUNT", "PLAN", "5H", "WEEK"];
+  const widths = header.map((title, index) =>
+    Math.max(title.length, ...rows.map((row) => row.cells[index]!.length)),
+  );
+  const line = (cells: readonly string[]) =>
+    cells
+      .map((value, index) => (index === cells.length - 1 ? value : value.padEnd(widths[index]!)))
+      .join("  ")
+      .trimEnd();
+  const indent = " ".repeat(widths[0]! + 2);
+  // Scoped limits line up under the account and plan columns, their bar under 5H.
+  const scopedWidth = widths[1]! + 2 + widths[2]!;
   const warning = report.settings.allocation;
   return [
-    ...lines,
+    line(header),
+    ...rows.flatMap((row) => [
+      line(row.cells),
+      ...row.scoped.map((scoped) => `${indent}${scoped.label.padEnd(scopedWidth)}  ${scoped.cell}`),
+      ...(row.note ? [`${indent}${row.note}`] : []),
+    ]),
     ...(report.allocation?.recommendations.map((entry) => `${USAGE_WORDING.nextHire}: ${entry.reason}`) ??
       []),
-    `Overlay meters ${report.settings.display.overlay ? "shown" : "hidden"} (/usage overlay on|off)`,
-    ...(warning === undefined
-      ? []
-      : [
-          warning.runOutWarning
-            ? `Run-out warning on, ${warning.runOutWarningHours}h or more before a weekly reset (/usage warning on|off|HOURS)`
-            : "Run-out warning off (/usage warning on|off|HOURS)",
-        ]),
+    `Overlay meters ${report.settings.display.overlay ? "shown" : "hidden"}${
+      warning === undefined
+        ? ""
+        : warning.runOutWarning
+          ? ` · run-out warning ${warning.runOutWarningHours}h before a weekly reset`
+          : " · run-out warning off"
+    } · --json for the raw report`,
   ].join("\n");
 }

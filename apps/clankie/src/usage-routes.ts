@@ -50,6 +50,8 @@ function usageAccounts(report: MachineWorkerAccounts, now: number): UsageAccount
         signedIn: account.signedIn,
         headroom: account.headroom,
         ...(account.identity === undefined ? {} : { identity: account.identity }),
+        // The probe keeps a tier only when its cached profile matches the signed-in identity.
+        ...(account.tier === undefined ? {} : { tier: account.tier }),
         ...(account.plan === undefined ? {} : { plan: account.plan }),
         ...(account.usage === undefined ? {} : { usage: account.usage }),
         ...(observed === undefined ? {} : { ageSeconds: Math.max(0, Math.floor((now - observed) / 1000)) }),

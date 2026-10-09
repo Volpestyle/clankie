@@ -124,7 +124,8 @@ job: a Claude or a Codex worker, each leading its own native subagents. The
 owner's guidance: Claude for visual and creative work; otherwise the best fit
 for the job, weighing `allocation` in `worker_accounts` (each harness's
 accounts ranked by plan size, what is left and pace against reset; `clankie
-usage` shows the same "Next hire" lines).
+usage` shows each account's plan tier and windows with the same "Next hire"
+lines, `--json` for the raw report).
 Workers report with `message_clankie`. Never deliver work by typing into a
 terminal. Mechanics, routing and recovery: [fleet tools](reference/fleet-tools.md).
 
